@@ -1,0 +1,199 @@
+# Framepiler Test Env — Bug Tracking Policy
+
+## Overview
+This document defines the bug tracking process for the Framepiler Test Environment. All bugs are tracked as individual markdown files in the single folder `bug/bugs/` inside this repository.
+
+## Directory Structure
+```
+bug/
+├── BUG_TRACKING_POLICY.md    # This file
+├── TEMPLATE.md               # Bug report template
+├── INDEX.md                  # Master index of all bugs (must be maintained)
+├── bugs/                     # All bug files live here (single folder)
+└── archive/                  # (optional) long‑lived closed/retired items
+```
+
+Notes
+- We do not use per‑state subfolders (open/fixed/closed/reopen). The authoritative state is the `status:` field in each bug file’s metadata. INDEX.md groups bugs by reading that status.
+
+### Canonical Tracker Only (no local duplicates)
+- The shared env tracker under `bug/bugs/` is the only authoritative place for bugs.
+- Do not open or maintain duplicate bugs in other repos (e.g., `frame_transpiler/docs/bugs`).
+- The local tracker in `frame_transpiler/docs/bugs` is frozen/deprecated; link to the shared bug file instead.
+
+## Bug Numbering Scheme
+- Bugs are numbered sequentially starting from #001
+- The next available bug number is tracked in INDEX.md
+- Never reuse bug numbers
+- Format: `bug_NNN_short_title.md` where:
+  - NNN is the zero-padded bug number (e.g., 001, 048, 123)
+  - short_title is a kebab-case summary (5-7 words max)
+
+## File Naming Examples
+- `bug_048_unreachable_return_after_transition.md`
+- `bug_049_typescript_transpilation_rate_low.md`
+- `bug_050_test_runner_language_filtering.md`
+
+## Bug Report Structure
+Every bug report must follow the template in TEMPLATE.md and include:
+1. **Metadata Header** (YAML front matter)
+2. **Description** (clear problem statement)
+3. **Reproduction Steps**
+4. **Expected vs Actual Behavior**
+5. **Impact Assessment**
+6. **Technical Analysis** (if available)
+7. **Proposed Solution**
+8. **Test Cases**
+9. **Build/Release Artifacts** — the exact path(s) to the built binaries and
+   compiled artifacts used to reproduce and validate the bug (for example,
+   `../frame_transpiler/target/release/framec`, adapter JS/TS output paths,
+   or shared harness entry scripts under `framepiler_test_env`).
+
+## Bug Tests vs Verification Tests
+
+In this shared environment we distinguish between:
+
+- **Bug tests** – repro steps and commands that demonstrate a specific bug.
+  - Usually tied to one bug file (e.g. ad hoc scripts under
+    `bug/tests/bug_081/` or external repros).
+  - May be environment-specific and are not necessarily run by CI.
+  - Must be listed explicitly in the bug’s **Reproduction Steps** and
+    **Build/Release Artifacts** sections.
+
+- **Verification tests** – stable, shared tests that enforce the agreed
+  semantics over time.
+  - Live under normal project locations (for example,
+    `adapter_protocol/scripts/run_adapter_smoke.sh`,
+    `adapter_protocol/tests/`, or future `tests/` trees).
+- Are suitable for CI and should not depend on external `/tmp` paths.
+
+Important: Do not rely on `/tmp` paths for reproducible validation. Use the shared env harnesses and scripts under `adapter_protocol/scripts/` and the per-bug commands recorded in each bug file.
+  - When a bug is fixed, its “Resolution” section should call out which
+    verification test(s) now cover the behavior so regressions are caught
+    automatically.
+
+When working a bug:
+
+1. Start with a bug test that reproduces the issue (documented in the bug
+   file).
+2. Once the correct semantics are understood, encode them in one or more
+   verification tests in the shared env and reference those tests from the
+   bug’s **Resolution** / **Verification** notes.
+
+## Workflow
+
+### 1. Submitting a New Bug
+1. Check INDEX.md for the next available bug number
+2. Copy TEMPLATE.md to `bugs/bug_NNN_short_title.md`
+3. Fill out all sections of the template
+4. Update INDEX.md with the new bug entry
+5. Commit with message: `bug: Add Bug #NNN - [Short Description]`
+
+### 1b. Grammar and Architecture Compliance (V3)
+- All new bugs and proposed fixes MUST respect the latest V3 architecture and grammar specs:
+  - Core: `docs/framepiler_design/architecture_v3/architecture_v3_overview.md`
+  - Frame syntax and MIR: `docs/framepiler_design/architecture_v3/03_frame_segment_parser.md`, `04_mir_assembly.md`
+  - Per‑language behavior: `01_body_closers_*.md`, `02_native_region_scanner_*.md`, `05_frame_statement_expansion_*.md`
+- If a bug report or “fix” relies on syntax or semantics that contradict these docs (for example, using non‑Python constructs inside `@target python_3` bodies, or pre‑V3 header forms), maintainers should:
+  - Reject the change as‑is (or mark the bug `Won't Fix`/`Duplicate` of “legacy syntax not supported”), and
+  - Ask the filer to restate the scenario using valid V3 grammar, or explicitly mark it as a legacy/retired test.
+- Tests and fixtures MUST NOT depend on out‑of‑date grammar. When a discrepancy is found, prefer updating/retiring the fixture over changing the compiler to accept invalid syntax.
+
+### 2. Working on a Bug
+1. Optional: add your name as assignee
+2. Document investigation findings in the Technical Analysis section
+3. Update the work log as you proceed
+
+### 3. Resolving a Bug (Developer)
+1. Do not close the bug yourself.
+2. In the bug file under `bugs/`, set `status: Fixed` and fill `fixed_version`.
+3. Add resolution details and tests in the bug file.
+4. Update `INDEX.md` with updated counts and list the bug under "Fixed" (computed from metadata).
+5. Commit with message: `fix(vX.Y.Z): Fixed Bug #NNN - [Short Description]`.
+Note: This step applies to bugs that were previously in `status: Open` or `status: Reopen`.
+
+### 3b. Closing a Bug (Opener/Owner)
+1. After verifying the fix, the original opener/owner changes `status: Closed` in the same bug file under `bugs/`.
+2. Update `INDEX.md` counts and lists accordingly (no file moves; state derives from metadata).
+3. Commit with message: `chore: Close Bug #NNN - [Short Description]`.
+
+### 4. Reopening a Bug
+1. In the same bug file under `bugs/`, set `status: Reopen` (not "Reopened").
+2. Add the reopening reason in Work Log and reference the regression version.
+3. Update `INDEX.md` counts and lists accordingly.
+4. Flow after Reopen: developer fixes and marks `status: Fixed` with `fixed_version`, then the original opener verifies and changes `status: Closed`.
+
+### 4b. State Transition Summary
+- New → `status: Open`
+- Developer fix → `status: Fixed`
+- Opener verifies → `status: Closed`
+- Regression → `status: Reopen` → then follow Fixed → Closed as above
+
+## Bug Priorities
+- **Critical**: System crash, data loss, security issue
+- **High**: Major functionality broken, blocks development
+- **Medium**: Feature partially broken, has workaround
+- **Low**: Minor issue, cosmetic, enhancement
+
+## Bug Categories
+- **Parser**: Syntax analysis, AST generation
+- **Semantic**: Type checking, symbol resolution
+- **CodeGen**: Target language generation
+- **Runtime**: Frame runtime behavior
+- **Tooling**: CLI, test runner, build system
+- **Documentation**: Docs, examples, tutorials
+
+## Status Values
+- **Open**: Bug confirmed, awaiting fix
+- **Fixed**: Developer implemented a fix; awaiting filer verification/closure
+- **Closed**: Filer/owner verified fix and closed the bug
+- **Reopen**: Previously Fixed/Closed bug has recurred (use this exact spelling)
+- **Won't Fix**: Intentional behavior or out of scope
+- **Duplicate**: Duplicate of another bug
+
+## Version Tracking
+- Always note the version where bug was discovered
+- Always note the version where bug was fixed
+- Use semantic versioning: vMAJOR.MINOR.PATCH
+
+## Git Integration
+- Reference bug numbers in commits: `Bug #048`
+- Use conventional commits:
+  - `bug: Add Bug #048 - Unreachable return statements`
+  - `fix(v0.82.3): Resolve Bug #048 - Unreachable return statements`
+  - `test: Add tests for Bug #048`
+
+## Search and Discovery
+- Use grep to search bug content: `grep -r "pattern" bug/bugs/`
+- Check INDEX.md for quick bug lookup
+- Use git history to track bug lifecycle
+
+## Migration from Legacy Systems
+When migrating bugs from old tracking systems:
+1. Preserve original bug numbers if possible
+2. Add migration note in bug file
+3. Mark source system in metadata
+
+## Review Process
+1. All bug reports should be reviewed for completeness
+2. Verify reproduction steps work
+3. Ensure proper categorization and priority
+4. Check for duplicates before creating new bug
+
+## Maintenance
+- Keep `INDEX.md` current in every relevant bug commit:
+  - Update counts: Total, Open, Fixed, Closed, Reopen, Won't Fix, Next Bug Number
+  - Update tables/lists for each state by scanning `bugs/` and filtering by each bug file’s `status` metadata (no per‑state folders)
+- Quarterly review of old open/reopen bugs
+- Archive bugs older than 1 year to `docs/bugs/archive/`
+
+## Contact
+For questions about bug tracking:
+- Check this policy document first
+- Consult INDEX.md for examples
+- Ask in project discussions
+
+---
+*Policy Version: 1.1*  
+*Last Updated: 2025-11-15*  
+*Next Review: 2026-01-15*
