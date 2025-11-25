@@ -8,7 +8,7 @@ status: Fixed
 priority: High
 category: CodeGen
 discovered_version: v0.86.58
-fixed_version: v0.86.58
+fixed_version: v0.86.59
 reporter: Codex
 assignee:
 created_date: 2025-11-26
@@ -29,6 +29,7 @@ When compiling the debugger runtime `src/debug/state_machines/PythonDebugRuntime
    ```
 4. Run `python3 -m py_compile /tmp/gen/PythonDebugRuntime.py`.
 5. Python raises `IndentationError: unindent does not match any outer indentation level` (around the lines above).
+6. Latest repro (2025-11-26): Same error when compiling `src/debug/state_machines/PythonDebugRuntime.fpy` with framec 0.86.58 and running `python3 -m py_compile rebuild/PythonDebugRuntime.py` (artifact copied to bug/artifacts/092/PythonDebugRuntime.py).
 
 ## Expected Behavior
 Generated Python should use valid indentation for transition expansions (e.g., `next_compartment = ...` aligned with surrounding code) so the module passes `python3 -m py_compile` and can execute.
@@ -44,7 +45,8 @@ Generated code includes mis-indented transition lines inside handlers, causing `
 - None clean. Avoiding `->` and hand-inlining transitions is not acceptable; codegen must emit valid Python.
 
 ## Build/Release Artifacts
-- framec binary: `/Users/marktruluck/projects/frame_transpiler/target/release/framec` (v0.86.58)
+- framec binary (workspace): `/Users/marktruluck/projects/frame_transpiler/target/release/framec` (v0.86.59)
+- Reference framec binary (shared env): `bug/releases/frame_transpiler/v0.86.59`
 - Source FRM: `/Users/marktruluck/vscode_editor/src/debug/state_machines/PythonDebugRuntime.fpy`
 - Generated artifact (failing): `/Users/marktruluck/vscode_editor/rebuild/PythonDebugRuntime.py`
 - Shared artifact copy: `/Users/marktruluck/projects/framepiler_test_env/bug/artifacts/092/PythonDebugRuntime.py`
@@ -67,7 +69,7 @@ Generated code includes mis-indented transition lines inside handlers, causing `
 
 Regression / verification:
 - Rebuild the Python debug runtime using the reference compiler:
-  - `FRAMEC_BIN=bug/releases/frame_transpiler/v0.86.58/framec bug/releases/frame_transpiler/v0.86.58/framec compile -l python_3 -o /tmp/debug_runtime_092 /Users/marktruluck/vscode_editor/src/debug/state_machines/PythonDebugRuntime.fpy`
+  - `FRAMEC_BIN=bug/releases/frame_transpiler/v0.86.59 bug/releases/frame_transpiler/v0.86.59 compile -l python_3 -o /tmp/debug_runtime_092 /Users/marktruluck/vscode_editor/src/debug/state_machines/PythonDebugRuntime.fpy`
 - Shared-env syntax validation:
   - `python3 -m py_compile bug/artifacts/092/PythonDebugRuntime.py` (or, when `__pycache__` is not writable:  
     `python3 -c "import py_compile; py_compile.compile('bug/artifacts/092/PythonDebugRuntime.py', cfile='/tmp/pydebug_092.pyc', doraise=True)"`)  
