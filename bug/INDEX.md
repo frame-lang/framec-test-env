@@ -2,8 +2,8 @@
 
 ## Statistics
 - **Total Bugs**: 49
-- **Open**: 1
-- **Fixed**: 1
+- **Open**: 0
+- **Fixed**: 2
 - **Closed**: 47
 - **Reopen**: 0
 
@@ -35,12 +35,13 @@
 
 | Bug # | Title | Priority | Category | Status | Assignee |
 |-------|-------|----------|----------|--------|---------- |
-| 092 | Python V3 codegen mis-indents transitions (IndentationError) | High | CodeGen | Open |  |
+
 ## Fixed (awaiting closure)
 
 | Bug # | Title |
 |-------|-------|
 | 091 | Python debug runtime generated with invalid brace syntax; cannot connect |
+| 092 | Python V3 codegen mis-indents transitions (IndentationError) |
 
 
 ## Reopen

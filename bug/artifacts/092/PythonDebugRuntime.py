@@ -600,10 +600,9 @@ class PythonDebugRuntime:
         if c.state == "__PythonDebugRuntime_state_WaitingForEntry":
             
             # Skip stop on entry if user continues
-                            next_compartment = FrameCompartment("__PythonDebugRuntime_state_Running")
+            next_compartment = FrameCompartment("__PythonDebugRuntime_state_Running")
             self._frame_transition(next_compartment)
             return
-            
             
         elif c.state == "__PythonDebugRuntime_state_Paused":
             
@@ -616,10 +615,9 @@ class PythonDebugRuntime:
                 "data": {"threadId": 1}
             })
             self.signalResumeEvent()
-                            next_compartment = FrameCompartment("__PythonDebugRuntime_state_Running")
+            next_compartment = FrameCompartment("__PythonDebugRuntime_state_Running")
             self._frame_transition(next_compartment)
             return
-            
             
     def _event_onGetCallStack(self, __e: FrameEvent, compartment: FrameCompartment):
         c = compartment or self._compartment
@@ -680,15 +678,13 @@ class PythonDebugRuntime:
             })
             
             if self.stopOnEntry:
-            next_compartment = FrameCompartment("__PythonDebugRuntime_state_WaitingForEntry")
+                next_compartment = FrameCompartment("__PythonDebugRuntime_state_WaitingForEntry")
                 self._frame_transition(next_compartment)
                 return
-            
             else:
-            next_compartment = FrameCompartment("__PythonDebugRuntime_state_Running")
+                next_compartment = FrameCompartment("__PythonDebugRuntime_state_Running")
                 self._frame_transition(next_compartment)
                 return
-            
             
     def _event_onNextStep(self, __e: FrameEvent, compartment: FrameCompartment):
         c = compartment or self._compartment
@@ -752,7 +748,6 @@ class PythonDebugRuntime:
             self._frame_transition(next_compartment)
             return
             
-            
     def _event_onStepOutOf(self, __e: FrameEvent, compartment: FrameCompartment):
         c = compartment or self._compartment
         if c.state == "__PythonDebugRuntime_state_Paused":
@@ -771,25 +766,22 @@ class PythonDebugRuntime:
             self._frame_transition(next_compartment)
             return
             
-            
     def _event_onTerminate(self, __e: FrameEvent, compartment: FrameCompartment):
         c = compartment or self._compartment
         if c.state == "__PythonDebugRuntime_state_Running":
             
             self.handleTermination()
-                            next_compartment = FrameCompartment("__PythonDebugRuntime_state_Terminating")
+            next_compartment = FrameCompartment("__PythonDebugRuntime_state_Terminating")
             self._frame_transition(next_compartment)
             return
-            
             
         elif c.state == "__PythonDebugRuntime_state_Paused":
             
             self.signalResumeEvent()
             self.handleTermination()
-                            next_compartment = FrameCompartment("__PythonDebugRuntime_state_Terminating")
+            next_compartment = FrameCompartment("__PythonDebugRuntime_state_Terminating")
             self._frame_transition(next_compartment)
             return
-            
             
     def _event_onTraceCall(self, __e: FrameEvent, compartment: FrameCompartment):
         c = compartment or self._compartment
@@ -814,10 +806,9 @@ class PythonDebugRuntime:
             if self.stopOnException and self.isUserCode(frame):
                 self.pauseExecution(frame, "exception", frameLine)
                 self.enterPausedState()
-            next_compartment = FrameCompartment("__PythonDebugRuntime_state_Paused")
+                next_compartment = FrameCompartment("__PythonDebugRuntime_state_Paused")
                 self._frame_transition(next_compartment)
                 return
-            
             
     def _event_onTraceLine(self, __e: FrameEvent, compartment: FrameCompartment):
         c = compartment or self._compartment
@@ -827,10 +818,9 @@ class PythonDebugRuntime:
             if frameLine is not None and self.isUserCode(frame):
                 self.pauseExecution(frame, "entry", frameLine)
                 self.enterPausedState()
-                                    next_compartment = FrameCompartment("__PythonDebugRuntime_state_Paused")
+                next_compartment = FrameCompartment("__PythonDebugRuntime_state_Paused")
                 self._frame_transition(next_compartment)
                 return
-            
             # Continue execution if not user code
             
         elif c.state == "__PythonDebugRuntime_state_Running":
@@ -842,28 +832,25 @@ class PythonDebugRuntime:
             if frameLine in self.breakpoints and self.isUserCode(frame):
                 self.pauseExecution(frame, "breakpoint", frameLine)
                 self.enterPausedState()
-                                    next_compartment = FrameCompartment("__PythonDebugRuntime_state_Paused")
+                next_compartment = FrameCompartment("__PythonDebugRuntime_state_Paused")
                 self._frame_transition(next_compartment)
                 return
-            
             
             # Handle step modes
             if self.stepMode == "stepIn":
                 if frameLine is not None and self.isUserCode(frame):
                     self.pauseExecution(frame, "step", frameLine)
                     self.enterPausedState()
-                                            next_compartment = FrameCompartment("__PythonDebugRuntime_state_Paused")
+                    next_compartment = FrameCompartment("__PythonDebugRuntime_state_Paused")
                     self._frame_transition(next_compartment)
                     return
-            
             elif self.stepMode == "next":
                 if self.shouldStopStepNext(frame, frameLine):
                     self.pauseExecution(frame, "step", frameLine)
                     self.enterPausedState()
-                                            next_compartment = FrameCompartment("__PythonDebugRuntime_state_Paused")
+                    next_compartment = FrameCompartment("__PythonDebugRuntime_state_Paused")
                     self._frame_transition(next_compartment)
                     return
-            
             elif self.stepMode == "stepOut":
                 # Will be handled in onTraceReturn
                 pass
@@ -872,10 +859,9 @@ class PythonDebugRuntime:
             if self.pauseRequested and frameLine is not None and self.isUserCode(frame):
                 self.pauseExecution(frame, "pause", frameLine)
                 self.enterPausedState()
-                                    next_compartment = FrameCompartment("__PythonDebugRuntime_state_Paused")
+                next_compartment = FrameCompartment("__PythonDebugRuntime_state_Paused")
                 self._frame_transition(next_compartment)
                 return
-            
             
     def _event_onTraceReturn(self, __e: FrameEvent, compartment: FrameCompartment):
         c = compartment or self._compartment
