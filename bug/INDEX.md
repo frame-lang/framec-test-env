@@ -1,10 +1,10 @@
 # Framepiler Test Env — Bug Index (canonical)
 
 ## Statistics
-- **Total Bugs**: 48
-- **Open**: 0
-- **Fixed**: 0
-- **Closed**: 48
+- **Total Bugs**: 49
+- **Open**: 1
+- **Fixed**: 1
+- **Closed**: 47
 - **Reopen**: 0
 
 ## Quick Links
@@ -17,7 +17,6 @@
 
 ## Recently Closed
 
-- #091: Python debug runtime generated with invalid brace syntax; cannot connect — fixed_version: v0.86.58
 - #080: TS multi‑method public wrappers/router/start state — fixed_version: v0.86.50
 - #078: TS runtime d.ts mismatch generator calls — fixed_version: v0.86.49
 - #074: TS generator missing actions and domain declarations — fixed_version: v0.86.49
@@ -36,11 +35,12 @@
 
 | Bug # | Title | Priority | Category | Status | Assignee |
 |-------|-------|----------|----------|--------|---------- |
-
+| 092 | Python V3 codegen mis-indents transitions (IndentationError) | High | CodeGen | Open |  |
 ## Fixed (awaiting closure)
 
 | Bug # | Title |
 |-------|-------|
+| 091 | Python debug runtime generated with invalid brace syntax; cannot connect |
 
 
 ## Reopen

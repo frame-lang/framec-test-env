@@ -4,7 +4,7 @@
 ```yaml
 bug_number: 091
 title: "Python debug runtime generated with invalid brace syntax; cannot connect"
-status: Closed
+status: Fixed
 priority: High
 category: CodeGen
 discovered_version: v0.86.58
@@ -43,7 +43,9 @@ The Python debug runtime generated from `src/debug/state_machines/PythonDebugRun
 ## Verification Tests
 - Shared-env syntax validation (must pass once fixed):  
   `python3 -m py_compile bug/artifacts/091/PythonDebugRuntime.py`  
-  (currently fails with `SyntaxError` until the FRM and artifact are corrected).
+  (in sandboxed environments that cannot write `__pycache__`, use  
+  `python3 -c "import py_compile; py_compile.compile('bug/artifacts/091/PythonDebugRuntime.py', cfile='/tmp/pydebug_091.pyc')"`  
+  to avoid local cache writes).
 - Reference compiler for re-validation:  
   `bug/releases/frame_transpiler/v0.86.58/framec`
 
@@ -90,3 +92,4 @@ Generated Python contains brace-style control flow and `if/elif` blocks not vali
 - 2025-11-24: Updated `PythonDebugRuntime.frm` (debugger/runtime repo) to use Python-native control flow, helper actions for paused/terminate entry, explicit `_frame_transition(...)` calls, and removed `$enter/$exit` handlers that produced invalid identifiers. Recompiled with `framec 0.86.58`; `python3 -m py_compile rebuild/PythonDebugRuntime.py` now passes. Synced the fixed artifact to `bug/artifacts/091/PythonDebugRuntime.py`. Status set to **Fixed**.
 - 2025-11-24: Closure verification — ran `framec 0.86.58 compile -l python_3 -o rebuild src/debug/state_machines/PythonDebugRuntime.frm` and `python3 -m py_compile rebuild/PythonDebugRuntime.py` (no errors). Confirmed artifact copied to `bug/artifacts/091/PythonDebugRuntime.py`. Status set to **Closed**.
 - 2025-11-24: Shared-env validation using `python3 -m py_compile bug/artifacts/091/PythonDebugRuntime.py` still fails with `SyntaxError` (brace-style `if` blocks remain in the stored artifact). Bug status set to **Reopen** until the corrected artifact is copied to `bug/artifacts/091/` and the shared-env `py_compile` check passes. Reference compiler for re-validation: `bug/releases/frame_transpiler/v0.86.58/framec`.
+- 2025-11-25: Updated shared artifact at `bug/artifacts/091/PythonDebugRuntime.py` to the fixed runtime and re-ran syntax validation via `py_compile.compile(..., cfile='/tmp/pydebug_091.pyc')` in the shared env. No `SyntaxError` is reported. Stage 7 native validation for Frame-owned Python runtimes now requires these `py_compile` checks in CI, so invalid native blocks are surfaced as test failures. Status set to **Fixed** (closure pending owner verification).
