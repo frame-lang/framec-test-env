@@ -1,7 +1,6 @@
 @target typescript
 
-system AdapterProtocolMinimal {
-
+system AdapterProtocol {
   interface:
     start()
     runtimeConnected()
@@ -14,6 +13,7 @@ system AdapterProtocolMinimal {
     $Idle {
       start() {
         this.commandQueue = []
+        this.pingCounter = 0
         this.handshakeComplete = false
         this.isReady = false
         this.pendingAction = false
@@ -21,99 +21,95 @@ system AdapterProtocolMinimal {
         this.isPaused = false
         this.lastStoppedReason = ""
         this.lastThreadId = 0
+        this.lastOutput = ""
+        this.lifecycle = "waiting"
+        this.debuggerId = "framepiler-test-env"
         -> $WaitingForConnection
       }
-
-      runtimeConnected() {
-        // Ignore until started
+      runtimeConnected() { /* ignore until started */ }
+      runtimeMessage(payload) { /* ignore until started */ }
+      runtimeDisconnected() {
+        this.lifecycle = "terminated"
+        -> $Terminated
       }
-
-      runtimeMessage(payload) {
-        // Ignore until started
-      }
-
-      runtimeDisconnected() { }
-
-      requestTerminate() {
-        // Nothing to terminate yet
-      }
-
-      drainCommands() {
-        return this.flushCommands()
-      }
+      requestTerminate() { /* noop */ }
+      drainCommands() { return this.flushCommands() }
     }
 
     $WaitingForConnection {
       runtimeConnected() {
+        this.lifecycle = "connected"
         this.handshakeComplete = false
-        this.enqueueCommand("initialize", {})
-        this.enqueueCommand("ping", {})
+        this.pingCounter = this.pingCounter + 1
+        this.enqueueCommand("initialize", {"debugger": this.debuggerId})
+        this.enqueueCommand("ping", {"sequence": this.pingCounter})
         -> $Connected
       }
-
-      runtimeMessage(payload) {
-        // Ignore stray messages until connection confirmed
-      }
-
-      runtimeDisconnected() { }
-
-      requestTerminate() {
+      runtimeMessage(payload) { /* ignore */ }
+      runtimeDisconnected() {
+        this.lifecycle = "terminated"
         -> $Terminated
       }
-
-      drainCommands() {
-        return this.flushCommands()
+      requestTerminate()   {
+        this.lifecycle = "terminated"
+        -> $Terminated
       }
+      drainCommands() { return this.flushCommands() }
     }
 
     $Connected {
       runtimeMessage(payload) {
         this.handleConnectedMessage(payload)
+        if (this.lifecycle === "terminated") {
+          -> $Terminated
+        }
       }
-
-      runtimeDisconnected() { }
-
+      runtimeDisconnected() {
+        this.lifecycle = "terminated"
+        -> $Terminated
+      }
       requestTerminate() {
-        // Minimal fixture: do not model terminating state; just drain.
+        this.enqueueCommand("terminate", {"reason": "requested"})
+        this.lifecycle = "terminating"
+        -> $Terminating
       }
+      drainCommands() { return this.flushCommands() }
+    }
 
-      drainCommands() {
-        return this.flushCommands()
+    $Terminating {
+      runtimeMessage(payload) {
+        this.handleTerminatingMessage(payload)
+        if (this.lifecycle === "terminated") {
+          -> $Terminated
+        }
       }
+      runtimeDisconnected() {
+        this.lifecycle = "terminated"
+        -> $Terminated
+      }
+      requestTerminate() { /* already terminating */ }
+      drainCommands() { return this.flushCommands() }
     }
 
     $Terminated {
-      start() { }
-      runtimeConnected() { }
-      runtimeMessage(payload) { }
-      runtimeDisconnected() { }
-      requestTerminate() { }
-      drainCommands() {
-        return this.flushCommands()
-      }
+      drainCommands() { return this.flushCommands() }
     }
-
+  
   actions:
     enqueueCommand(action, data) {
       const guarded: Record<string, boolean> = { continue: true, next: true, stepIn: true, stepOut: true, pause: true };
       const entry = { type: "command", action, data } as any;
       if (guarded[action]) {
         if (this.isReady !== true || this.handshakeComplete !== true) {
-          if (Array.isArray(this.deferredQueue) && this.deferredQueue.some((e: any) => e && e.action === action)) {
-            return;
-          }
+          if (Array.isArray(this.deferredQueue) && this.deferredQueue.some((e: any) => e && e.action === action)) { return; }
           this.deferredQueue.push(entry);
           return;
         }
-        if (this.pendingAction === true) {
-          return;
-        }
+        if (this.pendingAction === true) { return; }
         this.pendingAction = true;
       } else if (action === "setBreakpoints") {
         if (this.isReady !== true || this.handshakeComplete !== true) {
-          if (Array.isArray(this.deferredQueue) && this.deferredQueue.some((e: any) => e && e.action === action)) {
-            return;
-          }
+          if (Array.isArray(this.deferredQueue) && this.deferredQueue.some((e: any) => e && e.action === action)) { return; }
           this.deferredQueue.push(entry);
           return;
         }
@@ -122,15 +118,16 @@ system AdapterProtocolMinimal {
     }
 
     flushCommands() {
-      const queued = this.commandQueue;
-      this.commandQueue = [];
-      return queued;
+      const queued = this.commandQueue; this.commandQueue = []; return queued;
     }
 
     handleConnectedMessage(payload) {
       const eventType = payload["event"];
       if (eventType === "hello") {
         this.handshakeComplete = true;
+        this.lastOutput = "runtime ready";
+      } else if (eventType === "output") {
+        this.lastOutput = payload["data"]["output"];
       } else if (eventType === "ready") {
         this.isReady = true;
         if (this.deferredQueue && this.deferredQueue.length > 0) {
@@ -162,14 +159,18 @@ system AdapterProtocolMinimal {
           // ignore
         }
       } else if (eventType === "terminated") {
+        this.lifecycle = "terminated";
         this.isPaused = false;
         this.commandQueue = [];
         this.deferredQueue = [];
       }
     }
 
+    handleTerminatingMessage(payload) { if (payload["event"] === "terminated") this.lifecycle = "terminated"; }
+
   domain:
     commandQueue = []
+    pingCounter = 0
     handshakeComplete = false
     isReady = false
     pendingAction = false
@@ -177,4 +178,7 @@ system AdapterProtocolMinimal {
     isPaused = false
     lastStoppedReason = ""
     lastThreadId = 0
+    lastOutput = ""
+    lifecycle = "waiting"
+    debuggerId = "framepiler-test-env"
 }

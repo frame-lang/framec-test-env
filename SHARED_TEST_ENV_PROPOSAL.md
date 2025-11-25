@@ -7,10 +7,14 @@ Shared, hermetic test environment for the Frame Transpiler (PT) team and Debugge
 - Make adapter‑level semantics (guard/deferral, ready/handshake, stopped state) reproducible on any machine with the same commands.
 - Eliminate drift between:
   - PT’s V3 tests (`framec_tests` in the main repo), and
-  - DAP’s external validator scripts (e.g., `/tmp/frame_transpiler_repro/bug_081/run_validate.sh`).
+  - DAP’s external validator scripts (legacy; deprecated).
 - Keep the shared environment self‑contained and versioned, with minimal external dependencies beyond:
   - A `framec` binary from the PT repo.
   - A Node + `tsc` toolchain.
+
+> Deprecation Note
+> Legacy `/tmp/frame_transpiler_repro/.../run_validate.sh` scripts are deprecated. Use the shared environment harness:
+> `FRAMEC_BIN=/Users/marktruluck/projects/frame_transpiler/target/release/framec /Users/marktruluck/projects/framepiler_test_env/adapter_protocol/scripts/run_adapter_smoke.sh`.
 
 ---
 

@@ -47,7 +47,42 @@ Every bug report must follow the template in TEMPLATE.md and include:
 9. **Build/Release Artifacts** — the exact path(s) to the built binaries and
    compiled artifacts used to reproduce and validate the bug (for example,
    `../frame_transpiler/target/release/framec`, adapter JS/TS output paths,
-   or shared harness entry scripts under `framepiler_test_env`).
+   or shared harness entry scripts under `framepiler_test_env`). When a bug
+   is fixed in a new release of `frame_transpiler`, the canonical build used
+   for validation should be copied into this shared env under
+   `bug/releases/frame_transpiler/<version>/framec` and referenced from this
+   section.
+
+## Reference Releases for Validation
+
+For bugs that require changes to the `frame_transpiler` compiler or its
+runtime libraries, validation must be tied to a specific released build so
+both teams can reproduce behavior consistently.
+
+- The shared env keeps reference `frame_transpiler` releases under:
+
+  ```
+  bug/releases/frame_transpiler/<version>/framec
+  ```
+
+  where:
+  - `<version>` is the semantic version string (e.g. `v0.86.58`).
+  - `framec` is the release binary copied from
+    `../frame_transpiler/target/release/framec` at that version.
+
+- Policy:
+  - When marking a bug `status: Fixed` with a `fixed_version`, also:
+    - Build `framec` for that version in the main repo.
+    - Copy the release binary into
+      `bug/releases/frame_transpiler/<fixed_version>/framec`.
+    - Reference this path in the bug’s **Build/Release Artifacts** section as
+      the canonical compiler used for validation.
+  - Shared env bug tests and verification tests that depend on compiler
+    behavior (e.g., adapter protocol codegen, debug runtimes) should prefer
+    using this reference binary instead of ad‑hoc local builds.
+
+This ensures that when bugs are re‑verified or reopened, both teams are
+testing against the same compiler build and can reproduce results reliably.
 
 ## Bug Tests vs Verification Tests
 
