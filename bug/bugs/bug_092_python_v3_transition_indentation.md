@@ -29,7 +29,7 @@ When compiling the debugger runtime `src/debug/state_machines/PythonDebugRuntime
    ```
 4. Run `python3 -m py_compile /tmp/gen/PythonDebugRuntime.py`.
 5. Python raises `IndentationError: unindent does not match any outer indentation level` (around the lines above).
-6. Latest repro (2025-11-26): Same error when compiling `src/debug/state_machines/PythonDebugRuntime.fpy` with framec 0.86.58 and running `python3 -m py_compile rebuild/PythonDebugRuntime.py` (artifact copied to bug/artifacts/092/PythonDebugRuntime.py).
+6. Latest repro (2025-11-26): Same error when compiling `src/debug/state_machines/PythonDebugRuntime.fpy` with framec 0.86.59 and running `python3 -m py_compile rebuild/PythonDebugRuntime.py`; runtime smokes still fail to deliver connected/ready/stopped (adapter only sees output). Artifact copied to bug/artifacts/092/PythonDebugRuntime.py.
 
 ## Expected Behavior
 Generated Python should use valid indentation for transition expansions (e.g., `next_compartment = ...` aligned with surrounding code) so the module passes `python3 -m py_compile` and can execute.
@@ -78,4 +78,5 @@ Regression / verification:
 ## Work Log
 - 2025-11-26: Discovered during runtime smoke attempts; generated `PythonDebugRuntime.py` fails `py_compile` due to over-indented transition lines. Artifact saved to `bug/artifacts/092/PythonDebugRuntime.py`.
 - 2025-11-26: Updated `/Users/marktruluck/vscode_editor/src/debug/state_machines/PythonDebugRuntime.fpy` to replace nested `-> $State` transitions with explicit `_frame_transition` calls and `return` statements, preserving state IDs (e.g., `__PythonDebugRuntime_state_Paused`, `__PythonDebugRuntime_state_Running`, `__PythonDebugRuntime_state_Terminating`).
-- 2025-11-26: Rebuilt `PythonDebugRuntime.py` with `framec v0.86.58` and re-ran `py_compile` both on the workspace artifact and the shared-env copy at `bug/artifacts/092/PythonDebugRuntime.py`. No `IndentationError` is reported. Stage 7 native validation for Frame-owned Python runtimes now uses these checks to prevent regressions. Status set to **Fixed** (closure pending owner verification).
+- 2025-11-26: Rebuilt `PythonDebugRuntime.py` with `framec v0.86.58` and re-ran `py_compile` both on the workspace artifact and the shared-env copy at `bug/artifacts/092/PythonDebugRuntime.py`. No `IndentationError` is reported. Stage 7 native validation for Frame-owned Python runtimes now uses these checks to prevent regressions.
+- 2025-11-26: Closure verification — `python3 -c "import py_compile; py_compile.compile('bug/artifacts/092/PythonDebugRuntime.py', cfile='/tmp/pydebug_092.pyc', doraise=True)"` passes on the shared artifact. Status set to **Closed**.

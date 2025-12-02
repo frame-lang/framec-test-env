@@ -23,9 +23,13 @@ if (!outJs) {
 }
 
 // eslint-disable-next-line @typescript-eslint/no-var-requires
-const { AdapterProtocolMinimal } = require(outJs);
+const mod = require(outJs);
+const AdapterProtocolCtor = mod.AdapterProtocol || mod.AdapterProtocolMinimal;
+if (!AdapterProtocolCtor) {
+  throw new Error("Expected AdapterProtocol export (or AdapterProtocolMinimal) from generated JS");
+}
 
-const fsm = new AdapterProtocolMinimal();
+const fsm = new AdapterProtocolCtor();
 
 // Helper: host-level drain that reads and clears the commandQueue domain field.
 const drain = (): any[] => {
