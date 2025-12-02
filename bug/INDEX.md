@@ -2,8 +2,8 @@
 
 ## Statistics
 - **Total Bugs**: 53
-- **Open**: 1
-- **Fixed**: 0
+- **Open**: 0
+- **Fixed**: 1
 - **Closed**: 52
 - **Reopen**: 0
 
@@ -17,6 +17,7 @@
 
 ## Recently Closed
 
+- #097: Rust @persist constructor arity mismatch ignored (TrafficLight) — fixed_version: v0.86.70
 - #095: Rust V3 multi-state interface generates duplicate methods — fixed_version: v0.86.61
 - #092: Python V3 codegen mis-indents transitions (IndentationError) — fixed_version: v0.86.59
 - #093: Python V3 codegen mis-indents transitions with parented states (IndentationError) — fixed_version: v0.86.59
@@ -39,7 +40,7 @@
 
 | Bug # | Title | Priority | Category | Status | Assignee |
 |-------|-------|----------|----------|--------|---------- |
-| #097 | Rust @persist constructor arity mismatch ignored (TrafficLight) | High | CodeGen | Open |  |
+| _none_ |  |  |  |  |  |
 
 ## Reopen
 

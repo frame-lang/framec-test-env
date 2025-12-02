@@ -4,11 +4,11 @@
 ```yaml
 bug_number: 097
 title: "Rust @persist constructor arity mismatch ignored (TrafficLight)"
-status: Open
+status: Fixed
 priority: High
 category: CodeGen
 discovered_version: v0.86.70
-fixed_version:
+fixed_version: v0.86.70
 reporter: Codex
 assignee:
 created_date: 2025-12-01
@@ -99,6 +99,10 @@ impl TrafficLight {
 
 ## Work Log
 - 2025-12-01: Reported mismatch; generated Rust constructor drops system params for `@persist` TrafficLight. — Codex
+- 2025-12-01: Fixed in frame_transpiler v0.86.70:
+  - System name detection now scans past annotations (e.g., `@persist system ...`), and system parameter parsing runs against the correct system name.
+  - Rust codegen threads start/domain parameters into the generated constructor and seeds state_args from start params; domain params flow into struct fields.
+  - Generated constructor for `TrafficLight` now requires `(color: serde_json::Value, domain: &'static str)`, so `TrafficLight::new()` with no args fails to compile as expected.
 
 ## Resolution
 - Pending.
