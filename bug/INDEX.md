@@ -1,8 +1,8 @@
 # Framepiler Test Env — Bug Index (canonical)
 
 ## Statistics
-- **Total Bugs**: 52
-- **Open**: 0
+- **Total Bugs**: 53
+- **Open**: 1
 - **Fixed**: 0
 - **Closed**: 52
 - **Reopen**: 0
@@ -39,7 +39,7 @@
 
 | Bug # | Title | Priority | Category | Status | Assignee |
 |-------|-------|----------|----------|--------|---------- |
-| _none_ |  |  |  |  |  |
+| #097 | Rust @persist constructor arity mismatch ignored (TrafficLight) | High | CodeGen | Open |  |
 
 ## Reopen
 
