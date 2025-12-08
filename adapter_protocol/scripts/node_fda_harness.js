@@ -28,8 +28,12 @@ function main() {
   const Adapter = requireAdapter();
   const adapter = new Adapter();
   // Drive minimal flow: initialize -> launch -> onPythonConnected
-  adapter.initialize({});
-  adapter.launch({ program: '/tmp/dummy.frm' });
+  if (typeof adapter.initialize === 'function') {
+    adapter.initialize({});
+  }
+  if (typeof adapter.launch === 'function') {
+    adapter.launch({ program: '/tmp/dummy.frm' });
+  }
   if (typeof adapter.onPythonConnected === 'function') {
     adapter.onPythonConnected();
   }

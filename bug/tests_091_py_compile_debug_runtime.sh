@@ -12,5 +12,10 @@ if [[ ! -f "${TARGET}" ]]; then
   exit 1
 fi
 
-python3 -m py_compile "${TARGET}"
-echo "PY_COMPILE_OK"
+PYTHONDONTWRITEBYTECODE=1 python3 - "${TARGET}" <<'PY'
+import py_compile, tempfile, sys
+target = sys.argv[1]
+cfile = tempfile.mktemp(prefix="pydebug_091_", suffix=".pyc")
+py_compile.compile(target, cfile=cfile, doraise=True)
+print("PY_COMPILE_OK")
+PY
