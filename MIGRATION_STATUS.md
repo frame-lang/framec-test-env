@@ -44,19 +44,22 @@
 
 ### Rust Test Runner Enhancement
 - ✅ Metadata parsing implementation
-- ✅ Docker executor module
+- ✅ Docker executor module (placeholder)
 - ✅ Test reporter (JSON, JUnit, TAP)
 - ✅ CLI integration
-- ⏳ Metadata-based filtering
+- ✅ Metadata-based filtering
+- ✅ Unit tests for metadata parsing
+- ⏳ Docker executor implementation
 - ⏳ Exec harness support
 - ⏳ Parallel validation
 
 ## 📋 Next Steps
 
 ### Week 1 (This Week)
-- [ ] Complete metadata-based test filtering
-- [ ] Add unit tests for new components
-- [ ] Build and push Docker images to registry
+- [x] Complete metadata-based test filtering
+- [x] Add unit tests for metadata parsing 
+- [x] Build Docker images (Python, TypeScript, Rust)
+- [ ] Push Docker images to registry
 - [ ] Begin parallel validation (Rust vs Python runner)
 
 ### Week 2
