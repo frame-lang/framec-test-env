@@ -66,11 +66,16 @@
 - [x] Create parallel validation script
 - [x] Test Docker execution for all PRT languages
 
-### Week 2
+### Week 2 - IN PROGRESS
 - [ ] Push Docker images to registry
-- [ ] Run full parallel validation suite
-- [ ] Document and fix discrepancies
-- [ ] Performance benchmarking (Rust vs Python runner)
+- [x] Run full parallel validation suite (11/12 categories have discrepancies)
+- [x] Document and fix discrepancies (documented, fixes pending)
+- [x] Performance benchmarking (Rust runner is 12.59x faster!)
+- [x] Fix TypeScript .frts extension handling (fixed, now using .ts)
+- [ ] Fix transpiler issues discovered:
+  - [ ] Python: system.return keyword conflict
+  - [ ] TypeScript: undefined variable references  
+  - [ ] Rust: missing constructor arguments
 
 ### Week 3
 - [ ] Migrate test fixtures to shared environment
