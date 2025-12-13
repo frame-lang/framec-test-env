@@ -2,10 +2,12 @@
 // Replaces the Python docker_test_harness.py
 
 use anyhow::{anyhow, Context, Result};
+use chrono;
 use clap::Parser;
 use colored::*;
 use serde::{Deserialize, Serialize};
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::Instant;
@@ -36,6 +38,10 @@ struct Args {
     /// Verbose output
     #[arg(short, long)]
     verbose: bool,
+
+    /// Run comprehensive test summary across all categories
+    #[arg(long)]
+    summary: bool,
 }
 
 /// Test execution result
@@ -444,6 +450,91 @@ impl DockerTestRunner {
     }
 }
 
+/// Run comprehensive test summary across all categories  
+fn run_comprehensive_summary(runner: &DockerTestRunner, language: &str) -> Result<()> {
+    println!("================================================================");
+    println!("          FRAME TRANSPILER COMPREHENSIVE TEST REPORT");
+    println!("================================================================");
+    println!("Language: {}", language.to_uppercase());
+    println!("Date: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
+    println!("");
+
+    let categories = [
+        "async", "capabilities", "closers", "control_flow", "core", 
+        "data_types", "exec_smoke", "expansion", "facade_smoke", 
+        "imports", "mapping", "mir", "operators", "outline", 
+        "persistence", "prolog", "scoping", "systems", 
+        "systems_runtime", "validator"
+    ];
+
+    let mut total_passed = 0;
+    let mut total_failed = 0;
+    let mut total_tests = 0;
+    let mut categories_with_tests = 0;
+
+    for category in &categories {
+        let category_name = format!("v3_{}", category);
+        print!("  {:20}: ", category_name);
+        std::io::stdout().flush().unwrap();
+
+        match runner.run_category(language, &category_name) {
+            Ok(results) => {
+                if results.is_empty() {
+                    println!("no tests");
+                } else {
+                    let passed = results.iter().filter(|r| r.passed).count();
+                    let failed = results.len() - passed;
+                    let total = results.len();
+                    
+                    if failed == 0 {
+                        println!("✅ {} tests ({} passed)", total, passed);
+                    } else {
+                        println!("⚠️  {} tests ({} passed, {} failed)", total, passed, failed);
+                    }
+                    
+                    total_passed += passed;
+                    total_failed += failed; 
+                    total_tests += total;
+                    categories_with_tests += 1;
+                }
+            }
+            Err(e) => {
+                if e.to_string().contains("No test files found") {
+                    println!("no tests");
+                } else {
+                    println!("❌ ERROR: {}", e);
+                }
+            }
+        }
+    }
+
+    println!("");
+    println!("================================================================");
+    println!("SUMMARY FOR {}", language.to_uppercase());
+    println!("================================================================");
+    println!("Categories with tests: {}", categories_with_tests);
+    println!("Total tests executed: {}", total_tests);
+    
+    if total_tests > 0 {
+        let success_rate = (total_passed as f64 / total_tests as f64) * 100.0;
+        println!("Tests passed: {} ({:.1}%)", total_passed, success_rate);
+        println!("Tests failed: {}", total_failed);
+        
+        if total_failed == 0 {
+            println!("🎉 ALL TESTS PASSED!");
+        } else {
+            println!("⚠️  {} test(s) need attention", total_failed);
+        }
+    } else {
+        println!("No tests found for this language");
+    }
+    
+    println!("================================================================");
+
+    // Exit with failure if any tests failed
+    std::process::exit(if total_failed == 0 { 0 } else { 1 })
+}
+
 fn main() -> Result<()> {
     let args = Args::parse();
 
@@ -466,6 +557,11 @@ fn main() -> Result<()> {
 
     // Create runner
     let runner = DockerTestRunner::new(args.framec, shared_env, args.verbose)?;
+
+    // Handle summary mode
+    if args.summary {
+        return run_comprehensive_summary(&runner, &args.language);
+    }
 
     // Run tests
     let results = runner.run_category(&args.language, &args.category)?;
