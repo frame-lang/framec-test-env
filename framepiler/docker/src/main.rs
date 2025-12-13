@@ -84,6 +84,15 @@ impl DockerTestRunner {
             Err(_) => return false,
         };
 
+        // Check for skip conditions first
+        for line in content.lines().take(10) {
+            let line = line.trim();
+            // Skip Rust async tests that require tokio in simple Docker environment
+            if line.contains("@skip-if: tokio-unavailable") && language == "rust" {
+                return false;
+            }
+        }
+
         // Look for @target annotation in first 5 lines
         for line in content.lines().take(5) {
             let line = line.trim();

@@ -1,5 +1,5 @@
 @target rust
-
+// @skip-if: tokio-unavailable
 // @core
 // @run-expect: start
 // @run-expect: data from api.example.com/item/123

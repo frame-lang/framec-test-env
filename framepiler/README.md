@@ -6,54 +6,56 @@ This directory contains all transpiler-specific test resources.
 
 ```
 framepiler/
-├── docker/              # Docker configurations for transpiler tests
-│   ├── transpiler-test-base.dockerfile
-│   ├── docker-compose.transpiler-test.yml
-│   └── run-transpiler-tests.sh
-├── test_runner/         # Test execution infrastructure (NEW)
-│   ├── docker_orchestrator.py    # Docker container management
-│   └── shared_env_test_runner.py # Main test runner
-├── tests/               # Test cases and test runners
-├── fixtures/            # Test fixtures and Frame files (558 tests)
-│   └── test-frames/     # Migrated V3 test fixtures
-│       ├── v3/          # V3 architecture tests (19 categories)
-│       └── common/      # Common/shared tests
+├── docker/              # Docker test runner (Rust implementation)
+│   ├── src/
+│   │   └── main.rs     # Rust test runner implementation
+│   ├── Cargo.toml      # Builds frame-docker-runner binary
+│   ├── Dockerfile.python    # Python test container
+│   ├── Dockerfile.typescript # TypeScript test container
+│   ├── Dockerfile.rust      # Rust test container
+│   └── target/release/
+│       └── frame-docker-runner  # Test runner binary
 ├── frame_runtime_py/    # Python Frame runtime
-├── scripts/             # Test automation scripts
+├── frame_runtime_ts/    # TypeScript Frame runtime
+├── scripts/             # Legacy test automation scripts
 ├── results/             # Test execution results (gitignored)
 └── docs/                # Transpiler-specific test documentation
 ```
 
+**Note**: All test fixtures (607 tests) are now in `../common/test-frames/v3/` shared with other teams.
+
 ## Running Tests
 
-### New Test Runner (Recommended)
+### Docker Test Runner (Current Architecture)
+The test runner is a Rust binary located at `docker/target/release/frame-docker-runner`.
+
 ```bash
-# Run all Python tests
-python3 test_runner/shared_env_test_runner.py \
-  --framec /path/to/framec \
-  --test-root fixtures \
-  --language python
+# Set environment variable
+export FRAMEPILER_TEST_ENV=/path/to/framepiler_test_env
 
-# Run specific category with Docker
-python3 test_runner/shared_env_test_runner.py \
-  --framec /path/to/framec \
-  --test-root fixtures \
-  --category v3_core \
-  --verbose
+# Run Python tests
+./docker/target/release/frame-docker-runner python_3 v3_data_types \
+  --framec /path/to/framec
 
-# Run tests in parallel
-python3 test_runner/shared_env_test_runner.py \
-  --framec /path/to/framec \
-  --test-root fixtures \
-  --parallel 4 \
-  --format junit \
-  --output results/test-results.xml
+# Run TypeScript tests with verbose output
+./docker/target/release/frame-docker-runner typescript v3_operators \
+  --framec /path/to/framec --verbose
+
+# Run Rust tests with JSON output
+./docker/target/release/frame-docker-runner rust v3_systems \
+  --framec /path/to/framec --json
+
+# Run all categories for a language
+for category in data_types operators scoping systems async persistence imports; do
+  ./docker/target/release/frame-docker-runner python_3 v3_${category} \
+    --framec /path/to/framec
+done
 ```
 
-### Legacy Docker Compose Method
+### Building the Docker Runner
 ```bash
 cd docker/
-./run-transpiler-tests.sh
+cargo build --release
 ```
 
 ### With Custom Environment
