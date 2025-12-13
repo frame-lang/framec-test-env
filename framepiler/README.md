@@ -10,8 +10,15 @@ framepiler/
 │   ├── transpiler-test-base.dockerfile
 │   ├── docker-compose.transpiler-test.yml
 │   └── run-transpiler-tests.sh
+├── test_runner/         # Test execution infrastructure (NEW)
+│   ├── docker_orchestrator.py    # Docker container management
+│   └── shared_env_test_runner.py # Main test runner
 ├── tests/               # Test cases and test runners
-├── fixtures/            # Test fixtures and Frame files
+├── fixtures/            # Test fixtures and Frame files (558 tests)
+│   └── test-frames/     # Migrated V3 test fixtures
+│       ├── v3/          # V3 architecture tests (19 categories)
+│       └── common/      # Common/shared tests
+├── frame_runtime_py/    # Python Frame runtime
 ├── scripts/             # Test automation scripts
 ├── results/             # Test execution results (gitignored)
 └── docs/                # Transpiler-specific test documentation
@@ -19,7 +26,31 @@ framepiler/
 
 ## Running Tests
 
-### Quick Start
+### New Test Runner (Recommended)
+```bash
+# Run all Python tests
+python3 test_runner/shared_env_test_runner.py \
+  --framec /path/to/framec \
+  --test-root fixtures \
+  --language python
+
+# Run specific category with Docker
+python3 test_runner/shared_env_test_runner.py \
+  --framec /path/to/framec \
+  --test-root fixtures \
+  --category v3_core \
+  --verbose
+
+# Run tests in parallel
+python3 test_runner/shared_env_test_runner.py \
+  --framec /path/to/framec \
+  --test-root fixtures \
+  --parallel 4 \
+  --format junit \
+  --output results/test-results.xml
+```
+
+### Legacy Docker Compose Method
 ```bash
 cd docker/
 ./run-transpiler-tests.sh
@@ -43,14 +74,29 @@ All transpiler containers use the namespace `frame-transpiler-*`:
 
 ## Test Categories
 
-Tests are organized by V3 categories:
-- `v3_core` - Core transpilation tests
-- `v3_control_flow` - Control flow constructs
-- `v3_data_types` - Data type handling
-- `v3_operators` - Operator transpilation
-- `v3_systems` - System-level tests
-- `v3_async` - Async/await support
-- `v3_persistence` - Persistence features
+**Total: 558 test files** across 19 V3 categories:
+
+| Category | Tests | Description |
+|----------|-------|-------------|
+| `v3_core` | 12 | Core transpilation tests |
+| `v3_control_flow` | 40 | Control flow constructs |
+| `v3_systems` | 13 | System-level tests |
+| `v3_data_types` | 5 | Data type handling |
+| `v3_operators` | 5 | Operator transpilation |
+| `v3_scoping` | 3 | Scope resolution |
+| `v3_exec_smoke` | 8 | Execution smoke tests |
+| `v3_validator` | 10 | Validation tests |
+| `v3_mir` | 30 | MIR generation |
+| `v3_async` | 1 | Async/await support |
+| `v3_persistence` | 3 | Persistence features |
+| `v3_prolog` | 4 | Prolog tests |
+| `v3_imports` | 8 | Import handling |
+| `v3_outline` | 6 | Outline generation |
+| `v3_expansion` | 1 | Macro expansion |
+| `v3_closers` | 3 | Closure tests |
+| `v3_mapping` | 3 | Type mapping |
+| `v3_capabilities` | 16 | Capability tests |
+| `common` | 36 | Shared/common tests |
 
 ## Adding New Tests
 
