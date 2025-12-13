@@ -292,7 +292,7 @@ impl DockerTestRunner {
             "rust" => {
                 cmd.arg("bash").arg("-c")
                     .arg(format!(
-                        "cd /work && rustc {} -o test_binary 2>&1 && ./test_binary 2>&1",
+                        "cd /work && rustc --edition 2021 {} -o test_binary 2>&1 && ./test_binary 2>&1",
                         test_name
                     ));
             }
