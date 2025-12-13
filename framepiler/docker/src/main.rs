@@ -136,9 +136,16 @@ impl DockerTestRunner {
             let path = entry.path();
             let ext = path.extension().and_then(|s| s.to_str());
             
-            // Check for both .frm and .frm_v3 extensions
+            // Check for V3 Frame extensions: .frm, .frm_v3, and language-specific (.fpy, .frts, .frs, etc.)
             let is_frame_file = ext == Some("frm") || 
-                                path.to_string_lossy().ends_with(".frm_v3");
+                                path.to_string_lossy().ends_with(".frm_v3") ||
+                                ext == Some("fpy") ||  // Python
+                                ext == Some("frts") || // TypeScript  
+                                ext == Some("frs") ||  // Rust
+                                ext == Some("fc") ||   // C
+                                ext == Some("fcpp") || // C++
+                                ext == Some("frcs") || // C#
+                                ext == Some("fjava");  // Java
             
             if is_frame_file {
                 if self.is_test_for_language(path, language) {
@@ -166,26 +173,45 @@ impl DockerTestRunner {
             _ => return Err(anyhow!("Unsupported language: {}", language)),
         };
 
-        // Handle .frm_v3 files by stripping the full extension
+        // Handle V3 extensions: .frm, .frm_v3, and language-specific (.fpy, .frts, .frs, etc.)
         let file_name = test_file.file_name().unwrap().to_string_lossy();
         let base_name = if file_name.ends_with(".frm_v3") {
             file_name.strip_suffix(".frm_v3").unwrap().to_string()
         } else if file_name.ends_with(".frm") {
             file_name.strip_suffix(".frm").unwrap().to_string()
+        } else if file_name.ends_with(".fpy") {
+            file_name.strip_suffix(".fpy").unwrap().to_string()
+        } else if file_name.ends_with(".frts") {
+            file_name.strip_suffix(".frts").unwrap().to_string()
+        } else if file_name.ends_with(".frs") {
+            file_name.strip_suffix(".frs").unwrap().to_string()
+        } else if file_name.ends_with(".fc") {
+            file_name.strip_suffix(".fc").unwrap().to_string()
+        } else if file_name.ends_with(".fcpp") {
+            file_name.strip_suffix(".fcpp").unwrap().to_string()
+        } else if file_name.ends_with(".frcs") {
+            file_name.strip_suffix(".frcs").unwrap().to_string()
+        } else if file_name.ends_with(".fjava") {
+            file_name.strip_suffix(".fjava").unwrap().to_string()
         } else {
             test_file.file_stem().unwrap().to_string_lossy().to_string()
         };
 
         let output_file = output_dir.join(format!("{}.{}", base_name, ext));
 
-        // Run framec
-        let output = Command::new(&self.framec_path)
-            .args(&["-l", language])
+        // Build command with environment variables
+        let mut cmd = Command::new(&self.framec_path);
+        cmd.args(&["-l", language])
             .arg(test_file)
             .stdout(Stdio::piped())
-            .stderr(Stdio::piped())
-            .output()
-            .context("Failed to run framec")?;
+            .stderr(Stdio::piped());
+
+        // For Rust tests, set FRAME_EMIT_EXEC=1 to generate main function
+        if language == "rust" {
+            cmd.env("FRAME_EMIT_EXEC", "1");
+        }
+
+        let output = cmd.output().context("Failed to run framec")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
