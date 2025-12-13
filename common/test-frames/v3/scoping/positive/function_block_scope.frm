@@ -1,10 +1,5 @@
 @target rust
 
-fn helper() {
-    let y = 5;
-    println!("{}", y);
-}
-
 system Scope {
     interface:
         run()
@@ -12,6 +7,11 @@ system Scope {
     machine:
         $Start {
             run() {
+                // Rust doesn't support nested functions, use a closure instead
+                let helper = || {
+                    let y = 5;
+                    println!("{}", y);
+                };
                 helper();
                 let y = 10;
                 println!("{}", y);
