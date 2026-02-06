@@ -1,8 +1,8 @@
-@target typescript
-// @run-expect: STACK:PUSH
-// @run-expect: TRANSITION:
+@@target typescript
+@@run-expect: STACK:PUSH
+@@run-expect: TRANSITION:
 
-system S {
+@@system S {
     machine:
         $A {
             e() {

@@ -1,7 +1,7 @@
-@target typescript
+@@target typescript
 // @exec-ok
 
-system S {
+@@system S {
     machine:
         $A => $P {
             e() {

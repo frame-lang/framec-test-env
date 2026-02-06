@@ -1,7 +1,7 @@
-@target rust
-# @expect: E300
+@@target rust
+@@expect: E300
 
-system S {
+@@system S {
     machine:
         $A {
             e() {

@@ -6,7 +6,7 @@ fn main() {
     sys.test_method()
 }
 
-system ConflictSystem {
+@@system ConflictSystem {
     operations:
         conflicting_method() {
             print("Operation version")

@@ -1,11 +1,11 @@
-@target rust
+@@target rust
 
-// @core
-// @run-expect: start
-// @run-expect: data from api.example.com/item/123
-// @run-expect: processed payload with data from api.example.com/process
-// @run-expect: done
-system AsyncDemoRs {
+@@core
+@@run-expect: start
+@@run-expect: data from api.example.com/item/123
+@@run-expect: processed payload with data from api.example.com/process
+@@run-expect: done
+@@system AsyncDemoRs {
     operations:
         async fn fetch_data(url: String) -> String {
             println!("fetching {}", url);

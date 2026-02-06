@@ -1,12 +1,12 @@
-@target python_3
+@@target python_3
 
-# @core
-# @run-expect: Red
-# @run-expect: Green
-# @run-expect: Yellow
-# @run-expect: Red
+@@core
+@@run-expect: Red
+@@run-expect: Green
+@@run-expect: Yellow
+@@run-expect: Red
 
-@persist system TrafficLight($(color), domain) {
+@@persist @@system TrafficLight($(color), domain) {
     interface:
         tick()
 

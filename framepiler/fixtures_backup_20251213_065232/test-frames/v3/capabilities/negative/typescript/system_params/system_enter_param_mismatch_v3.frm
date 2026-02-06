@@ -1,9 +1,9 @@
-@target typescript
+@@target typescript
 # @expect: E417
 
 // Negative: system $>(...) params do not match start state's $>() handler.
 
-system SystemEnterParamMismatchTs($(color), $>(enterColor), domain) {
+@@system SystemEnterParamMismatchTs($(color), $>(enterColor), domain) {
     interface:
         run()
 

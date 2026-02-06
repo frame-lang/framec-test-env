@@ -1,4 +1,4 @@
-system TestProtocolVerification {
+@@system TestProtocolVerification {
     interface:
         start()
         increment()

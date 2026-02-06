@@ -1,6 +1,6 @@
-@target python_3
+@@target python_3
 
-system RuntimeStdio {
+@@system RuntimeStdio {
     machine:
         $Start {
             e() {

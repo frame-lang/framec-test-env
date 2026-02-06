@@ -1,6 +1,6 @@
-@target python
+@@target python
 
-system S {
+@@system S {
     actions:
         fn bad() {
             -> $B()

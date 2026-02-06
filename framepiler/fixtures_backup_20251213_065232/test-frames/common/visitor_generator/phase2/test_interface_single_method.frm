@@ -1,6 +1,6 @@
 # Phase 2: Single interface method with basic state machine
 
-system Calculator {
+@@system Calculator {
     interface:
         add(x: int, y: int): int
 

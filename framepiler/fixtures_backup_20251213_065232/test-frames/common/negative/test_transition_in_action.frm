@@ -1,4 +1,4 @@
-system TestSys {
+@@system TestSys {
     interface:
         go()
 

@@ -7,7 +7,7 @@ fn main() {
     print(f"Final value: {value}")
 }
 
-system TestProtocolVerification {
+@@system TestProtocolVerification {
     interface:
         start()
         increment()

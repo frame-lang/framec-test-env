@@ -1,7 +1,7 @@
-@target typescript
+@@target typescript
 // @run-expect: TRANSITION:__SysX_state_B
 
-system SysX {
+@@system SysX {
     machine:
         $A {
             e() {

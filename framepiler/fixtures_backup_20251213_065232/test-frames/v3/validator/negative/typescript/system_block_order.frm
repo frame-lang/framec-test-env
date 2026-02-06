@@ -1,7 +1,7 @@
-@target typescript
+@@target typescript
 // @expect: E113
 
-system S {
+@@system S {
     interface:
         e()
 

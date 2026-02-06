@@ -1,11 +1,11 @@
-@target rust
+@@target rust
 
 fn helper() {
     let y = 5;
     println!("{}", y);
 }
 
-system Scope {
+@@system Scope {
     interface:
         run()
 

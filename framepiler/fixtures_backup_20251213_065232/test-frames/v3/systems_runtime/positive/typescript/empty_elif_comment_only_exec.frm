@@ -1,10 +1,10 @@
-@target typescript
+@@target typescript
 
 // Bug #077 regression: comment-only terminal branch in event handler
 // must still emit a `;` so the generated TS is importable.
 // @run-expect: Red
 
-system EmptyElif {
+@@system EmptyElif {
   interface:
     run()
 

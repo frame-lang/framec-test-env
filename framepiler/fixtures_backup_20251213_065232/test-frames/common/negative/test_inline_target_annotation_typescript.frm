@@ -1,6 +1,6 @@
 # Negative: inline #[target: typescript] annotations must error
 
-system InlineTargetDirectiveTS {
+@@system InlineTargetDirectiveTS {
     interface:
         start()
 

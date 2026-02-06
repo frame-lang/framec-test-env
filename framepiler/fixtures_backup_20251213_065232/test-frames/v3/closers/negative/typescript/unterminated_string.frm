@@ -1,4 +1,4 @@
-@target typescript
+@@target typescript
 {
     const s = "unterminated;
 }

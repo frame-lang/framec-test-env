@@ -1,10 +1,10 @@
-@target typescript
+@@target typescript
 
 # V3 capability / regression guard for Bug 087:
 # Ensure actions with explicit return types and native `if`/`for` bodies
 # do not produce bogus methods like `public if(...)` or `public for(...)`.
 
-system Bug087IfForActionsTs {
+@@system Bug087IfForActionsTs {
 
   interface:
     run()

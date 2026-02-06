@@ -1,5 +1,5 @@
 // comment before target should fail
-@target typescript
+@@target typescript
 
 handler H { }
 

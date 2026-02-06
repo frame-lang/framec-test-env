@@ -1,6 +1,6 @@
 # Phase 3: Actions and operations
 
-system Calculator {
+@@system Calculator {
     operations:
         getVersionString(): string {
             return "Calculator v1.0"

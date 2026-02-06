@@ -1,6 +1,6 @@
 # Negative: nested member access under system is not supported (system.foo.bar())
 
-system NestedSystemMemberTest {
+@@system NestedSystemMemberTest {
     interface:
         test()
 

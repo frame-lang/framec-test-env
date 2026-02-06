@@ -1,8 +1,8 @@
-@target typescript
+@@target typescript
 
 // Name-based grouping with multiple $(...)/$>(...) segments.
 // @core
-system SystemParamsMultiTs($(color), $>(enterColor), $(extra)) {
+@@system SystemParamsMultiTs($(color), $>(enterColor), $(extra)) {
     interface:
         run(extra: string)
 

@@ -1,6 +1,6 @@
-@target python_3
+@@target python_3
 
-system Minimal {
+@@system Minimal {
     machine:
         $Start {
             $>() {

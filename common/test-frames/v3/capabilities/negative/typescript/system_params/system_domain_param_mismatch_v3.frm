@@ -1,9 +1,9 @@
-@target typescript
-# @expect: E418
+@@target typescript
+@@expect: E418
 
 // Negative: domain param name does not match any variable in domain: block.
 
-system SystemDomainParamMismatchTs($(color), $>(enterColor), badDomain) {
+@@system SystemDomainParamMismatchTs($(color), $>(enterColor), badDomain) {
     interface:
         run()
 

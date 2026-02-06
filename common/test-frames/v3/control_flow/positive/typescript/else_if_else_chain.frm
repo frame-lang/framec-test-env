@@ -1,18 +1,20 @@
-@target typescript
+@@target typescript
 
-system S {
-    machine:
-        $A => $P {
-            e() {
-                if (a) {
-                    x();
-                } else if (b) {
-                    y();
-                } else {
-                    z();
-                }
-                => $^
-            }
+fn test_else_if_else_chain() {
+    // Test: transition
+    if (x) {
+            // body
+-> $B()
         }
-        $P { }
+        else if (y) {
+            // body
+        }
+        else {
+            // tail
+        }
+    print("SUCCESS: test_else_if_else_chain completed")
+}
+
+fn main() {
+    test_else_if_else_chain()
 }

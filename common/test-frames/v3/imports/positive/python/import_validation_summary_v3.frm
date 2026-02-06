@@ -1,4 +1,4 @@
-@target python_3
+@@target python_3
 
 # V3 port of legacy test_import_validation_summary.frm.
 # Purpose: comprehensive import + builtin conversion validation using Python syntax.

@@ -1,7 +1,7 @@
-@target typescript
+@@target typescript
 // @expect: E200
 
-system S {
+@@system S {
     machine:
         $A {
             e() {

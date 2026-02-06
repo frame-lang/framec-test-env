@@ -1,9 +1,9 @@
-@target python_3
+@@target python_3
 # @expect: E406
 
 # Negative: system.helper() is not an interface method.
 
-system BadSystemCall {
+@@system BadSystemCall {
     interface:
         status()
 

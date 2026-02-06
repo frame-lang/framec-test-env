@@ -1,4 +1,4 @@
-@target typescript
+@@target typescript
 
 // V3 capability: system.return from operations (TypeScript).
 // Operations can read/write the per-call system.return slot just like
@@ -6,7 +6,7 @@
 // the pattern and wires `system.return` through the TypeScript runtime
 // return stack.
 
-system SystemReturnOpDemoTs {
+@@system SystemReturnOpDemoTs {
   operations:
     compute_default() {
       system.return = "op-default"

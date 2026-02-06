@@ -1,6 +1,6 @@
 # Negative: bare 'system' keyword is invalid (only system.return is allowed)
 
-system BareSystemKeywordTest {
+@@system BareSystemKeywordTest {
     interface:
         test()
 

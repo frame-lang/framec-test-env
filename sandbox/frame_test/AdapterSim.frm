@@ -1,6 +1,6 @@
-@target typescript
+@@target typescript
 
-system AdapterSim {
+@@system AdapterSim {
     machine:
         $Start {
             $>() {

@@ -1,6 +1,6 @@
 # Negative: calling a non-existent interface method via system.method()
 
-system UnknownInterfaceMethodTest {
+@@system UnknownInterfaceMethodTest {
     interface:
         test()
 

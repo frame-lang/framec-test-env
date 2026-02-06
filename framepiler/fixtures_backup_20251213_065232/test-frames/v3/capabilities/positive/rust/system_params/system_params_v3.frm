@@ -1,8 +1,8 @@
-@target rust
+@@target rust
 
 // @core
 
-system S($(start), $>(enter), domain) {
+@@system S($(start), $>(enter), domain) {
     machine:
         $A(start, enter) {
             e() { -> $B("done", "ok") }

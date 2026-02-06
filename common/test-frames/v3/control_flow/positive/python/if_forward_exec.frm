@@ -1,17 +1,14 @@
-@target python
-# @run-expect: FORWARD:PARENT
+@@target python
+@@run-expect: FORWARD:PARENT
 
-system S {
+@@system S {
     machine:
         $A => $P {
             e() {
                 if True:
                     => $^
-                else:
-                    -> $B()
             }
         }
-        $B { }
         $P { }
 }
 

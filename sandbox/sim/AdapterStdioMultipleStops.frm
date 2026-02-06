@@ -1,6 +1,6 @@
-@target typescript
+@@target typescript
 
-system AdapterStdioMultipleStops {
+@@system AdapterStdioMultipleStops {
     machine:
         $Start {
             e() {

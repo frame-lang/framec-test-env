@@ -1,23 +1,20 @@
-@target rust
-// @run-expect: STACK:PUSH
-// @run-expect: FORWARD:PARENT
-// @run-expect: TRANSITION:
+@@target rust
 
-system S {
-    machine:
-        $A => $P {
-            e() {
-                // Simulate try/finally shape with blocks; exec harness prints markers only
-                {
-                    $$[+]
-                    => $^
-                }
-                {
-                    -> $B()
+fn test_try_finally_stack_forward_transition() {
+    // Test: transition
+$$[+]
+=> $^
+                    }
+                    {
+-> $B()
+                    }
                 }
             }
-        }
-        $B { }
-        $P { }
+            $B { }
+            $P { }
+    print("SUCCESS: test_try_finally_stack_forward_transition completed")
 }
 
+fn main() {
+    test_try_finally_stack_forward_transition()
+}

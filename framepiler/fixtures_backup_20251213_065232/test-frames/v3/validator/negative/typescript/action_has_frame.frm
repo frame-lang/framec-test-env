@@ -1,6 +1,6 @@
-@target typescript
+@@target typescript
 
-system S {
+@@system S {
     actions:
         fn bad() {
             -> $B()

@@ -1,6 +1,6 @@
-@target rust
+@@target rust
 
-system Scope {
+@@system Scope {
     interface:
         run()
 

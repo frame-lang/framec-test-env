@@ -1,7 +1,7 @@
 fn incomplete_function(
     // Missing closing paren and brace - tests line number reporting
 
-system BrokenSystem {
+@@system BrokenSystem {
     machine:
         $State {
             handler() {

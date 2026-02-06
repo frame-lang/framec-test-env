@@ -1,6 +1,6 @@
-@target typescript
+@@target typescript
 
-system AdapterStdio {
+@@system AdapterStdio {
     machine:
         $Start {
             e() {

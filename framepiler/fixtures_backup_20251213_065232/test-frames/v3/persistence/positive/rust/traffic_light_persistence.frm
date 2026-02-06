@@ -1,4 +1,4 @@
-@target rust
+@@target rust
 
 // @core
 // @run-expect: Red
@@ -6,7 +6,7 @@
 // @run-expect: Yellow
 // @run-expect: Red
 
-@persist system TrafficLight($(color), domain) {
+@@persist @@system TrafficLight($(color), domain) {
     interface:
         tick()
 

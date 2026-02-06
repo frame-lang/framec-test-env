@@ -1,4 +1,4 @@
-@target typescript
+@@target typescript
 
 // V3 capability: system.return header defaults and handler returns (TypeScript).
 //
@@ -9,7 +9,7 @@
 //   - bare `return` (leave system.return at the header default)
 //   - `return expr` sugar (override system.return)
 
-system SystemReturnHeaderDefaultsTs {
+@@system SystemReturnHeaderDefaultsTs {
 
   interface:
     a1(): number = 10

@@ -1,9 +1,9 @@
-@target python_3
+@@target python_3
 
 # V3 capability fixture: exit handler (<$()) support.
 # Structural / compile-only: exercises $>() and <$() headers in a simple system.
 
-system ExitHandlerDemo {
+@@system ExitHandlerDemo {
     interface:
         tick()
 

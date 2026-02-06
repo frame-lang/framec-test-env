@@ -1,10 +1,10 @@
-@target typescript
+@@target typescript
 
 // Cross-language snapshot export (TypeScript).
 // This fixture mirrors the Python snapshot_dump behavior: it runs a
 // TrafficLight system to a known state and prints a single JSON snapshot.
 
-system TrafficLight($(color), domain) {
+@@system TrafficLight($(color), domain) {
     interface:
         tick()
 

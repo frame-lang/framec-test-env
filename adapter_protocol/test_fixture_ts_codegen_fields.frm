@@ -1,6 +1,6 @@
-@target typescript
+@@target typescript
 
-system TSFieldsTest {
+@@system TSFieldsTest {
 
   interface:
     init()

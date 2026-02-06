@@ -1,8 +1,8 @@
-@target typescript
+@@target typescript
 
 # V3 capability: system.return from handlers and actions (TypeScript).
 
-system SystemReturnDemoTs {
+@@system SystemReturnDemoTs {
     interface:
         status(): string = "idle"
 

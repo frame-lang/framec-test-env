@@ -1,6 +1,6 @@
-@target rust
+@@target rust
 
-system S {
+@@system S {
     actions:
         fn bad() {
             -> $B()

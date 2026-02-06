@@ -1,4 +1,4 @@
-@target typescript
+@@target typescript
 
 import { join from "path";
 

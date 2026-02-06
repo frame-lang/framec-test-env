@@ -1,7 +1,7 @@
-@target rust
+@@target rust
 // @expect: E113
 
-system S {
+@@system S {
     actions:
         fn bad() { => $^; }
     machine:

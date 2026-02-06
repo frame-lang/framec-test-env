@@ -1,12 +1,11 @@
-@target typescript
+@@target typescript
 
-system S {
+@@system S {
     machine:
         $A {
             e() {
                 $$[+]
                 $$[-]
-                x();
             }
         }
 }

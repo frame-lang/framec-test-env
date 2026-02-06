@@ -1,6 +1,6 @@
-@target typescript
+@@target typescript
 
-system AdapterStdioPauseStep {
+@@system AdapterStdioPauseStep {
     machine:
         $Start {
             e() {

@@ -1,9 +1,9 @@
-@target python
-# @run-expect: STACK:PUSH
-# @run-expect: STACK:POP
-# @run-expect: TRANSITION:
+@@target python
+@@run-expect: STACK:PUSH
+@@run-expect: STACK:POP
+@@run-expect: TRANSITION:
 
-system S {
+@@system S {
     machine:
         $A {
             e() {

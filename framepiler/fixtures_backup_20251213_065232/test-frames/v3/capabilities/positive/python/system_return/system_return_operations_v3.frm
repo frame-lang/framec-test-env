@@ -1,10 +1,10 @@
-@target python_3
+@@target python_3
 
 # V3 capability: system.return from operations (Python).
 # Operations are allowed to assign to system.return, sharing the same
 # per-call slot used by handlers and actions.
 
-system SystemReturnOpDemo {
+@@system SystemReturnOpDemo {
     interface:
         status(): str = "idle"
         get_default(): str = "op-default"

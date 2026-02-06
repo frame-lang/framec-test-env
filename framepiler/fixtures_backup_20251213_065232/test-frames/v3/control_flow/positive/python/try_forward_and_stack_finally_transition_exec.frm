@@ -1,10 +1,10 @@
-@target python
+@@target python
 # @run-expect: FORWARD:PARENT
 # @run-expect: STACK:PUSH
 # @run-expect: STACK:POP
 # @run-expect: TRANSITION:
 
-system S {
+@@system S {
     machine:
         $A => $P {
             e() {

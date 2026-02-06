@@ -1,6 +1,6 @@
-@target rust
+@@target rust
 
-system S {
+@@system S {
     machine:
         $P { e() { } }
         $A => $P {

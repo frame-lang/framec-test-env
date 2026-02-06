@@ -1,7 +1,7 @@
-@target python
-# @exec-ok
+@@target python
+@@exec-ok
 
-system S {
+@@system S {
     machine:
         $A => $P {
             e() {

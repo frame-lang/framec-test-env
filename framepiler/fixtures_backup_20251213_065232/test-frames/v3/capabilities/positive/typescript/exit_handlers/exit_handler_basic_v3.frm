@@ -1,9 +1,9 @@
-@target typescript
+@@target typescript
 
 # V3 capability fixture: exit handler (<$()) support (TypeScript).
 # Structural / compile-only: exercises $>() and <$() headers in a simple system.
 
-system ExitHandlerDemoTs {
+@@system ExitHandlerDemoTs {
     interface:
         tick()
 

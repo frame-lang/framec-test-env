@@ -1,6 +1,6 @@
-@target typescript
+@@target typescript
 
-system AdapterStdioExceptionDetails {
+@@system AdapterStdioExceptionDetails {
     machine:
         $Start {
             e() {

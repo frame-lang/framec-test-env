@@ -1,6 +1,6 @@
-@target python
+@@target python
 
-system RuntimeSim {
+@@system RuntimeSim {
     machine:
         $Start {
             $>() {

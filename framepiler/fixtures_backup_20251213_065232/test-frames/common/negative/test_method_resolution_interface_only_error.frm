@@ -6,7 +6,7 @@ fn main() {
     sys.test_method()
 }
 
-system InterfaceOnlyErrorSystem {
+@@system InterfaceOnlyErrorSystem {
     interface:
         test_method()
         interface_only_method(): string

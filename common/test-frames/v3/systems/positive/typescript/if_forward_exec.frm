@@ -1,7 +1,7 @@
-@target typescript
-// @run-expect: FORWARD:PARENT
+@@target typescript
+@@run-expect: FORWARD:PARENT
 
-system S {
+@@system S {
     machine:
         $A => $P {
             e() {

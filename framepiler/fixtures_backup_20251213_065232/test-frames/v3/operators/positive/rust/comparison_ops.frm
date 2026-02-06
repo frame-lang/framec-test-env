@@ -1,6 +1,6 @@
-@target rust
+@@target rust
 
-system Ops {
+@@system Ops {
     interface:
         run()
 

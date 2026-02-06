@@ -1,6 +1,6 @@
-@target typescript
+@@target typescript
 
-system AdapterStdioPauseStepOut {
+@@system AdapterStdioPauseStepOut {
     machine:
         $Start {
             e() {

@@ -1,5 +1,5 @@
 # Simple debug test
-system DebugTestSystem {
+@@system DebugTestSystem {
     interface: {
         start()
     }

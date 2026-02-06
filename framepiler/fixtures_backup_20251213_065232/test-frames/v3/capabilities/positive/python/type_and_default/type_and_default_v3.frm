@@ -1,9 +1,9 @@
-@target python_3
+@@target python_3
 
 # V3 capability fixture: header type/default segment (`: Type = default`).
 # This exercises `type_and_default` on interface/actions/operations headers.
 
-system TypeAndDefaultDemo {
+@@system TypeAndDefaultDemo {
     operations:
         @native
         helper(x): Result = None {

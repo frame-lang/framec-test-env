@@ -1,10 +1,10 @@
-@target rust
+@@target rust
 
 // Bug #077 regression: comment-only terminal branch in event handler
 // must still emit a statement so the generated Rust is compilable.
 // @run-expect: Red
 
-system EmptyElif {
+@@system EmptyElif {
   interface:
     run()
 

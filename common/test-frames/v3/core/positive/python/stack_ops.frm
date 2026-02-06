@@ -1,12 +1,11 @@
-@target python
+@@target python
 
-system S {
+@@system S {
     machine:
         $A {
             e() {
                 $$[+]
                 $$[-]
-                x()
             }
         }
 }

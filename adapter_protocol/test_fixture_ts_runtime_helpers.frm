@@ -1,6 +1,6 @@
-@target typescript
+@@target typescript
 
-system TSAdapterHelpersTest {
+@@system TSAdapterHelpersTest {
 
   interface:
     start()

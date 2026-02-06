@@ -1,6 +1,6 @@
-@target typescript
+@@target typescript
 
-system AdapterProtocol {
+@@system AdapterProtocol {
   interface:
     start()
     runtimeConnected()

@@ -1,7 +1,7 @@
 # NEGATIVE TEST - Malformed syntax with missing closing braces
 # This test should fail with: "Expected '}'"
 
-system DebuggerValidationTest {
+@@system DebuggerValidationTest {
     interface:
         start()
         getCurrentState()

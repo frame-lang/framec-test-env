@@ -1,4 +1,4 @@
-@target python_3
+@@target python_3
 
 # V3 port of legacy test_import_python_comprehensive.frm.
 # Purpose: ensure all common Python import forms are preserved and usable.

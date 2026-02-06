@@ -1,6 +1,6 @@
 # Phase 2: Enter handlers (exit handlers appear to have parser issues)
 
-system LifecycleMachine {
+@@system LifecycleMachine {
     interface:
         activate(): string
         deactivate(): string

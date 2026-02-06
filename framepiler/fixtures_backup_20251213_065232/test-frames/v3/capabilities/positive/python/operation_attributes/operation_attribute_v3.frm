@@ -1,8 +1,8 @@
-@target python_3
+@@target python_3
 
 # V3 capability fixture: operation attributes.
 
-system AttrDemo {
+@@system AttrDemo {
     operations:
         @native
         helper(x) { return x }

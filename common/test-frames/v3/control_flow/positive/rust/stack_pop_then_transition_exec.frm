@@ -1,8 +1,8 @@
-@target rust
-// @run-expect: STACK:POP
-// @run-expect: TRANSITION:
+@@target rust
+@@run-expect: STACK:POP
+@@run-expect: TRANSITION:
 
-system S {
+@@system S {
     machine:
         $A {
             e() {

@@ -1,9 +1,9 @@
-@target typescript
+@@target typescript
 # @expect: E406
 
 # Negative: system.helper() is not an interface method.
 
-system BadSystemCallTs {
+@@system BadSystemCallTs {
     interface:
         status()
 

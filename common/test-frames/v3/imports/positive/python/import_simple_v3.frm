@@ -1,4 +1,4 @@
-@target python_3
+@@target python_3
 
 # V3 port of legacy test_import_simple.frm.
 # Purpose: simple import forms and basic usage.
@@ -21,7 +21,7 @@ fn main() {
     print("Imports completed successfully")
 }
 
-system ImportTestV3Simple {
+@@system ImportTestV3Simple {
     operations:
         testMath() {
             result = math.cos(0)

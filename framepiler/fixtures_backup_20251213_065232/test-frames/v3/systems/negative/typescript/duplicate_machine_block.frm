@@ -1,9 +1,9 @@
-@target typescript
+@@target typescript
 
 // System with duplicate machine: blocks. Expect E114.
 // @expect: E114
 
-system S {
+@@system S {
     machine:
         $A {
             e() { x(); }

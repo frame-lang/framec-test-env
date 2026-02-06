@@ -1,4 +1,4 @@
-@target python_3
+@@target python_3
 
 # V3 port of legacy test_module_imports_no_backticks.frm.
 # Purpose: ensure module.attribute and module.method() work without backticks.

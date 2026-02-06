@@ -1,7 +1,7 @@
-@target python
+@@target python
 # @expect: E301
 
-system S {
+@@system S {
     machine:
         $A {
             e() {

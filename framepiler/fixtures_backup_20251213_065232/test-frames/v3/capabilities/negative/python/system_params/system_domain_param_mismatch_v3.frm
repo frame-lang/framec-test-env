@@ -1,9 +1,9 @@
-@target python_3
+@@target python_3
 # @expect: E418
 
 # Negative: domain param name does not match any variable in domain: block.
 
-system SystemDomainParamMismatch($(color), $>(enter_color), badDomain) {
+@@system SystemDomainParamMismatch($(color), $>(enter_color), badDomain) {
     interface:
         run()
 

@@ -1,8 +1,8 @@
-@target python_3
+@@target python_3
 
 # @core
 
-system SystemParamsMultiPy($(color), $>(enterColor), $(extra)) {
+@@system SystemParamsMultiPy($(color), $>(enterColor), $(extra)) {
     interface:
         run(extra)
 

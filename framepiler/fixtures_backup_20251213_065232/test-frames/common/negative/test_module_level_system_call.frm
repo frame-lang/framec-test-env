@@ -1,7 +1,7 @@
 # NEGATIVE TEST - Cannot instantiate systems at module level
 # This test should fail with: "Module-level function calls are not allowed"
 
-system TestSystem {
+@@system TestSystem {
     interface:
         doSomething()
     

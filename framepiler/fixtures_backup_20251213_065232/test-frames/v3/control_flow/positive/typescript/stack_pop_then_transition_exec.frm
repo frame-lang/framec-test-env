@@ -1,8 +1,8 @@
-@target typescript
+@@target typescript
 // @run-expect: STACK:POP
 // @run-expect: TRANSITION:
 
-system S {
+@@system S {
     machine:
         $A {
             e() {

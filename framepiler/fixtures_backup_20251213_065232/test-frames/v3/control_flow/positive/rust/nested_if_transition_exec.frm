@@ -1,7 +1,7 @@
-@target rust
+@@target rust
 // @run-expect: TRANSITION:
 
-system S {
+@@system S {
     machine:
         $A {
             e() {

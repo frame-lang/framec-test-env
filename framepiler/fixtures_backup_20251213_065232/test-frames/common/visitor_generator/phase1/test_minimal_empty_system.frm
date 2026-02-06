@@ -9,7 +9,7 @@
 #
 # Expected output: "SUCCESS: Empty system working"
 
-system MinimalEmpty {
+@@system MinimalEmpty {
     interface:
         test(): string
     

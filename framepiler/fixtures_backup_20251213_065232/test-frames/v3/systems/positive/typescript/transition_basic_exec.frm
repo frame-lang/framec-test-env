@@ -1,7 +1,7 @@
-@target typescript
+@@target typescript
 // @run-expect: TRANSITION:
 
-system S {
+@@system S {
     machine:
         $A {
             e() {

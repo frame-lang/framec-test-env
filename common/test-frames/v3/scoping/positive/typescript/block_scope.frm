@@ -1,17 +1,17 @@
-@target typescript
-// @exec-ok
+@@target typescript
 
-system S {
-    machine:
-        $A => $P {
-            e() {
-                let x = 1;
-                {
-                    let x = 2;
-                    => $^; x.toString();
+fn test_block_scope() {
+    // Test: transition
+    let x = 2;
+=> $^; x.toString();
+                    }
+                    x = 3;
                 }
-                x = 3;
             }
-        }
-        $P { }
+            $P { }
+    print("SUCCESS: test_block_scope completed")
+}
+
+fn main() {
+    test_block_scope()
 }

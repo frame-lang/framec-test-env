@@ -1,17 +1,17 @@
-@target typescript
-// @exec-ok
+@@target typescript
 
-system S {
-    machine:
-        $A => $P {
-            e() {
-                let x = 1;
-                {
-                    const x = 2;
-                    => $^; x.toString();
+fn test_let_const_shadowing() {
+    // Test: transition
+    const x = 2;
+=> $^; x.toString();
+                    }
+                    x = 4;
                 }
-                x = 4;
             }
-        }
-        $P { }
+            $P { }
+    print("SUCCESS: test_let_const_shadowing completed")
+}
+
+fn main() {
+    test_let_const_shadowing()
 }

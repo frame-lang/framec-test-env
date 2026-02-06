@@ -10,7 +10,7 @@
 # - greeting("World") -> "Hello, World!"
 # - farewell() -> "Goodbye!"
 
-system Greeter {
+@@system Greeter {
     interface:
         greeting(name: string): string
         farewell(): string

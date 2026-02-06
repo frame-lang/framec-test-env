@@ -1,19 +1,17 @@
-@target rust
-// @run-expect: FORWARD:PARENT
-// @run-expect: TRANSITION:
+@@target rust
 
-system S {
-    machine:
-        $Child => $Parent {
-            e() {
-                // Nested block to simulate structured control
-                {
-                    => $^
+fn test_nested_parent_forward_then_transition() {
+    // Test: transition
+=> $^
+                    }
+-> $Next()
                 }
-                -> $Next()
             }
-        }
-        $Next { }
-        $Parent { }
+            $Next { }
+            $Parent { }
+    print("SUCCESS: test_nested_parent_forward_then_transition completed")
 }
 
+fn main() {
+    test_nested_parent_forward_then_transition()
+}

@@ -1,8 +1,8 @@
-@target python_3
+@@target python_3
 
 # V3 capability: system.return from handlers and actions.
 
-system SystemReturnDemo {
+@@system SystemReturnDemo {
     interface:
         status(): str = "idle"
 

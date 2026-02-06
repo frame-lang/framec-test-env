@@ -1,6 +1,6 @@
 # Phase 2: Basic state transitions
 
-system SimpleStateMachine {
+@@system SimpleStateMachine {
     interface:
         start(): string
         stop(): string

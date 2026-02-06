@@ -1,6 +1,6 @@
 # Negative: inline #[target: python] annotations must error
 
-system InlineTargetDirectivePython {
+@@system InlineTargetDirectivePython {
     interface:
         start()
 

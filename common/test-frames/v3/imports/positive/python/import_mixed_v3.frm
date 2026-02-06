@@ -1,4 +1,4 @@
-@target python_3
+@@target python_3
 
 # V3 port of legacy test_import_mixed.frm.
 # Purpose: mixed native imports and builtins working together.

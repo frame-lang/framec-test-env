@@ -1,6 +1,6 @@
-@target rust
+@@target rust
 
-system S {
+@@system S {
     machine:
         $A => $P {
             e() { if a { => $^; } else { => $^; } }

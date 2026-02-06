@@ -5,24 +5,21 @@ use anyhow::{anyhow, Context, Result};
 use chrono;
 use clap::Parser;
 use colored::*;
+use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 use std::time::Instant;
 use walkdir::WalkDir;
 
 #[derive(Parser, Debug)]
 #[command(name = "frame-docker-runner")]
-#[command(about = "Run Frame tests in Docker containers", long_about = None)]
+#[command(about = "Run Frame tests in Docker containers - by default runs ALL tests for ALL languages", long_about = None)]
 struct Args {
-    /// Target language (python_3, typescript, rust)
-    language: String,
-
-    /// Test category (e.g., v3_data_types) or specific .frm file
-    category: String,
-
     /// Path to framec binary
     #[arg(long, default_value = "./target/release/framec")]
     framec: PathBuf,
@@ -30,6 +27,18 @@ struct Args {
     /// Path to shared test environment
     #[arg(long)]
     shared_env: Option<PathBuf>,
+
+    /// Filter by specific languages (comma-separated: python_3,typescript,rust)
+    #[arg(long, value_delimiter = ',')]
+    languages: Option<Vec<String>>,
+
+    /// Filter by specific categories (comma-separated: data_types,async,core)
+    #[arg(long, value_delimiter = ',')]
+    categories: Option<Vec<String>>,
+
+    /// Run specific .frm file
+    #[arg(long)]
+    file: Option<String>,
 
     /// Output results as JSON
     #[arg(long)]
@@ -42,6 +51,10 @@ struct Args {
     /// Run comprehensive test summary across all categories
     #[arg(long)]
     summary: bool,
+
+    /// Number of tests to run in parallel (default: 8)
+    #[arg(long, default_value = "8")]
+    parallel: usize,
 }
 
 /// Test execution result
@@ -83,75 +96,186 @@ impl DockerTestRunner {
         })
     }
 
-    /// Check if a test file is for the target language
-    fn is_test_for_language(&self, test_file: &Path, language: &str) -> bool {
+    /// Check if a test file should be included based on language filters
+    fn should_include_test(&self, test_file: &Path, language_filters: Option<&Vec<String>>) -> bool {
         let content = match fs::read_to_string(test_file) {
             Ok(c) => c,
             Err(_) => return false,
         };
 
-        // Check for skip conditions first
+        // Get the target language from the file
+        let target_language = self.get_target_language_from_content(&content);
+
+        // Exclude files without @@target
+        if target_language.is_empty() {
+            return false;
+        }
+
+        // If no language filters, include all tests
+        let Some(filters) = language_filters else {
+            return !self.should_skip_test(&content, &target_language);
+        };
+
+        // Check if target language matches any filter
+        let matches_filter = filters.iter().any(|filter| {
+            match filter.as_str() {
+                "python_3" | "python" => {
+                    target_language == "python_3" || target_language == "python"
+                }
+                "typescript" | "ts" => target_language == "typescript",
+                "rust" | "rs" => target_language == "rust",
+                "c" => target_language == "c",
+                "cpp" | "c++" => target_language == "cpp",
+                "java" => target_language == "java",
+                "csharp" | "c#" => target_language == "csharp",
+                "go" => target_language == "go",
+                _ => &target_language == filter, // Direct match for other languages
+            }
+        });
+
+        matches_filter && !self.should_skip_test(&content, &target_language)
+    }
+
+    /// Get target language from file content
+    /// Returns empty string if no @@target found (file will be skipped)
+    fn get_target_language_from_content(&self, content: &str) -> String {
+        // Look for @@target annotation in first 5 lines
+        for line in content.lines().take(5) {
+            let line = line.trim();
+            if line.starts_with("@@target") {
+                let target = line.split_whitespace().nth(1).unwrap_or("");
+                match target {
+                    "python" | "py" | "python_3" => return "python_3".to_string(),
+                    "typescript" | "ts" => return "typescript".to_string(),
+                    "rust" | "rs" => return "rust".to_string(),
+                    "c" => return "c".to_string(),
+                    "cpp" | "c++" => return "cpp".to_string(),
+                    "java" => return "java".to_string(),
+                    "csharp" | "c#" => return "csharp".to_string(),
+                    "go" => return "go".to_string(),
+                    _ => return target.to_string(),
+                }
+            }
+        }
+        // No @@target found - return empty string to indicate invalid file
+        String::new()
+    }
+
+    /// Check if a test should be skipped due to special conditions
+    fn should_skip_test(&self, content: &str, target_language: &str) -> bool {
+        // Check for skip conditions
         for line in content.lines().take(10) {
             let line = line.trim();
             // Skip Rust async tests that require tokio in simple Docker environment
-            if line.contains("@skip-if: tokio-unavailable") && language == "rust" {
-                return false;
+            if line.contains("@skip-if: tokio-unavailable") && target_language == "rust" {
+                return true;
             }
         }
-
-        // Look for @target annotation in first 5 lines
-        for line in content.lines().take(5) {
-            let line = line.trim();
-            if line.starts_with("@target") {
-                let target = line.split_whitespace().nth(1).unwrap_or("");
-                let lang_matches = match language {
-                    "python_3" | "python" => {
-                        target == "python" || target == "py" || target == "python_3"
-                    }
-                    "typescript" => target == "typescript" || target == "ts",
-                    "rust" => target == "rust" || target == "rs",
-                    _ => false,
-                };
-                return lang_matches;
-            }
-        }
-
-        // No @target means it's for all languages
-        true
+        false
     }
 
-    /// Find test files in a category
-    fn find_test_files(&self, category: &str, language: &str) -> Result<Vec<PathBuf>> {
-        // Handle single file
-        if category.ends_with(".frm") || category.ends_with(".frm_v3") {
-            let test_file = self.shared_env
-                .join("common/test-frames/v3")
-                .join(category);
-            if test_file.exists() {
-                return Ok(vec![test_file]);
-            }
-            return Err(anyhow!("Test file not found: {}", category));
+    /// Find all available test categories
+    fn find_all_categories(&self) -> Result<Vec<String>> {
+        let v3_dir = self.shared_env.join("common/test-frames/v3");
+        if !v3_dir.exists() {
+            return Err(anyhow!("V3 test directory not found: {}", v3_dir.display()));
         }
 
-        // Find test directory
-        let category_name = category.strip_prefix("v3_").unwrap_or(category);
-        let test_dir = self.shared_env
-            .join("common/test-frames/v3")
-            .join(category_name)
-            .join("positive");
-
-        if !test_dir.exists() {
-            return Err(anyhow!("Test directory not found: {}", test_dir.display()));
-        }
-
-        // Find all .frm and .frm_v3 files
-        let mut test_files = Vec::new();
-        for entry in WalkDir::new(&test_dir).max_depth(1) {
+        let mut categories = Vec::new();
+        for entry in fs::read_dir(&v3_dir)? {
             let entry = entry?;
             let path = entry.path();
+            if path.is_dir() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    // Skip special files and directories
+                    if !name.starts_with('.') && name != "test_simple_docker.frm" {
+                        categories.push(name.to_string());
+                    }
+                }
+            }
+        }
+        categories.sort();
+        Ok(categories)
+    }
+
+    /// Find test files based on filters
+    fn find_test_files_filtered(
+        &self, 
+        category_filters: Option<&Vec<String>>,
+        language_filters: Option<&Vec<String>>,
+        specific_file: Option<&String>
+    ) -> Result<Vec<(PathBuf, String)>> {
+        // Handle specific file
+        if let Some(file_name) = specific_file {
+            let test_file = if file_name.contains('/') {
+                PathBuf::from(file_name)
+            } else {
+                self.shared_env
+                    .join("common/test-frames/v3")
+                    .join(file_name)
+            };
+            
+            if test_file.exists() {
+                let target_lang = self.get_target_language(&test_file);
+                return Ok(vec![(test_file, target_lang)]);
+            }
+            return Err(anyhow!("Test file not found: {}", file_name));
+        }
+
+        // Get categories to search
+        let categories = if let Some(filters) = category_filters {
+            filters.clone()
+        } else {
+            self.find_all_categories()?
+        };
+
+        let mut all_test_files = Vec::new();
+
+        // Search each category
+        for category in categories {
+            let category_path = self.shared_env
+                .join("common/test-frames/v3")
+                .join(&category);
+
+            // Try positive directory first, then category root
+            let search_dirs = [
+                category_path.join("positive"),
+                category_path.clone(),
+            ];
+
+            for search_dir in &search_dirs {
+                if search_dir.exists() {
+                    let test_files = self.find_test_files_in_directory(search_dir, language_filters)?;
+                    all_test_files.extend(test_files);
+                    break; // Found tests in this directory, don't search the other
+                }
+            }
+        }
+
+        all_test_files.sort_by(|a, b| a.0.cmp(&b.0));
+        Ok(all_test_files)
+    }
+
+    /// Find test files in a specific directory
+    fn find_test_files_in_directory(
+        &self,
+        dir: &Path,
+        language_filters: Option<&Vec<String>>
+    ) -> Result<Vec<(PathBuf, String)>> {
+        let mut test_files = Vec::new();
+
+        for entry in WalkDir::new(dir).max_depth(3) {
+            let entry = entry?;
+            let path = entry.path();
+            
+            // Skip directories
+            if path.is_dir() {
+                continue;
+            }
+
             let ext = path.extension().and_then(|s| s.to_str());
             
-            // Check for V3 Frame extensions: .frm, .frm_v3, and language-specific (.fpy, .frts, .frs, etc.)
+            // Check for V3 Frame extensions
             let is_frame_file = ext == Some("frm") || 
                                 path.to_string_lossy().ends_with(".frm_v3") ||
                                 ext == Some("fpy") ||  // Python
@@ -163,19 +287,21 @@ impl DockerTestRunner {
                                 ext == Some("fjava");  // Java
             
             if is_frame_file {
-                if self.is_test_for_language(path, language) {
-                    test_files.push(path.to_path_buf());
+                if self.should_include_test(path, language_filters) {
+                    let target_lang = self.get_target_language(path);
+                    test_files.push((path.to_path_buf(), target_lang));
                 } else if self.verbose {
-                    println!("{} {} (not for {})", 
+                    let content = fs::read_to_string(path).unwrap_or_default();
+                    let target_lang = self.get_target_language_from_content(&content);
+                    println!("{} {} [{}] (filtered out)", 
                         "Skipping".yellow(),
                         path.file_name().unwrap().to_string_lossy(),
-                        language
+                        target_lang
                     );
                 }
             }
         }
 
-        test_files.sort();
         Ok(test_files)
     }
 
@@ -216,8 +342,9 @@ impl DockerTestRunner {
 
         // Build command with environment variables
         let mut cmd = Command::new(&self.framec_path);
-        cmd.args(&["-l", language])
+        cmd.args(&["compile"])
             .arg(test_file)
+            .args(&["-l", language])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
 
@@ -411,73 +538,163 @@ impl DockerTestRunner {
         }
     }
 
-    /// Run all tests in a category
-    fn run_category(&self, language: &str, category: &str) -> Result<Vec<TestResult>> {
-        let test_files = self.find_test_files(category, language)?;
+    /// Get the target language for a test file from its @@target pragma
+    fn get_target_language(&self, test_file: &Path) -> String {
+        let content = match fs::read_to_string(test_file) {
+            Ok(c) => c,
+            Err(_) => return String::new(), // Return empty on read error
+        };
+
+        // Use the common method
+        self.get_target_language_from_content(&content)
+    }
+
+    /// Run filtered tests
+    fn run_filtered_tests(
+        &self,
+        category_filters: Option<&Vec<String>>,
+        language_filters: Option<&Vec<String>>,
+        specific_file: Option<&String>,
+        parallel_count: usize
+    ) -> Result<Vec<TestResult>> {
+        let test_files = self.find_test_files_filtered(category_filters, language_filters, specific_file)?;
         
         if test_files.is_empty() {
-            return Err(anyhow!("No test files found for {} in {}", language, category));
+            return Err(anyhow!("No test files found matching the specified filters"));
         }
 
-        println!("Running {} tests for {}/{}", 
-            test_files.len(), language, category);
-        println!("{}", "=".repeat(60));
+        // Create filter description
+        let filter_desc = self.build_filter_description(category_filters, language_filters, specific_file);
+        
+        println!("Running {} tests {} (parallel: {})", test_files.len(), filter_desc, parallel_count);
+        println!("{}", "=".repeat(80));
 
-        let mut results = Vec::new();
-        for test_file in test_files {
-            let test_name = test_file.file_name().unwrap().to_string_lossy();
-            print!("Running {}... ", test_name);
-            
-            let result = self.run_test(&test_file, language);
-            
-            if result.passed {
-                println!("{}", "✓ PASSED".green());
-            } else {
-                println!("{} - {}", 
-                    "✗ FAILED".red(),
-                    result.error.as_ref().unwrap_or(&"Unknown error".to_string())
-                );
-            }
-            
-            if self.verbose && !result.output.is_empty() {
-                println!("  Output: {}", result.output.trim());
-            }
-            
-            results.push(result);
-        }
-
+        // Use atomic counter for progress tracking
+        let completed = Arc::new(AtomicUsize::new(0));
+        let total = test_files.len();
+        
+        // Configure thread pool
+        let results = rayon::ThreadPoolBuilder::new()
+            .num_threads(parallel_count)
+            .build()
+            .context("Failed to build thread pool")?
+            .install(|| {
+                // Run tests in parallel
+                let results: Vec<TestResult> = test_files
+                    .into_par_iter()
+                    .map(|(test_file, target_lang)| {
+                        let test_name = test_file.file_name().unwrap().to_string_lossy();
+                        
+                        // Show category in path for context
+                        let category = test_file.parent()
+                            .and_then(|p| p.file_name())
+                            .map(|n| n.to_string_lossy())
+                            .unwrap_or("unknown".into());
+                        
+                        let result = self.run_test(&test_file, &target_lang);
+                        
+                        // Update progress counter
+                        let count = completed.fetch_add(1, Ordering::SeqCst) + 1;
+                        
+                        // Thread-safe printing
+                        let status_str = if result.passed {
+                            format!("✓ PASSED")
+                        } else {
+                            format!("✗ FAILED - {}", 
+                                result.error.as_ref().unwrap_or(&"Unknown error".to_string()))
+                        };
+                        
+                        println!("[{}/{}] {}/{} [{}]... {}", 
+                            count, total, category, test_name, target_lang,
+                            if result.passed { 
+                                status_str.green().to_string() 
+                            } else { 
+                                status_str.red().to_string() 
+                            }
+                        );
+                        
+                        if self.verbose && !result.output.is_empty() {
+                            println!("  Output: {}", result.output.trim());
+                        }
+                        
+                        result
+                    })
+                    .collect();
+                
+                results
+            });
+        
         Ok(results)
+    }
+
+    /// Build a description of current filters for display
+    fn build_filter_description(
+        &self,
+        category_filters: Option<&Vec<String>>,
+        language_filters: Option<&Vec<String>>,
+        specific_file: Option<&String>
+    ) -> String {
+        if let Some(file) = specific_file {
+            return format!("for file: {}", file);
+        }
+
+        let mut parts = Vec::new();
+
+        if let Some(categories) = category_filters {
+            parts.push(format!("categories: {}", categories.join(",")));
+        } else {
+            parts.push("all categories".to_string());
+        }
+
+        if let Some(languages) = language_filters {
+            parts.push(format!("languages: {}", languages.join(",")));
+        } else {
+            parts.push("all languages".to_string());
+        }
+
+        format!("({})", parts.join(", "))
     }
 }
 
 /// Run comprehensive test summary across all categories  
-fn run_comprehensive_summary(runner: &DockerTestRunner, language: &str) -> Result<()> {
+fn run_comprehensive_summary(
+    runner: &DockerTestRunner,
+    category_filters: Option<&Vec<String>>,
+    language_filters: Option<&Vec<String>>,
+    parallel_count: usize
+) -> Result<()> {
     println!("================================================================");
     println!("          FRAME TRANSPILER COMPREHENSIVE TEST REPORT");
     println!("================================================================");
-    println!("Language: {}", language.to_uppercase());
+    
+    let filter_desc = runner.build_filter_description(category_filters, language_filters, None);
+    println!("Filters: {}", filter_desc);
+    println!("Parallel: {} threads", parallel_count);
     println!("Date: {}", chrono::Utc::now().format("%Y-%m-%d %H:%M:%S UTC"));
     println!("");
 
-    let categories = [
-        "async", "capabilities", "closers", "control_flow", "core", 
-        "data_types", "exec_smoke", "expansion", "facade_smoke", 
-        "imports", "mapping", "mir", "operators", "outline", 
-        "persistence", "prolog", "scoping", "systems", 
-        "systems_runtime", "validator"
-    ];
+    // Get all available categories
+    let all_categories = runner.find_all_categories()?;
+    
+    // Filter categories if specified
+    let categories_to_test = if let Some(filters) = category_filters {
+        filters.iter().filter(|c| all_categories.contains(c)).cloned().collect()
+    } else {
+        all_categories
+    };
 
     let mut total_passed = 0;
     let mut total_failed = 0;
     let mut total_tests = 0;
     let mut categories_with_tests = 0;
 
-    for category in &categories {
-        let category_name = format!("v3_{}", category);
-        print!("  {:20}: ", category_name);
+    for category in &categories_to_test {
+        print!("  {:20}: ", category);
         std::io::stdout().flush().unwrap();
 
-        match runner.run_category(language, &category_name) {
+        // Run tests for this specific category
+        let category_filter = vec![category.clone()];
+        match runner.run_filtered_tests(Some(&category_filter), language_filters, None, parallel_count) {
             Ok(results) => {
                 if results.is_empty() {
                     println!("no tests");
@@ -510,7 +727,7 @@ fn run_comprehensive_summary(runner: &DockerTestRunner, language: &str) -> Resul
 
     println!("");
     println!("================================================================");
-    println!("SUMMARY FOR {}", language.to_uppercase());
+    println!("SUMMARY");
     println!("================================================================");
     println!("Categories with tests: {}", categories_with_tests);
     println!("Total tests executed: {}", total_tests);
@@ -526,7 +743,7 @@ fn run_comprehensive_summary(runner: &DockerTestRunner, language: &str) -> Resul
             println!("⚠️  {} test(s) need attention", total_failed);
         }
     } else {
-        println!("No tests found for this language");
+        println!("No tests found matching the specified filters");
     }
     
     println!("================================================================");
@@ -560,11 +777,16 @@ fn main() -> Result<()> {
 
     // Handle summary mode
     if args.summary {
-        return run_comprehensive_summary(&runner, &args.language);
+        return run_comprehensive_summary(&runner, args.categories.as_ref(), args.languages.as_ref(), args.parallel);
     }
 
-    // Run tests
-    let results = runner.run_category(&args.language, &args.category)?;
+    // Run tests with filters
+    let results = runner.run_filtered_tests(
+        args.categories.as_ref(),
+        args.languages.as_ref(), 
+        args.file.as_ref(),
+        args.parallel
+    )?;
 
     // Count results
     let passed = results.iter().filter(|r| r.passed).count();
@@ -573,20 +795,28 @@ fn main() -> Result<()> {
     // Output results
     if args.json {
         let summary = serde_json::json!({
-            "language": args.language,
-            "category": args.category,
+            "filters": {
+                "languages": args.languages,
+                "categories": args.categories,
+                "file": args.file
+            },
             "passed": passed,
             "failed": failed,
             "tests": results,
         });
         println!("{}", serde_json::to_string_pretty(&summary)?);
     } else {
-        println!("{}", "=".repeat(60));
-        println!("Summary for {}/{}:", args.language, args.category);
+        let filter_desc = runner.build_filter_description(
+            args.categories.as_ref(),
+            args.languages.as_ref(),
+            args.file.as_ref()
+        );
+        println!("{}", "=".repeat(80));
+        println!("Summary {}:", filter_desc);
         println!("  {} Passed", format!("{}", passed).green());
         println!("  {} Failed", format!("{}", failed).red());
         println!("  Total: {}", results.len());
-        println!("{}", "=".repeat(60));
+        println!("{}", "=".repeat(80));
     }
 
     // Exit with error if any tests failed

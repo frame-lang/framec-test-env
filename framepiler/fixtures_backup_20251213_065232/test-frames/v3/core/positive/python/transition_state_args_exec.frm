@@ -1,7 +1,7 @@
-@target python
+@@target python
 # @run-expect: TRANSITION:__S_state_B
 
-system S {
+@@system S {
     machine:
         $A {
             e() {

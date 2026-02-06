@@ -1,6 +1,6 @@
-@target typescript
+@@target typescript
 
-system AdapterStdioBreakpoints {
+@@system AdapterStdioBreakpoints {
     machine:
         $Start {
             e() {

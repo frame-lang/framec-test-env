@@ -1,11 +1,11 @@
-@target rust
+@@target rust
 
 // V3 capability: system.return from handlers and actions (Rust).
 //
 // Mirrors the Python/TypeScript fixtures for handlers/actions setting
 // system.return inside a Rust-target system.
 
-system SystemReturnHandlersActionsRs {
+@@system SystemReturnHandlersActionsRs {
     interface:
         status(): String = String::from("idle")
 

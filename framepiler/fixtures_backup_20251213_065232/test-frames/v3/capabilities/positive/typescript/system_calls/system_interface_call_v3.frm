@@ -1,8 +1,8 @@
-@target typescript
+@@target typescript
 
 # V3 capability: system.method() calling an interface method (TypeScript).
 
-system SystemCallDemoTs {
+@@system SystemCallDemoTs {
     interface:
         status()
 

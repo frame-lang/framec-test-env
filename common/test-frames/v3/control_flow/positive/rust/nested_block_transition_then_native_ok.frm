@@ -1,13 +1,15 @@
-@target rust
+@@target rust
 
-system S {
-    machine:
-        $A {
-            e() {
-                { -> $B() }
-                let n = 1; // allowed: transition was last in its inner block
+fn test_nested_block_transition_then_native_ok() {
+    // Test: transition
+-> $B() }
+                    let n = 1; // allowed: transition was last in its inner block
+                }
             }
-        }
-        $B { e() { } }
+            $B { e() { } }
+    print("SUCCESS: test_nested_block_transition_then_native_ok completed")
 }
 
+fn main() {
+    test_nested_block_transition_then_native_ok()
+}

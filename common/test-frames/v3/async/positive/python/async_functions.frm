@@ -1,10 +1,10 @@
-@target python_3
+@@target python_3
 
-# @core
-# @run-expect: start
-# @run-expect: done
+@@core
+@@run-expect: start
+@@run-expect: done
 
-system AsyncDemoPy {
+@@system AsyncDemoPy {
     machine:
         $A {
             $>($enter) {

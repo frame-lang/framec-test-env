@@ -1,11 +1,11 @@
-@target python_3
+@@target python_3
 
 # V3 capability: system parameters ($(start), $>(enter), domain).
 # Positive: names align with start state, $>() handler, and domain variable.
 # Compile/validate-only (no fn main).
 # @core
 
-system SystemParamsDemo($(color), $>(enter_color), domain) {
+@@system SystemParamsDemo($(color), $>(enter_color), domain) {
     interface:
         run()
 

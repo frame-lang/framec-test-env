@@ -1,7 +1,7 @@
-@target rust
+@@target rust
 # @expect: E403
 
-system S {
+@@system S {
     machine:
         $A {
             e() {

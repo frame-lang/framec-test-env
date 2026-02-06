@@ -8,7 +8,7 @@
 #
 # Expected output: "SUCCESS: All tests passed" or "FAIL: [reason]"
 
-system Validator {
+@@system Validator {
     interface:
         runTest(): string
     

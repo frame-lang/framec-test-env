@@ -1,8 +1,8 @@
-@target python_3
+@@target python_3
 
 # V3 capability: system.method() calling an interface method.
 
-system SystemCallDemo {
+@@system SystemCallDemo {
     interface:
         status()
 

@@ -1,12 +1,12 @@
-@target typescript
+@@target typescript
 
-// @core
-// @run-expect: start
-// @run-expect: data from api.example.com/item/123
-// @run-expect: processed payload with data from api.example.com/process
-// @run-expect: done
+@@core
+@@run-expect: start
+@@run-expect: data from api.example.com/item/123
+@@run-expect: processed payload with data from api.example.com/process
+@@run-expect: done
 
-system AsyncDemoTs {
+@@system AsyncDemoTs {
     operations:
         async fn fetchData(url: string): Promise<string> {
             console.log(`fetching ${url}`);

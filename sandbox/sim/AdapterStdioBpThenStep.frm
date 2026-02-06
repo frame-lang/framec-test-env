@@ -1,6 +1,6 @@
-@target typescript
+@@target typescript
 
-system AdapterStdioBpThenStep {
+@@system AdapterStdioBpThenStep {
     machine:
         $Start {
             e() {

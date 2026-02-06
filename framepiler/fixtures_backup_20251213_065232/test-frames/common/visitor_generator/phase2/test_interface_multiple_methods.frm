@@ -1,6 +1,6 @@
 # Phase 2: Multiple interface methods with parameter handling
 
-system MathProcessor {
+@@system MathProcessor {
     interface:
         add(x: int, y: int): int
         multiply(a: float, b: float): float

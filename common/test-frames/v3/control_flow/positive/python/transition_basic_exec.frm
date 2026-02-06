@@ -1,7 +1,7 @@
-@target python
-# @run-expect: TRANSITION:
+@@target python
+@@run-expect: TRANSITION:
 
-system S {
+@@system S {
     machine:
         $A {
             e() {

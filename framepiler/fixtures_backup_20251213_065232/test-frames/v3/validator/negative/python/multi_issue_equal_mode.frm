@@ -1,8 +1,8 @@
-@target python
+@@target python
 # @expect: E300 E302 E402 E400
 # @expect-mode: equal
 
-system S {
+@@system S {
     machine:
         $A {
             e() {

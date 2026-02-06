@@ -1,4 +1,4 @@
-@target python_3
+@@target python_3
 
 # V3 capability: system.return header defaults and handler returns (Python).
 #
@@ -9,7 +9,7 @@
 #   - bare `return` (leave system.return at the header default)
 #   - `return expr` sugar (override system.return)
 
-system SystemReturnHeaderDefaultsPy {
+@@system SystemReturnHeaderDefaultsPy {
 
     interface:
         a1(): int = 10

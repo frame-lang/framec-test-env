@@ -1,4 +1,4 @@
-@target python_3
+@@target python_3
 
 # V3 port of legacy test_import_statements.frm.
 # Purpose: exercise a variety of import statement forms in a hermetic way.
@@ -34,7 +34,7 @@ fn main() {
     print("JSON: " + json_str)
 }
 
-system ImportTestV3Statements {
+@@system ImportTestV3Statements {
     operations:
         testImports() {
             # Test using imports in operations (simplified)

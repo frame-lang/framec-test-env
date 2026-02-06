@@ -1,10 +1,10 @@
-@target python_3
+@@target python_3
 
 # Cross-language snapshot export (Python).
 # This fixture runs a simple TrafficLight system to a known state and
 # prints a single JSON snapshot to stdout for external tools.
 
-system TrafficLight($(color), domain) {
+@@system TrafficLight($(color), domain) {
     interface:
         tick()
 

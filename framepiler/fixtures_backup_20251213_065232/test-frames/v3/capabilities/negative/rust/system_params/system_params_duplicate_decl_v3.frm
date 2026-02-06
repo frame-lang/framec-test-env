@@ -1,9 +1,9 @@
-@target rust
+@@target rust
 
 // @expect: E111
 // @core
 
-system S(color, color) {
+@@system S(color, color) {
     machine:
         $Red(color) { }
 }

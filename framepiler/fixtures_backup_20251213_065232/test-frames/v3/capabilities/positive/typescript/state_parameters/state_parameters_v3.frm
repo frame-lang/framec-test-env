@@ -1,10 +1,10 @@
-@target typescript
+@@target typescript
 
 // V3 structural fixture: parameterized state + transition with args.
 // This is compile/validate-only; runtime semantics are still covered
 // by legacy common tests (e.g., core/test_state_parameters.frm).
 
-system StateParamDemo {
+@@system StateParamDemo {
     interface:
         configure(minVal: number, maxVal: number)
         increment()

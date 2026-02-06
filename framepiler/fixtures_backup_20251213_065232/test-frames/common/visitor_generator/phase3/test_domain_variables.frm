@@ -1,6 +1,6 @@
 # Phase 3: Domain variables
 
-system DataProcessor {
+@@system DataProcessor {
     interface:
         initialize(value: int): bool
         getValue(): int

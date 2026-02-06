@@ -1,4 +1,4 @@
-@target python_3
+@@target python_3
 
 # V3 TrafficLight system runtime smoke (Python).
 # Uses system/state parameters and fn main().
@@ -7,7 +7,7 @@
 # @run-expect: Yellow
 # @run-expect: Red
 
-system TrafficLight($(color), domain) {
+@@system TrafficLight($(color), domain) {
     interface:
         tick()
 

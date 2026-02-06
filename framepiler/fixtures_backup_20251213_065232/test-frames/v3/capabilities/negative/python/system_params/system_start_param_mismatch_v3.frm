@@ -1,9 +1,9 @@
-@target python_3
+@@target python_3
 # @expect: E416
 
 # Negative: system $(...) params do not match start state's parameters.
 
-system SystemStartParamMismatch($(color), $>(enter_color), domain) {
+@@system SystemStartParamMismatch($(color), $>(enter_color), domain) {
     interface:
         run()
 

@@ -1,8 +1,8 @@
-@target typescript
+@@target typescript
 
 # V3 capability fixture: header type/default segment (`: Type = default`) in TypeScript.
 
-system TypeAndDefaultDemoTs {
+@@system TypeAndDefaultDemoTs {
     operations:
         @native
         helper(x: number): Result = 0 {

@@ -1,7 +1,7 @@
-@target typescript
+@@target typescript
 // @run-exact: TRANSITION:__S_state_B
 
-system S {
+@@system S {
     machine:
         $A {
             e() { -> $B() }

@@ -1,8 +1,8 @@
-@target rust
+@@target rust
 # @run-expect: FORWARD:PARENT
 # @run-expect: TRANSITION:
 
-system S {
+@@system S {
     machine:
         $P { e() { /* parent */ } }
         $A => $P {

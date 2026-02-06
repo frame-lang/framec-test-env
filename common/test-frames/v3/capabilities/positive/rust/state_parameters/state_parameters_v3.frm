@@ -1,6 +1,6 @@
-@target rust
+@@target rust
 
-system S($(color), domain) {
+@@system S($(color), domain) {
     interface:
         tick()
 

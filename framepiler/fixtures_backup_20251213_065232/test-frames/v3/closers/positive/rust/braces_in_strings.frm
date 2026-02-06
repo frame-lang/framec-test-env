@@ -1,4 +1,4 @@
-@target rust
+@@target rust
 {
     let s = "brace } inside string";
     // comment with }

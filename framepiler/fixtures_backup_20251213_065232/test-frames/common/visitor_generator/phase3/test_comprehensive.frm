@@ -1,6 +1,6 @@
 # Phase 3: Comprehensive test with all features
 
-system CompleteSystem {
+@@system CompleteSystem {
     operations:
         getCurrentStatus(): string {
             return status + " - Count: " + str(processed_count)

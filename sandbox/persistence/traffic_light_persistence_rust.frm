@@ -1,4 +1,4 @@
-@target rust
+@@target rust
 
 // V3 TrafficLight system persistence smoke (Rust).
 // Mirrors the Python/TypeScript persistence fixtures and exercises the
@@ -9,7 +9,7 @@
 // @run-expect: Yellow
 // @run-expect: Red
 
-@persist system TrafficLight($(color), domain) {
+@@persist @@system TrafficLight($(color), domain) {
     interface:
         tick()
 

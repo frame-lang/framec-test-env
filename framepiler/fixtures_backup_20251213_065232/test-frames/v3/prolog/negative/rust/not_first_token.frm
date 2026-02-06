@@ -1,5 +1,5 @@
 // comment before target
-@target rust
+@@target rust
 
 handler H { }
 

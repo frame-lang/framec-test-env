@@ -1,7 +1,7 @@
-@target python
+@@target python
 # @expect: E113
 
-system S {
+@@system S {
     interface:
         e()
 

@@ -1,6 +1,6 @@
-@target typescript
+@@target typescript
 
-system MinimalTS {
+@@system MinimalTS {
     machine:
         $Start {
             e() {

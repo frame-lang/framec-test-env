@@ -1,4 +1,4 @@
-@target rust
+@@target rust
 
 // V3 capability: system.return header defaults and handler returns (Rust).
 //
@@ -9,7 +9,7 @@
 //   - bare `return;` (leave system.return at the header default)
 //   - `return expr;` sugar (override system.return)
 
-system SystemReturnHeaderDefaultsRs {
+@@system SystemReturnHeaderDefaultsRs {
 
     interface:
         a1(): i64 = 10
