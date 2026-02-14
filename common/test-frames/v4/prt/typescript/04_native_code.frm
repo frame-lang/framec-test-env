@@ -1,0 +1,55 @@
+@@target typescript
+
+function helperFunction(x: number): number {
+    // Native helper function defined before system
+    return x * 2;
+}
+
+@@system NativeCode {
+    interface:
+        compute(value: number): number
+        use_math(): number
+
+    machine:
+        $Active {
+            compute(value: number): number {
+                // Native code with local variables
+                const temp = value + 10;
+                const result = helperFunction(temp);
+                console.log(`Computed: ${value} -> ${result}`);
+                return result;
+            }
+
+            use_math(): number {
+                // Using Math module
+                const result = Math.sqrt(16) + Math.PI;
+                console.log(`Math result: ${result}`);
+                return result;
+            }
+        }
+}
+
+function main() {
+    console.log("=== Test 04: Native Code Preservation ===");
+    const s = new NativeCode();
+
+    // Test native code in handler with helper function
+    const result = s.compute(5);
+    const expected = (5 + 10) * 2;  // 30
+    if (result !== expected) {
+        throw new Error(`Expected ${expected}, got ${result}`);
+    }
+    console.log(`compute(5) = ${result}`);
+
+    // Test Math module usage
+    const mathResult = s.use_math();
+    const expectedMath = Math.sqrt(16) + Math.PI;
+    if (Math.abs(mathResult - expectedMath) >= 0.001) {
+        throw new Error(`Expected ~${expectedMath}, got ${mathResult}`);
+    }
+    console.log(`use_math() = ${mathResult}`);
+
+    console.log("PASS: Native code preservation works correctly");
+}
+
+main();

@@ -2,27 +2,84 @@
 
 @@system StackOps {
     interface:
-        push_state()
-        pop_state()
-        do_work()
+        push_and_go()
+        pop_back()
+        do_work(): str
+        get_state(): str
 
     machine:
         $Main {
-            push_state() {
+            push_and_go() {
+                print("Pushing Main to stack, going to Sub")
                 $$[+]
                 -> $Sub
             }
 
-            do_work() {
+            pop_back() {
+                print("Cannot pop - nothing on stack in Main")
+            }
+
+            do_work(): str {
+                return "Working in Main"
+            }
+
+            get_state(): str {
+                return "Main"
             }
         }
 
         $Sub {
-            pop_state() {
+            push_and_go() {
+                print("Already in Sub")
+            }
+
+            pop_back() {
+                print("Popping back to previous state")
                 $$[-]
             }
 
-            do_work() {
+            do_work(): str {
+                return "Working in Sub"
+            }
+
+            get_state(): str {
+                return "Sub"
             }
         }
 }
+
+def main():
+    print("=== Test 09: Stack Push/Pop ===")
+    s = StackOps()
+
+    # Initial state should be Main
+    state = s.get_state()
+    assert state == "Main", f"Expected 'Main', got '{state}'"
+    print(f"Initial state: {state}")
+
+    # Do work in Main
+    work = s.do_work()
+    assert work == "Working in Main", f"Expected 'Working in Main', got '{work}'"
+    print(f"do_work(): {work}")
+
+    # Push and go to Sub
+    s.push_and_go()
+    state = s.get_state()
+    assert state == "Sub", f"Expected 'Sub', got '{state}'"
+    print(f"After push_and_go(): {state}")
+
+    # Do work in Sub
+    work = s.do_work()
+    assert work == "Working in Sub", f"Expected 'Working in Sub', got '{work}'"
+    print(f"do_work(): {work}")
+
+    # Pop back to Main
+    s.pop_back()
+    state = s.get_state()
+    assert state == "Main", f"Expected 'Main' after pop, got '{state}'"
+    print(f"After pop_back(): {state}")
+
+    print("PASS: Stack push/pop works correctly")
+
+if __name__ == '__main__':
+    main()

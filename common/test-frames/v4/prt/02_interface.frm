@@ -2,11 +2,46 @@
 
 @@system WithInterface {
     interface:
-        greet()
+        greet(name: str): str
+        get_count(): int
+
+    domain:
+        var call_count: int = 0
 
     machine:
         $Ready {
-            greet() {
+            greet(name: str): str {
+                self.call_count += 1
+                return f"Hello, {name}!"
+            }
+
+            get_count(): int {
+                return self.call_count
             }
         }
 }
+
+def main():
+    print("=== Test 02: Interface Methods ===")
+    s = WithInterface()
+
+    # Test interface method with parameter and return
+    result = s.greet("World")
+    assert result == "Hello, World!", f"Expected 'Hello, World!', got '{result}'"
+    print(f"greet('World') = {result}")
+
+    # Test domain variable access through interface
+    count = s.get_count()
+    assert count == 1, f"Expected count=1, got {count}"
+    print(f"get_count() = {count}")
+
+    # Call again to verify state
+    s.greet("Frame")
+    count2 = s.get_count()
+    assert count2 == 2, f"Expected count=2, got {count2}"
+    print(f"After second call: get_count() = {count2}")
+
+    print("PASS: Interface methods work correctly")
+
+if __name__ == '__main__':
+    main()

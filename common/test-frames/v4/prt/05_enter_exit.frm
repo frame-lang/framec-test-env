@@ -3,29 +3,77 @@
 @@system EnterExit {
     interface:
         toggle()
+        get_log(): list
+
+    domain:
+        var log: list = []
 
     machine:
         $Off {
             $>() {
+                self.log.append("enter:Off")
+                print("Entered Off state")
             }
 
             $<() {
+                self.log.append("exit:Off")
+                print("Exiting Off state")
             }
 
             toggle() {
                 -> $On
             }
+
+            get_log(): list {
+                return self.log
+            }
         }
 
         $On {
             $>() {
+                self.log.append("enter:On")
+                print("Entered On state")
             }
 
             $<() {
+                self.log.append("exit:On")
+                print("Exiting On state")
             }
 
             toggle() {
                 -> $Off
             }
+
+            get_log(): list {
+                return self.log
+            }
         }
 }
+
+def main():
+    print("=== Test 05: Enter/Exit Handlers ===")
+    s = EnterExit()
+
+    # Initial enter should have been called
+    log = s.get_log()
+    assert "enter:Off" in log, f"Expected 'enter:Off' in log, got {log}"
+    print(f"After construction: {log}")
+
+    # Toggle to On - should exit Off, enter On
+    s.toggle()
+    log = s.get_log()
+    assert "exit:Off" in log, f"Expected 'exit:Off' in log, got {log}"
+    assert "enter:On" in log, f"Expected 'enter:On' in log, got {log}"
+    print(f"After toggle to On: {log}")
+
+    # Toggle back to Off - should exit On, enter Off
+    s.toggle()
+    log = s.get_log()
+    assert log.count("enter:Off") == 2, f"Expected 2 'enter:Off' entries, got {log}"
+    assert "exit:On" in log, f"Expected 'exit:On' in log, got {log}"
+    print(f"After toggle to Off: {log}")
+
+    print("PASS: Enter/Exit handlers work correctly")
+
+if __name__ == '__main__':
+    main()

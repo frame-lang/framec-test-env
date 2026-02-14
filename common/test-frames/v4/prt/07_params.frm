@@ -2,18 +2,86 @@
 
 @@system WithParams {
     interface:
-        start(initial)
-        add(value)
+        start(initial: int)
+        add(value: int)
+        multiply(a: int, b: int): int
+        get_total(): int
+
+    domain:
+        var total: int = 0
 
     machine:
         $Idle {
-            start(initial) {
+            start(initial: int) {
+                self.total = initial
+                print(f"Started with initial value: {initial}")
                 -> $Running
+            }
+
+            add(value: int) {
+                print("Cannot add in Idle state")
+            }
+
+            multiply(a: int, b: int): int {
+                return 0
+            }
+
+            get_total(): int {
+                return self.total
             }
         }
 
         $Running {
-            add(value) {
+            start(initial: int) {
+                print("Already running")
+            }
+
+            add(value: int) {
+                self.total += value
+                print(f"Added {value}, total is now {self.total}")
+            }
+
+            multiply(a: int, b: int): int {
+                result = a * b
+                self.total += result
+                print(f"Multiplied {a} * {b} = {result}, total is now {self.total}")
+                return result
+            }
+
+            get_total(): int {
+                return self.total
             }
         }
 }
+
+def main():
+    print("=== Test 07: Handler Parameters ===")
+    s = WithParams()
+
+    # Initial total should be 0
+    total = s.get_total()
+    assert total == 0, f"Expected initial total=0, got {total}"
+
+    # Start with initial value
+    s.start(100)
+    total = s.get_total()
+    assert total == 100, f"Expected total=100, got {total}"
+    print(f"After start(100): total = {total}")
+
+    # Add value
+    s.add(25)
+    total = s.get_total()
+    assert total == 125, f"Expected total=125, got {total}"
+    print(f"After add(25): total = {total}")
+
+    # Multiply with two params
+    result = s.multiply(3, 5)
+    assert result == 15, f"Expected multiply result=15, got {result}"
+    total = s.get_total()
+    assert total == 140, f"Expected total=140, got {total}"
+    print(f"After multiply(3,5): result = {result}, total = {total}")
+
+    print("PASS: Handler parameters work correctly")
+
+if __name__ == '__main__':
+    main()
