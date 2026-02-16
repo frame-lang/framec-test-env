@@ -1,8 +1,7 @@
 @@target rust
 
-// NOTE: Rust push/pop does not preserve state variables across push/pop.
-// State variables are reinitialized when popping back to a state.
-// This is a known limitation - see TODO in system_codegen.rs
+// Rust now preserves state variables across push/pop using typed compartment enum.
+// See generate_rust_compartment_types() in system_codegen.rs
 
 @@system StateVarPushPop {
     interface:
@@ -75,21 +74,20 @@ fn main() {
     assert_eq!(count, 101, "Expected 101 after increment, got {}", count);
     println!("Other state after increment: {}", count);
 
-    // Pop back - NOTE: Rust does NOT preserve state vars, so count will be 0
-    // This is different from Python/TypeScript which do preserve state vars
+    // Pop back - state vars are now preserved in Rust (same as Python/TypeScript)
     s.restore();
     println!("Popped back to Counter");
 
     let count = s.get_count();
-    // In Rust, state vars reinitialize to default (0) after pop
-    assert_eq!(count, 0, "Expected 0 after pop (Rust limitation: state vars reinit), got {}", count);
-    println!("Counter after pop: {} (reinitialized, not preserved)", count);
+    // State vars are preserved across push/pop
+    assert_eq!(count, 3, "Expected 3 after pop (preserved), got {}", count);
+    println!("Counter after pop: {} (preserved!)", count);
 
     // Increment to verify it works
     s.increment();
     let count = s.get_count();
-    assert_eq!(count, 1, "Expected 1, got {}", count);
+    assert_eq!(count, 4, "Expected 4, got {}", count);
     println!("Counter after increment: {}", count);
 
-    println!("PASS: State push/pop works (note: state vars reinitialize in Rust)");
+    println!("PASS: State vars preserved across push/pop");
 }
