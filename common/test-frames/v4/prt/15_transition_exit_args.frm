@@ -1,0 +1,57 @@
+@@target python_3
+
+@@system TransitionExitArgs {
+    interface:
+        leave()
+        get_log(): list
+
+    domain:
+        var log: list = []
+
+    machine:
+        $Active {
+            $<(reason: str, code: int) {
+                self.log.append(f"exit:{reason}:{code}")
+            }
+
+            leave() {
+                self.log.append("leaving")
+                ("cleanup", 42) -> $Done
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+
+        $Done {
+            $>() {
+                self.log.append("enter:done")
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+}
+
+def main():
+    print("=== Test 15: Transition Exit Args ===")
+    s = TransitionExitArgs()
+
+    # Initial state is Active
+    log = s.get_log()
+    assert log == [], f"Expected empty log, got {log}"
+
+    # Leave - should call exit handler with args
+    s.leave()
+    log = s.get_log()
+    assert "leaving" in log, f"Expected 'leaving' in log, got {log}"
+    assert "exit:cleanup:42" in log, f"Expected 'exit:cleanup:42' in log, got {log}"
+    assert "enter:done" in log, f"Expected 'enter:done' in log, got {log}"
+    print(f"Log after transition: {log}")
+
+    print("PASS: Transition exit args work correctly")
+
+if __name__ == '__main__':
+    main()

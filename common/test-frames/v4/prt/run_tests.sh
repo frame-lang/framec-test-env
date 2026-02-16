@@ -41,7 +41,7 @@ lang_to_dir() {
     esac
 }
 
-for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_transition_enter_args; do
+for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_transition_enter_args 15_transition_exit_args; do
     echo "--- Test: $test ---"
 
     for lang_ext in "python_3:py" "typescript:ts" "rust:rs"; do
@@ -121,7 +121,7 @@ echo "=========================================="
 echo "Summary"
 echo "=========================================="
 
-for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_transition_enter_args; do
+for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_transition_enter_args 15_transition_exit_args; do
     line="$test:"
     for lang in python_3 typescript rust; do
         key="${test}_${lang}"
