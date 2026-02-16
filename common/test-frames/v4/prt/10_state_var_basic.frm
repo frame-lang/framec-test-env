@@ -1,0 +1,54 @@
+@@target python_3
+
+@@system StateVarBasic {
+    interface:
+        increment(): int
+        get_count(): int
+        reset()
+
+    machine:
+        $Counter {
+            $.count: int = 0
+
+            increment(): int {
+                $.count = $.count + 1
+                return $.count
+            }
+
+            get_count(): int {
+                return $.count
+            }
+
+            reset() {
+                $.count = 0
+            }
+        }
+}
+
+def main():
+    print("=== Test 10: State Variable Basic ===")
+    s = StateVarBasic()
+
+    # Initial value should be 0
+    assert s.get_count() == 0, f"Expected 0, got {s.get_count()}"
+    print(f"Initial count: {s.get_count()}")
+
+    # Increment should return new value
+    result = s.increment()
+    assert result == 1, f"Expected 1 after first increment, got {result}"
+    print(f"After first increment: {result}")
+
+    # Second increment
+    result = s.increment()
+    assert result == 2, f"Expected 2 after second increment, got {result}"
+    print(f"After second increment: {result}")
+
+    # Reset should set back to 0
+    s.reset()
+    assert s.get_count() == 0, f"Expected 0 after reset, got {s.get_count()}"
+    print(f"After reset: {s.get_count()}")
+
+    print("PASS: State variable basic operations work correctly")
+
+if __name__ == '__main__':
+    main()

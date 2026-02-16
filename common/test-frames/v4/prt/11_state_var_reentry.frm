@@ -1,0 +1,72 @@
+@@target python_3
+
+@@system StateVarReentry {
+    interface:
+        increment(): int
+        get_count(): int
+        go_other()
+        come_back()
+
+    machine:
+        $Counter {
+            $.count: int = 0
+
+            increment(): int {
+                $.count = $.count + 1
+                return $.count
+            }
+
+            get_count(): int {
+                return $.count
+            }
+
+            go_other() {
+                -> $Other
+            }
+        }
+
+        $Other {
+            come_back() {
+                -> $Counter
+            }
+
+            increment(): int {
+                return -1
+            }
+
+            get_count(): int {
+                return -1
+            }
+        }
+}
+
+def main():
+    print("=== Test 11: State Variable Reentry ===")
+    s = StateVarReentry()
+
+    # Increment a few times
+    s.increment()
+    s.increment()
+    count = s.get_count()
+    assert count == 2, f"Expected 2 after two increments, got {count}"
+    print(f"Count before leaving: {count}")
+
+    # Leave the state
+    s.go_other()
+    print("Transitioned to Other state")
+
+    # Come back - state var should be reinitialized to 0
+    s.come_back()
+    count = s.get_count()
+    assert count == 0, f"Expected 0 after re-entering Counter (state var reinit), got {count}"
+    print(f"Count after re-entering Counter: {count}")
+
+    # Increment again to verify it works
+    result = s.increment()
+    assert result == 1, f"Expected 1 after increment, got {result}"
+    print(f"After increment: {result}")
+
+    print("PASS: State variables reinitialize on state reentry")
+
+if __name__ == '__main__':
+    main()

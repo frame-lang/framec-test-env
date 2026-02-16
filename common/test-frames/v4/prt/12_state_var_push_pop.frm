@@ -1,0 +1,91 @@
+@@target python_3
+
+@@system StateVarPushPop {
+    interface:
+        increment(): int
+        get_count(): int
+        save_and_go()
+        restore()
+
+    machine:
+        $Counter {
+            $.count: int = 0
+
+            increment(): int {
+                $.count = $.count + 1
+                return $.count
+            }
+
+            get_count(): int {
+                return $.count
+            }
+
+            save_and_go() {
+                `push$
+                -> $Other
+            }
+        }
+
+        $Other {
+            $.other_count: int = 100
+
+            restore() {
+                `-> pop$
+            }
+
+            increment(): int {
+                $.other_count = $.other_count + 1
+                return $.other_count
+            }
+
+            get_count(): int {
+                return $.other_count
+            }
+        }
+}
+
+def main():
+    print("=== Test 12: State Variable Push/Pop ===")
+    s = StateVarPushPop()
+
+    # Increment counter to 3
+    s.increment()
+    s.increment()
+    s.increment()
+    count = s.get_count()
+    assert count == 3, f"Expected 3, got {count}"
+    print(f"Counter before push: {count}")
+
+    # Push and go to Other state
+    s.save_and_go()
+    print("Pushed and transitioned to Other")
+
+    # In Other state, count should be 100 (Other's state var)
+    count = s.get_count()
+    assert count == 100, f"Expected 100 in Other state, got {count}"
+    print(f"Other state count: {count}")
+
+    # Increment in Other
+    s.increment()
+    count = s.get_count()
+    assert count == 101, f"Expected 101 after increment, got {count}"
+    print(f"Other state after increment: {count}")
+
+    # Pop back - should restore Counter with count=3
+    s.restore()
+    print("Popped back to Counter")
+
+    count = s.get_count()
+    assert count == 3, f"Expected 3 after pop (preserved), got {count}"
+    print(f"Counter after pop: {count}")
+
+    # Increment to verify it works
+    s.increment()
+    count = s.get_count()
+    assert count == 4, f"Expected 4, got {count}"
+    print(f"Counter after increment: {count}")
+
+    print("PASS: State variables preserved across push/pop")
+
+if __name__ == '__main__':
+    main()
