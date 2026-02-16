@@ -1,0 +1,81 @@
+@@target python_3
+
+@@system TransitionPopTest {
+    interface:
+        start()
+        process()
+        get_state(): str
+        get_log(): list
+
+    domain:
+        var log: list = []
+
+    machine:
+        $Idle {
+            start() {
+                self.log.append("idle:start:push")
+                `push$
+                -> $Working
+            }
+
+            process() {
+                self.log.append("idle:process")
+            }
+
+            get_state(): str {
+                return "Idle"
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+
+        $Working {
+            process() {
+                self.log.append("working:process:before_pop")
+                -> pop$
+                # This should NOT execute because pop transitions away
+                self.log.append("working:process:after_pop")
+            }
+
+            get_state(): str {
+                return "Working"
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+}
+
+def main():
+    print("=== Test 17: Transition Pop ===")
+    s = TransitionPopTest()
+
+    # Initial state should be Idle
+    assert s.get_state() == "Idle", f"Expected 'Idle', got '{s.get_state()}'"
+    print(f"Initial state: {s.get_state()}")
+
+    # start() pushes Idle, transitions to Working
+    s.start()
+    assert s.get_state() == "Working", f"Expected 'Working', got '{s.get_state()}'"
+    print(f"After start(): {s.get_state()}")
+
+    # process() in Working does pop transition back to Idle
+    s.process()
+    assert s.get_state() == "Idle", f"Expected 'Idle' after pop, got '{s.get_state()}'"
+    print(f"After process() with pop: {s.get_state()}")
+
+    log = s.get_log()
+    print(f"Log: {log}")
+
+    # Verify log contents
+    assert "idle:start:push" in log, f"Expected 'idle:start:push' in log"
+    assert "working:process:before_pop" in log, f"Expected 'working:process:before_pop' in log"
+    assert "working:process:after_pop" not in log, f"Should NOT have 'working:process:after_pop' in log"
+
+    print("PASS: Transition pop works correctly")
+
+if __name__ == '__main__':
+    main()

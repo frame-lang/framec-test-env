@@ -1,0 +1,79 @@
+@@target rust
+
+@@system TransitionPopTest {
+    interface:
+        start()
+        process()
+        get_state(): String
+        get_log(): Vec<String>
+
+    domain:
+        var log: Vec<String> = Vec::new()
+
+    machine:
+        $Idle {
+            start() {
+                self.log.push("idle:start:push".to_string());
+                `push$
+                -> $Working
+            }
+
+            process() {
+                self.log.push("idle:process".to_string());
+            }
+
+            get_state(): String {
+                return "Idle".to_string();
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone();
+            }
+        }
+
+        $Working {
+            process() {
+                self.log.push("working:process:before_pop".to_string());
+                -> pop$
+                // This should NOT execute because pop transitions away
+                self.log.push("working:process:after_pop".to_string());
+            }
+
+            get_state(): String {
+                return "Working".to_string();
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone();
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 17: Transition Pop (Rust) ===");
+    let mut s = TransitionPopTest::new();
+
+    // Initial state should be Idle
+    assert_eq!(s.get_state(), "Idle", "Expected 'Idle'");
+    println!("Initial state: {}", s.get_state());
+
+    // start() pushes Idle, transitions to Working
+    s.start();
+    assert_eq!(s.get_state(), "Working", "Expected 'Working'");
+    println!("After start(): {}", s.get_state());
+
+    // process() in Working does pop transition back to Idle
+    s.process();
+    assert_eq!(s.get_state(), "Idle", "Expected 'Idle' after pop");
+    println!("After process() with pop: {}", s.get_state());
+
+    let log = s.get_log();
+    println!("Log: {:?}", log);
+
+    // Verify log contents
+    assert!(log.contains(&"idle:start:push".to_string()), "Expected 'idle:start:push' in log");
+    assert!(log.contains(&"working:process:before_pop".to_string()), "Expected 'working:process:before_pop' in log");
+    assert!(!log.contains(&"working:process:after_pop".to_string()), "Should NOT have 'working:process:after_pop' in log");
+
+    println!("PASS: Transition pop works correctly");
+}
