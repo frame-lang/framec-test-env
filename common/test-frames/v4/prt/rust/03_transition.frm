@@ -1,0 +1,54 @@
+@@target rust
+
+@@system WithTransition {
+    interface:
+        next()
+        get_state(): String
+
+    machine:
+        $First {
+            next() {
+                println!("Transitioning: First -> Second");
+                -> $Second
+            }
+
+            get_state(): String {
+                "First".to_string()
+            }
+        }
+
+        $Second {
+            next() {
+                println!("Transitioning: Second -> First");
+                -> $First
+            }
+
+            get_state(): String {
+                "Second".to_string()
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 03: State Transitions ===");
+    let mut s = WithTransition::new();
+
+    // Initial state should be First
+    let state = s.get_state();
+    assert_eq!(state, "First", "Expected 'First', got '{}'", state);
+    println!("Initial state: {}", state);
+
+    // Transition to Second
+    s.next();
+    let state = s.get_state();
+    assert_eq!(state, "Second", "Expected 'Second', got '{}'", state);
+    println!("After first next(): {}", state);
+
+    // Transition back to First
+    s.next();
+    let state = s.get_state();
+    assert_eq!(state, "First", "Expected 'First', got '{}'", state);
+    println!("After second next(): {}", state);
+
+    println!("PASS: State transitions work correctly");
+}

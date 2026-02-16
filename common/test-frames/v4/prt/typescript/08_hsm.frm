@@ -1,0 +1,69 @@
+@@target typescript
+
+@@system HSMForward {
+    interface:
+        event_a()
+        event_b()
+        get_log(): string[]
+
+    domain:
+        var log: string[] = []
+
+    machine:
+        $Child => $Parent {
+            event_a() {
+                this.log.push("Child:event_a");
+            }
+
+            event_b() {
+                this.log.push("Child:event_b_forward");
+                => $^
+            }
+
+            get_log(): string[] {
+                return this.log;
+            }
+        }
+
+        $Parent {
+            event_a() {
+                this.log.push("Parent:event_a");
+            }
+
+            event_b() {
+                this.log.push("Parent:event_b");
+            }
+
+            get_log(): string[] {
+                return this.log;
+            }
+        }
+}
+
+function main() {
+    console.log("=== Test 08: HSM Forward ===");
+    const s = new HSMForward();
+
+    // event_a should be handled by Child (no forward)
+    s.event_a();
+    let log = s.get_log();
+    if (!log.includes("Child:event_a")) {
+        throw new Error(`Expected 'Child:event_a' in log, got ${JSON.stringify(log)}`);
+    }
+    console.log(`After event_a: ${JSON.stringify(log)}`);
+
+    // event_b should forward to Parent
+    s.event_b();
+    log = s.get_log();
+    if (!log.includes("Child:event_b_forward")) {
+        throw new Error(`Expected 'Child:event_b_forward' in log, got ${JSON.stringify(log)}`);
+    }
+    if (!log.includes("Parent:event_b")) {
+        throw new Error(`Expected 'Parent:event_b' in log (forwarded), got ${JSON.stringify(log)}`);
+    }
+    console.log(`After event_b (forwarded): ${JSON.stringify(log)}`);
+
+    console.log("PASS: HSM forward works correctly");
+}
+
+main();

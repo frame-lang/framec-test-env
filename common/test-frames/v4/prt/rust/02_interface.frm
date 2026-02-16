@@ -1,0 +1,45 @@
+@@target rust
+
+@@system WithInterface {
+    interface:
+        greet(name: &str): String
+        get_count(): i32
+
+    domain:
+        var call_count: i32 = 0
+
+    machine:
+        $Ready {
+            greet(name: &str): String {
+                self.call_count += 1;
+                format!("Hello, {}!", name)
+            }
+
+            get_count(): i32 {
+                self.call_count
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 02: Interface Methods ===");
+    let mut s = WithInterface::new();
+
+    // Test interface method with parameter and return
+    let result = s.greet("World");
+    assert_eq!(result, "Hello, World!", "Expected 'Hello, World!', got '{}'", result);
+    println!("greet('World') = {}", result);
+
+    // Test domain variable access through interface
+    let count = s.get_count();
+    assert_eq!(count, 1, "Expected count=1, got {}", count);
+    println!("get_count() = {}", count);
+
+    // Call again to verify state
+    s.greet("Frame");
+    let count2 = s.get_count();
+    assert_eq!(count2, 2, "Expected count=2, got {}", count2);
+    println!("After second call: get_count() = {}", count2);
+
+    println!("PASS: Interface methods work correctly");
+}

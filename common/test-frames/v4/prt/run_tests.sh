@@ -65,28 +65,30 @@ for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 0
             compile_ok=true
         fi
 
-        # Syntax check
-        syntax_ok=false
+        # Run the test (not just syntax check)
+        run_ok=false
+        run_output=""
         if $compile_ok && [ -f "$out_file" ]; then
             case $lang in
                 python_3)
-                    if python3 -m py_compile "$out_file" 2>/dev/null; then
-                        syntax_ok=true
+                    run_output=$(python3 "$out_file" 2>&1)
+                    if echo "$run_output" | grep -q "PASS"; then
+                        run_ok=true
                     fi
                     ;;
                 typescript)
-                    # Use ES2020 for modern features like includes(), and DOM for console
-                    if npx tsc --noEmit --skipLibCheck --lib es2020,dom "$out_file" 2>/dev/null; then
-                        syntax_ok=true
+                    run_output=$(npx ts-node "$out_file" 2>&1)
+                    if echo "$run_output" | grep -q "PASS"; then
+                        run_ok=true
                     fi
                     ;;
                 rust)
-                    # Rust syntax check - try to compile as library
-                    if rustc --emit=metadata --crate-type=lib -o /dev/null "$out_file" 2>/dev/null; then
-                        syntax_ok=true
-                    else
-                        # Just assume it compiled for now
-                        syntax_ok=true
+                    exe_file="$OUT_DIR/${test}"
+                    if rustc "$out_file" -o "$exe_file" 2>/dev/null; then
+                        run_output=$("$exe_file" 2>&1)
+                        if echo "$run_output" | grep -q "PASS"; then
+                            run_ok=true
+                        fi
                     fi
                     ;;
             esac
@@ -97,9 +99,12 @@ for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 0
             result="COMPILE_FAIL"
             echo -e "  $lang: ${RED}COMPILE FAIL${NC}"
             fail_count=$((fail_count + 1))
-        elif ! $syntax_ok; then
-            result="SYNTAX_FAIL"
-            echo -e "  $lang: ${YELLOW}SYNTAX FAIL${NC}"
+        elif ! $run_ok; then
+            result="RUN_FAIL"
+            echo -e "  $lang: ${RED}RUN FAIL${NC}"
+            if [ -n "$run_output" ]; then
+                echo "    Output: $run_output" | head -5
+            fi
             fail_count=$((fail_count + 1))
         else
             result="PASS"

@@ -1,0 +1,83 @@
+@@target rust
+
+@@system StackOps {
+    interface:
+        push_and_go()
+        pop_back()
+        do_work(): String
+        get_state(): String
+
+    machine:
+        $Main {
+            push_and_go() {
+                println!("Pushing Main to stack, going to Sub");
+                push$
+                -> $Sub
+            }
+
+            pop_back() {
+                println!("Cannot pop - nothing on stack in Main");
+            }
+
+            do_work(): String {
+                "Working in Main".to_string()
+            }
+
+            get_state(): String {
+                "Main".to_string()
+            }
+        }
+
+        $Sub {
+            push_and_go() {
+                println!("Already in Sub");
+            }
+
+            pop_back() {
+                println!("Popping back to previous state");
+                -> pop$
+            }
+
+            do_work(): String {
+                "Working in Sub".to_string()
+            }
+
+            get_state(): String {
+                "Sub".to_string()
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 09: Stack Push/Pop ===");
+    let mut s = StackOps::new();
+
+    // Initial state should be Main
+    let state = s.get_state();
+    assert_eq!(state, "Main", "Expected 'Main', got '{}'", state);
+    println!("Initial state: {}", state);
+
+    // Do work in Main
+    let work = s.do_work();
+    assert_eq!(work, "Working in Main", "Expected 'Working in Main', got '{}'", work);
+    println!("do_work(): {}", work);
+
+    // Push and go to Sub
+    s.push_and_go();
+    let state = s.get_state();
+    assert_eq!(state, "Sub", "Expected 'Sub', got '{}'", state);
+    println!("After push_and_go(): {}", state);
+
+    // Do work in Sub
+    let work = s.do_work();
+    assert_eq!(work, "Working in Sub", "Expected 'Working in Sub', got '{}'", work);
+    println!("do_work(): {}", work);
+
+    // Pop back to Main
+    s.pop_back();
+    let state = s.get_state();
+    assert_eq!(state, "Main", "Expected 'Main' after pop, got '{}'", state);
+    println!("After pop_back(): {}", state);
+
+    println!("PASS: Stack push/pop works correctly");
+}
