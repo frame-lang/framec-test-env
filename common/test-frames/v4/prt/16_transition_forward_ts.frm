@@ -1,0 +1,61 @@
+@@target typescript
+
+@@system EventForwardTest {
+    interface:
+        process()
+        get_log(): string[]
+
+    domain:
+        var log: string[] = []
+
+    machine:
+        $Idle {
+            process() {
+                this.log.push("idle:process:before");
+                -> => $Working
+                // This should NOT execute because -> => returns after dispatch
+                this.log.push("idle:process:after");
+            }
+
+            get_log(): string[] {
+                return this.log;
+            }
+        }
+
+        $Working {
+            process() {
+                this.log.push("working:process");
+            }
+
+            get_log(): string[] {
+                return this.log;
+            }
+        }
+}
+
+function main(): void {
+    console.log("=== Test 16: Transition Forward (TypeScript) ===");
+    const s = new EventForwardTest();
+    s.process();
+    const log = s.get_log();
+    console.log(`Log: ${JSON.stringify(log)}`);
+
+    // After transition-forward:
+    // - Idle logs "idle:process:before"
+    // - Transition to Working
+    // - Working handles process(), logs "working:process"
+    // - Return prevents "idle:process:after"
+    if (!log.includes("idle:process:before")) {
+        throw new Error(`Expected 'idle:process:before' in log: ${log}`);
+    }
+    if (!log.includes("working:process")) {
+        throw new Error(`Expected 'working:process' in log: ${log}`);
+    }
+    if (log.includes("idle:process:after")) {
+        throw new Error(`Should NOT have 'idle:process:after' in log: ${log}`);
+    }
+
+    console.log("PASS: Transition forward works correctly");
+}
+
+main();

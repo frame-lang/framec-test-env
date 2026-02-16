@@ -1,0 +1,55 @@
+@@target python_3
+
+@@system EventForwardTest {
+    interface:
+        process()
+        get_log(): list
+
+    domain:
+        var log: list = []
+
+    machine:
+        $Idle {
+            process() {
+                self.log.append("idle:process:before")
+                -> => $Working
+                # This should NOT execute because -> => returns after dispatch
+                self.log.append("idle:process:after")
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+
+        $Working {
+            process() {
+                self.log.append("working:process")
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+}
+
+def main():
+    print("=== Test 16: Transition Forward ===")
+    s = EventForwardTest()
+    s.process()
+    log = s.get_log()
+    print(f"Log: {log}")
+
+    # After transition-forward:
+    # - Idle logs "idle:process:before"
+    # - Transition to Working
+    # - Working handles process(), logs "working:process"
+    # - Return prevents "idle:process:after"
+    assert "idle:process:before" in log, f"Expected 'idle:process:before' in log: {log}"
+    assert "working:process" in log, f"Expected 'working:process' in log: {log}"
+    assert "idle:process:after" not in log, f"Should NOT have 'idle:process:after' in log: {log}"
+
+    print("PASS: Transition forward works correctly")
+
+if __name__ == '__main__':
+    main()
