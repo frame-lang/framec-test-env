@@ -12,7 +12,7 @@
             $.value: int = 0
 
             add(a: int, b: int): int {
-                ^ a + b
+                return a + b
             }
 
             multiply(a: int, b: int): int {
@@ -20,12 +20,12 @@
             }
 
             greet(name: str): str {
-                ^ "Hello, " + name + "!"
+                return "Hello, " + name + "!"
             }
 
             get_value(): int {
                 $.value = 42
-                ^ $.value
+                return $.value
             }
         }
 }
@@ -34,7 +34,7 @@ def main():
     print("=== Test 13: System Return ===")
     calc = SystemReturnTest()
 
-    # Test caret return sugar
+    # Test return sugar
     result = calc.add(3, 5)
     assert result == 8, f"Expected 8, got {result}"
     print(f"add(3, 5) = {result}")

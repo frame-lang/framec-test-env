@@ -1,0 +1,75 @@
+@@target python_3
+
+# Tests that nested interface calls maintain separate return contexts
+
+@@system SystemReturnReentrantTest {
+    interface:
+        outer_call(): str
+        inner_call(): str
+        nested_call(): str
+        get_log(): str
+
+    machine:
+        $Start {
+            $.log: str = ""
+
+            outer_call(): str {
+                $.log = $.log + "outer_start,"
+                # Call inner method - this creates nested return context
+                inner_result = self.inner_call()
+                $.log = $.log + "outer_after_inner,"
+                # Our return should be independent of inner's return
+                return "outer_result:" + inner_result
+            }
+
+            inner_call(): str {
+                $.log = $.log + "inner,"
+                return "inner_result"
+            }
+
+            nested_call(): str {
+                $.log = $.log + "nested_start,"
+                # Two levels of nesting
+                result1 = self.inner_call()
+                result2 = self.outer_call()
+                $.log = $.log + "nested_end,"
+                return "nested:" + result1 + "+" + result2
+            }
+
+            get_log(): str {
+                return $.log
+            }
+        }
+}
+
+def main():
+    print("=== Test 16: System Return Reentrant (Nested Calls) ===")
+
+    # Test 1: Simple inner call
+    s1 = SystemReturnReentrantTest()
+    result = s1.inner_call()
+    assert result == "inner_result", f"Expected 'inner_result', got '{result}'"
+    print(f"1. inner_call() = '{result}'")
+
+    # Test 2: Outer calls inner - return contexts should be separate
+    s2 = SystemReturnReentrantTest()
+    result = s2.outer_call()
+    assert result == "outer_result:inner_result", f"Expected 'outer_result:inner_result', got '{result}'"
+    log = s2.get_log()
+    assert "outer_start" in log, f"Missing outer_start in log: {log}"
+    assert "inner" in log, f"Missing inner in log: {log}"
+    assert "outer_after_inner" in log, f"Missing outer_after_inner in log: {log}"
+    print(f"2. outer_call() = '{result}'")
+    print(f"   Log: '{log}'")
+
+    # Test 3: Deeply nested calls
+    s3 = SystemReturnReentrantTest()
+    result = s3.nested_call()
+    expected = "nested:inner_result+outer_result:inner_result"
+    assert result == expected, f"Expected '{expected}', got '{result}'"
+    print(f"3. nested_call() = '{result}'")
+
+    print("PASS: System return reentrant (nested calls) works correctly")
+
+if __name__ == '__main__':
+    main()
