@@ -1,0 +1,56 @@
+@@target python_3
+
+@@system TransitionEnterArgs {
+    interface:
+        start()
+        get_log(): list
+
+    domain:
+        var log: list = []
+
+    machine:
+        $Idle {
+            start() {
+                self.log.append("idle:start")
+                -> ("from_idle", 42) $Active
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+
+        $Active {
+            $>(source: str, value: int) {
+                self.log.append(f"active:enter:{source}:{value}")
+            }
+
+            start() {
+                self.log.append("active:start")
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+}
+
+def main():
+    print("=== Test 14: Transition Enter Args ===")
+    s = TransitionEnterArgs()
+
+    # Initial state is Idle
+    log = s.get_log()
+    assert log == [], f"Expected empty log, got {log}"
+
+    # Transition to Active with args
+    s.start()
+    log = s.get_log()
+    assert "idle:start" in log, f"Expected 'idle:start' in log, got {log}"
+    assert "active:enter:from_idle:42" in log, f"Expected 'active:enter:from_idle:42' in log, got {log}"
+    print(f"Log after transition: {log}")
+
+    print("PASS: Transition enter args work correctly")
+
+if __name__ == '__main__':
+    main()
