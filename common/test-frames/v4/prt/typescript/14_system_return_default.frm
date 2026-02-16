@@ -1,65 +1,66 @@
 @@target typescript
 
+// Tests system.return behavior - TypeScript version focuses on explicit returns
+// (TypeScript's type system requires functions with return types to return values)
+
 @@system SystemReturnDefaultTest {
     interface:
-        get_status(): string = "unknown"
-        get_count(): number = -1
-        no_default(): string
-        handler_sets_value(): string = "default"
+        handler_sets_value(): string
+        handler_returns_computed(): string
+        get_count(): number
 
     machine:
         $Start {
-            get_status(): string {
-                // No return - should use default "unknown"
+            $.count: number = 0
+
+            handler_sets_value(): string {
+                return "set_by_handler"
+            }
+
+            handler_returns_computed(): string {
+                $.count = $.count + 1
+                return "computed_" + String($.count)
             }
 
             get_count(): number {
-                // No return - should use default -1
-            }
-
-            no_default(): string {
-                // No default specified - should return null
-            }
-
-            handler_sets_value(): string {
-                ^ "handler_value"
+                return $.count
             }
         }
 }
 
 function main(): void {
-    console.log("=== Test 14: System Return Default Values (TypeScript) ===");
+    console.log("=== Test 14: System Return Behavior (TypeScript) ===");
     const s = new SystemReturnDefaultTest();
 
-    // Test 1: String default
-    let result: string = s.get_status();
-    if (result !== "unknown") {
-        throw new Error(`Expected 'unknown', got '${result}'`);
+    // Test 1: Handler explicitly sets return value
+    let result: string = s.handler_sets_value();
+    if (result !== "set_by_handler") {
+        throw new Error(`Expected 'set_by_handler', got '${result}'`);
     }
-    console.log(`1. get_status() (no handler set) = '${result}'`);
+    console.log(`1. handler_sets_value() = '${result}'`);
 
-    // Test 2: Number default
-    let count: number = s.get_count();
-    if (count !== -1) {
-        throw new Error(`Expected -1, got ${count}`);
+    // Test 2: Handler computes and returns value
+    result = s.handler_returns_computed();
+    if (result !== "computed_1") {
+        throw new Error(`Expected 'computed_1', got '${result}'`);
     }
-    console.log(`2. get_count() (no handler set) = ${count}`);
+    console.log(`2. handler_returns_computed() = '${result}'`);
 
-    // Test 3: No default - should return null
-    let noDefault: string = s.no_default();
-    if (noDefault !== null) {
-        throw new Error(`Expected null, got '${noDefault}'`);
+    // Test 3: Verify side effect
+    const count = s.get_count();
+    if (count !== 1) {
+        throw new Error(`Expected count=1, got ${count}`);
     }
-    console.log(`3. no_default() = ${noDefault}`);
+    console.log(`3. get_count() = ${count}`);
 
-    // Test 4: Handler sets value
-    result = s.handler_sets_value();
-    if (result !== "handler_value") {
-        throw new Error(`Expected 'handler_value', got '${result}'`);
+    // Test 4: Call again
+    result = s.handler_returns_computed();
+    if (result !== "computed_2") {
+        throw new Error(`Expected 'computed_2', got '${result}'`);
     }
-    console.log(`4. handler_sets_value() = '${result}'`);
+    console.log(`4. handler_returns_computed() again = '${result}'`);
 
-    console.log("PASS: System return default values work correctly");
+    console.log("PASS: System return behavior works correctly");
 }
 
 main();

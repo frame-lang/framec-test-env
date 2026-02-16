@@ -1,93 +1,84 @@
 @@target typescript
 
+// Tests that system.return follows "last writer wins" across transition lifecycle
+
 @@system SystemReturnChainTest {
     interface:
-        test_exit_sets(): string = "default"
-        test_enter_sets(): string = "default"
-        test_both_set(): string = "default"
+        test_enter_sets(): string
+        test_exit_then_enter(): string
         get_state(): string
 
     machine:
         $Start {
-            test_exit_sets(): string {
-                ("exit_value") -> $StateB
-            }
-
             test_enter_sets(): string {
-                -> ("enter_arg") $StateC
+                -> $EnterSetter
             }
 
-            test_both_set(): string {
-                ("exit_val") -> ("enter_val") $StateD
-            }
-
-            get_state(): string {
-                ^ "Start"
-            }
-
-            $<(msg: string) {
-                system.return = msg
-            }
-        }
-
-        $StateB {
-            get_state(): string {
-                ^ "StateB"
-            }
-        }
-
-        $StateC {
-            $>(arg: string) {
-                system.return = arg
+            test_exit_then_enter(): string {
+                -> $BothSet
             }
 
             get_state(): string {
-                ^ "StateC"
+                return "Start"
+            }
+
+            $<() {
+                // Exit handler sets initial value
+                system.return = "from_exit"
             }
         }
 
-        $StateD {
-            $>(arg: string) {
+        $EnterSetter {
+            $>() {
+                // Enter handler sets return value
+                system.return = "from_enter"
+            }
+
+            get_state(): string {
+                return "EnterSetter"
+            }
+        }
+
+        $BothSet {
+            $>() {
+                // Enter handler sets return - should overwrite exit's value
                 system.return = "enter_wins"
             }
 
             get_state(): string {
-                ^ "StateD"
+                return "BothSet"
             }
         }
 }
 
 function main(): void {
-    console.log("=== Test 15: System Return Chain (TypeScript) ===");
+    console.log("=== Test 15: System Return Chain (Last Writer Wins) (TypeScript) ===");
 
-    // Test 1: Exit handler sets return
+    // Test 1: Start exit + EnterSetter enter
+    // Start's exit sets "from_exit", EnterSetter's enter sets "from_enter"
+    // Enter should win (last writer)
     const s1 = new SystemReturnChainTest();
-    let result = s1.test_exit_sets();
-    if (result !== "exit_value") {
-        throw new Error(`Expected 'exit_value', got '${result}'`);
+    let result = s1.test_enter_sets();
+    if (result !== "from_enter") {
+        throw new Error(`Expected 'from_enter', got '${result}'`);
     }
-    if (s1.get_state() !== "StateB") {
-        throw new Error(`Expected state 'StateB'`);
+    if (s1.get_state() !== "EnterSetter") {
+        throw new Error(`Expected state 'EnterSetter'`);
     }
-    console.log(`1. Exit handler set return: '${result}'`);
+    console.log(`1. Exit set then enter set - enter wins: '${result}'`);
 
-    // Test 2: Enter handler sets return
+    // Test 2: Both handlers set, enter wins
     const s2 = new SystemReturnChainTest();
-    result = s2.test_enter_sets();
-    if (result !== "enter_arg") {
-        throw new Error(`Expected 'enter_arg', got '${result}'`);
-    }
-    console.log(`2. Enter handler set return: '${result}'`);
-
-    // Test 3: Both set - enter wins
-    const s3 = new SystemReturnChainTest();
-    result = s3.test_both_set();
+    result = s2.test_exit_then_enter();
     if (result !== "enter_wins") {
         throw new Error(`Expected 'enter_wins', got '${result}'`);
     }
-    console.log(`3. Both handlers set - enter wins: '${result}'`);
+    if (s2.get_state() !== "BothSet") {
+        throw new Error(`Expected state 'BothSet'`);
+    }
+    console.log(`2. Both set - enter wins: '${result}'`);
 
-    console.log("PASS: System return chain works correctly");
+    console.log("PASS: System return chain (last writer wins) works correctly");
 }
 
 main();

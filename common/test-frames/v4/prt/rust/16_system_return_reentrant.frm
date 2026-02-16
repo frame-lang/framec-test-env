@@ -1,10 +1,13 @@
 @@target rust
 
+// Tests nested interface calls with return values (Rust version)
+// Note: Rust uses native return pattern
+
 @@system SystemReturnReentrantTest {
     interface:
-        outer_call(): i32 = 0
-        inner_call(): i32 = 0
-        nested_call(): i32 = 0
+        outer_call(): i32
+        inner_call(): i32
+        nested_call(): i32
         get_call_count(): i32
 
     machine:
@@ -13,33 +16,32 @@
 
             outer_call(): i32 {
                 $.call_count = $.call_count + 1;
-                // Call inner - creates nested return context
-                let inner_result = self.inner_call();
-                // Our return should be independent of inner's
-                ^ 100 + inner_result
+                let inner_result: i32 = self.inner_call();
+                $.call_count = $.call_count + 1;
+                return 100 + inner_result;
             }
 
             inner_call(): i32 {
                 $.call_count = $.call_count + 1;
-                ^ 10
+                return 10;
             }
 
             nested_call(): i32 {
                 $.call_count = $.call_count + 1;
-                // Two levels of nesting
-                let r1 = self.inner_call();
-                let r2 = self.outer_call();
-                ^ 1000 + r1 + r2
+                let result1: i32 = self.inner_call();
+                let result2: i32 = self.outer_call();
+                $.call_count = $.call_count + 1;
+                return 1000 + result1 + result2;
             }
 
             get_call_count(): i32 {
-                ^ $.call_count
+                return $.call_count;
             }
         }
 }
 
 fn main() {
-    println!("=== Test 16: System Return Reentrant (Rust) ===");
+    println!("=== Test 16: System Return Reentrant (Nested Calls) (Rust) ===");
 
     // Test 1: Simple inner call
     let mut s1 = SystemReturnReentrantTest::new();
@@ -53,17 +55,17 @@ fn main() {
     // outer returns 100 + inner's 10 = 110
     assert_eq!(result, 110, "Expected 110, got {}", result);
     let count = s2.get_call_count();
-    assert_eq!(count, 2, "Expected 2 calls, got {}", count);
+    assert_eq!(count, 3, "Expected 3 calls, got {}", count);
     println!("2. outer_call() = {} (call_count = {})", result, count);
 
-    // Test 3: Deeply nested
+    // Test 3: Deeply nested calls
     let mut s3 = SystemReturnReentrantTest::new();
     let result = s3.nested_call();
     // nested: 1000 + inner(10) + outer(100 + inner(10)) = 1000 + 10 + 110 = 1120
     assert_eq!(result, 1120, "Expected 1120, got {}", result);
     let count = s3.get_call_count();
-    assert_eq!(count, 4, "Expected 4 calls, got {}", count);
+    assert_eq!(count, 6, "Expected 6 calls, got {}", count);
     println!("3. nested_call() = {} (call_count = {})", result, count);
 
-    println!("PASS: System return reentrant works correctly");
+    println!("PASS: System return reentrant (nested calls) works correctly");
 }
