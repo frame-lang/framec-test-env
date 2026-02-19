@@ -1,0 +1,97 @@
+@@target typescript
+
+@@persist
+@@system PersistTest {
+    interface:
+        set_value(v: number)
+        get_value(): number
+        go_active()
+        go_idle()
+
+    domain:
+        var value: number = 0
+        var name: string = "default"
+
+    machine:
+        $Idle {
+            set_value(v: number) {
+                this.value = v;
+            }
+
+            get_value(): number {
+                return this.value;
+            }
+
+            go_active() {
+                -> $Active
+            }
+
+            go_idle() {
+                // Already idle
+            }
+        }
+
+        $Active {
+            set_value(v: number) {
+                this.value = v * 2;
+            }
+
+            get_value(): number {
+                return this.value;
+            }
+
+            go_active() {
+                // Already active
+            }
+
+            go_idle() {
+                -> $Idle
+            }
+        }
+}
+
+function main(): void {
+    console.log("=== Test 23: Persist Basic (TypeScript) ===");
+
+    // Test 1: Create and modify system
+    const s1 = new PersistTest();
+    s1.set_value(10);
+    s1.go_active();
+    s1.set_value(5);  // Should be doubled to 10 in Active state
+
+    // Test 2: Save state
+    const data = s1.saveState();
+    if (data._state !== 'Active') {
+        throw new Error(`Expected 'Active', got ${data._state}`);
+    }
+    if (data.value !== 10) {
+        throw new Error(`Expected 10, got ${data.value}`);
+    }
+    console.log(`1. Saved state: ${JSON.stringify(data)}`);
+
+    // Test 3: Restore state
+    const s2 = PersistTest.restoreState(data);
+    if (s2.get_value() !== 10) {
+        throw new Error(`Expected 10, got ${s2.get_value()}`);
+    }
+    console.log(`2. Restored value: ${s2.get_value()}`);
+
+    // Test 4: Verify state is preserved (Active state doubles)
+    s2.set_value(3);  // Should be doubled to 6 in Active state
+    if (s2.get_value() !== 6) {
+        throw new Error(`Expected 6, got ${s2.get_value()}`);
+    }
+    console.log(`3. After set_value(3) in Active: ${s2.get_value()}`);
+
+    // Test 5: Verify transitions work after restore
+    s2.go_idle();
+    s2.set_value(4);  // Should NOT be doubled in Idle state
+    if (s2.get_value() !== 4) {
+        throw new Error(`Expected 4, got ${s2.get_value()}`);
+    }
+    console.log(`4. After go_idle, set_value(4): ${s2.get_value()}`);
+
+    console.log("PASS: Persist basic works correctly");
+}
+
+main();

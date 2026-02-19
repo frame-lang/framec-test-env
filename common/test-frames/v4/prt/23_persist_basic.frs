@@ -1,0 +1,87 @@
+@@target rust
+
+use serde::{Serialize, Deserialize};
+
+@@persist(serde)
+@@system PersistTest {
+    interface:
+        set_value(v: i32)
+        get_value(): i32
+        go_active()
+        go_idle()
+
+    domain:
+        var value: i32 = 0
+        var name: String = String::from("default")
+
+    machine:
+        $Idle {
+            set_value(v: i32) {
+                self.value = v;
+            }
+
+            get_value(): i32 {
+                return self.value;
+            }
+
+            go_active() {
+                -> $Active
+            }
+
+            go_idle() {
+                // Already idle
+            }
+        }
+
+        $Active {
+            set_value(v: i32) {
+                self.value = v * 2;
+            }
+
+            get_value(): i32 {
+                return self.value;
+            }
+
+            go_active() {
+                // Already active
+            }
+
+            go_idle() {
+                -> $Idle
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 23: Persist Basic (Rust with serde) ===");
+
+    // Test 1: Create and modify system
+    let mut s1 = PersistTest::new();
+    s1.set_value(10);
+    s1.go_active();
+    s1.set_value(5);  // Should be doubled to 10 in Active state
+
+    // Test 2: Save state
+    let json = s1.save_state();
+    assert!(json.contains("\"_state\":\"Active\""), "Expected Active state in JSON");
+    assert!(json.contains("\"value\":10"), "Expected value 10 in JSON");
+    println!("1. Saved state: {}", json);
+
+    // Test 3: Restore state
+    let mut s2 = PersistTest::restore_state(&json);
+    assert_eq!(s2.get_value(), 10, "Expected restored value 10");
+    println!("2. Restored value: {}", s2.get_value());
+
+    // Test 4: Verify state is preserved (Active state doubles)
+    s2.set_value(3);  // Should be doubled to 6 in Active state
+    assert_eq!(s2.get_value(), 6, "Expected 6 after set_value(3) in Active");
+    println!("3. After set_value(3) in Active: {}", s2.get_value());
+
+    // Test 5: Verify transitions work after restore
+    s2.go_idle();
+    s2.set_value(4);  // Should NOT be doubled in Idle state
+    assert_eq!(s2.get_value(), 4, "Expected 4 after set_value(4) in Idle");
+    println!("4. After go_idle, set_value(4): {}", s2.get_value());
+
+    println!("PASS: Persist basic works correctly");
+}

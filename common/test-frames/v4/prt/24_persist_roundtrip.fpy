@@ -1,0 +1,123 @@
+@@target python_3
+
+@@persist
+@@system PersistRoundtrip {
+    interface:
+        go_active()
+        go_idle()
+        get_state(): str
+        set_counter(n: int)
+        get_counter(): int
+        add_history(msg: str)
+
+    domain:
+        var counter: int = 0
+        var history: list = []
+        var mode: str = "normal"
+
+    machine:
+        $Idle {
+            go_active() {
+                self.history.append("idle->active")
+                -> $Active
+            }
+
+            go_idle() {
+                pass  # already idle
+            }
+
+            get_state(): str {
+                return "idle"
+            }
+
+            set_counter(n: int) {
+                self.counter = n
+            }
+
+            get_counter(): int {
+                return self.counter
+            }
+
+            add_history(msg: str) {
+                self.history.append("idle:" + msg)
+            }
+        }
+
+        $Active {
+            go_active() {
+                pass  # already active
+            }
+
+            go_idle() {
+                self.history.append("active->idle")
+                -> $Idle
+            }
+
+            get_state(): str {
+                return "active"
+            }
+
+            set_counter(n: int) {
+                self.counter = n * 2
+            }
+
+            get_counter(): int {
+                return self.counter
+            }
+
+            add_history(msg: str) {
+                self.history.append("active:" + msg)
+            }
+        }
+}
+
+def main():
+    print("=== Test 24: Persist Roundtrip ===")
+
+    # Test 1: Create system and build up state
+    s1 = PersistRoundtrip()
+    s1.set_counter(5)
+    s1.add_history("start")
+    s1.go_active()
+    s1.set_counter(3)  # Should be 6 in Active (doubled)
+    s1.add_history("work")
+
+    assert s1.get_state() == "active", f"Expected active, got {s1.get_state()}"
+    assert s1.get_counter() == 6, f"Expected 6, got {s1.get_counter()}"
+    print(f"1. State before save: state={s1.get_state()}, counter={s1.get_counter()}")
+    print(f"   History: {s1.history}")
+
+    # Test 2: Save state
+    data = s1.save_state()
+    print(f"2. Saved data keys: {list(data.keys())}")
+    assert data['_state'] == 'Active', f"Expected Active state in save data"
+    assert data['counter'] == 6, f"Expected counter=6 in save data"
+
+    # Test 3: Restore to new instance
+    s2 = PersistRoundtrip.restore_state(data)
+
+    # Verify restored state matches
+    assert s2.get_state() == "active", f"Expected active, got {s2.get_state()}"
+    assert s2.get_counter() == 6, f"Expected 6, got {s2.get_counter()}"
+    print(f"3. Restored state: state={s2.get_state()}, counter={s2.get_counter()}")
+
+    # Test 4: State machine continues to work after restore
+    s2.set_counter(2)  # Should be 4 in Active (doubled)
+    assert s2.get_counter() == 4, f"Expected 4, got {s2.get_counter()}"
+    print(f"4. Counter after set_counter(2): {s2.get_counter()}")
+
+    # Test 5: Verify history was preserved
+    assert s2.history == s1.history, f"History mismatch: {s2.history} vs {s1.history}"
+    print(f"5. History preserved: {s2.history}")
+
+    # Test 6: Transitions work after restore
+    s2.go_idle()
+    assert s2.get_state() == "idle", f"Expected idle after go_idle"
+    s2.set_counter(10)  # Not doubled in Idle
+    assert s2.get_counter() == 10, f"Expected 10, got {s2.get_counter()}"
+    print(f"6. After go_idle: state={s2.get_state()}, counter={s2.get_counter()}")
+
+    print("PASS: Persist roundtrip works correctly")
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,120 @@
+@@target rust
+
+use serde::{Serialize, Deserialize};
+
+@@persist(serde)
+@@system PersistStack {
+    interface:
+        push_and_go()
+        pop_back()
+        get_state(): String
+        get_depth(): i32
+
+    domain:
+        var depth: i32 = 0
+
+    machine:
+        $Start {
+            push_and_go() {
+                self.depth = self.depth + 1;
+                push$
+                -> $Middle
+            }
+
+            pop_back() {
+                // nothing to pop
+            }
+
+            get_state(): String {
+                return String::from("start");
+            }
+
+            get_depth(): i32 {
+                return self.depth;
+            }
+        }
+
+        $Middle {
+            push_and_go() {
+                self.depth = self.depth + 1;
+                push$
+                -> $End
+            }
+
+            pop_back() {
+                self.depth = self.depth - 1;
+                -> pop$
+            }
+
+            get_state(): String {
+                return String::from("middle");
+            }
+
+            get_depth(): i32 {
+                return self.depth;
+            }
+        }
+
+        $End {
+            push_and_go() {
+                // can't go further
+            }
+
+            pop_back() {
+                self.depth = self.depth - 1;
+                -> pop$
+            }
+
+            get_state(): String {
+                return String::from("end");
+            }
+
+            get_depth(): i32 {
+                return self.depth;
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 25: Persist Stack (Rust) ===");
+
+    // Test 1: Build up a stack
+    let mut s1 = PersistStack::new();
+    assert_eq!(s1.get_state(), "start", "Expected start");
+
+    s1.push_and_go();  // Start -> Middle (push Start)
+    assert_eq!(s1.get_state(), "middle", "Expected middle");
+    assert_eq!(s1.get_depth(), 1, "Expected depth 1");
+
+    s1.push_and_go();  // Middle -> End (push Middle)
+    assert_eq!(s1.get_state(), "end", "Expected end");
+    assert_eq!(s1.get_depth(), 2, "Expected depth 2");
+
+    println!("1. Built stack: state={}, depth={}", s1.get_state(), s1.get_depth());
+
+    // Test 2: Save state (should include stack)
+    let json = s1.save_state();
+    println!("2. Saved JSON: {}", json);
+    assert!(json.contains("\"_state\":\"End\""), "Expected End state in JSON");
+    assert!(json.contains("\"_state_stack\""), "Expected _state_stack in JSON");
+
+    // Test 3: Restore and verify stack works
+    let mut s2 = PersistStack::restore_state(&json);
+    assert_eq!(s2.get_state(), "end", "Restored: expected end");
+    assert_eq!(s2.get_depth(), 2, "Restored: expected depth 2");
+    println!("3. Restored: state={}, depth={}", s2.get_state(), s2.get_depth());
+
+    // Test 4: Pop should work after restore
+    s2.pop_back();  // End -> Middle (pop)
+    assert_eq!(s2.get_state(), "middle", "After pop: expected middle");
+    assert_eq!(s2.get_depth(), 1, "After pop: expected depth 1");
+    println!("4. After pop: state={}, depth={}", s2.get_state(), s2.get_depth());
+
+    // Test 5: Pop again
+    s2.pop_back();  // Middle -> Start (pop)
+    assert_eq!(s2.get_state(), "start", "After 2nd pop: expected start");
+    assert_eq!(s2.get_depth(), 0, "After 2nd pop: expected depth 0");
+    println!("5. After 2nd pop: state={}, depth={}", s2.get_state(), s2.get_depth());
+
+    println!("PASS: Persist stack works correctly");
+}

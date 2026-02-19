@@ -1,0 +1,67 @@
+@@target rust
+
+@@system DomainVars {
+    interface:
+        increment()
+        decrement()
+        get_count(): i32
+        set_count(value: i32)
+
+    domain:
+        var count: i32 = 0
+        var name: String = "counter".to_string()
+
+    machine:
+        $Counting {
+            increment() {
+                self.count += 1;
+                println!("{}: incremented to {}", self.name, self.count);
+            }
+
+            decrement() {
+                self.count -= 1;
+                println!("{}: decremented to {}", self.name, self.count);
+            }
+
+            get_count(): i32 {
+                self.count
+            }
+
+            set_count(value: i32) {
+                self.count = value;
+                println!("{}: set to {}", self.name, self.count);
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 06: Domain Variables ===");
+    let mut s = DomainVars::new();
+
+    // Initial value should be 0
+    let count = s.get_count();
+    assert_eq!(count, 0, "Expected initial count=0, got {}", count);
+    println!("Initial count: {}", count);
+
+    // Increment
+    s.increment();
+    let count = s.get_count();
+    assert_eq!(count, 1, "Expected count=1, got {}", count);
+
+    s.increment();
+    let count = s.get_count();
+    assert_eq!(count, 2, "Expected count=2, got {}", count);
+
+    // Decrement
+    s.decrement();
+    let count = s.get_count();
+    assert_eq!(count, 1, "Expected count=1, got {}", count);
+
+    // Set directly
+    s.set_count(100);
+    let count = s.get_count();
+    assert_eq!(count, 100, "Expected count=100, got {}", count);
+
+    println!("Final count: {}", count);
+    println!("PASS: Domain variables work correctly");
+}

@@ -1,0 +1,135 @@
+@@target rust
+
+use serde::{Serialize, Deserialize};
+
+@@persist(serde)
+@@system PersistRoundtrip {
+    interface:
+        go_active()
+        go_idle()
+        get_state(): String
+        set_counter(n: i32)
+        get_counter(): i32
+        set_mode(m: String)
+        get_mode(): String
+
+    domain:
+        var counter: i32 = 0
+        var mode: String = String::from("normal")
+
+    machine:
+        $Idle {
+            go_active() {
+                -> $Active
+            }
+
+            go_idle() {
+                // already idle
+            }
+
+            get_state(): String {
+                return String::from("idle");
+            }
+
+            set_counter(n: i32) {
+                self.counter = n;
+            }
+
+            get_counter(): i32 {
+                return self.counter;
+            }
+
+            set_mode(m: String) {
+                self.mode = m;
+            }
+
+            get_mode(): String {
+                return self.mode.clone();
+            }
+        }
+
+        $Active {
+            go_active() {
+                // already active
+            }
+
+            go_idle() {
+                -> $Idle
+            }
+
+            get_state(): String {
+                return String::from("active");
+            }
+
+            set_counter(n: i32) {
+                self.counter = n * 2;
+            }
+
+            get_counter(): i32 {
+                return self.counter;
+            }
+
+            set_mode(m: String) {
+                self.mode = m;
+            }
+
+            get_mode(): String {
+                return self.mode.clone();
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 24: Persist Roundtrip (Rust) ===");
+
+    // Test 1: Create system and build up state
+    let mut s1 = PersistRoundtrip::new();
+    s1.set_counter(5);
+    s1.set_mode(String::from("test"));
+    s1.go_active();
+    s1.set_counter(3);  // Should be 6 in Active (doubled)
+
+    assert_eq!(s1.get_state(), "active", "Expected active state");
+    assert_eq!(s1.get_counter(), 6, "Expected counter 6");
+    assert_eq!(s1.get_mode(), "test", "Expected mode test");
+    println!("1. State before save: state={}, counter={}, mode={}",
+        s1.get_state(), s1.get_counter(), s1.get_mode());
+
+    // Test 2: Save state
+    let json = s1.save_state();
+    println!("2. Saved JSON: {}", json);
+    assert!(json.contains("\"_state\":\"Active\""), "Expected Active in JSON");
+    assert!(json.contains("\"counter\":6"), "Expected counter:6 in JSON");
+    assert!(json.contains("\"mode\":\"test\""), "Expected mode:test in JSON");
+
+    // Test 3: Restore to new instance
+    let mut s2 = PersistRoundtrip::restore_state(&json);
+
+    // Verify restored state matches
+    assert_eq!(s2.get_state(), "active", "Restored: expected active state");
+    assert_eq!(s2.get_counter(), 6, "Restored: expected counter 6");
+    assert_eq!(s2.get_mode(), "test", "Restored: expected mode test");
+    println!("3. Restored state: state={}, counter={}, mode={}",
+        s2.get_state(), s2.get_counter(), s2.get_mode());
+
+    // Test 4: State machine continues to work after restore
+    s2.set_counter(2);  // Should be 4 in Active (doubled)
+    assert_eq!(s2.get_counter(), 4, "Expected 4 after set_counter(2)");
+    println!("4. Counter after set_counter(2): {}", s2.get_counter());
+
+    // Test 5: Transitions work after restore
+    s2.go_idle();
+    assert_eq!(s2.get_state(), "idle", "Expected idle after go_idle");
+    s2.set_counter(10);  // Not doubled in Idle
+    assert_eq!(s2.get_counter(), 10, "Expected 10 in Idle");
+    println!("5. After go_idle: state={}, counter={}", s2.get_state(), s2.get_counter());
+
+    // Test 6: Save and restore again
+    let json2 = s2.save_state();
+    let mut s3 = PersistRoundtrip::restore_state(&json2);
+    assert_eq!(s3.get_state(), "idle", "s3: expected idle");
+    assert_eq!(s3.get_counter(), 10, "s3: expected counter 10");
+    println!("6. Double restore works: state={}, counter={}", s3.get_state(), s3.get_counter());
+
+    println!("PASS: Persist roundtrip works correctly");
+}
