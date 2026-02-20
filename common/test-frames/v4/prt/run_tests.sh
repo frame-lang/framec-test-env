@@ -31,13 +31,13 @@ pass_count=0
 fail_count=0
 results=""
 
-# Map language to subdirectory name
-lang_to_dir() {
+# Map language to file extension
+lang_to_ext() {
     case $1 in
-        python_3) echo "python" ;;
-        typescript) echo "typescript" ;;
-        rust) echo "rust" ;;
-        *) echo "$1" ;;
+        python_3) echo "fpy" ;;
+        typescript) echo "fts" ;;
+        rust) echo "frs" ;;
+        *) echo "frm" ;;
     esac
 }
 
@@ -48,15 +48,11 @@ for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 0
         lang="${lang_ext%:*}"
         ext="${lang_ext#*:}"
         out_file="$OUT_DIR/${test}.${ext}"
-        lang_dir=$(lang_to_dir "$lang")
+        frame_ext=$(lang_to_ext "$lang")
 
         # Determine which test file to use
-        # Priority: language-specific > shared
-        if [ -f "$SCRIPT_DIR/${lang_dir}/${test}.frm" ]; then
-            test_file="$SCRIPT_DIR/${lang_dir}/${test}.frm"
-        else
-            test_file="$SCRIPT_DIR/${test}.frm"
-        fi
+        # Use language-specific file with .fpy/.fts/.frs extension
+        test_file="$SCRIPT_DIR/${test}.${frame_ext}"
 
         # Compile using explicit 'compile' subcommand (-o is a directory)
         # V4 is now the default - no env var needed
