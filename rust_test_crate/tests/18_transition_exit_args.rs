@@ -67,12 +67,8 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Done_get_count(&mut self) -> i32 {
+    fn _s_Active_get_count(&mut self) -> i32 {
 return self.count;
-    }
-
-    fn _s_Done_enter(&mut self) {
-self.count = self.count + 100;
     }
 
     fn _s_Active_leave(&mut self) {
@@ -80,12 +76,16 @@ self.count = 1;
 self._transition("Done");
     }
 
-    fn _s_Active_get_count(&mut self) -> i32 {
+    fn _s_Active_exit(&mut self) {
+self.count = self.count + 10;
+    }
+
+    fn _s_Done_get_count(&mut self) -> i32 {
 return self.count;
     }
 
-    fn _s_Active_exit(&mut self) {
-self.count = self.count + 10;
+    fn _s_Done_enter(&mut self) {
+self.count = self.count + 100;
     }
 }
 

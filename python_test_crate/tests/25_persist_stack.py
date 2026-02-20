@@ -96,21 +96,23 @@ class PersistStack:
         self.__kernel(__e)
         return self._return_value
 
-    def _state_Start(self, __e):
+    def _state_Middle(self, __e):
         if __e._message == "get_depth":
             self._return_value = self.depth
             __e._return = self._return_value
             return
         elif __e._message == "get_state":
-            self._return_value = "start"
+            self._return_value = "middle"
             __e._return = self._return_value
             return
         elif __e._message == "pop_back":
-            pass  # nothing to pop
+            self.depth = self.depth - 1
+            self.__compartment = self._state_stack.pop()
+            return
         elif __e._message == "push_and_go":
             self.depth = self.depth + 1
             self._state_stack.append(self.__compartment.copy())
-            __compartment = PersistStackCompartment("Middle", parent_compartment=self.__compartment.copy())
+            __compartment = PersistStackCompartment("End", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
 
     def _state_End(self, __e):
@@ -129,23 +131,21 @@ class PersistStack:
         elif __e._message == "push_and_go":
             pass  # can't go further
 
-    def _state_Middle(self, __e):
+    def _state_Start(self, __e):
         if __e._message == "get_depth":
             self._return_value = self.depth
             __e._return = self._return_value
             return
         elif __e._message == "get_state":
-            self._return_value = "middle"
+            self._return_value = "start"
             __e._return = self._return_value
             return
         elif __e._message == "pop_back":
-            self.depth = self.depth - 1
-            self.__compartment = self._state_stack.pop()
-            return
+            pass  # nothing to pop
         elif __e._message == "push_and_go":
             self.depth = self.depth + 1
             self._state_stack.append(self.__compartment.copy())
-            __compartment = PersistStackCompartment("End", parent_compartment=self.__compartment.copy())
+            __compartment = PersistStackCompartment("Middle", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
 
     def save_state(self) -> bytes:

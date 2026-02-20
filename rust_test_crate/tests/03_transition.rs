@@ -62,13 +62,13 @@ self._transition("Second");
 "First".to_string()
     }
 
+    fn _s_Second_get_state(&mut self) -> String {
+"Second".to_string()
+    }
+
     fn _s_Second_next(&mut self) {
 println!("Transitioning: Second -> First");
 self._transition("First");
-    }
-
-    fn _s_Second_get_state(&mut self) -> String {
-"Second".to_string()
     }
 }
 

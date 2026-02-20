@@ -114,6 +114,18 @@ match self._state.as_str() {
         }
     }
 
+    fn _s_Other_get_count(&mut self) -> i32 {
+-1
+    }
+
+    fn _s_Other_increment(&mut self) -> i32 {
+-1
+    }
+
+    fn _s_Other_come_back(&mut self) {
+self._transition("Counter");
+    }
+
     fn _s_Counter_increment(&mut self) -> i32 {
 self._sv_count = self._sv_count + 1;
 self._sv_count
@@ -125,18 +137,6 @@ self._sv_count
 
     fn _s_Counter_go_other(&mut self) {
 self._transition("Other");
-    }
-
-    fn _s_Other_come_back(&mut self) {
-self._transition("Counter");
-    }
-
-    fn _s_Other_get_count(&mut self) -> i32 {
--1
-    }
-
-    fn _s_Other_increment(&mut self) -> i32 {
--1
     }
 }
 

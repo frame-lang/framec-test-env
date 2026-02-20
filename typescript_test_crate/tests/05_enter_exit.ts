@@ -117,23 +117,6 @@ class EnterExit {
         return this._return_value;
     }
 
-    private _state_On(__e: EnterExitFrameEvent) {
-        if (__e._message === "<$") {
-            this.log.push("exit:On");
-            console.log("Exiting On state");
-        } else if (__e._message === "$>") {
-            this.log.push("enter:On");
-            console.log("Entered On state");
-        } else if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "toggle") {
-            const __compartment = new EnterExitCompartment("Off", this.__compartment.copy());
-            this.__transition(__compartment);
-        }
-    }
-
     private _state_Off(__e: EnterExitFrameEvent) {
         if (__e._message === "<$") {
             this.log.push("exit:Off");
@@ -147,6 +130,23 @@ class EnterExit {
             return;;
         } else if (__e._message === "toggle") {
             const __compartment = new EnterExitCompartment("On", this.__compartment.copy());
+            this.__transition(__compartment);
+        }
+    }
+
+    private _state_On(__e: EnterExitFrameEvent) {
+        if (__e._message === "<$") {
+            this.log.push("exit:On");
+            console.log("Exiting On state");
+        } else if (__e._message === "$>") {
+            this.log.push("enter:On");
+            console.log("Entered On state");
+        } else if (__e._message === "get_log") {
+            this._return_value = this.log;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "toggle") {
+            const __compartment = new EnterExitCompartment("Off", this.__compartment.copy());
             this.__transition(__compartment);
         }
     }

@@ -92,6 +92,21 @@ class ForwardEnterFirst:
         self.__kernel(__e)
         return self._return_value
 
+    def _state_Idle(self, __e):
+        if __e._message == "get_counter":
+            self._return_value = -1
+            __e._return = self._return_value
+            return
+        elif __e._message == "get_log":
+            self._return_value = self.log
+            __e._return = self._return_value
+            return
+        elif __e._message == "process":
+            __compartment = ForwardEnterFirstCompartment("Working", parent_compartment=self.__compartment.copy())
+            __compartment.forward_event = __e
+            self.__transition(__compartment)
+            return
+
     def _state_Working(self, __e):
         if __e._message == "$>":
             self.__compartment.state_vars["counter"] = 100
@@ -107,21 +122,6 @@ class ForwardEnterFirst:
         elif __e._message == "process":
             self.log.append("Working:process:counter=" + str(self.__compartment.state_vars["counter"]))
             self.__compartment.state_vars["counter"] = self.__compartment.state_vars["counter"] + 1
-
-    def _state_Idle(self, __e):
-        if __e._message == "get_counter":
-            self._return_value = -1
-            __e._return = self._return_value
-            return
-        elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
-            return
-        elif __e._message == "process":
-            __compartment = ForwardEnterFirstCompartment("Working", parent_compartment=self.__compartment.copy())
-            __compartment.forward_event = __e
-            self.__transition(__compartment)
-            return
 
 
 def main():

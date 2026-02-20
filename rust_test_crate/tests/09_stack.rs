@@ -69,6 +69,24 @@ match self._state.as_str() {
         }
     }
 
+    fn _s_Main_do_work(&mut self) -> String {
+"Working in Main".to_string()
+    }
+
+    fn _s_Main_get_state(&mut self) -> String {
+"Main".to_string()
+    }
+
+    fn _s_Main_pop_back(&mut self) {
+println!("Cannot pop - nothing on stack in Main");
+    }
+
+    fn _s_Main_push_and_go(&mut self) {
+println!("Pushing Main to stack, going to Sub");
+self._state_stack.push(Box::new(self._state.clone()));
+self._transition("Sub");
+    }
+
     fn _s_Sub_push_and_go(&mut self) {
 println!("Already in Sub");
     }
@@ -86,24 +104,6 @@ return;
 
     fn _s_Sub_get_state(&mut self) -> String {
 "Sub".to_string()
-    }
-
-    fn _s_Main_push_and_go(&mut self) {
-println!("Pushing Main to stack, going to Sub");
-self._state_stack.push(Box::new(self._state.clone()));
-self._transition("Sub");
-    }
-
-    fn _s_Main_get_state(&mut self) -> String {
-"Main".to_string()
-    }
-
-    fn _s_Main_do_work(&mut self) -> String {
-"Working in Main".to_string()
-    }
-
-    fn _s_Main_pop_back(&mut self) {
-println!("Cannot pop - nothing on stack in Main");
     }
 }
 

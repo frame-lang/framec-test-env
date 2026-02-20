@@ -105,13 +105,8 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Counter_get_value(&mut self) -> i32 {
-return self._sv_count
-    }
-
-    fn _s_Counter_enter(&mut self) {
-self._sv_count = 42;  // Hardcoded for Rust test
-println!("Counter entered");
+    fn _s_Idle_get_value(&mut self) -> i32 {
+return 0
     }
 
     fn _s_Idle_start(&mut self) {
@@ -120,8 +115,13 @@ println!("Counter entered");
 self._transition("Counter");
     }
 
-    fn _s_Idle_get_value(&mut self) -> i32 {
-return 0
+    fn _s_Counter_enter(&mut self) {
+self._sv_count = 42;  // Hardcoded for Rust test
+println!("Counter entered");
+    }
+
+    fn _s_Counter_get_value(&mut self) -> i32 {
+return self._sv_count
     }
 }
 

@@ -97,20 +97,40 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Active_get_counter(&mut self) -> i32 {
+    fn _s_Idle_get_counter(&mut self) -> i32 {
 return self.counter;
+    }
+
+    fn _s_Idle_go_idle(&mut self) {
+// already idle;
+    }
+
+    fn _s_Idle_go_active(&mut self) {
+self._transition("Active");
+    }
+
+    fn _s_Idle_set_mode(&mut self, m: String) {
+self.mode = m;
+    }
+
+    fn _s_Idle_get_mode(&mut self) -> String {
+return self.mode.clone();
+    }
+
+    fn _s_Idle_get_state(&mut self) -> String {
+return String::from("idle");
+    }
+
+    fn _s_Idle_set_counter(&mut self, n: i32) {
+self.counter = n;
     }
 
     fn _s_Active_set_counter(&mut self, n: i32) {
 self.counter = n * 2;
     }
 
-    fn _s_Active_go_active(&mut self) {
-// already active;
-    }
-
-    fn _s_Active_set_mode(&mut self, m: String) {
-self.mode = m;
+    fn _s_Active_get_counter(&mut self) -> i32 {
+return self.counter;
     }
 
     fn _s_Active_get_mode(&mut self) -> String {
@@ -125,32 +145,12 @@ self._transition("Idle");
 return String::from("active");
     }
 
-    fn _s_Idle_go_active(&mut self) {
-self._transition("Active");
-    }
-
-    fn _s_Idle_get_state(&mut self) -> String {
-return String::from("idle");
-    }
-
-    fn _s_Idle_go_idle(&mut self) {
-// already idle;
-    }
-
-    fn _s_Idle_set_counter(&mut self, n: i32) {
-self.counter = n;
-    }
-
-    fn _s_Idle_get_counter(&mut self) -> i32 {
-return self.counter;
-    }
-
-    fn _s_Idle_set_mode(&mut self, m: String) {
+    fn _s_Active_set_mode(&mut self, m: String) {
 self.mode = m;
     }
 
-    fn _s_Idle_get_mode(&mut self) -> String {
-return self.mode.clone();
+    fn _s_Active_go_active(&mut self) {
+// already active;
     }
 
     pub fn save_state(&mut self) -> String {

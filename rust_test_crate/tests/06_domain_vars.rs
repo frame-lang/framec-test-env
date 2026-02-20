@@ -69,6 +69,11 @@ match self._state.as_str() {
         }
     }
 
+    fn _s_Counting_set_count(&mut self, value: i32) {
+self.count = value;
+println!("{}: set to {}", self.name, self.count);
+    }
+
     fn _s_Counting_get_count(&mut self) -> i32 {
 self.count
     }
@@ -81,11 +86,6 @@ println!("{}: incremented to {}", self.name, self.count);
     fn _s_Counting_decrement(&mut self) {
 self.count -= 1;
 println!("{}: decremented to {}", self.name, self.count);
-    }
-
-    fn _s_Counting_set_count(&mut self, value: i32) {
-self.count = value;
-println!("{}: set to {}", self.name, self.count);
     }
 }
 

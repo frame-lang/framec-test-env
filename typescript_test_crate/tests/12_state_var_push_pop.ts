@@ -127,6 +127,24 @@ class StateVarPushPop {
         this.__kernel(__e);
     }
 
+    private _state_Other(__e: StateVarPushPopFrameEvent) {
+        if (__e._message === "$>") {
+            this.__compartment.state_vars["other_count"] = 100;
+        } else if (__e._message === "get_count") {
+            this._return_value = this.__compartment.state_vars["other_count"];
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "increment") {
+            this.__compartment.state_vars["other_count"] = this.__compartment.state_vars["other_count"] + 1;
+            this._return_value = this.__compartment.state_vars["other_count"];
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "restore") {
+            this.__compartment = this._state_stack.pop()!;
+            return;
+        }
+    }
+
     private _state_Counter(__e: StateVarPushPopFrameEvent) {
         if (__e._message === "$>") {
             this.__compartment.state_vars["count"] = 0;
@@ -143,24 +161,6 @@ class StateVarPushPop {
             this._state_stack.push(this.__compartment.copy());
             const __compartment = new StateVarPushPopCompartment("Other", this.__compartment.copy());
             this.__transition(__compartment);
-        }
-    }
-
-    private _state_Other(__e: StateVarPushPopFrameEvent) {
-        if (__e._message === "$>") {
-            this.__compartment.state_vars["other_count"] = 100;
-        } else if (__e._message === "get_count") {
-            this._return_value = this.__compartment.state_vars["other_count"];
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "increment") {
-            this.__compartment.state_vars["other_count"] = this.__compartment.state_vars["other_count"] + 1;
-            this._return_value = this.__compartment.state_vars["other_count"];
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "restore") {
-            this.__compartment = this._state_stack.pop()!;
-            return;
         }
     }
 }

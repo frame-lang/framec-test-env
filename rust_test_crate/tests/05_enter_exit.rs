@@ -67,17 +67,12 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_On_get_log(&mut self) -> Vec<String> {
-self.log.clone()
-    }
-
-    fn _s_On_enter(&mut self) {
-self.log.push("enter:On".to_string());
-println!("Entered On state");
-    }
-
     fn _s_On_toggle(&mut self) {
 self._transition("Off");
+    }
+
+    fn _s_On_get_log(&mut self) -> Vec<String> {
+self.log.clone()
     }
 
     fn _s_On_exit(&mut self) {
@@ -85,17 +80,22 @@ self.log.push("exit:On".to_string());
 println!("Exiting On state");
     }
 
-    fn _s_Off_toggle(&mut self) {
-self._transition("On");
+    fn _s_On_enter(&mut self) {
+self.log.push("enter:On".to_string());
+println!("Entered On state");
+    }
+
+    fn _s_Off_enter(&mut self) {
+self.log.push("enter:Off".to_string());
+println!("Entered Off state");
     }
 
     fn _s_Off_get_log(&mut self) -> Vec<String> {
 self.log.clone()
     }
 
-    fn _s_Off_enter(&mut self) {
-self.log.push("enter:Off".to_string());
-println!("Entered Off state");
+    fn _s_Off_toggle(&mut self) {
+self._transition("On");
     }
 
     fn _s_Off_exit(&mut self) {
