@@ -25,10 +25,6 @@ impl OperationsTest {
         self._enter();
     }
 
-    fn _change_state(&mut self, target_state: &str) {
-        self._state = target_state.to_string();
-    }
-
     fn _dispatch_event(&mut self, event: &str) {
 let handler_name = format!("_s_{}_{}", self._state, event);
 // Rust requires match-based dispatch or a handler registry
@@ -57,16 +53,16 @@ match self._state.as_str() {
         }
     }
 
+    fn _s_Ready_get_last_result(&mut self) -> i32 {
+return self.last_result;
+    }
+
     fn _s_Ready_compute(&mut self, a: i32, b: i32) -> i32 {
 // Use instance operations
 let sum_val = self.add(a, b);
 let prod_val = self.multiply(a, b);
 let last_result = sum_val + prod_val;
 return last_result;
-    }
-
-    fn _s_Ready_get_last_result(&mut self) -> i32 {
-return self.last_result;
     }
 
     pub fn add(&mut self, x: i32, y: i32) -> i32 {
@@ -129,4 +125,3 @@ fn main() {
 
     println!("PASS: Operations basic works correctly");
 }
-

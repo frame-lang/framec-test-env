@@ -28,10 +28,6 @@ impl SystemReturnChainTest {
         self._enter();
     }
 
-    fn _change_state(&mut self, target_state: &str) {
-        self._state = target_state.to_string();
-    }
-
     fn _dispatch_event(&mut self, event: &str) {
 let handler_name = format!("_s_{}_{}", self._state, event);
 // Rust requires match-based dispatch or a handler registry
@@ -55,16 +51,16 @@ match self._state.as_str() {
         }
     }
 
+    fn _s_Start_get_state_num(&mut self) -> i32 {
+return 1;
+    }
+
     fn _s_BothSet_get_state_num(&mut self) -> i32 {
 return 3;
     }
 
     fn _s_EnterSetter_get_state_num(&mut self) -> i32 {
 return 2;
-    }
-
-    fn _s_Start_get_state_num(&mut self) -> i32 {
-return 1;
     }
 }
 
@@ -79,4 +75,3 @@ fn main() {
 
     println!("PASS: System return works correctly");
 }
-

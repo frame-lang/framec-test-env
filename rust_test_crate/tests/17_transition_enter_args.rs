@@ -30,10 +30,6 @@ impl TransitionEnterArgs {
         self._enter();
     }
 
-    fn _change_state(&mut self, target_state: &str) {
-        self._state = target_state.to_string();
-    }
-
     fn _dispatch_event(&mut self, event: &str) {
 let handler_name = format!("_s_{}_{}", self._state, event);
 // Rust requires match-based dispatch or a handler registry
@@ -69,25 +65,25 @@ match self._state.as_str() {
         }
     }
 
+    fn _s_Idle_get_count(&mut self) -> i32 {
+return self.count;
+    }
+
     fn _s_Idle_start(&mut self) {
 self.count = 1;
 self._transition("Active");
     }
 
-    fn _s_Idle_get_count(&mut self) -> i32 {
+    fn _s_Active_get_count(&mut self) -> i32 {
 return self.count;
-    }
-
-    fn _s_Active_start(&mut self) {
-self.count = self.count + 10;
     }
 
     fn _s_Active_enter(&mut self) {
 self.count = self.count + 1;
     }
 
-    fn _s_Active_get_count(&mut self) -> i32 {
-return self.count;
+    fn _s_Active_start(&mut self) {
+self.count = self.count + 10;
     }
 }
 
@@ -108,4 +104,3 @@ fn main() {
 
     println!("PASS: Transition enter args work correctly");
 }
-

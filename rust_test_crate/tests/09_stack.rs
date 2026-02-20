@@ -23,10 +23,6 @@ impl StackOps {
         self._enter();
     }
 
-    fn _change_state(&mut self, target_state: &str) {
-        self._state = target_state.to_string();
-    }
-
     fn _dispatch_event(&mut self, event: &str) {
 let handler_name = format!("_s_{}_{}", self._state, event);
 // Rust requires match-based dispatch or a handler registry
@@ -73,6 +69,10 @@ match self._state.as_str() {
         }
     }
 
+    fn _s_Sub_push_and_go(&mut self) {
+println!("Already in Sub");
+    }
+
     fn _s_Sub_pop_back(&mut self) {
 println!("Popping back to previous state");
 let __popped_state = *self._state_stack.pop().unwrap().downcast::<String>().unwrap();
@@ -84,18 +84,8 @@ return;
 "Working in Sub".to_string()
     }
 
-    fn _s_Sub_push_and_go(&mut self) {
-println!("Already in Sub");
-    }
-
     fn _s_Sub_get_state(&mut self) -> String {
 "Sub".to_string()
-    }
-
-    fn _s_Main_push_and_go(&mut self) {
-println!("Pushing Main to stack, going to Sub");
-self._state_stack.push(Box::new(self._state.clone()));
-self._transition("Sub");
     }
 
     fn _s_Main_pop_back(&mut self) {
@@ -104,6 +94,12 @@ println!("Cannot pop - nothing on stack in Main");
 
     fn _s_Main_do_work(&mut self) -> String {
 "Working in Main".to_string()
+    }
+
+    fn _s_Main_push_and_go(&mut self) {
+println!("Pushing Main to stack, going to Sub");
+self._state_stack.push(Box::new(self._state.clone()));
+self._transition("Sub");
     }
 
     fn _s_Main_get_state(&mut self) -> String {
@@ -145,4 +141,3 @@ fn main() {
 
     println!("PASS: Stack push/pop works correctly");
 }
-

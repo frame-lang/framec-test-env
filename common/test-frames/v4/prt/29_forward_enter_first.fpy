@@ -1,0 +1,84 @@
+@@target python_3
+
+@@system ForwardEnterFirst {
+    interface:
+        process()
+        get_counter(): int
+        get_log(): list
+
+    domain:
+        var log: list = []
+
+    machine:
+        $Idle {
+            process() {
+                -> => $Working
+            }
+
+            get_counter(): int {
+                return -1
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+
+        $Working {
+            $.counter: int = 100
+
+            $>() {
+                self.log.append("Working:enter")
+            }
+
+            process() {
+                self.log.append("Working:process:counter=" + str($.counter))
+                $.counter = $.counter + 1
+            }
+
+            get_counter(): int {
+                return $.counter
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+}
+
+def main():
+    print("=== Test 29: Forward Enter First ===")
+    s = ForwardEnterFirst()
+
+    # Initial state is Idle
+    assert s.get_counter() == -1, "Expected -1 in Idle"
+
+    # Call process - should forward to Working
+    # Correct behavior: $> runs first (inits counter=100, logs "Working:enter")
+    # Then process runs (logs "Working:process:counter=100", increments to 101)
+    s.process()
+
+    # Check counter was initialized and incremented
+    counter = s.get_counter()
+    log = s.get_log()
+    print(f"Counter after forward: {counter}")
+    print(f"Log: {log}")
+
+    # Verify $> ran first
+    assert "Working:enter" in log, f"Expected 'Working:enter' in log: {log}"
+
+    # Verify process ran after $>
+    assert "Working:process:counter=100" in log, f"Expected 'Working:process:counter=100' in log: {log}"
+
+    # Verify counter was incremented
+    assert counter == 101, f"Expected counter=101, got {counter}"
+
+    # Verify order: enter before process
+    enter_idx = log.index("Working:enter")
+    process_idx = log.index("Working:process:counter=100")
+    assert enter_idx < process_idx, f"$> should run before process: {log}"
+
+    print("PASS: Forward sends $> first for non-$> events")
+
+if __name__ == '__main__':
+    main()

@@ -27,10 +27,6 @@ impl PersistTest {
         self._enter();
     }
 
-    fn _change_state(&mut self, target_state: &str) {
-        self._state = target_state.to_string();
-    }
-
     fn _dispatch_event(&mut self, event: &str) {
 let handler_name = format!("_s_{}_{}", self._state, event);
 // Rust requires match-based dispatch or a handler registry
@@ -77,6 +73,14 @@ match self._state.as_str() {
         }
     }
 
+    fn _s_Active_go_idle(&mut self) {
+self._transition("Idle");
+    }
+
+    fn _s_Active_go_active(&mut self) {
+// Already active;
+    }
+
     fn _s_Active_get_value(&mut self) -> i32 {
 return self.value;
     }
@@ -85,16 +89,12 @@ return self.value;
 self.value = v * 2;
     }
 
-    fn _s_Active_go_active(&mut self) {
-// Already active;
-    }
-
-    fn _s_Active_go_idle(&mut self) {
-self._transition("Idle");
-    }
-
     fn _s_Idle_go_idle(&mut self) {
 // Already idle;
+    }
+
+    fn _s_Idle_go_active(&mut self) {
+self._transition("Active");
     }
 
     fn _s_Idle_get_value(&mut self) -> i32 {
@@ -103,10 +103,6 @@ return self.value;
 
     fn _s_Idle_set_value(&mut self, v: i32) {
 self.value = v;
-    }
-
-    fn _s_Idle_go_active(&mut self) {
-self._transition("Active");
     }
 
     pub fn save_state(&mut self) -> String {
@@ -173,4 +169,3 @@ fn main() {
 
     println!("PASS: Persist basic works correctly");
 }
-

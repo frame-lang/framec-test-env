@@ -1,0 +1,167 @@
+class StateParamsFrameEvent {
+    public _message: string;
+    public _parameters: Record<string, any> | null;
+    public _return: any;
+
+    constructor(message: string, parameters: Record<string, any> | null) {
+        this._message = message;
+        this._parameters = parameters;
+        this._return = null;
+    }
+}
+
+
+class StateParamsCompartment {
+    public state: string;
+    public state_args: Record<string, any>;
+    public state_vars: Record<string, any>;
+    public enter_args: Record<string, any>;
+    public exit_args: Record<string, any>;
+    public forward_event: any;
+    public parent_compartment: StateParamsCompartment | null;
+
+    constructor(state: string, parent_compartment: StateParamsCompartment | null = null) {
+        this.state = state;
+        this.state_args = {  };
+        this.state_vars = {  };
+        this.enter_args = {  };
+        this.exit_args = {  };
+        this.forward_event = null;
+        this.parent_compartment = parent_compartment;
+    }
+
+    public copy(): StateParamsCompartment {
+        const c = new StateParamsCompartment(this.state, this.parent_compartment);
+        c.state_args = {...this.state_args};
+        c.state_vars = {...this.state_vars};
+        c.enter_args = {...this.enter_args};
+        c.exit_args = {...this.exit_args};
+        c.forward_event = this.forward_event;
+        return c;
+    }
+}
+
+
+class StateParams {
+    private _state_stack: Array<any>;
+    private __compartment: StateParamsCompartment;
+    private __next_compartment: StateParamsCompartment | null;
+    private _return_value: any;
+
+    constructor() {
+        this._state_stack = [];
+        this._return_value = null;
+        this.__compartment = new StateParamsCompartment("Idle");
+        this.__next_compartment = null;
+        const __frame_event = new StateParamsFrameEvent("$>", null);
+        this.__kernel(__frame_event);
+    }
+
+    private __kernel(__e: StateParamsFrameEvent) {
+        // Route event to current state
+        this.__router(__e);
+        // Process any pending transition
+        while (this.__next_compartment !== null) {
+            const next_compartment = this.__next_compartment;
+            this.__next_compartment = null;
+            // Exit current state
+            const exit_event = new StateParamsFrameEvent("<$", this.__compartment.exit_args);
+            this.__router(exit_event);
+            // Switch to new compartment
+            this.__compartment = next_compartment;
+            // Enter new state (or forward event)
+            if (next_compartment.forward_event === null) {
+                const enter_event = new StateParamsFrameEvent("$>", this.__compartment.enter_args);
+                this.__router(enter_event);
+            } else {
+                // Forward event to new state
+                const forward_event = next_compartment.forward_event;
+                next_compartment.forward_event = null;
+                if (forward_event._message === "$>") {
+                    // Forwarding enter event - just send it
+                    this.__router(forward_event);
+                } else {
+                    // Forwarding other event - send $> first, then forward
+                    const enter_event = new StateParamsFrameEvent("$>", this.__compartment.enter_args);
+                    this.__router(enter_event);
+                    this.__router(forward_event);
+                }
+            }
+        }
+    }
+
+    private __router(__e: StateParamsFrameEvent) {
+        const state_name = this.__compartment.state;
+        const handler_name = `_state_${state_name}`;
+        const handler = (this as any)[handler_name];
+        if (handler) {
+            handler.call(this, __e);
+        }
+    }
+
+    private __transition(next_compartment: StateParamsCompartment) {
+        this.__next_compartment = next_compartment;
+    }
+
+    public start(val: number) {
+        const __e = new StateParamsFrameEvent("start", {"0": val});
+        this.__kernel(__e);
+    }
+
+    public get_value(): number {
+        this._return_value = null;
+        const __e = new StateParamsFrameEvent("get_value", null);
+        this.__kernel(__e);
+        return this._return_value;
+    }
+
+    private _state_Counter(__e: StateParamsFrameEvent) {
+        if (__e._message === "$>") {
+            this.__compartment.state_vars["count"] = 0;
+            // Access state param via compartment - using string key "0"
+            this.__compartment.state_vars["count"] = this.__compartment.state_args["0"]
+            const count_val = this.__compartment.state_vars["count"]
+            console.log(`Counter entered with initial=${count_val}`)
+        } else if (__e._message === "get_value") {
+            this._return_value = this.__compartment.state_vars["count"];
+            __e._return = this._return_value;
+            return;
+        }
+    }
+
+    private _state_Idle(__e: StateParamsFrameEvent) {
+        if (__e._message === "get_value") {
+            this._return_value = 0;
+            __e._return = this._return_value;
+            return;
+        } else if (__e._message === "start") {
+            const val = __e._parameters?.["0"];
+            const __compartment = new StateParamsCompartment("Counter");
+            __compartment.state_args = {"0": val};
+            this.__transition(__compartment);
+        }
+    }
+}
+
+
+function main(): void {
+    console.log("=== Test 26: State Parameters ===")
+    const s = new StateParams()
+
+    let val = s.get_value()
+    if (val !== 0) {
+        throw new Error(`Expected 0 in Idle, got ${val}`)
+    }
+    console.log(`Initial value: ${val}`)
+
+    s.start(42)
+    val = s.get_value()
+    if (val !== 42) {
+        throw new Error(`Expected 42 in Counter from state param, got ${val}`)
+    }
+    console.log(`Value after transition: ${val}`)
+
+    console.log("PASS: State parameters work correctly")
+}
+
+main()

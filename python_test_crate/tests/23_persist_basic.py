@@ -1,82 +1,127 @@
 from typing import Any, Optional, List, Dict, Callable
 
+class PersistTestFrameEvent:
+    def __init__(self, message: str, parameters):
+        self._message = message
+        self._parameters = parameters
+        self._return = None
+
+
+class PersistTestCompartment:
+    def __init__(self, state: str, parent_compartment = None):
+        self.state = state
+        self.state_args = {}
+        self.state_vars = {}
+        self.enter_args = {}
+        self.exit_args = {}
+        self.forward_event = None
+        self.parent_compartment = parent_compartment
+
+    def copy(self) -> 'PersistTestCompartment':
+        c = PersistTestCompartment(self.state, self.parent_compartment)
+        c.state_args = self.state_args.copy()
+        c.state_vars = self.state_vars.copy()
+        c.enter_args = self.enter_args.copy()
+        c.exit_args = self.exit_args.copy()
+        c.forward_event = self.forward_event
+        return c
+
+
 class PersistTest:
     def __init__(self):
         self._state_stack = []
-        self._state_context = {}
         self._return_value = None
         self.value = 0
         self.name = "default"
-        self._state = "Idle"
-        self._enter()
+        self.__compartment = PersistTestCompartment("Idle")
+        self.__next_compartment = None
+        __frame_event = PersistTestFrameEvent("$>", None)
+        self.__kernel(__frame_event)
 
-    def _transition(self, target_state, exit_args = None, enter_args = None):
-        if exit_args:
-            self._exit(*exit_args)
-        else:
-            self._exit()
-        self._state = target_state
-        if enter_args:
-            self._enter(*enter_args)
-        else:
-            self._enter()
+    def __kernel(self, __e):
+        # Route event to current state
+        self.__router(__e)
+        # Process any pending transition
+        while self.__next_compartment is not None:
+            next_compartment = self.__next_compartment
+            self.__next_compartment = None
+            # Exit current state
+            exit_event = PersistTestFrameEvent("<$", self.__compartment.exit_args)
+            self.__router(exit_event)
+            # Switch to new compartment
+            self.__compartment = next_compartment
+            # Enter new state (or forward event)
+            if next_compartment.forward_event is None:
+                enter_event = PersistTestFrameEvent("$>", self.__compartment.enter_args)
+                self.__router(enter_event)
+            else:
+                # Forward event to new state
+                forward_event = next_compartment.forward_event
+                next_compartment.forward_event = None
+                if forward_event._message == "$>":
+                    # Forwarding enter event - just send it
+                    self.__router(forward_event)
+                else:
+                    # Forwarding other event - send $> first, then forward
+                    enter_event = PersistTestFrameEvent("$>", self.__compartment.enter_args)
+                    self.__router(enter_event)
+                    self.__router(forward_event)
 
-    def _change_state(self, target_state):
-        self._state = target_state
-
-    def _dispatch_event(self, event, *args):
-        handler_name = f"_s_{self._state}_{event}"
+    def __router(self, __e):
+        state_name = self.__compartment.state
+        handler_name = f"_state_{state_name}"
         handler = getattr(self, handler_name, None)
         if handler:
-            return handler(*args)
+            handler(__e)
 
-    def _enter(self, *args):
-        # No enter handlers
-        pass
-
-    def _exit(self, *args):
-        # No exit handlers
-        pass
+    def __transition(self, next_compartment):
+        self.__next_compartment = next_compartment
 
     def set_value(self, v: int):
-        self._dispatch_event("set_value", v)
+        __e = PersistTestFrameEvent("set_value", {"0": v})
+        self.__kernel(__e)
 
     def get_value(self) -> int:
         self._return_value = None
-        self._dispatch_event("get_value")
+        __e = PersistTestFrameEvent("get_value", None)
+        self.__kernel(__e)
         return self._return_value
 
     def go_active(self):
-        self._dispatch_event("go_active")
+        __e = PersistTestFrameEvent("go_active", None)
+        self.__kernel(__e)
 
     def go_idle(self):
-        self._dispatch_event("go_idle")
+        __e = PersistTestFrameEvent("go_idle", None)
+        self.__kernel(__e)
 
-    def _s_Idle_set_value(self, v: int):
-        self.value = v
+    def _state_Active(self, __e):
+        if __e._message == "get_value":
+            self._return_value = self.value
+            __e._return = self._return_value
+            return
+        elif __e._message == "go_active":
+            pass  # Already active
+        elif __e._message == "go_idle":
+            __compartment = PersistTestCompartment("Idle")
+            self.__transition(__compartment)
+        elif __e._message == "set_value":
+            v = __e._parameters["0"]
+            self.value = v * 2
 
-    def _s_Idle_go_idle(self):
-        pass  # Already idle
-
-    def _s_Idle_get_value(self) -> int:
-        self._return_value = self.value
-        return
-
-    def _s_Idle_go_active(self):
-        self._transition("Active", None, None)
-
-    def _s_Active_set_value(self, v: int):
-        self.value = v * 2
-
-    def _s_Active_get_value(self) -> int:
-        self._return_value = self.value
-        return
-
-    def _s_Active_go_active(self):
-        pass  # Already active
-
-    def _s_Active_go_idle(self):
-        self._transition("Idle", None, None)
+    def _state_Idle(self, __e):
+        if __e._message == "get_value":
+            self._return_value = self.value
+            __e._return = self._return_value
+            return
+        elif __e._message == "go_active":
+            __compartment = PersistTestCompartment("Active")
+            self.__transition(__compartment)
+        elif __e._message == "go_idle":
+            pass  # Already idle
+        elif __e._message == "set_value":
+            v = __e._parameters["0"]
+            self.value = v
 
     def save_state(self) -> bytes:
         import pickle
@@ -123,4 +168,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

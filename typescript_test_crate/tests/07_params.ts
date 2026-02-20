@@ -1,113 +1,179 @@
+class WithParamsFrameEvent {
+    public _message: string;
+    public _parameters: Record<string, any> | null;
+    public _return: any;
+
+    constructor(message: string, parameters: Record<string, any> | null) {
+        this._message = message;
+        this._parameters = parameters;
+        this._return = null;
+    }
+}
+
+
+class WithParamsCompartment {
+    public state: string;
+    public state_args: Record<string, any>;
+    public state_vars: Record<string, any>;
+    public enter_args: Record<string, any>;
+    public exit_args: Record<string, any>;
+    public forward_event: any;
+    public parent_compartment: WithParamsCompartment | null;
+
+    constructor(state: string, parent_compartment: WithParamsCompartment | null = null) {
+        this.state = state;
+        this.state_args = {  };
+        this.state_vars = {  };
+        this.enter_args = {  };
+        this.exit_args = {  };
+        this.forward_event = null;
+        this.parent_compartment = parent_compartment;
+    }
+
+    public copy(): WithParamsCompartment {
+        const c = new WithParamsCompartment(this.state, this.parent_compartment);
+        c.state_args = {...this.state_args};
+        c.state_vars = {...this.state_vars};
+        c.enter_args = {...this.enter_args};
+        c.exit_args = {...this.exit_args};
+        c.forward_event = this.forward_event;
+        return c;
+    }
+}
+
+
 class WithParams {
-    private _state: string;
     private _state_stack: Array<any>;
-    private _state_context: Record<string, any>;
+    private __compartment: WithParamsCompartment;
+    private __next_compartment: WithParamsCompartment | null;
     private _return_value: any;
     private total: number = 0;
 
     constructor() {
         this._state_stack = [];
-        this._state_context = {  };
         this._return_value = null;
         this.total = 0;
-        this._state = "Idle";
-        this._enter();
+        this.__compartment = new WithParamsCompartment("Idle");
+        this.__next_compartment = null;
+        const __frame_event = new WithParamsFrameEvent("$>", null);
+        this.__kernel(__frame_event);
     }
 
-    private _transition(target_state: string, exit_args: any = null, enter_args: any = null) {
-        if (exit_args) {
-            this._exit(...exit_args);
-        } else {
-            this._exit();
+    private __kernel(__e: WithParamsFrameEvent) {
+        // Route event to current state
+        this.__router(__e);
+        // Process any pending transition
+        while (this.__next_compartment !== null) {
+            const next_compartment = this.__next_compartment;
+            this.__next_compartment = null;
+            // Exit current state
+            const exit_event = new WithParamsFrameEvent("<$", this.__compartment.exit_args);
+            this.__router(exit_event);
+            // Switch to new compartment
+            this.__compartment = next_compartment;
+            // Enter new state (or forward event)
+            if (next_compartment.forward_event === null) {
+                const enter_event = new WithParamsFrameEvent("$>", this.__compartment.enter_args);
+                this.__router(enter_event);
+            } else {
+                // Forward event to new state
+                const forward_event = next_compartment.forward_event;
+                next_compartment.forward_event = null;
+                if (forward_event._message === "$>") {
+                    // Forwarding enter event - just send it
+                    this.__router(forward_event);
+                } else {
+                    // Forwarding other event - send $> first, then forward
+                    const enter_event = new WithParamsFrameEvent("$>", this.__compartment.enter_args);
+                    this.__router(enter_event);
+                    this.__router(forward_event);
+                }
+            }
         }
-        this._state = target_state;
-        if (enter_args) {
-            this._enter(...enter_args);
-        } else {
-            this._enter();
-        }
     }
 
-    private _change_state(target_state: string) {
-        this._state = target_state;
-    }
-
-    private _dispatch_event(event: string, ...args: any[]) {
-        const handler_name = `_s_${this._state}_${event}`;
+    private __router(__e: WithParamsFrameEvent) {
+        const state_name = this.__compartment.state;
+        const handler_name = `_state_${state_name}`;
         const handler = (this as any)[handler_name];
         if (handler) {
-            return handler.apply(this, args);
+            handler.call(this, __e);
         }
     }
 
-    private _enter(...args: any[]) {
-        // No enter handlers
-    }
-
-    private _exit(...args: any[]) {
-        // No exit handlers
+    private __transition(next_compartment: WithParamsCompartment) {
+        this.__next_compartment = next_compartment;
     }
 
     public start(initial: number) {
-        this._dispatch_event("start", initial);
+        const __e = new WithParamsFrameEvent("start", {"0": initial});
+        this.__kernel(__e);
     }
 
     public add(value: number) {
-        this._dispatch_event("add", value);
+        const __e = new WithParamsFrameEvent("add", {"0": value});
+        this.__kernel(__e);
     }
 
     public multiply(a: number, b: number): number {
-        this._return_value = null
-        this._dispatch_event("multiply", a, b)
-        return this._return_value
+        this._return_value = null;
+        const __e = new WithParamsFrameEvent("multiply", {"0": a, "1": b});
+        this.__kernel(__e);
+        return this._return_value;
     }
 
     public get_total(): number {
-        this._return_value = null
-        this._dispatch_event("get_total")
-        return this._return_value
+        this._return_value = null;
+        const __e = new WithParamsFrameEvent("get_total", null);
+        this.__kernel(__e);
+        return this._return_value;
     }
 
-    private _s_Idle_multiply(a: number, b: number) {
-        this._return_value = 0;
-        return this._return_value;;
+    private _state_Running(__e: WithParamsFrameEvent) {
+        if (__e._message === "add") {
+            const value = __e._parameters?.["0"];
+            this.total += value;
+            console.log(`Added ${value}, total is now ${this.total}`);
+        } else if (__e._message === "get_total") {
+            this._return_value = this.total;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "multiply") {
+            const a = __e._parameters?.["0"];
+            const b = __e._parameters?.["1"];
+            const result = a * b;
+            this.total += result;
+            console.log(`Multiplied ${a} * ${b} = ${result}, total is now ${this.total}`);
+            this._return_value = result;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "start") {
+            const initial = __e._parameters?.["0"];
+            console.log("Already running");
+        }
     }
 
-    private _s_Idle_add(value: number) {
-        console.log("Cannot add in Idle state");
-    }
-
-    private _s_Idle_start(initial: number) {
-        this.total = initial;
-        console.log(`Started with initial value: ${initial}`);
-        this._transition("Running", null, null);
-    }
-
-    private _s_Idle_get_total() {
-        this._return_value = this.total;
-        return this._return_value;;
-    }
-
-    private _s_Running_get_total() {
-        this._return_value = this.total;
-        return this._return_value;;
-    }
-
-    private _s_Running_add(value: number) {
-        this.total += value;
-        console.log(`Added ${value}, total is now ${this.total}`);
-    }
-
-    private _s_Running_multiply(a: number, b: number) {
-        const result = a * b;
-        this.total += result;
-        console.log(`Multiplied ${a} * ${b} = ${result}, total is now ${this.total}`);
-        this._return_value = result;
-        return this._return_value;;
-    }
-
-    private _s_Running_start(initial: number) {
-        console.log("Already running");
+    private _state_Idle(__e: WithParamsFrameEvent) {
+        if (__e._message === "add") {
+            const value = __e._parameters?.["0"];
+            console.log("Cannot add in Idle state");
+        } else if (__e._message === "get_total") {
+            this._return_value = this.total;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "multiply") {
+            const a = __e._parameters?.["0"];
+            const b = __e._parameters?.["1"];
+            this._return_value = 0;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "start") {
+            const initial = __e._parameters?.["0"];
+            this.total = initial;
+            console.log(`Started with initial value: ${initial}`);
+            const __compartment = new WithParamsCompartment("Running");
+            this.__transition(__compartment);
+        }
     }
 }
 
@@ -153,4 +219,3 @@ function main() {
 }
 
 main();
-

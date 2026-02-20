@@ -1,112 +1,169 @@
+class TransitionPopTestFrameEvent {
+    public _message: string;
+    public _parameters: Record<string, any> | null;
+    public _return: any;
+
+    constructor(message: string, parameters: Record<string, any> | null) {
+        this._message = message;
+        this._parameters = parameters;
+        this._return = null;
+    }
+}
+
+
+class TransitionPopTestCompartment {
+    public state: string;
+    public state_args: Record<string, any>;
+    public state_vars: Record<string, any>;
+    public enter_args: Record<string, any>;
+    public exit_args: Record<string, any>;
+    public forward_event: any;
+    public parent_compartment: TransitionPopTestCompartment | null;
+
+    constructor(state: string, parent_compartment: TransitionPopTestCompartment | null = null) {
+        this.state = state;
+        this.state_args = {  };
+        this.state_vars = {  };
+        this.enter_args = {  };
+        this.exit_args = {  };
+        this.forward_event = null;
+        this.parent_compartment = parent_compartment;
+    }
+
+    public copy(): TransitionPopTestCompartment {
+        const c = new TransitionPopTestCompartment(this.state, this.parent_compartment);
+        c.state_args = {...this.state_args};
+        c.state_vars = {...this.state_vars};
+        c.enter_args = {...this.enter_args};
+        c.exit_args = {...this.exit_args};
+        c.forward_event = this.forward_event;
+        return c;
+    }
+}
+
+
 class TransitionPopTest {
-    private _state: string;
     private _state_stack: Array<any>;
-    private _state_context: Record<string, any>;
+    private __compartment: TransitionPopTestCompartment;
+    private __next_compartment: TransitionPopTestCompartment | null;
     private _return_value: any;
     private log: string[] =     [];
 
     constructor() {
         this._state_stack = [];
-        this._state_context = {  };
         this._return_value = null;
         this.log =         [];
-        this._state = "Idle";
-        this._enter();
+        this.__compartment = new TransitionPopTestCompartment("Idle");
+        this.__next_compartment = null;
+        const __frame_event = new TransitionPopTestFrameEvent("$>", null);
+        this.__kernel(__frame_event);
     }
 
-    private _transition(target_state: string, exit_args: any = null, enter_args: any = null) {
-        if (exit_args) {
-            this._exit(...exit_args);
-        } else {
-            this._exit();
+    private __kernel(__e: TransitionPopTestFrameEvent) {
+        // Route event to current state
+        this.__router(__e);
+        // Process any pending transition
+        while (this.__next_compartment !== null) {
+            const next_compartment = this.__next_compartment;
+            this.__next_compartment = null;
+            // Exit current state
+            const exit_event = new TransitionPopTestFrameEvent("<$", this.__compartment.exit_args);
+            this.__router(exit_event);
+            // Switch to new compartment
+            this.__compartment = next_compartment;
+            // Enter new state (or forward event)
+            if (next_compartment.forward_event === null) {
+                const enter_event = new TransitionPopTestFrameEvent("$>", this.__compartment.enter_args);
+                this.__router(enter_event);
+            } else {
+                // Forward event to new state
+                const forward_event = next_compartment.forward_event;
+                next_compartment.forward_event = null;
+                if (forward_event._message === "$>") {
+                    // Forwarding enter event - just send it
+                    this.__router(forward_event);
+                } else {
+                    // Forwarding other event - send $> first, then forward
+                    const enter_event = new TransitionPopTestFrameEvent("$>", this.__compartment.enter_args);
+                    this.__router(enter_event);
+                    this.__router(forward_event);
+                }
+            }
         }
-        this._state = target_state;
-        if (enter_args) {
-            this._enter(...enter_args);
-        } else {
-            this._enter();
-        }
     }
 
-    private _change_state(target_state: string) {
-        this._state = target_state;
-    }
-
-    private _dispatch_event(event: string, ...args: any[]) {
-        const handler_name = `_s_${this._state}_${event}`;
+    private __router(__e: TransitionPopTestFrameEvent) {
+        const state_name = this.__compartment.state;
+        const handler_name = `_state_${state_name}`;
         const handler = (this as any)[handler_name];
         if (handler) {
-            return handler.apply(this, args);
+            handler.call(this, __e);
         }
     }
 
-    private _enter(...args: any[]) {
-        // No enter handlers
-    }
-
-    private _exit(...args: any[]) {
-        // No exit handlers
+    private __transition(next_compartment: TransitionPopTestCompartment) {
+        this.__next_compartment = next_compartment;
     }
 
     public start() {
-        this._dispatch_event("start");
+        const __e = new TransitionPopTestFrameEvent("start", null);
+        this.__kernel(__e);
     }
 
     public process() {
-        this._dispatch_event("process");
+        const __e = new TransitionPopTestFrameEvent("process", null);
+        this.__kernel(__e);
     }
 
     public get_state(): string {
-        this._return_value = null
-        this._dispatch_event("get_state")
-        return this._return_value
+        this._return_value = null;
+        const __e = new TransitionPopTestFrameEvent("get_state", null);
+        this.__kernel(__e);
+        return this._return_value;
     }
 
     public get_log(): string[] {
-        this._return_value = null
-        this._dispatch_event("get_log")
-        return this._return_value
+        this._return_value = null;
+        const __e = new TransitionPopTestFrameEvent("get_log", null);
+        this.__kernel(__e);
+        return this._return_value;
     }
 
-    private _s_Idle_process() {
-        this.log.push("idle:process");
+    private _state_Idle(__e: TransitionPopTestFrameEvent) {
+        if (__e._message === "get_log") {
+            this._return_value = this.log;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "get_state") {
+            this._return_value = "Idle";
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "process") {
+            this.log.push("idle:process");
+        } else if (__e._message === "start") {
+            this.log.push("idle:start:push");
+            this._state_stack.push(this.__compartment.copy());
+            const __compartment = new TransitionPopTestCompartment("Working");
+            this.__transition(__compartment);
+        }
     }
 
-    private _s_Idle_start() {
-        this.log.push("idle:start:push");
-        this._state_stack.push({state: this._state, context: {...this._state_context}});
-        this._transition("Working", null, null);
-    }
-
-    private _s_Idle_get_log() {
-        this._return_value = this.log;
-        return this._return_value;;
-    }
-
-    private _s_Idle_get_state() {
-        this._return_value = "Idle";
-        return this._return_value;;
-    }
-
-    private _s_Working_get_state() {
-        this._return_value = "Working";
-        return this._return_value;;
-    }
-
-    private _s_Working_get_log() {
-        this._return_value = this.log;
-        return this._return_value;;
-    }
-
-    private _s_Working_process() {
-        this.log.push("working:process:before_pop");
-        const __saved = this._state_stack.pop()!;
-        this._exit();
-        this._state = __saved.state;
-        this._state_context = __saved.context;
-        return;
-        // This should NOT execute because pop transitions away
-        this.log.push("working:process:after_pop");
+    private _state_Working(__e: TransitionPopTestFrameEvent) {
+        if (__e._message === "get_log") {
+            this._return_value = this.log;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "get_state") {
+            this._return_value = "Working";
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "process") {
+            this.log.push("working:process:before_pop");
+            this.__compartment = this._state_stack.pop()!;
+            return;
+            // This should NOT execute because pop transitions away
+            this.log.push("working:process:after_pop");
+        }
     }
 }
 
@@ -141,4 +198,3 @@ function main(): void {
 }
 
 main();
-

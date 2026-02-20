@@ -47,10 +47,6 @@ impl SystemReturnDefaultTest {
         self._enter();
     }
 
-    fn _change_state(&mut self, target_state: &str) {
-        self._state = target_state.to_string();
-    }
-
     fn _dispatch_event(&mut self, event: &str) {
 let handler_name = format!("_s_{}_{}", self._state, event);
 // Rust requires match-based dispatch or a handler registry
@@ -111,13 +107,13 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Start_handler_sets_value(&mut self) -> i32 {
-return 42;
-    }
-
     fn _s_Start_handler_returns_computed(&mut self) -> i32 {
 self._sv_count = self._sv_count + 1;
 return self._sv_count;
+    }
+
+    fn _s_Start_handler_sets_value(&mut self) -> i32 {
+return 42;
     }
 
     fn _s_Start_get_count(&mut self) -> i32 {
@@ -152,4 +148,3 @@ fn main() {
 
     println!("PASS: System return behavior works correctly");
 }
-

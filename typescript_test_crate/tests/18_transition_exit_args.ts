@@ -1,92 +1,147 @@
+class TransitionExitArgsFrameEvent {
+    public _message: string;
+    public _parameters: Record<string, any> | null;
+    public _return: any;
+
+    constructor(message: string, parameters: Record<string, any> | null) {
+        this._message = message;
+        this._parameters = parameters;
+        this._return = null;
+    }
+}
+
+
+class TransitionExitArgsCompartment {
+    public state: string;
+    public state_args: Record<string, any>;
+    public state_vars: Record<string, any>;
+    public enter_args: Record<string, any>;
+    public exit_args: Record<string, any>;
+    public forward_event: any;
+    public parent_compartment: TransitionExitArgsCompartment | null;
+
+    constructor(state: string, parent_compartment: TransitionExitArgsCompartment | null = null) {
+        this.state = state;
+        this.state_args = {  };
+        this.state_vars = {  };
+        this.enter_args = {  };
+        this.exit_args = {  };
+        this.forward_event = null;
+        this.parent_compartment = parent_compartment;
+    }
+
+    public copy(): TransitionExitArgsCompartment {
+        const c = new TransitionExitArgsCompartment(this.state, this.parent_compartment);
+        c.state_args = {...this.state_args};
+        c.state_vars = {...this.state_vars};
+        c.enter_args = {...this.enter_args};
+        c.exit_args = {...this.exit_args};
+        c.forward_event = this.forward_event;
+        return c;
+    }
+}
+
+
 class TransitionExitArgs {
-    private _state: string;
     private _state_stack: Array<any>;
-    private _state_context: Record<string, any>;
+    private __compartment: TransitionExitArgsCompartment;
+    private __next_compartment: TransitionExitArgsCompartment | null;
     private _return_value: any;
     private log: string[] =     [];
 
     constructor() {
         this._state_stack = [];
-        this._state_context = {  };
         this._return_value = null;
         this.log =         [];
-        this._state = "Active";
-        this._enter();
+        this.__compartment = new TransitionExitArgsCompartment("Active");
+        this.__next_compartment = null;
+        const __frame_event = new TransitionExitArgsFrameEvent("$>", null);
+        this.__kernel(__frame_event);
     }
 
-    private _transition(target_state: string, exit_args: any = null, enter_args: any = null) {
-        if (exit_args) {
-            this._exit(...exit_args);
-        } else {
-            this._exit();
+    private __kernel(__e: TransitionExitArgsFrameEvent) {
+        // Route event to current state
+        this.__router(__e);
+        // Process any pending transition
+        while (this.__next_compartment !== null) {
+            const next_compartment = this.__next_compartment;
+            this.__next_compartment = null;
+            // Exit current state
+            const exit_event = new TransitionExitArgsFrameEvent("<$", this.__compartment.exit_args);
+            this.__router(exit_event);
+            // Switch to new compartment
+            this.__compartment = next_compartment;
+            // Enter new state (or forward event)
+            if (next_compartment.forward_event === null) {
+                const enter_event = new TransitionExitArgsFrameEvent("$>", this.__compartment.enter_args);
+                this.__router(enter_event);
+            } else {
+                // Forward event to new state
+                const forward_event = next_compartment.forward_event;
+                next_compartment.forward_event = null;
+                if (forward_event._message === "$>") {
+                    // Forwarding enter event - just send it
+                    this.__router(forward_event);
+                } else {
+                    // Forwarding other event - send $> first, then forward
+                    const enter_event = new TransitionExitArgsFrameEvent("$>", this.__compartment.enter_args);
+                    this.__router(enter_event);
+                    this.__router(forward_event);
+                }
+            }
         }
-        this._state = target_state;
-        if (enter_args) {
-            this._enter(...enter_args);
-        } else {
-            this._enter();
-        }
     }
 
-    private _change_state(target_state: string) {
-        this._state = target_state;
-    }
-
-    private _dispatch_event(event: string, ...args: any[]) {
-        const handler_name = `_s_${this._state}_${event}`;
+    private __router(__e: TransitionExitArgsFrameEvent) {
+        const state_name = this.__compartment.state;
+        const handler_name = `_state_${state_name}`;
         const handler = (this as any)[handler_name];
         if (handler) {
-            return handler.apply(this, args);
+            handler.call(this, __e);
         }
     }
 
-    private _enter(...args: any[]) {
-        const handler_name = `_s_${this._state}_enter`;
-        const handler = (this as any)[handler_name];
-        if (handler) {
-            handler.call(this, ...args);
-        }
-    }
-
-    private _exit(...args: any[]) {
-        const handler_name = `_s_${this._state}_exit`;
-        const handler = (this as any)[handler_name];
-        if (handler) {
-            handler.call(this, ...args);
-        }
+    private __transition(next_compartment: TransitionExitArgsCompartment) {
+        this.__next_compartment = next_compartment;
     }
 
     public leave() {
-        this._dispatch_event("leave");
+        const __e = new TransitionExitArgsFrameEvent("leave", null);
+        this.__kernel(__e);
     }
 
     public get_log(): string[] {
-        this._return_value = null
-        this._dispatch_event("get_log")
-        return this._return_value
+        this._return_value = null;
+        const __e = new TransitionExitArgsFrameEvent("get_log", null);
+        this.__kernel(__e);
+        return this._return_value;
     }
 
-    private _s_Active_leave() {
-        this.log.push("leaving");
-        this._transition("Done", ["cleanup", 42], null);
+    private _state_Done(__e: TransitionExitArgsFrameEvent) {
+        if (__e._message === "$>") {
+            this.log.push("enter:done");
+        } else if (__e._message === "get_log") {
+            this._return_value = this.log;
+            __e._return = this._return_value;
+            return;;
+        }
     }
 
-    private _s_Active_exit(reason: string, code: number) {
-        this.log.push(`exit:${reason}:${code}`);
-    }
-
-    private _s_Active_get_log() {
-        this._return_value = this.log;
-        return this._return_value;;
-    }
-
-    private _s_Done_get_log() {
-        this._return_value = this.log;
-        return this._return_value;;
-    }
-
-    private _s_Done_enter() {
-        this.log.push("enter:done");
+    private _state_Active(__e: TransitionExitArgsFrameEvent) {
+        if (__e._message === "<$") {
+            const reason = __e._parameters?.["0"];
+            const code = __e._parameters?.["1"];
+            this.log.push(`exit:${reason}:${code}`);
+        } else if (__e._message === "get_log") {
+            this._return_value = this.log;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "leave") {
+            this.log.push("leaving");
+            this.__compartment.exit_args = Object.fromEntries(["cleanup", 42].map((v, i) => [String(i), v]));
+            const __compartment = new TransitionExitArgsCompartment("Done");
+            this.__transition(__compartment);
+        }
     }
 }
 
@@ -119,4 +174,3 @@ function main() {
 }
 
 main();
-

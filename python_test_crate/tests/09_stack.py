@@ -1,91 +1,132 @@
 from typing import Any, Optional, List, Dict, Callable
 
+class StackOpsFrameEvent:
+    def __init__(self, message: str, parameters):
+        self._message = message
+        self._parameters = parameters
+        self._return = None
+
+
+class StackOpsCompartment:
+    def __init__(self, state: str, parent_compartment = None):
+        self.state = state
+        self.state_args = {}
+        self.state_vars = {}
+        self.enter_args = {}
+        self.exit_args = {}
+        self.forward_event = None
+        self.parent_compartment = parent_compartment
+
+    def copy(self) -> 'StackOpsCompartment':
+        c = StackOpsCompartment(self.state, self.parent_compartment)
+        c.state_args = self.state_args.copy()
+        c.state_vars = self.state_vars.copy()
+        c.enter_args = self.enter_args.copy()
+        c.exit_args = self.exit_args.copy()
+        c.forward_event = self.forward_event
+        return c
+
+
 class StackOps:
     def __init__(self):
         self._state_stack = []
-        self._state_context = {}
         self._return_value = None
-        self._state = "Main"
-        self._enter()
+        self.__compartment = StackOpsCompartment("Main")
+        self.__next_compartment = None
+        __frame_event = StackOpsFrameEvent("$>", None)
+        self.__kernel(__frame_event)
 
-    def _transition(self, target_state, exit_args = None, enter_args = None):
-        if exit_args:
-            self._exit(*exit_args)
-        else:
-            self._exit()
-        self._state = target_state
-        if enter_args:
-            self._enter(*enter_args)
-        else:
-            self._enter()
+    def __kernel(self, __e):
+        # Route event to current state
+        self.__router(__e)
+        # Process any pending transition
+        while self.__next_compartment is not None:
+            next_compartment = self.__next_compartment
+            self.__next_compartment = None
+            # Exit current state
+            exit_event = StackOpsFrameEvent("<$", self.__compartment.exit_args)
+            self.__router(exit_event)
+            # Switch to new compartment
+            self.__compartment = next_compartment
+            # Enter new state (or forward event)
+            if next_compartment.forward_event is None:
+                enter_event = StackOpsFrameEvent("$>", self.__compartment.enter_args)
+                self.__router(enter_event)
+            else:
+                # Forward event to new state
+                forward_event = next_compartment.forward_event
+                next_compartment.forward_event = None
+                if forward_event._message == "$>":
+                    # Forwarding enter event - just send it
+                    self.__router(forward_event)
+                else:
+                    # Forwarding other event - send $> first, then forward
+                    enter_event = StackOpsFrameEvent("$>", self.__compartment.enter_args)
+                    self.__router(enter_event)
+                    self.__router(forward_event)
 
-    def _change_state(self, target_state):
-        self._state = target_state
-
-    def _dispatch_event(self, event, *args):
-        handler_name = f"_s_{self._state}_{event}"
+    def __router(self, __e):
+        state_name = self.__compartment.state
+        handler_name = f"_state_{state_name}"
         handler = getattr(self, handler_name, None)
         if handler:
-            return handler(*args)
+            handler(__e)
 
-    def _enter(self, *args):
-        # No enter handlers
-        pass
-
-    def _exit(self, *args):
-        # No exit handlers
-        pass
+    def __transition(self, next_compartment):
+        self.__next_compartment = next_compartment
 
     def push_and_go(self):
-        self._dispatch_event("push_and_go")
+        __e = StackOpsFrameEvent("push_and_go", None)
+        self.__kernel(__e)
 
     def pop_back(self):
-        self._dispatch_event("pop_back")
+        __e = StackOpsFrameEvent("pop_back", None)
+        self.__kernel(__e)
 
     def do_work(self) -> str:
         self._return_value = None
-        self._dispatch_event("do_work")
+        __e = StackOpsFrameEvent("do_work", None)
+        self.__kernel(__e)
         return self._return_value
 
     def get_state(self) -> str:
         self._return_value = None
-        self._dispatch_event("get_state")
+        __e = StackOpsFrameEvent("get_state", None)
+        self.__kernel(__e)
         return self._return_value
 
-    def _s_Sub_pop_back(self):
-        print("Popping back to previous state")
-        __saved = self._state_stack.pop()
-        self._exit()
-        self._state = __saved[0]
-        self._state_context = __saved[1]
-        return
+    def _state_Sub(self, __e):
+        if __e._message == "do_work":
+            self._return_value = "Working in Sub"
+            __e._return = self._return_value
+            return
+        elif __e._message == "get_state":
+            self._return_value = "Sub"
+            __e._return = self._return_value
+            return
+        elif __e._message == "pop_back":
+            print("Popping back to previous state")
+            self.__compartment = self._state_stack.pop()
+            return
+        elif __e._message == "push_and_go":
+            print("Already in Sub")
 
-    def _s_Sub_push_and_go(self):
-        print("Already in Sub")
-
-    def _s_Sub_do_work(self) -> str:
-        self._return_value = "Working in Sub"
-        return
-
-    def _s_Sub_get_state(self) -> str:
-        self._return_value = "Sub"
-        return
-
-    def _s_Main_push_and_go(self):
-        print("Pushing Main to stack, going to Sub")
-        self._state_stack.append((self._state, self._state_context.copy()))
-        self._transition("Sub", None, None)
-
-    def _s_Main_do_work(self) -> str:
-        self._return_value = "Working in Main"
-        return
-
-    def _s_Main_pop_back(self):
-        print("Cannot pop - nothing on stack in Main")
-
-    def _s_Main_get_state(self) -> str:
-        self._return_value = "Main"
-        return
+    def _state_Main(self, __e):
+        if __e._message == "do_work":
+            self._return_value = "Working in Main"
+            __e._return = self._return_value
+            return
+        elif __e._message == "get_state":
+            self._return_value = "Main"
+            __e._return = self._return_value
+            return
+        elif __e._message == "pop_back":
+            print("Cannot pop - nothing on stack in Main")
+        elif __e._message == "push_and_go":
+            print("Pushing Main to stack, going to Sub")
+            self._state_stack.append(self.__compartment.copy())
+            __compartment = StackOpsCompartment("Sub")
+            self.__transition(__compartment)
 
 
 def main():
@@ -123,4 +164,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

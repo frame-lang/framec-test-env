@@ -25,10 +25,6 @@ impl WithParams {
         self._enter();
     }
 
-    fn _change_state(&mut self, target_state: &str) {
-        self._state = target_state.to_string();
-    }
-
     fn _dispatch_event(&mut self, event: &str) {
 let handler_name = format!("_s_{}_{}", self._state, event);
 // Rust requires match-based dispatch or a handler registry
@@ -75,12 +71,12 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Idle_multiply(&mut self, a: i32, b: i32) -> i32 {
-0
+    fn _s_Idle_get_total(&mut self) -> i32 {
+self.total
     }
 
-    fn _s_Idle_add(&mut self, value: i32) {
-println!("Cannot add in Idle state");
+    fn _s_Idle_multiply(&mut self, a: i32, b: i32) -> i32 {
+0
     }
 
     fn _s_Idle_start(&mut self, initial: i32) {
@@ -89,20 +85,8 @@ println!("Started with initial value: {}", initial);
 self._transition("Running");
     }
 
-    fn _s_Idle_get_total(&mut self) -> i32 {
-self.total
-    }
-
-    fn _s_Running_multiply(&mut self, a: i32, b: i32) -> i32 {
-let result = a * b;
-self.total += result;
-println!("Multiplied {} * {} = {}, total is now {}", a, b, result, self.total);
-result
-    }
-
-    fn _s_Running_add(&mut self, value: i32) {
-self.total += value;
-println!("Added {}, total is now {}", value, self.total);
+    fn _s_Idle_add(&mut self, value: i32) {
+println!("Cannot add in Idle state");
     }
 
     fn _s_Running_get_total(&mut self) -> i32 {
@@ -111,6 +95,18 @@ self.total
 
     fn _s_Running_start(&mut self, initial: i32) {
 println!("Already running");
+    }
+
+    fn _s_Running_add(&mut self, value: i32) {
+self.total += value;
+println!("Added {}, total is now {}", value, self.total);
+    }
+
+    fn _s_Running_multiply(&mut self, a: i32, b: i32) -> i32 {
+let result = a * b;
+self.total += result;
+println!("Multiplied {} * {} = {}, total is now {}", a, b, result, self.total);
+result
     }
 }
 
@@ -144,4 +140,3 @@ fn main() {
 
     println!("PASS: Handler parameters work correctly");
 }
-

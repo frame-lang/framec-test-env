@@ -29,10 +29,6 @@ impl NativeCode {
         self._enter();
     }
 
-    fn _change_state(&mut self, target_state: &str) {
-        self._state = target_state.to_string();
-    }
-
     fn _dispatch_event(&mut self, event: &str) {
 let handler_name = format!("_s_{}_{}", self._state, event);
 // Rust requires match-based dispatch or a handler registry
@@ -61,18 +57,18 @@ match self._state.as_str() {
         }
     }
 
+    fn _s_Active_use_math(&mut self) -> f64 {
+// Using standard math operations
+let result = (16.0_f64).sqrt() + std::f64::consts::PI;
+println!("Math result: {}", result);
+result
+    }
+
     fn _s_Active_compute(&mut self, value: i32) -> i32 {
 // Native code with local variables
 let temp = value + 10;
 let result = helper_function(temp);
 println!("Computed: {} -> {}", value, result);
-result
-    }
-
-    fn _s_Active_use_math(&mut self) -> f64 {
-// Using standard math operations
-let result = (16.0_f64).sqrt() + std::f64::consts::PI;
-println!("Math result: {}", result);
 result
     }
 }
@@ -96,4 +92,3 @@ fn main() {
 
     println!("PASS: Native code preservation works correctly");
 }
-

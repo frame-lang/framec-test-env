@@ -1,107 +1,154 @@
+class EnterExitFrameEvent {
+    public _message: string;
+    public _parameters: Record<string, any> | null;
+    public _return: any;
+
+    constructor(message: string, parameters: Record<string, any> | null) {
+        this._message = message;
+        this._parameters = parameters;
+        this._return = null;
+    }
+}
+
+
+class EnterExitCompartment {
+    public state: string;
+    public state_args: Record<string, any>;
+    public state_vars: Record<string, any>;
+    public enter_args: Record<string, any>;
+    public exit_args: Record<string, any>;
+    public forward_event: any;
+    public parent_compartment: EnterExitCompartment | null;
+
+    constructor(state: string, parent_compartment: EnterExitCompartment | null = null) {
+        this.state = state;
+        this.state_args = {  };
+        this.state_vars = {  };
+        this.enter_args = {  };
+        this.exit_args = {  };
+        this.forward_event = null;
+        this.parent_compartment = parent_compartment;
+    }
+
+    public copy(): EnterExitCompartment {
+        const c = new EnterExitCompartment(this.state, this.parent_compartment);
+        c.state_args = {...this.state_args};
+        c.state_vars = {...this.state_vars};
+        c.enter_args = {...this.enter_args};
+        c.exit_args = {...this.exit_args};
+        c.forward_event = this.forward_event;
+        return c;
+    }
+}
+
+
 class EnterExit {
-    private _state: string;
     private _state_stack: Array<any>;
-    private _state_context: Record<string, any>;
+    private __compartment: EnterExitCompartment;
+    private __next_compartment: EnterExitCompartment | null;
     private _return_value: any;
     private log: string[] =     [];
 
     constructor() {
         this._state_stack = [];
-        this._state_context = {  };
         this._return_value = null;
         this.log =         [];
-        this._state = "Off";
-        this._enter();
+        this.__compartment = new EnterExitCompartment("Off");
+        this.__next_compartment = null;
+        const __frame_event = new EnterExitFrameEvent("$>", null);
+        this.__kernel(__frame_event);
     }
 
-    private _transition(target_state: string, exit_args: any = null, enter_args: any = null) {
-        if (exit_args) {
-            this._exit(...exit_args);
-        } else {
-            this._exit();
+    private __kernel(__e: EnterExitFrameEvent) {
+        // Route event to current state
+        this.__router(__e);
+        // Process any pending transition
+        while (this.__next_compartment !== null) {
+            const next_compartment = this.__next_compartment;
+            this.__next_compartment = null;
+            // Exit current state
+            const exit_event = new EnterExitFrameEvent("<$", this.__compartment.exit_args);
+            this.__router(exit_event);
+            // Switch to new compartment
+            this.__compartment = next_compartment;
+            // Enter new state (or forward event)
+            if (next_compartment.forward_event === null) {
+                const enter_event = new EnterExitFrameEvent("$>", this.__compartment.enter_args);
+                this.__router(enter_event);
+            } else {
+                // Forward event to new state
+                const forward_event = next_compartment.forward_event;
+                next_compartment.forward_event = null;
+                if (forward_event._message === "$>") {
+                    // Forwarding enter event - just send it
+                    this.__router(forward_event);
+                } else {
+                    // Forwarding other event - send $> first, then forward
+                    const enter_event = new EnterExitFrameEvent("$>", this.__compartment.enter_args);
+                    this.__router(enter_event);
+                    this.__router(forward_event);
+                }
+            }
         }
-        this._state = target_state;
-        if (enter_args) {
-            this._enter(...enter_args);
-        } else {
-            this._enter();
-        }
     }
 
-    private _change_state(target_state: string) {
-        this._state = target_state;
-    }
-
-    private _dispatch_event(event: string, ...args: any[]) {
-        const handler_name = `_s_${this._state}_${event}`;
+    private __router(__e: EnterExitFrameEvent) {
+        const state_name = this.__compartment.state;
+        const handler_name = `_state_${state_name}`;
         const handler = (this as any)[handler_name];
         if (handler) {
-            return handler.apply(this, args);
+            handler.call(this, __e);
         }
     }
 
-    private _enter(...args: any[]) {
-        const handler_name = `_s_${this._state}_enter`;
-        const handler = (this as any)[handler_name];
-        if (handler) {
-            handler.call(this, ...args);
-        }
-    }
-
-    private _exit(...args: any[]) {
-        const handler_name = `_s_${this._state}_exit`;
-        const handler = (this as any)[handler_name];
-        if (handler) {
-            handler.call(this, ...args);
-        }
+    private __transition(next_compartment: EnterExitCompartment) {
+        this.__next_compartment = next_compartment;
     }
 
     public toggle() {
-        this._dispatch_event("toggle");
+        const __e = new EnterExitFrameEvent("toggle", null);
+        this.__kernel(__e);
     }
 
     public get_log(): string[] {
-        this._return_value = null
-        this._dispatch_event("get_log")
-        return this._return_value
+        this._return_value = null;
+        const __e = new EnterExitFrameEvent("get_log", null);
+        this.__kernel(__e);
+        return this._return_value;
     }
 
-    private _s_Off_exit() {
-        this.log.push("exit:Off");
-        console.log("Exiting Off state");
+    private _state_Off(__e: EnterExitFrameEvent) {
+        if (__e._message === "<$") {
+            this.log.push("exit:Off");
+            console.log("Exiting Off state");
+        } else if (__e._message === "$>") {
+            this.log.push("enter:Off");
+            console.log("Entered Off state");
+        } else if (__e._message === "get_log") {
+            this._return_value = this.log;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "toggle") {
+            const __compartment = new EnterExitCompartment("On");
+            this.__transition(__compartment);
+        }
     }
 
-    private _s_Off_enter() {
-        this.log.push("enter:Off");
-        console.log("Entered Off state");
-    }
-
-    private _s_Off_toggle() {
-        this._transition("On", null, null);
-    }
-
-    private _s_Off_get_log() {
-        this._return_value = this.log;
-        return this._return_value;;
-    }
-
-    private _s_On_get_log() {
-        this._return_value = this.log;
-        return this._return_value;;
-    }
-
-    private _s_On_toggle() {
-        this._transition("Off", null, null);
-    }
-
-    private _s_On_exit() {
-        this.log.push("exit:On");
-        console.log("Exiting On state");
-    }
-
-    private _s_On_enter() {
-        this.log.push("enter:On");
-        console.log("Entered On state");
+    private _state_On(__e: EnterExitFrameEvent) {
+        if (__e._message === "<$") {
+            this.log.push("exit:On");
+            console.log("Exiting On state");
+        } else if (__e._message === "$>") {
+            this.log.push("enter:On");
+            console.log("Entered On state");
+        } else if (__e._message === "get_log") {
+            this._return_value = this.log;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "toggle") {
+            const __compartment = new EnterExitCompartment("Off");
+            this.__transition(__compartment);
+        }
     }
 }
 
@@ -144,4 +191,3 @@ function main() {
 }
 
 main();
-

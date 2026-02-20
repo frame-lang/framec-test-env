@@ -47,10 +47,6 @@ impl SystemReturnReentrantTest {
         self._enter();
     }
 
-    fn _change_state(&mut self, target_state: &str) {
-        self._state = target_state.to_string();
-    }
-
     fn _dispatch_event(&mut self, event: &str) {
 let handler_name = format!("_s_{}_{}", self._state, event);
 // Rust requires match-based dispatch or a handler registry
@@ -118,20 +114,9 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Start_outer_call(&mut self) -> i32 {
-self._sv_call_count = self._sv_call_count + 1;
-let inner_result: i32 = self.inner_call();
-self._sv_call_count = self._sv_call_count + 1;
-return 100 + inner_result;
-    }
-
     fn _s_Start_inner_call(&mut self) -> i32 {
 self._sv_call_count = self._sv_call_count + 1;
 return 10;
-    }
-
-    fn _s_Start_get_call_count(&mut self) -> i32 {
-return self._sv_call_count;
     }
 
     fn _s_Start_nested_call(&mut self) -> i32 {
@@ -140,6 +125,17 @@ let result1: i32 = self.inner_call();
 let result2: i32 = self.outer_call();
 self._sv_call_count = self._sv_call_count + 1;
 return 1000 + result1 + result2;
+    }
+
+    fn _s_Start_get_call_count(&mut self) -> i32 {
+return self._sv_call_count;
+    }
+
+    fn _s_Start_outer_call(&mut self) -> i32 {
+self._sv_call_count = self._sv_call_count + 1;
+let inner_result: i32 = self.inner_call();
+self._sv_call_count = self._sv_call_count + 1;
+return 100 + inner_result;
     }
 }
 
@@ -173,4 +169,3 @@ fn main() {
 
     println!("PASS: System return reentrant (nested calls) works correctly");
 }
-

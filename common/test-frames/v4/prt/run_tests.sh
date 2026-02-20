@@ -7,10 +7,24 @@
 #   - If a language-specific test exists in prt/<lang>/<test>.frm, use it
 #   - Otherwise, fall back to the shared test in prt/<test>.frm
 #   - This allows tests with language-specific native code
+#
+# Output directories:
+#   - Python: framepiler_test_env/python_test_crate/tests/
+#   - TypeScript: framepiler_test_env/typescript_test_crate/tests/
+#   - Rust: framepiler_test_env/rust_test_crate/tests/
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FRAMEC="${FRAMEC:-/Users/marktruluck/projects/frame_transpiler/target/release/framec}"
-OUT_DIR="${OUT_DIR:-/tmp/v4_prt_tests}"
+
+# Test environment root (framepiler_test_env/)
+# From prt/ go up: v4 -> test-frames -> common -> framepiler_test_env
+TEST_ENV_ROOT="${FRAMEPILER_TEST_ENV:-$(cd "$SCRIPT_DIR/../../../.." && pwd)}"
+
+# Language-specific output directories (use test crates, not /tmp)
+PYTHON_OUT="${PYTHON_OUT:-$TEST_ENV_ROOT/python_test_crate/tests}"
+TS_OUT="${TS_OUT:-$TEST_ENV_ROOT/typescript_test_crate/tests}"
+RUST_CRATE="${RUST_CRATE:-$TEST_ENV_ROOT/rust_test_crate}"
+RUST_OUT="$RUST_CRATE/tests"
 
 # Colors for output
 RED='\033[0;31m'
@@ -18,13 +32,19 @@ GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 NC='\033[0m' # No Color
 
-mkdir -p "$OUT_DIR"
+# Create output directories
+mkdir -p "$PYTHON_OUT"
+mkdir -p "$TS_OUT"
+mkdir -p "$RUST_OUT"
 
 echo "=========================================="
 echo "V4 PRT Test Suite"
 echo "=========================================="
 echo "Using framec: $FRAMEC"
-echo "Output dir: $OUT_DIR"
+echo "Test env root: $TEST_ENV_ROOT"
+echo "Python output: $PYTHON_OUT"
+echo "TypeScript output: $TS_OUT"
+echo "Rust output: $RUST_OUT"
 echo ""
 
 pass_count=0
@@ -41,27 +61,43 @@ lang_to_ext() {
     esac
 }
 
-for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_transition_enter_args 15_transition_exit_args; do
+# Get output directory for language
+lang_to_outdir() {
+    case $1 in
+        python_3) echo "$PYTHON_OUT" ;;
+        typescript) echo "$TS_OUT" ;;
+        rust) echo "$RUST_OUT" ;;
+    esac
+}
+
+# Get output file extension
+lang_to_outext() {
+    case $1 in
+        python_3) echo "py" ;;
+        typescript) echo "ts" ;;
+        rust) echo "rs" ;;
+    esac
+}
+
+for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_system_return_default 15_system_return_chain 16_system_return_reentrant 17_transition_enter_args 18_transition_exit_args 19_transition_forward 20_transition_pop 21_actions_basic 22_operations_basic 23_persist_basic 24_persist_roundtrip 25_persist_stack 26_state_params 29_forward_enter_first 30_hsm_default_forward; do
     echo "--- Test: $test ---"
 
-    for lang_ext in "python_3:py" "typescript:ts" "rust:rs"; do
-        lang="${lang_ext%:*}"
-        ext="${lang_ext#*:}"
-        out_file="$OUT_DIR/${test}.${ext}"
+    for lang in python_3 typescript rust; do
         frame_ext=$(lang_to_ext "$lang")
+        out_dir=$(lang_to_outdir "$lang")
+        out_ext=$(lang_to_outext "$lang")
+        out_file="$out_dir/${test}.${out_ext}"
 
         # Determine which test file to use
-        # Use language-specific file with .fpy/.fts/.frs extension
         test_file="$SCRIPT_DIR/${test}.${frame_ext}"
 
-        # Compile using explicit 'compile' subcommand (-o is a directory)
-        # V4 is now the default - no env var needed
+        # Compile using explicit 'compile' subcommand
         compile_ok=false
-        if "$FRAMEC" compile -l "$lang" -o "$OUT_DIR" "$test_file" 2>/dev/null; then
+        if "$FRAMEC" compile -l "$lang" -o "$out_dir" "$test_file" 2>/dev/null; then
             compile_ok=true
         fi
 
-        # Run the test (not just syntax check)
+        # Run the test
         run_ok=false
         run_output=""
         if $compile_ok && [ -f "$out_file" ]; then
@@ -73,18 +109,17 @@ for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 0
                     fi
                     ;;
                 typescript)
-                    run_output=$(npx ts-node "$out_file" 2>&1)
+                    # Run from the typescript crate directory (has node_modules)
+                    run_output=$(cd "$TEST_ENV_ROOT/typescript_test_crate" && npx ts-node "tests/${test}.ts" 2>&1)
                     if echo "$run_output" | grep -q "PASS"; then
                         run_ok=true
                     fi
                     ;;
                 rust)
-                    exe_file="$OUT_DIR/${test}"
-                    if rustc "$out_file" -o "$exe_file" 2>/dev/null; then
-                        run_output=$("$exe_file" 2>&1)
-                        if echo "$run_output" | grep -q "PASS"; then
-                            run_ok=true
-                        fi
+                    # All Rust tests run via cargo (has dependencies)
+                    run_output=$(cd "$RUST_CRATE" && cargo run --bin "$test" 2>&1)
+                    if echo "$run_output" | grep -q "PASS"; then
+                        run_ok=true
                     fi
                     ;;
             esac
@@ -117,7 +152,7 @@ echo "=========================================="
 echo "Summary"
 echo "=========================================="
 
-for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_transition_enter_args 15_transition_exit_args; do
+for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_system_return_default 15_system_return_chain 16_system_return_reentrant 17_transition_enter_args 18_transition_exit_args 19_transition_forward 20_transition_pop 21_actions_basic 22_operations_basic 23_persist_basic 24_persist_roundtrip 25_persist_stack 26_state_params 29_forward_enter_first 30_hsm_default_forward; do
     line="$test:"
     for lang in python_3 typescript rust; do
         key="${test}_${lang}"
@@ -137,6 +172,11 @@ done
 
 echo ""
 echo "Total: $pass_count passed, $fail_count failed"
+echo ""
+echo "Generated files:"
+echo "  Python: $PYTHON_OUT/*.py"
+echo "  TypeScript: $TS_OUT/*.ts"
+echo "  Rust: $RUST_OUT/*.rs"
 
 if [ $fail_count -gt 0 ]; then
     exit 1

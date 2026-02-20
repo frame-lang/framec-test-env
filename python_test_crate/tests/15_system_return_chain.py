@@ -1,89 +1,130 @@
 from typing import Any, Optional, List, Dict, Callable
 
+class SystemReturnChainTestFrameEvent:
+    def __init__(self, message: str, parameters):
+        self._message = message
+        self._parameters = parameters
+        self._return = None
+
+
+class SystemReturnChainTestCompartment:
+    def __init__(self, state: str, parent_compartment = None):
+        self.state = state
+        self.state_args = {}
+        self.state_vars = {}
+        self.enter_args = {}
+        self.exit_args = {}
+        self.forward_event = None
+        self.parent_compartment = parent_compartment
+
+    def copy(self) -> 'SystemReturnChainTestCompartment':
+        c = SystemReturnChainTestCompartment(self.state, self.parent_compartment)
+        c.state_args = self.state_args.copy()
+        c.state_vars = self.state_vars.copy()
+        c.enter_args = self.enter_args.copy()
+        c.exit_args = self.exit_args.copy()
+        c.forward_event = self.forward_event
+        return c
+
+
 class SystemReturnChainTest:
     def __init__(self):
         self._state_stack = []
-        self._state_context = {}
         self._return_value = None
-        self._state = "Start"
-        self._enter()
+        self.__compartment = SystemReturnChainTestCompartment("Start")
+        self.__next_compartment = None
+        __frame_event = SystemReturnChainTestFrameEvent("$>", None)
+        self.__kernel(__frame_event)
 
-    def _transition(self, target_state, exit_args = None, enter_args = None):
-        if exit_args:
-            self._exit(*exit_args)
-        else:
-            self._exit()
-        self._state = target_state
-        if enter_args:
-            self._enter(*enter_args)
-        else:
-            self._enter()
+    def __kernel(self, __e):
+        # Route event to current state
+        self.__router(__e)
+        # Process any pending transition
+        while self.__next_compartment is not None:
+            next_compartment = self.__next_compartment
+            self.__next_compartment = None
+            # Exit current state
+            exit_event = SystemReturnChainTestFrameEvent("<$", self.__compartment.exit_args)
+            self.__router(exit_event)
+            # Switch to new compartment
+            self.__compartment = next_compartment
+            # Enter new state (or forward event)
+            if next_compartment.forward_event is None:
+                enter_event = SystemReturnChainTestFrameEvent("$>", self.__compartment.enter_args)
+                self.__router(enter_event)
+            else:
+                # Forward event to new state
+                forward_event = next_compartment.forward_event
+                next_compartment.forward_event = None
+                if forward_event._message == "$>":
+                    # Forwarding enter event - just send it
+                    self.__router(forward_event)
+                else:
+                    # Forwarding other event - send $> first, then forward
+                    enter_event = SystemReturnChainTestFrameEvent("$>", self.__compartment.enter_args)
+                    self.__router(enter_event)
+                    self.__router(forward_event)
 
-    def _change_state(self, target_state):
-        self._state = target_state
-
-    def _dispatch_event(self, event, *args):
-        handler_name = f"_s_{self._state}_{event}"
+    def __router(self, __e):
+        state_name = self.__compartment.state
+        handler_name = f"_state_{state_name}"
         handler = getattr(self, handler_name, None)
         if handler:
-            return handler(*args)
+            handler(__e)
 
-    def _enter(self, *args):
-        handler_name = f"_s_{self._state}_enter"
-        handler = getattr(self, handler_name, None)
-        if handler:
-            handler(*args)
-
-    def _exit(self, *args):
-        handler_name = f"_s_{self._state}_exit"
-        handler = getattr(self, handler_name, None)
-        if handler:
-            handler(*args)
+    def __transition(self, next_compartment):
+        self.__next_compartment = next_compartment
 
     def test_enter_sets(self) -> str:
         self._return_value = None
-        self._dispatch_event("test_enter_sets")
+        __e = SystemReturnChainTestFrameEvent("test_enter_sets", None)
+        self.__kernel(__e)
         return self._return_value
 
     def test_exit_then_enter(self) -> str:
         self._return_value = None
-        self._dispatch_event("test_exit_then_enter")
+        __e = SystemReturnChainTestFrameEvent("test_exit_then_enter", None)
+        self.__kernel(__e)
         return self._return_value
 
     def get_state(self) -> str:
         self._return_value = None
-        self._dispatch_event("get_state")
+        __e = SystemReturnChainTestFrameEvent("get_state", None)
+        self.__kernel(__e)
         return self._return_value
 
-    def _s_BothSet_enter(self):
-        # Enter handler sets return - should overwrite exit's value
-        self._return_value = "enter_wins"
+    def _state_EnterSetter(self, __e):
+        if __e._message == "$>":
+            # Enter handler sets return value
+            self._return_value = "from_enter"
+        elif __e._message == "get_state":
+            self._return_value = "EnterSetter"
+            __e._return = self._return_value
+            return
 
-    def _s_BothSet_get_state(self) -> str:
-        self._return_value = "BothSet"
-        return
+    def _state_BothSet(self, __e):
+        if __e._message == "$>":
+            # Enter handler sets return - should overwrite exit's value
+            self._return_value = "enter_wins"
+        elif __e._message == "get_state":
+            self._return_value = "BothSet"
+            __e._return = self._return_value
+            return
 
-    def _s_Start_get_state(self) -> str:
-        self._return_value = "Start"
-        return
-
-    def _s_Start_test_enter_sets(self) -> str:
-        self._transition("EnterSetter", None, None)
-
-    def _s_Start_test_exit_then_enter(self) -> str:
-        self._transition("BothSet", None, None)
-
-    def _s_Start_exit(self):
-        # Exit handler sets initial value
-        self._return_value = "from_exit"
-
-    def _s_EnterSetter_get_state(self) -> str:
-        self._return_value = "EnterSetter"
-        return
-
-    def _s_EnterSetter_enter(self):
-        # Enter handler sets return value
-        self._return_value = "from_enter"
+    def _state_Start(self, __e):
+        if __e._message == "<$":
+            # Exit handler sets initial value
+            self._return_value = "from_exit"
+        elif __e._message == "get_state":
+            self._return_value = "Start"
+            __e._return = self._return_value
+            return
+        elif __e._message == "test_enter_sets":
+            __compartment = SystemReturnChainTestCompartment("EnterSetter")
+            self.__transition(__compartment)
+        elif __e._message == "test_exit_then_enter":
+            __compartment = SystemReturnChainTestCompartment("BothSet")
+            self.__transition(__compartment)
 
 
 def main():
@@ -109,4 +150,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-

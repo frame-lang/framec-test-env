@@ -1,91 +1,150 @@
+class DomainVarsFrameEvent {
+    public _message: string;
+    public _parameters: Record<string, any> | null;
+    public _return: any;
+
+    constructor(message: string, parameters: Record<string, any> | null) {
+        this._message = message;
+        this._parameters = parameters;
+        this._return = null;
+    }
+}
+
+
+class DomainVarsCompartment {
+    public state: string;
+    public state_args: Record<string, any>;
+    public state_vars: Record<string, any>;
+    public enter_args: Record<string, any>;
+    public exit_args: Record<string, any>;
+    public forward_event: any;
+    public parent_compartment: DomainVarsCompartment | null;
+
+    constructor(state: string, parent_compartment: DomainVarsCompartment | null = null) {
+        this.state = state;
+        this.state_args = {  };
+        this.state_vars = {  };
+        this.enter_args = {  };
+        this.exit_args = {  };
+        this.forward_event = null;
+        this.parent_compartment = parent_compartment;
+    }
+
+    public copy(): DomainVarsCompartment {
+        const c = new DomainVarsCompartment(this.state, this.parent_compartment);
+        c.state_args = {...this.state_args};
+        c.state_vars = {...this.state_vars};
+        c.enter_args = {...this.enter_args};
+        c.exit_args = {...this.exit_args};
+        c.forward_event = this.forward_event;
+        return c;
+    }
+}
+
+
 class DomainVars {
-    private _state: string;
     private _state_stack: Array<any>;
-    private _state_context: Record<string, any>;
+    private __compartment: DomainVarsCompartment;
+    private __next_compartment: DomainVarsCompartment | null;
     private _return_value: any;
     private count: number = 0;
     private name: string = "counter";
 
     constructor() {
         this._state_stack = [];
-        this._state_context = {  };
         this._return_value = null;
         this.count = 0;
         this.name = "counter";
-        this._state = "Counting";
-        this._enter();
+        this.__compartment = new DomainVarsCompartment("Counting");
+        this.__next_compartment = null;
+        const __frame_event = new DomainVarsFrameEvent("$>", null);
+        this.__kernel(__frame_event);
     }
 
-    private _transition(target_state: string, exit_args: any = null, enter_args: any = null) {
-        if (exit_args) {
-            this._exit(...exit_args);
-        } else {
-            this._exit();
+    private __kernel(__e: DomainVarsFrameEvent) {
+        // Route event to current state
+        this.__router(__e);
+        // Process any pending transition
+        while (this.__next_compartment !== null) {
+            const next_compartment = this.__next_compartment;
+            this.__next_compartment = null;
+            // Exit current state
+            const exit_event = new DomainVarsFrameEvent("<$", this.__compartment.exit_args);
+            this.__router(exit_event);
+            // Switch to new compartment
+            this.__compartment = next_compartment;
+            // Enter new state (or forward event)
+            if (next_compartment.forward_event === null) {
+                const enter_event = new DomainVarsFrameEvent("$>", this.__compartment.enter_args);
+                this.__router(enter_event);
+            } else {
+                // Forward event to new state
+                const forward_event = next_compartment.forward_event;
+                next_compartment.forward_event = null;
+                if (forward_event._message === "$>") {
+                    // Forwarding enter event - just send it
+                    this.__router(forward_event);
+                } else {
+                    // Forwarding other event - send $> first, then forward
+                    const enter_event = new DomainVarsFrameEvent("$>", this.__compartment.enter_args);
+                    this.__router(enter_event);
+                    this.__router(forward_event);
+                }
+            }
         }
-        this._state = target_state;
-        if (enter_args) {
-            this._enter(...enter_args);
-        } else {
-            this._enter();
-        }
     }
 
-    private _change_state(target_state: string) {
-        this._state = target_state;
-    }
-
-    private _dispatch_event(event: string, ...args: any[]) {
-        const handler_name = `_s_${this._state}_${event}`;
+    private __router(__e: DomainVarsFrameEvent) {
+        const state_name = this.__compartment.state;
+        const handler_name = `_state_${state_name}`;
         const handler = (this as any)[handler_name];
         if (handler) {
-            return handler.apply(this, args);
+            handler.call(this, __e);
         }
     }
 
-    private _enter(...args: any[]) {
-        // No enter handlers
-    }
-
-    private _exit(...args: any[]) {
-        // No exit handlers
+    private __transition(next_compartment: DomainVarsCompartment) {
+        this.__next_compartment = next_compartment;
     }
 
     public increment() {
-        this._dispatch_event("increment");
+        const __e = new DomainVarsFrameEvent("increment", null);
+        this.__kernel(__e);
     }
 
     public decrement() {
-        this._dispatch_event("decrement");
+        const __e = new DomainVarsFrameEvent("decrement", null);
+        this.__kernel(__e);
     }
 
     public get_count(): number {
-        this._return_value = null
-        this._dispatch_event("get_count")
-        return this._return_value
+        this._return_value = null;
+        const __e = new DomainVarsFrameEvent("get_count", null);
+        this.__kernel(__e);
+        return this._return_value;
     }
 
     public set_count(value: number) {
-        this._dispatch_event("set_count", value);
+        const __e = new DomainVarsFrameEvent("set_count", {"0": value});
+        this.__kernel(__e);
     }
 
-    private _s_Counting_increment() {
-        this.count += 1;
-        console.log(`${this.name}: incremented to ${this.count}`);
-    }
-
-    private _s_Counting_decrement() {
-        this.count -= 1;
-        console.log(`${this.name}: decremented to ${this.count}`);
-    }
-
-    private _s_Counting_get_count() {
-        this._return_value = this.count;
-        return this._return_value;;
-    }
-
-    private _s_Counting_set_count(value: number) {
-        this.count = value;
-        console.log(`${this.name}: set to ${this.count}`);
+    private _state_Counting(__e: DomainVarsFrameEvent) {
+        if (__e._message === "decrement") {
+            this.count -= 1;
+            console.log(`${this.name}: decremented to ${this.count}`);
+        } else if (__e._message === "get_count") {
+            this._return_value = this.count;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "increment") {
+            this.count += 1;
+            console.log(`${this.name}: incremented to ${this.count}`);
+        } else if (__e._message === "set_count") {
+            const value = __e._parameters?.["0"];
+            this.count = value;
+            console.log(`${this.name}: set to ${this.count}`);
+        }
     }
 }
 
@@ -133,4 +192,3 @@ function main() {
 }
 
 main();
-

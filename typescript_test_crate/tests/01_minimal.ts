@@ -1,60 +1,121 @@
+class MinimalFrameEvent {
+    public _message: string;
+    public _parameters: Record<string, any> | null;
+    public _return: any;
+
+    constructor(message: string, parameters: Record<string, any> | null) {
+        this._message = message;
+        this._parameters = parameters;
+        this._return = null;
+    }
+}
+
+
+class MinimalCompartment {
+    public state: string;
+    public state_args: Record<string, any>;
+    public state_vars: Record<string, any>;
+    public enter_args: Record<string, any>;
+    public exit_args: Record<string, any>;
+    public forward_event: any;
+    public parent_compartment: MinimalCompartment | null;
+
+    constructor(state: string, parent_compartment: MinimalCompartment | null = null) {
+        this.state = state;
+        this.state_args = {  };
+        this.state_vars = {  };
+        this.enter_args = {  };
+        this.exit_args = {  };
+        this.forward_event = null;
+        this.parent_compartment = parent_compartment;
+    }
+
+    public copy(): MinimalCompartment {
+        const c = new MinimalCompartment(this.state, this.parent_compartment);
+        c.state_args = {...this.state_args};
+        c.state_vars = {...this.state_vars};
+        c.enter_args = {...this.enter_args};
+        c.exit_args = {...this.exit_args};
+        c.forward_event = this.forward_event;
+        return c;
+    }
+}
+
+
 class Minimal {
-    private _state: string;
     private _state_stack: Array<any>;
-    private _state_context: Record<string, any>;
+    private __compartment: MinimalCompartment;
+    private __next_compartment: MinimalCompartment | null;
     private _return_value: any;
 
     constructor() {
         this._state_stack = [];
-        this._state_context = {  };
         this._return_value = null;
-        this._state = "Start";
-        this._enter();
+        this.__compartment = new MinimalCompartment("Start");
+        this.__next_compartment = null;
+        const __frame_event = new MinimalFrameEvent("$>", null);
+        this.__kernel(__frame_event);
     }
 
-    private _transition(target_state: string, exit_args: any = null, enter_args: any = null) {
-        if (exit_args) {
-            this._exit(...exit_args);
-        } else {
-            this._exit();
+    private __kernel(__e: MinimalFrameEvent) {
+        // Route event to current state
+        this.__router(__e);
+        // Process any pending transition
+        while (this.__next_compartment !== null) {
+            const next_compartment = this.__next_compartment;
+            this.__next_compartment = null;
+            // Exit current state
+            const exit_event = new MinimalFrameEvent("<$", this.__compartment.exit_args);
+            this.__router(exit_event);
+            // Switch to new compartment
+            this.__compartment = next_compartment;
+            // Enter new state (or forward event)
+            if (next_compartment.forward_event === null) {
+                const enter_event = new MinimalFrameEvent("$>", this.__compartment.enter_args);
+                this.__router(enter_event);
+            } else {
+                // Forward event to new state
+                const forward_event = next_compartment.forward_event;
+                next_compartment.forward_event = null;
+                if (forward_event._message === "$>") {
+                    // Forwarding enter event - just send it
+                    this.__router(forward_event);
+                } else {
+                    // Forwarding other event - send $> first, then forward
+                    const enter_event = new MinimalFrameEvent("$>", this.__compartment.enter_args);
+                    this.__router(enter_event);
+                    this.__router(forward_event);
+                }
+            }
         }
-        this._state = target_state;
-        if (enter_args) {
-            this._enter(...enter_args);
-        } else {
-            this._enter();
-        }
     }
 
-    private _change_state(target_state: string) {
-        this._state = target_state;
-    }
-
-    private _dispatch_event(event: string, ...args: any[]) {
-        const handler_name = `_s_${this._state}_${event}`;
+    private __router(__e: MinimalFrameEvent) {
+        const state_name = this.__compartment.state;
+        const handler_name = `_state_${state_name}`;
         const handler = (this as any)[handler_name];
         if (handler) {
-            return handler.apply(this, args);
+            handler.call(this, __e);
         }
     }
 
-    private _enter(...args: any[]) {
-        // No enter handlers
-    }
-
-    private _exit(...args: any[]) {
-        // No exit handlers
+    private __transition(next_compartment: MinimalCompartment) {
+        this.__next_compartment = next_compartment;
     }
 
     public is_alive(): boolean {
-        this._return_value = null
-        this._dispatch_event("is_alive")
-        return this._return_value
+        this._return_value = null;
+        const __e = new MinimalFrameEvent("is_alive", null);
+        this.__kernel(__e);
+        return this._return_value;
     }
 
-    private _s_Start_is_alive() {
-        this._return_value = true;
-        return this._return_value;;
+    private _state_Start(__e: MinimalFrameEvent) {
+        if (__e._message === "is_alive") {
+            this._return_value = true;
+            __e._return = this._return_value;
+            return;;
+        }
     }
 }
 
@@ -74,4 +135,3 @@ function main() {
 }
 
 main();
-

@@ -1,0 +1,84 @@
+@@target rust
+
+@@system ForwardEnterFirst {
+    interface:
+        process()
+        get_counter(): i32
+        get_log(): Vec<String>
+
+    domain:
+        var log: Vec<String> = Vec::new()
+
+    machine:
+        $Idle {
+            process() {
+                -> => $Working
+            }
+
+            get_counter(): i32 {
+                return -1;
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone();
+            }
+        }
+
+        $Working {
+            $.counter: i32 = 100
+
+            $>() {
+                self.log.push("Working:enter".to_string());
+            }
+
+            process() {
+                self.log.push(format!("Working:process:counter={}", $.counter));
+                $.counter = $.counter + 1;
+            }
+
+            get_counter(): i32 {
+                return $.counter;
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone();
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 29: Forward Enter First (Rust) ===");
+    let mut s = ForwardEnterFirst::new();
+
+    // Initial state is Idle
+    assert_eq!(s.get_counter(), -1, "Expected -1 in Idle");
+
+    // Call process - should forward to Working
+    // Correct behavior: $> runs first (inits counter=100, logs "Working:enter")
+    // Then process runs (logs "Working:process:counter=100", increments to 101)
+    s.process();
+
+    // Check counter was initialized and incremented
+    let counter = s.get_counter();
+    let log = s.get_log();
+    println!("Counter after forward: {}", counter);
+    println!("Log: {:?}", log);
+
+    // Verify $> ran first
+    assert!(log.contains(&"Working:enter".to_string()),
+            "Expected 'Working:enter' in log: {:?}", log);
+
+    // Verify process ran after $>
+    assert!(log.contains(&"Working:process:counter=100".to_string()),
+            "Expected 'Working:process:counter=100' in log: {:?}", log);
+
+    // Verify counter was incremented
+    assert_eq!(counter, 101, "Expected counter=101, got {}", counter);
+
+    // Verify order: enter before process
+    let enter_idx = log.iter().position(|x| x == "Working:enter").unwrap();
+    let process_idx = log.iter().position(|x| x == "Working:process:counter=100").unwrap();
+    assert!(enter_idx < process_idx, "$> should run before process: {:?}", log);
+
+    println!("PASS: Forward sends $> first for non-$> events");
+}
