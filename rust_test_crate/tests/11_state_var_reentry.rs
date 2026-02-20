@@ -127,12 +127,12 @@ self._sv_count
 self._transition("Other");
     }
 
-    fn _s_Other_get_count(&mut self) -> i32 {
--1
-    }
-
     fn _s_Other_come_back(&mut self) {
 self._transition("Counter");
+    }
+
+    fn _s_Other_get_count(&mut self) -> i32 {
+-1
     }
 
     fn _s_Other_increment(&mut self) -> i32 {

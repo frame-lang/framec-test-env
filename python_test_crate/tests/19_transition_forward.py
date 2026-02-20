@@ -101,7 +101,7 @@ class EventForwardTest:
             return
         elif __e._message == "process":
             self.log.append("idle:process:before")
-            __compartment = EventForwardTestCompartment("Working")
+            __compartment = EventForwardTestCompartment("Working", parent_compartment=self.__compartment.copy())
             __compartment.forward_event = __e
             self.__transition(__compartment)
             return

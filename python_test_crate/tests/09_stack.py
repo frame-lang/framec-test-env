@@ -125,7 +125,7 @@ class StackOps:
         elif __e._message == "push_and_go":
             print("Pushing Main to stack, going to Sub")
             self._state_stack.append(self.__compartment.copy())
-            __compartment = StackOpsCompartment("Sub")
+            __compartment = StackOpsCompartment("Sub", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
 
 

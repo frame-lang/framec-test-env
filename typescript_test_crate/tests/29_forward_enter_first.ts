@@ -134,7 +134,7 @@ class ForwardEnterFirst {
             __e._return = this._return_value;
             return;
         } else if (__e._message === "process") {
-            const __compartment = new ForwardEnterFirstCompartment("Working");
+            const __compartment = new ForwardEnterFirstCompartment("Working", this.__compartment.copy());
             __compartment.forward_event = __e;
             this.__transition(__compartment);
             return;

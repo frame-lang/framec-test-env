@@ -120,10 +120,10 @@ class SystemReturnChainTest:
             __e._return = self._return_value
             return
         elif __e._message == "test_enter_sets":
-            __compartment = SystemReturnChainTestCompartment("EnterSetter")
+            __compartment = SystemReturnChainTestCompartment("EnterSetter", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
         elif __e._message == "test_exit_then_enter":
-            __compartment = SystemReturnChainTestCompartment("BothSet")
+            __compartment = SystemReturnChainTestCompartment("BothSet", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
 
 

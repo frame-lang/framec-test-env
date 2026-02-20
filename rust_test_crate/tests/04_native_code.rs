@@ -57,18 +57,18 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Active_use_math(&mut self) -> f64 {
-// Using standard math operations
-let result = (16.0_f64).sqrt() + std::f64::consts::PI;
-println!("Math result: {}", result);
-result
-    }
-
     fn _s_Active_compute(&mut self, value: i32) -> i32 {
 // Native code with local variables
 let temp = value + 10;
 let result = helper_function(temp);
 println!("Computed: {} -> {}", value, result);
+result
+    }
+
+    fn _s_Active_use_math(&mut self) -> f64 {
+// Using standard math operations
+let result = (16.0_f64).sqrt() + std::f64::consts::PI;
+println!("Math result: {}", result);
 result
     }
 }

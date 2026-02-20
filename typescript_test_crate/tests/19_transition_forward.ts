@@ -117,22 +117,6 @@ class EventForwardTest {
         return this._return_value;
     }
 
-    private _state_Idle(__e: EventForwardTestFrameEvent) {
-        if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "process") {
-            this.log.push("idle:process:before");
-            const __compartment = new EventForwardTestCompartment("Working");
-            __compartment.forward_event = __e;
-            this.__transition(__compartment);
-            return;
-            // This should NOT execute because -> => returns after dispatch
-            this.log.push("idle:process:after");
-        }
-    }
-
     private _state_Working(__e: EventForwardTestFrameEvent) {
         if (__e._message === "get_log") {
             this._return_value = this.log;
@@ -140,6 +124,22 @@ class EventForwardTest {
             return;;
         } else if (__e._message === "process") {
             this.log.push("working:process");
+        }
+    }
+
+    private _state_Idle(__e: EventForwardTestFrameEvent) {
+        if (__e._message === "get_log") {
+            this._return_value = this.log;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "process") {
+            this.log.push("idle:process:before");
+            const __compartment = new EventForwardTestCompartment("Working", this.__compartment.copy());
+            __compartment.forward_event = __e;
+            this.__transition(__compartment);
+            return;
+            // This should NOT execute because -> => returns after dispatch
+            this.log.push("idle:process:after");
         }
     }
 }

@@ -136,7 +136,7 @@ class StateParams {
             return;
         } else if (__e._message === "start") {
             const val = __e._parameters?.["0"];
-            const __compartment = new StateParamsCompartment("Counter");
+            const __compartment = new StateParamsCompartment("Counter", this.__compartment.copy());
             __compartment.state_args = {"0": val};
             this.__transition(__compartment);
         }

@@ -171,7 +171,7 @@ class WithParams {
             const initial = __e._parameters?.["0"];
             this.total = initial;
             console.log(`Started with initial value: ${initial}`);
-            const __compartment = new WithParamsCompartment("Running");
+            const __compartment = new WithParamsCompartment("Running", this.__compartment.copy());
             this.__transition(__compartment);
         }
     }

@@ -73,24 +73,20 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Active_go_idle(&mut self) {
-self._transition("Idle");
-    }
-
-    fn _s_Active_go_active(&mut self) {
-// Already active;
+    fn _s_Active_set_value(&mut self, v: i32) {
+self.value = v * 2;
     }
 
     fn _s_Active_get_value(&mut self) -> i32 {
 return self.value;
     }
 
-    fn _s_Active_set_value(&mut self, v: i32) {
-self.value = v * 2;
+    fn _s_Active_go_idle(&mut self) {
+self._transition("Idle");
     }
 
-    fn _s_Idle_go_idle(&mut self) {
-// Already idle;
+    fn _s_Active_go_active(&mut self) {
+// Already active;
     }
 
     fn _s_Idle_go_active(&mut self) {
@@ -103,6 +99,10 @@ return self.value;
 
     fn _s_Idle_set_value(&mut self, v: i32) {
 self.value = v;
+    }
+
+    fn _s_Idle_go_idle(&mut self) {
+// Already idle;
     }
 
     pub fn save_state(&mut self) -> String {

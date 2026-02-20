@@ -75,12 +75,12 @@ return self.log.clone();
 self.log.push("Parent:handled_event".to_string());
     }
 
-    fn _s_Parent_get_log(&mut self) -> Vec<String> {
-return self.log.clone();
-    }
-
     fn _s_Parent_unhandled_event(&mut self) {
 self.log.push("Parent:unhandled_event".to_string());
+    }
+
+    fn _s_Parent_get_log(&mut self) -> Vec<String> {
+return self.log.clone();
     }
 }
 

@@ -95,6 +95,23 @@ class StateVarPushPop:
         __e = StateVarPushPopFrameEvent("restore", None)
         self.__kernel(__e)
 
+    def _state_Counter(self, __e):
+        if __e._message == "$>":
+            self.__compartment.state_vars["count"] = 0
+        elif __e._message == "get_count":
+            self._return_value = self.__compartment.state_vars["count"]
+            __e._return = self._return_value
+            return
+        elif __e._message == "increment":
+            self.__compartment.state_vars["count"] = self.__compartment.state_vars["count"] + 1
+            self._return_value = self.__compartment.state_vars["count"]
+            __e._return = self._return_value
+            return
+        elif __e._message == "save_and_go":
+            self._state_stack.append(self.__compartment.copy())
+            __compartment = StateVarPushPopCompartment("Other", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
+
     def _state_Other(self, __e):
         if __e._message == "$>":
             self.__compartment.state_vars["other_count"] = 100
@@ -110,23 +127,6 @@ class StateVarPushPop:
         elif __e._message == "restore":
             self.__compartment = self._state_stack.pop()
             return
-
-    def _state_Counter(self, __e):
-        if __e._message == "$>":
-            self.__compartment.state_vars["count"] = 0
-        elif __e._message == "get_count":
-            self._return_value = self.__compartment.state_vars["count"]
-            __e._return = self._return_value
-            return
-        elif __e._message == "increment":
-            self.__compartment.state_vars["count"] = self.__compartment.state_vars["count"] + 1
-            self._return_value = self.__compartment.state_vars["count"]
-            __e._return = self._return_value
-            return
-        elif __e._message == "save_and_go":
-            self._state_stack.append(self.__compartment.copy())
-            __compartment = StateVarPushPopCompartment("Other")
-            self.__transition(__compartment)
 
 
 def main():

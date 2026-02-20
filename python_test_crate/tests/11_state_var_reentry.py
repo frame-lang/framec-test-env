@@ -103,7 +103,7 @@ class StateVarReentry:
             __e._return = self._return_value
             return
         elif __e._message == "go_other":
-            __compartment = StateVarReentryCompartment("Other")
+            __compartment = StateVarReentryCompartment("Other", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
         elif __e._message == "increment":
             self.__compartment.state_vars["count"] = self.__compartment.state_vars["count"] + 1
@@ -113,7 +113,7 @@ class StateVarReentry:
 
     def _state_Other(self, __e):
         if __e._message == "come_back":
-            __compartment = StateVarReentryCompartment("Counter")
+            __compartment = StateVarReentryCompartment("Counter", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
         elif __e._message == "get_count":
             self._return_value = -1

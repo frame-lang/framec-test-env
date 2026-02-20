@@ -135,7 +135,7 @@ class PersistTest {
             __e._return = this._return_value;
             return;;
         } else if (__e._message === "go_active") {
-            const __compartment = new PersistTestCompartment("Active");
+            const __compartment = new PersistTestCompartment("Active", this.__compartment.copy());
             this.__transition(__compartment);
         } else if (__e._message === "go_idle") {
             // Already idle
@@ -153,7 +153,7 @@ class PersistTest {
         } else if (__e._message === "go_active") {
             // Already active
         } else if (__e._message === "go_idle") {
-            const __compartment = new PersistTestCompartment("Idle");
+            const __compartment = new PersistTestCompartment("Idle", this.__compartment.copy());
             this.__transition(__compartment);
         } else if (__e._message === "set_value") {
             const v = __e._parameters?.["0"];

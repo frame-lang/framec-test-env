@@ -105,7 +105,7 @@ class StateParams:
             return
         elif __e._message == "start":
             val = __e._parameters["0"]
-            __compartment = StateParamsCompartment("Counter")
+            __compartment = StateParamsCompartment("Counter", parent_compartment=self.__compartment.copy())
             __compartment.state_args = {"0": val}
             self.__transition(__compartment)
 

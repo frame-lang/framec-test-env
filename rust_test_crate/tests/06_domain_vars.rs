@@ -69,13 +69,13 @@ match self._state.as_str() {
         }
     }
 
+    fn _s_Counting_get_count(&mut self) -> i32 {
+self.count
+    }
+
     fn _s_Counting_increment(&mut self) {
 self.count += 1;
 println!("{}: incremented to {}", self.name, self.count);
-    }
-
-    fn _s_Counting_get_count(&mut self) -> i32 {
-self.count
     }
 
     fn _s_Counting_decrement(&mut self) {

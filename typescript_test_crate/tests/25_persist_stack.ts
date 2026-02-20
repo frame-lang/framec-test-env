@@ -145,7 +145,26 @@ class PersistStack {
         } else if (__e._message === "push_and_go") {
             this.depth = this.depth + 1;
             this._state_stack.push(this.__compartment.copy());
-            const __compartment = new PersistStackCompartment("End");
+            const __compartment = new PersistStackCompartment("End", this.__compartment.copy());
+            this.__transition(__compartment);
+        }
+    }
+
+    private _state_Start(__e: PersistStackFrameEvent) {
+        if (__e._message === "get_depth") {
+            this._return_value = this.depth;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "get_state") {
+            this._return_value = "start";
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "pop_back") {
+            // nothing to pop
+        } else if (__e._message === "push_and_go") {
+            this.depth = this.depth + 1;
+            this._state_stack.push(this.__compartment.copy());
+            const __compartment = new PersistStackCompartment("Middle", this.__compartment.copy());
             this.__transition(__compartment);
         }
     }
@@ -165,25 +184,6 @@ class PersistStack {
             return;
         } else if (__e._message === "push_and_go") {
             // can't go further
-        }
-    }
-
-    private _state_Start(__e: PersistStackFrameEvent) {
-        if (__e._message === "get_depth") {
-            this._return_value = this.depth;
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "get_state") {
-            this._return_value = "start";
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "pop_back") {
-            // nothing to pop
-        } else if (__e._message === "push_and_go") {
-            this.depth = this.depth + 1;
-            this._state_stack.push(this.__compartment.copy());
-            const __compartment = new PersistStackCompartment("Middle");
-            this.__transition(__compartment);
         }
     }
 

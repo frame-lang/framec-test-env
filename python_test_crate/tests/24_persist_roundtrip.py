@@ -120,7 +120,7 @@ class PersistRoundtrip:
             return
         elif __e._message == "go_active":
             self.history.append("idle->active")
-            __compartment = PersistRoundtripCompartment("Active")
+            __compartment = PersistRoundtripCompartment("Active", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
         elif __e._message == "go_idle":
             pass  # already idle
@@ -144,7 +144,7 @@ class PersistRoundtrip:
             pass  # already active
         elif __e._message == "go_idle":
             self.history.append("active->idle")
-            __compartment = PersistRoundtripCompartment("Idle")
+            __compartment = PersistRoundtripCompartment("Idle", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
         elif __e._message == "set_counter":
             n = __e._parameters["0"]

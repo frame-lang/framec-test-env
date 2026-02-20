@@ -67,12 +67,12 @@ return self._s_Working_process();
 self.log.push("idle:process:after".to_string());
     }
 
-    fn _s_Working_get_log(&mut self) -> Vec<String> {
-return self.log.clone();
-    }
-
     fn _s_Working_process(&mut self) {
 self.log.push("working:process".to_string());
+    }
+
+    fn _s_Working_get_log(&mut self) -> Vec<String> {
+return self.log.clone();
     }
 }
 

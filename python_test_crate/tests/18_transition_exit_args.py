@@ -106,7 +106,7 @@ class TransitionExitArgs:
         elif __e._message == "leave":
             self.log.append("leaving")
             self.__compartment.exit_args = {str(i): v for i, v in enumerate(("cleanup", 42,))}
-            __compartment = TransitionExitArgsCompartment("Done")
+            __compartment = TransitionExitArgsCompartment("Done", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
 
 

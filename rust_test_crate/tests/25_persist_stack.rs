@@ -75,8 +75,26 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Middle_get_depth(&mut self) -> i32 {
+    fn _s_Start_get_depth(&mut self) -> i32 {
 return self.depth;
+    }
+
+    fn _s_Start_push_and_go(&mut self) {
+self.depth = self.depth + 1;
+self._state_stack.push(Box::new(self._state.clone()));
+self._transition("Middle");
+    }
+
+    fn _s_Start_pop_back(&mut self) {
+// nothing to pop;
+    }
+
+    fn _s_Start_get_state(&mut self) -> String {
+return String::from("start");
+    }
+
+    fn _s_Middle_get_state(&mut self) -> String {
+return String::from("middle");
     }
 
     fn _s_Middle_pop_back(&mut self) {
@@ -86,40 +104,14 @@ self._transition(&__popped_state);
 return;
     }
 
-    fn _s_Middle_get_state(&mut self) -> String {
-return String::from("middle");
-    }
-
     fn _s_Middle_push_and_go(&mut self) {
 self.depth = self.depth + 1;
 self._state_stack.push(Box::new(self._state.clone()));
 self._transition("End");
     }
 
-    fn _s_Start_push_and_go(&mut self) {
-self.depth = self.depth + 1;
-self._state_stack.push(Box::new(self._state.clone()));
-self._transition("Middle");
-    }
-
-    fn _s_Start_get_state(&mut self) -> String {
-return String::from("start");
-    }
-
-    fn _s_Start_get_depth(&mut self) -> i32 {
+    fn _s_Middle_get_depth(&mut self) -> i32 {
 return self.depth;
-    }
-
-    fn _s_Start_pop_back(&mut self) {
-// nothing to pop;
-    }
-
-    fn _s_End_get_state(&mut self) -> String {
-return String::from("end");
-    }
-
-    fn _s_End_push_and_go(&mut self) {
-// can't go further;
     }
 
     fn _s_End_get_depth(&mut self) -> i32 {
@@ -131,6 +123,14 @@ self.depth = self.depth - 1;
 let __popped_state = *self._state_stack.pop().unwrap().downcast::<String>().unwrap();
 self._transition(&__popped_state);
 return;
+    }
+
+    fn _s_End_push_and_go(&mut self) {
+// can't go further;
+    }
+
+    fn _s_End_get_state(&mut self) -> String {
+return String::from("end");
     }
 
     pub fn save_state(&mut self) -> String {

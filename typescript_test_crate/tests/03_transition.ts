@@ -122,7 +122,7 @@ class WithTransition {
             return;;
         } else if (__e._message === "next") {
             console.log("Transitioning: Second -> First");
-            const __compartment = new WithTransitionCompartment("First");
+            const __compartment = new WithTransitionCompartment("First", this.__compartment.copy());
             this.__transition(__compartment);
         }
     }
@@ -134,7 +134,7 @@ class WithTransition {
             return;;
         } else if (__e._message === "next") {
             console.log("Transitioning: First -> Second");
-            const __compartment = new WithTransitionCompartment("Second");
+            const __compartment = new WithTransitionCompartment("Second", this.__compartment.copy());
             this.__transition(__compartment);
         }
     }

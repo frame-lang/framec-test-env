@@ -150,6 +150,34 @@ class PersistRoundtrip {
         return this._return_value;
     }
 
+    private _state_Idle(__e: PersistRoundtripFrameEvent) {
+        if (__e._message === "add_history") {
+            const msg = __e._parameters?.["0"];
+            this.history.push("idle:" + msg);
+        } else if (__e._message === "get_counter") {
+            this._return_value = this.counter;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "get_history") {
+            this._return_value = this.history;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "get_state") {
+            this._return_value = "idle";
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "go_active") {
+            this.history.push("idle->active");
+            const __compartment = new PersistRoundtripCompartment("Active", this.__compartment.copy());
+            this.__transition(__compartment);
+        } else if (__e._message === "go_idle") {
+            // already idle
+        } else if (__e._message === "set_counter") {
+            const n = __e._parameters?.["0"];
+            this.counter = n;
+        }
+    }
+
     private _state_Active(__e: PersistRoundtripFrameEvent) {
         if (__e._message === "add_history") {
             const msg = __e._parameters?.["0"];
@@ -170,39 +198,11 @@ class PersistRoundtrip {
             // already active
         } else if (__e._message === "go_idle") {
             this.history.push("active->idle");
-            const __compartment = new PersistRoundtripCompartment("Idle");
+            const __compartment = new PersistRoundtripCompartment("Idle", this.__compartment.copy());
             this.__transition(__compartment);
         } else if (__e._message === "set_counter") {
             const n = __e._parameters?.["0"];
             this.counter = n * 2;
-        }
-    }
-
-    private _state_Idle(__e: PersistRoundtripFrameEvent) {
-        if (__e._message === "add_history") {
-            const msg = __e._parameters?.["0"];
-            this.history.push("idle:" + msg);
-        } else if (__e._message === "get_counter") {
-            this._return_value = this.counter;
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "get_history") {
-            this._return_value = this.history;
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "get_state") {
-            this._return_value = "idle";
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "go_active") {
-            this.history.push("idle->active");
-            const __compartment = new PersistRoundtripCompartment("Active");
-            this.__transition(__compartment);
-        } else if (__e._message === "go_idle") {
-            // already idle
-        } else if (__e._message === "set_counter") {
-            const n = __e._parameters?.["0"];
-            this.counter = n;
         }
     }
 

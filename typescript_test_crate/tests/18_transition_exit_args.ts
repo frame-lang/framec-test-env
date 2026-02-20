@@ -117,16 +117,6 @@ class TransitionExitArgs {
         return this._return_value;
     }
 
-    private _state_Done(__e: TransitionExitArgsFrameEvent) {
-        if (__e._message === "$>") {
-            this.log.push("enter:done");
-        } else if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
-            return;;
-        }
-    }
-
     private _state_Active(__e: TransitionExitArgsFrameEvent) {
         if (__e._message === "<$") {
             const reason = __e._parameters?.["0"];
@@ -139,8 +129,18 @@ class TransitionExitArgs {
         } else if (__e._message === "leave") {
             this.log.push("leaving");
             this.__compartment.exit_args = Object.fromEntries(["cleanup", 42].map((v, i) => [String(i), v]));
-            const __compartment = new TransitionExitArgsCompartment("Done");
+            const __compartment = new TransitionExitArgsCompartment("Done", this.__compartment.copy());
             this.__transition(__compartment);
+        }
+    }
+
+    private _state_Done(__e: TransitionExitArgsFrameEvent) {
+        if (__e._message === "$>") {
+            this.log.push("enter:done");
+        } else if (__e._message === "get_log") {
+            this._return_value = this.log;
+            __e._return = this._return_value;
+            return;;
         }
     }
 }

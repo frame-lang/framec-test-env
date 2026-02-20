@@ -92,7 +92,7 @@ class WithTransition:
             return
         elif __e._message == "next":
             print("Transitioning: First -> Second")
-            __compartment = WithTransitionCompartment("Second")
+            __compartment = WithTransitionCompartment("Second", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
 
     def _state_Second(self, __e):
@@ -102,7 +102,7 @@ class WithTransition:
             return
         elif __e._message == "next":
             print("Transitioning: Second -> First")
-            __compartment = WithTransitionCompartment("First")
+            __compartment = WithTransitionCompartment("First", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
 
 

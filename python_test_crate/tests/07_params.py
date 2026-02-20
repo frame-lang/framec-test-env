@@ -96,27 +96,6 @@ class WithParams:
         self.__kernel(__e)
         return self._return_value
 
-    def _state_Idle(self, __e):
-        if __e._message == "add":
-            value = __e._parameters["0"]
-            print("Cannot add in Idle state")
-        elif __e._message == "get_total":
-            self._return_value = self.total
-            __e._return = self._return_value
-            return
-        elif __e._message == "multiply":
-            a = __e._parameters["0"]
-            b = __e._parameters["1"]
-            self._return_value = 0
-            __e._return = self._return_value
-            return
-        elif __e._message == "start":
-            initial = __e._parameters["0"]
-            self.total = initial
-            print(f"Started with initial value: {initial}")
-            __compartment = WithParamsCompartment("Running")
-            self.__transition(__compartment)
-
     def _state_Running(self, __e):
         if __e._message == "add":
             value = __e._parameters["0"]
@@ -138,6 +117,27 @@ class WithParams:
         elif __e._message == "start":
             initial = __e._parameters["0"]
             print("Already running")
+
+    def _state_Idle(self, __e):
+        if __e._message == "add":
+            value = __e._parameters["0"]
+            print("Cannot add in Idle state")
+        elif __e._message == "get_total":
+            self._return_value = self.total
+            __e._return = self._return_value
+            return
+        elif __e._message == "multiply":
+            a = __e._parameters["0"]
+            b = __e._parameters["1"]
+            self._return_value = 0
+            __e._return = self._return_value
+            return
+        elif __e._message == "start":
+            initial = __e._parameters["0"]
+            self.total = initial
+            print(f"Started with initial value: {initial}")
+            __compartment = WithParamsCompartment("Running", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
 
 
 def main():

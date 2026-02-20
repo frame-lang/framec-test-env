@@ -96,6 +96,23 @@ class TransitionPopTest:
         self.__kernel(__e)
         return self._return_value
 
+    def _state_Idle(self, __e):
+        if __e._message == "get_log":
+            self._return_value = self.log
+            __e._return = self._return_value
+            return
+        elif __e._message == "get_state":
+            self._return_value = "Idle"
+            __e._return = self._return_value
+            return
+        elif __e._message == "process":
+            self.log.append("idle:process")
+        elif __e._message == "start":
+            self.log.append("idle:start:push")
+            self._state_stack.append(self.__compartment.copy())
+            __compartment = TransitionPopTestCompartment("Working", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
+
     def _state_Working(self, __e):
         if __e._message == "get_log":
             self._return_value = self.log
@@ -111,23 +128,6 @@ class TransitionPopTest:
             return
             # This should NOT execute because pop transitions away
             self.log.append("working:process:after_pop")
-
-    def _state_Idle(self, __e):
-        if __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
-            return
-        elif __e._message == "get_state":
-            self._return_value = "Idle"
-            __e._return = self._return_value
-            return
-        elif __e._message == "process":
-            self.log.append("idle:process")
-        elif __e._message == "start":
-            self.log.append("idle:start:push")
-            self._state_stack.append(self.__compartment.copy())
-            __compartment = TransitionPopTestCompartment("Working")
-            self.__transition(__compartment)
 
 
 def main():

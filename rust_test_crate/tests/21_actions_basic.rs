@@ -53,10 +53,6 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Ready_get_log(&mut self) -> String {
-return self.log.clone();
-    }
-
     fn _s_Ready_process(&mut self, value: i32) -> i32 {
 self.__log_event("start");
 self.__validate_positive(value);
@@ -64,6 +60,10 @@ self.__log_event("valid");
 let result = value * 2;
 self.__log_event("done");
 return result;
+    }
+
+    fn _s_Ready_get_log(&mut self) -> String {
+return self.log.clone();
     }
 
     fn __log_event(&mut self, msg: &str) {

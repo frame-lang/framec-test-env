@@ -127,6 +127,21 @@ class StateVarReentry {
         this.__kernel(__e);
     }
 
+    private _state_Other(__e: StateVarReentryFrameEvent) {
+        if (__e._message === "come_back") {
+            const __compartment = new StateVarReentryCompartment("Counter", this.__compartment.copy());
+            this.__transition(__compartment);
+        } else if (__e._message === "get_count") {
+            this._return_value = -1;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "increment") {
+            this._return_value = -1;
+            __e._return = this._return_value;
+            return;;
+        }
+    }
+
     private _state_Counter(__e: StateVarReentryFrameEvent) {
         if (__e._message === "$>") {
             this.__compartment.state_vars["count"] = 0;
@@ -135,26 +150,11 @@ class StateVarReentry {
             __e._return = this._return_value;
             return;;
         } else if (__e._message === "go_other") {
-            const __compartment = new StateVarReentryCompartment("Other");
+            const __compartment = new StateVarReentryCompartment("Other", this.__compartment.copy());
             this.__transition(__compartment);
         } else if (__e._message === "increment") {
             this.__compartment.state_vars["count"] = this.__compartment.state_vars["count"] + 1;
             this._return_value = this.__compartment.state_vars["count"];
-            __e._return = this._return_value;
-            return;;
-        }
-    }
-
-    private _state_Other(__e: StateVarReentryFrameEvent) {
-        if (__e._message === "come_back") {
-            const __compartment = new StateVarReentryCompartment("Counter");
-            this.__transition(__compartment);
-        } else if (__e._message === "get_count") {
-            this._return_value = -1;
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "increment") {
-            this._return_value = -1;
             __e._return = this._return_value;
             return;;
         }

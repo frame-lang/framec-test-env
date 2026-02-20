@@ -128,23 +128,23 @@ class SystemReturnChainTest {
         return this._return_value;
     }
 
-    private _state_BothSet(__e: SystemReturnChainTestFrameEvent) {
-        if (__e._message === "$>") {
-            // Enter handler sets return - should overwrite exit's value
-            this._return_value = "enter_wins";;
-        } else if (__e._message === "get_state") {
-            this._return_value = "BothSet";
-            __e._return = this._return_value;
-            return;;
-        }
-    }
-
     private _state_EnterSetter(__e: SystemReturnChainTestFrameEvent) {
         if (__e._message === "$>") {
             // Enter handler sets return value
             this._return_value = "from_enter";;
         } else if (__e._message === "get_state") {
             this._return_value = "EnterSetter";
+            __e._return = this._return_value;
+            return;;
+        }
+    }
+
+    private _state_BothSet(__e: SystemReturnChainTestFrameEvent) {
+        if (__e._message === "$>") {
+            // Enter handler sets return - should overwrite exit's value
+            this._return_value = "enter_wins";;
+        } else if (__e._message === "get_state") {
+            this._return_value = "BothSet";
             __e._return = this._return_value;
             return;;
         }
@@ -159,10 +159,10 @@ class SystemReturnChainTest {
             __e._return = this._return_value;
             return;;
         } else if (__e._message === "test_enter_sets") {
-            const __compartment = new SystemReturnChainTestCompartment("EnterSetter");
+            const __compartment = new SystemReturnChainTestCompartment("EnterSetter", this.__compartment.copy());
             this.__transition(__compartment);
         } else if (__e._message === "test_exit_then_enter") {
-            const __compartment = new SystemReturnChainTestCompartment("BothSet");
+            const __compartment = new SystemReturnChainTestCompartment("BothSet", this.__compartment.copy());
             this.__transition(__compartment);
         }
     }

@@ -127,6 +127,25 @@ class StackOps {
         return this._return_value;
     }
 
+    private _state_Main(__e: StackOpsFrameEvent) {
+        if (__e._message === "do_work") {
+            this._return_value = "Working in Main";
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "get_state") {
+            this._return_value = "Main";
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "pop_back") {
+            console.log("Cannot pop - nothing on stack in Main");
+        } else if (__e._message === "push_and_go") {
+            console.log("Pushing Main to stack, going to Sub");
+            this._state_stack.push(this.__compartment.copy());
+            const __compartment = new StackOpsCompartment("Sub", this.__compartment.copy());
+            this.__transition(__compartment);
+        }
+    }
+
     private _state_Sub(__e: StackOpsFrameEvent) {
         if (__e._message === "do_work") {
             this._return_value = "Working in Sub";
@@ -142,25 +161,6 @@ class StackOps {
             return;
         } else if (__e._message === "push_and_go") {
             console.log("Already in Sub");
-        }
-    }
-
-    private _state_Main(__e: StackOpsFrameEvent) {
-        if (__e._message === "do_work") {
-            this._return_value = "Working in Main";
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "get_state") {
-            this._return_value = "Main";
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "pop_back") {
-            console.log("Cannot pop - nothing on stack in Main");
-        } else if (__e._message === "push_and_go") {
-            console.log("Pushing Main to stack, going to Sub");
-            this._state_stack.push(this.__compartment.copy());
-            const __compartment = new StackOpsCompartment("Sub");
-            this.__transition(__compartment);
         }
     }
 }

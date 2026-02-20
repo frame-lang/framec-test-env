@@ -86,21 +86,6 @@ class EnterExit:
         self.__kernel(__e)
         return self._return_value
 
-    def _state_On(self, __e):
-        if __e._message == "<$":
-            self.log.append("exit:On")
-            print("Exiting On state")
-        elif __e._message == "$>":
-            self.log.append("enter:On")
-            print("Entered On state")
-        elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
-            return
-        elif __e._message == "toggle":
-            __compartment = EnterExitCompartment("Off")
-            self.__transition(__compartment)
-
     def _state_Off(self, __e):
         if __e._message == "<$":
             self.log.append("exit:Off")
@@ -113,7 +98,22 @@ class EnterExit:
             __e._return = self._return_value
             return
         elif __e._message == "toggle":
-            __compartment = EnterExitCompartment("On")
+            __compartment = EnterExitCompartment("On", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
+
+    def _state_On(self, __e):
+        if __e._message == "<$":
+            self.log.append("exit:On")
+            print("Exiting On state")
+        elif __e._message == "$>":
+            self.log.append("enter:On")
+            print("Entered On state")
+        elif __e._message == "get_log":
+            self._return_value = self.log
+            __e._return = self._return_value
+            return
+        elif __e._message == "toggle":
+            __compartment = EnterExitCompartment("Off", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
 
 
