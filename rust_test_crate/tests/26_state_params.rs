@@ -5,28 +5,56 @@
 
 use std::collections::HashMap;
 
+#[derive(Clone, Debug)]
+struct StateParamsFrameEvent {
+    message: String,
+}
+
+impl StateParamsFrameEvent {
+    fn new(message: &str) -> Self {
+        Self { message: message.to_string() }
+    }
+}
+
+#[derive(Clone)]
+struct StateParamsCompartment {
+    state: String,
+    state_vars: std::collections::HashMap<String, i32>,
+    forward_event: Option<StateParamsFrameEvent>,
+}
+
+impl StateParamsCompartment {
+    fn new(state: &str) -> Self {
+        Self {
+            state: state.to_string(),
+            state_vars: std::collections::HashMap::new(),
+            forward_event: None,
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct CounterContext {
     count: i32,
 }
 
 #[derive(Clone)]
-enum StateParamsCompartment {
+enum StateParamsStateContext {
     Idle,
     Counter(CounterContext),
     Empty,
 }
 
-impl Default for StateParamsCompartment {
+impl Default for StateParamsStateContext {
     fn default() -> Self {
-        StateParamsCompartment::Idle
+        StateParamsStateContext::Idle
     }
 }
 
 pub struct StateParams {
-    _state: String,
-    _state_stack: Vec<(String, StateParamsCompartment)>,
-    _state_context: HashMap<String, Box<dyn std::any::Any>>,
+    _state_stack: Vec<(String, StateParamsStateContext)>,
+    __compartment: StateParamsCompartment,
+    __next_compartment: Option<StateParamsCompartment>,
     _sv_count: i32,
 }
 
@@ -34,93 +62,130 @@ impl StateParams {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
-            _state_context: HashMap::from([]),
             _sv_count: 0,
-            _state: String::from("Idle"),
+            __compartment: StateParamsCompartment::new("Idle"),
+            __next_compartment: None,
         };
-        this._enter();
+let __frame_event = StateParamsFrameEvent::new("$>");
+this.__kernel(__frame_event);
         this
     }
 
-    fn _transition(&mut self, target_state: &str) {
-        self._exit();
-        self._state = target_state.to_string();
-        self._enter();
+    fn __kernel(&mut self, __e: StateParamsFrameEvent) {
+// Route event to current state
+self.__router(&__e);
+// Process any pending transition
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    // Exit current state
+    let exit_event = StateParamsFrameEvent::new("$<");
+    self.__router(&exit_event);
+    // Switch to new compartment
+    self.__compartment = next_compartment;
+    // Enter new state (or forward event)
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = StateParamsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        // Forward event to new state
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            // Forwarding enter event - just send it
+            self.__router(&forward_event);
+        } else {
+            // Forwarding other event - send $> first, then forward
+            let enter_event = StateParamsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
     }
 
-    fn _dispatch_event(&mut self, event: &str) {
-let handler_name = format!("_s_{}_{}", self._state, event);
-// Rust requires match-based dispatch or a handler registry
-// For now, use explicit match in caller;
-    }
-
-    fn _enter(&mut self) {
-match self._state.as_str() {
-    "Counter" => {
-        self._sv_count = 0;
-        self._s_Counter_enter();
-    }
+    fn __router(&mut self, __e: &StateParamsFrameEvent) {
+match self.__compartment.state.as_str() {
+    "Idle" => self._state_Idle(__e),
+    "Counter" => self._state_Counter(__e),
     _ => {}
 }
     }
 
-    fn _exit(&mut self) {
-        // No exit handlers
+    fn __transition(&mut self, next_compartment: StateParamsCompartment) {
+self.__next_compartment = Some(next_compartment);
     }
 
     fn _state_stack_push(&mut self) {
-let compartment = match self._state.as_str() {
-    "Idle" => StateParamsCompartment::Idle,
-    "Counter" => StateParamsCompartment::Counter(CounterContext { count: self._sv_count }),
-    _ => StateParamsCompartment::Empty,
+let state_context = match self.__compartment.state.as_str() {
+    "Idle" => StateParamsStateContext::Idle,
+    "Counter" => StateParamsStateContext::Counter(CounterContext { count: self._sv_count }),
+    _ => StateParamsStateContext::Empty,
 };
-self._state_stack.push((self._state.clone(), compartment));
+self._state_stack.push((self.__compartment.state.clone(), state_context));
     }
 
     fn _state_stack_pop(&mut self) {
-let (saved_state, compartment) = self._state_stack.pop().unwrap();
-self._exit();
-self._state = saved_state;
-match compartment {
-    StateParamsCompartment::Idle => {}
-    StateParamsCompartment::Counter(ctx) => {
+let (saved_state, state_context) = self._state_stack.pop().unwrap();
+let exit_event = StateParamsFrameEvent::new("$<");
+self.__router(&exit_event);
+self.__compartment.state = saved_state;
+match state_context {
+    StateParamsStateContext::Idle => {}
+    StateParamsStateContext::Counter(ctx) => {
         self._sv_count = ctx.count;
     }
-    StateParamsCompartment::Empty => {}
+    StateParamsStateContext::Empty => {}
 }
     }
 
     pub fn start(&mut self) {
-match self._state.as_str() {
-            "Idle" => { self._s_Idle_start(); }
-            _ => {}
-        }
+let __e = StateParamsFrameEvent::new("start");
+self.__kernel(__e);
     }
 
     pub fn get_value(&mut self) -> i32 {
-match self._state.as_str() {
-            "Idle" => self._s_Idle_get_value(),
-            "Counter" => self._s_Counter_get_value(),
+let __e = StateParamsFrameEvent::new("get_value");
+match self.__compartment.state.as_str() {
+            "Idle" => self._s_Idle_get_value(&__e),
+            "Counter" => self._s_Counter_get_value(&__e),
             _ => Default::default(),
         }
     }
 
-    fn _s_Idle_get_value(&mut self) -> i32 {
+    fn _state_Idle(&mut self, __e: &StateParamsFrameEvent) {
+match __e.message.as_str() {
+    "get_value" => { self._s_Idle_get_value(__e); }
+    "start" => { self._s_Idle_start(__e); }
+    _ => {}
+}
+    }
+
+    fn _state_Counter(&mut self, __e: &StateParamsFrameEvent) {
+match __e.message.as_str() {
+    "$>" => {
+        self._sv_count = 0;
+        self._s_Counter_enter(__e);
+    }
+    "get_value" => { self._s_Counter_get_value(__e); }
+    _ => {}
+}
+    }
+
+    fn _s_Idle_start(&mut self, __e: &StateParamsFrameEvent) {
+// For Rust, state params not yet wired up to compartment
+// Just testing basic transition for now
+self.__transition(StateParamsCompartment::new("Counter"));
+    }
+
+    fn _s_Idle_get_value(&mut self, __e: &StateParamsFrameEvent) -> i32 {
 return 0
     }
 
-    fn _s_Idle_start(&mut self) {
-// For Rust, state params not yet wired up to compartment
-// Just testing basic transition for now
-self._transition("Counter");
-    }
-
-    fn _s_Counter_enter(&mut self) {
+    fn _s_Counter_enter(&mut self, __e: &StateParamsFrameEvent) {
 self._sv_count = 42;  // Hardcoded for Rust test
 println!("Counter entered");
     }
 
-    fn _s_Counter_get_value(&mut self) -> i32 {
+    fn _s_Counter_get_value(&mut self, __e: &StateParamsFrameEvent) -> i32 {
 return self._sv_count
     }
 }

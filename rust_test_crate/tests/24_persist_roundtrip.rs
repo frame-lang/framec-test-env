@@ -1,9 +1,50 @@
 use std::collections::HashMap;
 
+#[derive(Clone, Debug)]
+struct PersistRoundtripFrameEvent {
+    message: String,
+}
+
+impl PersistRoundtripFrameEvent {
+    fn new(message: &str) -> Self {
+        Self { message: message.to_string() }
+    }
+}
+
+#[derive(Clone)]
+struct PersistRoundtripCompartment {
+    state: String,
+    state_vars: std::collections::HashMap<String, i32>,
+    forward_event: Option<PersistRoundtripFrameEvent>,
+}
+
+impl PersistRoundtripCompartment {
+    fn new(state: &str) -> Self {
+        Self {
+            state: state.to_string(),
+            state_vars: std::collections::HashMap::new(),
+            forward_event: None,
+        }
+    }
+}
+
+#[derive(Clone)]
+enum PersistRoundtripStateContext {
+    Idle,
+    Active,
+    Empty,
+}
+
+impl Default for PersistRoundtripStateContext {
+    fn default() -> Self {
+        PersistRoundtripStateContext::Idle
+    }
+}
+
 pub struct PersistRoundtrip {
-    _state: String,
-    _state_stack: Vec<Box<dyn std::any::Any>>,
-    _state_context: HashMap<String, Box<dyn std::any::Any>>,
+    _state_stack: Vec<(String, PersistRoundtripStateContext)>,
+    __compartment: PersistRoundtripCompartment,
+    __next_compartment: Option<PersistRoundtripCompartment>,
     counter: i32,
     mode: String,
 }
@@ -12,153 +53,257 @@ impl PersistRoundtrip {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
-            _state_context: HashMap::from([]),
             counter: 0,
             mode: String::from("normal"),
-            _state: String::from("Idle"),
+            __compartment: PersistRoundtripCompartment::new("Idle"),
+            __next_compartment: None,
         };
-        this._enter();
+let __frame_event = PersistRoundtripFrameEvent::new("$>");
+this.__kernel(__frame_event);
         this
     }
 
-    fn _transition(&mut self, target_state: &str) {
-        self._exit();
-        self._state = target_state.to_string();
-        self._enter();
+    fn __kernel(&mut self, __e: PersistRoundtripFrameEvent) {
+// Route event to current state
+self.__router(&__e);
+// Process any pending transition
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    // Exit current state
+    let exit_event = PersistRoundtripFrameEvent::new("$<");
+    self.__router(&exit_event);
+    // Switch to new compartment
+    self.__compartment = next_compartment;
+    // Enter new state (or forward event)
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = PersistRoundtripFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        // Forward event to new state
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            // Forwarding enter event - just send it
+            self.__router(&forward_event);
+        } else {
+            // Forwarding other event - send $> first, then forward
+            let enter_event = PersistRoundtripFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
     }
 
-    fn _dispatch_event(&mut self, event: &str) {
-let handler_name = format!("_s_{}_{}", self._state, event);
-// Rust requires match-based dispatch or a handler registry
-// For now, use explicit match in caller;
+    fn __router(&mut self, __e: &PersistRoundtripFrameEvent) {
+match self.__compartment.state.as_str() {
+    "Idle" => self._state_Idle(__e),
+    "Active" => self._state_Active(__e),
+    _ => {}
+}
     }
 
-    fn _enter(&mut self) {
-        // No enter handlers
+    fn __transition(&mut self, next_compartment: PersistRoundtripCompartment) {
+self.__next_compartment = Some(next_compartment);
     }
 
-    fn _exit(&mut self) {
-        // No exit handlers
+    fn _state_stack_push(&mut self) {
+let state_context = match self.__compartment.state.as_str() {
+    "Idle" => PersistRoundtripStateContext::Idle,
+    "Active" => PersistRoundtripStateContext::Active,
+    _ => PersistRoundtripStateContext::Empty,
+};
+self._state_stack.push((self.__compartment.state.clone(), state_context));
+    }
+
+    fn _state_stack_pop(&mut self) {
+let (saved_state, state_context) = self._state_stack.pop().unwrap();
+let exit_event = PersistRoundtripFrameEvent::new("$<");
+self.__router(&exit_event);
+self.__compartment.state = saved_state;
+match state_context {
+    PersistRoundtripStateContext::Idle => {}
+    PersistRoundtripStateContext::Active => {}
+    PersistRoundtripStateContext::Empty => {}
+}
     }
 
     pub fn go_active(&mut self) {
-match self._state.as_str() {
-            "Idle" => { self._s_Idle_go_active(); }
-            "Active" => { self._s_Active_go_active(); }
-            _ => {}
-        }
+let __e = PersistRoundtripFrameEvent::new("go_active");
+self.__kernel(__e);
     }
 
     pub fn go_idle(&mut self) {
-match self._state.as_str() {
-            "Idle" => { self._s_Idle_go_idle(); }
-            "Active" => { self._s_Active_go_idle(); }
-            _ => {}
-        }
+let __e = PersistRoundtripFrameEvent::new("go_idle");
+self.__kernel(__e);
     }
 
     pub fn get_state(&mut self) -> String {
-match self._state.as_str() {
-            "Idle" => self._s_Idle_get_state(),
-            "Active" => self._s_Active_get_state(),
+let __e = PersistRoundtripFrameEvent::new("get_state");
+match self.__compartment.state.as_str() {
+            "Idle" => self._s_Idle_get_state(&__e),
+            "Active" => self._s_Active_get_state(&__e),
             _ => Default::default(),
         }
     }
 
     pub fn set_counter(&mut self, n: i32) {
-match self._state.as_str() {
-            "Idle" => { self._s_Idle_set_counter(n); }
-            "Active" => { self._s_Active_set_counter(n); }
+let __e = PersistRoundtripFrameEvent::new("set_counter");
+match self.__compartment.state.as_str() {
+            "Idle" => { self._s_Idle_set_counter(&__e, n); }
+            "Active" => { self._s_Active_set_counter(&__e, n); }
             _ => {}
         }
+// Process any pending transitions (bypassed kernel)
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = PersistRoundtripFrameEvent::new("$<");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = PersistRoundtripFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = PersistRoundtripFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
     }
 
     pub fn get_counter(&mut self) -> i32 {
-match self._state.as_str() {
-            "Idle" => self._s_Idle_get_counter(),
-            "Active" => self._s_Active_get_counter(),
+let __e = PersistRoundtripFrameEvent::new("get_counter");
+match self.__compartment.state.as_str() {
+            "Idle" => self._s_Idle_get_counter(&__e),
+            "Active" => self._s_Active_get_counter(&__e),
             _ => Default::default(),
         }
     }
 
     pub fn set_mode(&mut self, m: String) {
-match self._state.as_str() {
-            "Idle" => { self._s_Idle_set_mode(m); }
-            "Active" => { self._s_Active_set_mode(m); }
+let __e = PersistRoundtripFrameEvent::new("set_mode");
+match self.__compartment.state.as_str() {
+            "Idle" => { self._s_Idle_set_mode(&__e, m); }
+            "Active" => { self._s_Active_set_mode(&__e, m); }
             _ => {}
         }
+// Process any pending transitions (bypassed kernel)
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = PersistRoundtripFrameEvent::new("$<");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = PersistRoundtripFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = PersistRoundtripFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
     }
 
     pub fn get_mode(&mut self) -> String {
-match self._state.as_str() {
-            "Idle" => self._s_Idle_get_mode(),
-            "Active" => self._s_Active_get_mode(),
+let __e = PersistRoundtripFrameEvent::new("get_mode");
+match self.__compartment.state.as_str() {
+            "Idle" => self._s_Idle_get_mode(&__e),
+            "Active" => self._s_Active_get_mode(&__e),
             _ => Default::default(),
         }
     }
 
-    fn _s_Idle_go_idle(&mut self) {
+    fn _state_Idle(&mut self, __e: &PersistRoundtripFrameEvent) {
+match __e.message.as_str() {
+    "get_counter" => { self._s_Idle_get_counter(__e); }
+    "get_mode" => { self._s_Idle_get_mode(__e); }
+    "get_state" => { self._s_Idle_get_state(__e); }
+    "go_active" => { self._s_Idle_go_active(__e); }
+    "go_idle" => { self._s_Idle_go_idle(__e); }
+    _ => {}
+}
+    }
+
+    fn _state_Active(&mut self, __e: &PersistRoundtripFrameEvent) {
+match __e.message.as_str() {
+    "get_counter" => { self._s_Active_get_counter(__e); }
+    "get_mode" => { self._s_Active_get_mode(__e); }
+    "get_state" => { self._s_Active_get_state(__e); }
+    "go_active" => { self._s_Active_go_active(__e); }
+    "go_idle" => { self._s_Active_go_idle(__e); }
+    _ => {}
+}
+    }
+
+    fn _s_Idle_get_mode(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
+return self.mode.clone();
+    }
+
+    fn _s_Idle_go_idle(&mut self, __e: &PersistRoundtripFrameEvent) {
 // already idle;
     }
 
-    fn _s_Idle_set_counter(&mut self, n: i32) {
+    fn _s_Idle_go_active(&mut self, __e: &PersistRoundtripFrameEvent) {
+self.__transition(PersistRoundtripCompartment::new("Active"));
+    }
+
+    fn _s_Idle_set_counter(&mut self, __e: &PersistRoundtripFrameEvent, n: i32) {
 self.counter = n;
     }
 
-    fn _s_Idle_get_state(&mut self) -> String {
+    fn _s_Idle_get_state(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
 return String::from("idle");
     }
 
-    fn _s_Idle_get_counter(&mut self) -> i32 {
-return self.counter;
-    }
-
-    fn _s_Idle_set_mode(&mut self, m: String) {
+    fn _s_Idle_set_mode(&mut self, __e: &PersistRoundtripFrameEvent, m: String) {
 self.mode = m;
     }
 
-    fn _s_Idle_get_mode(&mut self) -> String {
-return self.mode.clone();
+    fn _s_Idle_get_counter(&mut self, __e: &PersistRoundtripFrameEvent) -> i32 {
+return self.counter;
     }
 
-    fn _s_Idle_go_active(&mut self) {
-self._transition("Active");
-    }
-
-    fn _s_Active_get_mode(&mut self) -> String {
-return self.mode.clone();
-    }
-
-    fn _s_Active_get_state(&mut self) -> String {
-return String::from("active");
-    }
-
-    fn _s_Active_go_active(&mut self) {
+    fn _s_Active_go_active(&mut self, __e: &PersistRoundtripFrameEvent) {
 // already active;
     }
 
-    fn _s_Active_go_idle(&mut self) {
-self._transition("Idle");
-    }
-
-    fn _s_Active_get_counter(&mut self) -> i32 {
-return self.counter;
-    }
-
-    fn _s_Active_set_counter(&mut self, n: i32) {
-self.counter = n * 2;
-    }
-
-    fn _s_Active_set_mode(&mut self, m: String) {
+    fn _s_Active_set_mode(&mut self, __e: &PersistRoundtripFrameEvent, m: String) {
 self.mode = m;
     }
 
+    fn _s_Active_get_counter(&mut self, __e: &PersistRoundtripFrameEvent) -> i32 {
+return self.counter;
+    }
+
+    fn _s_Active_go_idle(&mut self, __e: &PersistRoundtripFrameEvent) {
+self.__transition(PersistRoundtripCompartment::new("Idle"));
+    }
+
+    fn _s_Active_set_counter(&mut self, __e: &PersistRoundtripFrameEvent, n: i32) {
+self.counter = n * 2;
+    }
+
+    fn _s_Active_get_mode(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
+return self.mode.clone();
+    }
+
+    fn _s_Active_get_state(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
+return String::from("active");
+    }
+
     pub fn save_state(&mut self) -> String {
-let stack_states: Vec<String> = self._state_stack.iter()
-    .filter_map(|b| b.downcast_ref::<String>().cloned())
-    .collect();
+let stack_states: Vec<&str> = self._state_stack.iter().map(|(s, _)| s.as_str()).collect();
 serde_json::json!({
-    "_state": self._state,
+    "_state": self.__compartment.state,
     "_state_stack": stack_states,
     "counter": self.counter,
     "mode": self.mode,
@@ -167,15 +312,15 @@ serde_json::json!({
 
     pub fn restore_state(json: &str) -> PersistRoundtrip {
 let data: serde_json::Value = serde_json::from_str(json).unwrap();
-let stack: Vec<Box<dyn std::any::Any>> = data["_state_stack"].as_array()
+let stack: Vec<(String, PersistRoundtripStateContext)> = data["_state_stack"].as_array()
     .map(|arr| arr.iter()
-        .filter_map(|v| v.as_str().map(|s| Box::new(s.to_string()) as Box<dyn std::any::Any>))
+        .filter_map(|v| v.as_str().map(|s| (s.to_string(), PersistRoundtripStateContext::Empty)))
         .collect())
     .unwrap_or_default();
 let mut instance = PersistRoundtrip {
-    _state: data["_state"].as_str().unwrap().to_string(),
     _state_stack: stack,
-    _state_context: std::collections::HashMap::new(),
+    __compartment: PersistRoundtripCompartment::new(data["_state"].as_str().unwrap()),
+    __next_compartment: None,
     counter: serde_json::from_value(data["counter"].clone()).unwrap(),
     mode: data["mode"].as_str().unwrap().to_string(),
 };

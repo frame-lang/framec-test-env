@@ -1,9 +1,49 @@
 use std::collections::HashMap;
 
+#[derive(Clone, Debug)]
+struct WithInterfaceFrameEvent {
+    message: String,
+}
+
+impl WithInterfaceFrameEvent {
+    fn new(message: &str) -> Self {
+        Self { message: message.to_string() }
+    }
+}
+
+#[derive(Clone)]
+struct WithInterfaceCompartment {
+    state: String,
+    state_vars: std::collections::HashMap<String, i32>,
+    forward_event: Option<WithInterfaceFrameEvent>,
+}
+
+impl WithInterfaceCompartment {
+    fn new(state: &str) -> Self {
+        Self {
+            state: state.to_string(),
+            state_vars: std::collections::HashMap::new(),
+            forward_event: None,
+        }
+    }
+}
+
+#[derive(Clone)]
+enum WithInterfaceStateContext {
+    Ready,
+    Empty,
+}
+
+impl Default for WithInterfaceStateContext {
+    fn default() -> Self {
+        WithInterfaceStateContext::Ready
+    }
+}
+
 pub struct WithInterface {
-    _state: String,
-    _state_stack: Vec<Box<dyn std::any::Any>>,
-    _state_context: HashMap<String, Box<dyn std::any::Any>>,
+    _state_stack: Vec<(String, WithInterfaceStateContext)>,
+    __compartment: WithInterfaceCompartment,
+    __next_compartment: Option<WithInterfaceCompartment>,
     call_count: i32,
 }
 
@@ -11,54 +51,105 @@ impl WithInterface {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
-            _state_context: HashMap::from([]),
             call_count: 0,
-            _state: String::from("Ready"),
+            __compartment: WithInterfaceCompartment::new("Ready"),
+            __next_compartment: None,
         };
-        this._enter();
+let __frame_event = WithInterfaceFrameEvent::new("$>");
+this.__kernel(__frame_event);
         this
     }
 
-    fn _transition(&mut self, target_state: &str) {
-        self._exit();
-        self._state = target_state.to_string();
-        self._enter();
+    fn __kernel(&mut self, __e: WithInterfaceFrameEvent) {
+// Route event to current state
+self.__router(&__e);
+// Process any pending transition
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    // Exit current state
+    let exit_event = WithInterfaceFrameEvent::new("$<");
+    self.__router(&exit_event);
+    // Switch to new compartment
+    self.__compartment = next_compartment;
+    // Enter new state (or forward event)
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = WithInterfaceFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        // Forward event to new state
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            // Forwarding enter event - just send it
+            self.__router(&forward_event);
+        } else {
+            // Forwarding other event - send $> first, then forward
+            let enter_event = WithInterfaceFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
     }
 
-    fn _dispatch_event(&mut self, event: &str) {
-let handler_name = format!("_s_{}_{}", self._state, event);
-// Rust requires match-based dispatch or a handler registry
-// For now, use explicit match in caller;
+    fn __router(&mut self, __e: &WithInterfaceFrameEvent) {
+match self.__compartment.state.as_str() {
+    "Ready" => self._state_Ready(__e),
+    _ => {}
+}
     }
 
-    fn _enter(&mut self) {
-        // No enter handlers
+    fn __transition(&mut self, next_compartment: WithInterfaceCompartment) {
+self.__next_compartment = Some(next_compartment);
     }
 
-    fn _exit(&mut self) {
-        // No exit handlers
+    fn _state_stack_push(&mut self) {
+let state_context = match self.__compartment.state.as_str() {
+    "Ready" => WithInterfaceStateContext::Ready,
+    _ => WithInterfaceStateContext::Empty,
+};
+self._state_stack.push((self.__compartment.state.clone(), state_context));
+    }
+
+    fn _state_stack_pop(&mut self) {
+let (saved_state, state_context) = self._state_stack.pop().unwrap();
+let exit_event = WithInterfaceFrameEvent::new("$<");
+self.__router(&exit_event);
+self.__compartment.state = saved_state;
+match state_context {
+    WithInterfaceStateContext::Ready => {}
+    WithInterfaceStateContext::Empty => {}
+}
     }
 
     pub fn greet(&mut self, name: &str) -> String {
-match self._state.as_str() {
-            "Ready" => self._s_Ready_greet(name),
+let __e = WithInterfaceFrameEvent::new("greet");
+match self.__compartment.state.as_str() {
+            "Ready" => self._s_Ready_greet(&__e, name),
             _ => Default::default(),
         }
     }
 
     pub fn get_count(&mut self) -> i32 {
-match self._state.as_str() {
-            "Ready" => self._s_Ready_get_count(),
+let __e = WithInterfaceFrameEvent::new("get_count");
+match self.__compartment.state.as_str() {
+            "Ready" => self._s_Ready_get_count(&__e),
             _ => Default::default(),
         }
     }
 
-    fn _s_Ready_greet(&mut self, name: &str) -> String {
+    fn _state_Ready(&mut self, __e: &WithInterfaceFrameEvent) {
+match __e.message.as_str() {
+    "get_count" => { self._s_Ready_get_count(__e); }
+    _ => {}
+}
+    }
+
+    fn _s_Ready_greet(&mut self, __e: &WithInterfaceFrameEvent, name: &str) -> String {
 self.call_count += 1;
 format!("Hello, {}!", name)
     }
 
-    fn _s_Ready_get_count(&mut self) -> i32 {
+    fn _s_Ready_get_count(&mut self, __e: &WithInterfaceFrameEvent) -> i32 {
 self.call_count
     }
 }

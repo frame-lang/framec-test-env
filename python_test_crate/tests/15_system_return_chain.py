@@ -93,12 +93,12 @@ class SystemReturnChainTest:
         self.__kernel(__e)
         return self._return_value
 
-    def _state_EnterSetter(self, __e):
+    def _state_BothSet(self, __e):
         if __e._message == "$>":
-            # Enter handler sets return value
-            self._return_value = "from_enter"
+            # Enter handler sets return - should overwrite exit's value
+            self._return_value = "enter_wins"
         elif __e._message == "get_state":
-            self._return_value = "EnterSetter"
+            self._return_value = "BothSet"
             __e._return = self._return_value
             return
 
@@ -117,12 +117,12 @@ class SystemReturnChainTest:
             __compartment = SystemReturnChainTestCompartment("BothSet", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
 
-    def _state_BothSet(self, __e):
+    def _state_EnterSetter(self, __e):
         if __e._message == "$>":
-            # Enter handler sets return - should overwrite exit's value
-            self._return_value = "enter_wins"
+            # Enter handler sets return value
+            self._return_value = "from_enter"
         elif __e._message == "get_state":
-            self._return_value = "BothSet"
+            self._return_value = "EnterSetter"
             __e._return = self._return_value
             return
 

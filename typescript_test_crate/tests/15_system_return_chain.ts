@@ -128,6 +128,17 @@ class SystemReturnChainTest {
         return this._return_value;
     }
 
+    private _state_BothSet(__e: SystemReturnChainTestFrameEvent) {
+        if (__e._message === "$>") {
+            // Enter handler sets return - should overwrite exit's value
+            this._return_value = "enter_wins";;
+        } else if (__e._message === "get_state") {
+            this._return_value = "BothSet";
+            __e._return = this._return_value;
+            return;;
+        }
+    }
+
     private _state_EnterSetter(__e: SystemReturnChainTestFrameEvent) {
         if (__e._message === "$>") {
             // Enter handler sets return value
@@ -153,17 +164,6 @@ class SystemReturnChainTest {
         } else if (__e._message === "test_exit_then_enter") {
             const __compartment = new SystemReturnChainTestCompartment("BothSet", this.__compartment.copy());
             this.__transition(__compartment);
-        }
-    }
-
-    private _state_BothSet(__e: SystemReturnChainTestFrameEvent) {
-        if (__e._message === "$>") {
-            // Enter handler sets return - should overwrite exit's value
-            this._return_value = "enter_wins";;
-        } else if (__e._message === "get_state") {
-            this._return_value = "BothSet";
-            __e._return = this._return_value;
-            return;;
         }
     }
 }

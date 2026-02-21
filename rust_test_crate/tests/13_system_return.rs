@@ -1,26 +1,54 @@
 use std::collections::HashMap;
 
+#[derive(Clone, Debug)]
+struct SystemReturnTestFrameEvent {
+    message: String,
+}
+
+impl SystemReturnTestFrameEvent {
+    fn new(message: &str) -> Self {
+        Self { message: message.to_string() }
+    }
+}
+
+#[derive(Clone)]
+struct SystemReturnTestCompartment {
+    state: String,
+    state_vars: std::collections::HashMap<String, i32>,
+    forward_event: Option<SystemReturnTestFrameEvent>,
+}
+
+impl SystemReturnTestCompartment {
+    fn new(state: &str) -> Self {
+        Self {
+            state: state.to_string(),
+            state_vars: std::collections::HashMap::new(),
+            forward_event: None,
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 struct CalculatorContext {
     value: i32,
 }
 
 #[derive(Clone)]
-enum SystemReturnTestCompartment {
+enum SystemReturnTestStateContext {
     Calculator(CalculatorContext),
     Empty,
 }
 
-impl Default for SystemReturnTestCompartment {
+impl Default for SystemReturnTestStateContext {
     fn default() -> Self {
-        SystemReturnTestCompartment::Calculator(CalculatorContext::default())
+        SystemReturnTestStateContext::Calculator(CalculatorContext::default())
     }
 }
 
 pub struct SystemReturnTest {
-    _state: String,
-    _state_stack: Vec<(String, SystemReturnTestCompartment)>,
-    _state_context: HashMap<String, Box<dyn std::any::Any>>,
+    _state_stack: Vec<(String, SystemReturnTestStateContext)>,
+    __compartment: SystemReturnTestCompartment,
+    __next_compartment: Option<SystemReturnTestCompartment>,
     _sv_value: i32,
 }
 
@@ -28,90 +56,122 @@ impl SystemReturnTest {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
-            _state_context: HashMap::from([]),
             _sv_value: 0,
-            _state: String::from("Calculator"),
+            __compartment: SystemReturnTestCompartment::new("Calculator"),
+            __next_compartment: None,
         };
-        this._enter();
+let __frame_event = SystemReturnTestFrameEvent::new("$>");
+this.__kernel(__frame_event);
         this
     }
 
-    fn _transition(&mut self, target_state: &str) {
-        self._exit();
-        self._state = target_state.to_string();
-        self._enter();
+    fn __kernel(&mut self, __e: SystemReturnTestFrameEvent) {
+// Route event to current state
+self.__router(&__e);
+// Process any pending transition
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    // Exit current state
+    let exit_event = SystemReturnTestFrameEvent::new("$<");
+    self.__router(&exit_event);
+    // Switch to new compartment
+    self.__compartment = next_compartment;
+    // Enter new state (or forward event)
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = SystemReturnTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        // Forward event to new state
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            // Forwarding enter event - just send it
+            self.__router(&forward_event);
+        } else {
+            // Forwarding other event - send $> first, then forward
+            let enter_event = SystemReturnTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
     }
 
-    fn _dispatch_event(&mut self, event: &str) {
-let handler_name = format!("_s_{}_{}", self._state, event);
-// Rust requires match-based dispatch or a handler registry
-// For now, use explicit match in caller;
+    fn __router(&mut self, __e: &SystemReturnTestFrameEvent) {
+match self.__compartment.state.as_str() {
+    "Calculator" => self._state_Calculator(__e),
+    _ => {}
+}
     }
 
-    fn _enter(&mut self) {
-match self._state.as_str() {
-    "Calculator" => {
+    fn __transition(&mut self, next_compartment: SystemReturnTestCompartment) {
+self.__next_compartment = Some(next_compartment);
+    }
+
+    fn _state_stack_push(&mut self) {
+let state_context = match self.__compartment.state.as_str() {
+    "Calculator" => SystemReturnTestStateContext::Calculator(CalculatorContext { value: self._sv_value }),
+    _ => SystemReturnTestStateContext::Empty,
+};
+self._state_stack.push((self.__compartment.state.clone(), state_context));
+    }
+
+    fn _state_stack_pop(&mut self) {
+let (saved_state, state_context) = self._state_stack.pop().unwrap();
+let exit_event = SystemReturnTestFrameEvent::new("$<");
+self.__router(&exit_event);
+self.__compartment.state = saved_state;
+match state_context {
+    SystemReturnTestStateContext::Calculator(ctx) => {
+        self._sv_value = ctx.value;
+    }
+    SystemReturnTestStateContext::Empty => {}
+}
+    }
+
+    pub fn add(&mut self, a: i32, b: i32) -> i32 {
+let __e = SystemReturnTestFrameEvent::new("add");
+match self.__compartment.state.as_str() {
+            "Calculator" => self._s_Calculator_add(&__e, a, b),
+            _ => Default::default(),
+        }
+    }
+
+    pub fn multiply(&mut self, a: i32, b: i32) -> i32 {
+let __e = SystemReturnTestFrameEvent::new("multiply");
+match self.__compartment.state.as_str() {
+            "Calculator" => self._s_Calculator_multiply(&__e, a, b),
+            _ => Default::default(),
+        }
+    }
+
+    pub fn get_value(&mut self) -> i32 {
+let __e = SystemReturnTestFrameEvent::new("get_value");
+match self.__compartment.state.as_str() {
+            "Calculator" => self._s_Calculator_get_value(&__e),
+            _ => Default::default(),
+        }
+    }
+
+    fn _state_Calculator(&mut self, __e: &SystemReturnTestFrameEvent) {
+match __e.message.as_str() {
+    "get_value" => { self._s_Calculator_get_value(__e); }
+    "$>" => {
         self._sv_value = 0;
     }
     _ => {}
 }
     }
 
-    fn _exit(&mut self) {
-        // No exit handlers
+    fn _s_Calculator_multiply(&mut self, __e: &SystemReturnTestFrameEvent, a: i32, b: i32) -> i32 {
+return a * b
     }
 
-    fn _state_stack_push(&mut self) {
-let compartment = match self._state.as_str() {
-    "Calculator" => SystemReturnTestCompartment::Calculator(CalculatorContext { value: self._sv_value }),
-    _ => SystemReturnTestCompartment::Empty,
-};
-self._state_stack.push((self._state.clone(), compartment));
-    }
-
-    fn _state_stack_pop(&mut self) {
-let (saved_state, compartment) = self._state_stack.pop().unwrap();
-self._exit();
-self._state = saved_state;
-match compartment {
-    SystemReturnTestCompartment::Calculator(ctx) => {
-        self._sv_value = ctx.value;
-    }
-    SystemReturnTestCompartment::Empty => {}
-}
-    }
-
-    pub fn add(&mut self, a: i32, b: i32) -> i32 {
-match self._state.as_str() {
-            "Calculator" => self._s_Calculator_add(a, b),
-            _ => Default::default(),
-        }
-    }
-
-    pub fn multiply(&mut self, a: i32, b: i32) -> i32 {
-match self._state.as_str() {
-            "Calculator" => self._s_Calculator_multiply(a, b),
-            _ => Default::default(),
-        }
-    }
-
-    pub fn get_value(&mut self) -> i32 {
-match self._state.as_str() {
-            "Calculator" => self._s_Calculator_get_value(),
-            _ => Default::default(),
-        }
-    }
-
-    fn _s_Calculator_get_value(&mut self) -> i32 {
+    fn _s_Calculator_get_value(&mut self, __e: &SystemReturnTestFrameEvent) -> i32 {
 self._sv_value = 42;
 return self._sv_value
     }
 
-    fn _s_Calculator_multiply(&mut self, a: i32, b: i32) -> i32 {
-return a * b
-    }
-
-    fn _s_Calculator_add(&mut self, a: i32, b: i32) -> i32 {
+    fn _s_Calculator_add(&mut self, __e: &SystemReturnTestFrameEvent, a: i32, b: i32) -> i32 {
 return a + b
     }
 }
