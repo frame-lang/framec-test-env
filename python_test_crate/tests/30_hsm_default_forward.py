@@ -90,16 +90,6 @@ class HSMDefaultForward:
         self.__kernel(__e)
         return self._return_value
 
-    def _state_Child(self, __e):
-        if __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
-            return
-        elif __e._message == "handled_event":
-            self.log.append("Child:handled_event")
-        else:
-            self._state_Parent(__e)
-
     def _state_Parent(self, __e):
         if __e._message == "get_log":
             self._return_value = self.log
@@ -109,6 +99,16 @@ class HSMDefaultForward:
             self.log.append("Parent:handled_event")
         elif __e._message == "unhandled_event":
             self.log.append("Parent:unhandled_event")
+
+    def _state_Child(self, __e):
+        if __e._message == "get_log":
+            self._return_value = self.log
+            __e._return = self._return_value
+            return
+        elif __e._message == "handled_event":
+            self.log.append("Child:handled_event")
+        else:
+            self._state_Parent(__e)
 
 
 def main():

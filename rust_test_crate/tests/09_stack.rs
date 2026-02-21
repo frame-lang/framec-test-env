@@ -69,12 +69,23 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Main_do_work(&mut self) -> String {
-"Working in Main".to_string()
+    fn _s_Sub_pop_back(&mut self) {
+println!("Popping back to previous state");
+let __popped_state = *self._state_stack.pop().unwrap().downcast::<String>().unwrap();
+self._transition(&__popped_state);
+return;
     }
 
-    fn _s_Main_get_state(&mut self) -> String {
-"Main".to_string()
+    fn _s_Sub_push_and_go(&mut self) {
+println!("Already in Sub");
+    }
+
+    fn _s_Sub_do_work(&mut self) -> String {
+"Working in Sub".to_string()
+    }
+
+    fn _s_Sub_get_state(&mut self) -> String {
+"Sub".to_string()
     }
 
     fn _s_Main_pop_back(&mut self) {
@@ -87,23 +98,12 @@ self._state_stack.push(Box::new(self._state.clone()));
 self._transition("Sub");
     }
 
-    fn _s_Sub_push_and_go(&mut self) {
-println!("Already in Sub");
+    fn _s_Main_get_state(&mut self) -> String {
+"Main".to_string()
     }
 
-    fn _s_Sub_pop_back(&mut self) {
-println!("Popping back to previous state");
-let __popped_state = *self._state_stack.pop().unwrap().downcast::<String>().unwrap();
-self._transition(&__popped_state);
-return;
-    }
-
-    fn _s_Sub_do_work(&mut self) -> String {
-"Working in Sub".to_string()
-    }
-
-    fn _s_Sub_get_state(&mut self) -> String {
-"Sub".to_string()
+    fn _s_Main_do_work(&mut self) -> String {
+"Working in Main".to_string()
     }
 }
 

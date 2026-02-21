@@ -115,19 +115,6 @@ class StateParams {
         return this._return_value;
     }
 
-    private _state_Idle(__e: StateParamsFrameEvent) {
-        if (__e._message === "get_value") {
-            this._return_value = 0;
-            __e._return = this._return_value;
-            return;
-        } else if (__e._message === "start") {
-            const val = __e._parameters?.["0"];
-            const __compartment = new StateParamsCompartment("Counter", this.__compartment.copy());
-            __compartment.state_args = {"0": val};
-            this.__transition(__compartment);
-        }
-    }
-
     private _state_Counter(__e: StateParamsFrameEvent) {
         if (__e._message === "$>") {
             this.__compartment.state_vars["count"] = 0;
@@ -139,6 +126,19 @@ class StateParams {
             this._return_value = this.__compartment.state_vars["count"];
             __e._return = this._return_value;
             return;
+        }
+    }
+
+    private _state_Idle(__e: StateParamsFrameEvent) {
+        if (__e._message === "get_value") {
+            this._return_value = 0;
+            __e._return = this._return_value;
+            return;
+        } else if (__e._message === "start") {
+            const val = __e._parameters?.["0"];
+            const __compartment = new StateParamsCompartment("Counter", this.__compartment.copy());
+            __compartment.state_args = {"0": val};
+            this.__transition(__compartment);
         }
     }
 }

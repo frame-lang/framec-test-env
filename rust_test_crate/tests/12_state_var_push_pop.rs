@@ -131,18 +131,9 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Counter_increment(&mut self) -> i32 {
-self._sv_count = self._sv_count + 1;
-self._sv_count
-    }
-
-    fn _s_Counter_get_count(&mut self) -> i32 {
-self._sv_count
-    }
-
-    fn _s_Counter_save_and_go(&mut self) {
-self._state_stack_push();
-self._transition("Other");
+    fn _s_Other_increment(&mut self) -> i32 {
+self._sv_other_count = self._sv_other_count + 1;
+self._sv_other_count
     }
 
     fn _s_Other_restore(&mut self) {
@@ -150,13 +141,22 @@ self._state_stack_pop();
 return;
     }
 
-    fn _s_Other_increment(&mut self) -> i32 {
-self._sv_other_count = self._sv_other_count + 1;
+    fn _s_Other_get_count(&mut self) -> i32 {
 self._sv_other_count
     }
 
-    fn _s_Other_get_count(&mut self) -> i32 {
-self._sv_other_count
+    fn _s_Counter_get_count(&mut self) -> i32 {
+self._sv_count
+    }
+
+    fn _s_Counter_increment(&mut self) -> i32 {
+self._sv_count = self._sv_count + 1;
+self._sv_count
+    }
+
+    fn _s_Counter_save_and_go(&mut self) {
+self._state_stack_push();
+self._transition("Other");
     }
 }
 

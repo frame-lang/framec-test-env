@@ -107,17 +107,17 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Start_handler_returns_computed(&mut self) -> i32 {
-self._sv_count = self._sv_count + 1;
-return self._sv_count;
-    }
-
     fn _s_Start_get_count(&mut self) -> i32 {
 return self._sv_count;
     }
 
     fn _s_Start_handler_sets_value(&mut self) -> i32 {
 return 42;
+    }
+
+    fn _s_Start_handler_returns_computed(&mut self) -> i32 {
+self._sv_count = self._sv_count + 1;
+return self._sv_count;
     }
 }
 

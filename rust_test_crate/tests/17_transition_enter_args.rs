@@ -74,16 +74,16 @@ self.count = 1;
 self._transition("Active");
     }
 
-    fn _s_Active_enter(&mut self) {
-self.count = self.count + 1;
-    }
-
     fn _s_Active_start(&mut self) {
 self.count = self.count + 10;
     }
 
     fn _s_Active_get_count(&mut self) -> i32 {
 return self.count;
+    }
+
+    fn _s_Active_enter(&mut self) {
+self.count = self.count + 1;
     }
 }
 

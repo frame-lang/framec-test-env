@@ -85,17 +85,6 @@ class StateParams:
         self.__kernel(__e)
         return self._return_value
 
-    def _state_Idle(self, __e):
-        if __e._message == "get_value":
-            self._return_value = 0
-            __e._return = self._return_value
-            return
-        elif __e._message == "start":
-            val = __e._parameters["0"]
-            __compartment = StateParamsCompartment("Counter", parent_compartment=self.__compartment.copy())
-            __compartment.state_args = {"0": val}
-            self.__transition(__compartment)
-
     def _state_Counter(self, __e):
         if __e._message == "$>":
             self.__compartment.state_vars["count"] = 0
@@ -108,6 +97,17 @@ class StateParams:
             self._return_value = self.__compartment.state_vars["count"]
             __e._return = self._return_value
             return
+
+    def _state_Idle(self, __e):
+        if __e._message == "get_value":
+            self._return_value = 0
+            __e._return = self._return_value
+            return
+        elif __e._message == "start":
+            val = __e._parameters["0"]
+            __compartment = StateParamsCompartment("Counter", parent_compartment=self.__compartment.copy())
+            __compartment.state_args = {"0": val}
+            self.__transition(__compartment)
 
 
 def main():

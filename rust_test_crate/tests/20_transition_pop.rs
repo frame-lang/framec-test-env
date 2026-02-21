@@ -70,25 +70,21 @@ match self._state.as_str() {
         }
     }
 
+    fn _s_Idle_process(&mut self) {
+self.log.push("idle:process".to_string());
+    }
+
     fn _s_Idle_start(&mut self) {
 self.log.push("idle:start:push".to_string());
 self._state_stack.push(Box::new(self._state.clone()));
 self._transition("Working");
     }
 
-    fn _s_Idle_process(&mut self) {
-self.log.push("idle:process".to_string());
-    }
-
-    fn _s_Idle_get_log(&mut self) -> Vec<String> {
-return self.log.clone();
-    }
-
     fn _s_Idle_get_state(&mut self) -> String {
 return "Idle".to_string();
     }
 
-    fn _s_Working_get_log(&mut self) -> Vec<String> {
+    fn _s_Idle_get_log(&mut self) -> Vec<String> {
 return self.log.clone();
     }
 
@@ -99,6 +95,10 @@ self._transition(&__popped_state);
 return;
 // This should NOT execute because pop transitions away
 self.log.push("working:process:after_pop".to_string());
+    }
+
+    fn _s_Working_get_log(&mut self) -> Vec<String> {
+return self.log.clone();
     }
 
     fn _s_Working_get_state(&mut self) -> String {

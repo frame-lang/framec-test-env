@@ -55,16 +55,12 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Working_process(&mut self) {
-self.log.push("working:process".to_string());
-    }
-
     fn _s_Working_get_log(&mut self) -> Vec<String> {
 return self.log.clone();
     }
 
-    fn _s_Idle_get_log(&mut self) -> Vec<String> {
-return self.log.clone();
+    fn _s_Working_process(&mut self) {
+self.log.push("working:process".to_string());
     }
 
     fn _s_Idle_process(&mut self) {
@@ -73,6 +69,10 @@ self._transition("Working");
 return self._s_Working_process();
 // This should NOT execute because -> => returns after dispatch
 self.log.push("idle:process:after".to_string());
+    }
+
+    fn _s_Idle_get_log(&mut self) -> Vec<String> {
+return self.log.clone();
     }
 }
 

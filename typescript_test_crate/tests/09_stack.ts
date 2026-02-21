@@ -127,6 +127,24 @@ class StackOps {
         return this._return_value;
     }
 
+    private _state_Sub(__e: StackOpsFrameEvent) {
+        if (__e._message === "do_work") {
+            this._return_value = "Working in Sub";
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "get_state") {
+            this._return_value = "Sub";
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "pop_back") {
+            console.log("Popping back to previous state");
+            this.__compartment = this._state_stack.pop()!;
+            return;
+        } else if (__e._message === "push_and_go") {
+            console.log("Already in Sub");
+        }
+    }
+
     private _state_Main(__e: StackOpsFrameEvent) {
         if (__e._message === "do_work") {
             this._return_value = "Working in Main";
@@ -143,24 +161,6 @@ class StackOps {
             this._state_stack.push(this.__compartment.copy());
             const __compartment = new StackOpsCompartment("Sub", this.__compartment.copy());
             this.__transition(__compartment);
-        }
-    }
-
-    private _state_Sub(__e: StackOpsFrameEvent) {
-        if (__e._message === "do_work") {
-            this._return_value = "Working in Sub";
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "get_state") {
-            this._return_value = "Sub";
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "pop_back") {
-            console.log("Popping back to previous state");
-            this.__compartment = this._state_stack.pop()!;
-            return;
-        } else if (__e._message === "push_and_go") {
-            console.log("Already in Sub");
         }
     }
 }

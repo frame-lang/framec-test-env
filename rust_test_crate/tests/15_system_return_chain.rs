@@ -55,12 +55,12 @@ match self._state.as_str() {
 return 3;
     }
 
-    fn _s_EnterSetter_get_state_num(&mut self) -> i32 {
-return 2;
-    }
-
     fn _s_Start_get_state_num(&mut self) -> i32 {
 return 1;
+    }
+
+    fn _s_EnterSetter_get_state_num(&mut self) -> i32 {
+return 2;
     }
 }
 

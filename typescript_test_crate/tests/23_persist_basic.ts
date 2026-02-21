@@ -129,22 +129,6 @@ class PersistTest {
         this.__kernel(__e);
     }
 
-    private _state_Active(__e: PersistTestFrameEvent) {
-        if (__e._message === "get_value") {
-            this._return_value = this.value;
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "go_active") {
-            // Already active
-        } else if (__e._message === "go_idle") {
-            const __compartment = new PersistTestCompartment("Idle", this.__compartment.copy());
-            this.__transition(__compartment);
-        } else if (__e._message === "set_value") {
-            const v = __e._parameters?.["0"];
-            this.value = v * 2;
-        }
-    }
-
     private _state_Idle(__e: PersistTestFrameEvent) {
         if (__e._message === "get_value") {
             this._return_value = this.value;
@@ -158,6 +142,22 @@ class PersistTest {
         } else if (__e._message === "set_value") {
             const v = __e._parameters?.["0"];
             this.value = v;
+        }
+    }
+
+    private _state_Active(__e: PersistTestFrameEvent) {
+        if (__e._message === "get_value") {
+            this._return_value = this.value;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "go_active") {
+            // Already active
+        } else if (__e._message === "go_idle") {
+            const __compartment = new PersistTestCompartment("Idle", this.__compartment.copy());
+            this.__transition(__compartment);
+        } else if (__e._message === "set_value") {
+            const v = __e._parameters?.["0"];
+            this.value = v * 2;
         }
     }
 

@@ -53,22 +53,22 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_First_next(&mut self) {
-println!("Transitioning: First -> Second");
-self._transition("Second");
-    }
-
-    fn _s_First_get_state(&mut self) -> String {
-"First".to_string()
+    fn _s_Second_next(&mut self) {
+println!("Transitioning: Second -> First");
+self._transition("First");
     }
 
     fn _s_Second_get_state(&mut self) -> String {
 "Second".to_string()
     }
 
-    fn _s_Second_next(&mut self) {
-println!("Transitioning: Second -> First");
-self._transition("First");
+    fn _s_First_get_state(&mut self) -> String {
+"First".to_string()
+    }
+
+    fn _s_First_next(&mut self) {
+println!("Transitioning: First -> Second");
+self._transition("Second");
     }
 }
 

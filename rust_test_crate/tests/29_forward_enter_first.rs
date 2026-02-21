@@ -111,9 +111,21 @@ match self._state.as_str() {
         }
     }
 
-    fn _s_Working_process(&mut self) {
-self.log.push(format!("Working:process:counter={}", self._sv_counter));
-self._sv_counter = self._sv_counter + 1;
+    fn _s_Idle_process(&mut self) {
+self._transition("Working");
+return self._s_Working_process();
+    }
+
+    fn _s_Idle_get_counter(&mut self) -> i32 {
+return -1;
+    }
+
+    fn _s_Idle_get_log(&mut self) -> Vec<String> {
+return self.log.clone();
+    }
+
+    fn _s_Working_get_counter(&mut self) -> i32 {
+return self._sv_counter;
     }
 
     fn _s_Working_get_log(&mut self) -> Vec<String> {
@@ -124,21 +136,9 @@ return self.log.clone();
 self.log.push("Working:enter".to_string());
     }
 
-    fn _s_Working_get_counter(&mut self) -> i32 {
-return self._sv_counter;
-    }
-
-    fn _s_Idle_get_log(&mut self) -> Vec<String> {
-return self.log.clone();
-    }
-
-    fn _s_Idle_process(&mut self) {
-self._transition("Working");
-return self._s_Working_process();
-    }
-
-    fn _s_Idle_get_counter(&mut self) -> i32 {
-return -1;
+    fn _s_Working_process(&mut self) {
+self.log.push(format!("Working:process:counter={}", self._sv_counter));
+self._sv_counter = self._sv_counter + 1;
     }
 }
 

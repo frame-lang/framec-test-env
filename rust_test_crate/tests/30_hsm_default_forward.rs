@@ -63,16 +63,16 @@ match self._state.as_str() {
         }
     }
 
+    fn _s_Parent_handled_event(&mut self) {
+self.log.push("Parent:handled_event".to_string());
+    }
+
     fn _s_Parent_unhandled_event(&mut self) {
 self.log.push("Parent:unhandled_event".to_string());
     }
 
     fn _s_Parent_get_log(&mut self) -> Vec<String> {
 return self.log.clone();
-    }
-
-    fn _s_Parent_handled_event(&mut self) {
-self.log.push("Parent:handled_event".to_string());
     }
 
     fn _s_Child_handled_event(&mut self) {
