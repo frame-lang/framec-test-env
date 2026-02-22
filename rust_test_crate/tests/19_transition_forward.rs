@@ -155,6 +155,10 @@ match __e.message.as_str() {
 }
     }
 
+    fn _s_Idle_get_log(&mut self, __e: &EventForwardTestFrameEvent) -> Vec<String> {
+return self.log.clone();
+    }
+
     fn _s_Idle_process(&mut self, __e: &EventForwardTestFrameEvent) {
 self.log.push("idle:process:before".to_string());
 let mut __compartment = EventForwardTestCompartment::new("Working");
@@ -163,10 +167,6 @@ self.__transition(__compartment);
 return;
 // This should NOT execute because -> => returns after dispatch
 self.log.push("idle:process:after".to_string());
-    }
-
-    fn _s_Idle_get_log(&mut self, __e: &EventForwardTestFrameEvent) -> Vec<String> {
-return self.log.clone();
     }
 
     fn _s_Working_process(&mut self, __e: &EventForwardTestFrameEvent) {

@@ -162,21 +162,17 @@ match __e.message.as_str() {
 }
     }
 
+    fn _s_Child_get_log(&mut self, __e: &HSMForwardFrameEvent) -> Vec<String> {
+self.log.clone()
+    }
+
     fn _s_Child_event_b(&mut self, __e: &HSMForwardFrameEvent) {
 self.log.push("Child:event_b_forward".to_string());
 self._state_Parent(__e);
     }
 
-    fn _s_Child_get_log(&mut self, __e: &HSMForwardFrameEvent) -> Vec<String> {
-self.log.clone()
-    }
-
     fn _s_Child_event_a(&mut self, __e: &HSMForwardFrameEvent) {
 self.log.push("Child:event_a".to_string());
-    }
-
-    fn _s_Parent_event_b(&mut self, __e: &HSMForwardFrameEvent) {
-self.log.push("Parent:event_b".to_string());
     }
 
     fn _s_Parent_get_log(&mut self, __e: &HSMForwardFrameEvent) -> Vec<String> {
@@ -185,6 +181,10 @@ self.log.clone()
 
     fn _s_Parent_event_a(&mut self, __e: &HSMForwardFrameEvent) {
 self.log.push("Parent:event_a".to_string());
+    }
+
+    fn _s_Parent_event_b(&mut self, __e: &HSMForwardFrameEvent) {
+self.log.push("Parent:event_b".to_string());
     }
 }
 

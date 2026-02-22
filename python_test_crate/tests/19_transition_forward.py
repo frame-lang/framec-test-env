@@ -86,14 +86,6 @@ class EventForwardTest:
         self.__kernel(__e)
         return self._return_value
 
-    def _state_Working(self, __e):
-        if __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
-            return
-        elif __e._message == "process":
-            self.log.append("working:process")
-
     def _state_Idle(self, __e):
         if __e._message == "get_log":
             self._return_value = self.log
@@ -107,6 +99,14 @@ class EventForwardTest:
             return
             # This should NOT execute because -> => returns after dispatch
             self.log.append("idle:process:after")
+
+    def _state_Working(self, __e):
+        if __e._message == "get_log":
+            self._return_value = self.log
+            __e._return = self._return_value
+            return
+        elif __e._message == "process":
+            self.log.append("working:process")
 
 
 def main():

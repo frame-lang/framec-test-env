@@ -144,6 +144,14 @@ match self.__compartment.state.as_str() {
         }
     }
 
+    fn _state_Child(&mut self, __e: &HSMDefaultForwardFrameEvent) {
+match __e.message.as_str() {
+    "get_log" => { self._s_Child_get_log(__e); }
+    "handled_event" => { self._s_Child_handled_event(__e); }
+    _ => self._state_Parent(__e),
+}
+    }
+
     fn _state_Parent(&mut self, __e: &HSMDefaultForwardFrameEvent) {
 match __e.message.as_str() {
     "get_log" => { self._s_Parent_get_log(__e); }
@@ -153,32 +161,24 @@ match __e.message.as_str() {
 }
     }
 
-    fn _state_Child(&mut self, __e: &HSMDefaultForwardFrameEvent) {
-match __e.message.as_str() {
-    "get_log" => { self._s_Child_get_log(__e); }
-    "handled_event" => { self._s_Child_handled_event(__e); }
-    _ => self._state_Parent(__e),
-}
-    }
-
-    fn _s_Parent_handled_event(&mut self, __e: &HSMDefaultForwardFrameEvent) {
-self.log.push("Parent:handled_event".to_string());
-    }
-
-    fn _s_Parent_get_log(&mut self, __e: &HSMDefaultForwardFrameEvent) -> Vec<String> {
+    fn _s_Child_get_log(&mut self, __e: &HSMDefaultForwardFrameEvent) -> Vec<String> {
 return self.log.clone();
-    }
-
-    fn _s_Parent_unhandled_event(&mut self, __e: &HSMDefaultForwardFrameEvent) {
-self.log.push("Parent:unhandled_event".to_string());
     }
 
     fn _s_Child_handled_event(&mut self, __e: &HSMDefaultForwardFrameEvent) {
 self.log.push("Child:handled_event".to_string());
     }
 
-    fn _s_Child_get_log(&mut self, __e: &HSMDefaultForwardFrameEvent) -> Vec<String> {
+    fn _s_Parent_unhandled_event(&mut self, __e: &HSMDefaultForwardFrameEvent) {
+self.log.push("Parent:unhandled_event".to_string());
+    }
+
+    fn _s_Parent_get_log(&mut self, __e: &HSMDefaultForwardFrameEvent) -> Vec<String> {
 return self.log.clone();
+    }
+
+    fn _s_Parent_handled_event(&mut self, __e: &HSMDefaultForwardFrameEvent) {
+self.log.push("Parent:handled_event".to_string());
     }
 }
 

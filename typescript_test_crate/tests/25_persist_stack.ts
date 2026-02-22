@@ -150,6 +150,24 @@ class PersistStack {
         }
     }
 
+    private _state_End(__e: PersistStackFrameEvent) {
+        if (__e._message === "get_depth") {
+            this._return_value = this.depth;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "get_state") {
+            this._return_value = "end";
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "pop_back") {
+            this.depth = this.depth - 1;
+            this.__compartment = this._state_stack.pop()!;
+            return;
+        } else if (__e._message === "push_and_go") {
+            // can't go further
+        }
+    }
+
     private _state_Start(__e: PersistStackFrameEvent) {
         if (__e._message === "get_depth") {
             this._return_value = this.depth;
@@ -166,24 +184,6 @@ class PersistStack {
             this._state_stack.push(this.__compartment.copy());
             const __compartment = new PersistStackCompartment("Middle", this.__compartment.copy());
             this.__transition(__compartment);
-        }
-    }
-
-    private _state_End(__e: PersistStackFrameEvent) {
-        if (__e._message === "get_depth") {
-            this._return_value = this.depth;
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "get_state") {
-            this._return_value = "end";
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "pop_back") {
-            this.depth = this.depth - 1;
-            this.__compartment = this._state_stack.pop()!;
-            return;
-        } else if (__e._message === "push_and_go") {
-            // can't go further
         }
     }
 

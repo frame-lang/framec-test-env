@@ -95,6 +95,22 @@ class StackOps:
         self.__kernel(__e)
         return self._return_value
 
+    def _state_Sub(self, __e):
+        if __e._message == "do_work":
+            self._return_value = "Working in Sub"
+            __e._return = self._return_value
+            return
+        elif __e._message == "get_state":
+            self._return_value = "Sub"
+            __e._return = self._return_value
+            return
+        elif __e._message == "pop_back":
+            print("Popping back to previous state")
+            self.__compartment = self._state_stack.pop()
+            return
+        elif __e._message == "push_and_go":
+            print("Already in Sub")
+
     def _state_Main(self, __e):
         if __e._message == "do_work":
             self._return_value = "Working in Main"
@@ -111,22 +127,6 @@ class StackOps:
             self._state_stack.append(self.__compartment.copy())
             __compartment = StackOpsCompartment("Sub", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
-
-    def _state_Sub(self, __e):
-        if __e._message == "do_work":
-            self._return_value = "Working in Sub"
-            __e._return = self._return_value
-            return
-        elif __e._message == "get_state":
-            self._return_value = "Sub"
-            __e._return = self._return_value
-            return
-        elif __e._message == "pop_back":
-            print("Popping back to previous state")
-            self.__compartment = self._state_stack.pop()
-            return
-        elif __e._message == "push_and_go":
-            print("Already in Sub")
 
 
 def main():

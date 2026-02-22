@@ -193,13 +193,13 @@ self._sv_call_count = self._sv_call_count + 1;
 return 100 + inner_result;
     }
 
-    fn _s_Start_get_call_count(&mut self, __e: &SystemReturnReentrantTestFrameEvent) -> i32 {
-return self._sv_call_count;
-    }
-
     fn _s_Start_inner_call(&mut self, __e: &SystemReturnReentrantTestFrameEvent) -> i32 {
 self._sv_call_count = self._sv_call_count + 1;
 return 10;
+    }
+
+    fn _s_Start_get_call_count(&mut self, __e: &SystemReturnReentrantTestFrameEvent) -> i32 {
+return self._sv_call_count;
     }
 }
 

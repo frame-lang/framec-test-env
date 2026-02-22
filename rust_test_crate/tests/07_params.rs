@@ -201,6 +201,13 @@ match self.__compartment.state.as_str() {
         }
     }
 
+    fn _state_Idle(&mut self, __e: &WithParamsFrameEvent) {
+match __e.message.as_str() {
+    "get_total" => { self._s_Idle_get_total(__e); }
+    _ => {}
+}
+    }
+
     fn _state_Running(&mut self, __e: &WithParamsFrameEvent) {
 match __e.message.as_str() {
     "get_total" => { self._s_Running_get_total(__e); }
@@ -208,11 +215,22 @@ match __e.message.as_str() {
 }
     }
 
-    fn _state_Idle(&mut self, __e: &WithParamsFrameEvent) {
-match __e.message.as_str() {
-    "get_total" => { self._s_Idle_get_total(__e); }
-    _ => {}
-}
+    fn _s_Idle_add(&mut self, __e: &WithParamsFrameEvent, value: i32) {
+println!("Cannot add in Idle state");
+    }
+
+    fn _s_Idle_start(&mut self, __e: &WithParamsFrameEvent, initial: i32) {
+self.total = initial;
+println!("Started with initial value: {}", initial);
+self.__transition(WithParamsCompartment::new("Running"));
+    }
+
+    fn _s_Idle_multiply(&mut self, __e: &WithParamsFrameEvent, a: i32, b: i32) -> i32 {
+0
+    }
+
+    fn _s_Idle_get_total(&mut self, __e: &WithParamsFrameEvent) -> i32 {
+self.total
     }
 
     fn _s_Running_start(&mut self, __e: &WithParamsFrameEvent, initial: i32) {
@@ -224,10 +242,6 @@ self.total += value;
 println!("Added {}, total is now {}", value, self.total);
     }
 
-    fn _s_Running_get_total(&mut self, __e: &WithParamsFrameEvent) -> i32 {
-self.total
-    }
-
     fn _s_Running_multiply(&mut self, __e: &WithParamsFrameEvent, a: i32, b: i32) -> i32 {
 let result = a * b;
 self.total += result;
@@ -235,21 +249,7 @@ println!("Multiplied {} * {} = {}, total is now {}", a, b, result, self.total);
 result
     }
 
-    fn _s_Idle_start(&mut self, __e: &WithParamsFrameEvent, initial: i32) {
-self.total = initial;
-println!("Started with initial value: {}", initial);
-self.__transition(WithParamsCompartment::new("Running"));
-    }
-
-    fn _s_Idle_add(&mut self, __e: &WithParamsFrameEvent, value: i32) {
-println!("Cannot add in Idle state");
-    }
-
-    fn _s_Idle_multiply(&mut self, __e: &WithParamsFrameEvent, a: i32, b: i32) -> i32 {
-0
-    }
-
-    fn _s_Idle_get_total(&mut self, __e: &WithParamsFrameEvent) -> i32 {
+    fn _s_Running_get_total(&mut self, __e: &WithParamsFrameEvent) -> i32 {
 self.total
     }
 }

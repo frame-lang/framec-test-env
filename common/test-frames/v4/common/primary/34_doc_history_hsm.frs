@@ -1,0 +1,136 @@
+@@target rust
+
+// Documentation Example: HSM with History (History203)
+// Refactored common gotoC behavior into parent state $AB
+
+@@system HistoryHSM {
+    interface:
+        goto_a()
+        goto_b()
+        goto_c()
+        go_back()
+        get_state(): String
+        get_log(): Vec<String>
+
+    machine:
+        $Waiting {
+            $>() {
+                self.log_msg(String::from("In $Waiting"));
+            }
+            goto_a() {
+                self.log_msg(String::from("goto_a"));
+                -> $A
+            }
+            goto_b() {
+                self.log_msg(String::from("goto_b"));
+                -> $B
+            }
+            get_state(): String {
+                return String::from("Waiting")
+            }
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+        }
+
+        $A => $AB {
+            $>() {
+                self.log_msg(String::from("In $A"));
+            }
+            goto_b() {
+                self.log_msg(String::from("goto_b"));
+                -> $B
+            }
+            get_state(): String {
+                return String::from("A")
+            }
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+            => $^
+        }
+
+        $B => $AB {
+            $>() {
+                self.log_msg(String::from("In $B"));
+            }
+            goto_a() {
+                self.log_msg(String::from("goto_a"));
+                -> $A
+            }
+            get_state(): String {
+                return String::from("B")
+            }
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+            => $^
+        }
+
+        $AB {
+            goto_c() {
+                self.log_msg(String::from("goto_c in $AB"));
+                push$
+                -> $C
+            }
+        }
+
+        $C {
+            $>() {
+                self.log_msg(String::from("In $C"));
+            }
+            go_back() {
+                self.log_msg(String::from("go_back"));
+                -> pop$
+            }
+            get_state(): String {
+                return String::from("C")
+            }
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+        }
+
+    actions:
+        log_msg(msg: String) {
+            self.log.push(msg);
+        }
+
+    domain:
+        var log: Vec<String> = Vec::new()
+}
+
+fn main() {
+    println!("=== Test 34: Doc History HSM ===");
+    let mut h = HistoryHSM::new();
+
+    // Start in Waiting
+    assert_eq!(h.get_state(), "Waiting", "Expected 'Waiting'");
+
+    // Go to A
+    h.goto_a();
+    assert_eq!(h.get_state(), "A", "Expected 'A'");
+
+    // Go to C (using inherited goto_c from $AB)
+    h.goto_c();
+    assert_eq!(h.get_state(), "C", "Expected 'C'");
+
+    // Go back (should pop to A)
+    h.go_back();
+    assert_eq!(h.get_state(), "A", "Expected 'A' after go_back");
+
+    // Go to B
+    h.goto_b();
+    assert_eq!(h.get_state(), "B", "Expected 'B'");
+
+    // Go to C (again using inherited goto_c)
+    h.goto_c();
+    assert_eq!(h.get_state(), "C", "Expected 'C'");
+
+    // Go back (should pop to B)
+    h.go_back();
+    assert_eq!(h.get_state(), "B", "Expected 'B' after go_back");
+
+    println!("Log: {:?}", h.get_log());
+    println!("PASS: HSM with history works correctly");
+}

@@ -124,6 +124,23 @@ class ForwardEnterFirst {
         return this._return_value;
     }
 
+    private _state_Idle(__e: ForwardEnterFirstFrameEvent) {
+        if (__e._message === "get_counter") {
+            this._return_value = -1;
+            __e._return = this._return_value;
+            return;
+        } else if (__e._message === "get_log") {
+            this._return_value = this.log;
+            __e._return = this._return_value;
+            return;
+        } else if (__e._message === "process") {
+            const __compartment = new ForwardEnterFirstCompartment("Working", this.__compartment.copy());
+            __compartment.forward_event = __e;
+            this.__transition(__compartment);
+            return;
+        }
+    }
+
     private _state_Working(__e: ForwardEnterFirstFrameEvent) {
         if (__e._message === "$>") {
             this.__compartment.state_vars["counter"] = 100;
@@ -139,23 +156,6 @@ class ForwardEnterFirst {
         } else if (__e._message === "process") {
             this.log.push("Working:process:counter=" + this.__compartment.state_vars["counter"].toString())
             this.__compartment.state_vars["counter"] = this.__compartment.state_vars["counter"] + 1
-        }
-    }
-
-    private _state_Idle(__e: ForwardEnterFirstFrameEvent) {
-        if (__e._message === "get_counter") {
-            this._return_value = -1;
-            __e._return = this._return_value;
-            return;
-        } else if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
-            return;
-        } else if (__e._message === "process") {
-            const __compartment = new ForwardEnterFirstCompartment("Working", this.__compartment.copy());
-            __compartment.forward_event = __e;
-            this.__transition(__compartment);
-            return;
         }
     }
 }

@@ -198,13 +198,13 @@ return -1;
 return self.log.clone();
     }
 
-    fn _s_Working_enter(&mut self, __e: &ForwardEnterFirstFrameEvent) {
-self.log.push("Working:enter".to_string());
-    }
-
     fn _s_Working_process(&mut self, __e: &ForwardEnterFirstFrameEvent) {
 self.log.push(format!("Working:process:counter={}", self._sv_counter));
 self._sv_counter = self._sv_counter + 1;
+    }
+
+    fn _s_Working_enter(&mut self, __e: &ForwardEnterFirstFrameEvent) {
+self.log.push("Working:enter".to_string());
     }
 
     fn _s_Working_get_counter(&mut self, __e: &ForwardEnterFirstFrameEvent) -> i32 {

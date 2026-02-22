@@ -1,0 +1,87 @@
+@@target rust
+
+// Documentation Example: HSM Lamp with color behavior factored out
+
+@@system LampHSM {
+    interface:
+        turn_on()
+        turn_off()
+        get_color(): String
+        set_color(color: String)
+        is_lamp_on(): bool
+
+    machine:
+        $Off => $ColorBehavior {
+            turn_on() {
+                -> $On
+            }
+            is_lamp_on(): bool {
+                return self.lamp_on
+            }
+            => $^
+        }
+
+        $On => $ColorBehavior {
+            $>() {
+                self.turn_on_lamp()
+            }
+            $<() {
+                self.turn_off_lamp()
+            }
+            turn_off() {
+                -> $Off
+            }
+            is_lamp_on(): bool {
+                return self.lamp_on
+            }
+            => $^
+        }
+
+        $ColorBehavior {
+            get_color(): String {
+                return self.color.clone()
+            }
+            set_color(color: String) {
+                self.color = color
+            }
+        }
+
+    actions:
+        turn_on_lamp() {
+            self.lamp_on = true;
+        }
+        turn_off_lamp() {
+            self.lamp_on = false;
+        }
+
+    domain:
+        var color: String = String::from("white")
+        var lamp_on: bool = false
+}
+
+fn main() {
+    println!("=== Test 32: Doc Lamp HSM ===");
+    let mut lamp = LampHSM::new();
+
+    // Color behavior available in both states
+    assert_eq!(lamp.get_color(), "white", "Expected 'white'");
+    lamp.set_color(String::from("red"));
+    assert_eq!(lamp.get_color(), "red", "Expected 'red'");
+
+    // Turn on
+    lamp.turn_on();
+    assert!(lamp.is_lamp_on(), "Lamp should be on");
+
+    // Color still works when on
+    lamp.set_color(String::from("green"));
+    assert_eq!(lamp.get_color(), "green", "Expected 'green'");
+
+    // Turn off
+    lamp.turn_off();
+    assert!(!lamp.is_lamp_on(), "Lamp should be off");
+
+    // Color still works when off
+    assert_eq!(lamp.get_color(), "green", "Expected 'green'");
+
+    println!("PASS: HSM lamp works correctly");
+}

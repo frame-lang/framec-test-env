@@ -149,16 +149,16 @@ match __e.message.as_str() {
 }
     }
 
-    fn _state_Start(&mut self, __e: &SystemReturnChainTestFrameEvent) {
+    fn _state_BothSet(&mut self, __e: &SystemReturnChainTestFrameEvent) {
 match __e.message.as_str() {
-    "get_state_num" => { self._s_Start_get_state_num(__e); }
+    "get_state_num" => { self._s_BothSet_get_state_num(__e); }
     _ => {}
 }
     }
 
-    fn _state_BothSet(&mut self, __e: &SystemReturnChainTestFrameEvent) {
+    fn _state_Start(&mut self, __e: &SystemReturnChainTestFrameEvent) {
 match __e.message.as_str() {
-    "get_state_num" => { self._s_BothSet_get_state_num(__e); }
+    "get_state_num" => { self._s_Start_get_state_num(__e); }
     _ => {}
 }
     }
@@ -167,12 +167,12 @@ match __e.message.as_str() {
 return 2;
     }
 
-    fn _s_Start_get_state_num(&mut self, __e: &SystemReturnChainTestFrameEvent) -> i32 {
-return 1;
-    }
-
     fn _s_BothSet_get_state_num(&mut self, __e: &SystemReturnChainTestFrameEvent) -> i32 {
 return 3;
+    }
+
+    fn _s_Start_get_state_num(&mut self, __e: &SystemReturnChainTestFrameEvent) -> i32 {
+return 1;
     }
 }
 

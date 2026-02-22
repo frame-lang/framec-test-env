@@ -189,6 +189,12 @@ match __e.message.as_str() {
 }
     }
 
+    fn _s_Middle_push_and_go(&mut self, __e: &PersistStackFrameEvent) {
+self.depth = self.depth + 1;
+self._state_stack_push();
+self.__transition(PersistStackCompartment::new("End"));
+    }
+
     fn _s_Middle_get_depth(&mut self, __e: &PersistStackFrameEvent) -> i32 {
 return self.depth;
     }
@@ -203,10 +209,8 @@ return;
 return String::from("middle");
     }
 
-    fn _s_Middle_push_and_go(&mut self, __e: &PersistStackFrameEvent) {
-self.depth = self.depth + 1;
-self._state_stack_push();
-self.__transition(PersistStackCompartment::new("End"));
+    fn _s_End_push_and_go(&mut self, __e: &PersistStackFrameEvent) {
+// can't go further;
     }
 
     fn _s_End_get_state(&mut self, __e: &PersistStackFrameEvent) -> String {
@@ -219,22 +223,18 @@ self._state_stack_pop();
 return;
     }
 
-    fn _s_End_push_and_go(&mut self, __e: &PersistStackFrameEvent) {
-// can't go further;
-    }
-
     fn _s_End_get_depth(&mut self, __e: &PersistStackFrameEvent) -> i32 {
 return self.depth;
-    }
-
-    fn _s_Start_pop_back(&mut self, __e: &PersistStackFrameEvent) {
-// nothing to pop;
     }
 
     fn _s_Start_push_and_go(&mut self, __e: &PersistStackFrameEvent) {
 self.depth = self.depth + 1;
 self._state_stack_push();
 self.__transition(PersistStackCompartment::new("Middle"));
+    }
+
+    fn _s_Start_pop_back(&mut self, __e: &PersistStackFrameEvent) {
+// nothing to pop;
     }
 
     fn _s_Start_get_state(&mut self, __e: &PersistStackFrameEvent) -> String {

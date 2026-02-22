@@ -86,14 +86,6 @@ class TransitionExitArgs:
         self.__kernel(__e)
         return self._return_value
 
-    def _state_Done(self, __e):
-        if __e._message == "$>":
-            self.log.append("enter:done")
-        elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
-            return
-
     def _state_Active(self, __e):
         if __e._message == "<$":
             reason = __e._parameters["0"]
@@ -108,6 +100,14 @@ class TransitionExitArgs:
             self.__compartment.exit_args = {str(i): v for i, v in enumerate(("cleanup", 42,))}
             __compartment = TransitionExitArgsCompartment("Done", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
+
+    def _state_Done(self, __e):
+        if __e._message == "$>":
+            self.log.append("enter:done")
+        elif __e._message == "get_log":
+            self._return_value = self.log
+            __e._return = self._return_value
+            return
 
 
 def main():

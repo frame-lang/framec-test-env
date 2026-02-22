@@ -1,0 +1,152 @@
+@@target typescript
+
+// Documentation Example: HSM with History (History203)
+// Refactored common gotoC behavior into parent state $AB
+
+@@system HistoryHSM {
+    interface:
+        gotoA()
+        gotoB()
+        gotoC()
+        goBack()
+        get_state(): string
+        get_log(): string[]
+
+    machine:
+        $Waiting {
+            $>() {
+                this.log_msg("In $Waiting")
+            }
+            gotoA() {
+                this.log_msg("gotoA")
+                -> $A
+            }
+            gotoB() {
+                this.log_msg("gotoB")
+                -> $B
+            }
+            get_state(): string {
+                return "Waiting"
+            }
+            get_log(): string[] {
+                return this.log
+            }
+        }
+
+        $A => $AB {
+            $>() {
+                this.log_msg("In $A")
+            }
+            gotoB() {
+                this.log_msg("gotoB")
+                -> $B
+            }
+            get_state(): string {
+                return "A"
+            }
+            get_log(): string[] {
+                return this.log
+            }
+            => $^
+        }
+
+        $B => $AB {
+            $>() {
+                this.log_msg("In $B")
+            }
+            gotoA() {
+                this.log_msg("gotoA")
+                -> $A
+            }
+            get_state(): string {
+                return "B"
+            }
+            get_log(): string[] {
+                return this.log
+            }
+            => $^
+        }
+
+        $AB {
+            gotoC() {
+                this.log_msg("gotoC in $AB")
+                push$
+                -> $C
+            }
+        }
+
+        $C {
+            $>() {
+                this.log_msg("In $C")
+            }
+            goBack() {
+                this.log_msg("goBack")
+                -> pop$
+            }
+            get_state(): string {
+                return "C"
+            }
+            get_log(): string[] {
+                return this.log
+            }
+        }
+
+    actions:
+        log_msg(msg: string) {
+            this.log.push(msg)
+        }
+
+    domain:
+        var log: string[] = []
+}
+
+function main() {
+    console.log("=== Test 34: Doc History HSM ===");
+    const h = new HistoryHSM();
+
+    // Start in Waiting
+    if (h.get_state() !== "Waiting") {
+        throw new Error(`Expected 'Waiting', got '${h.get_state()}'`);
+    }
+
+    // Go to A
+    h.gotoA();
+    if (h.get_state() !== "A") {
+        throw new Error(`Expected 'A', got '${h.get_state()}'`);
+    }
+
+    // Go to C (using inherited gotoC from $AB)
+    h.gotoC();
+    if (h.get_state() !== "C") {
+        throw new Error(`Expected 'C', got '${h.get_state()}'`);
+    }
+
+    // Go back (should pop to A)
+    h.goBack();
+    if (h.get_state() !== "A") {
+        throw new Error(`Expected 'A' after goBack, got '${h.get_state()}'`);
+    }
+
+    // Go to B
+    h.gotoB();
+    if (h.get_state() !== "B") {
+        throw new Error(`Expected 'B', got '${h.get_state()}'`);
+    }
+
+    // Go to C (again using inherited gotoC)
+    h.gotoC();
+    if (h.get_state() !== "C") {
+        throw new Error(`Expected 'C', got '${h.get_state()}'`);
+    }
+
+    // Go back (should pop to B)
+    h.goBack();
+    if (h.get_state() !== "B") {
+        throw new Error(`Expected 'B' after goBack, got '${h.get_state()}'`);
+    }
+
+    console.log("Log:", h.get_log());
+    console.log("PASS: HSM with history works correctly");
+}
+
+main();

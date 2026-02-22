@@ -137,14 +137,6 @@ match self.__compartment.state.as_str() {
         }
     }
 
-    fn _state_First(&mut self, __e: &WithTransitionFrameEvent) {
-match __e.message.as_str() {
-    "get_state" => { self._s_First_get_state(__e); }
-    "next" => { self._s_First_next(__e); }
-    _ => {}
-}
-    }
-
     fn _state_Second(&mut self, __e: &WithTransitionFrameEvent) {
 match __e.message.as_str() {
     "get_state" => { self._s_Second_get_state(__e); }
@@ -153,13 +145,12 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_First_get_state(&mut self, __e: &WithTransitionFrameEvent) -> String {
-"First".to_string()
-    }
-
-    fn _s_First_next(&mut self, __e: &WithTransitionFrameEvent) {
-println!("Transitioning: First -> Second");
-self.__transition(WithTransitionCompartment::new("Second"));
+    fn _state_First(&mut self, __e: &WithTransitionFrameEvent) {
+match __e.message.as_str() {
+    "get_state" => { self._s_First_get_state(__e); }
+    "next" => { self._s_First_next(__e); }
+    _ => {}
+}
     }
 
     fn _s_Second_next(&mut self, __e: &WithTransitionFrameEvent) {
@@ -169,6 +160,15 @@ self.__transition(WithTransitionCompartment::new("First"));
 
     fn _s_Second_get_state(&mut self, __e: &WithTransitionFrameEvent) -> String {
 "Second".to_string()
+    }
+
+    fn _s_First_next(&mut self, __e: &WithTransitionFrameEvent) {
+println!("Transitioning: First -> Second");
+self.__transition(WithTransitionCompartment::new("Second"));
+    }
+
+    fn _s_First_get_state(&mut self, __e: &WithTransitionFrameEvent) -> String {
+"First".to_string()
     }
 }
 

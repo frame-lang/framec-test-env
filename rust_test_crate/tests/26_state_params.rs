@@ -151,14 +151,6 @@ match self.__compartment.state.as_str() {
         }
     }
 
-    fn _state_Idle(&mut self, __e: &StateParamsFrameEvent) {
-match __e.message.as_str() {
-    "get_value" => { self._s_Idle_get_value(__e); }
-    "start" => { self._s_Idle_start(__e); }
-    _ => {}
-}
-    }
-
     fn _state_Counter(&mut self, __e: &StateParamsFrameEvent) {
 match __e.message.as_str() {
     "$>" => {
@@ -170,23 +162,31 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Idle_start(&mut self, __e: &StateParamsFrameEvent) {
-// For Rust, state params not yet wired up to compartment
-// Just testing basic transition for now
-self.__transition(StateParamsCompartment::new("Counter"));
+    fn _state_Idle(&mut self, __e: &StateParamsFrameEvent) {
+match __e.message.as_str() {
+    "get_value" => { self._s_Idle_get_value(__e); }
+    "start" => { self._s_Idle_start(__e); }
+    _ => {}
+}
     }
 
-    fn _s_Idle_get_value(&mut self, __e: &StateParamsFrameEvent) -> i32 {
-return 0
+    fn _s_Counter_enter(&mut self, __e: &StateParamsFrameEvent) {
+self._sv_count = 42;  // Hardcoded for Rust test
+println!("Counter entered");
     }
 
     fn _s_Counter_get_value(&mut self, __e: &StateParamsFrameEvent) -> i32 {
 return self._sv_count
     }
 
-    fn _s_Counter_enter(&mut self, __e: &StateParamsFrameEvent) {
-self._sv_count = 42;  // Hardcoded for Rust test
-println!("Counter entered");
+    fn _s_Idle_get_value(&mut self, __e: &StateParamsFrameEvent) -> i32 {
+return 0
+    }
+
+    fn _s_Idle_start(&mut self, __e: &StateParamsFrameEvent) {
+// For Rust, state params not yet wired up to compartment
+// Just testing basic transition for now
+self.__transition(StateParamsCompartment::new("Counter"));
     }
 }
 

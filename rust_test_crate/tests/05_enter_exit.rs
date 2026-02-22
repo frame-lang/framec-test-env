@@ -139,16 +139,6 @@ match self.__compartment.state.as_str() {
         }
     }
 
-    fn _state_On(&mut self, __e: &EnterExitFrameEvent) {
-match __e.message.as_str() {
-    "$<" => { self._s_On_exit(__e); }
-    "$>" => { self._s_On_enter(__e); }
-    "get_log" => { self._s_On_get_log(__e); }
-    "toggle" => { self._s_On_toggle(__e); }
-    _ => {}
-}
-    }
-
     fn _state_Off(&mut self, __e: &EnterExitFrameEvent) {
 match __e.message.as_str() {
     "$<" => { self._s_Off_exit(__e); }
@@ -159,22 +149,18 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_On_get_log(&mut self, __e: &EnterExitFrameEvent) -> Vec<String> {
+    fn _state_On(&mut self, __e: &EnterExitFrameEvent) {
+match __e.message.as_str() {
+    "$<" => { self._s_On_exit(__e); }
+    "$>" => { self._s_On_enter(__e); }
+    "get_log" => { self._s_On_get_log(__e); }
+    "toggle" => { self._s_On_toggle(__e); }
+    _ => {}
+}
+    }
+
+    fn _s_Off_get_log(&mut self, __e: &EnterExitFrameEvent) -> Vec<String> {
 self.log.clone()
-    }
-
-    fn _s_On_enter(&mut self, __e: &EnterExitFrameEvent) {
-self.log.push("enter:On".to_string());
-println!("Entered On state");
-    }
-
-    fn _s_On_exit(&mut self, __e: &EnterExitFrameEvent) {
-self.log.push("exit:On".to_string());
-println!("Exiting On state");
-    }
-
-    fn _s_On_toggle(&mut self, __e: &EnterExitFrameEvent) {
-self.__transition(EnterExitCompartment::new("Off"));
     }
 
     fn _s_Off_enter(&mut self, __e: &EnterExitFrameEvent) {
@@ -187,12 +173,26 @@ self.log.push("exit:Off".to_string());
 println!("Exiting Off state");
     }
 
-    fn _s_Off_get_log(&mut self, __e: &EnterExitFrameEvent) -> Vec<String> {
+    fn _s_Off_toggle(&mut self, __e: &EnterExitFrameEvent) {
+self.__transition(EnterExitCompartment::new("On"));
+    }
+
+    fn _s_On_enter(&mut self, __e: &EnterExitFrameEvent) {
+self.log.push("enter:On".to_string());
+println!("Entered On state");
+    }
+
+    fn _s_On_exit(&mut self, __e: &EnterExitFrameEvent) {
+self.log.push("exit:On".to_string());
+println!("Exiting On state");
+    }
+
+    fn _s_On_get_log(&mut self, __e: &EnterExitFrameEvent) -> Vec<String> {
 self.log.clone()
     }
 
-    fn _s_Off_toggle(&mut self, __e: &EnterExitFrameEvent) {
-self.__transition(EnterExitCompartment::new("On"));
+    fn _s_On_toggle(&mut self, __e: &EnterExitFrameEvent) {
+self.__transition(EnterExitCompartment::new("Off"));
     }
 }
 

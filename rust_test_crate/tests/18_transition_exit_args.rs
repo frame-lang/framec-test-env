@@ -174,12 +174,12 @@ return self.count;
 self.count = self.count + 10;
     }
 
-    fn _s_Done_get_count(&mut self, __e: &TransitionExitArgsFrameEvent) -> i32 {
-return self.count;
-    }
-
     fn _s_Done_enter(&mut self, __e: &TransitionExitArgsFrameEvent) {
 self.count = self.count + 100;
+    }
+
+    fn _s_Done_get_count(&mut self, __e: &TransitionExitArgsFrameEvent) -> i32 {
+return self.count;
     }
 }
 

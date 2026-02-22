@@ -113,6 +113,22 @@ class PersistStack:
             __compartment = PersistStackCompartment("Middle", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
 
+    def _state_End(self, __e):
+        if __e._message == "get_depth":
+            self._return_value = self.depth
+            __e._return = self._return_value
+            return
+        elif __e._message == "get_state":
+            self._return_value = "end"
+            __e._return = self._return_value
+            return
+        elif __e._message == "pop_back":
+            self.depth = self.depth - 1
+            self.__compartment = self._state_stack.pop()
+            return
+        elif __e._message == "push_and_go":
+            pass  # can't go further
+
     def _state_Middle(self, __e):
         if __e._message == "get_depth":
             self._return_value = self.depth
@@ -131,22 +147,6 @@ class PersistStack:
             self._state_stack.append(self.__compartment.copy())
             __compartment = PersistStackCompartment("End", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
-
-    def _state_End(self, __e):
-        if __e._message == "get_depth":
-            self._return_value = self.depth
-            __e._return = self._return_value
-            return
-        elif __e._message == "get_state":
-            self._return_value = "end"
-            __e._return = self._return_value
-            return
-        elif __e._message == "pop_back":
-            self.depth = self.depth - 1
-            self.__compartment = self._state_stack.pop()
-            return
-        elif __e._message == "push_and_go":
-            pass  # can't go further
 
     def save_state(self) -> bytes:
         import pickle

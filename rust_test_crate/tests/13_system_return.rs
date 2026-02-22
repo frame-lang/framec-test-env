@@ -162,12 +162,12 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Calculator_add(&mut self, __e: &SystemReturnTestFrameEvent, a: i32, b: i32) -> i32 {
-return a + b
-    }
-
     fn _s_Calculator_multiply(&mut self, __e: &SystemReturnTestFrameEvent, a: i32, b: i32) -> i32 {
 return a * b
+    }
+
+    fn _s_Calculator_add(&mut self, __e: &SystemReturnTestFrameEvent, a: i32, b: i32) -> i32 {
+return a + b
     }
 
     fn _s_Calculator_get_value(&mut self, __e: &SystemReturnTestFrameEvent) -> i32 {

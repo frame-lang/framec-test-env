@@ -153,6 +153,16 @@ match self.__compartment.state.as_str() {
         }
     }
 
+    fn _state_Idle(&mut self, __e: &TransitionPopTestFrameEvent) {
+match __e.message.as_str() {
+    "get_log" => { self._s_Idle_get_log(__e); }
+    "get_state" => { self._s_Idle_get_state(__e); }
+    "process" => { self._s_Idle_process(__e); }
+    "start" => { self._s_Idle_start(__e); }
+    _ => {}
+}
+    }
+
     fn _state_Working(&mut self, __e: &TransitionPopTestFrameEvent) {
 match __e.message.as_str() {
     "get_log" => { self._s_Working_get_log(__e); }
@@ -162,14 +172,22 @@ match __e.message.as_str() {
 }
     }
 
-    fn _state_Idle(&mut self, __e: &TransitionPopTestFrameEvent) {
-match __e.message.as_str() {
-    "get_log" => { self._s_Idle_get_log(__e); }
-    "get_state" => { self._s_Idle_get_state(__e); }
-    "process" => { self._s_Idle_process(__e); }
-    "start" => { self._s_Idle_start(__e); }
-    _ => {}
-}
+    fn _s_Idle_start(&mut self, __e: &TransitionPopTestFrameEvent) {
+self.log.push("idle:start:push".to_string());
+self._state_stack_push();
+self.__transition(TransitionPopTestCompartment::new("Working"));
+    }
+
+    fn _s_Idle_process(&mut self, __e: &TransitionPopTestFrameEvent) {
+self.log.push("idle:process".to_string());
+    }
+
+    fn _s_Idle_get_state(&mut self, __e: &TransitionPopTestFrameEvent) -> String {
+return "Idle".to_string();
+    }
+
+    fn _s_Idle_get_log(&mut self, __e: &TransitionPopTestFrameEvent) -> Vec<String> {
+return self.log.clone();
     }
 
     fn _s_Working_process(&mut self, __e: &TransitionPopTestFrameEvent) {
@@ -186,24 +204,6 @@ return self.log.clone();
 
     fn _s_Working_get_state(&mut self, __e: &TransitionPopTestFrameEvent) -> String {
 return "Working".to_string();
-    }
-
-    fn _s_Idle_process(&mut self, __e: &TransitionPopTestFrameEvent) {
-self.log.push("idle:process".to_string());
-    }
-
-    fn _s_Idle_get_log(&mut self, __e: &TransitionPopTestFrameEvent) -> Vec<String> {
-return self.log.clone();
-    }
-
-    fn _s_Idle_start(&mut self, __e: &TransitionPopTestFrameEvent) {
-self.log.push("idle:start:push".to_string());
-self._state_stack_push();
-self.__transition(TransitionPopTestCompartment::new("Working"));
-    }
-
-    fn _s_Idle_get_state(&mut self, __e: &TransitionPopTestFrameEvent) -> String {
-return "Idle".to_string();
     }
 }
 

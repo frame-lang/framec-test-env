@@ -193,10 +193,6 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Idle_set_value(&mut self, __e: &PersistTestFrameEvent, v: i32) {
-self.value = v;
-    }
-
     fn _s_Idle_go_idle(&mut self, __e: &PersistTestFrameEvent) {
 // Already idle;
     }
@@ -209,20 +205,24 @@ return self.value;
 self.__transition(PersistTestCompartment::new("Active"));
     }
 
+    fn _s_Idle_set_value(&mut self, __e: &PersistTestFrameEvent, v: i32) {
+self.value = v;
+    }
+
     fn _s_Active_get_value(&mut self, __e: &PersistTestFrameEvent) -> i32 {
 return self.value;
     }
 
-    fn _s_Active_set_value(&mut self, __e: &PersistTestFrameEvent, v: i32) {
-self.value = v * 2;
+    fn _s_Active_go_idle(&mut self, __e: &PersistTestFrameEvent) {
+self.__transition(PersistTestCompartment::new("Idle"));
     }
 
     fn _s_Active_go_active(&mut self, __e: &PersistTestFrameEvent) {
 // Already active;
     }
 
-    fn _s_Active_go_idle(&mut self, __e: &PersistTestFrameEvent) {
-self.__transition(PersistTestCompartment::new("Idle"));
+    fn _s_Active_set_value(&mut self, __e: &PersistTestFrameEvent, v: i32) {
+self.value = v * 2;
     }
 
     pub fn save_state(&mut self) -> String {
