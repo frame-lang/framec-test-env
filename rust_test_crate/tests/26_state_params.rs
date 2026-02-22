@@ -180,13 +180,13 @@ self.__transition(StateParamsCompartment::new("Counter"));
 return 0
     }
 
+    fn _s_Counter_get_value(&mut self, __e: &StateParamsFrameEvent) -> i32 {
+return self._sv_count
+    }
+
     fn _s_Counter_enter(&mut self, __e: &StateParamsFrameEvent) {
 self._sv_count = 42;  // Hardcoded for Rust test
 println!("Counter entered");
-    }
-
-    fn _s_Counter_get_value(&mut self, __e: &StateParamsFrameEvent) -> i32 {
-return self._sv_count
     }
 }
 

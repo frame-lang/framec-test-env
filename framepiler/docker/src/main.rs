@@ -176,24 +176,35 @@ impl DockerTestRunner {
 
     /// Find all available test categories
     fn find_all_categories(&self) -> Result<Vec<String>> {
-        let v3_dir = self.shared_env.join("common/test-frames/v3");
-        if !v3_dir.exists() {
-            return Err(anyhow!("V3 test directory not found: {}", v3_dir.display()));
+        let mut categories = Vec::new();
+
+        // V4 PRT main tests (numbered tests like 01_minimal)
+        let v4_prt_dir = self.shared_env.join("common/test-frames/v4/prt");
+        if v4_prt_dir.exists() {
+            categories.push("prt".to_string());
         }
 
-        let mut categories = Vec::new();
-        for entry in fs::read_dir(&v3_dir)? {
-            let entry = entry?;
-            let path = entry.path();
-            if path.is_dir() {
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    // Skip special files and directories
-                    if !name.starts_with('.') && name != "test_simple_docker.frm" {
-                        categories.push(name.to_string());
+        // V4 migrated test categories
+        let v4_migrated_dir = self.shared_env.join("common/test-frames/v4/prt/migrated");
+        if v4_migrated_dir.exists() {
+            for entry in fs::read_dir(&v4_migrated_dir)? {
+                let entry = entry?;
+                let path = entry.path();
+                if path.is_dir() {
+                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                        // Skip special directories
+                        if !name.starts_with('.') && name != "v3_only" && name != "known_issues" {
+                            categories.push(name.to_string());
+                        }
                     }
                 }
             }
         }
+
+        if categories.is_empty() {
+            return Err(anyhow!("No test directories found in V4"));
+        }
+
         categories.sort();
         Ok(categories)
     }
@@ -211,10 +222,10 @@ impl DockerTestRunner {
                 PathBuf::from(file_name)
             } else {
                 self.shared_env
-                    .join("common/test-frames/v3")
+                    .join("common/test-frames/v4/prt")
                     .join(file_name)
             };
-            
+
             if test_file.exists() {
                 let target_lang = self.get_target_language(&test_file);
                 return Ok(vec![(test_file, target_lang)]);
@@ -233,8 +244,19 @@ impl DockerTestRunner {
 
         // Search each category
         for category in categories {
+            // Handle "prt" specially - it's the main V4 PRT tests
+            if category == "prt" {
+                let prt_dir = self.shared_env.join("common/test-frames/v4/prt");
+                if prt_dir.exists() {
+                    let test_files = self.find_test_files_in_directory(&prt_dir, language_filters)?;
+                    all_test_files.extend(test_files);
+                }
+                continue;
+            }
+
+            // Migrated test categories
             let category_path = self.shared_env
-                .join("common/test-frames/v3")
+                .join("common/test-frames/v4/prt/migrated")
                 .join(&category);
 
             // Try positive directory first, then category root
@@ -267,7 +289,16 @@ impl DockerTestRunner {
         for entry in WalkDir::new(dir).max_depth(3) {
             let entry = entry?;
             let path = entry.path();
-            
+
+            // Skip excluded directories
+            let path_str = path.to_string_lossy();
+            if path_str.contains("/v3_only/") ||
+               path_str.contains("/known_issues/") ||
+               path_str.contains("/negative/") ||
+               path_str.contains("/validation_tests/") {
+                continue;
+            }
+
             // Skip directories
             if path.is_dir() {
                 continue;
@@ -275,16 +306,15 @@ impl DockerTestRunner {
 
             let ext = path.extension().and_then(|s| s.to_str());
             
-            // Check for V3 Frame extensions
-            let is_frame_file = ext == Some("frm") || 
-                                path.to_string_lossy().ends_with(".frm_v3") ||
+            // Check for Frame V4 extensions
+            let is_frame_file = ext == Some("frm") ||
                                 ext == Some("fpy") ||  // Python
-                                ext == Some("frts") || // TypeScript  
+                                ext == Some("fts") ||  // TypeScript
                                 ext == Some("frs") ||  // Rust
                                 ext == Some("fc") ||   // C
                                 ext == Some("fcpp") || // C++
-                                ext == Some("frcs") || // C#
-                                ext == Some("fjava");  // Java
+                                ext == Some("fcs") ||  // C#
+                                ext == Some("fjv");    // Java
             
             if is_frame_file {
                 if self.should_include_test(path, language_filters) {
@@ -314,36 +344,33 @@ impl DockerTestRunner {
             _ => return Err(anyhow!("Unsupported language: {}", language)),
         };
 
-        // Handle V3 extensions: .frm, .frm_v3, and language-specific (.fpy, .frts, .frs, etc.)
+        // Handle Frame extensions: .frm and language-specific (.fpy, .fts, .frs, etc.)
         let file_name = test_file.file_name().unwrap().to_string_lossy();
-        let base_name = if file_name.ends_with(".frm_v3") {
-            file_name.strip_suffix(".frm_v3").unwrap().to_string()
-        } else if file_name.ends_with(".frm") {
+        let base_name = if file_name.ends_with(".frm") {
             file_name.strip_suffix(".frm").unwrap().to_string()
         } else if file_name.ends_with(".fpy") {
             file_name.strip_suffix(".fpy").unwrap().to_string()
-        } else if file_name.ends_with(".frts") {
-            file_name.strip_suffix(".frts").unwrap().to_string()
+        } else if file_name.ends_with(".fts") {
+            file_name.strip_suffix(".fts").unwrap().to_string()
         } else if file_name.ends_with(".frs") {
             file_name.strip_suffix(".frs").unwrap().to_string()
         } else if file_name.ends_with(".fc") {
             file_name.strip_suffix(".fc").unwrap().to_string()
         } else if file_name.ends_with(".fcpp") {
             file_name.strip_suffix(".fcpp").unwrap().to_string()
-        } else if file_name.ends_with(".frcs") {
-            file_name.strip_suffix(".frcs").unwrap().to_string()
-        } else if file_name.ends_with(".fjava") {
-            file_name.strip_suffix(".fjava").unwrap().to_string()
+        } else if file_name.ends_with(".fcs") {
+            file_name.strip_suffix(".fcs").unwrap().to_string()
+        } else if file_name.ends_with(".fjv") {
+            file_name.strip_suffix(".fjv").unwrap().to_string()
         } else {
             test_file.file_stem().unwrap().to_string_lossy().to_string()
         };
 
         let output_file = output_dir.join(format!("{}.{}", base_name, ext));
 
-        // Build command with environment variables
+        // Build command - V4 uses direct invocation, not "compile" subcommand
         let mut cmd = Command::new(&self.framec_path);
-        cmd.args(&["compile"])
-            .arg(test_file)
+        cmd.arg(test_file)
             .args(&["-l", language])
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -432,11 +459,40 @@ impl DockerTestRunner {
                 cmd.arg("node").arg(format!("/work/{}", test_name));
             }
             "rust" => {
-                cmd.arg("bash").arg("-c")
-                    .arg(format!(
-                        "cd /work && rustc --edition 2021 {} -o test_binary 2>&1 && ./test_binary 2>&1",
-                        test_name
-                    ));
+                // Check if test needs serde (has @@persist or uses serde)
+                let test_content = fs::read_to_string(test_file).unwrap_or_default();
+                let needs_cargo = test_content.contains("use serde") ||
+                                  test_content.contains("#[derive(Serialize") ||
+                                  test_content.contains("serde_json");
+
+                if needs_cargo {
+                    // Use cargo for tests with dependencies
+                    cmd.arg("bash").arg("-c")
+                        .arg(format!(
+                            r#"cd /work && \
+                            mkdir -p /tmp/rust_test/src && \
+                            cp {} /tmp/rust_test/src/main.rs && \
+                            cat > /tmp/rust_test/Cargo.toml << 'CARGO_EOF'
+[package]
+name = "frame_test"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+serde = {{ version = "1.0", features = ["derive"] }}
+serde_json = "1.0"
+CARGO_EOF
+                            cd /tmp/rust_test && cargo run --release 2>&1"#,
+                            test_name
+                        ));
+                } else {
+                    // Use rustc directly for simple tests
+                    cmd.arg("bash").arg("-c")
+                        .arg(format!(
+                            "cd /work && rustc --edition 2021 {} -o test_binary 2>&1 && ./test_binary 2>&1",
+                            test_name
+                        ));
+                }
             }
             _ => {}
         }

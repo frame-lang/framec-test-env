@@ -179,6 +179,10 @@ match __e.message.as_str() {
 }
     }
 
+    fn _s_Idle_get_log(&mut self, __e: &ForwardEnterFirstFrameEvent) -> Vec<String> {
+return self.log.clone();
+    }
+
     fn _s_Idle_process(&mut self, __e: &ForwardEnterFirstFrameEvent) {
 let mut __compartment = ForwardEnterFirstCompartment::new("Working");
 __compartment.forward_event = Some(__e.clone());
@@ -186,29 +190,25 @@ self.__transition(__compartment);
 return;
     }
 
-    fn _s_Idle_get_log(&mut self, __e: &ForwardEnterFirstFrameEvent) -> Vec<String> {
-return self.log.clone();
-    }
-
     fn _s_Idle_get_counter(&mut self, __e: &ForwardEnterFirstFrameEvent) -> i32 {
 return -1;
-    }
-
-    fn _s_Working_enter(&mut self, __e: &ForwardEnterFirstFrameEvent) {
-self.log.push("Working:enter".to_string());
     }
 
     fn _s_Working_get_log(&mut self, __e: &ForwardEnterFirstFrameEvent) -> Vec<String> {
 return self.log.clone();
     }
 
-    fn _s_Working_get_counter(&mut self, __e: &ForwardEnterFirstFrameEvent) -> i32 {
-return self._sv_counter;
+    fn _s_Working_enter(&mut self, __e: &ForwardEnterFirstFrameEvent) {
+self.log.push("Working:enter".to_string());
     }
 
     fn _s_Working_process(&mut self, __e: &ForwardEnterFirstFrameEvent) {
 self.log.push(format!("Working:process:counter={}", self._sv_counter));
 self._sv_counter = self._sv_counter + 1;
+    }
+
+    fn _s_Working_get_counter(&mut self, __e: &ForwardEnterFirstFrameEvent) -> i32 {
+return self._sv_counter;
     }
 }
 

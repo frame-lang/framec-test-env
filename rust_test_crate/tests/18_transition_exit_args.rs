@@ -161,10 +161,6 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Active_exit(&mut self, __e: &TransitionExitArgsFrameEvent) {
-self.count = self.count + 10;
-    }
-
     fn _s_Active_leave(&mut self, __e: &TransitionExitArgsFrameEvent) {
 self.count = 1;
 self.__transition(TransitionExitArgsCompartment::new("Done"));
@@ -174,12 +170,16 @@ self.__transition(TransitionExitArgsCompartment::new("Done"));
 return self.count;
     }
 
-    fn _s_Done_enter(&mut self, __e: &TransitionExitArgsFrameEvent) {
-self.count = self.count + 100;
+    fn _s_Active_exit(&mut self, __e: &TransitionExitArgsFrameEvent) {
+self.count = self.count + 10;
     }
 
     fn _s_Done_get_count(&mut self, __e: &TransitionExitArgsFrameEvent) -> i32 {
 return self.count;
+    }
+
+    fn _s_Done_enter(&mut self, __e: &TransitionExitArgsFrameEvent) {
+self.count = self.count + 100;
     }
 }
 

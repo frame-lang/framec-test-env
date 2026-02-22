@@ -159,12 +159,12 @@ match self.__compartment.state.as_str() {
         }
     }
 
-    fn _state_Start(&mut self, __e: &PersistStackFrameEvent) {
+    fn _state_Middle(&mut self, __e: &PersistStackFrameEvent) {
 match __e.message.as_str() {
-    "get_depth" => { self._s_Start_get_depth(__e); }
-    "get_state" => { self._s_Start_get_state(__e); }
-    "pop_back" => { self._s_Start_pop_back(__e); }
-    "push_and_go" => { self._s_Start_push_and_go(__e); }
+    "get_depth" => { self._s_Middle_get_depth(__e); }
+    "get_state" => { self._s_Middle_get_state(__e); }
+    "pop_back" => { self._s_Middle_pop_back(__e); }
+    "push_and_go" => { self._s_Middle_push_and_go(__e); }
     _ => {}
 }
     }
@@ -179,54 +179,28 @@ match __e.message.as_str() {
 }
     }
 
-    fn _state_Middle(&mut self, __e: &PersistStackFrameEvent) {
+    fn _state_Start(&mut self, __e: &PersistStackFrameEvent) {
 match __e.message.as_str() {
-    "get_depth" => { self._s_Middle_get_depth(__e); }
-    "get_state" => { self._s_Middle_get_state(__e); }
-    "pop_back" => { self._s_Middle_pop_back(__e); }
-    "push_and_go" => { self._s_Middle_push_and_go(__e); }
+    "get_depth" => { self._s_Start_get_depth(__e); }
+    "get_state" => { self._s_Start_get_state(__e); }
+    "pop_back" => { self._s_Start_pop_back(__e); }
+    "push_and_go" => { self._s_Start_push_and_go(__e); }
     _ => {}
 }
     }
 
-    fn _s_Start_push_and_go(&mut self, __e: &PersistStackFrameEvent) {
-self.depth = self.depth + 1;
-self._state_stack_push();
-self.__transition(PersistStackCompartment::new("Middle"));
-    }
-
-    fn _s_Start_pop_back(&mut self, __e: &PersistStackFrameEvent) {
-// nothing to pop;
-    }
-
-    fn _s_Start_get_state(&mut self, __e: &PersistStackFrameEvent) -> String {
-return String::from("start");
-    }
-
-    fn _s_Start_get_depth(&mut self, __e: &PersistStackFrameEvent) -> i32 {
+    fn _s_Middle_get_depth(&mut self, __e: &PersistStackFrameEvent) -> i32 {
 return self.depth;
     }
 
-    fn _s_End_pop_back(&mut self, __e: &PersistStackFrameEvent) {
+    fn _s_Middle_pop_back(&mut self, __e: &PersistStackFrameEvent) {
 self.depth = self.depth - 1;
 self._state_stack_pop();
 return;
     }
 
-    fn _s_End_get_depth(&mut self, __e: &PersistStackFrameEvent) -> i32 {
-return self.depth;
-    }
-
-    fn _s_End_get_state(&mut self, __e: &PersistStackFrameEvent) -> String {
-return String::from("end");
-    }
-
-    fn _s_End_push_and_go(&mut self, __e: &PersistStackFrameEvent) {
-// can't go further;
-    }
-
-    fn _s_Middle_get_depth(&mut self, __e: &PersistStackFrameEvent) -> i32 {
-return self.depth;
+    fn _s_Middle_get_state(&mut self, __e: &PersistStackFrameEvent) -> String {
+return String::from("middle");
     }
 
     fn _s_Middle_push_and_go(&mut self, __e: &PersistStackFrameEvent) {
@@ -235,14 +209,40 @@ self._state_stack_push();
 self.__transition(PersistStackCompartment::new("End"));
     }
 
-    fn _s_Middle_get_state(&mut self, __e: &PersistStackFrameEvent) -> String {
-return String::from("middle");
+    fn _s_End_get_state(&mut self, __e: &PersistStackFrameEvent) -> String {
+return String::from("end");
     }
 
-    fn _s_Middle_pop_back(&mut self, __e: &PersistStackFrameEvent) {
+    fn _s_End_pop_back(&mut self, __e: &PersistStackFrameEvent) {
 self.depth = self.depth - 1;
 self._state_stack_pop();
 return;
+    }
+
+    fn _s_End_push_and_go(&mut self, __e: &PersistStackFrameEvent) {
+// can't go further;
+    }
+
+    fn _s_End_get_depth(&mut self, __e: &PersistStackFrameEvent) -> i32 {
+return self.depth;
+    }
+
+    fn _s_Start_pop_back(&mut self, __e: &PersistStackFrameEvent) {
+// nothing to pop;
+    }
+
+    fn _s_Start_push_and_go(&mut self, __e: &PersistStackFrameEvent) {
+self.depth = self.depth + 1;
+self._state_stack_push();
+self.__transition(PersistStackCompartment::new("Middle"));
+    }
+
+    fn _s_Start_get_state(&mut self, __e: &PersistStackFrameEvent) -> String {
+return String::from("start");
+    }
+
+    fn _s_Start_get_depth(&mut self, __e: &PersistStackFrameEvent) -> i32 {
+return self.depth;
     }
 
     pub fn save_state(&mut self) -> String {

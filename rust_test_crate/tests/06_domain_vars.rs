@@ -178,23 +178,23 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Counting_set_count(&mut self, __e: &DomainVarsFrameEvent, value: i32) {
-self.count = value;
-println!("{}: set to {}", self.name, self.count);
-    }
-
-    fn _s_Counting_get_count(&mut self, __e: &DomainVarsFrameEvent) -> i32 {
-self.count
-    }
-
     fn _s_Counting_increment(&mut self, __e: &DomainVarsFrameEvent) {
 self.count += 1;
 println!("{}: incremented to {}", self.name, self.count);
     }
 
+    fn _s_Counting_set_count(&mut self, __e: &DomainVarsFrameEvent, value: i32) {
+self.count = value;
+println!("{}: set to {}", self.name, self.count);
+    }
+
     fn _s_Counting_decrement(&mut self, __e: &DomainVarsFrameEvent) {
 self.count -= 1;
 println!("{}: decremented to {}", self.name, self.count);
+    }
+
+    fn _s_Counting_get_count(&mut self, __e: &DomainVarsFrameEvent) -> i32 {
+self.count
     }
 }
 

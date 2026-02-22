@@ -139,14 +139,6 @@ match self.__compartment.state.as_str() {
         }
     }
 
-    fn _state_Working(&mut self, __e: &EventForwardTestFrameEvent) {
-match __e.message.as_str() {
-    "get_log" => { self._s_Working_get_log(__e); }
-    "process" => { self._s_Working_process(__e); }
-    _ => {}
-}
-    }
-
     fn _state_Idle(&mut self, __e: &EventForwardTestFrameEvent) {
 match __e.message.as_str() {
     "get_log" => { self._s_Idle_get_log(__e); }
@@ -155,12 +147,12 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Working_process(&mut self, __e: &EventForwardTestFrameEvent) {
-self.log.push("working:process".to_string());
-    }
-
-    fn _s_Working_get_log(&mut self, __e: &EventForwardTestFrameEvent) -> Vec<String> {
-return self.log.clone();
+    fn _state_Working(&mut self, __e: &EventForwardTestFrameEvent) {
+match __e.message.as_str() {
+    "get_log" => { self._s_Working_get_log(__e); }
+    "process" => { self._s_Working_process(__e); }
+    _ => {}
+}
     }
 
     fn _s_Idle_process(&mut self, __e: &EventForwardTestFrameEvent) {
@@ -174,6 +166,14 @@ self.log.push("idle:process:after".to_string());
     }
 
     fn _s_Idle_get_log(&mut self, __e: &EventForwardTestFrameEvent) -> Vec<String> {
+return self.log.clone();
+    }
+
+    fn _s_Working_process(&mut self, __e: &EventForwardTestFrameEvent) {
+self.log.push("working:process".to_string());
+    }
+
+    fn _s_Working_get_log(&mut self, __e: &EventForwardTestFrameEvent) -> Vec<String> {
 return self.log.clone();
     }
 }

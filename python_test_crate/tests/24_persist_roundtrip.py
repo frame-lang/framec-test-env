@@ -106,28 +106,6 @@ class PersistRoundtrip:
         __e = PersistRoundtripFrameEvent("add_history", {"0": msg})
         self.__kernel(__e)
 
-    def _state_Idle(self, __e):
-        if __e._message == "add_history":
-            msg = __e._parameters["0"]
-            self.history.append("idle:" + msg)
-        elif __e._message == "get_counter":
-            self._return_value = self.counter
-            __e._return = self._return_value
-            return
-        elif __e._message == "get_state":
-            self._return_value = "idle"
-            __e._return = self._return_value
-            return
-        elif __e._message == "go_active":
-            self.history.append("idle->active")
-            __compartment = PersistRoundtripCompartment("Active", parent_compartment=self.__compartment.copy())
-            self.__transition(__compartment)
-        elif __e._message == "go_idle":
-            pass  # already idle
-        elif __e._message == "set_counter":
-            n = __e._parameters["0"]
-            self.counter = n
-
     def _state_Active(self, __e):
         if __e._message == "add_history":
             msg = __e._parameters["0"]
@@ -149,6 +127,28 @@ class PersistRoundtrip:
         elif __e._message == "set_counter":
             n = __e._parameters["0"]
             self.counter = n * 2
+
+    def _state_Idle(self, __e):
+        if __e._message == "add_history":
+            msg = __e._parameters["0"]
+            self.history.append("idle:" + msg)
+        elif __e._message == "get_counter":
+            self._return_value = self.counter
+            __e._return = self._return_value
+            return
+        elif __e._message == "get_state":
+            self._return_value = "idle"
+            __e._return = self._return_value
+            return
+        elif __e._message == "go_active":
+            self.history.append("idle->active")
+            __compartment = PersistRoundtripCompartment("Active", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
+        elif __e._message == "go_idle":
+            pass  # already idle
+        elif __e._message == "set_counter":
+            n = __e._parameters["0"]
+            self.counter = n
 
     def save_state(self) -> bytes:
         import pickle

@@ -166,12 +166,12 @@ self._sv_count = self._sv_count + 1;
 self._sv_count
     }
 
-    fn _s_Counter_get_count(&mut self, __e: &StateVarBasicFrameEvent) -> i32 {
-self._sv_count
-    }
-
     fn _s_Counter_reset(&mut self, __e: &StateVarBasicFrameEvent) {
 self._sv_count = 0;
+    }
+
+    fn _s_Counter_get_count(&mut self, __e: &StateVarBasicFrameEvent) -> i32 {
+self._sv_count
     }
 }
 

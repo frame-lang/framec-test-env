@@ -198,23 +198,18 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Other_restore(&mut self, __e: &StateVarPushPopFrameEvent) {
-self._state_stack_pop();
-return;
+    fn _s_Other_increment(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
+self._sv_other_count = self._sv_other_count + 1;
+self._sv_other_count
     }
 
     fn _s_Other_get_count(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
 self._sv_other_count
     }
 
-    fn _s_Other_increment(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
-self._sv_other_count = self._sv_other_count + 1;
-self._sv_other_count
-    }
-
-    fn _s_Counter_save_and_go(&mut self, __e: &StateVarPushPopFrameEvent) {
-self._state_stack_push();
-self.__transition(StateVarPushPopCompartment::new("Other"));
+    fn _s_Other_restore(&mut self, __e: &StateVarPushPopFrameEvent) {
+self._state_stack_pop();
+return;
     }
 
     fn _s_Counter_get_count(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
@@ -224,6 +219,11 @@ self._sv_count
     fn _s_Counter_increment(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
 self._sv_count = self._sv_count + 1;
 self._sv_count
+    }
+
+    fn _s_Counter_save_and_go(&mut self, __e: &StateVarPushPopFrameEvent) {
+self._state_stack_push();
+self.__transition(StateVarPushPopCompartment::new("Other"));
     }
 }
 

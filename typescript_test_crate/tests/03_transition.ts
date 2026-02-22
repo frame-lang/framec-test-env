@@ -115,18 +115,6 @@ class WithTransition {
         return this._return_value;
     }
 
-    private _state_Second(__e: WithTransitionFrameEvent) {
-        if (__e._message === "get_state") {
-            this._return_value = "Second";
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "next") {
-            console.log("Transitioning: Second -> First");
-            const __compartment = new WithTransitionCompartment("First", this.__compartment.copy());
-            this.__transition(__compartment);
-        }
-    }
-
     private _state_First(__e: WithTransitionFrameEvent) {
         if (__e._message === "get_state") {
             this._return_value = "First";
@@ -135,6 +123,18 @@ class WithTransition {
         } else if (__e._message === "next") {
             console.log("Transitioning: First -> Second");
             const __compartment = new WithTransitionCompartment("Second", this.__compartment.copy());
+            this.__transition(__compartment);
+        }
+    }
+
+    private _state_Second(__e: WithTransitionFrameEvent) {
+        if (__e._message === "get_state") {
+            this._return_value = "Second";
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "next") {
+            console.log("Transitioning: Second -> First");
+            const __compartment = new WithTransitionCompartment("First", this.__compartment.copy());
             this.__transition(__compartment);
         }
     }

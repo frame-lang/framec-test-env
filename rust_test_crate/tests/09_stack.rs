@@ -171,10 +171,6 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Main_get_state(&mut self, __e: &StackOpsFrameEvent) -> String {
-"Main".to_string()
-    }
-
     fn _s_Main_do_work(&mut self, __e: &StackOpsFrameEvent) -> String {
 "Working in Main".to_string()
     }
@@ -183,28 +179,32 @@ match __e.message.as_str() {
 println!("Cannot pop - nothing on stack in Main");
     }
 
+    fn _s_Main_get_state(&mut self, __e: &StackOpsFrameEvent) -> String {
+"Main".to_string()
+    }
+
     fn _s_Main_push_and_go(&mut self, __e: &StackOpsFrameEvent) {
 println!("Pushing Main to stack, going to Sub");
 self._state_stack_push();
 self.__transition(StackOpsCompartment::new("Sub"));
     }
 
-    fn _s_Sub_get_state(&mut self, __e: &StackOpsFrameEvent) -> String {
-"Sub".to_string()
-    }
-
     fn _s_Sub_push_and_go(&mut self, __e: &StackOpsFrameEvent) {
 println!("Already in Sub");
+    }
+
+    fn _s_Sub_do_work(&mut self, __e: &StackOpsFrameEvent) -> String {
+"Working in Sub".to_string()
+    }
+
+    fn _s_Sub_get_state(&mut self, __e: &StackOpsFrameEvent) -> String {
+"Sub".to_string()
     }
 
     fn _s_Sub_pop_back(&mut self, __e: &StackOpsFrameEvent) {
 println!("Popping back to previous state");
 self._state_stack_pop();
 return;
-    }
-
-    fn _s_Sub_do_work(&mut self, __e: &StackOpsFrameEvent) -> String {
-"Working in Sub".to_string()
     }
 }
 

@@ -85,16 +85,6 @@ class WithTransition:
         self.__kernel(__e)
         return self._return_value
 
-    def _state_Second(self, __e):
-        if __e._message == "get_state":
-            self._return_value = "Second"
-            __e._return = self._return_value
-            return
-        elif __e._message == "next":
-            print("Transitioning: Second -> First")
-            __compartment = WithTransitionCompartment("First", parent_compartment=self.__compartment.copy())
-            self.__transition(__compartment)
-
     def _state_First(self, __e):
         if __e._message == "get_state":
             self._return_value = "First"
@@ -103,6 +93,16 @@ class WithTransition:
         elif __e._message == "next":
             print("Transitioning: First -> Second")
             __compartment = WithTransitionCompartment("Second", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
+
+    def _state_Second(self, __e):
+        if __e._message == "get_state":
+            self._return_value = "Second"
+            __e._return = self._return_value
+            return
+        elif __e._message == "next":
+            print("Transitioning: Second -> First")
+            __compartment = WithTransitionCompartment("First", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
 
 

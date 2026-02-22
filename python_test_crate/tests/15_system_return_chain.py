@@ -102,6 +102,15 @@ class SystemReturnChainTest:
             __e._return = self._return_value
             return
 
+    def _state_EnterSetter(self, __e):
+        if __e._message == "$>":
+            # Enter handler sets return value
+            self._return_value = "from_enter"
+        elif __e._message == "get_state":
+            self._return_value = "EnterSetter"
+            __e._return = self._return_value
+            return
+
     def _state_Start(self, __e):
         if __e._message == "<$":
             # Exit handler sets initial value
@@ -116,15 +125,6 @@ class SystemReturnChainTest:
         elif __e._message == "test_exit_then_enter":
             __compartment = SystemReturnChainTestCompartment("BothSet", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
-
-    def _state_EnterSetter(self, __e):
-        if __e._message == "$>":
-            # Enter handler sets return value
-            self._return_value = "from_enter"
-        elif __e._message == "get_state":
-            self._return_value = "EnterSetter"
-            __e._return = self._return_value
-            return
 
 
 def main():

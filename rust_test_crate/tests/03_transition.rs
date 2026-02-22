@@ -153,22 +153,22 @@ match __e.message.as_str() {
 }
     }
 
+    fn _s_First_get_state(&mut self, __e: &WithTransitionFrameEvent) -> String {
+"First".to_string()
+    }
+
     fn _s_First_next(&mut self, __e: &WithTransitionFrameEvent) {
 println!("Transitioning: First -> Second");
 self.__transition(WithTransitionCompartment::new("Second"));
     }
 
-    fn _s_First_get_state(&mut self, __e: &WithTransitionFrameEvent) -> String {
-"First".to_string()
+    fn _s_Second_next(&mut self, __e: &WithTransitionFrameEvent) {
+println!("Transitioning: Second -> First");
+self.__transition(WithTransitionCompartment::new("First"));
     }
 
     fn _s_Second_get_state(&mut self, __e: &WithTransitionFrameEvent) -> String {
 "Second".to_string()
-    }
-
-    fn _s_Second_next(&mut self, __e: &WithTransitionFrameEvent) {
-println!("Transitioning: Second -> First");
-self.__transition(WithTransitionCompartment::new("First"));
     }
 }
 
