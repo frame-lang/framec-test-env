@@ -8,67 +8,106 @@ Frame V4 tests run in parallel Docker containers, one per target language. Each 
 
 ```
 framepiler_test_env/
-├── tests/               # Test source files
-│   ├── common/          # Tests that pass in ALL 3 languages
-│   │   ├── primary/     # 32 primary reference tests
-│   │   ├── operators/   # Arithmetic, comparison, logical
-│   │   ├── control_flow/# If/else, while, try/catch
-│   │   ├── core/        # Core language features
-│   │   └── ...
-│   ├── python/          # Python-specific tests
-│   ├── typescript/      # TypeScript-specific tests
-│   └── rust/            # Rust-specific tests
-├── output/              # Generated code (build artifacts)
-│   ├── python/tests/
-│   ├── typescript/tests/
-│   └── rust/tests/
-├── docker/              # Docker test runners
-└── docs/                # This documentation
+├── tests/                   # Test source files
+│   ├── common/              # Tests that pass in ALL 3 languages
+│   │   ├── primary/         # 32 primary reference tests
+│   │   ├── operators/       # Arithmetic, comparison, logical
+│   │   ├── control_flow/    # If/else, while, try/catch
+│   │   ├── core/            # Core language features
+│   │   ├── capabilities/    # System return, persistence
+│   │   ├── data_types/      # Lists, dicts, basic types
+│   │   ├── exec_smoke/      # Execution smoke tests
+│   │   ├── interfaces/      # Interface method tests
+│   │   ├── scoping/         # Function scope, shadowing
+│   │   ├── systems/         # State transitions, HSM, forwards
+│   │   └── validator/       # Terminal transitions, stack ops
+│   ├── python/              # Python-specific tests (.fpy)
+│   ├── typescript/          # TypeScript-specific tests (.fts)
+│   └── rust/                # Rust-specific tests (.frs)
+├── output/                  # Generated code (build artifacts)
+│   ├── python/tests/        # Compiled Python tests
+│   ├── typescript/tests/    # Compiled TypeScript tests
+│   └── rust/tests/          # Compiled Rust tests
+├── docker/                  # Docker test infrastructure
+│   ├── docker-compose.yml   # Main orchestration
+│   ├── python/              # Python container config
+│   ├── typescript/          # TypeScript container config
+│   └── rust/                # Rust container config
+├── bug/                     # Bug tracking system
+│   ├── bugs/                # Bug files
+│   ├── releases/            # Historical framec binaries
+│   └── artifacts/           # Reproduction artifacts
+├── docs/                    # This documentation
+└── scripts/                 # Utility scripts
 ```
 
 ## File Extensions
 
-| Extension | Language   | Container        |
-|-----------|------------|------------------|
-| `.fpy`    | Python     | python-runner    |
-| `.fts`    | TypeScript | typescript-runner|
-| `.frs`    | Rust       | rust-runner      |
+| Extension | Language   | Container          |
+|-----------|------------|--------------------|
+| `.fpy`    | Python     | frame-python-runner|
+| `.fts`    | TypeScript | frame-typescript-runner|
+| `.frs`    | Rust       | frame-rust-runner  |
+
+## Running Tests
+
+### Docker (Recommended)
+```bash
+cd framepiler_test_env
+docker compose -f docker/docker-compose.yml up --build
+```
+
+### Local - Primary Reference Tests
+```bash
+cd tests/common/primary
+./run_tests.sh
+```
+
+### Local - All Tests
+```bash
+cd tests
+./run_all_tests.sh
+```
+
+## Test Counts (2025-02-22)
+
+| Language   | Tests | Status |
+|------------|-------|--------|
+| Python     | 147   | 100%   |
+| TypeScript | 127   | 100%   |
+| Rust       | 127   | 100%   |
+| **Total**  | **401** | **100%** |
 
 ## Container Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                         Host System                              │
-│                                                                  │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐              │
-│  │   Python    │  │ TypeScript  │  │    Rust     │              │
-│  │  Container  │  │  Container  │  │  Container  │              │
-│  │             │  │             │  │             │              │
-│  │ 1. Find     │  │ 1. Find     │  │ 1. Find     │              │
-│  │    *.fpy    │  │    *.fts    │  │    *.frs    │              │
-│  │ 2. Compile  │  │ 2. Compile  │  │ 2. Compile  │              │
-│  │ 3. Run      │  │ 3. Run      │  │ 3. Run      │              │
-│  │ 4. TAP out  │  │ 4. TAP out  │  │ 4. TAP out  │              │
-│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘              │
-│         │                │                │                      │
-│         └────────────────┼────────────────┘                      │
-│                          │                                       │
-│                          ▼                                       │
-│              ┌───────────────────────┐                          │
-│              │   Shared Volume       │                          │
-│              │   tests/     │                          │
-│              └───────────────────────┘                          │
-│                          │                                       │
-│                          ▼                                       │
-│              ┌───────────────────────┐                          │
-│              │   TAP Aggregator      │                          │
-│              │   (merge 3 streams)   │                          │
-│              └───────────────────────┘                          │
-│                          │                                       │
-│                          ▼                                       │
-│              ┌───────────────────────┐                          │
-│              │   Final Report        │                          │
-│              └───────────────────────┘                          │
+│                         Host System                             │
+│                                                                 │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐             │
+│  │   Python    │  │ TypeScript  │  │    Rust     │             │
+│  │  Container  │  │  Container  │  │  Container  │             │
+│  │             │  │             │  │             │             │
+│  │ 1. Find     │  │ 1. Find     │  │ 1. Find     │             │
+│  │    *.fpy    │  │    *.fts    │  │    *.frs    │             │
+│  │ 2. Compile  │  │ 2. Compile  │  │ 2. Compile  │             │
+│  │ 3. Run      │  │ 3. Run      │  │ 3. Run      │             │
+│  │ 4. TAP out  │  │ 4. TAP out  │  │ 4. TAP out  │             │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘             │
+│         │                │                │                     │
+│         └────────────────┼────────────────┘                     │
+│                          │                                      │
+│                          ▼                                      │
+│              ┌───────────────────────┐                         │
+│              │   Shared Volume       │                         │
+│              │   tests/ (read-only)  │                         │
+│              └───────────────────────┘                         │
+│                          │                                      │
+│                          ▼                                      │
+│              ┌───────────────────────┐                         │
+│              │   TAP Output          │                         │
+│              │   (stdout per runner) │                         │
+│              └───────────────────────┘                         │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -96,94 +135,45 @@ not ok 3 - switch state after turnOff
 | `ok N` | Test N passed |
 | `not ok N` | Test N failed |
 | `# comment` | Diagnostic info |
-| `---` / `...` | YAML block for structured diagnostics |
 | `# SKIP` | Test skipped |
 | `# TODO` | Test expected to fail |
 
-### Example Test Output
-
-```tap
-TAP version 14
-1..2
-ok 1 - arithmetic addition
-ok 2 - arithmetic subtraction
-```
-
-## Container Isolation
-
-All temporary files stay inside the container. The host remains clean.
-
-**Inside Container (ephemeral):**
-- `/tmp/out/` - compiled output from framec
-- Cargo target directories
-- node_modules (baked into image)
-- Any logs or intermediate files
-
-**Mounted Read-Only from Host:**
-- `tests/` - source test files only
-
-**Output to Host:**
-- TAP stream via stdout (captured by docker-compose)
-
-When containers stop, all compilation artifacts disappear. Only the TAP output is retained.
-
 ## Container Workflow
-
-Each container performs these steps:
 
 ### 1. Discovery
 ```bash
-# Find tests for this language
 find /tests/common /tests/<language> -name "*.<ext>"
 ```
 
 ### 2. Compilation
 ```bash
-# Compile Frame source to target language
 framec compile -l <language> -o /tmp/out <test_file>
 ```
 
 ### 3. Execution
 ```bash
-# Run compiled test
 python3 /tmp/out/test.py        # Python
 npx ts-node /tmp/out/test.ts    # TypeScript
 cargo run --bin test            # Rust
 ```
 
 ### 4. Output
-Test subprocess emits TAP to stdout. Container streams it through.
+Test emits TAP to stdout. Container streams it through.
 
-## Parallelism
+## Container Isolation
 
-All three containers run simultaneously:
+**Inside Container (ephemeral):**
+- `/tmp/out/` - compiled output from framec
+- Cargo target directories
+- node_modules (baked into image)
 
-```bash
-docker-compose up
-```
+**Mounted Read-Only from Host:**
+- `tests/` - source test files only
 
-Each container:
-- Mounts `tests/` read-only
-- Has framec binary available
-- Has language runtime installed
-- Outputs TAP stream to stdout
+**Output to Host:**
+- TAP stream via stdout
 
-## Result Aggregation
-
-TAP streams from all containers are merged using `tap-merge` or equivalent:
-
-```bash
-docker-compose up | tap-merge | tap-summary
-```
-
-Or capture individually:
-
-```bash
-docker logs python-runner > python.tap
-docker logs typescript-runner > typescript.tap
-docker logs rust-runner > rust.tap
-tap-merge *.tap > combined.tap
-```
+When containers stop, all compilation artifacts disappear.
 
 ## Test File Structure
 
@@ -191,9 +181,12 @@ Each test file is a complete, standalone program:
 
 ```python
 # example.fpy
-@@target python_3
+@@target python
 
 @@system Lamp {
+    interface:
+        turnOn()
+        turnOff()
     machine:
         $Off {
             turnOn() { -> $On }
@@ -203,38 +196,28 @@ Each test file is a complete, standalone program:
         }
 }
 
-# TAP output
-def main():
-    lamp = Lamp()
+if __name__ == "__main__":
     print("TAP version 14")
     print("1..2")
-
-    # Test 1
-    if lamp.state == "Off":
-        print("ok 1 - initial state is Off")
-    else:
-        print("not ok 1 - initial state is Off")
-
-    # Test 2
+    lamp = Lamp()
+    print("ok 1 - initial state" if lamp._state == "_sOff" else "not ok 1")
     lamp.turnOn()
-    if lamp.state == "On":
-        print("ok 2 - turnOn transitions to On")
-    else:
-        print("not ok 2 - turnOn transitions to On")
-
-if __name__ == "__main__":
-    main()
+    print("ok 2 - after turnOn" if lamp._state == "_sOn" else "not ok 2")
 ```
 
 ## Adding New Tests
 
-1. Create test file with appropriate extension:
-   - `common/<category>/test_name.fpy` + `.fts` + `.frs` for universal tests
-   - `<language>/<category>/test_name.<ext>` for language-specific tests
+1. **Universal tests** (pass in all 3 languages):
+   - Add to `tests/common/<category>/`
+   - Create all 3 extensions: `.fpy`, `.fts`, `.frs`
 
-2. Test must emit valid TAP to stdout
+2. **Language-specific tests**:
+   - Add to `tests/<language>/<category>/`
+   - Use appropriate extension
 
-3. Test will be discovered and run automatically on next container execution
+3. Test must emit valid TAP to stdout
+
+4. Test will be discovered automatically on next run
 
 ## CI Integration
 
@@ -245,29 +228,22 @@ TAP is widely supported:
 | GitHub Actions | `tap-xunit` converts to JUnit XML |
 | Jenkins | TAP Plugin |
 | GitLab CI | Custom parser or JUnit conversion |
-| CircleCI | JUnit conversion |
 
 Example GitHub Actions:
 
 ```yaml
 - name: Run Frame V4 Tests
-  run: docker-compose up | tee results.tap
+  run: docker compose -f docker/docker-compose.yml up | tee results.tap
 
-- name: Convert TAP to JUnit
-  run: cat results.tap | tap-xunit > results.xml
-
-- name: Publish Results
-  uses: mikepenz/action-junit-report@v3
-  with:
-    report_paths: results.xml
+- name: Check Results
+  run: grep -q "not ok" results.tap && exit 1 || exit 0
 ```
 
 ## Dependencies
 
 ### Host
 - Docker
-- docker-compose
-- tap-merge (optional, for aggregation)
+- docker-compose (or `docker compose`)
 
 ### Python Container
 - Python 3.x
@@ -275,10 +251,19 @@ Example GitHub Actions:
 
 ### TypeScript Container
 - Node.js
-- npx / ts-node
+- ts-node
 - framec binary
 
 ### Rust Container
 - Rust toolchain (rustc, cargo)
 - framec binary
 - serde (for persistence tests)
+
+## Bug Tracking
+
+The `bug/` directory contains:
+- `bugs/` - Individual bug files with metadata
+- `releases/` - Historical framec binaries for regression testing
+- `artifacts/` - Reproduction artifacts
+
+See `bug/README.md` for the tracking process.

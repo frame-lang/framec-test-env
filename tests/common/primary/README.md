@@ -1,90 +1,64 @@
-# V4 PRT Test Suite
+# V4 Primary Reference Tests
 
-Progressive tests for validating V4 codegen across Python, Rust, and TypeScript.
+32 progressive tests validating V4 codegen across Python, TypeScript, and Rust.
 
 ## Test Sequence
 
-| # | Test | Validates | Task |
-|---|------|-----------|------|
-| 01 | minimal | Basic pipeline - compiles without error | #8 |
-| 02 | interface | Interface method generation | #9 |
-| 03 | transition | Handler + transition expansion | #10,11,12 |
-| 04 | native_code | Native code preservation in handlers | #10,11,12 |
-| 05 | enter_exit | Lifecycle handlers ($> and $<) | #10,11,12 |
-| 06 | domain_vars | Domain variable initialization | #10,11,12 |
-| 07 | params | Parameters to handlers | #10,11,12 |
-| 08 | hsm | HSM parent forwarding (=> $^) | #10,11,12 |
-| 09 | stack | Stack push/pop ($$[+]/$$[-]) | #10,11,12 |
+| # | Test | Validates |
+|---|------|-----------|
+| 01 | minimal | Basic pipeline - compiles without error |
+| 02 | interface | Interface method generation |
+| 03 | transition | Handler + transition expansion |
+| 04 | native_code | Native code preservation in handlers |
+| 05 | enter_exit | Lifecycle handlers ($> and $<) |
+| 06 | domain_vars | Domain variable initialization |
+| 07 | params | Parameters to handlers |
+| 08 | hsm | HSM parent forwarding (=> $^) |
+| 09 | stack | Stack push/pop ($$[+]/$$[-]) |
+| 10-12 | state_var_* | State variable preservation |
+| 13-16 | system_return_* | System return semantics |
+| 17-18 | transition_*_args | Enter/exit argument passing |
+| 19 | transition_forward | Forward transitions (-> =>) |
+| 20 | transition_pop | Pop transitions (-> $$[-]) |
+| 21-22 | actions/operations | Action and operation blocks |
+| 23-25 | persist_* | Serialization (@@persist) |
+| 26 | state_params | State parameters ($State(args)) |
+| 29 | forward_enter_first | Enter before forwarded event |
+| 30 | hsm_default_forward | Default state-level forward (=> $^) |
+| 31-34 | doc_* | Documentation examples |
 
 ## Running Tests
 
-### Compile All Languages
-
+### Via Script (Recommended)
 ```bash
-# Set up
-export TEST_DIR=/Users/marktruluck/projects/frame_transpiler/framepiler_test_env/common/test-frames/v4/prt
-export FRAMEC=/Users/marktruluck/projects/frame_transpiler/target/release/framec
-
-# Run for each test
-for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack; do
-    echo "=== Testing $test ==="
-
-    # Python
-    FRAME_USE_V4=1 $FRAMEC $TEST_DIR/${test}.frm -l python_3 -o /tmp/${test}.py
-    python3 -m py_compile /tmp/${test}.py && echo "  Python: SYNTAX OK" || echo "  Python: SYNTAX FAIL"
-
-    # TypeScript
-    FRAME_USE_V4=1 $FRAMEC $TEST_DIR/${test}.frm -l typescript -o /tmp/${test}.ts
-    npx tsc --noEmit /tmp/${test}.ts 2>/dev/null && echo "  TypeScript: SYNTAX OK" || echo "  TypeScript: SYNTAX FAIL"
-
-    # Rust
-    FRAME_USE_V4=1 $FRAMEC $TEST_DIR/${test}.frm -l rust -o /tmp/${test}.rs
-    rustc --emit=metadata /tmp/${test}.rs 2>/dev/null && echo "  Rust: SYNTAX OK" || echo "  Rust: SYNTAX FAIL"
-done
+./run_tests.sh
 ```
 
-### Validate Individual Test
-
+### Via Docker
 ```bash
-# Python
-FRAME_USE_V4=1 $FRAMEC 03_transition.frm -l python_3 -o /tmp/test.py
-python3 -c "
-from test import WithTransition
-t = WithTransition()
-t.next()  # Should print 'Going to Second'
-t.next()  # Should print 'Going to First'
-"
-
-# TypeScript
-FRAME_USE_V4=1 $FRAMEC 03_transition.frm -l typescript -o /tmp/test.ts
-npx ts-node -e "
-import { WithTransition } from '/tmp/test';
-const t = new WithTransition();
-t.next();  // Should print 'Going to Second'
-t.next();  // Should print 'Going to First'
-"
-
-# Rust
-FRAME_USE_V4=1 $FRAMEC 03_transition.frm -l rust -o /tmp/test.rs
-# Compile and run (requires main function wrapper)
+cd ../../..  # framepiler_test_env/
+docker compose -f docker/docker-compose.yml up --build
 ```
 
-## Expected Output Structure
+## File Extensions
 
-All three languages should produce equivalent structures:
+Each test has 3 versions:
+- `XX_test_name.fpy` - Python
+- `XX_test_name.fts` - TypeScript
+- `XX_test_name.frs` - Rust
 
-### Class/Struct
-- State tracking: `_state`, `_state_stack`, `_state_context`
-- Constructor initializes to first state
+## Output
 
-### Methods
-- **Interface methods** (public): `greet()`, `next()`, etc.
-- **Handler methods** (private): `_s_Ready_greet()`, `_s_First_next()`, etc.
-- **Lifecycle handlers**: `_s_Off_enter()`, `_s_Off_exit()`
-- **Core machinery**: `_transition()`, `_dispatch_event()`, `_enter()`, `_exit()`
+Tests emit TAP format:
+```tap
+TAP version 14
+1..2
+ok 1 - initial state is correct
+ok 2 - transition works
+```
 
 ## Pass Criteria
 
-1. **Syntax Valid**: Generated code passes language syntax check
-2. **Runnable**: Can instantiate class and call interface methods
-3. **Correct Behavior**: Output matches expected behavior
+1. **Compiles**: Generated code passes language syntax check
+2. **Runs**: Can instantiate class and call interface methods
+3. **Passes**: Output contains "PASS" or all TAP tests pass
