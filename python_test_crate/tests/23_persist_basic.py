@@ -95,20 +95,6 @@ class PersistTest:
         __e = PersistTestFrameEvent("go_idle", None)
         self.__kernel(__e)
 
-    def _state_Active(self, __e):
-        if __e._message == "get_value":
-            self._return_value = self.value
-            __e._return = self._return_value
-            return
-        elif __e._message == "go_active":
-            pass  # Already active
-        elif __e._message == "go_idle":
-            __compartment = PersistTestCompartment("Idle", parent_compartment=self.__compartment.copy())
-            self.__transition(__compartment)
-        elif __e._message == "set_value":
-            v = __e._parameters["0"]
-            self.value = v * 2
-
     def _state_Idle(self, __e):
         if __e._message == "get_value":
             self._return_value = self.value
@@ -122,6 +108,20 @@ class PersistTest:
         elif __e._message == "set_value":
             v = __e._parameters["0"]
             self.value = v
+
+    def _state_Active(self, __e):
+        if __e._message == "get_value":
+            self._return_value = self.value
+            __e._return = self._return_value
+            return
+        elif __e._message == "go_active":
+            pass  # Already active
+        elif __e._message == "go_idle":
+            __compartment = PersistTestCompartment("Idle", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
+        elif __e._message == "set_value":
+            v = __e._parameters["0"]
+            self.value = v * 2
 
     def save_state(self) -> bytes:
         import pickle

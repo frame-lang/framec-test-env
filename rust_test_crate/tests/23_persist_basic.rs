@@ -175,6 +175,15 @@ let __e = PersistTestFrameEvent::new("go_idle");
 self.__kernel(__e);
     }
 
+    fn _state_Active(&mut self, __e: &PersistTestFrameEvent) {
+match __e.message.as_str() {
+    "get_value" => { self._s_Active_get_value(__e); }
+    "go_active" => { self._s_Active_go_active(__e); }
+    "go_idle" => { self._s_Active_go_idle(__e); }
+    _ => {}
+}
+    }
+
     fn _state_Idle(&mut self, __e: &PersistTestFrameEvent) {
 match __e.message.as_str() {
     "get_value" => { self._s_Idle_get_value(__e); }
@@ -184,13 +193,20 @@ match __e.message.as_str() {
 }
     }
 
-    fn _state_Active(&mut self, __e: &PersistTestFrameEvent) {
-match __e.message.as_str() {
-    "get_value" => { self._s_Active_get_value(__e); }
-    "go_active" => { self._s_Active_go_active(__e); }
-    "go_idle" => { self._s_Active_go_idle(__e); }
-    _ => {}
-}
+    fn _s_Active_set_value(&mut self, __e: &PersistTestFrameEvent, v: i32) {
+self.value = v * 2;
+    }
+
+    fn _s_Active_go_idle(&mut self, __e: &PersistTestFrameEvent) {
+self.__transition(PersistTestCompartment::new("Idle"));
+    }
+
+    fn _s_Active_go_active(&mut self, __e: &PersistTestFrameEvent) {
+// Already active;
+    }
+
+    fn _s_Active_get_value(&mut self, __e: &PersistTestFrameEvent) -> i32 {
+return self.value;
     }
 
     fn _s_Idle_go_idle(&mut self, __e: &PersistTestFrameEvent) {
@@ -207,22 +223,6 @@ self.__transition(PersistTestCompartment::new("Active"));
 
     fn _s_Idle_set_value(&mut self, __e: &PersistTestFrameEvent, v: i32) {
 self.value = v;
-    }
-
-    fn _s_Active_get_value(&mut self, __e: &PersistTestFrameEvent) -> i32 {
-return self.value;
-    }
-
-    fn _s_Active_go_idle(&mut self, __e: &PersistTestFrameEvent) {
-self.__transition(PersistTestCompartment::new("Idle"));
-    }
-
-    fn _s_Active_go_active(&mut self, __e: &PersistTestFrameEvent) {
-// Already active;
-    }
-
-    fn _s_Active_set_value(&mut self, __e: &PersistTestFrameEvent, v: i32) {
-self.value = v * 2;
     }
 
     pub fn save_state(&mut self) -> String {

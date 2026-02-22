@@ -122,12 +122,11 @@ class HSMForward {
         return this._return_value;
     }
 
-    private _state_Child(__e: HSMForwardFrameEvent) {
+    private _state_Parent(__e: HSMForwardFrameEvent) {
         if (__e._message === "event_a") {
-            this.log.push("Child:event_a");
+            this.log.push("Parent:event_a");
         } else if (__e._message === "event_b") {
-            this.log.push("Child:event_b_forward");
-            this._state_Parent(__e);
+            this.log.push("Parent:event_b");
         } else if (__e._message === "get_log") {
             this._return_value = this.log;
             __e._return = this._return_value;
@@ -135,11 +134,12 @@ class HSMForward {
         }
     }
 
-    private _state_Parent(__e: HSMForwardFrameEvent) {
+    private _state_Child(__e: HSMForwardFrameEvent) {
         if (__e._message === "event_a") {
-            this.log.push("Parent:event_a");
+            this.log.push("Child:event_a");
         } else if (__e._message === "event_b") {
-            this.log.push("Parent:event_b");
+            this.log.push("Child:event_b_forward");
+            this._state_Parent(__e);
         } else if (__e._message === "get_log") {
             this._return_value = this.log;
             __e._return = this._return_value;

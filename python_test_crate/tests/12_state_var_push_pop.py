@@ -95,22 +95,6 @@ class StateVarPushPop:
         __e = StateVarPushPopFrameEvent("restore", None)
         self.__kernel(__e)
 
-    def _state_Other(self, __e):
-        if __e._message == "$>":
-            self.__compartment.state_vars["other_count"] = 100
-        elif __e._message == "get_count":
-            self._return_value = self.__compartment.state_vars["other_count"]
-            __e._return = self._return_value
-            return
-        elif __e._message == "increment":
-            self.__compartment.state_vars["other_count"] = self.__compartment.state_vars["other_count"] + 1
-            self._return_value = self.__compartment.state_vars["other_count"]
-            __e._return = self._return_value
-            return
-        elif __e._message == "restore":
-            self.__compartment = self._state_stack.pop()
-            return
-
     def _state_Counter(self, __e):
         if __e._message == "$>":
             self.__compartment.state_vars["count"] = 0
@@ -127,6 +111,22 @@ class StateVarPushPop:
             self._state_stack.append(self.__compartment.copy())
             __compartment = StateVarPushPopCompartment("Other", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
+
+    def _state_Other(self, __e):
+        if __e._message == "$>":
+            self.__compartment.state_vars["other_count"] = 100
+        elif __e._message == "get_count":
+            self._return_value = self.__compartment.state_vars["other_count"]
+            __e._return = self._return_value
+            return
+        elif __e._message == "increment":
+            self.__compartment.state_vars["other_count"] = self.__compartment.state_vars["other_count"] + 1
+            self._return_value = self.__compartment.state_vars["other_count"]
+            __e._return = self._return_value
+            return
+        elif __e._message == "restore":
+            self.__compartment = self._state_stack.pop()
+            return
 
 
 def main():

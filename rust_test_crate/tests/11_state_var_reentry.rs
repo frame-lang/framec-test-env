@@ -160,15 +160,6 @@ let __e = StateVarReentryFrameEvent::new("come_back");
 self.__kernel(__e);
     }
 
-    fn _state_Other(&mut self, __e: &StateVarReentryFrameEvent) {
-match __e.message.as_str() {
-    "come_back" => { self._s_Other_come_back(__e); }
-    "get_count" => { self._s_Other_get_count(__e); }
-    "increment" => { self._s_Other_increment(__e); }
-    _ => {}
-}
-    }
-
     fn _state_Counter(&mut self, __e: &StateVarReentryFrameEvent) {
 match __e.message.as_str() {
     "get_count" => { self._s_Counter_get_count(__e); }
@@ -181,20 +172,17 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Other_increment(&mut self, __e: &StateVarReentryFrameEvent) -> i32 {
--1
+    fn _state_Other(&mut self, __e: &StateVarReentryFrameEvent) {
+match __e.message.as_str() {
+    "come_back" => { self._s_Other_come_back(__e); }
+    "get_count" => { self._s_Other_get_count(__e); }
+    "increment" => { self._s_Other_increment(__e); }
+    _ => {}
+}
     }
 
-    fn _s_Other_come_back(&mut self, __e: &StateVarReentryFrameEvent) {
-self.__transition(StateVarReentryCompartment::new("Counter"));
-    }
-
-    fn _s_Other_get_count(&mut self, __e: &StateVarReentryFrameEvent) -> i32 {
--1
-    }
-
-    fn _s_Counter_go_other(&mut self, __e: &StateVarReentryFrameEvent) {
-self.__transition(StateVarReentryCompartment::new("Other"));
+    fn _s_Counter_get_count(&mut self, __e: &StateVarReentryFrameEvent) -> i32 {
+self._sv_count
     }
 
     fn _s_Counter_increment(&mut self, __e: &StateVarReentryFrameEvent) -> i32 {
@@ -202,8 +190,20 @@ self._sv_count = self._sv_count + 1;
 self._sv_count
     }
 
-    fn _s_Counter_get_count(&mut self, __e: &StateVarReentryFrameEvent) -> i32 {
-self._sv_count
+    fn _s_Counter_go_other(&mut self, __e: &StateVarReentryFrameEvent) {
+self.__transition(StateVarReentryCompartment::new("Other"));
+    }
+
+    fn _s_Other_come_back(&mut self, __e: &StateVarReentryFrameEvent) {
+self.__transition(StateVarReentryCompartment::new("Counter"));
+    }
+
+    fn _s_Other_increment(&mut self, __e: &StateVarReentryFrameEvent) -> i32 {
+-1
+    }
+
+    fn _s_Other_get_count(&mut self, __e: &StateVarReentryFrameEvent) -> i32 {
+-1
     }
 }
 

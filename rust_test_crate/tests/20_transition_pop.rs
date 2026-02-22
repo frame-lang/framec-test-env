@@ -172,6 +172,10 @@ match __e.message.as_str() {
 }
     }
 
+    fn _s_Idle_get_log(&mut self, __e: &TransitionPopTestFrameEvent) -> Vec<String> {
+return self.log.clone();
+    }
+
     fn _s_Idle_start(&mut self, __e: &TransitionPopTestFrameEvent) {
 self.log.push("idle:start:push".to_string());
 self._state_stack_push();
@@ -186,10 +190,6 @@ self.log.push("idle:process".to_string());
 return "Idle".to_string();
     }
 
-    fn _s_Idle_get_log(&mut self, __e: &TransitionPopTestFrameEvent) -> Vec<String> {
-return self.log.clone();
-    }
-
     fn _s_Working_process(&mut self, __e: &TransitionPopTestFrameEvent) {
 self.log.push("working:process:before_pop".to_string());
 self._state_stack_pop();
@@ -198,12 +198,12 @@ return;
 self.log.push("working:process:after_pop".to_string());
     }
 
-    fn _s_Working_get_log(&mut self, __e: &TransitionPopTestFrameEvent) -> Vec<String> {
-return self.log.clone();
-    }
-
     fn _s_Working_get_state(&mut self, __e: &TransitionPopTestFrameEvent) -> String {
 return "Working".to_string();
+    }
+
+    fn _s_Working_get_log(&mut self, __e: &TransitionPopTestFrameEvent) -> Vec<String> {
+return self.log.clone();
     }
 }
 

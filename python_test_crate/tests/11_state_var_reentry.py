@@ -95,19 +95,6 @@ class StateVarReentry:
         __e = StateVarReentryFrameEvent("come_back", None)
         self.__kernel(__e)
 
-    def _state_Other(self, __e):
-        if __e._message == "come_back":
-            __compartment = StateVarReentryCompartment("Counter", parent_compartment=self.__compartment.copy())
-            self.__transition(__compartment)
-        elif __e._message == "get_count":
-            self._return_value = -1
-            __e._return = self._return_value
-            return
-        elif __e._message == "increment":
-            self._return_value = -1
-            __e._return = self._return_value
-            return
-
     def _state_Counter(self, __e):
         if __e._message == "$>":
             self.__compartment.state_vars["count"] = 0
@@ -121,6 +108,19 @@ class StateVarReentry:
         elif __e._message == "increment":
             self.__compartment.state_vars["count"] = self.__compartment.state_vars["count"] + 1
             self._return_value = self.__compartment.state_vars["count"]
+            __e._return = self._return_value
+            return
+
+    def _state_Other(self, __e):
+        if __e._message == "come_back":
+            __compartment = StateVarReentryCompartment("Counter", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
+        elif __e._message == "get_count":
+            self._return_value = -1
+            __e._return = self._return_value
+            return
+        elif __e._message == "increment":
+            self._return_value = -1
             __e._return = self._return_value
             return
 

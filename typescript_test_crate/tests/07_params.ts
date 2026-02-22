@@ -129,29 +129,6 @@ class WithParams {
         return this._return_value;
     }
 
-    private _state_Idle(__e: WithParamsFrameEvent) {
-        if (__e._message === "add") {
-            const value = __e._parameters?.["0"];
-            console.log("Cannot add in Idle state");
-        } else if (__e._message === "get_total") {
-            this._return_value = this.total;
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "multiply") {
-            const a = __e._parameters?.["0"];
-            const b = __e._parameters?.["1"];
-            this._return_value = 0;
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "start") {
-            const initial = __e._parameters?.["0"];
-            this.total = initial;
-            console.log(`Started with initial value: ${initial}`);
-            const __compartment = new WithParamsCompartment("Running", this.__compartment.copy());
-            this.__transition(__compartment);
-        }
-    }
-
     private _state_Running(__e: WithParamsFrameEvent) {
         if (__e._message === "add") {
             const value = __e._parameters?.["0"];
@@ -173,6 +150,29 @@ class WithParams {
         } else if (__e._message === "start") {
             const initial = __e._parameters?.["0"];
             console.log("Already running");
+        }
+    }
+
+    private _state_Idle(__e: WithParamsFrameEvent) {
+        if (__e._message === "add") {
+            const value = __e._parameters?.["0"];
+            console.log("Cannot add in Idle state");
+        } else if (__e._message === "get_total") {
+            this._return_value = this.total;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "multiply") {
+            const a = __e._parameters?.["0"];
+            const b = __e._parameters?.["1"];
+            this._return_value = 0;
+            __e._return = this._return_value;
+            return;;
+        } else if (__e._message === "start") {
+            const initial = __e._parameters?.["0"];
+            this.total = initial;
+            console.log(`Started with initial value: ${initial}`);
+            const __compartment = new WithParamsCompartment("Running", this.__compartment.copy());
+            this.__transition(__compartment);
         }
     }
 }

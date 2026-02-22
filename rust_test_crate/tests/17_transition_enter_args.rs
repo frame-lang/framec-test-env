@@ -144,6 +144,14 @@ match self.__compartment.state.as_str() {
         }
     }
 
+    fn _state_Idle(&mut self, __e: &TransitionEnterArgsFrameEvent) {
+match __e.message.as_str() {
+    "get_count" => { self._s_Idle_get_count(__e); }
+    "start" => { self._s_Idle_start(__e); }
+    _ => {}
+}
+    }
+
     fn _state_Active(&mut self, __e: &TransitionEnterArgsFrameEvent) {
 match __e.message.as_str() {
     "$>" => { self._s_Active_enter(__e); }
@@ -153,32 +161,24 @@ match __e.message.as_str() {
 }
     }
 
-    fn _state_Idle(&mut self, __e: &TransitionEnterArgsFrameEvent) {
-match __e.message.as_str() {
-    "get_count" => { self._s_Idle_get_count(__e); }
-    "start" => { self._s_Idle_start(__e); }
-    _ => {}
-}
-    }
-
-    fn _s_Active_start(&mut self, __e: &TransitionEnterArgsFrameEvent) {
-self.count = self.count + 10;
-    }
-
-    fn _s_Active_get_count(&mut self, __e: &TransitionEnterArgsFrameEvent) -> i32 {
-return self.count;
-    }
-
-    fn _s_Active_enter(&mut self, __e: &TransitionEnterArgsFrameEvent) {
-self.count = self.count + 1;
-    }
-
     fn _s_Idle_start(&mut self, __e: &TransitionEnterArgsFrameEvent) {
 self.count = 1;
 self.__transition(TransitionEnterArgsCompartment::new("Active"));
     }
 
     fn _s_Idle_get_count(&mut self, __e: &TransitionEnterArgsFrameEvent) -> i32 {
+return self.count;
+    }
+
+    fn _s_Active_start(&mut self, __e: &TransitionEnterArgsFrameEvent) {
+self.count = self.count + 10;
+    }
+
+    fn _s_Active_enter(&mut self, __e: &TransitionEnterArgsFrameEvent) {
+self.count = self.count + 1;
+    }
+
+    fn _s_Active_get_count(&mut self, __e: &TransitionEnterArgsFrameEvent) -> i32 {
 return self.count;
     }
 }

@@ -174,18 +174,6 @@ let __e = StateVarPushPopFrameEvent::new("restore");
 self.__kernel(__e);
     }
 
-    fn _state_Other(&mut self, __e: &StateVarPushPopFrameEvent) {
-match __e.message.as_str() {
-    "get_count" => { self._s_Other_get_count(__e); }
-    "increment" => { self._s_Other_increment(__e); }
-    "restore" => { self._s_Other_restore(__e); }
-    "$>" => {
-        self._sv_other_count = 100;
-    }
-    _ => {}
-}
-    }
-
     fn _state_Counter(&mut self, __e: &StateVarPushPopFrameEvent) {
 match __e.message.as_str() {
     "get_count" => { self._s_Counter_get_count(__e); }
@@ -198,22 +186,16 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Other_get_count(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
-self._sv_other_count
+    fn _state_Other(&mut self, __e: &StateVarPushPopFrameEvent) {
+match __e.message.as_str() {
+    "get_count" => { self._s_Other_get_count(__e); }
+    "increment" => { self._s_Other_increment(__e); }
+    "restore" => { self._s_Other_restore(__e); }
+    "$>" => {
+        self._sv_other_count = 100;
     }
-
-    fn _s_Other_increment(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
-self._sv_other_count = self._sv_other_count + 1;
-self._sv_other_count
-    }
-
-    fn _s_Other_restore(&mut self, __e: &StateVarPushPopFrameEvent) {
-self._state_stack_pop();
-return;
-    }
-
-    fn _s_Counter_get_count(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
-self._sv_count
+    _ => {}
+}
     }
 
     fn _s_Counter_save_and_go(&mut self, __e: &StateVarPushPopFrameEvent) {
@@ -224,6 +206,24 @@ self.__transition(StateVarPushPopCompartment::new("Other"));
     fn _s_Counter_increment(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
 self._sv_count = self._sv_count + 1;
 self._sv_count
+    }
+
+    fn _s_Counter_get_count(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
+self._sv_count
+    }
+
+    fn _s_Other_restore(&mut self, __e: &StateVarPushPopFrameEvent) {
+self._state_stack_pop();
+return;
+    }
+
+    fn _s_Other_increment(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
+self._sv_other_count = self._sv_other_count + 1;
+self._sv_other_count
+    }
+
+    fn _s_Other_get_count(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
+self._sv_other_count
     }
 }
 

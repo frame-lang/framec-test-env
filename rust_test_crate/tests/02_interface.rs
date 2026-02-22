@@ -144,13 +144,13 @@ match __e.message.as_str() {
 }
     }
 
+    fn _s_Ready_get_count(&mut self, __e: &WithInterfaceFrameEvent) -> i32 {
+self.call_count
+    }
+
     fn _s_Ready_greet(&mut self, __e: &WithInterfaceFrameEvent, name: &str) -> String {
 self.call_count += 1;
 format!("Hello, {}!", name)
-    }
-
-    fn _s_Ready_get_count(&mut self, __e: &WithInterfaceFrameEvent) -> i32 {
-self.call_count
     }
 }
 

@@ -90,22 +90,22 @@ class HSMForward:
         self.__kernel(__e)
         return self._return_value
 
+    def _state_Parent(self, __e):
+        if __e._message == "event_a":
+            self.log.append("Parent:event_a")
+        elif __e._message == "event_b":
+            self.log.append("Parent:event_b")
+        elif __e._message == "get_log":
+            self._return_value = self.log
+            __e._return = self._return_value
+            return
+
     def _state_Child(self, __e):
         if __e._message == "event_a":
             self.log.append("Child:event_a")
         elif __e._message == "event_b":
             self.log.append("Child:event_b_forward")
             self._state_Parent(__e)
-        elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
-            return
-
-    def _state_Parent(self, __e):
-        if __e._message == "event_a":
-            self.log.append("Parent:event_a")
-        elif __e._message == "event_b":
-            self.log.append("Parent:event_b")
         elif __e._message == "get_log":
             self._return_value = self.log
             __e._return = self._return_value
