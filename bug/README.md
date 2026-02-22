@@ -6,9 +6,8 @@ This folder is the canonical bug tracker for the Framepiler shared test environm
   - INDEX.md — grouped views built from each bug file’s `status` metadata
   - BUG_TRACKING_POLICY.md — process and state transitions
 - Policy: see BUG_TRACKING_POLICY.md (no per‑state subfolders; status lives in metadata)
-- Preferred validation: shared adapter smoke
-  FRAMEC_BIN=/Users/marktruluck/projects/frame_transpiler/target/release/framec \
-    /Users/marktruluck/projects/framepiler_test_env/adapter_protocol/scripts/run_adapter_smoke.sh
+- Preferred validation: run docker tests
+  cd /Users/marktruluck/projects/framepiler_test_env && docker compose -f docker/docker-compose.yml up
 
 How to add a bug
 1) Pick next number from INDEX.md

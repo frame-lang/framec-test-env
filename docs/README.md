@@ -7,18 +7,22 @@ Frame V4 tests run in parallel Docker containers, one per target language. Each 
 ## Directory Structure
 
 ```
-test-frames/v4/
-├── common/              # Tests that pass in ALL 3 languages
-│   ├── primary/         # 32 primary reference tests
-│   ├── operators/       # Arithmetic, comparison, logical
-│   ├── control_flow/    # If/else, while, try/catch
-│   ├── core/            # Core language features
-│   └── ...
-│
-├── python/              # Python-specific tests
-├── typescript/          # TypeScript-specific tests
-├── rust/                # Rust-specific tests
-│
+framepiler_test_env/
+├── tests/               # Test source files
+│   ├── common/          # Tests that pass in ALL 3 languages
+│   │   ├── primary/     # 32 primary reference tests
+│   │   ├── operators/   # Arithmetic, comparison, logical
+│   │   ├── control_flow/# If/else, while, try/catch
+│   │   ├── core/        # Core language features
+│   │   └── ...
+│   ├── python/          # Python-specific tests
+│   ├── typescript/      # TypeScript-specific tests
+│   └── rust/            # Rust-specific tests
+├── output/              # Generated code (build artifacts)
+│   ├── python/tests/
+│   ├── typescript/tests/
+│   └── rust/tests/
+├── docker/              # Docker test runners
 └── docs/                # This documentation
 ```
 
@@ -52,7 +56,7 @@ test-frames/v4/
 │                          ▼                                       │
 │              ┌───────────────────────┐                          │
 │              │   Shared Volume       │                          │
-│              │   test-frames/v4/     │                          │
+│              │   tests/     │                          │
 │              └───────────────────────┘                          │
 │                          │                                       │
 │                          ▼                                       │
@@ -116,7 +120,7 @@ All temporary files stay inside the container. The host remains clean.
 - Any logs or intermediate files
 
 **Mounted Read-Only from Host:**
-- `test-frames/v4/` - source test files only
+- `tests/` - source test files only
 
 **Output to Host:**
 - TAP stream via stdout (captured by docker-compose)
@@ -159,7 +163,7 @@ docker-compose up
 ```
 
 Each container:
-- Mounts `test-frames/v4/` read-only
+- Mounts `tests/` read-only
 - Has framec binary available
 - Has language runtime installed
 - Outputs TAP stream to stdout

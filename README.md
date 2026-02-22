@@ -1,40 +1,58 @@
 # Frame Test Environment
 
-Shared test infrastructure for Frame V4 language validation.
+Test infrastructure for Frame V4 language validation.
 
 ## Quick Start
 
 ```bash
-cd common/test-frames/v4/common/primary
+# Run all tests via Docker (recommended)
+docker compose -f docker/docker-compose.yml up --build
+
+# Or run locally
+cd tests/common/primary
 ./run_tests.sh
 ```
-
-## Documentation
-
-See [docs/README.md](docs/README.md) for the complete test architecture.
 
 ## Directory Structure
 
 ```
 framepiler_test_env/
+├── tests/                   # Test sources
+│   ├── common/              # Cross-language tests
+│   │   ├── primary/         # Primary reference tests (32 tests)
+│   │   ├── control_flow/    # Control flow tests
+│   │   ├── operators/       # Operator tests
+│   │   └── ...
+│   ├── python/              # Python-specific tests
+│   ├── typescript/          # TypeScript-specific tests
+│   └── rust/                # Rust-specific tests
+├── output/                  # Generated code (build artifacts)
+│   ├── python/tests/
+│   ├── typescript/tests/
+│   └── rust/tests/
+├── docker/                  # Docker test runners
+├── bug/                     # Bug tracking
 ├── docs/                    # Documentation
-├── common/
-│   └── test-frames/
-│       └── v4/              # V4 tests
-│           ├── common/      # Tests passing in all 3 languages
-│           ├── python/      # Python-specific tests
-│           ├── typescript/  # TypeScript-specific tests
-│           └── rust/        # Rust-specific tests
-├── python_test_crate/       # Python test output
-├── typescript_test_crate/   # TypeScript test output
-└── rust_test_crate/         # Rust test output
+└── scripts/                 # Utility scripts
 ```
 
 ## Test Counts
 
 | Location | Files |
 |----------|-------|
-| common/  | 393   |
+| common/  | ~400  |
 | python/  | 15    |
 | typescript/ | 7  |
 | rust/    | 7     |
+
+## File Extensions
+
+- `.fpy` - Python target
+- `.fts` - TypeScript target
+- `.frs` - Rust target
+
+## Docker Test Results
+
+All tests emit TAP (Test Anything Protocol) output for CI integration.
+
+Last verified: Python 147, TypeScript 127, Rust 127 (401 total, 100% passing)
