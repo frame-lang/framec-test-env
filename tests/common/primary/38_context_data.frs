@@ -1,0 +1,89 @@
+@@target rust
+
+use std::collections::HashMap;
+
+// Test: Context Data (@@:data)
+// Validates call-scoped data that persists across handler -> <$ -> $> chain
+
+@@system ContextDataTest {
+    interface:
+        process_with_data(value: i32): String
+        check_data_isolation(): String
+        transition_preserves_data(x: i32): String
+
+    machine:
+        $Start {
+            process_with_data(value: i32): String {
+                // Set data in handler
+                @@:data["input"] = @@.value.to_string();
+                @@:return = format!("processed:{}", @@:data["input"]);
+            }
+
+            check_data_isolation(): String {
+                // Set data, call another method, verify our data preserved
+                @@:data["outer"] = "outer_value".to_string();
+
+                // This creates its own context with its own data
+                let inner_result = self.process_with_data(99);
+
+                // Our data should still be here
+                @@:return = format!("outer_data={},inner={}", @@:data["outer"], inner_result);
+            }
+
+            transition_preserves_data(x: i32): String {
+                // Set data, transition, verify data available in lifecycle handlers
+                @@:data["started_in"] = "Start".to_string();
+                @@:data["value"] = @@.x.to_string();
+                -> $End
+            }
+
+            <$() {
+                // Exit handler can access data set by event handler
+                @@:data["exit_seen"] = "true".to_string();
+            }
+        }
+
+        $End {
+            $>() {
+                // Enter handler can access data set by previous handlers
+                @@:data["ended_in"] = "End".to_string();
+
+                // Build final result from accumulated data
+                @@:return = format!(
+                    "from={},to={},value={},exit_seen={}",
+                    @@:data["started_in"],
+                    @@:data["ended_in"],
+                    @@:data["value"],
+                    @@:data["exit_seen"]
+                );
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 38: Context Data ===");
+
+    // Test 1: Basic data set/get
+    let mut s1 = ContextDataTest::new();
+    let result = s1.process_with_data(42);
+    assert_eq!(result, "processed:42", "Expected 'processed:42', got '{}'", result);
+    println!("1. process_with_data(42) = '{}'", result);
+
+    // Test 2: Data isolation between nested calls
+    let mut s2 = ContextDataTest::new();
+    let result = s2.check_data_isolation();
+    let expected = "outer_data=outer_value,inner=processed:99";
+    assert_eq!(result, expected, "Expected '{}', got '{}'", expected, result);
+    println!("2. check_data_isolation() = '{}'", result);
+
+    // Test 3: Data preserved across transition (handler -> <$ -> $>)
+    let mut s3 = ContextDataTest::new();
+    let result = s3.transition_preserves_data(100);
+    // Data should flow: handler sets -> exit accesses -> enter accesses and returns
+    assert!(result.contains("from=Start"), "Expected 'from=Start' in '{}'", result);
+    assert!(result.contains("to=End"), "Expected 'to=End' in '{}'", result);
+    assert!(result.contains("value=100"), "Expected 'value=100' in '{}'", result);
+    println!("3. transition_preserves_data(100) = '{}'", result);
+
+    println!("PASS: Context data works correctly");
+}

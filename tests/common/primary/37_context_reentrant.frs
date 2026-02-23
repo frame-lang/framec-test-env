@@ -1,0 +1,64 @@
+@@target rust
+
+// Test: Context Stack Reentrancy
+// Validates that nested interface calls maintain separate contexts
+
+@@system ContextReentrantTest {
+    interface:
+        outer(x: i32): String
+        inner(y: i32): String
+        get_both(a: i32, b: i32): String
+
+    machine:
+        $Ready {
+            outer(x: i32): String {
+                // Set our return before calling inner
+                @@:return = "outer_initial".to_string();
+
+                // Call inner - should NOT clobber our return
+                let inner_result = self.inner(@@.x * 10);
+
+                // Our return should still be accessible
+                // Update it with combined result
+                @@:return = format!("outer:{},inner:{}", @@.x, inner_result);
+            }
+
+            inner(y: i32): String {
+                // Inner has its own context
+                // @@.y should be inner's param, not outer's
+                @@:return = format!("{}", @@.y);
+            }
+
+            get_both(a: i32, b: i32): String {
+                // Test that we can access multiple params
+                let result_a = self.inner(@@.a);
+                let result_b = self.inner(@@.b);
+                // After both inner calls, @@.a and @@.b should still be our params
+                @@:return = format!("a={},b={},results={}+{}", @@.a, @@.b, result_a, result_b);
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 37: Context Reentrant ===");
+    let mut s = ContextReentrantTest::new();
+
+    // Test 1: Simple nesting - outer calls inner
+    let result = s.outer(5);
+    let expected = "outer:5,inner:50";
+    assert_eq!(result, expected, "Expected '{}', got '{}'", expected, result);
+    println!("1. outer(5) = '{}'", result);
+
+    // Test 2: Inner alone
+    let result = s.inner(42);
+    assert_eq!(result, "42", "Expected '42', got '{}'", result);
+    println!("2. inner(42) = '{}'", result);
+
+    // Test 3: Multiple inner calls, params preserved
+    let result = s.get_both(10, 20);
+    let expected = "a=10,b=20,results=10+20";
+    assert_eq!(result, expected, "Expected '{}', got '{}'", expected, result);
+    println!("3. get_both(10, 20) = '{}'", result);
+
+    println!("PASS: Context reentrant works correctly");
+}

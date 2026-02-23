@@ -1,0 +1,79 @@
+@@target python_3
+
+# Test: Context Stack Reentrancy
+# Validates that nested interface calls maintain separate contexts
+
+@@system ContextReentrantTest {
+    interface:
+        outer(x: int): str
+        inner(y: int): str
+        deeply_nested(z: int): str
+        get_both(a: int, b: int): str
+
+    machine:
+        $Ready {
+            outer(x: int): str {
+                # Set our return before calling inner
+                @@:return = "outer_initial"
+
+                # Call inner - should NOT clobber our return
+                inner_result = self.inner(@@.x * 10)
+
+                # Our return should still be accessible
+                # Update it with combined result
+                @@:return = "outer:" + str(@@.x) + ",inner:" + inner_result
+            }
+
+            inner(y: int): str {
+                # Inner has its own context
+                # @@.y should be inner's param, not outer's
+                @@:return = str(@@.y)
+            }
+
+            deeply_nested(z: int): str {
+                # 3 levels deep
+                outer_result = self.outer(@@.z)
+                @@:return = "deep:" + str(@@.z) + "," + outer_result
+            }
+
+            get_both(a: int, b: int): str {
+                # Test that we can access multiple params
+                result_a = self.inner(@@.a)
+                result_b = self.inner(@@.b)
+                # After both inner calls, @@.a and @@.b should still be our params
+                @@:return = "a=" + str(@@.a) + ",b=" + str(@@.b) + ",results=" + result_a + "+" + result_b
+            }
+        }
+}
+
+def main():
+    print("=== Test 37: Context Reentrant ===")
+    s = ContextReentrantTest()
+
+    # Test 1: Simple nesting - outer calls inner
+    result = s.outer(5)
+    expected = "outer:5,inner:50"
+    assert result == expected, f"Expected '{expected}', got '{result}'"
+    print(f"1. outer(5) = '{result}'")
+
+    # Test 2: Inner alone
+    result = s.inner(42)
+    assert result == "42", f"Expected '42', got '{result}'"
+    print(f"2. inner(42) = '{result}'")
+
+    # Test 3: Deep nesting (3 levels)
+    result = s.deeply_nested(3)
+    expected = "deep:3,outer:3,inner:30"
+    assert result == expected, f"Expected '{expected}', got '{result}'"
+    print(f"3. deeply_nested(3) = '{result}'")
+
+    # Test 4: Multiple inner calls, params preserved
+    result = s.get_both(10, 20)
+    expected = "a=10,b=20,results=10+20"
+    assert result == expected, f"Expected '{expected}', got '{result}'"
+    print(f"4. get_both(10, 20) = '{result}'")
+
+    print("PASS: Context reentrant works correctly")
+
+if __name__ == '__main__':
+    main()
