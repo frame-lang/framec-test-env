@@ -1,12 +1,23 @@
 class SystemReturnTestFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class SystemReturnTestFrameContext {
+    public event: SystemReturnTestFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: SystemReturnTestFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,11 +57,11 @@ class SystemReturnTest {
     private _state_stack: Array<any>;
     private __compartment: SystemReturnTestCompartment;
     private __next_compartment: SystemReturnTestCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.__compartment = new SystemReturnTestCompartment("Calculator");
         this.__next_compartment = null;
         const __frame_event = new SystemReturnTestFrameEvent("$>", null);
@@ -104,56 +115,57 @@ class SystemReturnTest {
     }
 
     public add(a: number, b: number): number {
-        this._return_value = null;
-        const __e = new SystemReturnTestFrameEvent("add", {"0": a, "1": b});
+        const __e = new SystemReturnTestFrameEvent("add", {"a": a, "b": b});
+        const __ctx = new SystemReturnTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public multiply(a: number, b: number): number {
-        this._return_value = null;
-        const __e = new SystemReturnTestFrameEvent("multiply", {"0": a, "1": b});
+        const __e = new SystemReturnTestFrameEvent("multiply", {"a": a, "b": b});
+        const __ctx = new SystemReturnTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public greet(name: string): string {
-        this._return_value = null;
-        const __e = new SystemReturnTestFrameEvent("greet", {"0": name});
+        const __e = new SystemReturnTestFrameEvent("greet", {"name": name});
+        const __ctx = new SystemReturnTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_value(): number {
-        this._return_value = null;
         const __e = new SystemReturnTestFrameEvent("get_value", null);
+        const __ctx = new SystemReturnTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Calculator(__e: SystemReturnTestFrameEvent) {
         if (__e._message === "$>") {
             this.__compartment.state_vars["value"] = 0;
         } else if (__e._message === "add") {
-            const a = __e._parameters?.["0"];
-            const b = __e._parameters?.["1"];
-            this._return_value = a + b;
-            __e._return = this._return_value;
+            const a = __e._parameters?.["a"];
+            const b = __e._parameters?.["b"];
+            this._context_stack[this._context_stack.length - 1]._return = a + b;
             return;;
         } else if (__e._message === "get_value") {
             this.__compartment.state_vars["value"] = 42;
-            this._return_value = this.__compartment.state_vars["value"];
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["value"];
             return;;
         } else if (__e._message === "greet") {
-            const name = __e._parameters?.["0"];
-            this._return_value = "Hello, " + name + "!";
-            __e._return = this._return_value;
+            const name = __e._parameters?.["name"];
+            this._context_stack[this._context_stack.length - 1]._return = "Hello, " + name + "!";
             return;;
         } else if (__e._message === "multiply") {
-            const a = __e._parameters?.["0"];
-            const b = __e._parameters?.["1"];
-            this._return_value = a * b;;
+            const a = __e._parameters?.["a"];
+            const b = __e._parameters?.["b"];
+            this._context_stack[this._context_stack.length - 1]._return = a * b;;
         }
     }
 }

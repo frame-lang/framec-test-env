@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct PersistRoundtripFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl PersistRoundtripFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct PersistRoundtripFrameContext {
+    event: PersistRoundtripFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl PersistRoundtripFrameContext {
+    fn new(event: PersistRoundtripFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -45,6 +68,7 @@ pub struct PersistRoundtrip {
     _state_stack: Vec<(String, PersistRoundtripStateContext)>,
     __compartment: PersistRoundtripCompartment,
     __next_compartment: Option<PersistRoundtripCompartment>,
+    _context_stack: Vec<PersistRoundtripFrameContext>,
     counter: i32,
     mode: String,
 }
@@ -53,6 +77,7 @@ impl PersistRoundtrip {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             counter: 0,
             mode: String::from("normal"),
             __compartment: PersistRoundtripCompartment::new("Idle"),
@@ -244,6 +269,14 @@ match __e.message.as_str() {
 }
     }
 
+    fn _s_Active_set_counter(&mut self, __e: &PersistRoundtripFrameEvent, n: i32) {
+self.counter = n * 2;
+    }
+
+    fn _s_Active_set_mode(&mut self, __e: &PersistRoundtripFrameEvent, m: String) {
+self.mode = m;
+    }
+
     fn _s_Active_get_mode(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
 return self.mode.clone();
     }
@@ -264,24 +297,24 @@ self.__transition(PersistRoundtripCompartment::new("Idle"));
 return String::from("active");
     }
 
-    fn _s_Active_set_counter(&mut self, __e: &PersistRoundtripFrameEvent, n: i32) {
-self.counter = n * 2;
+    fn _s_Idle_get_state(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
+return String::from("idle");
     }
 
-    fn _s_Active_set_mode(&mut self, __e: &PersistRoundtripFrameEvent, m: String) {
-self.mode = m;
+    fn _s_Idle_set_counter(&mut self, __e: &PersistRoundtripFrameEvent, n: i32) {
+self.counter = n;
+    }
+
+    fn _s_Idle_go_active(&mut self, __e: &PersistRoundtripFrameEvent) {
+self.__transition(PersistRoundtripCompartment::new("Active"));
     }
 
     fn _s_Idle_go_idle(&mut self, __e: &PersistRoundtripFrameEvent) {
 // already idle;
     }
 
-    fn _s_Idle_get_state(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
-return String::from("idle");
-    }
-
-    fn _s_Idle_go_active(&mut self, __e: &PersistRoundtripFrameEvent) {
-self.__transition(PersistRoundtripCompartment::new("Active"));
+    fn _s_Idle_get_counter(&mut self, __e: &PersistRoundtripFrameEvent) -> i32 {
+return self.counter;
     }
 
     fn _s_Idle_set_mode(&mut self, __e: &PersistRoundtripFrameEvent, m: String) {
@@ -290,14 +323,6 @@ self.mode = m;
 
     fn _s_Idle_get_mode(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
 return self.mode.clone();
-    }
-
-    fn _s_Idle_set_counter(&mut self, __e: &PersistRoundtripFrameEvent, n: i32) {
-self.counter = n;
-    }
-
-    fn _s_Idle_get_counter(&mut self, __e: &PersistRoundtripFrameEvent) -> i32 {
-return self.counter;
     }
 
     pub fn save_state(&mut self) -> String {

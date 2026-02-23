@@ -4,7 +4,13 @@ class DomainVarsFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class DomainVarsFrameContext:
+    def __init__(self, event: DomainVarsFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class DomainVarsCompartment:
@@ -30,7 +36,7 @@ class DomainVarsCompartment:
 class DomainVars:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.count = 0
         self.name = "counter"
         self.__compartment = DomainVarsCompartment("Counting")
@@ -79,35 +85,44 @@ class DomainVars:
 
     def increment(self):
         __e = DomainVarsFrameEvent("increment", None)
+        __ctx = DomainVarsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def decrement(self):
         __e = DomainVarsFrameEvent("decrement", None)
+        __ctx = DomainVarsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_count(self) -> int:
-        self._return_value = None
         __e = DomainVarsFrameEvent("get_count", None)
+        __ctx = DomainVarsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def set_count(self, value: int):
-        __e = DomainVarsFrameEvent("set_count", {"0": value})
+        __e = DomainVarsFrameEvent("set_count", {"value": value})
+        __ctx = DomainVarsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def _state_Counting(self, __e):
         if __e._message == "decrement":
             self.count -= 1
             print(f"{self.name}: decremented to {self.count}")
         elif __e._message == "get_count":
-            self._return_value = self.count
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.count
             return
         elif __e._message == "increment":
             self.count += 1
             print(f"{self.name}: incremented to {self.count}")
         elif __e._message == "set_count":
-            value = __e._parameters["0"]
+            value = __e._parameters["value"]
             self.count = value
             print(f"{self.name}: set to {self.count}")
 

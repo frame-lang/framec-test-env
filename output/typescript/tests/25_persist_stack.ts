@@ -1,12 +1,23 @@
 class PersistStackFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class PersistStackFrameContext {
+    public event: PersistStackFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: PersistStackFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,12 +57,12 @@ class PersistStack {
     private _state_stack: Array<any>;
     private __compartment: PersistStackCompartment;
     private __next_compartment: PersistStackCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private depth: number = 0;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.depth = 0;
         this.__compartment = new PersistStackCompartment("Start");
         this.__next_compartment = null;
@@ -107,36 +118,42 @@ class PersistStack {
 
     public push_and_go() {
         const __e = new PersistStackFrameEvent("push_and_go", null);
+        const __ctx = new PersistStackFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public pop_back() {
         const __e = new PersistStackFrameEvent("pop_back", null);
+        const __ctx = new PersistStackFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_state(): string {
-        this._return_value = null;
         const __e = new PersistStackFrameEvent("get_state", null);
+        const __ctx = new PersistStackFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_depth(): number {
-        this._return_value = null;
         const __e = new PersistStackFrameEvent("get_depth", null);
+        const __ctx = new PersistStackFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Middle(__e: PersistStackFrameEvent) {
         if (__e._message === "get_depth") {
-            this._return_value = this.depth;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.depth;
             return;;
         } else if (__e._message === "get_state") {
-            this._return_value = "middle";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "middle";
             return;;
         } else if (__e._message === "pop_back") {
             this.depth = this.depth - 1;
@@ -150,32 +167,12 @@ class PersistStack {
         }
     }
 
-    private _state_End(__e: PersistStackFrameEvent) {
-        if (__e._message === "get_depth") {
-            this._return_value = this.depth;
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "get_state") {
-            this._return_value = "end";
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "pop_back") {
-            this.depth = this.depth - 1;
-            this.__compartment = this._state_stack.pop()!;
-            return;
-        } else if (__e._message === "push_and_go") {
-            // can't go further
-        }
-    }
-
     private _state_Start(__e: PersistStackFrameEvent) {
         if (__e._message === "get_depth") {
-            this._return_value = this.depth;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.depth;
             return;;
         } else if (__e._message === "get_state") {
-            this._return_value = "start";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "start";
             return;;
         } else if (__e._message === "pop_back") {
             // nothing to pop
@@ -184,6 +181,22 @@ class PersistStack {
             this._state_stack.push(this.__compartment.copy());
             const __compartment = new PersistStackCompartment("Middle", this.__compartment.copy());
             this.__transition(__compartment);
+        }
+    }
+
+    private _state_End(__e: PersistStackFrameEvent) {
+        if (__e._message === "get_depth") {
+            this._context_stack[this._context_stack.length - 1]._return = this.depth;
+            return;;
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "end";
+            return;;
+        } else if (__e._message === "pop_back") {
+            this.depth = this.depth - 1;
+            this.__compartment = this._state_stack.pop()!;
+            return;
+        } else if (__e._message === "push_and_go") {
+            // can't go further
         }
     }
 

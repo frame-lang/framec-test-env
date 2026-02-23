@@ -1,12 +1,23 @@
 class PersistRoundtripFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class PersistRoundtripFrameContext {
+    public event: PersistRoundtripFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: PersistRoundtripFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,14 +57,14 @@ class PersistRoundtrip {
     private _state_stack: Array<any>;
     private __compartment: PersistRoundtripCompartment;
     private __next_compartment: PersistRoundtripCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private counter: number = 0;
     private history: string[] =     [];
     private mode: string = "normal";
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.counter = 0;
         this.history =         [];
         this.mode = "normal";
@@ -111,88 +122,72 @@ class PersistRoundtrip {
 
     public go_active() {
         const __e = new PersistRoundtripFrameEvent("go_active", null);
+        const __ctx = new PersistRoundtripFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public go_idle() {
         const __e = new PersistRoundtripFrameEvent("go_idle", null);
+        const __ctx = new PersistRoundtripFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_state(): string {
-        this._return_value = null;
         const __e = new PersistRoundtripFrameEvent("get_state", null);
+        const __ctx = new PersistRoundtripFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public set_counter(n: number) {
-        const __e = new PersistRoundtripFrameEvent("set_counter", {"0": n});
+        const __e = new PersistRoundtripFrameEvent("set_counter", {"n": n});
+        const __ctx = new PersistRoundtripFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_counter(): number {
-        this._return_value = null;
         const __e = new PersistRoundtripFrameEvent("get_counter", null);
+        const __ctx = new PersistRoundtripFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public add_history(msg: string) {
-        const __e = new PersistRoundtripFrameEvent("add_history", {"0": msg});
+        const __e = new PersistRoundtripFrameEvent("add_history", {"msg": msg});
+        const __ctx = new PersistRoundtripFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_history(): string[] {
-        this._return_value = null;
         const __e = new PersistRoundtripFrameEvent("get_history", null);
+        const __ctx = new PersistRoundtripFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
-    }
-
-    private _state_Active(__e: PersistRoundtripFrameEvent) {
-        if (__e._message === "add_history") {
-            const msg = __e._parameters?.["0"];
-            this.history.push("active:" + msg);
-        } else if (__e._message === "get_counter") {
-            this._return_value = this.counter;
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "get_history") {
-            this._return_value = this.history;
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "get_state") {
-            this._return_value = "active";
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "go_active") {
-            // already active
-        } else if (__e._message === "go_idle") {
-            this.history.push("active->idle");
-            const __compartment = new PersistRoundtripCompartment("Idle", this.__compartment.copy());
-            this.__transition(__compartment);
-        } else if (__e._message === "set_counter") {
-            const n = __e._parameters?.["0"];
-            this.counter = n * 2;
-        }
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Idle(__e: PersistRoundtripFrameEvent) {
         if (__e._message === "add_history") {
-            const msg = __e._parameters?.["0"];
+            const msg = __e._parameters?.["msg"];
             this.history.push("idle:" + msg);
         } else if (__e._message === "get_counter") {
-            this._return_value = this.counter;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.counter;
             return;;
         } else if (__e._message === "get_history") {
-            this._return_value = this.history;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.history;
             return;;
         } else if (__e._message === "get_state") {
-            this._return_value = "idle";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "idle";
             return;;
         } else if (__e._message === "go_active") {
             this.history.push("idle->active");
@@ -201,8 +196,33 @@ class PersistRoundtrip {
         } else if (__e._message === "go_idle") {
             // already idle
         } else if (__e._message === "set_counter") {
-            const n = __e._parameters?.["0"];
+            const n = __e._parameters?.["n"];
             this.counter = n;
+        }
+    }
+
+    private _state_Active(__e: PersistRoundtripFrameEvent) {
+        if (__e._message === "add_history") {
+            const msg = __e._parameters?.["msg"];
+            this.history.push("active:" + msg);
+        } else if (__e._message === "get_counter") {
+            this._context_stack[this._context_stack.length - 1]._return = this.counter;
+            return;;
+        } else if (__e._message === "get_history") {
+            this._context_stack[this._context_stack.length - 1]._return = this.history;
+            return;;
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "active";
+            return;;
+        } else if (__e._message === "go_active") {
+            // already active
+        } else if (__e._message === "go_idle") {
+            this.history.push("active->idle");
+            const __compartment = new PersistRoundtripCompartment("Idle", this.__compartment.copy());
+            this.__transition(__compartment);
+        } else if (__e._message === "set_counter") {
+            const n = __e._parameters?.["n"];
+            this.counter = n * 2;
         }
     }
 

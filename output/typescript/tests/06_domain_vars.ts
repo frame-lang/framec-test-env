@@ -1,12 +1,23 @@
 class DomainVarsFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class DomainVarsFrameContext {
+    public event: DomainVarsFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: DomainVarsFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,13 +57,13 @@ class DomainVars {
     private _state_stack: Array<any>;
     private __compartment: DomainVarsCompartment;
     private __next_compartment: DomainVarsCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private count: number = 0;
     private name: string = "counter";
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.count = 0;
         this.name = "counter";
         this.__compartment = new DomainVarsCompartment("Counting");
@@ -109,24 +120,34 @@ class DomainVars {
 
     public increment() {
         const __e = new DomainVarsFrameEvent("increment", null);
+        const __ctx = new DomainVarsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public decrement() {
         const __e = new DomainVarsFrameEvent("decrement", null);
+        const __ctx = new DomainVarsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_count(): number {
-        this._return_value = null;
         const __e = new DomainVarsFrameEvent("get_count", null);
+        const __ctx = new DomainVarsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public set_count(value: number) {
-        const __e = new DomainVarsFrameEvent("set_count", {"0": value});
+        const __e = new DomainVarsFrameEvent("set_count", {"value": value});
+        const __ctx = new DomainVarsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     private _state_Counting(__e: DomainVarsFrameEvent) {
@@ -134,14 +155,13 @@ class DomainVars {
             this.count -= 1;
             console.log(`${this.name}: decremented to ${this.count}`);
         } else if (__e._message === "get_count") {
-            this._return_value = this.count;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.count;
             return;;
         } else if (__e._message === "increment") {
             this.count += 1;
             console.log(`${this.name}: incremented to ${this.count}`);
         } else if (__e._message === "set_count") {
-            const value = __e._parameters?.["0"];
+            const value = __e._parameters?.["value"];
             this.count = value;
             console.log(`${this.name}: set to ${this.count}`);
         }

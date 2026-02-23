@@ -8,11 +8,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct HistoryHSMFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl HistoryHSMFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct HistoryHSMFrameContext {
+    event: HistoryHSMFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl HistoryHSMFrameContext {
+    fn new(event: HistoryHSMFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -53,6 +76,7 @@ pub struct HistoryHSM {
     _state_stack: Vec<(String, HistoryHSMStateContext)>,
     __compartment: HistoryHSMCompartment,
     __next_compartment: Option<HistoryHSMCompartment>,
+    _context_stack: Vec<HistoryHSMFrameContext>,
     log: Vec<String>,
 }
 
@@ -60,6 +84,7 @@ impl HistoryHSM {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             log: Vec::new(),
             __compartment: HistoryHSMCompartment::new("Waiting"),
             __next_compartment: None,
@@ -184,13 +209,9 @@ match self.__compartment.state.as_str() {
         }
     }
 
-    fn _state_Waiting(&mut self, __e: &HistoryHSMFrameEvent) {
+    fn _state_AB(&mut self, __e: &HistoryHSMFrameEvent) {
 match __e.message.as_str() {
-    "$>" => { self._s_Waiting_enter(__e); }
-    "get_log" => { self._s_Waiting_get_log(__e); }
-    "get_state" => { self._s_Waiting_get_state(__e); }
-    "goto_a" => { self._s_Waiting_goto_a(__e); }
-    "goto_b" => { self._s_Waiting_goto_b(__e); }
+    "goto_c" => { self._s_AB_goto_c(__e); }
     _ => {}
 }
     }
@@ -215,9 +236,13 @@ match __e.message.as_str() {
 }
     }
 
-    fn _state_AB(&mut self, __e: &HistoryHSMFrameEvent) {
+    fn _state_Waiting(&mut self, __e: &HistoryHSMFrameEvent) {
 match __e.message.as_str() {
-    "goto_c" => { self._s_AB_goto_c(__e); }
+    "$>" => { self._s_Waiting_enter(__e); }
+    "get_log" => { self._s_Waiting_get_log(__e); }
+    "get_state" => { self._s_Waiting_get_state(__e); }
+    "goto_a" => { self._s_Waiting_goto_a(__e); }
+    "goto_b" => { self._s_Waiting_goto_b(__e); }
     _ => {}
 }
     }
@@ -232,35 +257,19 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Waiting_get_state(&mut self, __e: &HistoryHSMFrameEvent) -> String {
-return String::from("Waiting")
-    }
-
-    fn _s_Waiting_enter(&mut self, __e: &HistoryHSMFrameEvent) {
-self.log_msg(String::from("In $Waiting"));
-    }
-
-    fn _s_Waiting_goto_a(&mut self, __e: &HistoryHSMFrameEvent) {
-self.log_msg(String::from("goto_a"));
-self.__transition(HistoryHSMCompartment::new("A"));
-    }
-
-    fn _s_Waiting_goto_b(&mut self, __e: &HistoryHSMFrameEvent) {
-self.log_msg(String::from("goto_b"));
-self.__transition(HistoryHSMCompartment::new("B"));
-    }
-
-    fn _s_Waiting_get_log(&mut self, __e: &HistoryHSMFrameEvent) -> Vec<String> {
-return self.log.clone()
-    }
-
-    fn _s_A_get_state(&mut self, __e: &HistoryHSMFrameEvent) -> String {
-return String::from("A")
+    fn _s_AB_goto_c(&mut self, __e: &HistoryHSMFrameEvent) {
+self.log_msg(String::from("goto_c in $AB"));
+self._state_stack_push();
+self.__transition(HistoryHSMCompartment::new("C"));
     }
 
     fn _s_A_goto_b(&mut self, __e: &HistoryHSMFrameEvent) {
 self.log_msg(String::from("goto_b"));
 self.__transition(HistoryHSMCompartment::new("B"));
+    }
+
+    fn _s_A_get_state(&mut self, __e: &HistoryHSMFrameEvent) -> String {
+return String::from("A")
     }
 
     fn _s_A_get_log(&mut self, __e: &HistoryHSMFrameEvent) -> Vec<String> {
@@ -275,23 +284,39 @@ self.log_msg(String::from("In $A"));
 return String::from("B")
     }
 
-    fn _s_B_enter(&mut self, __e: &HistoryHSMFrameEvent) {
-self.log_msg(String::from("In $B"));
-    }
-
     fn _s_B_goto_a(&mut self, __e: &HistoryHSMFrameEvent) {
 self.log_msg(String::from("goto_a"));
 self.__transition(HistoryHSMCompartment::new("A"));
+    }
+
+    fn _s_B_enter(&mut self, __e: &HistoryHSMFrameEvent) {
+self.log_msg(String::from("In $B"));
     }
 
     fn _s_B_get_log(&mut self, __e: &HistoryHSMFrameEvent) -> Vec<String> {
 return self.log.clone()
     }
 
-    fn _s_AB_goto_c(&mut self, __e: &HistoryHSMFrameEvent) {
-self.log_msg(String::from("goto_c in $AB"));
-self._state_stack_push();
-self.__transition(HistoryHSMCompartment::new("C"));
+    fn _s_Waiting_goto_b(&mut self, __e: &HistoryHSMFrameEvent) {
+self.log_msg(String::from("goto_b"));
+self.__transition(HistoryHSMCompartment::new("B"));
+    }
+
+    fn _s_Waiting_get_state(&mut self, __e: &HistoryHSMFrameEvent) -> String {
+return String::from("Waiting")
+    }
+
+    fn _s_Waiting_get_log(&mut self, __e: &HistoryHSMFrameEvent) -> Vec<String> {
+return self.log.clone()
+    }
+
+    fn _s_Waiting_enter(&mut self, __e: &HistoryHSMFrameEvent) {
+self.log_msg(String::from("In $Waiting"));
+    }
+
+    fn _s_Waiting_goto_a(&mut self, __e: &HistoryHSMFrameEvent) {
+self.log_msg(String::from("goto_a"));
+self.__transition(HistoryHSMCompartment::new("A"));
     }
 
     fn _s_C_go_back(&mut self, __e: &HistoryHSMFrameEvent) {

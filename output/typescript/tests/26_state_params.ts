@@ -1,12 +1,23 @@
 class StateParamsFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class StateParamsFrameContext {
+    public event: StateParamsFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: StateParamsFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,11 +57,11 @@ class StateParams {
     private _state_stack: Array<any>;
     private __compartment: StateParamsCompartment;
     private __next_compartment: StateParamsCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.__compartment = new StateParamsCompartment("Idle");
         this.__next_compartment = null;
         const __frame_event = new StateParamsFrameEvent("$>", null);
@@ -104,28 +115,19 @@ class StateParams {
     }
 
     public start(val: number) {
-        const __e = new StateParamsFrameEvent("start", {"0": val});
+        const __e = new StateParamsFrameEvent("start", {"val": val});
+        const __ctx = new StateParamsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_value(): number {
-        this._return_value = null;
         const __e = new StateParamsFrameEvent("get_value", null);
+        const __ctx = new StateParamsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
-    }
-
-    private _state_Idle(__e: StateParamsFrameEvent) {
-        if (__e._message === "get_value") {
-            this._return_value = 0;
-            __e._return = this._return_value;
-            return;
-        } else if (__e._message === "start") {
-            const val = __e._parameters?.["0"];
-            const __compartment = new StateParamsCompartment("Counter", this.__compartment.copy());
-            __compartment.state_args = {"0": val};
-            this.__transition(__compartment);
-        }
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Counter(__e: StateParamsFrameEvent) {
@@ -136,9 +138,20 @@ class StateParams {
             const count_val = this.__compartment.state_vars["count"]
             console.log(`Counter entered with initial=${count_val}`)
         } else if (__e._message === "get_value") {
-            this._return_value = this.__compartment.state_vars["count"];
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["count"];
             return;
+        }
+    }
+
+    private _state_Idle(__e: StateParamsFrameEvent) {
+        if (__e._message === "get_value") {
+            this._context_stack[this._context_stack.length - 1]._return = 0;
+            return;
+        } else if (__e._message === "start") {
+            const val = __e._parameters?.["val"];
+            const __compartment = new StateParamsCompartment("Counter", this.__compartment.copy());
+            __compartment.state_args = {"0": val};
+            this.__transition(__compartment);
         }
     }
 }

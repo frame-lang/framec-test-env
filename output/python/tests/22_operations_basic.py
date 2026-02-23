@@ -4,7 +4,13 @@ class OperationsTestFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class OperationsTestFrameContext:
+    def __init__(self, event: OperationsTestFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class OperationsTestCompartment:
@@ -30,7 +36,7 @@ class OperationsTestCompartment:
 class OperationsTest:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.last_result = 0
         self.__compartment = OperationsTestCompartment("Ready")
         self.__next_compartment = None
@@ -77,31 +83,31 @@ class OperationsTest:
         self.__next_compartment = next_compartment
 
     def compute(self, a: int, b: int) -> int:
-        self._return_value = None
-        __e = OperationsTestFrameEvent("compute", {"0": a, "1": b})
+        __e = OperationsTestFrameEvent("compute", {"a": a, "b": b})
+        __ctx = OperationsTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def get_last_result(self) -> int:
-        self._return_value = None
         __e = OperationsTestFrameEvent("get_last_result", None)
+        __ctx = OperationsTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Ready(self, __e):
         if __e._message == "compute":
-            a = __e._parameters["0"]
-            b = __e._parameters["1"]
+            a = __e._parameters["a"]
+            b = __e._parameters["b"]
             # Use instance operations
             sum_val = self.add(a, b)
             prod_val = self.multiply(a, b)
             last_result = sum_val + prod_val
-            self._return_value = last_result
-            __e._return = self._return_value
+            self._context_stack[-1]._return = last_result
             return
         elif __e._message == "get_last_result":
-            self._return_value = last_result
-            __e._return = self._return_value
+            self._context_stack[-1]._return = last_result
             return
 
     def add(self, x: int, y: int) -> int:

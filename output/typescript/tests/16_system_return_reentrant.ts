@@ -5,12 +5,23 @@
 class SystemReturnReentrantTestFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class SystemReturnReentrantTestFrameContext {
+    public event: SystemReturnReentrantTestFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: SystemReturnReentrantTestFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -50,11 +61,11 @@ class SystemReturnReentrantTest {
     private _state_stack: Array<any>;
     private __compartment: SystemReturnReentrantTestCompartment;
     private __next_compartment: SystemReturnReentrantTestCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.__compartment = new SystemReturnReentrantTestCompartment("Start");
         this.__next_compartment = null;
         const __frame_event = new SystemReturnReentrantTestFrameEvent("$>", null);
@@ -108,44 +119,46 @@ class SystemReturnReentrantTest {
     }
 
     public outer_call(): string {
-        this._return_value = null;
         const __e = new SystemReturnReentrantTestFrameEvent("outer_call", null);
+        const __ctx = new SystemReturnReentrantTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public inner_call(): string {
-        this._return_value = null;
         const __e = new SystemReturnReentrantTestFrameEvent("inner_call", null);
+        const __ctx = new SystemReturnReentrantTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public nested_call(): string {
-        this._return_value = null;
         const __e = new SystemReturnReentrantTestFrameEvent("nested_call", null);
+        const __ctx = new SystemReturnReentrantTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_log(): string {
-        this._return_value = null;
         const __e = new SystemReturnReentrantTestFrameEvent("get_log", null);
+        const __ctx = new SystemReturnReentrantTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Start(__e: SystemReturnReentrantTestFrameEvent) {
         if (__e._message === "$>") {
             this.__compartment.state_vars["log"] = "";
         } else if (__e._message === "get_log") {
-            this._return_value = this.__compartment.state_vars["log"];
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["log"];
             return;;
         } else if (__e._message === "inner_call") {
             this.__compartment.state_vars["log"] = this.__compartment.state_vars["log"] + "inner,";
-            this._return_value = "inner_result";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "inner_result";
             return;;
         } else if (__e._message === "nested_call") {
             this.__compartment.state_vars["log"] = this.__compartment.state_vars["log"] + "nested_start,";
@@ -153,8 +166,7 @@ class SystemReturnReentrantTest {
             const result1 = this.inner_call();
             const result2 = this.outer_call();
             this.__compartment.state_vars["log"] = this.__compartment.state_vars["log"] + "nested_end,";
-            this._return_value = "nested:" + result1 + "+" + result2;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "nested:" + result1 + "+" + result2;
             return;;
         } else if (__e._message === "outer_call") {
             this.__compartment.state_vars["log"] = this.__compartment.state_vars["log"] + "outer_start,";
@@ -162,8 +174,7 @@ class SystemReturnReentrantTest {
             const inner_result = this.inner_call();
             this.__compartment.state_vars["log"] = this.__compartment.state_vars["log"] + "outer_after_inner,";
             // Our return should be independent of inner's return
-            this._return_value = "outer_result:" + inner_result;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "outer_result:" + inner_result;
             return;;
         }
     }

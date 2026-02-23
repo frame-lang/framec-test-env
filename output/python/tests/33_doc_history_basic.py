@@ -4,7 +4,13 @@ class HistoryBasicFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class HistoryBasicFrameContext:
+    def __init__(self, event: HistoryBasicFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class HistoryBasicCompartment:
@@ -30,7 +36,7 @@ class HistoryBasicCompartment:
 class HistoryBasic:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.__compartment = HistoryBasicCompartment("A")
         self.__next_compartment = None
         __frame_event = HistoryBasicFrameEvent("$>", None)
@@ -77,30 +83,42 @@ class HistoryBasic:
 
     def gotoC_from_A(self):
         __e = HistoryBasicFrameEvent("gotoC_from_A", None)
+        __ctx = HistoryBasicFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def gotoC_from_B(self):
         __e = HistoryBasicFrameEvent("gotoC_from_B", None)
+        __ctx = HistoryBasicFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def gotoB(self):
         __e = HistoryBasicFrameEvent("gotoB", None)
+        __ctx = HistoryBasicFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def return_back(self):
         __e = HistoryBasicFrameEvent("return_back", None)
+        __ctx = HistoryBasicFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_state(self) -> str:
-        self._return_value = None
         __e = HistoryBasicFrameEvent("get_state", None)
+        __ctx = HistoryBasicFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_A(self, __e):
         if __e._message == "get_state":
-            self._return_value = "A"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "A"
             return
         elif __e._message == "gotoB":
             __compartment = HistoryBasicCompartment("B", parent_compartment=self.__compartment.copy())
@@ -112,8 +130,7 @@ class HistoryBasic:
 
     def _state_C(self, __e):
         if __e._message == "get_state":
-            self._return_value = "C"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "C"
             return
         elif __e._message == "return_back":
             self.__compartment = self._state_stack.pop()
@@ -121,8 +138,7 @@ class HistoryBasic:
 
     def _state_B(self, __e):
         if __e._message == "get_state":
-            self._return_value = "B"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "B"
             return
         elif __e._message == "gotoC_from_B":
             self._state_stack.append(self.__compartment.copy())

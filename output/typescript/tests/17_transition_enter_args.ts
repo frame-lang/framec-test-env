@@ -1,12 +1,23 @@
 class TransitionEnterArgsFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class TransitionEnterArgsFrameContext {
+    public event: TransitionEnterArgsFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: TransitionEnterArgsFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,12 +57,12 @@ class TransitionEnterArgs {
     private _state_stack: Array<any>;
     private __compartment: TransitionEnterArgsCompartment;
     private __next_compartment: TransitionEnterArgsCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private log: string[] =     [];
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.log =         [];
         this.__compartment = new TransitionEnterArgsCompartment("Idle");
         this.__next_compartment = null;
@@ -107,20 +118,23 @@ class TransitionEnterArgs {
 
     public start() {
         const __e = new TransitionEnterArgsFrameEvent("start", null);
+        const __ctx = new TransitionEnterArgsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_log(): string[] {
-        this._return_value = null;
         const __e = new TransitionEnterArgsFrameEvent("get_log", null);
+        const __ctx = new TransitionEnterArgsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Idle(__e: TransitionEnterArgsFrameEvent) {
         if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;;
         } else if (__e._message === "start") {
             this.log.push("idle:start");
@@ -132,12 +146,11 @@ class TransitionEnterArgs {
 
     private _state_Active(__e: TransitionEnterArgsFrameEvent) {
         if (__e._message === "$>") {
-            const source = __e._parameters?.["0"];
-            const value = __e._parameters?.["1"];
+            const source = __e._parameters?.["source"];
+            const value = __e._parameters?.["value"];
             this.log.push(`active:enter:${source}:${value}`);
         } else if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;;
         } else if (__e._message === "start") {
             this.log.push("active:start");

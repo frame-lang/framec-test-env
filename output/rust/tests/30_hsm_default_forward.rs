@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct HSMDefaultForwardFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl HSMDefaultForwardFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct HSMDefaultForwardFrameContext {
+    event: HSMDefaultForwardFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl HSMDefaultForwardFrameContext {
+    fn new(event: HSMDefaultForwardFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -45,6 +68,7 @@ pub struct HSMDefaultForward {
     _state_stack: Vec<(String, HSMDefaultForwardStateContext)>,
     __compartment: HSMDefaultForwardCompartment,
     __next_compartment: Option<HSMDefaultForwardCompartment>,
+    _context_stack: Vec<HSMDefaultForwardFrameContext>,
     log: Vec<String>,
 }
 
@@ -52,6 +76,7 @@ impl HSMDefaultForward {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             log: Vec::new(),
             __compartment: HSMDefaultForwardCompartment::new("Child"),
             __next_compartment: None,
@@ -144,14 +169,6 @@ match self.__compartment.state.as_str() {
         }
     }
 
-    fn _state_Child(&mut self, __e: &HSMDefaultForwardFrameEvent) {
-match __e.message.as_str() {
-    "get_log" => { self._s_Child_get_log(__e); }
-    "handled_event" => { self._s_Child_handled_event(__e); }
-    _ => self._state_Parent(__e),
-}
-    }
-
     fn _state_Parent(&mut self, __e: &HSMDefaultForwardFrameEvent) {
 match __e.message.as_str() {
     "get_log" => { self._s_Parent_get_log(__e); }
@@ -161,12 +178,12 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Child_get_log(&mut self, __e: &HSMDefaultForwardFrameEvent) -> Vec<String> {
-return self.log.clone();
-    }
-
-    fn _s_Child_handled_event(&mut self, __e: &HSMDefaultForwardFrameEvent) {
-self.log.push("Child:handled_event".to_string());
+    fn _state_Child(&mut self, __e: &HSMDefaultForwardFrameEvent) {
+match __e.message.as_str() {
+    "get_log" => { self._s_Child_get_log(__e); }
+    "handled_event" => { self._s_Child_handled_event(__e); }
+    _ => self._state_Parent(__e),
+}
     }
 
     fn _s_Parent_unhandled_event(&mut self, __e: &HSMDefaultForwardFrameEvent) {
@@ -179,6 +196,14 @@ return self.log.clone();
 
     fn _s_Parent_handled_event(&mut self, __e: &HSMDefaultForwardFrameEvent) {
 self.log.push("Parent:handled_event".to_string());
+    }
+
+    fn _s_Child_handled_event(&mut self, __e: &HSMDefaultForwardFrameEvent) {
+self.log.push("Child:handled_event".to_string());
+    }
+
+    fn _s_Child_get_log(&mut self, __e: &HSMDefaultForwardFrameEvent) -> Vec<String> {
+return self.log.clone();
     }
 }
 

@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct StateVarBasicFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl StateVarBasicFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct StateVarBasicFrameContext {
+    event: StateVarBasicFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl StateVarBasicFrameContext {
+    fn new(event: StateVarBasicFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -49,6 +72,7 @@ pub struct StateVarBasic {
     _state_stack: Vec<(String, StateVarBasicStateContext)>,
     __compartment: StateVarBasicCompartment,
     __next_compartment: Option<StateVarBasicCompartment>,
+    _context_stack: Vec<StateVarBasicFrameContext>,
     _sv_count: i32,
 }
 
@@ -56,6 +80,7 @@ impl StateVarBasic {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             _sv_count: 0,
             __compartment: StateVarBasicCompartment::new("Counter"),
             __next_compartment: None,
@@ -161,16 +186,16 @@ match __e.message.as_str() {
 }
     }
 
+    fn _s_Counter_get_count(&mut self, __e: &StateVarBasicFrameEvent) -> i32 {
+self._sv_count
+    }
+
     fn _s_Counter_reset(&mut self, __e: &StateVarBasicFrameEvent) {
 self._sv_count = 0;
     }
 
     fn _s_Counter_increment(&mut self, __e: &StateVarBasicFrameEvent) -> i32 {
 self._sv_count = self._sv_count + 1;
-self._sv_count
-    }
-
-    fn _s_Counter_get_count(&mut self, __e: &StateVarBasicFrameEvent) -> i32 {
 self._sv_count
     }
 }

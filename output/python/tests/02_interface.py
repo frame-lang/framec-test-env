@@ -4,7 +4,13 @@ class WithInterfaceFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class WithInterfaceFrameContext:
+    def __init__(self, event: WithInterfaceFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class WithInterfaceCompartment:
@@ -30,7 +36,7 @@ class WithInterfaceCompartment:
 class WithInterface:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.call_count = 0
         self.__compartment = WithInterfaceCompartment("Ready")
         self.__next_compartment = None
@@ -77,27 +83,27 @@ class WithInterface:
         self.__next_compartment = next_compartment
 
     def greet(self, name: str) -> str:
-        self._return_value = None
-        __e = WithInterfaceFrameEvent("greet", {"0": name})
+        __e = WithInterfaceFrameEvent("greet", {"name": name})
+        __ctx = WithInterfaceFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def get_count(self) -> int:
-        self._return_value = None
         __e = WithInterfaceFrameEvent("get_count", None)
+        __ctx = WithInterfaceFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Ready(self, __e):
         if __e._message == "get_count":
-            self._return_value = self.call_count
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.call_count
             return
         elif __e._message == "greet":
-            name = __e._parameters["0"]
+            name = __e._parameters["name"]
             self.call_count += 1
-            self._return_value = f"Hello, {name}!"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = f"Hello, {name}!"
             return
 
 

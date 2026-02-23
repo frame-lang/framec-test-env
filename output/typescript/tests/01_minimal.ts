@@ -1,12 +1,23 @@
 class MinimalFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class MinimalFrameContext {
+    public event: MinimalFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: MinimalFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,11 +57,11 @@ class Minimal {
     private _state_stack: Array<any>;
     private __compartment: MinimalCompartment;
     private __next_compartment: MinimalCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.__compartment = new MinimalCompartment("Start");
         this.__next_compartment = null;
         const __frame_event = new MinimalFrameEvent("$>", null);
@@ -104,16 +115,16 @@ class Minimal {
     }
 
     public is_alive(): boolean {
-        this._return_value = null;
         const __e = new MinimalFrameEvent("is_alive", null);
+        const __ctx = new MinimalFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Start(__e: MinimalFrameEvent) {
         if (__e._message === "is_alive") {
-            this._return_value = true;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = true;
             return;;
         }
     }

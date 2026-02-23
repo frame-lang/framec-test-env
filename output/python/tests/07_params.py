@@ -4,7 +4,13 @@ class WithParamsFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class WithParamsFrameContext:
+    def __init__(self, event: WithParamsFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class WithParamsCompartment:
@@ -30,7 +36,7 @@ class WithParamsCompartment:
 class WithParams:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.total = 0
         self.__compartment = WithParamsCompartment("Idle")
         self.__next_compartment = None
@@ -77,41 +83,47 @@ class WithParams:
         self.__next_compartment = next_compartment
 
     def start(self, initial: int):
-        __e = WithParamsFrameEvent("start", {"0": initial})
+        __e = WithParamsFrameEvent("start", {"initial": initial})
+        __ctx = WithParamsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def add(self, value: int):
-        __e = WithParamsFrameEvent("add", {"0": value})
+        __e = WithParamsFrameEvent("add", {"value": value})
+        __ctx = WithParamsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def multiply(self, a: int, b: int) -> int:
-        self._return_value = None
-        __e = WithParamsFrameEvent("multiply", {"0": a, "1": b})
+        __e = WithParamsFrameEvent("multiply", {"a": a, "b": b})
+        __ctx = WithParamsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def get_total(self) -> int:
-        self._return_value = None
         __e = WithParamsFrameEvent("get_total", None)
+        __ctx = WithParamsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Idle(self, __e):
         if __e._message == "add":
-            value = __e._parameters["0"]
+            value = __e._parameters["value"]
             print("Cannot add in Idle state")
         elif __e._message == "get_total":
-            self._return_value = self.total
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.total
             return
         elif __e._message == "multiply":
-            a = __e._parameters["0"]
-            b = __e._parameters["1"]
-            self._return_value = 0
-            __e._return = self._return_value
+            a = __e._parameters["a"]
+            b = __e._parameters["b"]
+            self._context_stack[-1]._return = 0
             return
         elif __e._message == "start":
-            initial = __e._parameters["0"]
+            initial = __e._parameters["initial"]
             self.total = initial
             print(f"Started with initial value: {initial}")
             __compartment = WithParamsCompartment("Running", parent_compartment=self.__compartment.copy())
@@ -119,24 +131,22 @@ class WithParams:
 
     def _state_Running(self, __e):
         if __e._message == "add":
-            value = __e._parameters["0"]
+            value = __e._parameters["value"]
             self.total += value
             print(f"Added {value}, total is now {self.total}")
         elif __e._message == "get_total":
-            self._return_value = self.total
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.total
             return
         elif __e._message == "multiply":
-            a = __e._parameters["0"]
-            b = __e._parameters["1"]
+            a = __e._parameters["a"]
+            b = __e._parameters["b"]
             result = a * b
             self.total += result
             print(f"Multiplied {a} * {b} = {result}, total is now {self.total}")
-            self._return_value = result
-            __e._return = self._return_value
+            self._context_stack[-1]._return = result
             return
         elif __e._message == "start":
-            initial = __e._parameters["0"]
+            initial = __e._parameters["initial"]
             print("Already running")
 
 

@@ -1,12 +1,23 @@
 class WithInterfaceFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class WithInterfaceFrameContext {
+    public event: WithInterfaceFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: WithInterfaceFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,12 +57,12 @@ class WithInterface {
     private _state_stack: Array<any>;
     private __compartment: WithInterfaceCompartment;
     private __next_compartment: WithInterfaceCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private call_count: number = 0;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.call_count = 0;
         this.__compartment = new WithInterfaceCompartment("Ready");
         this.__next_compartment = null;
@@ -106,29 +117,29 @@ class WithInterface {
     }
 
     public greet(name: string): string {
-        this._return_value = null;
-        const __e = new WithInterfaceFrameEvent("greet", {"0": name});
+        const __e = new WithInterfaceFrameEvent("greet", {"name": name});
+        const __ctx = new WithInterfaceFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_count(): number {
-        this._return_value = null;
         const __e = new WithInterfaceFrameEvent("get_count", null);
+        const __ctx = new WithInterfaceFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Ready(__e: WithInterfaceFrameEvent) {
         if (__e._message === "get_count") {
-            this._return_value = this.call_count;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.call_count;
             return;;
         } else if (__e._message === "greet") {
-            const name = __e._parameters?.["0"];
+            const name = __e._parameters?.["name"];
             this.call_count += 1;
-            this._return_value = `Hello, ${name}!`;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = `Hello, ${name}!`;
             return;;
         }
     }

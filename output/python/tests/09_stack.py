@@ -4,7 +4,13 @@ class StackOpsFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class StackOpsFrameContext:
+    def __init__(self, event: StackOpsFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class StackOpsCompartment:
@@ -30,7 +36,7 @@ class StackOpsCompartment:
 class StackOps:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.__compartment = StackOpsCompartment("Main")
         self.__next_compartment = None
         __frame_event = StackOpsFrameEvent("$>", None)
@@ -77,32 +83,52 @@ class StackOps:
 
     def push_and_go(self):
         __e = StackOpsFrameEvent("push_and_go", None)
+        __ctx = StackOpsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def pop_back(self):
         __e = StackOpsFrameEvent("pop_back", None)
+        __ctx = StackOpsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def do_work(self) -> str:
-        self._return_value = None
         __e = StackOpsFrameEvent("do_work", None)
+        __ctx = StackOpsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def get_state(self) -> str:
-        self._return_value = None
         __e = StackOpsFrameEvent("get_state", None)
+        __ctx = StackOpsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
+
+    def _state_Sub(self, __e):
+        if __e._message == "do_work":
+            self._context_stack[-1]._return = "Working in Sub"
+            return
+        elif __e._message == "get_state":
+            self._context_stack[-1]._return = "Sub"
+            return
+        elif __e._message == "pop_back":
+            print("Popping back to previous state")
+            self.__compartment = self._state_stack.pop()
+            return
+        elif __e._message == "push_and_go":
+            print("Already in Sub")
 
     def _state_Main(self, __e):
         if __e._message == "do_work":
-            self._return_value = "Working in Main"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "Working in Main"
             return
         elif __e._message == "get_state":
-            self._return_value = "Main"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "Main"
             return
         elif __e._message == "pop_back":
             print("Cannot pop - nothing on stack in Main")
@@ -111,22 +137,6 @@ class StackOps:
             self._state_stack.append(self.__compartment.copy())
             __compartment = StackOpsCompartment("Sub", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
-
-    def _state_Sub(self, __e):
-        if __e._message == "do_work":
-            self._return_value = "Working in Sub"
-            __e._return = self._return_value
-            return
-        elif __e._message == "get_state":
-            self._return_value = "Sub"
-            __e._return = self._return_value
-            return
-        elif __e._message == "pop_back":
-            print("Popping back to previous state")
-            self.__compartment = self._state_stack.pop()
-            return
-        elif __e._message == "push_and_go":
-            print("Already in Sub")
 
 
 def main():

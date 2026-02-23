@@ -8,11 +8,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct TransitionEnterArgsFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl TransitionEnterArgsFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct TransitionEnterArgsFrameContext {
+    event: TransitionEnterArgsFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl TransitionEnterArgsFrameContext {
+    fn new(event: TransitionEnterArgsFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -50,6 +73,7 @@ pub struct TransitionEnterArgs {
     _state_stack: Vec<(String, TransitionEnterArgsStateContext)>,
     __compartment: TransitionEnterArgsCompartment,
     __next_compartment: Option<TransitionEnterArgsCompartment>,
+    _context_stack: Vec<TransitionEnterArgsFrameContext>,
     count: i32,
 }
 
@@ -57,6 +81,7 @@ impl TransitionEnterArgs {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             count: 0,
             __compartment: TransitionEnterArgsCompartment::new("Idle"),
             __next_compartment: None,
@@ -174,12 +199,12 @@ return self.count;
 self.count = self.count + 10;
     }
 
-    fn _s_Active_enter(&mut self, __e: &TransitionEnterArgsFrameEvent) {
-self.count = self.count + 1;
-    }
-
     fn _s_Active_get_count(&mut self, __e: &TransitionEnterArgsFrameEvent) -> i32 {
 return self.count;
+    }
+
+    fn _s_Active_enter(&mut self, __e: &TransitionEnterArgsFrameEvent) {
+self.count = self.count + 1;
     }
 }
 

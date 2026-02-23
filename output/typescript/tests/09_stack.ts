@@ -1,12 +1,23 @@
 class StackOpsFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class StackOpsFrameContext {
+    public event: StackOpsFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: StackOpsFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,11 +57,11 @@ class StackOps {
     private _state_stack: Array<any>;
     private __compartment: StackOpsCompartment;
     private __next_compartment: StackOpsCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.__compartment = new StackOpsCompartment("Main");
         this.__next_compartment = null;
         const __frame_event = new StackOpsFrameEvent("$>", null);
@@ -105,36 +116,42 @@ class StackOps {
 
     public push_and_go() {
         const __e = new StackOpsFrameEvent("push_and_go", null);
+        const __ctx = new StackOpsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public pop_back() {
         const __e = new StackOpsFrameEvent("pop_back", null);
+        const __ctx = new StackOpsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public do_work(): string {
-        this._return_value = null;
         const __e = new StackOpsFrameEvent("do_work", null);
+        const __ctx = new StackOpsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_state(): string {
-        this._return_value = null;
         const __e = new StackOpsFrameEvent("get_state", null);
+        const __ctx = new StackOpsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Main(__e: StackOpsFrameEvent) {
         if (__e._message === "do_work") {
-            this._return_value = "Working in Main";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "Working in Main";
             return;;
         } else if (__e._message === "get_state") {
-            this._return_value = "Main";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "Main";
             return;;
         } else if (__e._message === "pop_back") {
             console.log("Cannot pop - nothing on stack in Main");
@@ -148,12 +165,10 @@ class StackOps {
 
     private _state_Sub(__e: StackOpsFrameEvent) {
         if (__e._message === "do_work") {
-            this._return_value = "Working in Sub";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "Working in Sub";
             return;;
         } else if (__e._message === "get_state") {
-            this._return_value = "Sub";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "Sub";
             return;;
         } else if (__e._message === "pop_back") {
             console.log("Popping back to previous state");

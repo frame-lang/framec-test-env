@@ -8,11 +8,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct SystemReturnChainTestFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl SystemReturnChainTestFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct SystemReturnChainTestFrameContext {
+    event: SystemReturnChainTestFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl SystemReturnChainTestFrameContext {
+    fn new(event: SystemReturnChainTestFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -51,12 +74,14 @@ pub struct SystemReturnChainTest {
     _state_stack: Vec<(String, SystemReturnChainTestStateContext)>,
     __compartment: SystemReturnChainTestCompartment,
     __next_compartment: Option<SystemReturnChainTestCompartment>,
+    _context_stack: Vec<SystemReturnChainTestFrameContext>,
 }
 
 impl SystemReturnChainTest {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             __compartment: SystemReturnChainTestCompartment::new("Start"),
             __next_compartment: None,
         };
@@ -149,16 +174,16 @@ match __e.message.as_str() {
 }
     }
 
-    fn _state_EnterSetter(&mut self, __e: &SystemReturnChainTestFrameEvent) {
+    fn _state_BothSet(&mut self, __e: &SystemReturnChainTestFrameEvent) {
 match __e.message.as_str() {
-    "get_state_num" => { self._s_EnterSetter_get_state_num(__e); }
+    "get_state_num" => { self._s_BothSet_get_state_num(__e); }
     _ => {}
 }
     }
 
-    fn _state_BothSet(&mut self, __e: &SystemReturnChainTestFrameEvent) {
+    fn _state_EnterSetter(&mut self, __e: &SystemReturnChainTestFrameEvent) {
 match __e.message.as_str() {
-    "get_state_num" => { self._s_BothSet_get_state_num(__e); }
+    "get_state_num" => { self._s_EnterSetter_get_state_num(__e); }
     _ => {}
 }
     }
@@ -167,12 +192,12 @@ match __e.message.as_str() {
 return 1;
     }
 
-    fn _s_EnterSetter_get_state_num(&mut self, __e: &SystemReturnChainTestFrameEvent) -> i32 {
-return 2;
-    }
-
     fn _s_BothSet_get_state_num(&mut self, __e: &SystemReturnChainTestFrameEvent) -> i32 {
 return 3;
+    }
+
+    fn _s_EnterSetter_get_state_num(&mut self, __e: &SystemReturnChainTestFrameEvent) -> i32 {
+return 2;
     }
 }
 

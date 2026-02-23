@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct PersistStackFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl PersistStackFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct PersistStackFrameContext {
+    event: PersistStackFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl PersistStackFrameContext {
+    fn new(event: PersistStackFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -46,6 +69,7 @@ pub struct PersistStack {
     _state_stack: Vec<(String, PersistStackStateContext)>,
     __compartment: PersistStackCompartment,
     __next_compartment: Option<PersistStackCompartment>,
+    _context_stack: Vec<PersistStackFrameContext>,
     depth: i32,
 }
 
@@ -53,6 +77,7 @@ impl PersistStack {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             depth: 0,
             __compartment: PersistStackCompartment::new("Start"),
             __next_compartment: None,
@@ -159,6 +184,16 @@ match self.__compartment.state.as_str() {
         }
     }
 
+    fn _state_Start(&mut self, __e: &PersistStackFrameEvent) {
+match __e.message.as_str() {
+    "get_depth" => { self._s_Start_get_depth(__e); }
+    "get_state" => { self._s_Start_get_state(__e); }
+    "pop_back" => { self._s_Start_pop_back(__e); }
+    "push_and_go" => { self._s_Start_push_and_go(__e); }
+    _ => {}
+}
+    }
+
     fn _state_Middle(&mut self, __e: &PersistStackFrameEvent) {
 match __e.message.as_str() {
     "get_depth" => { self._s_Middle_get_depth(__e); }
@@ -179,14 +214,30 @@ match __e.message.as_str() {
 }
     }
 
-    fn _state_Start(&mut self, __e: &PersistStackFrameEvent) {
-match __e.message.as_str() {
-    "get_depth" => { self._s_Start_get_depth(__e); }
-    "get_state" => { self._s_Start_get_state(__e); }
-    "pop_back" => { self._s_Start_pop_back(__e); }
-    "push_and_go" => { self._s_Start_push_and_go(__e); }
-    _ => {}
-}
+    fn _s_Start_push_and_go(&mut self, __e: &PersistStackFrameEvent) {
+self.depth = self.depth + 1;
+self._state_stack_push();
+self.__transition(PersistStackCompartment::new("Middle"));
+    }
+
+    fn _s_Start_get_depth(&mut self, __e: &PersistStackFrameEvent) -> i32 {
+return self.depth;
+    }
+
+    fn _s_Start_pop_back(&mut self, __e: &PersistStackFrameEvent) {
+// nothing to pop;
+    }
+
+    fn _s_Start_get_state(&mut self, __e: &PersistStackFrameEvent) -> String {
+return String::from("start");
+    }
+
+    fn _s_Middle_get_depth(&mut self, __e: &PersistStackFrameEvent) -> i32 {
+return self.depth;
+    }
+
+    fn _s_Middle_get_state(&mut self, __e: &PersistStackFrameEvent) -> String {
+return String::from("middle");
     }
 
     fn _s_Middle_push_and_go(&mut self, __e: &PersistStackFrameEvent) {
@@ -195,18 +246,10 @@ self._state_stack_push();
 self.__transition(PersistStackCompartment::new("End"));
     }
 
-    fn _s_Middle_get_depth(&mut self, __e: &PersistStackFrameEvent) -> i32 {
-return self.depth;
-    }
-
     fn _s_Middle_pop_back(&mut self, __e: &PersistStackFrameEvent) {
 self.depth = self.depth - 1;
 self._state_stack_pop();
 return;
-    }
-
-    fn _s_Middle_get_state(&mut self, __e: &PersistStackFrameEvent) -> String {
-return String::from("middle");
     }
 
     fn _s_End_push_and_go(&mut self, __e: &PersistStackFrameEvent) {
@@ -224,24 +267,6 @@ return;
     }
 
     fn _s_End_get_depth(&mut self, __e: &PersistStackFrameEvent) -> i32 {
-return self.depth;
-    }
-
-    fn _s_Start_push_and_go(&mut self, __e: &PersistStackFrameEvent) {
-self.depth = self.depth + 1;
-self._state_stack_push();
-self.__transition(PersistStackCompartment::new("Middle"));
-    }
-
-    fn _s_Start_pop_back(&mut self, __e: &PersistStackFrameEvent) {
-// nothing to pop;
-    }
-
-    fn _s_Start_get_state(&mut self, __e: &PersistStackFrameEvent) -> String {
-return String::from("start");
-    }
-
-    fn _s_Start_get_depth(&mut self, __e: &PersistStackFrameEvent) -> i32 {
 return self.depth;
     }
 

@@ -4,7 +4,13 @@ class PersistRoundtripFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class PersistRoundtripFrameContext:
+    def __init__(self, event: PersistRoundtripFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class PersistRoundtripCompartment:
@@ -30,7 +36,7 @@ class PersistRoundtripCompartment:
 class PersistRoundtrip:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.counter = 0
         self.history =         []
         self.mode = "normal"
@@ -80,65 +86,55 @@ class PersistRoundtrip:
 
     def go_active(self):
         __e = PersistRoundtripFrameEvent("go_active", None)
+        __ctx = PersistRoundtripFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def go_idle(self):
         __e = PersistRoundtripFrameEvent("go_idle", None)
+        __ctx = PersistRoundtripFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_state(self) -> str:
-        self._return_value = None
         __e = PersistRoundtripFrameEvent("get_state", None)
+        __ctx = PersistRoundtripFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def set_counter(self, n: int):
-        __e = PersistRoundtripFrameEvent("set_counter", {"0": n})
+        __e = PersistRoundtripFrameEvent("set_counter", {"n": n})
+        __ctx = PersistRoundtripFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_counter(self) -> int:
-        self._return_value = None
         __e = PersistRoundtripFrameEvent("get_counter", None)
+        __ctx = PersistRoundtripFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def add_history(self, msg: str):
-        __e = PersistRoundtripFrameEvent("add_history", {"0": msg})
+        __e = PersistRoundtripFrameEvent("add_history", {"msg": msg})
+        __ctx = PersistRoundtripFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-
-    def _state_Active(self, __e):
-        if __e._message == "add_history":
-            msg = __e._parameters["0"]
-            self.history.append("active:" + msg)
-        elif __e._message == "get_counter":
-            self._return_value = self.counter
-            __e._return = self._return_value
-            return
-        elif __e._message == "get_state":
-            self._return_value = "active"
-            __e._return = self._return_value
-            return
-        elif __e._message == "go_active":
-            pass  # already active
-        elif __e._message == "go_idle":
-            self.history.append("active->idle")
-            __compartment = PersistRoundtripCompartment("Idle", parent_compartment=self.__compartment.copy())
-            self.__transition(__compartment)
-        elif __e._message == "set_counter":
-            n = __e._parameters["0"]
-            self.counter = n * 2
+        self._context_stack.pop()
 
     def _state_Idle(self, __e):
         if __e._message == "add_history":
-            msg = __e._parameters["0"]
+            msg = __e._parameters["msg"]
             self.history.append("idle:" + msg)
         elif __e._message == "get_counter":
-            self._return_value = self.counter
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.counter
             return
         elif __e._message == "get_state":
-            self._return_value = "idle"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "idle"
             return
         elif __e._message == "go_active":
             self.history.append("idle->active")
@@ -147,8 +143,28 @@ class PersistRoundtrip:
         elif __e._message == "go_idle":
             pass  # already idle
         elif __e._message == "set_counter":
-            n = __e._parameters["0"]
+            n = __e._parameters["n"]
             self.counter = n
+
+    def _state_Active(self, __e):
+        if __e._message == "add_history":
+            msg = __e._parameters["msg"]
+            self.history.append("active:" + msg)
+        elif __e._message == "get_counter":
+            self._context_stack[-1]._return = self.counter
+            return
+        elif __e._message == "get_state":
+            self._context_stack[-1]._return = "active"
+            return
+        elif __e._message == "go_active":
+            pass  # already active
+        elif __e._message == "go_idle":
+            self.history.append("active->idle")
+            __compartment = PersistRoundtripCompartment("Idle", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
+        elif __e._message == "set_counter":
+            n = __e._parameters["n"]
+            self.counter = n * 2
 
     def save_state(self) -> bytes:
         import pickle

@@ -1,12 +1,23 @@
 class PersistTestFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class PersistTestFrameContext {
+    public event: PersistTestFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: PersistTestFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,13 +57,13 @@ class PersistTest {
     private _state_stack: Array<any>;
     private __compartment: PersistTestCompartment;
     private __next_compartment: PersistTestCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private value: number = 0;
     private name: string = "default";
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.value = 0;
         this.name = "default";
         this.__compartment = new PersistTestCompartment("Idle");
@@ -108,31 +119,40 @@ class PersistTest {
     }
 
     public set_value(v: number) {
-        const __e = new PersistTestFrameEvent("set_value", {"0": v});
+        const __e = new PersistTestFrameEvent("set_value", {"v": v});
+        const __ctx = new PersistTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_value(): number {
-        this._return_value = null;
         const __e = new PersistTestFrameEvent("get_value", null);
+        const __ctx = new PersistTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public go_active() {
         const __e = new PersistTestFrameEvent("go_active", null);
+        const __ctx = new PersistTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public go_idle() {
         const __e = new PersistTestFrameEvent("go_idle", null);
+        const __ctx = new PersistTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     private _state_Idle(__e: PersistTestFrameEvent) {
         if (__e._message === "get_value") {
-            this._return_value = this.value;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.value;
             return;;
         } else if (__e._message === "go_active") {
             const __compartment = new PersistTestCompartment("Active", this.__compartment.copy());
@@ -140,15 +160,14 @@ class PersistTest {
         } else if (__e._message === "go_idle") {
             // Already idle
         } else if (__e._message === "set_value") {
-            const v = __e._parameters?.["0"];
+            const v = __e._parameters?.["v"];
             this.value = v;
         }
     }
 
     private _state_Active(__e: PersistTestFrameEvent) {
         if (__e._message === "get_value") {
-            this._return_value = this.value;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.value;
             return;;
         } else if (__e._message === "go_active") {
             // Already active
@@ -156,7 +175,7 @@ class PersistTest {
             const __compartment = new PersistTestCompartment("Idle", this.__compartment.copy());
             this.__transition(__compartment);
         } else if (__e._message === "set_value") {
-            const v = __e._parameters?.["0"];
+            const v = __e._parameters?.["v"];
             this.value = v * 2;
         }
     }

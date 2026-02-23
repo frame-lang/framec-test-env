@@ -12,7 +12,13 @@ class NativeCodeFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class NativeCodeFrameContext:
+    def __init__(self, event: NativeCodeFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class NativeCodeCompartment:
@@ -38,7 +44,7 @@ class NativeCodeCompartment:
 class NativeCode:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.__compartment = NativeCodeCompartment("Active")
         self.__next_compartment = None
         __frame_event = NativeCodeFrameEvent("$>", None)
@@ -84,33 +90,33 @@ class NativeCode:
         self.__next_compartment = next_compartment
 
     def compute(self, value: int) -> int:
-        self._return_value = None
-        __e = NativeCodeFrameEvent("compute", {"0": value})
+        __e = NativeCodeFrameEvent("compute", {"value": value})
+        __ctx = NativeCodeFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def use_math(self) -> float:
-        self._return_value = None
         __e = NativeCodeFrameEvent("use_math", None)
+        __ctx = NativeCodeFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Active(self, __e):
         if __e._message == "compute":
-            value = __e._parameters["0"]
+            value = __e._parameters["value"]
             # Native code with local variables
             temp = value + 10
             result = helper_function(temp)
             print(f"Computed: {value} -> {result}")
-            self._return_value = result
-            __e._return = self._return_value
+            self._context_stack[-1]._return = result
             return
         elif __e._message == "use_math":
             # Using imported math module
             result = math.sqrt(16) + math.pi
             print(f"Math result: {result}")
-            self._return_value = result
-            __e._return = self._return_value
+            self._context_stack[-1]._return = result
             return
 
 

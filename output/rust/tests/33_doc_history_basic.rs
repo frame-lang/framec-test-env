@@ -7,11 +7,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct HistoryBasicFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl HistoryBasicFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct HistoryBasicFrameContext {
+    event: HistoryBasicFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl HistoryBasicFrameContext {
+    fn new(event: HistoryBasicFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -50,12 +73,14 @@ pub struct HistoryBasic {
     _state_stack: Vec<(String, HistoryBasicStateContext)>,
     __compartment: HistoryBasicCompartment,
     __next_compartment: Option<HistoryBasicCompartment>,
+    _context_stack: Vec<HistoryBasicFrameContext>,
 }
 
 impl HistoryBasic {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             __compartment: HistoryBasicCompartment::new("A"),
             __next_compartment: None,
         };
@@ -161,19 +186,19 @@ match self.__compartment.state.as_str() {
         }
     }
 
-    fn _state_C(&mut self, __e: &HistoryBasicFrameEvent) {
-match __e.message.as_str() {
-    "get_state" => { self._s_C_get_state(__e); }
-    "return_back" => { self._s_C_return_back(__e); }
-    _ => {}
-}
-    }
-
     fn _state_A(&mut self, __e: &HistoryBasicFrameEvent) {
 match __e.message.as_str() {
     "get_state" => { self._s_A_get_state(__e); }
     "goto_b" => { self._s_A_goto_b(__e); }
     "goto_c_from_a" => { self._s_A_goto_c_from_a(__e); }
+    _ => {}
+}
+    }
+
+    fn _state_C(&mut self, __e: &HistoryBasicFrameEvent) {
+match __e.message.as_str() {
+    "get_state" => { self._s_C_get_state(__e); }
+    "return_back" => { self._s_C_return_back(__e); }
     _ => {}
 }
     }
@@ -186,13 +211,8 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_C_return_back(&mut self, __e: &HistoryBasicFrameEvent) {
-self._state_stack_pop();
-return;
-    }
-
-    fn _s_C_get_state(&mut self, __e: &HistoryBasicFrameEvent) -> String {
-return String::from("C")
+    fn _s_A_goto_b(&mut self, __e: &HistoryBasicFrameEvent) {
+self.__transition(HistoryBasicCompartment::new("B"));
     }
 
     fn _s_A_get_state(&mut self, __e: &HistoryBasicFrameEvent) -> String {
@@ -204,8 +224,13 @@ self._state_stack_push();
 self.__transition(HistoryBasicCompartment::new("C"));
     }
 
-    fn _s_A_goto_b(&mut self, __e: &HistoryBasicFrameEvent) {
-self.__transition(HistoryBasicCompartment::new("B"));
+    fn _s_C_return_back(&mut self, __e: &HistoryBasicFrameEvent) {
+self._state_stack_pop();
+return;
+    }
+
+    fn _s_C_get_state(&mut self, __e: &HistoryBasicFrameEvent) -> String {
+return String::from("C")
     }
 
     fn _s_B_get_state(&mut self, __e: &HistoryBasicFrameEvent) -> String {

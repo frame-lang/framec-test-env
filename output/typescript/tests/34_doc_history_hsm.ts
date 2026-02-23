@@ -6,12 +6,23 @@
 class HistoryHSMFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class HistoryHSMFrameContext {
+    public event: HistoryHSMFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: HistoryHSMFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -51,12 +62,12 @@ class HistoryHSM {
     private _state_stack: Array<any>;
     private __compartment: HistoryHSMCompartment;
     private __next_compartment: HistoryHSMCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private log: string[] =     [];
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.log =         [];
         this.__compartment = new HistoryHSMCompartment("Waiting");
         this.__next_compartment = null;
@@ -112,48 +123,112 @@ class HistoryHSM {
 
     public gotoA() {
         const __e = new HistoryHSMFrameEvent("gotoA", null);
+        const __ctx = new HistoryHSMFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public gotoB() {
         const __e = new HistoryHSMFrameEvent("gotoB", null);
+        const __ctx = new HistoryHSMFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public gotoC() {
         const __e = new HistoryHSMFrameEvent("gotoC", null);
+        const __ctx = new HistoryHSMFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public goBack() {
         const __e = new HistoryHSMFrameEvent("goBack", null);
+        const __ctx = new HistoryHSMFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_state(): string {
-        this._return_value = null;
         const __e = new HistoryHSMFrameEvent("get_state", null);
+        const __ctx = new HistoryHSMFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_log(): string[] {
-        this._return_value = null;
         const __e = new HistoryHSMFrameEvent("get_log", null);
+        const __ctx = new HistoryHSMFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
+    }
+
+    private _state_C(__e: HistoryHSMFrameEvent) {
+        if (__e._message === "$>") {
+            this.log_msg("In $C")
+        } else if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "C";
+            return;
+        } else if (__e._message === "goBack") {
+            this.log_msg("goBack")
+            this.__compartment = this._state_stack.pop()!;
+            return;
+        }
+    }
+
+    private _state_A(__e: HistoryHSMFrameEvent) {
+        if (__e._message === "$>") {
+            this.log_msg("In $A")
+        } else if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "A";
+            return;
+        } else if (__e._message === "gotoB") {
+            this.log_msg("gotoB")
+            const __compartment = new HistoryHSMCompartment("B", this.__compartment.copy());
+            this.__transition(__compartment);
+        } else {
+            this._state_AB(__e);
+        }
+    }
+
+    private _state_B(__e: HistoryHSMFrameEvent) {
+        if (__e._message === "$>") {
+            this.log_msg("In $B")
+        } else if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "B";
+            return;
+        } else if (__e._message === "gotoA") {
+            this.log_msg("gotoA")
+            const __compartment = new HistoryHSMCompartment("A", this.__compartment.copy());
+            this.__transition(__compartment);
+        } else {
+            this._state_AB(__e);
+        }
     }
 
     private _state_Waiting(__e: HistoryHSMFrameEvent) {
         if (__e._message === "$>") {
             this.log_msg("In $Waiting")
         } else if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;
         } else if (__e._message === "get_state") {
-            this._return_value = "Waiting";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "Waiting";
             return;
         } else if (__e._message === "gotoA") {
             this.log_msg("gotoA")
@@ -172,64 +247,6 @@ class HistoryHSM {
             this._state_stack.push(this.__compartment.copy());
             const __compartment = new HistoryHSMCompartment("C", this.__compartment.copy());
             this.__transition(__compartment);
-        }
-    }
-
-    private _state_C(__e: HistoryHSMFrameEvent) {
-        if (__e._message === "$>") {
-            this.log_msg("In $C")
-        } else if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
-            return;
-        } else if (__e._message === "get_state") {
-            this._return_value = "C";
-            __e._return = this._return_value;
-            return;
-        } else if (__e._message === "goBack") {
-            this.log_msg("goBack")
-            this.__compartment = this._state_stack.pop()!;
-            return;
-        }
-    }
-
-    private _state_A(__e: HistoryHSMFrameEvent) {
-        if (__e._message === "$>") {
-            this.log_msg("In $A")
-        } else if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
-            return;
-        } else if (__e._message === "get_state") {
-            this._return_value = "A";
-            __e._return = this._return_value;
-            return;
-        } else if (__e._message === "gotoB") {
-            this.log_msg("gotoB")
-            const __compartment = new HistoryHSMCompartment("B", this.__compartment.copy());
-            this.__transition(__compartment);
-        } else {
-            this._state_AB(__e);
-        }
-    }
-
-    private _state_B(__e: HistoryHSMFrameEvent) {
-        if (__e._message === "$>") {
-            this.log_msg("In $B")
-        } else if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
-            return;
-        } else if (__e._message === "get_state") {
-            this._return_value = "B";
-            __e._return = this._return_value;
-            return;
-        } else if (__e._message === "gotoA") {
-            this.log_msg("gotoA")
-            const __compartment = new HistoryHSMCompartment("A", this.__compartment.copy());
-            this.__transition(__compartment);
-        } else {
-            this._state_AB(__e);
         }
     }
 

@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct SystemReturnTestFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl SystemReturnTestFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct SystemReturnTestFrameContext {
+    event: SystemReturnTestFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl SystemReturnTestFrameContext {
+    fn new(event: SystemReturnTestFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -49,6 +72,7 @@ pub struct SystemReturnTest {
     _state_stack: Vec<(String, SystemReturnTestStateContext)>,
     __compartment: SystemReturnTestCompartment,
     __next_compartment: Option<SystemReturnTestCompartment>,
+    _context_stack: Vec<SystemReturnTestFrameContext>,
     _sv_value: i32,
 }
 
@@ -56,6 +80,7 @@ impl SystemReturnTest {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             _sv_value: 0,
             __compartment: SystemReturnTestCompartment::new("Calculator"),
             __next_compartment: None,
@@ -162,8 +187,8 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Calculator_add(&mut self, __e: &SystemReturnTestFrameEvent, a: i32, b: i32) -> i32 {
-return a + b
+    fn _s_Calculator_multiply(&mut self, __e: &SystemReturnTestFrameEvent, a: i32, b: i32) -> i32 {
+return a * b
     }
 
     fn _s_Calculator_get_value(&mut self, __e: &SystemReturnTestFrameEvent) -> i32 {
@@ -171,8 +196,8 @@ self._sv_value = 42;
 return self._sv_value
     }
 
-    fn _s_Calculator_multiply(&mut self, __e: &SystemReturnTestFrameEvent, a: i32, b: i32) -> i32 {
-return a * b
+    fn _s_Calculator_add(&mut self, __e: &SystemReturnTestFrameEvent, a: i32, b: i32) -> i32 {
+return a + b
     }
 }
 

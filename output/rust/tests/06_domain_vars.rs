@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct DomainVarsFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl DomainVarsFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct DomainVarsFrameContext {
+    event: DomainVarsFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl DomainVarsFrameContext {
+    fn new(event: DomainVarsFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -44,6 +67,7 @@ pub struct DomainVars {
     _state_stack: Vec<(String, DomainVarsStateContext)>,
     __compartment: DomainVarsCompartment,
     __next_compartment: Option<DomainVarsCompartment>,
+    _context_stack: Vec<DomainVarsFrameContext>,
     count: i32,
     name: String,
 }
@@ -52,6 +76,7 @@ impl DomainVars {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             count: 0,
             name: String::from("counter"),
             __compartment: DomainVarsCompartment::new("Counting"),
@@ -178,11 +203,6 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Counting_decrement(&mut self, __e: &DomainVarsFrameEvent) {
-self.count -= 1;
-println!("{}: decremented to {}", self.name, self.count);
-    }
-
     fn _s_Counting_set_count(&mut self, __e: &DomainVarsFrameEvent, value: i32) {
 self.count = value;
 println!("{}: set to {}", self.name, self.count);
@@ -191,6 +211,11 @@ println!("{}: set to {}", self.name, self.count);
     fn _s_Counting_increment(&mut self, __e: &DomainVarsFrameEvent) {
 self.count += 1;
 println!("{}: incremented to {}", self.name, self.count);
+    }
+
+    fn _s_Counting_decrement(&mut self, __e: &DomainVarsFrameEvent) {
+self.count -= 1;
+println!("{}: decremented to {}", self.name, self.count);
     }
 
     fn _s_Counting_get_count(&mut self, __e: &DomainVarsFrameEvent) -> i32 {

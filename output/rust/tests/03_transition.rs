@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct WithTransitionFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl WithTransitionFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct WithTransitionFrameContext {
+    event: WithTransitionFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl WithTransitionFrameContext {
+    fn new(event: WithTransitionFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -45,12 +68,14 @@ pub struct WithTransition {
     _state_stack: Vec<(String, WithTransitionStateContext)>,
     __compartment: WithTransitionCompartment,
     __next_compartment: Option<WithTransitionCompartment>,
+    _context_stack: Vec<WithTransitionFrameContext>,
 }
 
 impl WithTransition {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             __compartment: WithTransitionCompartment::new("First"),
             __next_compartment: None,
         };

@@ -1,12 +1,23 @@
 class WithTransitionFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class WithTransitionFrameContext {
+    public event: WithTransitionFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: WithTransitionFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,11 +57,11 @@ class WithTransition {
     private _state_stack: Array<any>;
     private __compartment: WithTransitionCompartment;
     private __next_compartment: WithTransitionCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.__compartment = new WithTransitionCompartment("First");
         this.__next_compartment = null;
         const __frame_event = new WithTransitionFrameEvent("$>", null);
@@ -105,36 +116,38 @@ class WithTransition {
 
     public next() {
         const __e = new WithTransitionFrameEvent("next", null);
+        const __ctx = new WithTransitionFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_state(): string {
-        this._return_value = null;
         const __e = new WithTransitionFrameEvent("get_state", null);
+        const __ctx = new WithTransitionFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
-    }
-
-    private _state_Second(__e: WithTransitionFrameEvent) {
-        if (__e._message === "get_state") {
-            this._return_value = "Second";
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "next") {
-            console.log("Transitioning: Second -> First");
-            const __compartment = new WithTransitionCompartment("First", this.__compartment.copy());
-            this.__transition(__compartment);
-        }
+        return this._context_stack.pop()!._return;
     }
 
     private _state_First(__e: WithTransitionFrameEvent) {
         if (__e._message === "get_state") {
-            this._return_value = "First";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "First";
             return;;
         } else if (__e._message === "next") {
             console.log("Transitioning: First -> Second");
             const __compartment = new WithTransitionCompartment("Second", this.__compartment.copy());
+            this.__transition(__compartment);
+        }
+    }
+
+    private _state_Second(__e: WithTransitionFrameEvent) {
+        if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "Second";
+            return;;
+        } else if (__e._message === "next") {
+            console.log("Transitioning: Second -> First");
+            const __compartment = new WithTransitionCompartment("First", this.__compartment.copy());
             this.__transition(__compartment);
         }
     }

@@ -4,7 +4,13 @@ class HSMForwardFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class HSMForwardFrameContext:
+    def __init__(self, event: HSMForwardFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class HSMForwardCompartment:
@@ -30,7 +36,7 @@ class HSMForwardCompartment:
 class HSMForward:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.log =         []
         self.__compartment = HSMForwardCompartment("Child")
         self.__next_compartment = None
@@ -78,17 +84,24 @@ class HSMForward:
 
     def event_a(self):
         __e = HSMForwardFrameEvent("event_a", None)
+        __ctx = HSMForwardFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def event_b(self):
         __e = HSMForwardFrameEvent("event_b", None)
+        __ctx = HSMForwardFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_log(self) -> list:
-        self._return_value = None
         __e = HSMForwardFrameEvent("get_log", None)
+        __ctx = HSMForwardFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Parent(self, __e):
         if __e._message == "event_a":
@@ -96,8 +109,7 @@ class HSMForward:
         elif __e._message == "event_b":
             self.log.append("Parent:event_b")
         elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
 
     def _state_Child(self, __e):
@@ -107,8 +119,7 @@ class HSMForward:
             self.log.append("Child:event_b_forward")
             self._state_Parent(__e)
         elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
 
 

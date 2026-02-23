@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct StateVarReentryFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl StateVarReentryFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct StateVarReentryFrameContext {
+    event: StateVarReentryFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl StateVarReentryFrameContext {
+    fn new(event: StateVarReentryFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -50,6 +73,7 @@ pub struct StateVarReentry {
     _state_stack: Vec<(String, StateVarReentryStateContext)>,
     __compartment: StateVarReentryCompartment,
     __next_compartment: Option<StateVarReentryCompartment>,
+    _context_stack: Vec<StateVarReentryFrameContext>,
     _sv_count: i32,
 }
 
@@ -57,6 +81,7 @@ impl StateVarReentry {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             _sv_count: 0,
             __compartment: StateVarReentryCompartment::new("Counter"),
             __next_compartment: None,
@@ -181,8 +206,8 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Counter_get_count(&mut self, __e: &StateVarReentryFrameEvent) -> i32 {
-self._sv_count
+    fn _s_Counter_go_other(&mut self, __e: &StateVarReentryFrameEvent) {
+self.__transition(StateVarReentryCompartment::new("Other"));
     }
 
     fn _s_Counter_increment(&mut self, __e: &StateVarReentryFrameEvent) -> i32 {
@@ -190,19 +215,19 @@ self._sv_count = self._sv_count + 1;
 self._sv_count
     }
 
-    fn _s_Counter_go_other(&mut self, __e: &StateVarReentryFrameEvent) {
-self.__transition(StateVarReentryCompartment::new("Other"));
+    fn _s_Counter_get_count(&mut self, __e: &StateVarReentryFrameEvent) -> i32 {
+self._sv_count
     }
 
     fn _s_Other_come_back(&mut self, __e: &StateVarReentryFrameEvent) {
 self.__transition(StateVarReentryCompartment::new("Counter"));
     }
 
-    fn _s_Other_increment(&mut self, __e: &StateVarReentryFrameEvent) -> i32 {
+    fn _s_Other_get_count(&mut self, __e: &StateVarReentryFrameEvent) -> i32 {
 -1
     }
 
-    fn _s_Other_get_count(&mut self, __e: &StateVarReentryFrameEvent) -> i32 {
+    fn _s_Other_increment(&mut self, __e: &StateVarReentryFrameEvent) -> i32 {
 -1
     }
 }

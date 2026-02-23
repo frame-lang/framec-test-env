@@ -4,7 +4,13 @@ class PersistTestFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class PersistTestFrameContext:
+    def __init__(self, event: PersistTestFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class PersistTestCompartment:
@@ -30,7 +36,7 @@ class PersistTestCompartment:
 class PersistTest:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.value = 0
         self.name = "default"
         self.__compartment = PersistTestCompartment("Idle")
@@ -78,41 +84,36 @@ class PersistTest:
         self.__next_compartment = next_compartment
 
     def set_value(self, v: int):
-        __e = PersistTestFrameEvent("set_value", {"0": v})
+        __e = PersistTestFrameEvent("set_value", {"v": v})
+        __ctx = PersistTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_value(self) -> int:
-        self._return_value = None
         __e = PersistTestFrameEvent("get_value", None)
+        __ctx = PersistTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def go_active(self):
         __e = PersistTestFrameEvent("go_active", None)
+        __ctx = PersistTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def go_idle(self):
         __e = PersistTestFrameEvent("go_idle", None)
+        __ctx = PersistTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-
-    def _state_Idle(self, __e):
-        if __e._message == "get_value":
-            self._return_value = self.value
-            __e._return = self._return_value
-            return
-        elif __e._message == "go_active":
-            __compartment = PersistTestCompartment("Active", parent_compartment=self.__compartment.copy())
-            self.__transition(__compartment)
-        elif __e._message == "go_idle":
-            pass  # Already idle
-        elif __e._message == "set_value":
-            v = __e._parameters["0"]
-            self.value = v
+        self._context_stack.pop()
 
     def _state_Active(self, __e):
         if __e._message == "get_value":
-            self._return_value = self.value
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.value
             return
         elif __e._message == "go_active":
             pass  # Already active
@@ -120,8 +121,21 @@ class PersistTest:
             __compartment = PersistTestCompartment("Idle", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
         elif __e._message == "set_value":
-            v = __e._parameters["0"]
+            v = __e._parameters["v"]
             self.value = v * 2
+
+    def _state_Idle(self, __e):
+        if __e._message == "get_value":
+            self._context_stack[-1]._return = self.value
+            return
+        elif __e._message == "go_active":
+            __compartment = PersistTestCompartment("Active", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
+        elif __e._message == "go_idle":
+            pass  # Already idle
+        elif __e._message == "set_value":
+            v = __e._parameters["v"]
+            self.value = v
 
     def save_state(self) -> bytes:
         import pickle

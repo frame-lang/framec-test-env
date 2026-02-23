@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct ForwardEnterFirstFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl ForwardEnterFirstFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct ForwardEnterFirstFrameContext {
+    event: ForwardEnterFirstFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl ForwardEnterFirstFrameContext {
+    fn new(event: ForwardEnterFirstFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -50,6 +73,7 @@ pub struct ForwardEnterFirst {
     _state_stack: Vec<(String, ForwardEnterFirstStateContext)>,
     __compartment: ForwardEnterFirstCompartment,
     __next_compartment: Option<ForwardEnterFirstCompartment>,
+    _context_stack: Vec<ForwardEnterFirstFrameContext>,
     log: Vec<String>,
     _sv_counter: i32,
 }
@@ -58,6 +82,7 @@ impl ForwardEnterFirst {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             log: Vec::new(),
             _sv_counter: 0,
             __compartment: ForwardEnterFirstCompartment::new("Idle"),
@@ -194,6 +219,10 @@ return;
 return -1;
     }
 
+    fn _s_Working_get_counter(&mut self, __e: &ForwardEnterFirstFrameEvent) -> i32 {
+return self._sv_counter;
+    }
+
     fn _s_Working_get_log(&mut self, __e: &ForwardEnterFirstFrameEvent) -> Vec<String> {
 return self.log.clone();
     }
@@ -205,10 +234,6 @@ self._sv_counter = self._sv_counter + 1;
 
     fn _s_Working_enter(&mut self, __e: &ForwardEnterFirstFrameEvent) {
 self.log.push("Working:enter".to_string());
-    }
-
-    fn _s_Working_get_counter(&mut self, __e: &ForwardEnterFirstFrameEvent) -> i32 {
-return self._sv_counter;
     }
 }
 

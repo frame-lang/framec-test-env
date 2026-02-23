@@ -4,7 +4,13 @@ class SystemReturnDefaultTestFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class SystemReturnDefaultTestFrameContext:
+    def __init__(self, event: SystemReturnDefaultTestFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class SystemReturnDefaultTestCompartment:
@@ -30,7 +36,7 @@ class SystemReturnDefaultTestCompartment:
 class SystemReturnDefaultTest:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.__compartment = SystemReturnDefaultTestCompartment("Start")
         self.__next_compartment = None
         __frame_event = SystemReturnDefaultTestFrameEvent("$>", None)
@@ -76,36 +82,37 @@ class SystemReturnDefaultTest:
         self.__next_compartment = next_compartment
 
     def handler_sets_value(self) -> str:
-        self._return_value = None
         __e = SystemReturnDefaultTestFrameEvent("handler_sets_value", None)
+        __ctx = SystemReturnDefaultTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def handler_no_return(self) -> str:
-        self._return_value = None
         __e = SystemReturnDefaultTestFrameEvent("handler_no_return", None)
+        __ctx = SystemReturnDefaultTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def get_count(self) -> int:
-        self._return_value = None
         __e = SystemReturnDefaultTestFrameEvent("get_count", None)
+        __ctx = SystemReturnDefaultTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Start(self, __e):
         if __e._message == "$>":
             self.__compartment.state_vars["count"] = 0
         elif __e._message == "get_count":
-            self._return_value = self.__compartment.state_vars["count"]
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.__compartment.state_vars["count"]
             return
         elif __e._message == "handler_no_return":
             # Does not set return - should return None
             self.__compartment.state_vars["count"] = self.__compartment.state_vars["count"] + 1
         elif __e._message == "handler_sets_value":
-            self._return_value = "set_by_handler"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "set_by_handler"
             return
 
 

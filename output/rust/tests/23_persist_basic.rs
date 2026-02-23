@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct PersistTestFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl PersistTestFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct PersistTestFrameContext {
+    event: PersistTestFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl PersistTestFrameContext {
+    fn new(event: PersistTestFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -45,6 +68,7 @@ pub struct PersistTest {
     _state_stack: Vec<(String, PersistTestStateContext)>,
     __compartment: PersistTestCompartment,
     __next_compartment: Option<PersistTestCompartment>,
+    _context_stack: Vec<PersistTestFrameContext>,
     value: i32,
     name: String,
 }
@@ -53,6 +77,7 @@ impl PersistTest {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             value: 0,
             name: String::from("default"),
             __compartment: PersistTestCompartment::new("Idle"),
@@ -175,15 +200,6 @@ let __e = PersistTestFrameEvent::new("go_idle");
 self.__kernel(__e);
     }
 
-    fn _state_Active(&mut self, __e: &PersistTestFrameEvent) {
-match __e.message.as_str() {
-    "get_value" => { self._s_Active_get_value(__e); }
-    "go_active" => { self._s_Active_go_active(__e); }
-    "go_idle" => { self._s_Active_go_idle(__e); }
-    _ => {}
-}
-    }
-
     fn _state_Idle(&mut self, __e: &PersistTestFrameEvent) {
 match __e.message.as_str() {
     "get_value" => { self._s_Idle_get_value(__e); }
@@ -193,20 +209,21 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Active_set_value(&mut self, __e: &PersistTestFrameEvent, v: i32) {
-self.value = v * 2;
+    fn _state_Active(&mut self, __e: &PersistTestFrameEvent) {
+match __e.message.as_str() {
+    "get_value" => { self._s_Active_get_value(__e); }
+    "go_active" => { self._s_Active_go_active(__e); }
+    "go_idle" => { self._s_Active_go_idle(__e); }
+    _ => {}
+}
     }
 
-    fn _s_Active_go_idle(&mut self, __e: &PersistTestFrameEvent) {
-self.__transition(PersistTestCompartment::new("Idle"));
+    fn _s_Idle_go_active(&mut self, __e: &PersistTestFrameEvent) {
+self.__transition(PersistTestCompartment::new("Active"));
     }
 
-    fn _s_Active_go_active(&mut self, __e: &PersistTestFrameEvent) {
-// Already active;
-    }
-
-    fn _s_Active_get_value(&mut self, __e: &PersistTestFrameEvent) -> i32 {
-return self.value;
+    fn _s_Idle_set_value(&mut self, __e: &PersistTestFrameEvent, v: i32) {
+self.value = v;
     }
 
     fn _s_Idle_go_idle(&mut self, __e: &PersistTestFrameEvent) {
@@ -217,12 +234,20 @@ return self.value;
 return self.value;
     }
 
-    fn _s_Idle_go_active(&mut self, __e: &PersistTestFrameEvent) {
-self.__transition(PersistTestCompartment::new("Active"));
+    fn _s_Active_go_active(&mut self, __e: &PersistTestFrameEvent) {
+// Already active;
     }
 
-    fn _s_Idle_set_value(&mut self, __e: &PersistTestFrameEvent, v: i32) {
-self.value = v;
+    fn _s_Active_get_value(&mut self, __e: &PersistTestFrameEvent) -> i32 {
+return self.value;
+    }
+
+    fn _s_Active_set_value(&mut self, __e: &PersistTestFrameEvent, v: i32) {
+self.value = v * 2;
+    }
+
+    fn _s_Active_go_idle(&mut self, __e: &PersistTestFrameEvent) {
+self.__transition(PersistTestCompartment::new("Idle"));
     }
 
     pub fn save_state(&mut self) -> String {

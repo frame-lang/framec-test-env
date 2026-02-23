@@ -1,12 +1,23 @@
 class WithParamsFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class WithParamsFrameContext {
+    public event: WithParamsFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: WithParamsFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,12 +57,12 @@ class WithParams {
     private _state_stack: Array<any>;
     private __compartment: WithParamsCompartment;
     private __next_compartment: WithParamsCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private total: number = 0;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.total = 0;
         this.__compartment = new WithParamsCompartment("Idle");
         this.__next_compartment = null;
@@ -106,69 +117,73 @@ class WithParams {
     }
 
     public start(initial: number) {
-        const __e = new WithParamsFrameEvent("start", {"0": initial});
+        const __e = new WithParamsFrameEvent("start", {"initial": initial});
+        const __ctx = new WithParamsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public add(value: number) {
-        const __e = new WithParamsFrameEvent("add", {"0": value});
+        const __e = new WithParamsFrameEvent("add", {"value": value});
+        const __ctx = new WithParamsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public multiply(a: number, b: number): number {
-        this._return_value = null;
-        const __e = new WithParamsFrameEvent("multiply", {"0": a, "1": b});
+        const __e = new WithParamsFrameEvent("multiply", {"a": a, "b": b});
+        const __ctx = new WithParamsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_total(): number {
-        this._return_value = null;
         const __e = new WithParamsFrameEvent("get_total", null);
+        const __ctx = new WithParamsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Running(__e: WithParamsFrameEvent) {
         if (__e._message === "add") {
-            const value = __e._parameters?.["0"];
+            const value = __e._parameters?.["value"];
             this.total += value;
             console.log(`Added ${value}, total is now ${this.total}`);
         } else if (__e._message === "get_total") {
-            this._return_value = this.total;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.total;
             return;;
         } else if (__e._message === "multiply") {
-            const a = __e._parameters?.["0"];
-            const b = __e._parameters?.["1"];
+            const a = __e._parameters?.["a"];
+            const b = __e._parameters?.["b"];
             const result = a * b;
             this.total += result;
             console.log(`Multiplied ${a} * ${b} = ${result}, total is now ${this.total}`);
-            this._return_value = result;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = result;
             return;;
         } else if (__e._message === "start") {
-            const initial = __e._parameters?.["0"];
+            const initial = __e._parameters?.["initial"];
             console.log("Already running");
         }
     }
 
     private _state_Idle(__e: WithParamsFrameEvent) {
         if (__e._message === "add") {
-            const value = __e._parameters?.["0"];
+            const value = __e._parameters?.["value"];
             console.log("Cannot add in Idle state");
         } else if (__e._message === "get_total") {
-            this._return_value = this.total;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.total;
             return;;
         } else if (__e._message === "multiply") {
-            const a = __e._parameters?.["0"];
-            const b = __e._parameters?.["1"];
-            this._return_value = 0;
-            __e._return = this._return_value;
+            const a = __e._parameters?.["a"];
+            const b = __e._parameters?.["b"];
+            this._context_stack[this._context_stack.length - 1]._return = 0;
             return;;
         } else if (__e._message === "start") {
-            const initial = __e._parameters?.["0"];
+            const initial = __e._parameters?.["initial"];
             this.total = initial;
             console.log(`Started with initial value: ${initial}`);
             const __compartment = new WithParamsCompartment("Running", this.__compartment.copy());

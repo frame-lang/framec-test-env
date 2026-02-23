@@ -4,7 +4,13 @@ class StateParamsFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class StateParamsFrameContext:
+    def __init__(self, event: StateParamsFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class StateParamsCompartment:
@@ -30,7 +36,7 @@ class StateParamsCompartment:
 class StateParams:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.__compartment = StateParamsCompartment("Idle")
         self.__next_compartment = None
         __frame_event = StateParamsFrameEvent("$>", None)
@@ -76,14 +82,18 @@ class StateParams:
         self.__next_compartment = next_compartment
 
     def start(self, val: int):
-        __e = StateParamsFrameEvent("start", {"0": val})
+        __e = StateParamsFrameEvent("start", {"val": val})
+        __ctx = StateParamsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_value(self) -> int:
-        self._return_value = None
         __e = StateParamsFrameEvent("get_value", None)
+        __ctx = StateParamsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Counter(self, __e):
         if __e._message == "$>":
@@ -94,17 +104,15 @@ class StateParams:
             count_val = self.__compartment.state_vars["count"]
             print(f"Counter entered with initial={count_val}")
         elif __e._message == "get_value":
-            self._return_value = self.__compartment.state_vars["count"]
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.__compartment.state_vars["count"]
             return
 
     def _state_Idle(self, __e):
         if __e._message == "get_value":
-            self._return_value = 0
-            __e._return = self._return_value
+            self._context_stack[-1]._return = 0
             return
         elif __e._message == "start":
-            val = __e._parameters["0"]
+            val = __e._parameters["val"]
             __compartment = StateParamsCompartment("Counter", parent_compartment=self.__compartment.copy())
             __compartment.state_args = {"0": val}
             self.__transition(__compartment)

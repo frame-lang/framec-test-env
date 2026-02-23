@@ -4,7 +4,13 @@ class PersistStackFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class PersistStackFrameContext:
+    def __init__(self, event: PersistStackFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class PersistStackCompartment:
@@ -30,7 +36,7 @@ class PersistStackCompartment:
 class PersistStack:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.depth = 0
         self.__compartment = PersistStackCompartment("Start")
         self.__next_compartment = None
@@ -78,32 +84,38 @@ class PersistStack:
 
     def push_and_go(self):
         __e = PersistStackFrameEvent("push_and_go", None)
+        __ctx = PersistStackFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def pop_back(self):
         __e = PersistStackFrameEvent("pop_back", None)
+        __ctx = PersistStackFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_state(self) -> str:
-        self._return_value = None
         __e = PersistStackFrameEvent("get_state", None)
+        __ctx = PersistStackFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def get_depth(self) -> int:
-        self._return_value = None
         __e = PersistStackFrameEvent("get_depth", None)
+        __ctx = PersistStackFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Start(self, __e):
         if __e._message == "get_depth":
-            self._return_value = self.depth
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.depth
             return
         elif __e._message == "get_state":
-            self._return_value = "start"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "start"
             return
         elif __e._message == "pop_back":
             pass  # nothing to pop
@@ -113,30 +125,12 @@ class PersistStack:
             __compartment = PersistStackCompartment("Middle", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
 
-    def _state_End(self, __e):
-        if __e._message == "get_depth":
-            self._return_value = self.depth
-            __e._return = self._return_value
-            return
-        elif __e._message == "get_state":
-            self._return_value = "end"
-            __e._return = self._return_value
-            return
-        elif __e._message == "pop_back":
-            self.depth = self.depth - 1
-            self.__compartment = self._state_stack.pop()
-            return
-        elif __e._message == "push_and_go":
-            pass  # can't go further
-
     def _state_Middle(self, __e):
         if __e._message == "get_depth":
-            self._return_value = self.depth
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.depth
             return
         elif __e._message == "get_state":
-            self._return_value = "middle"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "middle"
             return
         elif __e._message == "pop_back":
             self.depth = self.depth - 1
@@ -147,6 +141,20 @@ class PersistStack:
             self._state_stack.append(self.__compartment.copy())
             __compartment = PersistStackCompartment("End", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
+
+    def _state_End(self, __e):
+        if __e._message == "get_depth":
+            self._context_stack[-1]._return = self.depth
+            return
+        elif __e._message == "get_state":
+            self._context_stack[-1]._return = "end"
+            return
+        elif __e._message == "pop_back":
+            self.depth = self.depth - 1
+            self.__compartment = self._state_stack.pop()
+            return
+        elif __e._message == "push_and_go":
+            pass  # can't go further
 
     def save_state(self) -> bytes:
         import pickle

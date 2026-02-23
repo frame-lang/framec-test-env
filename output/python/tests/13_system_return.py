@@ -4,7 +4,13 @@ class SystemReturnTestFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class SystemReturnTestFrameContext:
+    def __init__(self, event: SystemReturnTestFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class SystemReturnTestCompartment:
@@ -30,7 +36,7 @@ class SystemReturnTestCompartment:
 class SystemReturnTest:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.__compartment = SystemReturnTestCompartment("Calculator")
         self.__next_compartment = None
         __frame_event = SystemReturnTestFrameEvent("$>", None)
@@ -76,52 +82,53 @@ class SystemReturnTest:
         self.__next_compartment = next_compartment
 
     def add(self, a: int, b: int) -> int:
-        self._return_value = None
-        __e = SystemReturnTestFrameEvent("add", {"0": a, "1": b})
+        __e = SystemReturnTestFrameEvent("add", {"a": a, "b": b})
+        __ctx = SystemReturnTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def multiply(self, a: int, b: int) -> int:
-        self._return_value = None
-        __e = SystemReturnTestFrameEvent("multiply", {"0": a, "1": b})
+        __e = SystemReturnTestFrameEvent("multiply", {"a": a, "b": b})
+        __ctx = SystemReturnTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def greet(self, name: str) -> str:
-        self._return_value = None
-        __e = SystemReturnTestFrameEvent("greet", {"0": name})
+        __e = SystemReturnTestFrameEvent("greet", {"name": name})
+        __ctx = SystemReturnTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def get_value(self) -> int:
-        self._return_value = None
         __e = SystemReturnTestFrameEvent("get_value", None)
+        __ctx = SystemReturnTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Calculator(self, __e):
         if __e._message == "$>":
             self.__compartment.state_vars["value"] = 0
         elif __e._message == "add":
-            a = __e._parameters["0"]
-            b = __e._parameters["1"]
-            self._return_value = a + b
-            __e._return = self._return_value
+            a = __e._parameters["a"]
+            b = __e._parameters["b"]
+            self._context_stack[-1]._return = a + b
             return
         elif __e._message == "get_value":
             self.__compartment.state_vars["value"] = 42
-            self._return_value = self.__compartment.state_vars["value"]
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.__compartment.state_vars["value"]
             return
         elif __e._message == "greet":
-            name = __e._parameters["0"]
-            self._return_value = "Hello, " + name + "!"
-            __e._return = self._return_value
+            name = __e._parameters["name"]
+            self._context_stack[-1]._return = "Hello, " + name + "!"
             return
         elif __e._message == "multiply":
-            a = __e._parameters["0"]
-            b = __e._parameters["1"]
-            self._return_value = a * b
+            a = __e._parameters["a"]
+            b = __e._parameters["b"]
+            self._context_stack[-1]._return = a * b
 
 
 def main():

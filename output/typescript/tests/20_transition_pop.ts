@@ -1,12 +1,23 @@
 class TransitionPopTestFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class TransitionPopTestFrameContext {
+    public event: TransitionPopTestFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: TransitionPopTestFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,12 +57,12 @@ class TransitionPopTest {
     private _state_stack: Array<any>;
     private __compartment: TransitionPopTestCompartment;
     private __next_compartment: TransitionPopTestCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private log: string[] =     [];
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.log =         [];
         this.__compartment = new TransitionPopTestCompartment("Idle");
         this.__next_compartment = null;
@@ -107,36 +118,42 @@ class TransitionPopTest {
 
     public start() {
         const __e = new TransitionPopTestFrameEvent("start", null);
+        const __ctx = new TransitionPopTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public process() {
         const __e = new TransitionPopTestFrameEvent("process", null);
+        const __ctx = new TransitionPopTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_state(): string {
-        this._return_value = null;
         const __e = new TransitionPopTestFrameEvent("get_state", null);
+        const __ctx = new TransitionPopTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_log(): string[] {
-        this._return_value = null;
         const __e = new TransitionPopTestFrameEvent("get_log", null);
+        const __ctx = new TransitionPopTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Working(__e: TransitionPopTestFrameEvent) {
         if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;;
         } else if (__e._message === "get_state") {
-            this._return_value = "Working";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "Working";
             return;;
         } else if (__e._message === "process") {
             this.log.push("working:process:before_pop");
@@ -149,12 +166,10 @@ class TransitionPopTest {
 
     private _state_Idle(__e: TransitionPopTestFrameEvent) {
         if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;;
         } else if (__e._message === "get_state") {
-            this._return_value = "Idle";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "Idle";
             return;;
         } else if (__e._message === "process") {
             this.log.push("idle:process");

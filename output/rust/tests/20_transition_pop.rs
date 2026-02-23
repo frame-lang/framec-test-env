@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct TransitionPopTestFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl TransitionPopTestFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct TransitionPopTestFrameContext {
+    event: TransitionPopTestFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl TransitionPopTestFrameContext {
+    fn new(event: TransitionPopTestFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -45,6 +68,7 @@ pub struct TransitionPopTest {
     _state_stack: Vec<(String, TransitionPopTestStateContext)>,
     __compartment: TransitionPopTestCompartment,
     __next_compartment: Option<TransitionPopTestCompartment>,
+    _context_stack: Vec<TransitionPopTestFrameContext>,
     log: Vec<String>,
 }
 
@@ -52,6 +76,7 @@ impl TransitionPopTest {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             log: Vec::new(),
             __compartment: TransitionPopTestCompartment::new("Idle"),
             __next_compartment: None,
@@ -172,6 +197,10 @@ match __e.message.as_str() {
 }
     }
 
+    fn _s_Idle_get_state(&mut self, __e: &TransitionPopTestFrameEvent) -> String {
+return "Idle".to_string();
+    }
+
     fn _s_Idle_get_log(&mut self, __e: &TransitionPopTestFrameEvent) -> Vec<String> {
 return self.log.clone();
     }
@@ -186,8 +215,8 @@ self.__transition(TransitionPopTestCompartment::new("Working"));
 self.log.push("idle:process".to_string());
     }
 
-    fn _s_Idle_get_state(&mut self, __e: &TransitionPopTestFrameEvent) -> String {
-return "Idle".to_string();
+    fn _s_Working_get_log(&mut self, __e: &TransitionPopTestFrameEvent) -> Vec<String> {
+return self.log.clone();
     }
 
     fn _s_Working_process(&mut self, __e: &TransitionPopTestFrameEvent) {
@@ -200,10 +229,6 @@ self.log.push("working:process:after_pop".to_string());
 
     fn _s_Working_get_state(&mut self, __e: &TransitionPopTestFrameEvent) -> String {
 return "Working".to_string();
-    }
-
-    fn _s_Working_get_log(&mut self, __e: &TransitionPopTestFrameEvent) -> Vec<String> {
-return self.log.clone();
     }
 }
 

@@ -8,11 +8,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct StateParamsFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl StateParamsFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct StateParamsFrameContext {
+    event: StateParamsFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl StateParamsFrameContext {
+    fn new(event: StateParamsFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -55,6 +78,7 @@ pub struct StateParams {
     _state_stack: Vec<(String, StateParamsStateContext)>,
     __compartment: StateParamsCompartment,
     __next_compartment: Option<StateParamsCompartment>,
+    _context_stack: Vec<StateParamsFrameContext>,
     _sv_count: i32,
 }
 
@@ -62,6 +86,7 @@ impl StateParams {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             _sv_count: 0,
             __compartment: StateParamsCompartment::new("Idle"),
             __next_compartment: None,
@@ -151,6 +176,14 @@ match self.__compartment.state.as_str() {
         }
     }
 
+    fn _state_Idle(&mut self, __e: &StateParamsFrameEvent) {
+match __e.message.as_str() {
+    "get_value" => { self._s_Idle_get_value(__e); }
+    "start" => { self._s_Idle_start(__e); }
+    _ => {}
+}
+    }
+
     fn _state_Counter(&mut self, __e: &StateParamsFrameEvent) {
 match __e.message.as_str() {
     "$>" => {
@@ -162,23 +195,6 @@ match __e.message.as_str() {
 }
     }
 
-    fn _state_Idle(&mut self, __e: &StateParamsFrameEvent) {
-match __e.message.as_str() {
-    "get_value" => { self._s_Idle_get_value(__e); }
-    "start" => { self._s_Idle_start(__e); }
-    _ => {}
-}
-    }
-
-    fn _s_Counter_enter(&mut self, __e: &StateParamsFrameEvent) {
-self._sv_count = 42;  // Hardcoded for Rust test
-println!("Counter entered");
-    }
-
-    fn _s_Counter_get_value(&mut self, __e: &StateParamsFrameEvent) -> i32 {
-return self._sv_count
-    }
-
     fn _s_Idle_get_value(&mut self, __e: &StateParamsFrameEvent) -> i32 {
 return 0
     }
@@ -187,6 +203,15 @@ return 0
 // For Rust, state params not yet wired up to compartment
 // Just testing basic transition for now
 self.__transition(StateParamsCompartment::new("Counter"));
+    }
+
+    fn _s_Counter_get_value(&mut self, __e: &StateParamsFrameEvent) -> i32 {
+return self._sv_count
+    }
+
+    fn _s_Counter_enter(&mut self, __e: &StateParamsFrameEvent) {
+self._sv_count = 42;  // Hardcoded for Rust test
+println!("Counter entered");
     }
 }
 

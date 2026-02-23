@@ -4,7 +4,13 @@ class ForwardEnterFirstFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class ForwardEnterFirstFrameContext:
+    def __init__(self, event: ForwardEnterFirstFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class ForwardEnterFirstCompartment:
@@ -30,7 +36,7 @@ class ForwardEnterFirstCompartment:
 class ForwardEnterFirst:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.log =         []
         self.__compartment = ForwardEnterFirstCompartment("Idle")
         self.__next_compartment = None
@@ -78,28 +84,31 @@ class ForwardEnterFirst:
 
     def process(self):
         __e = ForwardEnterFirstFrameEvent("process", None)
+        __ctx = ForwardEnterFirstFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_counter(self) -> int:
-        self._return_value = None
         __e = ForwardEnterFirstFrameEvent("get_counter", None)
+        __ctx = ForwardEnterFirstFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def get_log(self) -> list:
-        self._return_value = None
         __e = ForwardEnterFirstFrameEvent("get_log", None)
+        __ctx = ForwardEnterFirstFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Idle(self, __e):
         if __e._message == "get_counter":
-            self._return_value = -1
-            __e._return = self._return_value
+            self._context_stack[-1]._return = -1
             return
         elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
         elif __e._message == "process":
             __compartment = ForwardEnterFirstCompartment("Working", parent_compartment=self.__compartment.copy())
@@ -112,12 +121,10 @@ class ForwardEnterFirst:
             self.__compartment.state_vars["counter"] = 100
             self.log.append("Working:enter")
         elif __e._message == "get_counter":
-            self._return_value = self.__compartment.state_vars["counter"]
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.__compartment.state_vars["counter"]
             return
         elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
         elif __e._message == "process":
             self.log.append("Working:process:counter=" + str(self.__compartment.state_vars["counter"]))

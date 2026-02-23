@@ -4,7 +4,13 @@ class EventForwardTestFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class EventForwardTestFrameContext:
+    def __init__(self, event: EventForwardTestFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class EventForwardTestCompartment:
@@ -30,7 +36,7 @@ class EventForwardTestCompartment:
 class EventForwardTest:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.log =         []
         self.__compartment = EventForwardTestCompartment("Idle")
         self.__next_compartment = None
@@ -78,18 +84,21 @@ class EventForwardTest:
 
     def process(self):
         __e = EventForwardTestFrameEvent("process", None)
+        __ctx = EventForwardTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_log(self) -> list:
-        self._return_value = None
         __e = EventForwardTestFrameEvent("get_log", None)
+        __ctx = EventForwardTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Idle(self, __e):
         if __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
         elif __e._message == "process":
             self.log.append("idle:process:before")
@@ -102,8 +111,7 @@ class EventForwardTest:
 
     def _state_Working(self, __e):
         if __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
         elif __e._message == "process":
             self.log.append("working:process")

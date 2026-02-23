@@ -1,12 +1,23 @@
 class HSMDefaultForwardFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class HSMDefaultForwardFrameContext {
+    public event: HSMDefaultForwardFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: HSMDefaultForwardFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,12 +57,12 @@ class HSMDefaultForward {
     private _state_stack: Array<any>;
     private __compartment: HSMDefaultForwardCompartment;
     private __next_compartment: HSMDefaultForwardCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private log: string[] =     [];
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.log =         [];
         this.__compartment = new HSMDefaultForwardCompartment("Child");
         this.__next_compartment = null;
@@ -107,25 +118,31 @@ class HSMDefaultForward {
 
     public handled_event() {
         const __e = new HSMDefaultForwardFrameEvent("handled_event", null);
+        const __ctx = new HSMDefaultForwardFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public unhandled_event() {
         const __e = new HSMDefaultForwardFrameEvent("unhandled_event", null);
+        const __ctx = new HSMDefaultForwardFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_log(): string[] {
-        this._return_value = null;
         const __e = new HSMDefaultForwardFrameEvent("get_log", null);
+        const __ctx = new HSMDefaultForwardFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Child(__e: HSMDefaultForwardFrameEvent) {
         if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;
         } else if (__e._message === "handled_event") {
             this.log.push("Child:handled_event")
@@ -136,8 +153,7 @@ class HSMDefaultForward {
 
     private _state_Parent(__e: HSMDefaultForwardFrameEvent) {
         if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;
         } else if (__e._message === "handled_event") {
             this.log.push("Parent:handled_event")

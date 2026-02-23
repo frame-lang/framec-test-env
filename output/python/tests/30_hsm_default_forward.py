@@ -4,7 +4,13 @@ class HSMDefaultForwardFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class HSMDefaultForwardFrameContext:
+    def __init__(self, event: HSMDefaultForwardFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class HSMDefaultForwardCompartment:
@@ -30,7 +36,7 @@ class HSMDefaultForwardCompartment:
 class HSMDefaultForward:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.log =         []
         self.__compartment = HSMDefaultForwardCompartment("Child")
         self.__next_compartment = None
@@ -78,22 +84,28 @@ class HSMDefaultForward:
 
     def handled_event(self):
         __e = HSMDefaultForwardFrameEvent("handled_event", None)
+        __ctx = HSMDefaultForwardFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def unhandled_event(self):
         __e = HSMDefaultForwardFrameEvent("unhandled_event", None)
+        __ctx = HSMDefaultForwardFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_log(self) -> list:
-        self._return_value = None
         __e = HSMDefaultForwardFrameEvent("get_log", None)
+        __ctx = HSMDefaultForwardFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Parent(self, __e):
         if __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
         elif __e._message == "handled_event":
             self.log.append("Parent:handled_event")
@@ -102,8 +114,7 @@ class HSMDefaultForward:
 
     def _state_Child(self, __e):
         if __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
         elif __e._message == "handled_event":
             self.log.append("Child:handled_event")

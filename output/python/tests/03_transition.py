@@ -4,7 +4,13 @@ class WithTransitionFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class WithTransitionFrameContext:
+    def __init__(self, event: WithTransitionFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class WithTransitionCompartment:
@@ -30,7 +36,7 @@ class WithTransitionCompartment:
 class WithTransition:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.__compartment = WithTransitionCompartment("First")
         self.__next_compartment = None
         __frame_event = WithTransitionFrameEvent("$>", None)
@@ -77,32 +83,34 @@ class WithTransition:
 
     def next(self):
         __e = WithTransitionFrameEvent("next", None)
+        __ctx = WithTransitionFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_state(self) -> str:
-        self._return_value = None
         __e = WithTransitionFrameEvent("get_state", None)
+        __ctx = WithTransitionFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
-
-    def _state_Second(self, __e):
-        if __e._message == "get_state":
-            self._return_value = "Second"
-            __e._return = self._return_value
-            return
-        elif __e._message == "next":
-            print("Transitioning: Second -> First")
-            __compartment = WithTransitionCompartment("First", parent_compartment=self.__compartment.copy())
-            self.__transition(__compartment)
+        return self._context_stack.pop()._return
 
     def _state_First(self, __e):
         if __e._message == "get_state":
-            self._return_value = "First"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "First"
             return
         elif __e._message == "next":
             print("Transitioning: First -> Second")
             __compartment = WithTransitionCompartment("Second", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
+
+    def _state_Second(self, __e):
+        if __e._message == "get_state":
+            self._context_stack[-1]._return = "Second"
+            return
+        elif __e._message == "next":
+            print("Transitioning: Second -> First")
+            __compartment = WithTransitionCompartment("First", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
 
 

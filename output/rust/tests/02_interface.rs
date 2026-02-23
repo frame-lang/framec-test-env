@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct WithInterfaceFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl WithInterfaceFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct WithInterfaceFrameContext {
+    event: WithInterfaceFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl WithInterfaceFrameContext {
+    fn new(event: WithInterfaceFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -44,6 +67,7 @@ pub struct WithInterface {
     _state_stack: Vec<(String, WithInterfaceStateContext)>,
     __compartment: WithInterfaceCompartment,
     __next_compartment: Option<WithInterfaceCompartment>,
+    _context_stack: Vec<WithInterfaceFrameContext>,
     call_count: i32,
 }
 
@@ -51,6 +75,7 @@ impl WithInterface {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             call_count: 0,
             __compartment: WithInterfaceCompartment::new("Ready"),
             __next_compartment: None,

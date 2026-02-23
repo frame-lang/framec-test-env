@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct OperationsTestFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl OperationsTestFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct OperationsTestFrameContext {
+    event: OperationsTestFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl OperationsTestFrameContext {
+    fn new(event: OperationsTestFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -44,6 +67,7 @@ pub struct OperationsTest {
     _state_stack: Vec<(String, OperationsTestStateContext)>,
     __compartment: OperationsTestCompartment,
     __next_compartment: Option<OperationsTestCompartment>,
+    _context_stack: Vec<OperationsTestFrameContext>,
     last_result: i32,
 }
 
@@ -51,6 +75,7 @@ impl OperationsTest {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             last_result: 0,
             __compartment: OperationsTestCompartment::new("Ready"),
             __next_compartment: None,
@@ -144,16 +169,16 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Ready_get_last_result(&mut self, __e: &OperationsTestFrameEvent) -> i32 {
-return self.last_result;
-    }
-
     fn _s_Ready_compute(&mut self, __e: &OperationsTestFrameEvent, a: i32, b: i32) -> i32 {
 // Use instance operations
 let sum_val = self.add(a, b);
 let prod_val = self.multiply(a, b);
 let last_result = sum_val + prod_val;
 return last_result;
+    }
+
+    fn _s_Ready_get_last_result(&mut self, __e: &OperationsTestFrameEvent) -> i32 {
+return self.last_result;
     }
 
     pub fn add(&mut self, x: i32, y: i32) -> i32 {

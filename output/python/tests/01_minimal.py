@@ -4,7 +4,13 @@ class MinimalFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class MinimalFrameContext:
+    def __init__(self, event: MinimalFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class MinimalCompartment:
@@ -30,7 +36,7 @@ class MinimalCompartment:
 class Minimal:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.__compartment = MinimalCompartment("Start")
         self.__next_compartment = None
         __frame_event = MinimalFrameEvent("$>", None)
@@ -76,15 +82,15 @@ class Minimal:
         self.__next_compartment = next_compartment
 
     def is_alive(self) -> bool:
-        self._return_value = None
         __e = MinimalFrameEvent("is_alive", None)
+        __ctx = MinimalFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Start(self, __e):
         if __e._message == "is_alive":
-            self._return_value = True
-            __e._return = self._return_value
+            self._context_stack[-1]._return = True
             return
 
 

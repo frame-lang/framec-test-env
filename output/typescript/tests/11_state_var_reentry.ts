@@ -1,12 +1,23 @@
 class StateVarReentryFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class StateVarReentryFrameContext {
+    public event: StateVarReentryFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: StateVarReentryFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,11 +57,11 @@ class StateVarReentry {
     private _state_stack: Array<any>;
     private __compartment: StateVarReentryCompartment;
     private __next_compartment: StateVarReentryCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.__compartment = new StateVarReentryCompartment("Counter");
         this.__next_compartment = null;
         const __frame_event = new StateVarReentryFrameEvent("$>", null);
@@ -104,43 +115,49 @@ class StateVarReentry {
     }
 
     public increment(): number {
-        this._return_value = null;
         const __e = new StateVarReentryFrameEvent("increment", null);
+        const __ctx = new StateVarReentryFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_count(): number {
-        this._return_value = null;
         const __e = new StateVarReentryFrameEvent("get_count", null);
+        const __ctx = new StateVarReentryFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public go_other() {
         const __e = new StateVarReentryFrameEvent("go_other", null);
+        const __ctx = new StateVarReentryFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public come_back() {
         const __e = new StateVarReentryFrameEvent("come_back", null);
+        const __ctx = new StateVarReentryFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     private _state_Counter(__e: StateVarReentryFrameEvent) {
         if (__e._message === "$>") {
             this.__compartment.state_vars["count"] = 0;
         } else if (__e._message === "get_count") {
-            this._return_value = this.__compartment.state_vars["count"];
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["count"];
             return;;
         } else if (__e._message === "go_other") {
             const __compartment = new StateVarReentryCompartment("Other", this.__compartment.copy());
             this.__transition(__compartment);
         } else if (__e._message === "increment") {
             this.__compartment.state_vars["count"] = this.__compartment.state_vars["count"] + 1;
-            this._return_value = this.__compartment.state_vars["count"];
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["count"];
             return;;
         }
     }
@@ -150,12 +167,10 @@ class StateVarReentry {
             const __compartment = new StateVarReentryCompartment("Counter", this.__compartment.copy());
             this.__transition(__compartment);
         } else if (__e._message === "get_count") {
-            this._return_value = -1;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = -1;
             return;;
         } else if (__e._message === "increment") {
-            this._return_value = -1;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = -1;
             return;;
         }
     }

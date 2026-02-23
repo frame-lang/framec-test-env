@@ -4,7 +4,13 @@ class TransitionEnterArgsFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class TransitionEnterArgsFrameContext:
+    def __init__(self, event: TransitionEnterArgsFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class TransitionEnterArgsCompartment:
@@ -30,7 +36,7 @@ class TransitionEnterArgsCompartment:
 class TransitionEnterArgs:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.log =         []
         self.__compartment = TransitionEnterArgsCompartment("Idle")
         self.__next_compartment = None
@@ -78,30 +84,32 @@ class TransitionEnterArgs:
 
     def start(self):
         __e = TransitionEnterArgsFrameEvent("start", None)
+        __ctx = TransitionEnterArgsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_log(self) -> list:
-        self._return_value = None
         __e = TransitionEnterArgsFrameEvent("get_log", None)
+        __ctx = TransitionEnterArgsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Active(self, __e):
         if __e._message == "$>":
-            source = __e._parameters["0"]
-            value = __e._parameters["1"]
+            source = __e._parameters["source"]
+            value = __e._parameters["value"]
             self.log.append(f"active:enter:{source}:{value}")
         elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
         elif __e._message == "start":
             self.log.append("active:start")
 
     def _state_Idle(self, __e):
         if __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
         elif __e._message == "start":
             self.log.append("idle:start")

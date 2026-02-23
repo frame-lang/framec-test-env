@@ -1,12 +1,23 @@
 class HSMForwardFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class HSMForwardFrameContext {
+    public event: HSMForwardFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: HSMForwardFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,12 +57,12 @@ class HSMForward {
     private _state_stack: Array<any>;
     private __compartment: HSMForwardCompartment;
     private __next_compartment: HSMForwardCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private log: string[] =     [];
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.log =         [];
         this.__compartment = new HSMForwardCompartment("Child");
         this.__next_compartment = null;
@@ -107,31 +118,26 @@ class HSMForward {
 
     public event_a() {
         const __e = new HSMForwardFrameEvent("event_a", null);
+        const __ctx = new HSMForwardFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public event_b() {
         const __e = new HSMForwardFrameEvent("event_b", null);
+        const __ctx = new HSMForwardFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_log(): string[] {
-        this._return_value = null;
         const __e = new HSMForwardFrameEvent("get_log", null);
+        const __ctx = new HSMForwardFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
-    }
-
-    private _state_Parent(__e: HSMForwardFrameEvent) {
-        if (__e._message === "event_a") {
-            this.log.push("Parent:event_a");
-        } else if (__e._message === "event_b") {
-            this.log.push("Parent:event_b");
-        } else if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
-            return;;
-        }
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Child(__e: HSMForwardFrameEvent) {
@@ -141,8 +147,18 @@ class HSMForward {
             this.log.push("Child:event_b_forward");
             this._state_Parent(__e);
         } else if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;;
+        }
+    }
+
+    private _state_Parent(__e: HSMForwardFrameEvent) {
+        if (__e._message === "event_a") {
+            this.log.push("Parent:event_a");
+        } else if (__e._message === "event_b") {
+            this.log.push("Parent:event_b");
+        } else if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;;
         }
     }

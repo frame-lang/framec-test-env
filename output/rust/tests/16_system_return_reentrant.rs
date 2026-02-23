@@ -8,11 +8,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct SystemReturnReentrantTestFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl SystemReturnReentrantTestFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct SystemReturnReentrantTestFrameContext {
+    event: SystemReturnReentrantTestFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl SystemReturnReentrantTestFrameContext {
+    fn new(event: SystemReturnReentrantTestFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -54,6 +77,7 @@ pub struct SystemReturnReentrantTest {
     _state_stack: Vec<(String, SystemReturnReentrantTestStateContext)>,
     __compartment: SystemReturnReentrantTestCompartment,
     __next_compartment: Option<SystemReturnReentrantTestCompartment>,
+    _context_stack: Vec<SystemReturnReentrantTestFrameContext>,
     _sv_call_count: i32,
 }
 
@@ -61,6 +85,7 @@ impl SystemReturnReentrantTest {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             _sv_call_count: 0,
             __compartment: SystemReturnReentrantTestCompartment::new("Start"),
             __next_compartment: None,
@@ -178,13 +203,6 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Start_outer_call(&mut self, __e: &SystemReturnReentrantTestFrameEvent) -> i32 {
-self._sv_call_count = self._sv_call_count + 1;
-let inner_result: i32 = self.inner_call();
-self._sv_call_count = self._sv_call_count + 1;
-return 100 + inner_result;
-    }
-
     fn _s_Start_nested_call(&mut self, __e: &SystemReturnReentrantTestFrameEvent) -> i32 {
 self._sv_call_count = self._sv_call_count + 1;
 let result1: i32 = self.inner_call();
@@ -196,6 +214,13 @@ return 1000 + result1 + result2;
     fn _s_Start_inner_call(&mut self, __e: &SystemReturnReentrantTestFrameEvent) -> i32 {
 self._sv_call_count = self._sv_call_count + 1;
 return 10;
+    }
+
+    fn _s_Start_outer_call(&mut self, __e: &SystemReturnReentrantTestFrameEvent) -> i32 {
+self._sv_call_count = self._sv_call_count + 1;
+let inner_result: i32 = self.inner_call();
+self._sv_call_count = self._sv_call_count + 1;
+return 100 + inner_result;
     }
 
     fn _s_Start_get_call_count(&mut self, __e: &SystemReturnReentrantTestFrameEvent) -> i32 {

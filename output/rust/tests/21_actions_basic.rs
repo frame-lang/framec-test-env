@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct ActionsTestFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl ActionsTestFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct ActionsTestFrameContext {
+    event: ActionsTestFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl ActionsTestFrameContext {
+    fn new(event: ActionsTestFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -44,6 +67,7 @@ pub struct ActionsTest {
     _state_stack: Vec<(String, ActionsTestStateContext)>,
     __compartment: ActionsTestCompartment,
     __next_compartment: Option<ActionsTestCompartment>,
+    _context_stack: Vec<ActionsTestFrameContext>,
     log: String,
 }
 
@@ -51,6 +75,7 @@ impl ActionsTest {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             log: String::new(),
             __compartment: ActionsTestCompartment::new("Ready"),
             __next_compartment: None,
@@ -144,6 +169,10 @@ match __e.message.as_str() {
 }
     }
 
+    fn _s_Ready_get_log(&mut self, __e: &ActionsTestFrameEvent) -> String {
+return self.log.clone();
+    }
+
     fn _s_Ready_process(&mut self, __e: &ActionsTestFrameEvent, value: i32) -> i32 {
 self.__log_event("start");
 self.__validate_positive(value);
@@ -151,10 +180,6 @@ self.__log_event("valid");
 let result = value * 2;
 self.__log_event("done");
 return result;
-    }
-
-    fn _s_Ready_get_log(&mut self, __e: &ActionsTestFrameEvent) -> String {
-return self.log.clone();
     }
 
     fn __log_event(&mut self, msg: &str) {

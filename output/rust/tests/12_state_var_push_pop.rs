@@ -8,11 +8,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct StateVarPushPopFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl StateVarPushPopFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct StateVarPushPopFrameContext {
+    event: StateVarPushPopFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl StateVarPushPopFrameContext {
+    fn new(event: StateVarPushPopFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -60,6 +83,7 @@ pub struct StateVarPushPop {
     _state_stack: Vec<(String, StateVarPushPopStateContext)>,
     __compartment: StateVarPushPopCompartment,
     __next_compartment: Option<StateVarPushPopCompartment>,
+    _context_stack: Vec<StateVarPushPopFrameContext>,
     _sv_count: i32,
     _sv_other_count: i32,
 }
@@ -68,6 +92,7 @@ impl StateVarPushPop {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             _sv_count: 0,
             _sv_other_count: 0,
             __compartment: StateVarPushPopCompartment::new("Counter"),
@@ -203,13 +228,17 @@ self._state_stack_push();
 self.__transition(StateVarPushPopCompartment::new("Other"));
     }
 
+    fn _s_Counter_get_count(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
+self._sv_count
+    }
+
     fn _s_Counter_increment(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
 self._sv_count = self._sv_count + 1;
 self._sv_count
     }
 
-    fn _s_Counter_get_count(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
-self._sv_count
+    fn _s_Other_get_count(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
+self._sv_other_count
     }
 
     fn _s_Other_restore(&mut self, __e: &StateVarPushPopFrameEvent) {
@@ -219,10 +248,6 @@ return;
 
     fn _s_Other_increment(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
 self._sv_other_count = self._sv_other_count + 1;
-self._sv_other_count
-    }
-
-    fn _s_Other_get_count(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
 self._sv_other_count
     }
 }

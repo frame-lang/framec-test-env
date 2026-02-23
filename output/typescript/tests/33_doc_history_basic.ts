@@ -5,12 +5,23 @@
 class HistoryBasicFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class HistoryBasicFrameContext {
+    public event: HistoryBasicFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: HistoryBasicFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -50,11 +61,11 @@ class HistoryBasic {
     private _state_stack: Array<any>;
     private __compartment: HistoryBasicCompartment;
     private __next_compartment: HistoryBasicCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.__compartment = new HistoryBasicCompartment("A");
         this.__next_compartment = null;
         const __frame_event = new HistoryBasicFrameEvent("$>", null);
@@ -109,35 +120,47 @@ class HistoryBasic {
 
     public gotoC_from_A() {
         const __e = new HistoryBasicFrameEvent("gotoC_from_A", null);
+        const __ctx = new HistoryBasicFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public gotoC_from_B() {
         const __e = new HistoryBasicFrameEvent("gotoC_from_B", null);
+        const __ctx = new HistoryBasicFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public gotoB() {
         const __e = new HistoryBasicFrameEvent("gotoB", null);
+        const __ctx = new HistoryBasicFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public return_back() {
         const __e = new HistoryBasicFrameEvent("return_back", null);
+        const __ctx = new HistoryBasicFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_state(): string {
-        this._return_value = null;
         const __e = new HistoryBasicFrameEvent("get_state", null);
+        const __ctx = new HistoryBasicFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_B(__e: HistoryBasicFrameEvent) {
         if (__e._message === "get_state") {
-            this._return_value = "B";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "B";
             return;
         } else if (__e._message === "gotoC_from_B") {
             this._state_stack.push(this.__compartment.copy());
@@ -148,8 +171,7 @@ class HistoryBasic {
 
     private _state_C(__e: HistoryBasicFrameEvent) {
         if (__e._message === "get_state") {
-            this._return_value = "C";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "C";
             return;
         } else if (__e._message === "return_back") {
             this.__compartment = this._state_stack.pop()!;
@@ -159,8 +181,7 @@ class HistoryBasic {
 
     private _state_A(__e: HistoryBasicFrameEvent) {
         if (__e._message === "get_state") {
-            this._return_value = "A";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "A";
             return;
         } else if (__e._message === "gotoB") {
             const __compartment = new HistoryBasicCompartment("B", this.__compartment.copy());

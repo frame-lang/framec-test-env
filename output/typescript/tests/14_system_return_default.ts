@@ -6,12 +6,23 @@
 class SystemReturnDefaultTestFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class SystemReturnDefaultTestFrameContext {
+    public event: SystemReturnDefaultTestFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: SystemReturnDefaultTestFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -51,11 +62,11 @@ class SystemReturnDefaultTest {
     private _state_stack: Array<any>;
     private __compartment: SystemReturnDefaultTestCompartment;
     private __next_compartment: SystemReturnDefaultTestCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.__compartment = new SystemReturnDefaultTestCompartment("Start");
         this.__next_compartment = null;
         const __frame_event = new SystemReturnDefaultTestFrameEvent("$>", null);
@@ -109,39 +120,40 @@ class SystemReturnDefaultTest {
     }
 
     public handler_sets_value(): string {
-        this._return_value = null;
         const __e = new SystemReturnDefaultTestFrameEvent("handler_sets_value", null);
+        const __ctx = new SystemReturnDefaultTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public handler_no_return(): string | null {
-        this._return_value = null;
         const __e = new SystemReturnDefaultTestFrameEvent("handler_no_return", null);
+        const __ctx = new SystemReturnDefaultTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_count(): number {
-        this._return_value = null;
         const __e = new SystemReturnDefaultTestFrameEvent("get_count", null);
+        const __ctx = new SystemReturnDefaultTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Start(__e: SystemReturnDefaultTestFrameEvent) {
         if (__e._message === "$>") {
             this.__compartment.state_vars["count"] = 0;
         } else if (__e._message === "get_count") {
-            this._return_value = this.__compartment.state_vars["count"];
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["count"];
             return;;
         } else if (__e._message === "handler_no_return") {
             // Does not set return - should return null/undefined
             this.__compartment.state_vars["count"] = this.__compartment.state_vars["count"] + 1;
         } else if (__e._message === "handler_sets_value") {
-            this._return_value = "set_by_handler";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "set_by_handler";
             return;;
         }
     }

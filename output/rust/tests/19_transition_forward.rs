@@ -3,11 +3,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct EventForwardTestFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl EventForwardTestFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct EventForwardTestFrameContext {
+    event: EventForwardTestFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl EventForwardTestFrameContext {
+    fn new(event: EventForwardTestFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -45,6 +68,7 @@ pub struct EventForwardTest {
     _state_stack: Vec<(String, EventForwardTestStateContext)>,
     __compartment: EventForwardTestCompartment,
     __next_compartment: Option<EventForwardTestCompartment>,
+    _context_stack: Vec<EventForwardTestFrameContext>,
     log: Vec<String>,
 }
 
@@ -52,6 +76,7 @@ impl EventForwardTest {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             log: Vec::new(),
             __compartment: EventForwardTestCompartment::new("Idle"),
             __next_compartment: None,
@@ -139,6 +164,14 @@ match self.__compartment.state.as_str() {
         }
     }
 
+    fn _state_Working(&mut self, __e: &EventForwardTestFrameEvent) {
+match __e.message.as_str() {
+    "get_log" => { self._s_Working_get_log(__e); }
+    "process" => { self._s_Working_process(__e); }
+    _ => {}
+}
+    }
+
     fn _state_Idle(&mut self, __e: &EventForwardTestFrameEvent) {
 match __e.message.as_str() {
     "get_log" => { self._s_Idle_get_log(__e); }
@@ -147,12 +180,12 @@ match __e.message.as_str() {
 }
     }
 
-    fn _state_Working(&mut self, __e: &EventForwardTestFrameEvent) {
-match __e.message.as_str() {
-    "get_log" => { self._s_Working_get_log(__e); }
-    "process" => { self._s_Working_process(__e); }
-    _ => {}
-}
+    fn _s_Working_process(&mut self, __e: &EventForwardTestFrameEvent) {
+self.log.push("working:process".to_string());
+    }
+
+    fn _s_Working_get_log(&mut self, __e: &EventForwardTestFrameEvent) -> Vec<String> {
+return self.log.clone();
     }
 
     fn _s_Idle_get_log(&mut self, __e: &EventForwardTestFrameEvent) -> Vec<String> {
@@ -167,14 +200,6 @@ self.__transition(__compartment);
 return;
 // This should NOT execute because -> => returns after dispatch
 self.log.push("idle:process:after".to_string());
-    }
-
-    fn _s_Working_process(&mut self, __e: &EventForwardTestFrameEvent) {
-self.log.push("working:process".to_string());
-    }
-
-    fn _s_Working_get_log(&mut self, __e: &EventForwardTestFrameEvent) -> Vec<String> {
-return self.log.clone();
     }
 }
 

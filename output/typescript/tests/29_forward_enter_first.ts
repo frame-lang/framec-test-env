@@ -1,12 +1,23 @@
 class ForwardEnterFirstFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class ForwardEnterFirstFrameContext {
+    public event: ForwardEnterFirstFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: ForwardEnterFirstFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,12 +57,12 @@ class ForwardEnterFirst {
     private _state_stack: Array<any>;
     private __compartment: ForwardEnterFirstCompartment;
     private __next_compartment: ForwardEnterFirstCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private log: string[] =     [];
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.log =         [];
         this.__compartment = new ForwardEnterFirstCompartment("Idle");
         this.__next_compartment = null;
@@ -107,31 +118,34 @@ class ForwardEnterFirst {
 
     public process() {
         const __e = new ForwardEnterFirstFrameEvent("process", null);
+        const __ctx = new ForwardEnterFirstFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_counter(): number {
-        this._return_value = null;
         const __e = new ForwardEnterFirstFrameEvent("get_counter", null);
+        const __ctx = new ForwardEnterFirstFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_log(): string[] {
-        this._return_value = null;
         const __e = new ForwardEnterFirstFrameEvent("get_log", null);
+        const __ctx = new ForwardEnterFirstFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Idle(__e: ForwardEnterFirstFrameEvent) {
         if (__e._message === "get_counter") {
-            this._return_value = -1;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = -1;
             return;
         } else if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;
         } else if (__e._message === "process") {
             const __compartment = new ForwardEnterFirstCompartment("Working", this.__compartment.copy());
@@ -146,12 +160,10 @@ class ForwardEnterFirst {
             this.__compartment.state_vars["counter"] = 100;
             this.log.push("Working:enter")
         } else if (__e._message === "get_counter") {
-            this._return_value = this.__compartment.state_vars["counter"];
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["counter"];
             return;
         } else if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;
         } else if (__e._message === "process") {
             this.log.push("Working:process:counter=" + this.__compartment.state_vars["counter"].toString())

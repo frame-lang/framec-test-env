@@ -1,12 +1,23 @@
 class ActionsTestFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class ActionsTestFrameContext {
+    public event: ActionsTestFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: ActionsTestFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,12 +57,12 @@ class ActionsTest {
     private _state_stack: Array<any>;
     private __compartment: ActionsTestCompartment;
     private __next_compartment: ActionsTestCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private log: string = "";
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.log = "";
         this.__compartment = new ActionsTestCompartment("Ready");
         this.__next_compartment = null;
@@ -106,33 +117,33 @@ class ActionsTest {
     }
 
     public process(value: number): number {
-        this._return_value = null;
-        const __e = new ActionsTestFrameEvent("process", {"0": value});
+        const __e = new ActionsTestFrameEvent("process", {"value": value});
+        const __ctx = new ActionsTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_log(): string {
-        this._return_value = null;
         const __e = new ActionsTestFrameEvent("get_log", null);
+        const __ctx = new ActionsTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Ready(__e: ActionsTestFrameEvent) {
         if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;;
         } else if (__e._message === "process") {
-            const value = __e._parameters?.["0"];
+            const value = __e._parameters?.["value"];
             this.__log_event("start");
             this.__validate_positive(value);
             this.__log_event("valid");
             const result = value * 2;
             this.__log_event("done");
-            this._return_value = result;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = result;
             return;;
         }
     }

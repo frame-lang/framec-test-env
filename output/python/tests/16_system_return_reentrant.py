@@ -4,7 +4,13 @@ class SystemReturnReentrantTestFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class SystemReturnReentrantTestFrameContext:
+    def __init__(self, event: SystemReturnReentrantTestFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class SystemReturnReentrantTestCompartment:
@@ -30,7 +36,7 @@ class SystemReturnReentrantTestCompartment:
 class SystemReturnReentrantTest:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.__compartment = SystemReturnReentrantTestCompartment("Start")
         self.__next_compartment = None
         __frame_event = SystemReturnReentrantTestFrameEvent("$>", None)
@@ -76,40 +82,42 @@ class SystemReturnReentrantTest:
         self.__next_compartment = next_compartment
 
     def outer_call(self) -> str:
-        self._return_value = None
         __e = SystemReturnReentrantTestFrameEvent("outer_call", None)
+        __ctx = SystemReturnReentrantTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def inner_call(self) -> str:
-        self._return_value = None
         __e = SystemReturnReentrantTestFrameEvent("inner_call", None)
+        __ctx = SystemReturnReentrantTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def nested_call(self) -> str:
-        self._return_value = None
         __e = SystemReturnReentrantTestFrameEvent("nested_call", None)
+        __ctx = SystemReturnReentrantTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def get_log(self) -> str:
-        self._return_value = None
         __e = SystemReturnReentrantTestFrameEvent("get_log", None)
+        __ctx = SystemReturnReentrantTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Start(self, __e):
         if __e._message == "$>":
             self.__compartment.state_vars["log"] = ""
         elif __e._message == "get_log":
-            self._return_value = self.__compartment.state_vars["log"]
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.__compartment.state_vars["log"]
             return
         elif __e._message == "inner_call":
             self.__compartment.state_vars["log"] = self.__compartment.state_vars["log"] + "inner,"
-            self._return_value = "inner_result"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "inner_result"
             return
         elif __e._message == "nested_call":
             self.__compartment.state_vars["log"] = self.__compartment.state_vars["log"] + "nested_start,"
@@ -117,8 +125,7 @@ class SystemReturnReentrantTest:
             result1 = self.inner_call()
             result2 = self.outer_call()
             self.__compartment.state_vars["log"] = self.__compartment.state_vars["log"] + "nested_end,"
-            self._return_value = "nested:" + result1 + "+" + result2
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "nested:" + result1 + "+" + result2
             return
         elif __e._message == "outer_call":
             self.__compartment.state_vars["log"] = self.__compartment.state_vars["log"] + "outer_start,"
@@ -126,8 +133,7 @@ class SystemReturnReentrantTest:
             inner_result = self.inner_call()
             self.__compartment.state_vars["log"] = self.__compartment.state_vars["log"] + "outer_after_inner,"
             # Our return should be independent of inner's return
-            self._return_value = "outer_result:" + inner_result
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "outer_result:" + inner_result
             return
 
 

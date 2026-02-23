@@ -4,7 +4,13 @@ class HistoryHSMFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class HistoryHSMFrameContext:
+    def __init__(self, event: HistoryHSMFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class HistoryHSMCompartment:
@@ -30,7 +36,7 @@ class HistoryHSMCompartment:
 class HistoryHSM:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.log =         []
         self.__compartment = HistoryHSMCompartment("Waiting")
         self.__next_compartment = None
@@ -78,42 +84,54 @@ class HistoryHSM:
 
     def gotoA(self):
         __e = HistoryHSMFrameEvent("gotoA", None)
+        __ctx = HistoryHSMFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def gotoB(self):
         __e = HistoryHSMFrameEvent("gotoB", None)
+        __ctx = HistoryHSMFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def gotoC(self):
         __e = HistoryHSMFrameEvent("gotoC", None)
+        __ctx = HistoryHSMFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def goBack(self):
         __e = HistoryHSMFrameEvent("goBack", None)
+        __ctx = HistoryHSMFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_state(self) -> str:
-        self._return_value = None
         __e = HistoryHSMFrameEvent("get_state", None)
+        __ctx = HistoryHSMFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def get_log(self) -> list:
-        self._return_value = None
         __e = HistoryHSMFrameEvent("get_log", None)
+        __ctx = HistoryHSMFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Waiting(self, __e):
         if __e._message == "$>":
             self.log_msg("In $Waiting")
         elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
         elif __e._message == "get_state":
-            self._return_value = "Waiting"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "Waiting"
             return
         elif __e._message == "gotoA":
             self.log_msg("gotoA")
@@ -128,50 +146,14 @@ class HistoryHSM:
         if __e._message == "$>":
             self.log_msg("In $B")
         elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
         elif __e._message == "get_state":
-            self._return_value = "B"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "B"
             return
         elif __e._message == "gotoA":
             self.log_msg("gotoA")
             __compartment = HistoryHSMCompartment("A", parent_compartment=self.__compartment.copy())
-            self.__transition(__compartment)
-        else:
-            self._state_AB(__e)
-
-    def _state_C(self, __e):
-        if __e._message == "$>":
-            self.log_msg("In $C")
-        elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
-            return
-        elif __e._message == "get_state":
-            self._return_value = "C"
-            __e._return = self._return_value
-            return
-        elif __e._message == "goBack":
-            self.log_msg("goBack")
-            self.__compartment = self._state_stack.pop()
-            return
-
-    def _state_A(self, __e):
-        if __e._message == "$>":
-            self.log_msg("In $A")
-        elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
-            return
-        elif __e._message == "get_state":
-            self._return_value = "A"
-            __e._return = self._return_value
-            return
-        elif __e._message == "gotoB":
-            self.log_msg("gotoB")
-            __compartment = HistoryHSMCompartment("B", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
         else:
             self._state_AB(__e)
@@ -182,6 +164,36 @@ class HistoryHSM:
             self._state_stack.append(self.__compartment.copy())
             __compartment = HistoryHSMCompartment("C", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
+
+    def _state_A(self, __e):
+        if __e._message == "$>":
+            self.log_msg("In $A")
+        elif __e._message == "get_log":
+            self._context_stack[-1]._return = self.log
+            return
+        elif __e._message == "get_state":
+            self._context_stack[-1]._return = "A"
+            return
+        elif __e._message == "gotoB":
+            self.log_msg("gotoB")
+            __compartment = HistoryHSMCompartment("B", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
+        else:
+            self._state_AB(__e)
+
+    def _state_C(self, __e):
+        if __e._message == "$>":
+            self.log_msg("In $C")
+        elif __e._message == "get_log":
+            self._context_stack[-1]._return = self.log
+            return
+        elif __e._message == "get_state":
+            self._context_stack[-1]._return = "C"
+            return
+        elif __e._message == "goBack":
+            self.log_msg("goBack")
+            self.__compartment = self._state_stack.pop()
+            return
 
     def log_msg(self, msg: str):
         self.log.append(msg)

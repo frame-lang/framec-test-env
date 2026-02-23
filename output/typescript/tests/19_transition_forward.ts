@@ -1,12 +1,23 @@
 class EventForwardTestFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class EventForwardTestFrameContext {
+    public event: EventForwardTestFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: EventForwardTestFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,12 +57,12 @@ class EventForwardTest {
     private _state_stack: Array<any>;
     private __compartment: EventForwardTestCompartment;
     private __next_compartment: EventForwardTestCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private log: string[] =     [];
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.log =         [];
         this.__compartment = new EventForwardTestCompartment("Idle");
         this.__next_compartment = null;
@@ -107,20 +118,23 @@ class EventForwardTest {
 
     public process() {
         const __e = new EventForwardTestFrameEvent("process", null);
+        const __ctx = new EventForwardTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_log(): string[] {
-        this._return_value = null;
         const __e = new EventForwardTestFrameEvent("get_log", null);
+        const __ctx = new EventForwardTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Working(__e: EventForwardTestFrameEvent) {
         if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;;
         } else if (__e._message === "process") {
             this.log.push("working:process");
@@ -129,8 +143,7 @@ class EventForwardTest {
 
     private _state_Idle(__e: EventForwardTestFrameEvent) {
         if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;;
         } else if (__e._message === "process") {
             this.log.push("idle:process:before");

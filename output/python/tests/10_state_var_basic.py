@@ -4,7 +4,13 @@ class StateVarBasicFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class StateVarBasicFrameContext:
+    def __init__(self, event: StateVarBasicFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class StateVarBasicCompartment:
@@ -30,7 +36,7 @@ class StateVarBasicCompartment:
 class StateVarBasic:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.__compartment = StateVarBasicCompartment("Counter")
         self.__next_compartment = None
         __frame_event = StateVarBasicFrameEvent("$>", None)
@@ -76,32 +82,35 @@ class StateVarBasic:
         self.__next_compartment = next_compartment
 
     def increment(self) -> int:
-        self._return_value = None
         __e = StateVarBasicFrameEvent("increment", None)
+        __ctx = StateVarBasicFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def get_count(self) -> int:
-        self._return_value = None
         __e = StateVarBasicFrameEvent("get_count", None)
+        __ctx = StateVarBasicFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def reset(self):
         __e = StateVarBasicFrameEvent("reset", None)
+        __ctx = StateVarBasicFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def _state_Counter(self, __e):
         if __e._message == "$>":
             self.__compartment.state_vars["count"] = 0
         elif __e._message == "get_count":
-            self._return_value = self.__compartment.state_vars["count"]
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.__compartment.state_vars["count"]
             return
         elif __e._message == "increment":
             self.__compartment.state_vars["count"] = self.__compartment.state_vars["count"] + 1
-            self._return_value = self.__compartment.state_vars["count"]
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.__compartment.state_vars["count"]
             return
         elif __e._message == "reset":
             self.__compartment.state_vars["count"] = 0

@@ -1,12 +1,23 @@
 class StateVarPushPopFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class StateVarPushPopFrameContext {
+    public event: StateVarPushPopFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: StateVarPushPopFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,11 +57,11 @@ class StateVarPushPop {
     private _state_stack: Array<any>;
     private __compartment: StateVarPushPopCompartment;
     private __next_compartment: StateVarPushPopCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.__compartment = new StateVarPushPopCompartment("Counter");
         this.__next_compartment = null;
         const __frame_event = new StateVarPushPopFrameEvent("$>", null);
@@ -104,63 +115,67 @@ class StateVarPushPop {
     }
 
     public increment(): number {
-        this._return_value = null;
         const __e = new StateVarPushPopFrameEvent("increment", null);
+        const __ctx = new StateVarPushPopFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_count(): number {
-        this._return_value = null;
         const __e = new StateVarPushPopFrameEvent("get_count", null);
+        const __ctx = new StateVarPushPopFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public save_and_go() {
         const __e = new StateVarPushPopFrameEvent("save_and_go", null);
+        const __ctx = new StateVarPushPopFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public restore() {
         const __e = new StateVarPushPopFrameEvent("restore", null);
+        const __ctx = new StateVarPushPopFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-    }
-
-    private _state_Other(__e: StateVarPushPopFrameEvent) {
-        if (__e._message === "$>") {
-            this.__compartment.state_vars["other_count"] = 100;
-        } else if (__e._message === "get_count") {
-            this._return_value = this.__compartment.state_vars["other_count"];
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "increment") {
-            this.__compartment.state_vars["other_count"] = this.__compartment.state_vars["other_count"] + 1;
-            this._return_value = this.__compartment.state_vars["other_count"];
-            __e._return = this._return_value;
-            return;;
-        } else if (__e._message === "restore") {
-            this.__compartment = this._state_stack.pop()!;
-            return;
-        }
+        this._context_stack.pop();
     }
 
     private _state_Counter(__e: StateVarPushPopFrameEvent) {
         if (__e._message === "$>") {
             this.__compartment.state_vars["count"] = 0;
         } else if (__e._message === "get_count") {
-            this._return_value = this.__compartment.state_vars["count"];
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["count"];
             return;;
         } else if (__e._message === "increment") {
             this.__compartment.state_vars["count"] = this.__compartment.state_vars["count"] + 1;
-            this._return_value = this.__compartment.state_vars["count"];
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["count"];
             return;;
         } else if (__e._message === "save_and_go") {
             this._state_stack.push(this.__compartment.copy());
             const __compartment = new StateVarPushPopCompartment("Other", this.__compartment.copy());
             this.__transition(__compartment);
+        }
+    }
+
+    private _state_Other(__e: StateVarPushPopFrameEvent) {
+        if (__e._message === "$>") {
+            this.__compartment.state_vars["other_count"] = 100;
+        } else if (__e._message === "get_count") {
+            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["other_count"];
+            return;;
+        } else if (__e._message === "increment") {
+            this.__compartment.state_vars["other_count"] = this.__compartment.state_vars["other_count"] + 1;
+            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["other_count"];
+            return;;
+        } else if (__e._message === "restore") {
+            this.__compartment = this._state_stack.pop()!;
+            return;
         }
     }
 }

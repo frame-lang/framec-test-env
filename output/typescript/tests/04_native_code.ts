@@ -8,12 +8,23 @@ function helper_function(x: number): number {
 class NativeCodeFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class NativeCodeFrameContext {
+    public event: NativeCodeFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: NativeCodeFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -53,11 +64,11 @@ class NativeCode {
     private _state_stack: Array<any>;
     private __compartment: NativeCodeCompartment;
     private __next_compartment: NativeCodeCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.__compartment = new NativeCodeCompartment("Active");
         this.__next_compartment = null;
         const __frame_event = new NativeCodeFrameEvent("$>", null);
@@ -111,35 +122,35 @@ class NativeCode {
     }
 
     public compute(value: number): number {
-        this._return_value = null;
-        const __e = new NativeCodeFrameEvent("compute", {"0": value});
+        const __e = new NativeCodeFrameEvent("compute", {"value": value});
+        const __ctx = new NativeCodeFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public use_math(): number {
-        this._return_value = null;
         const __e = new NativeCodeFrameEvent("use_math", null);
+        const __ctx = new NativeCodeFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Active(__e: NativeCodeFrameEvent) {
         if (__e._message === "compute") {
-            const value = __e._parameters?.["0"];
+            const value = __e._parameters?.["value"];
             // Native code with local variables
             const temp = value + 10;
             const result = helper_function(temp);
             console.log(`Computed: ${value} -> ${result}`);
-            this._return_value = result;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = result;
             return;;
         } else if (__e._message === "use_math") {
             // Using Math module
             const result = Math.sqrt(16) + Math.PI;
             console.log(`Math result: ${result}`);
-            this._return_value = result;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = result;
             return;;
         }
     }

@@ -1,12 +1,23 @@
 class StateVarBasicFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class StateVarBasicFrameContext {
+    public event: StateVarBasicFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: StateVarBasicFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,11 +57,11 @@ class StateVarBasic {
     private _state_stack: Array<any>;
     private __compartment: StateVarBasicCompartment;
     private __next_compartment: StateVarBasicCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.__compartment = new StateVarBasicCompartment("Counter");
         this.__next_compartment = null;
         const __frame_event = new StateVarBasicFrameEvent("$>", null);
@@ -104,35 +115,38 @@ class StateVarBasic {
     }
 
     public increment(): number {
-        this._return_value = null;
         const __e = new StateVarBasicFrameEvent("increment", null);
+        const __ctx = new StateVarBasicFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_count(): number {
-        this._return_value = null;
         const __e = new StateVarBasicFrameEvent("get_count", null);
+        const __ctx = new StateVarBasicFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public reset() {
         const __e = new StateVarBasicFrameEvent("reset", null);
+        const __ctx = new StateVarBasicFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     private _state_Counter(__e: StateVarBasicFrameEvent) {
         if (__e._message === "$>") {
             this.__compartment.state_vars["count"] = 0;
         } else if (__e._message === "get_count") {
-            this._return_value = this.__compartment.state_vars["count"];
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["count"];
             return;;
         } else if (__e._message === "increment") {
             this.__compartment.state_vars["count"] = this.__compartment.state_vars["count"] + 1;
-            this._return_value = this.__compartment.state_vars["count"];
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["count"];
             return;;
         } else if (__e._message === "reset") {
             this.__compartment.state_vars["count"] = 0;

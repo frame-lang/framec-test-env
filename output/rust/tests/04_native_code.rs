@@ -9,11 +9,34 @@ use std::collections::HashMap;
 #[derive(Clone, Debug)]
 struct NativeCodeFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, String>,
 }
 
 impl NativeCodeFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
+        Self { message: message.to_string(), parameters }
+    }
+}
+
+struct NativeCodeFrameContext {
+    event: NativeCodeFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl NativeCodeFrameContext {
+    fn new(event: NativeCodeFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -50,12 +73,14 @@ pub struct NativeCode {
     _state_stack: Vec<(String, NativeCodeStateContext)>,
     __compartment: NativeCodeCompartment,
     __next_compartment: Option<NativeCodeCompartment>,
+    _context_stack: Vec<NativeCodeFrameContext>,
 }
 
 impl NativeCode {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             __compartment: NativeCodeCompartment::new("Active"),
             __next_compartment: None,
         };

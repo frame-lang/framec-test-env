@@ -4,7 +4,13 @@ class ActionsTestFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class ActionsTestFrameContext:
+    def __init__(self, event: ActionsTestFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class ActionsTestCompartment:
@@ -30,7 +36,7 @@ class ActionsTestCompartment:
 class ActionsTest:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.log = ""
         self.__compartment = ActionsTestCompartment("Ready")
         self.__next_compartment = None
@@ -77,31 +83,31 @@ class ActionsTest:
         self.__next_compartment = next_compartment
 
     def process(self, value: int) -> int:
-        self._return_value = None
-        __e = ActionsTestFrameEvent("process", {"0": value})
+        __e = ActionsTestFrameEvent("process", {"value": value})
+        __ctx = ActionsTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def get_log(self) -> str:
-        self._return_value = None
         __e = ActionsTestFrameEvent("get_log", None)
+        __ctx = ActionsTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_Ready(self, __e):
         if __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
         elif __e._message == "process":
-            value = __e._parameters["0"]
+            value = __e._parameters["value"]
             self.__log_event("start")
             self.__validate_positive(value)
             self.__log_event("valid")
             result = value * 2
             self.__log_event("done")
-            self._return_value = result
-            __e._return = self._return_value
+            self._context_stack[-1]._return = result
             return
 
     def __log_event(self, msg: str):

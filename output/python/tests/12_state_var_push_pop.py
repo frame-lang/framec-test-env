@@ -4,7 +4,13 @@ class StateVarPushPopFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class StateVarPushPopFrameContext:
+    def __init__(self, event: StateVarPushPopFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class StateVarPushPopCompartment:
@@ -30,7 +36,7 @@ class StateVarPushPopCompartment:
 class StateVarPushPop:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.__compartment = StateVarPushPopCompartment("Counter")
         self.__next_compartment = None
         __frame_event = StateVarPushPopFrameEvent("$>", None)
@@ -76,36 +82,42 @@ class StateVarPushPop:
         self.__next_compartment = next_compartment
 
     def increment(self) -> int:
-        self._return_value = None
         __e = StateVarPushPopFrameEvent("increment", None)
+        __ctx = StateVarPushPopFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def get_count(self) -> int:
-        self._return_value = None
         __e = StateVarPushPopFrameEvent("get_count", None)
+        __ctx = StateVarPushPopFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def save_and_go(self):
         __e = StateVarPushPopFrameEvent("save_and_go", None)
+        __ctx = StateVarPushPopFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def restore(self):
         __e = StateVarPushPopFrameEvent("restore", None)
+        __ctx = StateVarPushPopFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def _state_Counter(self, __e):
         if __e._message == "$>":
             self.__compartment.state_vars["count"] = 0
         elif __e._message == "get_count":
-            self._return_value = self.__compartment.state_vars["count"]
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.__compartment.state_vars["count"]
             return
         elif __e._message == "increment":
             self.__compartment.state_vars["count"] = self.__compartment.state_vars["count"] + 1
-            self._return_value = self.__compartment.state_vars["count"]
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.__compartment.state_vars["count"]
             return
         elif __e._message == "save_and_go":
             self._state_stack.append(self.__compartment.copy())
@@ -116,13 +128,11 @@ class StateVarPushPop:
         if __e._message == "$>":
             self.__compartment.state_vars["other_count"] = 100
         elif __e._message == "get_count":
-            self._return_value = self.__compartment.state_vars["other_count"]
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.__compartment.state_vars["other_count"]
             return
         elif __e._message == "increment":
             self.__compartment.state_vars["other_count"] = self.__compartment.state_vars["other_count"] + 1
-            self._return_value = self.__compartment.state_vars["other_count"]
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.__compartment.state_vars["other_count"]
             return
         elif __e._message == "restore":
             self.__compartment = self._state_stack.pop()
