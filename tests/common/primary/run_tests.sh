@@ -79,7 +79,7 @@ lang_to_outext() {
     esac
 }
 
-for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_system_return_default 15_system_return_chain 16_system_return_reentrant 17_transition_enter_args 18_transition_exit_args 19_transition_forward 20_transition_pop 21_actions_basic 22_operations_basic 23_persist_basic 24_persist_roundtrip 25_persist_stack 26_state_params 29_forward_enter_first 30_hsm_default_forward 31_doc_lamp_basic 32_doc_lamp_hsm 33_doc_history_basic 34_doc_history_hsm; do
+for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_system_return_default 15_system_return_chain 16_system_return_reentrant 17_transition_enter_args 18_transition_exit_args 19_transition_forward 20_transition_pop 21_actions_basic 22_operations_basic 23_persist_basic 24_persist_roundtrip 25_persist_stack 26_state_params 29_forward_enter_first 30_hsm_default_forward 31_doc_lamp_basic 32_doc_lamp_hsm 33_doc_history_basic 34_doc_history_hsm 35_return_init 36_context_basic 37_context_reentrant 38_context_data; do
     echo "--- Test: $test ---"
 
     for lang in python_3 typescript rust; do
@@ -152,7 +152,7 @@ echo "=========================================="
 echo "Summary"
 echo "=========================================="
 
-for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_system_return_default 15_system_return_chain 16_system_return_reentrant 17_transition_enter_args 18_transition_exit_args 19_transition_forward 20_transition_pop 21_actions_basic 22_operations_basic 23_persist_basic 24_persist_roundtrip 25_persist_stack 26_state_params 29_forward_enter_first 30_hsm_default_forward 31_doc_lamp_basic 32_doc_lamp_hsm 33_doc_history_basic 34_doc_history_hsm; do
+for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_system_return_default 15_system_return_chain 16_system_return_reentrant 17_transition_enter_args 18_transition_exit_args 19_transition_forward 20_transition_pop 21_actions_basic 22_operations_basic 23_persist_basic 24_persist_roundtrip 25_persist_stack 26_state_params 29_forward_enter_first 30_hsm_default_forward 31_doc_lamp_basic 32_doc_lamp_hsm 33_doc_history_basic 34_doc_history_hsm 35_return_init 36_context_basic 37_context_reentrant 38_context_data; do
     line="$test:"
     for lang in python_3 typescript rust; do
         key="${test}_${lang}"
