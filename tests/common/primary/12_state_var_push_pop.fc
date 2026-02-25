@@ -1,0 +1,110 @@
+@@target c
+
+@@system StateVarPushPop {
+    interface:
+        increment(): int
+        get_count(): int
+        save_and_go(): void
+        restore(): void
+
+    machine:
+        $Counter {
+            $.count: int = 0
+
+            increment(): int {
+                $.count = $.count + 1;
+                StateVarPushPop_CTX(self)->_return = (void*)(intptr_t)$.count;
+                return;
+            }
+
+            get_count(): int {
+                StateVarPushPop_CTX(self)->_return = (void*)(intptr_t)$.count;
+                return;
+            }
+
+            save_and_go() {
+                push$
+                -> $Other
+            }
+        }
+
+        $Other {
+            $.other_count: int = 100
+
+            restore() {
+                -> pop$
+            }
+
+            increment(): int {
+                $.other_count = $.other_count + 1;
+                StateVarPushPop_CTX(self)->_return = (void*)(intptr_t)$.other_count;
+                return;
+            }
+
+            get_count(): int {
+                StateVarPushPop_CTX(self)->_return = (void*)(intptr_t)$.other_count;
+                return;
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 12: State Variable Push/Pop ===\n");
+    StateVarPushPop* s = StateVarPushPop_new();
+
+    // Increment counter to 3
+    StateVarPushPop_increment(s);
+    StateVarPushPop_increment(s);
+    StateVarPushPop_increment(s);
+    int count = StateVarPushPop_get_count(s);
+    if (count != 3) {
+        printf("FAIL: Expected 3, got %d\n", count);
+        return 1;
+    }
+    printf("Counter before push: %d\n", count);
+
+    // Push and go to Other state
+    StateVarPushPop_save_and_go(s);
+    printf("Pushed and transitioned to Other\n");
+
+    // In Other state, count should be 100 (Other's state var)
+    count = StateVarPushPop_get_count(s);
+    if (count != 100) {
+        printf("FAIL: Expected 100 in Other state, got %d\n", count);
+        return 1;
+    }
+    printf("Other state count: %d\n", count);
+
+    // Increment in Other
+    StateVarPushPop_increment(s);
+    count = StateVarPushPop_get_count(s);
+    if (count != 101) {
+        printf("FAIL: Expected 101 after increment, got %d\n", count);
+        return 1;
+    }
+    printf("Other state after increment: %d\n", count);
+
+    // Pop back - should restore Counter with count=3
+    StateVarPushPop_restore(s);
+    printf("Popped back to Counter\n");
+
+    count = StateVarPushPop_get_count(s);
+    if (count != 3) {
+        printf("FAIL: Expected 3 after pop (preserved), got %d\n", count);
+        return 1;
+    }
+    printf("Counter after pop: %d\n", count);
+
+    // Increment to verify it works
+    StateVarPushPop_increment(s);
+    count = StateVarPushPop_get_count(s);
+    if (count != 4) {
+        printf("FAIL: Expected 4, got %d\n", count);
+        return 1;
+    }
+    printf("Counter after increment: %d\n", count);
+
+    printf("PASS: State variables preserved across push/pop\n");
+    StateVarPushPop_destroy(s);
+    return 0;
+}

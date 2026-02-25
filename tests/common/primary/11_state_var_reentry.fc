@@ -1,0 +1,85 @@
+@@target c
+
+@@system StateVarReentry {
+    interface:
+        increment(): int
+        get_count(): int
+        go_other(): void
+        come_back(): void
+
+    machine:
+        $Counter {
+            $.count: int = 0
+
+            increment(): int {
+                $.count = $.count + 1;
+                StateVarReentry_CTX(self)->_return = (void*)(intptr_t)$.count;
+                return;
+            }
+
+            get_count(): int {
+                StateVarReentry_CTX(self)->_return = (void*)(intptr_t)$.count;
+                return;
+            }
+
+            go_other() {
+                -> $Other
+            }
+        }
+
+        $Other {
+            come_back() {
+                -> $Counter
+            }
+
+            increment(): int {
+                StateVarReentry_CTX(self)->_return = (void*)(intptr_t)-1;
+                return;
+            }
+
+            get_count(): int {
+                StateVarReentry_CTX(self)->_return = (void*)(intptr_t)-1;
+                return;
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 11: State Variable Reentry ===\n");
+    StateVarReentry* s = StateVarReentry_new();
+
+    // Increment a few times
+    StateVarReentry_increment(s);
+    StateVarReentry_increment(s);
+    int count = StateVarReentry_get_count(s);
+    if (count != 2) {
+        printf("FAIL: Expected 2 after two increments, got %d\n", count);
+        return 1;
+    }
+    printf("Count before leaving: %d\n", count);
+
+    // Leave the state
+    StateVarReentry_go_other(s);
+    printf("Transitioned to Other state\n");
+
+    // Come back - state var should be reinitialized to 0
+    StateVarReentry_come_back(s);
+    count = StateVarReentry_get_count(s);
+    if (count != 0) {
+        printf("FAIL: Expected 0 after re-entering Counter (state var reinit), got %d\n", count);
+        return 1;
+    }
+    printf("Count after re-entering Counter: %d\n", count);
+
+    // Increment again to verify it works
+    int result = StateVarReentry_increment(s);
+    if (result != 1) {
+        printf("FAIL: Expected 1 after increment, got %d\n", result);
+        return 1;
+    }
+    printf("After increment: %d\n", result);
+
+    printf("PASS: State variables reinitialize on state reentry\n");
+    StateVarReentry_destroy(s);
+    return 0;
+}

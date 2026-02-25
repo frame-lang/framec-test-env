@@ -1,0 +1,97 @@
+@@target c
+
+@@system EnterExit {
+    interface:
+        toggle(): void
+        get_log_count(): int
+
+    domain:
+        var enter_off_count: int = 0
+        var exit_off_count: int = 0
+        var enter_on_count: int = 0
+        var exit_on_count: int = 0
+
+    machine:
+        $Off {
+            $>() {
+                self->enter_off_count = self->enter_off_count + 1;
+                printf("Entered Off state\n");
+            }
+
+            <$() {
+                self->exit_off_count = self->exit_off_count + 1;
+                printf("Exiting Off state\n");
+            }
+
+            toggle() {
+                -> $On
+            }
+
+            get_log_count(): int {
+                // Return encoded counts: enter_off * 1000 + exit_off * 100 + enter_on * 10 + exit_on
+                int result = self->enter_off_count * 1000 + self->exit_off_count * 100 + self->enter_on_count * 10 + self->exit_on_count;
+                EnterExit_CTX(self)->_return = (void*)(intptr_t)result;
+                return;
+            }
+        }
+
+        $On {
+            $>() {
+                self->enter_on_count = self->enter_on_count + 1;
+                printf("Entered On state\n");
+            }
+
+            <$() {
+                self->exit_on_count = self->exit_on_count + 1;
+                printf("Exiting On state\n");
+            }
+
+            toggle() {
+                -> $Off
+            }
+
+            get_log_count(): int {
+                int result = self->enter_off_count * 1000 + self->exit_off_count * 100 + self->enter_on_count * 10 + self->exit_on_count;
+                EnterExit_CTX(self)->_return = (void*)(intptr_t)result;
+                return;
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 05: Enter/Exit Handlers ===\n");
+    EnterExit* s = EnterExit_new();
+
+    // Initial enter should have been called (enter_off_count = 1)
+    int log = EnterExit_get_log_count(s);
+    // Expected: 1*1000 + 0*100 + 0*10 + 0 = 1000
+    if (log != 1000) {
+        printf("FAIL: After construction expected 1000, got %d\n", log);
+        return 1;
+    }
+    printf("After construction: log_count = %d (enter_off=1)\n", log);
+
+    // Toggle to On - should exit Off, enter On
+    EnterExit_toggle(s);
+    log = EnterExit_get_log_count(s);
+    // Expected: 1*1000 + 1*100 + 1*10 + 0 = 1110
+    if (log != 1110) {
+        printf("FAIL: After toggle to On expected 1110, got %d\n", log);
+        return 1;
+    }
+    printf("After toggle to On: log_count = %d (enter_off=1, exit_off=1, enter_on=1)\n", log);
+
+    // Toggle back to Off - should exit On, enter Off
+    EnterExit_toggle(s);
+    log = EnterExit_get_log_count(s);
+    // Expected: 2*1000 + 1*100 + 1*10 + 1 = 2111
+    if (log != 2111) {
+        printf("FAIL: After toggle to Off expected 2111, got %d\n", log);
+        return 1;
+    }
+    printf("After toggle to Off: log_count = %d (enter_off=2, exit_off=1, enter_on=1, exit_on=1)\n", log);
+
+    printf("PASS: Enter/Exit handlers work correctly\n");
+    EnterExit_destroy(s);
+    return 0;
+}

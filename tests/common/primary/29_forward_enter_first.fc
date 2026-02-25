@@ -1,0 +1,92 @@
+@@target c
+
+@@system ForwardEnterFirst {
+    interface:
+        process(): void
+        get_counter(): int
+        get_log_code(): int
+
+    domain:
+        var log_code: int = 0
+
+    machine:
+        $Idle {
+            process() {
+                -> => $Working
+            }
+
+            get_counter(): int {
+                ForwardEnterFirst_CTX(self)->_return = (void*)(intptr_t)-1;
+                return;
+            }
+
+            get_log_code(): int {
+                ForwardEnterFirst_CTX(self)->_return = (void*)(intptr_t)self->log_code;
+                return;
+            }
+        }
+
+        $Working {
+            $.counter: int = 100
+
+            $>() {
+                self->log_code = self->log_code + 1;  // "Working:enter"
+            }
+
+            process() {
+                self->log_code = self->log_code + 10;  // "Working:process:counter=100"
+                $.counter = $.counter + 1;
+            }
+
+            get_counter(): int {
+                ForwardEnterFirst_CTX(self)->_return = (void*)(intptr_t)$.counter;
+                return;
+            }
+
+            get_log_code(): int {
+                ForwardEnterFirst_CTX(self)->_return = (void*)(intptr_t)self->log_code;
+                return;
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 29: Forward Enter First ===\n");
+    ForwardEnterFirst* s = ForwardEnterFirst_new();
+
+    // Initial state is Idle
+    int counter = ForwardEnterFirst_get_counter(s);
+    if (counter != -1) {
+        printf("FAIL: Expected -1 in Idle, got %d\n", counter);
+        return 1;
+    }
+
+    // Call process - should forward to Working
+    // Correct behavior: $> runs first (inits counter=100, logs +1)
+    // Then process runs (logs +10, increments to 101)
+    ForwardEnterFirst_process(s);
+
+    // Check counter was initialized and incremented
+    counter = ForwardEnterFirst_get_counter(s);
+    int log_code = ForwardEnterFirst_get_log_code(s);
+    printf("Counter after forward: %d\n", counter);
+    printf("Log code: %d\n", log_code);
+
+    // Verify $> ran first (log_code has +1)
+    // Verify process ran after $> (log_code has +10)
+    // Total should be 11
+    if (log_code != 11) {
+        printf("FAIL: Expected log_code=11, got %d\n", log_code);
+        return 1;
+    }
+
+    // Verify counter was incremented from 100 to 101
+    if (counter != 101) {
+        printf("FAIL: Expected counter=101, got %d\n", counter);
+        return 1;
+    }
+
+    printf("PASS: Forward sends $> first for non-$> events\n");
+    ForwardEnterFirst_destroy(s);
+    return 0;
+}

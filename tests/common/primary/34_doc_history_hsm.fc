@@ -1,0 +1,175 @@
+@@target c
+
+// Documentation Example: HSM with History (History203)
+// Refactored common gotoC behavior into parent state $AB
+
+@@system HistoryHSM {
+    interface:
+        gotoA(): void
+        gotoB(): void
+        gotoC(): void
+        goBack(): void
+        get_state(): int
+        get_log_code(): int
+
+    machine:
+        $Waiting {
+            $>() {
+                self->log_code = self->log_code + 1;  // "In $Waiting"
+            }
+            gotoA() {
+                self->log_code = self->log_code + 10;  // "gotoA"
+                -> $A
+            }
+            gotoB() {
+                self->log_code = self->log_code + 100;  // "gotoB"
+                -> $B
+            }
+            get_state(): int {
+                HistoryHSM_CTX(self)->_return = (void*)(intptr_t)0;  // Waiting
+                return;
+            }
+            get_log_code(): int {
+                HistoryHSM_CTX(self)->_return = (void*)(intptr_t)self->log_code;
+                return;
+            }
+        }
+
+        $A => $AB {
+            $>() {
+                self->log_code = self->log_code + 1000;  // "In $A"
+            }
+            gotoB() {
+                self->log_code = self->log_code + 100;  // "gotoB"
+                -> $B
+            }
+            get_state(): int {
+                HistoryHSM_CTX(self)->_return = (void*)(intptr_t)1;  // A
+                return;
+            }
+            get_log_code(): int {
+                HistoryHSM_CTX(self)->_return = (void*)(intptr_t)self->log_code;
+                return;
+            }
+            => $^
+        }
+
+        $B => $AB {
+            $>() {
+                self->log_code = self->log_code + 2000;  // "In $B"
+            }
+            gotoA() {
+                self->log_code = self->log_code + 10;  // "gotoA"
+                -> $A
+            }
+            get_state(): int {
+                HistoryHSM_CTX(self)->_return = (void*)(intptr_t)2;  // B
+                return;
+            }
+            get_log_code(): int {
+                HistoryHSM_CTX(self)->_return = (void*)(intptr_t)self->log_code;
+                return;
+            }
+            => $^
+        }
+
+        $AB {
+            gotoC() {
+                self->log_code = self->log_code + 10000;  // "gotoC in $AB"
+                push$
+                -> $C
+            }
+        }
+
+        $C {
+            $>() {
+                self->log_code = self->log_code + 100000;  // "In $C"
+            }
+            goBack() {
+                self->log_code = self->log_code + 1000000;  // "goBack"
+                -> pop$
+            }
+            get_state(): int {
+                HistoryHSM_CTX(self)->_return = (void*)(intptr_t)3;  // C
+                return;
+            }
+            get_log_code(): int {
+                HistoryHSM_CTX(self)->_return = (void*)(intptr_t)self->log_code;
+                return;
+            }
+        }
+
+    actions:
+        log_msg(msg: str) {
+            // In C we use log_code instead of string array
+        }
+
+    domain:
+        var log_code: int = 0
+}
+
+int main() {
+    printf("=== Test 34: Doc History HSM ===\n");
+    HistoryHSM* h = HistoryHSM_new();
+
+    // Start in Waiting (enter: +1)
+    int state = HistoryHSM_get_state(h);
+    if (state != 0) {
+        printf("FAIL: Expected 0 (Waiting), got %d\n", state);
+        return 1;
+    }
+
+    // Go to A (gotoA: +10, enter A: +1000)
+    HistoryHSM_gotoA(h);
+    state = HistoryHSM_get_state(h);
+    if (state != 1) {
+        printf("FAIL: Expected 1 (A), got %d\n", state);
+        return 1;
+    }
+
+    // Go to C (gotoC in $AB: +10000, enter C: +100000)
+    HistoryHSM_gotoC(h);
+    state = HistoryHSM_get_state(h);
+    if (state != 3) {
+        printf("FAIL: Expected 3 (C), got %d\n", state);
+        return 1;
+    }
+
+    // Go back (goBack: +1000000, should pop to A, enter A: +1000)
+    HistoryHSM_goBack(h);
+    state = HistoryHSM_get_state(h);
+    if (state != 1) {
+        printf("FAIL: Expected 1 (A) after goBack, got %d\n", state);
+        return 1;
+    }
+
+    // Go to B (gotoB: +100, enter B: +2000)
+    HistoryHSM_gotoB(h);
+    state = HistoryHSM_get_state(h);
+    if (state != 2) {
+        printf("FAIL: Expected 2 (B), got %d\n", state);
+        return 1;
+    }
+
+    // Go to C (gotoC in $AB: +10000, enter C: +100000)
+    HistoryHSM_gotoC(h);
+    state = HistoryHSM_get_state(h);
+    if (state != 3) {
+        printf("FAIL: Expected 3 (C), got %d\n", state);
+        return 1;
+    }
+
+    // Go back (goBack: +1000000, should pop to B, enter B: +2000)
+    HistoryHSM_goBack(h);
+    state = HistoryHSM_get_state(h);
+    if (state != 2) {
+        printf("FAIL: Expected 2 (B) after goBack, got %d\n", state);
+        return 1;
+    }
+
+    int log_code = HistoryHSM_get_log_code(h);
+    printf("Log code: %d\n", log_code);
+    printf("PASS: HSM with history works correctly\n");
+    HistoryHSM_destroy(h);
+    return 0;
+}

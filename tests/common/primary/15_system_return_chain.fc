@@ -1,0 +1,94 @@
+@@target c
+
+// Tests that system.return follows "last writer wins" across transition lifecycle
+
+@@system SystemReturnChainTest {
+    interface:
+        test_enter_sets(): int
+        test_exit_then_enter(): int
+        get_state(): int
+
+    machine:
+        $Start {
+            test_enter_sets(): int {
+                -> $EnterSetter
+            }
+
+            test_exit_then_enter(): int {
+                -> $BothSet
+            }
+
+            get_state(): int {
+                SystemReturnChainTest_CTX(self)->_return = (void*)(intptr_t)1;
+                return;
+            }
+
+            <$() {
+                // Exit handler sets initial value (10)
+                SystemReturnChainTest_CTX(self)->_return = (void*)(intptr_t)10;
+            }
+        }
+
+        $EnterSetter {
+            $>() {
+                // Enter handler sets return value (20)
+                SystemReturnChainTest_CTX(self)->_return = (void*)(intptr_t)20;
+            }
+
+            get_state(): int {
+                SystemReturnChainTest_CTX(self)->_return = (void*)(intptr_t)2;
+                return;
+            }
+        }
+
+        $BothSet {
+            $>() {
+                // Enter handler sets return - should overwrite exit's value (30)
+                SystemReturnChainTest_CTX(self)->_return = (void*)(intptr_t)30;
+            }
+
+            get_state(): int {
+                SystemReturnChainTest_CTX(self)->_return = (void*)(intptr_t)3;
+                return;
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 15: System Return Chain (Last Writer Wins) ===\n");
+
+    // Test 1: Start exit + EnterSetter enter
+    // Start's exit sets 10, EnterSetter's enter sets 20
+    // Enter should win (last writer)
+    SystemReturnChainTest* s1 = SystemReturnChainTest_new();
+    int result = SystemReturnChainTest_test_enter_sets(s1);
+    if (result != 20) {
+        printf("FAIL: Expected 20 (from_enter), got %d\n", result);
+        return 1;
+    }
+    int state = SystemReturnChainTest_get_state(s1);
+    if (state != 2) {
+        printf("FAIL: Expected state 2 (EnterSetter), got %d\n", state);
+        return 1;
+    }
+    printf("1. Exit set then enter set - enter wins: %d\n", result);
+    SystemReturnChainTest_destroy(s1);
+
+    // Test 2: Both handlers set, enter wins
+    SystemReturnChainTest* s2 = SystemReturnChainTest_new();
+    result = SystemReturnChainTest_test_exit_then_enter(s2);
+    if (result != 30) {
+        printf("FAIL: Expected 30 (enter_wins), got %d\n", result);
+        return 1;
+    }
+    state = SystemReturnChainTest_get_state(s2);
+    if (state != 3) {
+        printf("FAIL: Expected state 3 (BothSet), got %d\n", state);
+        return 1;
+    }
+    printf("2. Both set - enter wins: %d\n", result);
+    SystemReturnChainTest_destroy(s2);
+
+    printf("PASS: System return chain (last writer wins) works correctly\n");
+    return 0;
+}

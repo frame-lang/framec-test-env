@@ -1,0 +1,86 @@
+@@target c
+
+// Documentation Example: HSM Lamp with color behavior factored out
+
+@@system LampHSM {
+    interface:
+        turnOn(): void
+        turnOff(): void
+        get_lamp_on(): int
+
+    machine:
+        $Off => $ColorBehavior {
+            turnOn() {
+                -> $On
+            }
+            get_lamp_on(): int {
+                LampHSM_CTX(self)->_return = (void*)(intptr_t)self->lamp_on;
+                return;
+            }
+            => $^
+        }
+
+        $On => $ColorBehavior {
+            $>() {
+                LampHSM_turnOnLamp(self);
+            }
+            <$() {
+                LampHSM_turnOffLamp(self);
+            }
+            turnOff() {
+                -> $Off
+            }
+            get_lamp_on(): int {
+                LampHSM_CTX(self)->_return = (void*)(intptr_t)self->lamp_on;
+                return;
+            }
+            => $^
+        }
+
+        $ColorBehavior {
+            // Color behavior would be here in the full version
+        }
+
+    actions:
+        turnOnLamp() {
+            self->lamp_on = 1;
+        }
+        turnOffLamp() {
+            self->lamp_on = 0;
+        }
+
+    domain:
+        var lamp_on: int = 0
+}
+
+int main() {
+    printf("=== Test 32: Doc Lamp HSM ===\n");
+    LampHSM* lamp = LampHSM_new();
+
+    // Initially off
+    int on = LampHSM_get_lamp_on(lamp);
+    if (on != 0) {
+        printf("FAIL: Lamp should be off initially, got %d\n", on);
+        return 1;
+    }
+
+    // Turn on
+    LampHSM_turnOn(lamp);
+    on = LampHSM_get_lamp_on(lamp);
+    if (on != 1) {
+        printf("FAIL: Lamp should be on after turnOn, got %d\n", on);
+        return 1;
+    }
+
+    // Turn off
+    LampHSM_turnOff(lamp);
+    on = LampHSM_get_lamp_on(lamp);
+    if (on != 0) {
+        printf("FAIL: Lamp should be off after turnOff, got %d\n", on);
+        return 1;
+    }
+
+    printf("PASS: HSM lamp works correctly\n");
+    LampHSM_destroy(lamp);
+    return 0;
+}

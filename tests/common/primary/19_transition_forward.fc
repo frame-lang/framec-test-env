@@ -1,0 +1,59 @@
+@@target c
+
+@@system EventForwardTest {
+    interface:
+        process(): void
+        get_log_code(): int
+
+    domain:
+        var log_code: int = 0
+
+    machine:
+        $Idle {
+            process() {
+                self->log_code = self->log_code + 1;  // "idle:process:before"
+                -> => $Working
+                // This should NOT execute because -> => returns after dispatch
+                self->log_code = self->log_code + 100;  // "idle:process:after"
+            }
+
+            get_log_code(): int {
+                EventForwardTest_CTX(self)->_return = (void*)(intptr_t)self->log_code;
+                return;
+            }
+        }
+
+        $Working {
+            process() {
+                self->log_code = self->log_code + 10;  // "working:process"
+            }
+
+            get_log_code(): int {
+                EventForwardTest_CTX(self)->_return = (void*)(intptr_t)self->log_code;
+                return;
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 19: Transition Forward ===\n");
+    EventForwardTest* s = EventForwardTest_new();
+    EventForwardTest_process(s);
+    int log_code = EventForwardTest_get_log_code(s);
+    printf("Log code: %d\n", log_code);
+
+    // After transition-forward:
+    // - Idle logs +1 ("idle:process:before")
+    // - Transition to Working
+    // - Working handles process(), logs +10 ("working:process")
+    // - Return prevents +100 ("idle:process:after")
+    // Expected: 1 + 10 = 11
+    if (log_code != 11) {
+        printf("FAIL: Expected 11, got %d\n", log_code);
+        return 1;
+    }
+
+    printf("PASS: Transition forward works correctly\n");
+    EventForwardTest_destroy(s);
+    return 0;
+}

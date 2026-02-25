@@ -1,0 +1,70 @@
+@@target c
+
+@@system HSMForward {
+    interface:
+        event_a(): void
+        event_b(): void
+        get_count(): int
+
+    domain:
+        var count: int = 0
+
+    machine:
+        $Child => $Parent {
+            event_a() {
+                self->count = self->count + 1;
+            }
+
+            event_b() {
+                self->count = self->count + 10;
+                => $^
+            }
+
+            get_count(): int {
+                HSMForward_CTX(self)->_return = (void*)(intptr_t)self->count;
+                return;
+            }
+        }
+
+        $Parent {
+            event_a() {
+                self->count = self->count + 100;
+            }
+
+            event_b() {
+                self->count = self->count + 1000;
+            }
+
+            get_count(): int {
+                HSMForward_CTX(self)->_return = (void*)(intptr_t)self->count;
+                return;
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 08: HSM Forward ===\n");
+    HSMForward* s = HSMForward_new();
+
+    // event_a should be handled by Child (no forward)
+    HSMForward_event_a(s);
+    int count = HSMForward_get_count(s);
+    printf("After event_a: count = %d (expected 1)\n", count);
+    if (count != 1) {
+        printf("FAIL: Expected 1, got %d\n", count);
+        return 1;
+    }
+
+    // event_b should forward to Parent (+10 in Child, +1000 in Parent)
+    HSMForward_event_b(s);
+    count = HSMForward_get_count(s);
+    printf("After event_b (forwarded): count = %d (expected 1011)\n", count);
+    if (count != 1011) {
+        printf("FAIL: Expected 1011, got %d\n", count);
+        return 1;
+    }
+
+    printf("PASS: HSM forward works correctly\n");
+    HSMForward_destroy(s);
+    return 0;
+}

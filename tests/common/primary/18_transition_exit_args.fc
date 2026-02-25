@@ -1,0 +1,66 @@
+@@target c
+
+@@system TransitionExitArgs {
+    interface:
+        leave(): void
+        get_exit_code(): int
+
+    domain:
+        var exit_code: int = 0
+        var enter_done: int = 0
+
+    machine:
+        $Active {
+            <$(reason: str, code: int) {
+                printf("exit:reason=%s,code=%d\n", reason, code);
+                self->exit_code = code;
+            }
+
+            leave() {
+                printf("leaving\n");
+                ("cleanup", 42) -> $Done
+            }
+
+            get_exit_code(): int {
+                TransitionExitArgs_CTX(self)->_return = (void*)(intptr_t)self->exit_code;
+                return;
+            }
+        }
+
+        $Done {
+            $>() {
+                printf("enter:done\n");
+                self->enter_done = 1;
+            }
+
+            get_exit_code(): int {
+                TransitionExitArgs_CTX(self)->_return = (void*)(intptr_t)self->exit_code;
+                return;
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 18: Transition Exit Args ===\n");
+    TransitionExitArgs* s = TransitionExitArgs_new();
+
+    // Initial state is Active
+    int code = TransitionExitArgs_get_exit_code(s);
+    if (code != 0) {
+        printf("FAIL: Expected 0 initially, got %d\n", code);
+        return 1;
+    }
+
+    // Leave - should call exit handler with args
+    TransitionExitArgs_leave(s);
+    code = TransitionExitArgs_get_exit_code(s);
+    if (code != 42) {
+        printf("FAIL: Expected exit_code=42, got %d\n", code);
+        return 1;
+    }
+    printf("After transition: exit_code = %d\n", code);
+
+    printf("PASS: Transition exit args work correctly\n");
+    TransitionExitArgs_destroy(s);
+    return 0;
+}

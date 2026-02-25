@@ -1,0 +1,77 @@
+@@target c
+
+// NOTE: Default return value syntax (method(): type = default) not yet implemented.
+// This test validates behavior when handler doesn't set system.return.
+
+@@system SystemReturnDefaultTest {
+    interface:
+        handler_sets_value(): int
+        handler_no_return(): int
+        get_count(): int
+
+    machine:
+        $Start {
+            $.count: int = 0
+
+            handler_sets_value(): int {
+                SystemReturnDefaultTest_CTX(self)->_return = (void*)(intptr_t)42;
+                return;
+            }
+
+            handler_no_return(): int {
+                // Does not set return - should return 0 (NULL cast to int)
+                $.count = $.count + 1;
+            }
+
+            get_count(): int {
+                SystemReturnDefaultTest_CTX(self)->_return = (void*)(intptr_t)$.count;
+                return;
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 14: System Return Default Behavior ===\n");
+    SystemReturnDefaultTest* s = SystemReturnDefaultTest_new();
+
+    // Test 1: Handler explicitly sets return value
+    int result = SystemReturnDefaultTest_handler_sets_value(s);
+    if (result != 42) {
+        printf("FAIL: Expected 42, got %d\n", result);
+        return 1;
+    }
+    printf("1. handler_sets_value() = %d\n", result);
+
+    // Test 2: Handler does NOT set return - should return 0 (NULL)
+    result = SystemReturnDefaultTest_handler_no_return(s);
+    if (result != 0) {
+        printf("FAIL: Expected 0, got %d\n", result);
+        return 1;
+    }
+    printf("2. handler_no_return() = %d\n", result);
+
+    // Test 3: Verify handler was called (side effect check)
+    int count = SystemReturnDefaultTest_get_count(s);
+    if (count != 1) {
+        printf("FAIL: Expected count=1, got %d\n", count);
+        return 1;
+    }
+    printf("3. Handler was called, count = %d\n", count);
+
+    // Test 4: Call again to verify idempotence
+    result = SystemReturnDefaultTest_handler_no_return(s);
+    if (result != 0) {
+        printf("FAIL: Expected 0 again, got %d\n", result);
+        return 1;
+    }
+    count = SystemReturnDefaultTest_get_count(s);
+    if (count != 2) {
+        printf("FAIL: Expected count=2, got %d\n", count);
+        return 1;
+    }
+    printf("4. Second call: result=%d, count=%d\n", result, count);
+
+    printf("PASS: System return default behavior works correctly\n");
+    SystemReturnDefaultTest_destroy(s);
+    return 0;
+}

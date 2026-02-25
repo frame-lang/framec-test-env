@@ -1,0 +1,68 @@
+@@target c
+
+@@system HSMDefaultForward {
+    interface:
+        handled_event(): void
+        unhandled_event(): void
+        get_log_code(): int
+
+    domain:
+        var log_code: int = 0
+
+    machine:
+        $Child => $Parent {
+            handled_event() {
+                self->log_code = self->log_code + 1;  // "Child:handled_event"
+            }
+
+            get_log_code(): int {
+                HSMDefaultForward_CTX(self)->_return = (void*)(intptr_t)self->log_code;
+                return;
+            }
+
+            => $^
+        }
+
+        $Parent {
+            handled_event() {
+                self->log_code = self->log_code + 10;  // "Parent:handled_event"
+            }
+
+            unhandled_event() {
+                self->log_code = self->log_code + 100;  // "Parent:unhandled_event"
+            }
+
+            get_log_code(): int {
+                HSMDefaultForward_CTX(self)->_return = (void*)(intptr_t)self->log_code;
+                return;
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 30: HSM State-Level Default Forward ===\n");
+    HSMDefaultForward* s = HSMDefaultForward_new();
+
+    HSMDefaultForward_handled_event(s);
+    int log_code = HSMDefaultForward_get_log_code(s);
+    // Child handles it: +1
+    if (log_code != 1) {
+        printf("FAIL: Expected 1 after handled_event, got %d\n", log_code);
+        return 1;
+    }
+    printf("After handled_event: log_code = %d\n", log_code);
+
+    HSMDefaultForward_unhandled_event(s);
+    log_code = HSMDefaultForward_get_log_code(s);
+    // Child doesn't handle it, forwards to Parent: +100
+    // Total: 1 + 100 = 101
+    if (log_code != 101) {
+        printf("FAIL: Expected 101 after unhandled_event (forwarded), got %d\n", log_code);
+        return 1;
+    }
+    printf("After unhandled_event (forwarded): log_code = %d\n", log_code);
+
+    printf("PASS: HSM state-level default forward works correctly\n");
+    HSMDefaultForward_destroy(s);
+    return 0;
+}

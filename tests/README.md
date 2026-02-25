@@ -2,75 +2,237 @@
 
 Test sources for Frame V4 language validation.
 
+## Quick Start
+
+```bash
+# Run all tests
+./run_tests.sh
+
+# Run only Python tests
+./run_tests.sh --python
+
+# Run only a specific category
+./run_tests.sh --category primary
+
+# Verbose output
+./run_tests.sh -v
+
+# Compile only (no execution)
+./run_tests.sh --compile-only
+
+# Show help
+./run_tests.sh --help
+```
+
+## Test Runner
+
+**`run_tests.sh`** is the single, unified test runner. It dynamically discovers all tests based on directory structure - no configuration file needed.
+
+### Command Line Options
+
+| Option | Description |
+|--------|-------------|
+| `--python`, `--py` | Run only Python tests |
+| `--typescript`, `--ts` | Run only TypeScript tests |
+| `--rust`, `--rs` | Run only Rust tests |
+| `--c` | Run only C tests |
+| `--category NAME`, `-c NAME` | Run only tests in category NAME |
+| `--verbose`, `-v` | Show detailed output on failures |
+| `--compile-only` | Only transpile, don't execute |
+| `--help`, `-h` | Show help |
+
+### Examples
+
+```bash
+# Run all tests for all languages
+./run_tests.sh
+
+# Run only the primary reference tests
+./run_tests.sh --category primary
+
+# Run only TypeScript control_flow tests
+./run_tests.sh --ts --category control_flow
+
+# Compile only, useful for checking transpilation
+./run_tests.sh --compile-only
+
+# Debug a failing test with verbose output
+./run_tests.sh -v --category primary --python
+```
+
 ## Directory Structure
+
+The directory structure IS the configuration. Tests are discovered automatically.
 
 ```
 tests/
-├── common/           # Tests that pass in ALL 3 languages (Python, TypeScript, Rust)
-│   ├── primary/      # Primary reference tests (32 tests × 3 langs = 96 files)
-│   ├── operators/    # Arithmetic, comparison, logical, ternary
-│   ├── scoping/      # Function scope, nested functions, shadowing
-│   ├── validator/    # Terminal transitions, stack ops, forwards
-│   ├── core/         # Core language features
-│   ├── control_flow/ # If/else, while, try/catch
-│   ├── data_types/   # Lists, dicts, basic types
-│   ├── capabilities/ # System return, persistence
-│   ├── exec_smoke/   # Execution smoke tests
-│   ├── interfaces/   # Interface method tests
-│   └── systems/      # State transitions, HSM, forwards
+├── run_tests.sh          # THE test runner (use this!)
 │
-├── python/           # Python-specific tests (use .fpy extension)
-│   ├── async/        # Async/await (Python decorators)
-│   ├── core/         # Python-specific syntax
-│   └── ...
+├── common/               # Tests for ALL languages
+│   ├── primary/          # Core reference tests (36 tests)
+│   ├── automata/         # Mealy/Moore machines
+│   ├── capabilities/     # Actions, operations, persistence
+│   ├── control_flow/     # If/else, while, forwards
+│   ├── core/             # Core language features
+│   ├── data_types/       # Lists, dicts, strings
+│   ├── exec_smoke/       # Execution smoke tests
+│   ├── interfaces/       # Interface methods
+│   ├── operators/        # Arithmetic, comparison, logical
+│   ├── scoping/          # Variable scoping
+│   ├── systems/          # State machines, HSM
+│   └── validator/        # Validation tests
 │
-├── typescript/       # TypeScript-specific tests (use .fts extension)
-│   ├── imports/      # TypeScript import syntax
-│   ├── core/         # TypeScript-specific syntax
-│   └── ...
+├── python/               # Python-only tests
+│   ├── async/
+│   ├── capabilities/
+│   ├── control_flow/
+│   ├── core/
+│   ├── data_types/
+│   ├── interfaces/
+│   └── systems/
 │
-├── rust/             # Rust-specific tests (use .frs extension)
-│   ├── control_flow/ # Rust-specific control flow
-│   └── ...
+├── typescript/           # TypeScript-only tests
+│   ├── control_flow/
+│   ├── core/
+│   ├── imports/
+│   └── systems/
 │
-└── run_all_tests.sh  # Master test runner
+├── rust/                 # Rust-only tests
+│   └── control_flow/
+│
+└── c/                    # C-only tests
+    └── (add categories as needed)
 ```
 
 ## File Extensions
 
-- `.fpy` - Python target
-- `.fts` - TypeScript target
-- `.frs` - Rust target
+| Extension | Language | Target Flag |
+|-----------|----------|-------------|
+| `.fpy` | Python | `@@target python_3` |
+| `.fts` | TypeScript | `@@target typescript` |
+| `.frs` | Rust | `@@target rust` |
+| `.fc` | C | `@@target c` |
 
-## Running Tests
+## Test Markers
 
-### Docker (recommended)
-```bash
-cd ..  # framepiler_test_env/
-docker compose -f docker/docker-compose.yml up --build
+Add markers in the first 10 lines of a test file to control behavior:
+
+```frame
+@@target python_3
+# @skip - Do not run this test
+# @known-fail - Expected to fail (tracked bug)
+# @timeout 60 - Custom timeout in seconds (default: 30)
+
+@@system MyTest {
+    ...
+}
 ```
 
-### Local - Primary Reference Tests
-```bash
-cd common/primary
-./run_tests.sh
-```
+### Marker Reference
 
-### Local - All Tests
-```bash
-./run_all_tests.sh
-```
+| Marker | Effect |
+|--------|--------|
+| `# @skip` | Test is skipped entirely |
+| `# @known-fail` | Test runs but failure doesn't count against pass rate |
+| `# @timeout N` | Override default 30-second timeout |
 
 ## Test Counts
 
-| Category | Files |
-|----------|-------|
-| common/  | ~400  |
-| python/  | 15    |
-| typescript/ | 7  |
-| rust/    | 7     |
+| Scope | Python | TypeScript | Rust | C | Total |
+|-------|--------|------------|------|---|-------|
+| common/ | 137 | 126 | 126 | 12 | 401 |
+| language-specific/ | 15 | 7 | 7 | 0 | 29 |
+| **Total** | **152** | **133** | **133** | **12** | **430** |
 
 ## Adding New Tests
 
-1. **Universal tests** (pass in all 3 languages): Add to `common/<category>/` with all 3 extensions (.fpy, .fts, .frs)
-2. **Language-specific tests**: Add to `<language>/<category>/` with the appropriate extension
+### 1. Universal Test (all languages)
+
+Create files in `common/<category>/`:
+```
+common/operators/my_new_test.fpy
+common/operators/my_new_test.fts
+common/operators/my_new_test.frs
+common/operators/my_new_test.fc   # optional
+```
+
+### 2. Language-Specific Test
+
+Create file in `<language>/<category>/`:
+```
+python/async/my_async_test.fpy
+```
+
+### 3. New Category
+
+Just create the directory. The runner discovers it automatically:
+```bash
+mkdir -p common/my_new_category
+# Add test files...
+./run_tests.sh --category my_new_category
+```
+
+## Test Requirements
+
+A test **passes** if its output contains the string `PASS`.
+
+A test **fails** if:
+- Transpilation fails
+- Compilation fails (C, Rust)
+- Execution fails
+- Output does not contain `PASS`
+
+### Example Test Structure
+
+```frame
+@@target python_3
+
+@@system MyTest {
+    interface:
+        run_test(): void
+
+    machine:
+        $Start {
+            run_test() {
+                # Test logic here
+                print("PASS: my test works")
+            }
+        }
+}
+
+if __name__ == "__main__":
+    t = MyTest()
+    t.run_test()
+```
+
+## Output Locations
+
+Generated files are written to:
+
+| Language | Output Directory |
+|----------|------------------|
+| Python | `output/python/tests/*.py` |
+| TypeScript | `output/typescript/tests/*.ts` |
+| Rust | `output/rust/tests/*.rs` |
+| C | `output/c/tests/*.c` |
+
+## Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `FRAMEC` | Path to framec binary | `target/release/framec` |
+| `FRAMEPILER_TEST_ENV` | Test environment root | Auto-detected |
+
+## Troubleshooting
+
+### Tests not discovered?
+- Check file extension matches language (.fpy, .fts, .frs, .fc)
+- Ensure file is in a category subdirectory, not directly in `common/`
+
+### Test timing out?
+- Add `# @timeout 60` marker for longer timeout
+- Check for infinite loops in test
+
+### Need to skip a broken test?
+- Add `# @skip` marker temporarily
+- Or `# @known-fail` if it's a tracked bug

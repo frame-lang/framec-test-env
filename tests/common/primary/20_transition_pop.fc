@@ -1,0 +1,99 @@
+@@target c
+
+@@system TransitionPopTest {
+    interface:
+        start(): void
+        process(): void
+        get_state(): int
+        get_log_code(): int
+
+    domain:
+        var log_code: int = 0
+
+    machine:
+        $Idle {
+            start() {
+                self->log_code = self->log_code + 1;  // "idle:start:push"
+                push$
+                -> $Working
+            }
+
+            process() {
+                self->log_code = self->log_code + 10;  // "idle:process"
+            }
+
+            get_state(): int {
+                TransitionPopTest_CTX(self)->_return = (void*)(intptr_t)1;
+                return;
+            }
+
+            get_log_code(): int {
+                TransitionPopTest_CTX(self)->_return = (void*)(intptr_t)self->log_code;
+                return;
+            }
+        }
+
+        $Working {
+            process() {
+                self->log_code = self->log_code + 100;  // "working:process:before_pop"
+                -> pop$
+                // This should NOT execute because pop transitions away
+                self->log_code = self->log_code + 1000;  // "working:process:after_pop"
+            }
+
+            get_state(): int {
+                TransitionPopTest_CTX(self)->_return = (void*)(intptr_t)2;
+                return;
+            }
+
+            get_log_code(): int {
+                TransitionPopTest_CTX(self)->_return = (void*)(intptr_t)self->log_code;
+                return;
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 20: Transition Pop ===\n");
+    TransitionPopTest* s = TransitionPopTest_new();
+
+    // Initial state should be Idle (1)
+    int state = TransitionPopTest_get_state(s);
+    if (state != 1) {
+        printf("FAIL: Expected 1 (Idle), got %d\n", state);
+        return 1;
+    }
+    printf("Initial state: %d (Idle)\n", state);
+
+    // start() pushes Idle, transitions to Working
+    TransitionPopTest_start(s);
+    state = TransitionPopTest_get_state(s);
+    if (state != 2) {
+        printf("FAIL: Expected 2 (Working), got %d\n", state);
+        return 1;
+    }
+    printf("After start(): %d (Working)\n", state);
+
+    // process() in Working does pop transition back to Idle
+    TransitionPopTest_process(s);
+    state = TransitionPopTest_get_state(s);
+    if (state != 1) {
+        printf("FAIL: Expected 1 (Idle) after pop, got %d\n", state);
+        return 1;
+    }
+    printf("After process() with pop: %d (Idle)\n", state);
+
+    int log_code = TransitionPopTest_get_log_code(s);
+    printf("Log code: %d\n", log_code);
+
+    // Verify log contents: 1 (idle:start) + 100 (working:process:before_pop) = 101
+    // Should NOT have +1000 (working:process:after_pop)
+    if (log_code != 101) {
+        printf("FAIL: Expected 101, got %d\n", log_code);
+        return 1;
+    }
+
+    printf("PASS: Transition pop works correctly\n");
+    TransitionPopTest_destroy(s);
+    return 0;
+}
