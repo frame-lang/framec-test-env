@@ -1,0 +1,79 @@
+// @skip Header defaults require InterfaceMethod.return_init support in C codegen
+@@target c
+
+// capability: system.return header defaults and handler returns (C).
+//
+// This fixture exercises:
+// - Interface header defaults: a1(): int = 10, a2(a): int = a,
+//   a3(a): int = self->x + a
+// - Handler bodies that use:
+//   - bare `return` (leave system.return at the header default)
+//   - `return expr` sugar (override system.return)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+
+@@system SystemReturnHeaderDefaultsC {
+
+    interface:
+        a1(): int = 10
+        a2(a): int = a
+        a3(a): int = self->x + a
+
+    machine:
+        $Idle {
+            a1() {
+                if (self->x < 5) {
+                    return;
+                } else {
+                    return 0;
+                }
+            }
+
+            a2(a) {
+                return;
+            }
+
+            a3(a) {
+                return a;
+            }
+        }
+
+    actions:
+        bump_x(delta) {
+            self->x = self->x + delta
+        }
+
+    domain:
+        x:int = 3
+}
+
+int main() {
+    SystemReturnHeaderDefaultsC* s = SystemReturnHeaderDefaultsC_new();
+
+    // Test a1(): should return 10 (header default) since x=3 < 5
+    int r1 = SystemReturnHeaderDefaultsC_a1(s);
+    if (r1 != 10) {
+        printf("FAIL: a1() expected 10, got %d\n", r1);
+        return 1;
+    }
+
+    // Test a2(5): should return 5 (header default = a)
+    int r2 = SystemReturnHeaderDefaultsC_a2(s, 5);
+    if (r2 != 5) {
+        printf("FAIL: a2(5) expected 5, got %d\n", r2);
+        return 1;
+    }
+
+    // Test a3(7): should return 7 (explicit return a, not header default x+a=10)
+    int r3 = SystemReturnHeaderDefaultsC_a3(s, 7);
+    if (r3 != 7) {
+        printf("FAIL: a3(7) expected 7, got %d\n", r3);
+        return 1;
+    }
+
+    SystemReturnHeaderDefaultsC_destroy(s);
+    printf("PASS\n");
+    return 0;
+}
