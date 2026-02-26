@@ -1,25 +1,73 @@
-// @skip - Context syntax (@@.param, @@:return) not yet implemented for C target
 @@target c
 
-// NOTE: This test is skipped for C target because the context syntax
-// (@@.param, @@:return) is Python-specific Frame V4 syntax
-// that hasn't been implemented for C yet.
+// Test: Context Stack Reentrancy
+// Validates that nested interface calls maintain separate contexts
 
-@@system ContextReentrantTestSkipped {
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+
+@@system ContextReentrantTest {
     interface:
-        is_alive(): bool
+        outer(x: int): int
+        inner(y: int): int
+        get_sum(a: int, b: int): int
 
     machine:
-        $Start {
-            is_alive(): bool {
-                ContextReentrantTestSkipped_CTX(self)->_return = (void*)(intptr_t)1;
-                return;
+        $Ready {
+            outer(x: int): int {
+                // Call inner - should NOT clobber our context
+                int inner_result = ContextReentrantTest_inner(self, @@.x * 10);
+
+                // Our param should still be accessible
+                @@:return = @@.x + inner_result
+            }
+
+            inner(y: int): int {
+                // Inner has its own context
+                @@:return = @@.y
+            }
+
+            get_sum(a: int, b: int): int {
+                // Test that we can access multiple params after nested calls
+                int result_a = ContextReentrantTest_inner(self, @@.a);
+                int result_b = ContextReentrantTest_inner(self, @@.b);
+                // @@.a and @@.b should still be our params
+                @@:return = @@.a + @@.b + result_a + result_b
             }
         }
 }
 
 int main() {
-    printf("=== Test 37: Context Reentrant (SKIPPED - @@ syntax not implemented for C) ===\n");
-    printf("SKIP: Context syntax (@@.param, @@:return) requires V4 C backend support\n");
+    printf("TAP version 14\n");
+    printf("1..3\n");
+
+    ContextReentrantTest* s = ContextReentrantTest_new();
+
+    // Test 1: outer(5) calls inner(50), returns 5 + 50 = 55
+    int result = ContextReentrantTest_outer(s, 5);
+    if (result == 55) {
+        printf("ok 1 - outer(5) = 55\n");
+    } else {
+        printf("not ok 1 - outer(5) = 55 # got %d\n", result);
+    }
+
+    // Test 2: inner(42) alone
+    result = ContextReentrantTest_inner(s, 42);
+    if (result == 42) {
+        printf("ok 2 - inner(42) = 42\n");
+    } else {
+        printf("not ok 2 - inner(42) = 42 # got %d\n", result);
+    }
+
+    // Test 3: get_sum(10, 20) calls inner twice, returns 10+20+10+20 = 60
+    result = ContextReentrantTest_get_sum(s, 10, 20);
+    if (result == 60) {
+        printf("ok 3 - get_sum(10, 20) = 60\n");
+    } else {
+        printf("not ok 3 - get_sum(10, 20) = 60 # got %d\n", result);
+    }
+
+    ContextReentrantTest_destroy(s);
     return 0;
 }
