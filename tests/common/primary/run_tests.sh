@@ -1,6 +1,6 @@
 #!/bin/bash
 # V4 PRT Test Runner
-# Validates V4 codegen for Python, Rust, and TypeScript
+# Validates V4 codegen for Python, Rust, TypeScript, and C
 # Compatible with bash 3.2+ (macOS default)
 #
 # Test file resolution:
@@ -25,6 +25,7 @@ PYTHON_OUT="${PYTHON_OUT:-$TEST_ENV_ROOT/output/python/tests}"
 TS_OUT="${TS_OUT:-$TEST_ENV_ROOT/output/typescript/tests}"
 RUST_CRATE="${RUST_CRATE:-$TEST_ENV_ROOT/output/rust}"
 RUST_OUT="$RUST_CRATE/tests"
+C_OUT="${C_OUT:-$TEST_ENV_ROOT/output/c/tests}"
 
 # Colors for output
 RED='\033[0;31m'
@@ -36,6 +37,7 @@ NC='\033[0m' # No Color
 mkdir -p "$PYTHON_OUT"
 mkdir -p "$TS_OUT"
 mkdir -p "$RUST_OUT"
+mkdir -p "$C_OUT"
 
 echo "=========================================="
 echo "V4 PRT Test Suite"
@@ -45,6 +47,7 @@ echo "Test env root: $TEST_ENV_ROOT"
 echo "Python output: $PYTHON_OUT"
 echo "TypeScript output: $TS_OUT"
 echo "Rust output: $RUST_OUT"
+echo "C output: $C_OUT"
 echo ""
 
 pass_count=0
@@ -57,6 +60,7 @@ lang_to_ext() {
         python_3) echo "fpy" ;;
         typescript) echo "fts" ;;
         rust) echo "frs" ;;
+        c) echo "fc" ;;
         *) echo "frm" ;;
     esac
 }
@@ -67,6 +71,7 @@ lang_to_outdir() {
         python_3) echo "$PYTHON_OUT" ;;
         typescript) echo "$TS_OUT" ;;
         rust) echo "$RUST_OUT" ;;
+        c) echo "$C_OUT" ;;
     esac
 }
 
@@ -76,13 +81,14 @@ lang_to_outext() {
         python_3) echo "py" ;;
         typescript) echo "ts" ;;
         rust) echo "rs" ;;
+        c) echo "c" ;;
     esac
 }
 
-for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_system_return_default 15_system_return_chain 16_system_return_reentrant 17_transition_enter_args 18_transition_exit_args 19_transition_forward 20_transition_pop 21_actions_basic 22_operations_basic 23_persist_basic 24_persist_roundtrip 25_persist_stack 26_state_params 29_forward_enter_first 30_hsm_default_forward 31_doc_lamp_basic 32_doc_lamp_hsm 33_doc_history_basic 34_doc_history_hsm 35_return_init 36_context_basic 37_context_reentrant 38_context_data; do
+for test in 01_interface_return 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_system_return_default 15_system_return_chain 16_system_return_reentrant 17_transition_enter_args 18_transition_exit_args 19_transition_forward 20_transition_pop 21_actions_basic 22_operations_basic 23_persist_basic 24_persist_roundtrip 25_persist_stack 26_state_params 29_forward_enter_first 30_hsm_default_forward 31_doc_lamp_basic 32_doc_lamp_hsm 33_doc_history_basic 34_doc_history_hsm 35_return_init 36_context_basic 37_context_reentrant 38_context_data; do
     echo "--- Test: $test ---"
 
-    for lang in python_3 typescript rust; do
+    for lang in python_3 typescript rust c; do
         frame_ext=$(lang_to_ext "$lang")
         out_dir=$(lang_to_outdir "$lang")
         out_ext=$(lang_to_outext "$lang")
@@ -122,6 +128,18 @@ for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 0
                         run_ok=true
                     fi
                     ;;
+                c)
+                    # Compile C with gcc and run
+                    c_bin="$C_OUT/${test}"
+                    if gcc -o "$c_bin" "$out_file" 2>&1; then
+                        run_output=$("$c_bin" 2>&1)
+                        if echo "$run_output" | grep -q "PASS"; then
+                            run_ok=true
+                        fi
+                    else
+                        run_output="gcc compilation failed"
+                    fi
+                    ;;
             esac
         fi
 
@@ -152,9 +170,9 @@ echo "=========================================="
 echo "Summary"
 echo "=========================================="
 
-for test in 01_minimal 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_system_return_default 15_system_return_chain 16_system_return_reentrant 17_transition_enter_args 18_transition_exit_args 19_transition_forward 20_transition_pop 21_actions_basic 22_operations_basic 23_persist_basic 24_persist_roundtrip 25_persist_stack 26_state_params 29_forward_enter_first 30_hsm_default_forward 31_doc_lamp_basic 32_doc_lamp_hsm 33_doc_history_basic 34_doc_history_hsm 35_return_init 36_context_basic 37_context_reentrant 38_context_data; do
+for test in 01_interface_return 02_interface 03_transition 04_native_code 05_enter_exit 06_domain_vars 07_params 08_hsm 09_stack 10_state_var_basic 11_state_var_reentry 12_state_var_push_pop 13_system_return 14_system_return_default 15_system_return_chain 16_system_return_reentrant 17_transition_enter_args 18_transition_exit_args 19_transition_forward 20_transition_pop 21_actions_basic 22_operations_basic 23_persist_basic 24_persist_roundtrip 25_persist_stack 26_state_params 29_forward_enter_first 30_hsm_default_forward 31_doc_lamp_basic 32_doc_lamp_hsm 33_doc_history_basic 34_doc_history_hsm 35_return_init 36_context_basic 37_context_reentrant 38_context_data; do
     line="$test:"
-    for lang in python_3 typescript rust; do
+    for lang in python_3 typescript rust c; do
         key="${test}_${lang}"
         # Find result in results string
         result=$(echo "$results" | tr ' ' '\n' | grep "^${key}:" | cut -d: -f2)
@@ -177,6 +195,7 @@ echo "Generated files:"
 echo "  Python: $PYTHON_OUT/*.py"
 echo "  TypeScript: $TS_OUT/*.ts"
 echo "  Rust: $RUST_OUT/*.rs"
+echo "  C: $C_OUT/*.c"
 
 if [ $fail_count -gt 0 ]; then
     exit 1
