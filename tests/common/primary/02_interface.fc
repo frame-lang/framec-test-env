@@ -1,43 +1,67 @@
 @@target c
 
-@@system Calculator {
+@@system WithInterface {
     interface:
-        add(a: int, b: int): int
-        sub(a: int, b: int): int
+        greet(name: char*): char*
+        get_count(): int
+
+    domain:
+        var call_count: int = 0
 
     machine:
         $Ready {
-            add(a: int, b: int): int {
-                // Parameters are auto-extracted to local vars a, b
-                Calculator_CTX(self)->_return = (void*)(intptr_t)(a + b);
-                return;
+            greet(name: char*): char* {
+                self->call_count += 1;
+                static char buffer[256];
+                sprintf(buffer, "Hello, %s!", name);
+                return buffer
             }
-            sub(a: int, b: int): int {
-                Calculator_CTX(self)->_return = (void*)(intptr_t)(a - b);
-                return;
+
+            get_count(): int {
+                return self->call_count
             }
         }
 }
 
 int main() {
     printf("=== Test 02: Interface Methods ===\n");
-    Calculator* c = Calculator_new();
+    WithInterface* s = WithInterface_new();
+    int error_count = 0;
 
-    int sum = Calculator_add(c, 3, 5);
-    printf("add(3, 5) = %d\n", sum);
-    if (sum != 8) {
-        printf("FAIL: Expected 8, got %d\n", sum);
-        return 1;
+    // Test interface method with parameter and return
+    char* result = WithInterface_greet(s, "World");
+    if (strcmp(result, "Hello, World!") != 0) {
+        printf("FAIL: Expected 'Hello, World!', got '%s'\n", result);
+        error_count++;
+    } else {
+        printf("greet('World') = %s\n", result);
     }
 
-    int diff = Calculator_sub(c, 10, 4);
-    printf("sub(10, 4) = %d\n", diff);
-    if (diff != 6) {
-        printf("FAIL: Expected 6, got %d\n", diff);
-        return 1;
+    // Test domain variable access through interface
+    int count = WithInterface_get_count(s);
+    if (count != 1) {
+        printf("FAIL: Expected count=1, got %d\n", count);
+        error_count++;
+    } else {
+        printf("get_count() = %d\n", count);
     }
 
-    printf("PASS: Interface methods work correctly\n");
-    Calculator_destroy(c);
-    return 0;
+    // Call again to verify state
+    WithInterface_greet(s, "Frame");
+    int count2 = WithInterface_get_count(s);
+    if (count2 != 2) {
+        printf("FAIL: Expected count=2, got %d\n", count2);
+        error_count++;
+    } else {
+        printf("After second call: get_count() = %d\n", count2);
+    }
+
+    WithInterface_destroy(s);
+    if (error_count > 0) {
+        printf("FAIL: %d test(s) failed\n", error_count);
+        return 1;
+    } else {
+        printf("PASS: Interface methods work correctly\n");
+        return 0;
+    }
 }
