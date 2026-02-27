@@ -1,24 +1,78 @@
-// @skip - Context syntax (@@:data) not yet implemented for C target
 @@target c
 
-// NOTE: This test is skipped for C target because the context data syntax
-// (@@:data) is Python-specific Frame V4 syntax that hasn't been implemented
-// for C yet.
+// Test: Context Data (@@:data)
+// Validates call-scoped data storage and retrieval
 
-@@system ContextDataTestSkipped {
+#include <string.h>
+
+@@system ContextDataTest {
     interface:
-        is_alive(): bool
+        store_and_retrieve(value: int): int
+        transition_with_data(x: int): int
 
     machine:
         $Start {
-            is_alive(): bool {
-                return 1
+            store_and_retrieve(value: int): int {
+                // Store value in context data
+                @@:data["input"] = (void*)(intptr_t)@@.value;
+                // Retrieve and return
+                @@:return = (int)(intptr_t)@@:data["input"];
+            }
+
+            transition_with_data(x: int): int {
+                // Set data before transition
+                @@:data["started_value"] = (void*)(intptr_t)@@.x;
+                @@:data["from_state"] = (void*)(intptr_t)1;  // 1 = Start
+                -> $End
+            }
+
+            <$() {
+                // Exit handler can access and modify data
+                @@:data["exit_seen"] = (void*)(intptr_t)1;
+            }
+        }
+
+        $End {
+            $>() {
+                // Enter handler builds result from accumulated data
+                int started = (int)(intptr_t)@@:data["started_value"];
+                int from = (int)(intptr_t)@@:data["from_state"];
+                int exit_flag = (int)(intptr_t)@@:data["exit_seen"];
+                // Encode result: started * 1000 + from * 100 + exit_flag * 10 + 2(=End)
+                @@:return = started * 1000 + from * 100 + exit_flag * 10 + 2;
             }
         }
 }
 
 int main() {
-    printf("=== Test 38: Context Data (SKIPPED - @@:data syntax not implemented for C) ===\n");
-    printf("SKIP: Context data syntax (@@:data) requires V4 C backend support\n");
-    return 0;
+    printf("=== Test 38: Context Data ===\n");
+    int pass = 1;
+
+    // Test 1: Basic data store/retrieve
+    ContextDataTest* s1 = ContextDataTest_new();
+    int result1 = ContextDataTest_store_and_retrieve(s1, 42);
+    if (result1 != 42) {
+        printf("FAIL: store_and_retrieve(42) = %d, expected 42\n", result1);
+        pass = 0;
+    } else {
+        printf("1. store_and_retrieve(42) = %d\n", result1);
+    }
+    ContextDataTest_destroy(s1);
+
+    // Test 2: Data preserved across transition (handler -> <$ -> $>)
+    ContextDataTest* s2 = ContextDataTest_new();
+    int result2 = ContextDataTest_transition_with_data(s2, 5);
+    // Expected: 5*1000 + 1*100 + 1*10 + 2 = 5112
+    if (result2 != 5112) {
+        printf("FAIL: transition_with_data(5) = %d, expected 5112\n", result2);
+        pass = 0;
+    } else {
+        printf("2. transition_with_data(5) = %d (encodes: value=5, from=1, exit=1, to=2)\n", result2);
+    }
+    ContextDataTest_destroy(s2);
+
+    if (pass) {
+        printf("PASS: Context data works correctly\n");
+    }
+    return pass ? 0 : 1;
 }
