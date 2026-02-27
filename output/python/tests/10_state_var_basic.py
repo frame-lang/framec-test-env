@@ -104,7 +104,8 @@ class StateVarBasic:
 
     def _state_Counter(self, __e):
         if __e._message == "$>":
-            self.__compartment.state_vars["count"] = 0
+            if "count" not in self.__compartment.state_vars:
+                self.__compartment.state_vars["count"] = 0
         elif __e._message == "get_count":
             self._context_stack[-1]._return = self.__compartment.state_vars["count"]
             return

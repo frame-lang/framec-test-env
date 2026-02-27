@@ -5,10 +5,18 @@
 
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct SystemReturnChainTestFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for SystemReturnChainTestFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl SystemReturnChainTestFrameEvent {
@@ -17,9 +25,6 @@ impl SystemReturnChainTestFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -97,7 +102,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = SystemReturnChainTestFrameEvent::new("$<");
+    let exit_event = SystemReturnChainTestFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -158,18 +163,45 @@ match state_context {
     }
 
     pub fn get_state_num(&mut self) -> i32 {
-let __e = SystemReturnChainTestFrameEvent::new("get_state_num");
+let mut __e = SystemReturnChainTestFrameEvent::new("get_state_num");
+let __ctx = SystemReturnChainTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Start" => self._s_Start_get_state_num(&__e),
-            "EnterSetter" => self._s_EnterSetter_get_state_num(&__e),
-            "BothSet" => self._s_BothSet_get_state_num(&__e),
-            _ => Default::default(),
+            "Start" => { self._s_Start_get_state_num(&__e); }
+            "EnterSetter" => { self._s_EnterSetter_get_state_num(&__e); }
+            "BothSet" => { self._s_BothSet_get_state_num(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = SystemReturnChainTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = SystemReturnChainTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = SystemReturnChainTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
         }
     }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
+    }
 
-    fn _state_Start(&mut self, __e: &SystemReturnChainTestFrameEvent) {
+    fn _state_EnterSetter(&mut self, __e: &SystemReturnChainTestFrameEvent) {
 match __e.message.as_str() {
-    "get_state_num" => { self._s_Start_get_state_num(__e); }
+    "get_state_num" => { self._s_EnterSetter_get_state_num(__e); }
     _ => {}
 }
     }
@@ -181,23 +213,26 @@ match __e.message.as_str() {
 }
     }
 
-    fn _state_EnterSetter(&mut self, __e: &SystemReturnChainTestFrameEvent) {
+    fn _state_Start(&mut self, __e: &SystemReturnChainTestFrameEvent) {
 match __e.message.as_str() {
-    "get_state_num" => { self._s_EnterSetter_get_state_num(__e); }
+    "get_state_num" => { self._s_Start_get_state_num(__e); }
     _ => {}
 }
     }
 
-    fn _s_Start_get_state_num(&mut self, __e: &SystemReturnChainTestFrameEvent) -> i32 {
-return 1;
+    fn _s_EnterSetter_get_state_num(&mut self, __e: &SystemReturnChainTestFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(2)); }
+return;;
     }
 
-    fn _s_BothSet_get_state_num(&mut self, __e: &SystemReturnChainTestFrameEvent) -> i32 {
-return 3;
+    fn _s_BothSet_get_state_num(&mut self, __e: &SystemReturnChainTestFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(3)); }
+return;;
     }
 
-    fn _s_EnterSetter_get_state_num(&mut self, __e: &SystemReturnChainTestFrameEvent) -> i32 {
-return 2;
+    fn _s_Start_get_state_num(&mut self, __e: &SystemReturnChainTestFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(1)); }
+return;;
     }
 }
 

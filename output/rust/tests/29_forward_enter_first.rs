@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct ForwardEnterFirstFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for ForwardEnterFirstFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl ForwardEnterFirstFrameEvent {
@@ -12,9 +20,6 @@ impl ForwardEnterFirstFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -100,7 +105,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = ForwardEnterFirstFrameEvent::new("$<");
+    let exit_event = ForwardEnterFirstFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -160,34 +165,105 @@ match state_context {
     }
 
     pub fn process(&mut self) {
-let __e = ForwardEnterFirstFrameEvent::new("process");
-self.__kernel(__e);
+let mut __e = ForwardEnterFirstFrameEvent::new("process");
+let __ctx = ForwardEnterFirstFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Idle" => { self._s_Idle_process(&__e); }
+            "Working" => { self._s_Working_process(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = ForwardEnterFirstFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = ForwardEnterFirstFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = ForwardEnterFirstFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn get_counter(&mut self) -> i32 {
-let __e = ForwardEnterFirstFrameEvent::new("get_counter");
+let mut __e = ForwardEnterFirstFrameEvent::new("get_counter");
+let __ctx = ForwardEnterFirstFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Idle" => self._s_Idle_get_counter(&__e),
-            "Working" => self._s_Working_get_counter(&__e),
-            _ => Default::default(),
+            "Idle" => { self._s_Idle_get_counter(&__e); }
+            "Working" => { self._s_Working_get_counter(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = ForwardEnterFirstFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = ForwardEnterFirstFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = ForwardEnterFirstFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn get_log(&mut self) -> Vec<String> {
-let __e = ForwardEnterFirstFrameEvent::new("get_log");
+let mut __e = ForwardEnterFirstFrameEvent::new("get_log");
+let __ctx = ForwardEnterFirstFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Idle" => self._s_Idle_get_log(&__e),
-            "Working" => self._s_Working_get_log(&__e),
-            _ => Default::default(),
+            "Idle" => { self._s_Idle_get_log(&__e); }
+            "Working" => { self._s_Working_get_log(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = ForwardEnterFirstFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = ForwardEnterFirstFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = ForwardEnterFirstFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
         }
     }
-
-    fn _state_Idle(&mut self, __e: &ForwardEnterFirstFrameEvent) {
-match __e.message.as_str() {
-    "get_counter" => { self._s_Idle_get_counter(__e); }
-    "get_log" => { self._s_Idle_get_log(__e); }
-    "process" => { self._s_Idle_process(__e); }
-    _ => {}
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<Vec<String>>().unwrap()
+} else {
+    Default::default()
 }
     }
 
@@ -204,27 +280,13 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Idle_get_log(&mut self, __e: &ForwardEnterFirstFrameEvent) -> Vec<String> {
-return self.log.clone();
-    }
-
-    fn _s_Idle_process(&mut self, __e: &ForwardEnterFirstFrameEvent) {
-let mut __compartment = ForwardEnterFirstCompartment::new("Working");
-__compartment.forward_event = Some(__e.clone());
-self.__transition(__compartment);
-return;
-    }
-
-    fn _s_Idle_get_counter(&mut self, __e: &ForwardEnterFirstFrameEvent) -> i32 {
-return -1;
-    }
-
-    fn _s_Working_get_counter(&mut self, __e: &ForwardEnterFirstFrameEvent) -> i32 {
-return self._sv_counter;
-    }
-
-    fn _s_Working_get_log(&mut self, __e: &ForwardEnterFirstFrameEvent) -> Vec<String> {
-return self.log.clone();
+    fn _state_Idle(&mut self, __e: &ForwardEnterFirstFrameEvent) {
+match __e.message.as_str() {
+    "get_counter" => { self._s_Idle_get_counter(__e); }
+    "get_log" => { self._s_Idle_get_log(__e); }
+    "process" => { self._s_Idle_process(__e); }
+    _ => {}
+}
     }
 
     fn _s_Working_process(&mut self, __e: &ForwardEnterFirstFrameEvent) {
@@ -234,6 +296,33 @@ self._sv_counter = self._sv_counter + 1;
 
     fn _s_Working_enter(&mut self, __e: &ForwardEnterFirstFrameEvent) {
 self.log.push("Working:enter".to_string());
+    }
+
+    fn _s_Working_get_log(&mut self, __e: &ForwardEnterFirstFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.log.clone())); }
+return;;
+    }
+
+    fn _s_Working_get_counter(&mut self, __e: &ForwardEnterFirstFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self._sv_counter)); }
+return;;
+    }
+
+    fn _s_Idle_process(&mut self, __e: &ForwardEnterFirstFrameEvent) {
+let mut __compartment = ForwardEnterFirstCompartment::new("Working");
+__compartment.forward_event = Some(__e.clone());
+self.__transition(__compartment);
+return;
+    }
+
+    fn _s_Idle_get_counter(&mut self, __e: &ForwardEnterFirstFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(-1)); }
+return;;
+    }
+
+    fn _s_Idle_get_log(&mut self, __e: &ForwardEnterFirstFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.log.clone())); }
+return;;
     }
 }
 

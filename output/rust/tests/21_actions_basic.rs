@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct ActionsTestFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for ActionsTestFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl ActionsTestFrameEvent {
@@ -12,9 +20,6 @@ impl ActionsTestFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -92,7 +97,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = ActionsTestFrameEvent::new("$<");
+    let exit_event = ActionsTestFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -147,19 +152,74 @@ match state_context {
     }
 
     pub fn process(&mut self, value: i32) -> i32 {
-let __e = ActionsTestFrameEvent::new("process");
+let mut __e = ActionsTestFrameEvent::new("process");
+__e.parameters.insert("value".to_string(), Box::new(value) as Box<dyn std::any::Any>);
+let __ctx = ActionsTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Ready" => self._s_Ready_process(&__e, value),
-            _ => Default::default(),
+            "Ready" => { self._s_Ready_process(&__e, value); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = ActionsTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = ActionsTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = ActionsTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn get_log(&mut self) -> String {
-let __e = ActionsTestFrameEvent::new("get_log");
+let mut __e = ActionsTestFrameEvent::new("get_log");
+let __ctx = ActionsTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Ready" => self._s_Ready_get_log(&__e),
-            _ => Default::default(),
+            "Ready" => { self._s_Ready_get_log(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = ActionsTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = ActionsTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = ActionsTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<String>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_Ready(&mut self, __e: &ActionsTestFrameEvent) {
@@ -169,17 +229,19 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Ready_get_log(&mut self, __e: &ActionsTestFrameEvent) -> String {
-return self.log.clone();
-    }
-
-    fn _s_Ready_process(&mut self, __e: &ActionsTestFrameEvent, value: i32) -> i32 {
+    fn _s_Ready_process(&mut self, __e: &ActionsTestFrameEvent, value: i32) {
 self.__log_event("start");
 self.__validate_positive(value);
 self.__log_event("valid");
 let result = value * 2;
 self.__log_event("done");
-return result;
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(result)); }
+return;;
+    }
+
+    fn _s_Ready_get_log(&mut self, __e: &ActionsTestFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.log.clone())); }
+return;;
     }
 
     fn __log_event(&mut self, msg: &str) {

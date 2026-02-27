@@ -5,14 +5,42 @@
 
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct TransitionExitArgsFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for TransitionExitArgsFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl TransitionExitArgsFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+}
+
+struct TransitionExitArgsFrameContext {
+    event: TransitionExitArgsFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl TransitionExitArgsFrameContext {
+    fn new(event: TransitionExitArgsFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -50,6 +78,7 @@ pub struct TransitionExitArgs {
     _state_stack: Vec<(String, TransitionExitArgsStateContext)>,
     __compartment: TransitionExitArgsCompartment,
     __next_compartment: Option<TransitionExitArgsCompartment>,
+    _context_stack: Vec<TransitionExitArgsFrameContext>,
     count: i32,
 }
 
@@ -57,6 +86,7 @@ impl TransitionExitArgs {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             count: 0,
             __compartment: TransitionExitArgsCompartment::new("Active"),
             __next_compartment: None,
@@ -73,7 +103,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = TransitionExitArgsFrameEvent::new("$<");
+    let exit_event = TransitionExitArgsFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -131,22 +161,74 @@ match state_context {
     }
 
     pub fn leave(&mut self) {
-let __e = TransitionExitArgsFrameEvent::new("leave");
-self.__kernel(__e);
+let mut __e = TransitionExitArgsFrameEvent::new("leave");
+let __ctx = TransitionExitArgsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Active" => { self._s_Active_leave(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = TransitionExitArgsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = TransitionExitArgsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = TransitionExitArgsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn get_count(&mut self) -> i32 {
-let __e = TransitionExitArgsFrameEvent::new("get_count");
+let mut __e = TransitionExitArgsFrameEvent::new("get_count");
+let __ctx = TransitionExitArgsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Active" => self._s_Active_get_count(&__e),
-            "Done" => self._s_Done_get_count(&__e),
-            _ => Default::default(),
+            "Active" => { self._s_Active_get_count(&__e); }
+            "Done" => { self._s_Done_get_count(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = TransitionExitArgsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = TransitionExitArgsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = TransitionExitArgsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_Active(&mut self, __e: &TransitionExitArgsFrameEvent) {
 match __e.message.as_str() {
-    "$<" => { self._s_Active_exit(__e); }
+    "<$" => { self._s_Active_exit(__e); }
     "get_count" => { self._s_Active_get_count(__e); }
     "leave" => { self._s_Active_leave(__e); }
     _ => {}
@@ -166,16 +248,18 @@ self.count = 1;
 self.__transition(TransitionExitArgsCompartment::new("Done"));
     }
 
-    fn _s_Active_get_count(&mut self, __e: &TransitionExitArgsFrameEvent) -> i32 {
-return self.count;
-    }
-
     fn _s_Active_exit(&mut self, __e: &TransitionExitArgsFrameEvent) {
 self.count = self.count + 10;
     }
 
-    fn _s_Done_get_count(&mut self, __e: &TransitionExitArgsFrameEvent) -> i32 {
-return self.count;
+    fn _s_Active_get_count(&mut self, __e: &TransitionExitArgsFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.count)); }
+return;;
+    }
+
+    fn _s_Done_get_count(&mut self, __e: &TransitionExitArgsFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.count)); }
+return;;
     }
 
     fn _s_Done_enter(&mut self, __e: &TransitionExitArgsFrameEvent) {

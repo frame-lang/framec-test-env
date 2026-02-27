@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct StackOpsFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for StackOpsFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl StackOpsFrameEvent {
@@ -12,9 +20,6 @@ impl StackOpsFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -91,7 +96,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = StackOpsFrameEvent::new("$<");
+    let exit_event = StackOpsFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -149,31 +154,137 @@ match state_context {
     }
 
     pub fn push_and_go(&mut self) {
-let __e = StackOpsFrameEvent::new("push_and_go");
-self.__kernel(__e);
+let mut __e = StackOpsFrameEvent::new("push_and_go");
+let __ctx = StackOpsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Main" => { self._s_Main_push_and_go(&__e); }
+            "Sub" => { self._s_Sub_push_and_go(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = StackOpsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = StackOpsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = StackOpsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn pop_back(&mut self) {
-let __e = StackOpsFrameEvent::new("pop_back");
-self.__kernel(__e);
+let mut __e = StackOpsFrameEvent::new("pop_back");
+let __ctx = StackOpsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Main" => { self._s_Main_pop_back(&__e); }
+            "Sub" => { self._s_Sub_pop_back(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = StackOpsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = StackOpsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = StackOpsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn do_work(&mut self) -> String {
-let __e = StackOpsFrameEvent::new("do_work");
+let mut __e = StackOpsFrameEvent::new("do_work");
+let __ctx = StackOpsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Main" => self._s_Main_do_work(&__e),
-            "Sub" => self._s_Sub_do_work(&__e),
-            _ => Default::default(),
+            "Main" => { self._s_Main_do_work(&__e); }
+            "Sub" => { self._s_Sub_do_work(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = StackOpsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = StackOpsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = StackOpsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<String>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn get_state(&mut self) -> String {
-let __e = StackOpsFrameEvent::new("get_state");
+let mut __e = StackOpsFrameEvent::new("get_state");
+let __ctx = StackOpsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Main" => self._s_Main_get_state(&__e),
-            "Sub" => self._s_Sub_get_state(&__e),
-            _ => Default::default(),
+            "Main" => { self._s_Main_get_state(&__e); }
+            "Sub" => { self._s_Sub_get_state(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = StackOpsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = StackOpsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = StackOpsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<String>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_Sub(&mut self, __e: &StackOpsFrameEvent) {
@@ -196,22 +307,30 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Sub_push_and_go(&mut self, __e: &StackOpsFrameEvent) {
-println!("Already in Sub");
-    }
-
-    fn _s_Sub_do_work(&mut self, __e: &StackOpsFrameEvent) -> String {
-"Working in Sub".to_string()
-    }
-
-    fn _s_Sub_get_state(&mut self, __e: &StackOpsFrameEvent) -> String {
-"Sub".to_string()
-    }
-
     fn _s_Sub_pop_back(&mut self, __e: &StackOpsFrameEvent) {
 println!("Popping back to previous state");
 self._state_stack_pop();
 return;
+    }
+
+    fn _s_Sub_do_work(&mut self, __e: &StackOpsFrameEvent) {
+"Working in Sub".to_string();
+    }
+
+    fn _s_Sub_push_and_go(&mut self, __e: &StackOpsFrameEvent) {
+println!("Already in Sub");
+    }
+
+    fn _s_Sub_get_state(&mut self, __e: &StackOpsFrameEvent) {
+"Sub".to_string();
+    }
+
+    fn _s_Main_get_state(&mut self, __e: &StackOpsFrameEvent) {
+"Main".to_string();
+    }
+
+    fn _s_Main_pop_back(&mut self, __e: &StackOpsFrameEvent) {
+println!("Cannot pop - nothing on stack in Main");
     }
 
     fn _s_Main_push_and_go(&mut self, __e: &StackOpsFrameEvent) {
@@ -220,16 +339,8 @@ self._state_stack_push();
 self.__transition(StackOpsCompartment::new("Sub"));
     }
 
-    fn _s_Main_pop_back(&mut self, __e: &StackOpsFrameEvent) {
-println!("Cannot pop - nothing on stack in Main");
-    }
-
-    fn _s_Main_do_work(&mut self, __e: &StackOpsFrameEvent) -> String {
-"Working in Main".to_string()
-    }
-
-    fn _s_Main_get_state(&mut self, __e: &StackOpsFrameEvent) -> String {
-"Main".to_string()
+    fn _s_Main_do_work(&mut self, __e: &StackOpsFrameEvent) {
+"Working in Main".to_string();
     }
 }
 

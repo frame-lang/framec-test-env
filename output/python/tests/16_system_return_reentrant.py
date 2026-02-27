@@ -1,3 +1,7 @@
+
+# Tests that nested interface calls maintain separate return contexts
+
+
 from typing import Any, Optional, List, Dict, Callable
 
 class SystemReturnReentrantTestFrameEvent:
@@ -111,7 +115,8 @@ class SystemReturnReentrantTest:
 
     def _state_Start(self, __e):
         if __e._message == "$>":
-            self.__compartment.state_vars["log"] = ""
+            if "log" not in self.__compartment.state_vars:
+                self.__compartment.state_vars["log"] = ""
         elif __e._message == "get_log":
             self._context_stack[-1]._return = self.__compartment.state_vars["log"]
             return

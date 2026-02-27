@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct HSMForwardFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for HSMForwardFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl HSMForwardFrameEvent {
@@ -12,9 +20,6 @@ impl HSMForwardFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -93,7 +98,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = HSMForwardFrameEvent::new("$<");
+    let exit_event = HSMForwardFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -151,22 +156,101 @@ match state_context {
     }
 
     pub fn event_a(&mut self) {
-let __e = HSMForwardFrameEvent::new("event_a");
-self.__kernel(__e);
+let mut __e = HSMForwardFrameEvent::new("event_a");
+let __ctx = HSMForwardFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Child" => { self._s_Child_event_a(&__e); }
+            "Parent" => { self._s_Parent_event_a(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = HSMForwardFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = HSMForwardFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = HSMForwardFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn event_b(&mut self) {
-let __e = HSMForwardFrameEvent::new("event_b");
-self.__kernel(__e);
+let mut __e = HSMForwardFrameEvent::new("event_b");
+let __ctx = HSMForwardFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Child" => { self._s_Child_event_b(&__e); }
+            "Parent" => { self._s_Parent_event_b(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = HSMForwardFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = HSMForwardFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = HSMForwardFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn get_log(&mut self) -> Vec<String> {
-let __e = HSMForwardFrameEvent::new("get_log");
+let mut __e = HSMForwardFrameEvent::new("get_log");
+let __ctx = HSMForwardFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Child" => self._s_Child_get_log(&__e),
-            "Parent" => self._s_Parent_get_log(&__e),
-            _ => Default::default(),
+            "Child" => { self._s_Child_get_log(&__e); }
+            "Parent" => { self._s_Parent_get_log(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = HSMForwardFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = HSMForwardFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = HSMForwardFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<Vec<String>>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_Child(&mut self, __e: &HSMForwardFrameEvent) {
@@ -174,7 +258,7 @@ match __e.message.as_str() {
     "event_a" => { self._s_Child_event_a(__e); }
     "event_b" => { self._s_Child_event_b(__e); }
     "get_log" => { self._s_Child_get_log(__e); }
-    _ => {}
+    _ => self._state_Parent(__e),
 }
     }
 
@@ -192,24 +276,24 @@ self.log.push("Child:event_b_forward".to_string());
 self._state_Parent(__e);
     }
 
+    fn _s_Child_get_log(&mut self, __e: &HSMForwardFrameEvent) {
+self.log.clone();
+    }
+
     fn _s_Child_event_a(&mut self, __e: &HSMForwardFrameEvent) {
 self.log.push("Child:event_a".to_string());
     }
 
-    fn _s_Child_get_log(&mut self, __e: &HSMForwardFrameEvent) -> Vec<String> {
-self.log.clone()
+    fn _s_Parent_event_b(&mut self, __e: &HSMForwardFrameEvent) {
+self.log.push("Parent:event_b".to_string());
+    }
+
+    fn _s_Parent_get_log(&mut self, __e: &HSMForwardFrameEvent) {
+self.log.clone();
     }
 
     fn _s_Parent_event_a(&mut self, __e: &HSMForwardFrameEvent) {
 self.log.push("Parent:event_a".to_string());
-    }
-
-    fn _s_Parent_get_log(&mut self, __e: &HSMForwardFrameEvent) -> Vec<String> {
-self.log.clone()
-    }
-
-    fn _s_Parent_event_b(&mut self, __e: &HSMForwardFrameEvent) {
-self.log.push("Parent:event_b".to_string());
     }
 }
 

@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct TransitionPopTestFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for TransitionPopTestFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl TransitionPopTestFrameEvent {
@@ -12,9 +20,6 @@ impl TransitionPopTestFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -93,7 +98,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = TransitionPopTestFrameEvent::new("$<");
+    let exit_event = TransitionPopTestFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -151,31 +156,136 @@ match state_context {
     }
 
     pub fn start(&mut self) {
-let __e = TransitionPopTestFrameEvent::new("start");
-self.__kernel(__e);
+let mut __e = TransitionPopTestFrameEvent::new("start");
+let __ctx = TransitionPopTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Idle" => { self._s_Idle_start(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = TransitionPopTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = TransitionPopTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = TransitionPopTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn process(&mut self) {
-let __e = TransitionPopTestFrameEvent::new("process");
-self.__kernel(__e);
+let mut __e = TransitionPopTestFrameEvent::new("process");
+let __ctx = TransitionPopTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Idle" => { self._s_Idle_process(&__e); }
+            "Working" => { self._s_Working_process(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = TransitionPopTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = TransitionPopTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = TransitionPopTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn get_state(&mut self) -> String {
-let __e = TransitionPopTestFrameEvent::new("get_state");
+let mut __e = TransitionPopTestFrameEvent::new("get_state");
+let __ctx = TransitionPopTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Idle" => self._s_Idle_get_state(&__e),
-            "Working" => self._s_Working_get_state(&__e),
-            _ => Default::default(),
+            "Idle" => { self._s_Idle_get_state(&__e); }
+            "Working" => { self._s_Working_get_state(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = TransitionPopTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = TransitionPopTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = TransitionPopTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<String>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn get_log(&mut self) -> Vec<String> {
-let __e = TransitionPopTestFrameEvent::new("get_log");
+let mut __e = TransitionPopTestFrameEvent::new("get_log");
+let __ctx = TransitionPopTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Idle" => self._s_Idle_get_log(&__e),
-            "Working" => self._s_Working_get_log(&__e),
-            _ => Default::default(),
+            "Idle" => { self._s_Idle_get_log(&__e); }
+            "Working" => { self._s_Working_get_log(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = TransitionPopTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = TransitionPopTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = TransitionPopTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<Vec<String>>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_Idle(&mut self, __e: &TransitionPopTestFrameEvent) {
@@ -197,14 +307,6 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Idle_get_state(&mut self, __e: &TransitionPopTestFrameEvent) -> String {
-return "Idle".to_string();
-    }
-
-    fn _s_Idle_get_log(&mut self, __e: &TransitionPopTestFrameEvent) -> Vec<String> {
-return self.log.clone();
-    }
-
     fn _s_Idle_start(&mut self, __e: &TransitionPopTestFrameEvent) {
 self.log.push("idle:start:push".to_string());
 self._state_stack_push();
@@ -215,8 +317,19 @@ self.__transition(TransitionPopTestCompartment::new("Working"));
 self.log.push("idle:process".to_string());
     }
 
-    fn _s_Working_get_log(&mut self, __e: &TransitionPopTestFrameEvent) -> Vec<String> {
-return self.log.clone();
+    fn _s_Idle_get_log(&mut self, __e: &TransitionPopTestFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.log.clone())); }
+return;;
+    }
+
+    fn _s_Idle_get_state(&mut self, __e: &TransitionPopTestFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new("Idle".to_string())); }
+return;;
+    }
+
+    fn _s_Working_get_log(&mut self, __e: &TransitionPopTestFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.log.clone())); }
+return;;
     }
 
     fn _s_Working_process(&mut self, __e: &TransitionPopTestFrameEvent) {
@@ -227,8 +340,9 @@ return;
 self.log.push("working:process:after_pop".to_string());
     }
 
-    fn _s_Working_get_state(&mut self, __e: &TransitionPopTestFrameEvent) -> String {
-return "Working".to_string();
+    fn _s_Working_get_state(&mut self, __e: &TransitionPopTestFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new("Working".to_string())); }
+return;;
     }
 }
 

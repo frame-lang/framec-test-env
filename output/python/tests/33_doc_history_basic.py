@@ -1,3 +1,7 @@
+
+# Documentation Example: History with push$/pop$ (History201)
+
+
 from typing import Any, Optional, List, Dict, Callable
 
 class HistoryBasicFrameEvent:
@@ -116,6 +120,14 @@ class HistoryBasic:
         self.__kernel(__e)
         return self._context_stack.pop()._return
 
+    def _state_C(self, __e):
+        if __e._message == "get_state":
+            self._context_stack[-1]._return = "C"
+            return
+        elif __e._message == "return_back":
+            self.__transition(self._state_stack.pop())
+            return
+
     def _state_A(self, __e):
         if __e._message == "get_state":
             self._context_stack[-1]._return = "A"
@@ -127,14 +139,6 @@ class HistoryBasic:
             self._state_stack.append(self.__compartment.copy())
             __compartment = HistoryBasicCompartment("C", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
-
-    def _state_C(self, __e):
-        if __e._message == "get_state":
-            self._context_stack[-1]._return = "C"
-            return
-        elif __e._message == "return_back":
-            self.__compartment = self._state_stack.pop()
-            return
 
     def _state_B(self, __e):
         if __e._message == "get_state":

@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct DomainVarsFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for DomainVarsFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl DomainVarsFrameEvent {
@@ -12,9 +20,6 @@ impl DomainVarsFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -94,7 +99,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = DomainVarsFrameEvent::new("$<");
+    let exit_event = DomainVarsFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -149,33 +154,16 @@ match state_context {
     }
 
     pub fn increment(&mut self) {
-let __e = DomainVarsFrameEvent::new("increment");
-self.__kernel(__e);
-    }
-
-    pub fn decrement(&mut self) {
-let __e = DomainVarsFrameEvent::new("decrement");
-self.__kernel(__e);
-    }
-
-    pub fn get_count(&mut self) -> i32 {
-let __e = DomainVarsFrameEvent::new("get_count");
+let mut __e = DomainVarsFrameEvent::new("increment");
+let __ctx = DomainVarsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Counting" => self._s_Counting_get_count(&__e),
-            _ => Default::default(),
-        }
-    }
-
-    pub fn set_count(&mut self, value: i32) {
-let __e = DomainVarsFrameEvent::new("set_count");
-match self.__compartment.state.as_str() {
-            "Counting" => { self._s_Counting_set_count(&__e, value); }
+            "Counting" => { self._s_Counting_increment(&__e); }
             _ => {}
         }
-// Process any pending transitions (bypassed kernel)
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
-    let exit_event = DomainVarsFrameEvent::new("$<");
+    let exit_event = DomainVarsFrameEvent::new("<$");
     self.__router(&exit_event);
     self.__compartment = next_compartment;
     if self.__compartment.forward_event.is_none() {
@@ -192,6 +180,103 @@ while self.__next_compartment.is_some() {
         }
     }
 }
+self._context_stack.pop();
+    }
+
+    pub fn decrement(&mut self) {
+let mut __e = DomainVarsFrameEvent::new("decrement");
+let __ctx = DomainVarsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Counting" => { self._s_Counting_decrement(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = DomainVarsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = DomainVarsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = DomainVarsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
+    }
+
+    pub fn get_count(&mut self) -> i32 {
+let mut __e = DomainVarsFrameEvent::new("get_count");
+let __ctx = DomainVarsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Counting" => { self._s_Counting_get_count(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = DomainVarsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = DomainVarsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = DomainVarsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
+    }
+
+    pub fn set_count(&mut self, value: i32) {
+let mut __e = DomainVarsFrameEvent::new("set_count");
+__e.parameters.insert("value".to_string(), Box::new(value) as Box<dyn std::any::Any>);
+let __ctx = DomainVarsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Counting" => { self._s_Counting_set_count(&__e, value); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = DomainVarsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = DomainVarsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = DomainVarsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     fn _state_Counting(&mut self, __e: &DomainVarsFrameEvent) {
@@ -203,9 +288,8 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Counting_set_count(&mut self, __e: &DomainVarsFrameEvent, value: i32) {
-self.count = value;
-println!("{}: set to {}", self.name, self.count);
+    fn _s_Counting_get_count(&mut self, __e: &DomainVarsFrameEvent) {
+self.count;
     }
 
     fn _s_Counting_increment(&mut self, __e: &DomainVarsFrameEvent) {
@@ -213,13 +297,14 @@ self.count += 1;
 println!("{}: incremented to {}", self.name, self.count);
     }
 
+    fn _s_Counting_set_count(&mut self, __e: &DomainVarsFrameEvent, value: i32) {
+self.count = value;
+println!("{}: set to {}", self.name, self.count);
+    }
+
     fn _s_Counting_decrement(&mut self, __e: &DomainVarsFrameEvent) {
 self.count -= 1;
 println!("{}: decremented to {}", self.name, self.count);
-    }
-
-    fn _s_Counting_get_count(&mut self, __e: &DomainVarsFrameEvent) -> i32 {
-self.count
     }
 }
 

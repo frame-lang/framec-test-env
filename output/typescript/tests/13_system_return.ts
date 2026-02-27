@@ -148,7 +148,9 @@ class SystemReturnTest {
 
     private _state_Calculator(__e: SystemReturnTestFrameEvent) {
         if (__e._message === "$>") {
-            this.__compartment.state_vars["value"] = 0;
+            if (!("value" in this.__compartment.state_vars)) {
+                this.__compartment.state_vars["value"] = 0;
+            }
         } else if (__e._message === "add") {
             const a = __e._parameters?.["a"];
             const b = __e._parameters?.["b"];

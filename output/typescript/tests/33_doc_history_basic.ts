@@ -169,16 +169,6 @@ class HistoryBasic {
         }
     }
 
-    private _state_C(__e: HistoryBasicFrameEvent) {
-        if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "C";
-            return;
-        } else if (__e._message === "return_back") {
-            this.__compartment = this._state_stack.pop()!;
-            return;
-        }
-    }
-
     private _state_A(__e: HistoryBasicFrameEvent) {
         if (__e._message === "get_state") {
             this._context_stack[this._context_stack.length - 1]._return = "A";
@@ -190,6 +180,16 @@ class HistoryBasic {
             this._state_stack.push(this.__compartment.copy());
             const __compartment = new HistoryBasicCompartment("C", this.__compartment.copy());
             this.__transition(__compartment);
+        }
+    }
+
+    private _state_C(__e: HistoryBasicFrameEvent) {
+        if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "C";
+            return;
+        } else if (__e._message === "return_back") {
+            this.__transition(this._state_stack.pop()!);
+            return;
         }
     }
 }

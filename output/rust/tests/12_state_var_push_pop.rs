@@ -5,10 +5,18 @@
 
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct StateVarPushPopFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for StateVarPushPopFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl StateVarPushPopFrameEvent {
@@ -17,9 +25,6 @@ impl StateVarPushPopFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -110,7 +115,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = StateVarPushPopFrameEvent::new("$<");
+    let exit_event = StateVarPushPopFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -172,31 +177,135 @@ match state_context {
     }
 
     pub fn increment(&mut self) -> i32 {
-let __e = StateVarPushPopFrameEvent::new("increment");
+let mut __e = StateVarPushPopFrameEvent::new("increment");
+let __ctx = StateVarPushPopFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Counter" => self._s_Counter_increment(&__e),
-            "Other" => self._s_Other_increment(&__e),
-            _ => Default::default(),
+            "Counter" => { self._s_Counter_increment(&__e); }
+            "Other" => { self._s_Other_increment(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = StateVarPushPopFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = StateVarPushPopFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = StateVarPushPopFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn get_count(&mut self) -> i32 {
-let __e = StateVarPushPopFrameEvent::new("get_count");
+let mut __e = StateVarPushPopFrameEvent::new("get_count");
+let __ctx = StateVarPushPopFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Counter" => self._s_Counter_get_count(&__e),
-            "Other" => self._s_Other_get_count(&__e),
-            _ => Default::default(),
+            "Counter" => { self._s_Counter_get_count(&__e); }
+            "Other" => { self._s_Other_get_count(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = StateVarPushPopFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = StateVarPushPopFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = StateVarPushPopFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn save_and_go(&mut self) {
-let __e = StateVarPushPopFrameEvent::new("save_and_go");
-self.__kernel(__e);
+let mut __e = StateVarPushPopFrameEvent::new("save_and_go");
+let __ctx = StateVarPushPopFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Counter" => { self._s_Counter_save_and_go(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = StateVarPushPopFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = StateVarPushPopFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = StateVarPushPopFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn restore(&mut self) {
-let __e = StateVarPushPopFrameEvent::new("restore");
-self.__kernel(__e);
+let mut __e = StateVarPushPopFrameEvent::new("restore");
+let __ctx = StateVarPushPopFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Other" => { self._s_Other_restore(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = StateVarPushPopFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = StateVarPushPopFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = StateVarPushPopFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     fn _state_Counter(&mut self, __e: &StateVarPushPopFrameEvent) {
@@ -223,22 +332,22 @@ match __e.message.as_str() {
 }
     }
 
+    fn _s_Counter_increment(&mut self, __e: &StateVarPushPopFrameEvent) {
+self._sv_count = self._sv_count + 1;
+self._sv_count;
+    }
+
+    fn _s_Counter_get_count(&mut self, __e: &StateVarPushPopFrameEvent) {
+self._sv_count;
+    }
+
     fn _s_Counter_save_and_go(&mut self, __e: &StateVarPushPopFrameEvent) {
 self._state_stack_push();
 self.__transition(StateVarPushPopCompartment::new("Other"));
     }
 
-    fn _s_Counter_get_count(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
-self._sv_count
-    }
-
-    fn _s_Counter_increment(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
-self._sv_count = self._sv_count + 1;
-self._sv_count
-    }
-
-    fn _s_Other_get_count(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
-self._sv_other_count
+    fn _s_Other_get_count(&mut self, __e: &StateVarPushPopFrameEvent) {
+self._sv_other_count;
     }
 
     fn _s_Other_restore(&mut self, __e: &StateVarPushPopFrameEvent) {
@@ -246,9 +355,9 @@ self._state_stack_pop();
 return;
     }
 
-    fn _s_Other_increment(&mut self, __e: &StateVarPushPopFrameEvent) -> i32 {
+    fn _s_Other_increment(&mut self, __e: &StateVarPushPopFrameEvent) {
 self._sv_other_count = self._sv_other_count + 1;
-self._sv_other_count
+self._sv_other_count;
     }
 }
 

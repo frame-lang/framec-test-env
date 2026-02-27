@@ -148,25 +148,6 @@ class PersistStack {
         return this._context_stack.pop()!._return;
     }
 
-    private _state_Middle(__e: PersistStackFrameEvent) {
-        if (__e._message === "get_depth") {
-            this._context_stack[this._context_stack.length - 1]._return = this.depth;
-            return;;
-        } else if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "middle";
-            return;;
-        } else if (__e._message === "pop_back") {
-            this.depth = this.depth - 1;
-            this.__compartment = this._state_stack.pop()!;
-            return;
-        } else if (__e._message === "push_and_go") {
-            this.depth = this.depth + 1;
-            this._state_stack.push(this.__compartment.copy());
-            const __compartment = new PersistStackCompartment("End", this.__compartment.copy());
-            this.__transition(__compartment);
-        }
-    }
-
     private _state_Start(__e: PersistStackFrameEvent) {
         if (__e._message === "get_depth") {
             this._context_stack[this._context_stack.length - 1]._return = this.depth;
@@ -184,6 +165,25 @@ class PersistStack {
         }
     }
 
+    private _state_Middle(__e: PersistStackFrameEvent) {
+        if (__e._message === "get_depth") {
+            this._context_stack[this._context_stack.length - 1]._return = this.depth;
+            return;;
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "middle";
+            return;;
+        } else if (__e._message === "pop_back") {
+            this.depth = this.depth - 1;
+            this.__transition(this._state_stack.pop()!);
+            return;
+        } else if (__e._message === "push_and_go") {
+            this.depth = this.depth + 1;
+            this._state_stack.push(this.__compartment.copy());
+            const __compartment = new PersistStackCompartment("End", this.__compartment.copy());
+            this.__transition(__compartment);
+        }
+    }
+
     private _state_End(__e: PersistStackFrameEvent) {
         if (__e._message === "get_depth") {
             this._context_stack[this._context_stack.length - 1]._return = this.depth;
@@ -193,7 +193,7 @@ class PersistStack {
             return;;
         } else if (__e._message === "pop_back") {
             this.depth = this.depth - 1;
-            this.__compartment = this._state_stack.pop()!;
+            this.__transition(this._state_stack.pop()!);
             return;
         } else if (__e._message === "push_and_go") {
             // can't go further

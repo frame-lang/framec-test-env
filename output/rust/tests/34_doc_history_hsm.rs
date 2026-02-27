@@ -5,10 +5,18 @@
 
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct HistoryHSMFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for HistoryHSMFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl HistoryHSMFrameEvent {
@@ -17,9 +25,6 @@ impl HistoryHSMFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -101,7 +106,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = HistoryHSMFrameEvent::new("$<");
+    let exit_event = HistoryHSMFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -168,51 +173,202 @@ match state_context {
     }
 
     pub fn goto_a(&mut self) {
-let __e = HistoryHSMFrameEvent::new("goto_a");
-self.__kernel(__e);
+let mut __e = HistoryHSMFrameEvent::new("goto_a");
+let __ctx = HistoryHSMFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Waiting" => { self._s_Waiting_goto_a(&__e); }
+            "B" => { self._s_B_goto_a(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = HistoryHSMFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = HistoryHSMFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = HistoryHSMFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn goto_b(&mut self) {
-let __e = HistoryHSMFrameEvent::new("goto_b");
-self.__kernel(__e);
+let mut __e = HistoryHSMFrameEvent::new("goto_b");
+let __ctx = HistoryHSMFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Waiting" => { self._s_Waiting_goto_b(&__e); }
+            "A" => { self._s_A_goto_b(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = HistoryHSMFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = HistoryHSMFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = HistoryHSMFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn goto_c(&mut self) {
-let __e = HistoryHSMFrameEvent::new("goto_c");
-self.__kernel(__e);
+let mut __e = HistoryHSMFrameEvent::new("goto_c");
+let __ctx = HistoryHSMFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "A" => { self._s_AB_goto_c(&__e); }
+            "B" => { self._s_AB_goto_c(&__e); }
+            "AB" => { self._s_AB_goto_c(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = HistoryHSMFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = HistoryHSMFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = HistoryHSMFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn go_back(&mut self) {
-let __e = HistoryHSMFrameEvent::new("go_back");
-self.__kernel(__e);
+let mut __e = HistoryHSMFrameEvent::new("go_back");
+let __ctx = HistoryHSMFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "C" => { self._s_C_go_back(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = HistoryHSMFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = HistoryHSMFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = HistoryHSMFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn get_state(&mut self) -> String {
-let __e = HistoryHSMFrameEvent::new("get_state");
+let mut __e = HistoryHSMFrameEvent::new("get_state");
+let __ctx = HistoryHSMFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Waiting" => self._s_Waiting_get_state(&__e),
-            "A" => self._s_A_get_state(&__e),
-            "B" => self._s_B_get_state(&__e),
-            "C" => self._s_C_get_state(&__e),
-            _ => Default::default(),
+            "Waiting" => { self._s_Waiting_get_state(&__e); }
+            "A" => { self._s_A_get_state(&__e); }
+            "B" => { self._s_B_get_state(&__e); }
+            "C" => { self._s_C_get_state(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = HistoryHSMFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = HistoryHSMFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = HistoryHSMFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<String>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn get_log(&mut self) -> Vec<String> {
-let __e = HistoryHSMFrameEvent::new("get_log");
+let mut __e = HistoryHSMFrameEvent::new("get_log");
+let __ctx = HistoryHSMFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Waiting" => self._s_Waiting_get_log(&__e),
-            "A" => self._s_A_get_log(&__e),
-            "B" => self._s_B_get_log(&__e),
-            "C" => self._s_C_get_log(&__e),
-            _ => Default::default(),
+            "Waiting" => { self._s_Waiting_get_log(&__e); }
+            "A" => { self._s_A_get_log(&__e); }
+            "B" => { self._s_B_get_log(&__e); }
+            "C" => { self._s_C_get_log(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = HistoryHSMFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = HistoryHSMFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = HistoryHSMFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
         }
     }
-
-    fn _state_AB(&mut self, __e: &HistoryHSMFrameEvent) {
-match __e.message.as_str() {
-    "goto_c" => { self._s_AB_goto_c(__e); }
-    _ => {}
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<Vec<String>>().unwrap()
+} else {
+    Default::default()
 }
     }
 
@@ -222,16 +378,6 @@ match __e.message.as_str() {
     "get_log" => { self._s_A_get_log(__e); }
     "get_state" => { self._s_A_get_state(__e); }
     "goto_b" => { self._s_A_goto_b(__e); }
-    _ => self._state_AB(__e),
-}
-    }
-
-    fn _state_B(&mut self, __e: &HistoryHSMFrameEvent) {
-match __e.message.as_str() {
-    "$>" => { self._s_B_enter(__e); }
-    "get_log" => { self._s_B_get_log(__e); }
-    "get_state" => { self._s_B_get_state(__e); }
-    "goto_a" => { self._s_B_goto_a(__e); }
     _ => self._state_AB(__e),
 }
     }
@@ -247,6 +393,13 @@ match __e.message.as_str() {
 }
     }
 
+    fn _state_AB(&mut self, __e: &HistoryHSMFrameEvent) {
+match __e.message.as_str() {
+    "goto_c" => { self._s_AB_goto_c(__e); }
+    _ => {}
+}
+    }
+
     fn _state_C(&mut self, __e: &HistoryHSMFrameEvent) {
 match __e.message.as_str() {
     "$>" => { self._s_C_enter(__e); }
@@ -257,10 +410,24 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_AB_goto_c(&mut self, __e: &HistoryHSMFrameEvent) {
-self.log_msg(String::from("goto_c in $AB"));
-self._state_stack_push();
-self.__transition(HistoryHSMCompartment::new("C"));
+    fn _state_B(&mut self, __e: &HistoryHSMFrameEvent) {
+match __e.message.as_str() {
+    "$>" => { self._s_B_enter(__e); }
+    "get_log" => { self._s_B_get_log(__e); }
+    "get_state" => { self._s_B_get_state(__e); }
+    "goto_a" => { self._s_B_goto_a(__e); }
+    _ => self._state_AB(__e),
+}
+    }
+
+    fn _s_A_get_state(&mut self, __e: &HistoryHSMFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(String::from("A"))); }
+return;
+    }
+
+    fn _s_A_get_log(&mut self, __e: &HistoryHSMFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.log.clone())); }
+return;
     }
 
     fn _s_A_goto_b(&mut self, __e: &HistoryHSMFrameEvent) {
@@ -268,33 +435,13 @@ self.log_msg(String::from("goto_b"));
 self.__transition(HistoryHSMCompartment::new("B"));
     }
 
-    fn _s_A_get_state(&mut self, __e: &HistoryHSMFrameEvent) -> String {
-return String::from("A")
-    }
-
-    fn _s_A_get_log(&mut self, __e: &HistoryHSMFrameEvent) -> Vec<String> {
-return self.log.clone()
-    }
-
     fn _s_A_enter(&mut self, __e: &HistoryHSMFrameEvent) {
 self.log_msg(String::from("In $A"));
     }
 
-    fn _s_B_get_state(&mut self, __e: &HistoryHSMFrameEvent) -> String {
-return String::from("B")
-    }
-
-    fn _s_B_goto_a(&mut self, __e: &HistoryHSMFrameEvent) {
+    fn _s_Waiting_goto_a(&mut self, __e: &HistoryHSMFrameEvent) {
 self.log_msg(String::from("goto_a"));
 self.__transition(HistoryHSMCompartment::new("A"));
-    }
-
-    fn _s_B_enter(&mut self, __e: &HistoryHSMFrameEvent) {
-self.log_msg(String::from("In $B"));
-    }
-
-    fn _s_B_get_log(&mut self, __e: &HistoryHSMFrameEvent) -> Vec<String> {
-return self.log.clone()
     }
 
     fn _s_Waiting_goto_b(&mut self, __e: &HistoryHSMFrameEvent) {
@@ -302,21 +449,33 @@ self.log_msg(String::from("goto_b"));
 self.__transition(HistoryHSMCompartment::new("B"));
     }
 
-    fn _s_Waiting_get_state(&mut self, __e: &HistoryHSMFrameEvent) -> String {
-return String::from("Waiting")
+    fn _s_Waiting_get_state(&mut self, __e: &HistoryHSMFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(String::from("Waiting"))); }
+return;
     }
 
-    fn _s_Waiting_get_log(&mut self, __e: &HistoryHSMFrameEvent) -> Vec<String> {
-return self.log.clone()
+    fn _s_Waiting_get_log(&mut self, __e: &HistoryHSMFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.log.clone())); }
+return;
     }
 
     fn _s_Waiting_enter(&mut self, __e: &HistoryHSMFrameEvent) {
 self.log_msg(String::from("In $Waiting"));
     }
 
-    fn _s_Waiting_goto_a(&mut self, __e: &HistoryHSMFrameEvent) {
-self.log_msg(String::from("goto_a"));
-self.__transition(HistoryHSMCompartment::new("A"));
+    fn _s_AB_goto_c(&mut self, __e: &HistoryHSMFrameEvent) {
+self.log_msg(String::from("goto_c in $AB"));
+self._state_stack_push();
+self.__transition(HistoryHSMCompartment::new("C"));
+    }
+
+    fn _s_C_enter(&mut self, __e: &HistoryHSMFrameEvent) {
+self.log_msg(String::from("In $C"));
+    }
+
+    fn _s_C_get_log(&mut self, __e: &HistoryHSMFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.log.clone())); }
+return;
     }
 
     fn _s_C_go_back(&mut self, __e: &HistoryHSMFrameEvent) {
@@ -325,16 +484,28 @@ self._state_stack_pop();
 return;
     }
 
-    fn _s_C_get_log(&mut self, __e: &HistoryHSMFrameEvent) -> Vec<String> {
-return self.log.clone()
+    fn _s_C_get_state(&mut self, __e: &HistoryHSMFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(String::from("C"))); }
+return;
     }
 
-    fn _s_C_get_state(&mut self, __e: &HistoryHSMFrameEvent) -> String {
-return String::from("C")
+    fn _s_B_enter(&mut self, __e: &HistoryHSMFrameEvent) {
+self.log_msg(String::from("In $B"));
     }
 
-    fn _s_C_enter(&mut self, __e: &HistoryHSMFrameEvent) {
-self.log_msg(String::from("In $C"));
+    fn _s_B_goto_a(&mut self, __e: &HistoryHSMFrameEvent) {
+self.log_msg(String::from("goto_a"));
+self.__transition(HistoryHSMCompartment::new("A"));
+    }
+
+    fn _s_B_get_log(&mut self, __e: &HistoryHSMFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.log.clone())); }
+return;
+    }
+
+    fn _s_B_get_state(&mut self, __e: &HistoryHSMFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(String::from("B"))); }
+return;
     }
 
     fn log_msg(&mut self, msg: String) {

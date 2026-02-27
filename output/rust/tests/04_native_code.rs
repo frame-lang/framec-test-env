@@ -6,10 +6,18 @@ fn helper_function(x: i32) -> i32 {
 
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct NativeCodeFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for NativeCodeFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl NativeCodeFrameEvent {
@@ -18,9 +26,6 @@ impl NativeCodeFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -96,7 +101,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = NativeCodeFrameEvent::new("$<");
+    let exit_event = NativeCodeFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -151,19 +156,74 @@ match state_context {
     }
 
     pub fn compute(&mut self, value: i32) -> i32 {
-let __e = NativeCodeFrameEvent::new("compute");
+let mut __e = NativeCodeFrameEvent::new("compute");
+__e.parameters.insert("value".to_string(), Box::new(value) as Box<dyn std::any::Any>);
+let __ctx = NativeCodeFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Active" => self._s_Active_compute(&__e, value),
-            _ => Default::default(),
+            "Active" => { self._s_Active_compute(&__e, value); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = NativeCodeFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = NativeCodeFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = NativeCodeFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn use_math(&mut self) -> f64 {
-let __e = NativeCodeFrameEvent::new("use_math");
+let mut __e = NativeCodeFrameEvent::new("use_math");
+let __ctx = NativeCodeFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Active" => self._s_Active_use_math(&__e),
-            _ => Default::default(),
+            "Active" => { self._s_Active_use_math(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = NativeCodeFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = NativeCodeFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = NativeCodeFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<f64>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_Active(&mut self, __e: &NativeCodeFrameEvent) {
@@ -173,19 +233,19 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Active_compute(&mut self, __e: &NativeCodeFrameEvent, value: i32) -> i32 {
+    fn _s_Active_use_math(&mut self, __e: &NativeCodeFrameEvent) {
+// Using standard math operations
+let result = (16.0_f64).sqrt() + std::f64::consts::PI;
+println!("Math result: {}", result);
+result;
+    }
+
+    fn _s_Active_compute(&mut self, __e: &NativeCodeFrameEvent, value: i32) {
 // Native code with local variables
 let temp = value + 10;
 let result = helper_function(temp);
 println!("Computed: {} -> {}", value, result);
-result
-    }
-
-    fn _s_Active_use_math(&mut self, __e: &NativeCodeFrameEvent) -> f64 {
-// Using standard math operations
-let result = (16.0_f64).sqrt() + std::f64::consts::PI;
-println!("Math result: {}", result);
-result
+result;
     }
 }
 

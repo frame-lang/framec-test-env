@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct SystemReturnTestFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for SystemReturnTestFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl SystemReturnTestFrameEvent {
@@ -12,9 +20,6 @@ impl SystemReturnTestFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -97,7 +102,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = SystemReturnTestFrameEvent::new("$<");
+    let exit_event = SystemReturnTestFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -154,27 +159,112 @@ match state_context {
     }
 
     pub fn add(&mut self, a: i32, b: i32) -> i32 {
-let __e = SystemReturnTestFrameEvent::new("add");
+let mut __e = SystemReturnTestFrameEvent::new("add");
+__e.parameters.insert("a".to_string(), Box::new(a) as Box<dyn std::any::Any>);
+__e.parameters.insert("b".to_string(), Box::new(b) as Box<dyn std::any::Any>);
+let __ctx = SystemReturnTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Calculator" => self._s_Calculator_add(&__e, a, b),
-            _ => Default::default(),
+            "Calculator" => { self._s_Calculator_add(&__e, a, b); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = SystemReturnTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = SystemReturnTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = SystemReturnTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn multiply(&mut self, a: i32, b: i32) -> i32 {
-let __e = SystemReturnTestFrameEvent::new("multiply");
+let mut __e = SystemReturnTestFrameEvent::new("multiply");
+__e.parameters.insert("a".to_string(), Box::new(a) as Box<dyn std::any::Any>);
+__e.parameters.insert("b".to_string(), Box::new(b) as Box<dyn std::any::Any>);
+let __ctx = SystemReturnTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Calculator" => self._s_Calculator_multiply(&__e, a, b),
-            _ => Default::default(),
+            "Calculator" => { self._s_Calculator_multiply(&__e, a, b); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = SystemReturnTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = SystemReturnTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = SystemReturnTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn get_value(&mut self) -> i32 {
-let __e = SystemReturnTestFrameEvent::new("get_value");
+let mut __e = SystemReturnTestFrameEvent::new("get_value");
+let __ctx = SystemReturnTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Calculator" => self._s_Calculator_get_value(&__e),
-            _ => Default::default(),
+            "Calculator" => { self._s_Calculator_get_value(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = SystemReturnTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = SystemReturnTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = SystemReturnTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_Calculator(&mut self, __e: &SystemReturnTestFrameEvent) {
@@ -187,17 +277,19 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Calculator_multiply(&mut self, __e: &SystemReturnTestFrameEvent, a: i32, b: i32) -> i32 {
-return a * b
+    fn _s_Calculator_multiply(&mut self, __e: &SystemReturnTestFrameEvent, a: i32, b: i32) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(a * b)); }
     }
 
-    fn _s_Calculator_get_value(&mut self, __e: &SystemReturnTestFrameEvent) -> i32 {
+    fn _s_Calculator_add(&mut self, __e: &SystemReturnTestFrameEvent, a: i32, b: i32) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(a + b)); }
+return;
+    }
+
+    fn _s_Calculator_get_value(&mut self, __e: &SystemReturnTestFrameEvent) {
 self._sv_value = 42;
-return self._sv_value
-    }
-
-    fn _s_Calculator_add(&mut self, __e: &SystemReturnTestFrameEvent, a: i32, b: i32) -> i32 {
-return a + b
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self._sv_value)); }
+return;
     }
 }
 

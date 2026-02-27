@@ -140,6 +140,24 @@ class ForwardEnterFirst {
         return this._context_stack.pop()!._return;
     }
 
+    private _state_Working(__e: ForwardEnterFirstFrameEvent) {
+        if (__e._message === "$>") {
+            if (!("counter" in this.__compartment.state_vars)) {
+                this.__compartment.state_vars["counter"] = 100;
+            }
+            this.log.push("Working:enter")
+        } else if (__e._message === "get_counter") {
+            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["counter"];
+            return;
+        } else if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;
+        } else if (__e._message === "process") {
+            this.log.push("Working:process:counter=" + this.__compartment.state_vars["counter"].toString())
+            this.__compartment.state_vars["counter"] = this.__compartment.state_vars["counter"] + 1;
+        }
+    }
+
     private _state_Idle(__e: ForwardEnterFirstFrameEvent) {
         if (__e._message === "get_counter") {
             this._context_stack[this._context_stack.length - 1]._return = -1;
@@ -152,22 +170,6 @@ class ForwardEnterFirst {
             __compartment.forward_event = __e;
             this.__transition(__compartment);
             return;
-        }
-    }
-
-    private _state_Working(__e: ForwardEnterFirstFrameEvent) {
-        if (__e._message === "$>") {
-            this.__compartment.state_vars["counter"] = 100;
-            this.log.push("Working:enter")
-        } else if (__e._message === "get_counter") {
-            this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["counter"];
-            return;
-        } else if (__e._message === "get_log") {
-            this._context_stack[this._context_stack.length - 1]._return = this.log;
-            return;
-        } else if (__e._message === "process") {
-            this.log.push("Working:process:counter=" + this.__compartment.state_vars["counter"].toString())
-            this.__compartment.state_vars["counter"] = this.__compartment.state_vars["counter"] + 1
         }
     }
 }

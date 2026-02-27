@@ -132,6 +132,19 @@ class TransitionEnterArgs {
         return this._context_stack.pop()!._return;
     }
 
+    private _state_Active(__e: TransitionEnterArgsFrameEvent) {
+        if (__e._message === "$>") {
+            const source = __e._parameters?.["0"];
+            const value = __e._parameters?.["1"];
+            this.log.push(`active:enter:${source}:${value}`);
+        } else if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;;
+        } else if (__e._message === "start") {
+            this.log.push("active:start");
+        }
+    }
+
     private _state_Idle(__e: TransitionEnterArgsFrameEvent) {
         if (__e._message === "get_log") {
             this._context_stack[this._context_stack.length - 1]._return = this.log;
@@ -141,19 +154,6 @@ class TransitionEnterArgs {
             const __compartment = new TransitionEnterArgsCompartment("Active", this.__compartment.copy());
             __compartment.enter_args = Object.fromEntries(["from_idle", 42].map((v, i) => [String(i), v]));
             this.__transition(__compartment);
-        }
-    }
-
-    private _state_Active(__e: TransitionEnterArgsFrameEvent) {
-        if (__e._message === "$>") {
-            const source = __e._parameters?.["source"];
-            const value = __e._parameters?.["value"];
-            this.log.push(`active:enter:${source}:${value}`);
-        } else if (__e._message === "get_log") {
-            this._context_stack[this._context_stack.length - 1]._return = this.log;
-            return;;
-        } else if (__e._message === "start") {
-            this.log.push("active:start");
         }
     }
 }

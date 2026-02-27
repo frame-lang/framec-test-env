@@ -4,14 +4,42 @@
 
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct LampFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for LampFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl LampFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+}
+
+struct LampFrameContext {
+    event: LampFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl LampFrameContext {
+    fn new(event: LampFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -49,6 +77,7 @@ pub struct Lamp {
     _state_stack: Vec<(String, LampStateContext)>,
     __compartment: LampCompartment,
     __next_compartment: Option<LampCompartment>,
+    _context_stack: Vec<LampFrameContext>,
     color: String,
     switch_closed: bool,
 }
@@ -57,6 +86,7 @@ impl Lamp {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             color: String::from("white"),
             switch_closed: false,
             __compartment: LampCompartment::new("Off"),
@@ -74,7 +104,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = LampFrameEvent::new("$<");
+    let exit_event = LampFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -132,35 +162,16 @@ match state_context {
     }
 
     pub fn turn_on(&mut self) {
-let __e = LampFrameEvent::new("turn_on");
-self.__kernel(__e);
-    }
-
-    pub fn turn_off(&mut self) {
-let __e = LampFrameEvent::new("turn_off");
-self.__kernel(__e);
-    }
-
-    pub fn get_color(&mut self) -> String {
-let __e = LampFrameEvent::new("get_color");
+let mut __e = LampFrameEvent::new("turn_on");
+let __ctx = LampFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Off" => self._s_Off_get_color(&__e),
-            "On" => self._s_On_get_color(&__e),
-            _ => Default::default(),
-        }
-    }
-
-    pub fn set_color(&mut self, color: String) {
-let __e = LampFrameEvent::new("set_color");
-match self.__compartment.state.as_str() {
-            "Off" => { self._s_Off_set_color(&__e, color); }
-            "On" => { self._s_On_set_color(&__e, color); }
+            "Off" => { self._s_Off_turn_on(&__e); }
             _ => {}
         }
-// Process any pending transitions (bypassed kernel)
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
-    let exit_event = LampFrameEvent::new("$<");
+    let exit_event = LampFrameEvent::new("<$");
     self.__router(&exit_event);
     self.__compartment = next_compartment;
     if self.__compartment.forward_event.is_none() {
@@ -177,20 +188,146 @@ while self.__next_compartment.is_some() {
         }
     }
 }
+self._context_stack.pop();
+    }
+
+    pub fn turn_off(&mut self) {
+let mut __e = LampFrameEvent::new("turn_off");
+let __ctx = LampFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "On" => { self._s_On_turn_off(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = LampFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = LampFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = LampFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
+    }
+
+    pub fn get_color(&mut self) -> String {
+let mut __e = LampFrameEvent::new("get_color");
+let __ctx = LampFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Off" => { self._s_Off_get_color(&__e); }
+            "On" => { self._s_On_get_color(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = LampFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = LampFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = LampFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<String>().unwrap()
+} else {
+    Default::default()
+}
+    }
+
+    pub fn set_color(&mut self, color: String) {
+let mut __e = LampFrameEvent::new("set_color");
+__e.parameters.insert("color".to_string(), Box::new(color) as Box<dyn std::any::Any>);
+let __ctx = LampFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Off" => { self._s_Off_set_color(&__e, color); }
+            "On" => { self._s_On_set_color(&__e, color); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = LampFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = LampFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = LampFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn is_switch_closed(&mut self) -> bool {
-let __e = LampFrameEvent::new("is_switch_closed");
+let mut __e = LampFrameEvent::new("is_switch_closed");
+let __ctx = LampFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Off" => self._s_Off_is_switch_closed(&__e),
-            "On" => self._s_On_is_switch_closed(&__e),
-            _ => Default::default(),
+            "Off" => { self._s_Off_is_switch_closed(&__e); }
+            "On" => { self._s_On_is_switch_closed(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = LampFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = LampFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = LampFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<bool>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_On(&mut self, __e: &LampFrameEvent) {
 match __e.message.as_str() {
-    "$<" => { self._s_On_exit(__e); }
+    "<$" => { self._s_On_exit(__e); }
     "$>" => { self._s_On_enter(__e); }
     "get_color" => { self._s_On_get_color(__e); }
     "is_switch_closed" => { self._s_On_is_switch_closed(__e); }
@@ -208,44 +345,48 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_On_get_color(&mut self, __e: &LampFrameEvent) -> String {
-return self.color.clone()
+    fn _s_On_turn_off(&mut self, __e: &LampFrameEvent) {
+self.__transition(LampCompartment::new("Off"));
     }
 
-    fn _s_On_set_color(&mut self, __e: &LampFrameEvent, color: String) {
-self.color = color;
+    fn _s_On_get_color(&mut self, __e: &LampFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.color.clone())); }
+return;
+    }
+
+    fn _s_On_is_switch_closed(&mut self, __e: &LampFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.switch_closed)); }
+return;
     }
 
     fn _s_On_enter(&mut self, __e: &LampFrameEvent) {
 self.close_switch();
     }
 
+    fn _s_On_set_color(&mut self, __e: &LampFrameEvent, color: String) {
+self.color = color;
+    }
+
     fn _s_On_exit(&mut self, __e: &LampFrameEvent) {
 self.open_switch();
-    }
-
-    fn _s_On_turn_off(&mut self, __e: &LampFrameEvent) {
-self.__transition(LampCompartment::new("Off"));
-    }
-
-    fn _s_On_is_switch_closed(&mut self, __e: &LampFrameEvent) -> bool {
-return self.switch_closed
     }
 
     fn _s_Off_turn_on(&mut self, __e: &LampFrameEvent) {
 self.__transition(LampCompartment::new("On"));
     }
 
-    fn _s_Off_get_color(&mut self, __e: &LampFrameEvent) -> String {
-return self.color.clone()
+    fn _s_Off_is_switch_closed(&mut self, __e: &LampFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.switch_closed)); }
+return;
     }
 
     fn _s_Off_set_color(&mut self, __e: &LampFrameEvent, color: String) {
 self.color = color;
     }
 
-    fn _s_Off_is_switch_closed(&mut self, __e: &LampFrameEvent) -> bool {
-return self.switch_closed
+    fn _s_Off_get_color(&mut self, __e: &LampFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.color.clone())); }
+return;
     }
 
     fn close_switch(&mut self) {

@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct OperationsTestFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for OperationsTestFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl OperationsTestFrameEvent {
@@ -12,9 +20,6 @@ impl OperationsTestFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -92,7 +97,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = OperationsTestFrameEvent::new("$<");
+    let exit_event = OperationsTestFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -147,19 +152,75 @@ match state_context {
     }
 
     pub fn compute(&mut self, a: i32, b: i32) -> i32 {
-let __e = OperationsTestFrameEvent::new("compute");
+let mut __e = OperationsTestFrameEvent::new("compute");
+__e.parameters.insert("a".to_string(), Box::new(a) as Box<dyn std::any::Any>);
+__e.parameters.insert("b".to_string(), Box::new(b) as Box<dyn std::any::Any>);
+let __ctx = OperationsTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Ready" => self._s_Ready_compute(&__e, a, b),
-            _ => Default::default(),
+            "Ready" => { self._s_Ready_compute(&__e, a, b); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = OperationsTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = OperationsTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = OperationsTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn get_last_result(&mut self) -> i32 {
-let __e = OperationsTestFrameEvent::new("get_last_result");
+let mut __e = OperationsTestFrameEvent::new("get_last_result");
+let __ctx = OperationsTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Ready" => self._s_Ready_get_last_result(&__e),
-            _ => Default::default(),
+            "Ready" => { self._s_Ready_get_last_result(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = OperationsTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = OperationsTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = OperationsTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_Ready(&mut self, __e: &OperationsTestFrameEvent) {
@@ -169,16 +230,18 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Ready_compute(&mut self, __e: &OperationsTestFrameEvent, a: i32, b: i32) -> i32 {
+    fn _s_Ready_compute(&mut self, __e: &OperationsTestFrameEvent, a: i32, b: i32) {
 // Use instance operations
 let sum_val = self.add(a, b);
 let prod_val = self.multiply(a, b);
 let last_result = sum_val + prod_val;
-return last_result;
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(last_result)); }
+return;;
     }
 
-    fn _s_Ready_get_last_result(&mut self, __e: &OperationsTestFrameEvent) -> i32 {
-return self.last_result;
+    fn _s_Ready_get_last_result(&mut self, __e: &OperationsTestFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.last_result)); }
+return;;
     }
 
     pub fn add(&mut self, x: i32, y: i32) -> i32 {

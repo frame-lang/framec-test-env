@@ -5,10 +5,18 @@
 
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct SystemReturnDefaultTestFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for SystemReturnDefaultTestFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl SystemReturnDefaultTestFrameEvent {
@@ -17,9 +25,6 @@ impl SystemReturnDefaultTestFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -102,7 +107,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = SystemReturnDefaultTestFrameEvent::new("$<");
+    let exit_event = SystemReturnDefaultTestFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -159,27 +164,108 @@ match state_context {
     }
 
     pub fn handler_sets_value(&mut self) -> i32 {
-let __e = SystemReturnDefaultTestFrameEvent::new("handler_sets_value");
+let mut __e = SystemReturnDefaultTestFrameEvent::new("handler_sets_value");
+let __ctx = SystemReturnDefaultTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Start" => self._s_Start_handler_sets_value(&__e),
-            _ => Default::default(),
+            "Start" => { self._s_Start_handler_sets_value(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = SystemReturnDefaultTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = SystemReturnDefaultTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = SystemReturnDefaultTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn handler_returns_computed(&mut self) -> i32 {
-let __e = SystemReturnDefaultTestFrameEvent::new("handler_returns_computed");
+let mut __e = SystemReturnDefaultTestFrameEvent::new("handler_returns_computed");
+let __ctx = SystemReturnDefaultTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Start" => self._s_Start_handler_returns_computed(&__e),
-            _ => Default::default(),
+            "Start" => { self._s_Start_handler_returns_computed(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = SystemReturnDefaultTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = SystemReturnDefaultTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = SystemReturnDefaultTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn get_count(&mut self) -> i32 {
-let __e = SystemReturnDefaultTestFrameEvent::new("get_count");
+let mut __e = SystemReturnDefaultTestFrameEvent::new("get_count");
+let __ctx = SystemReturnDefaultTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Start" => self._s_Start_get_count(&__e),
-            _ => Default::default(),
+            "Start" => { self._s_Start_get_count(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = SystemReturnDefaultTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = SystemReturnDefaultTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = SystemReturnDefaultTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_Start(&mut self, __e: &SystemReturnDefaultTestFrameEvent) {
@@ -194,17 +280,20 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Start_handler_sets_value(&mut self, __e: &SystemReturnDefaultTestFrameEvent) -> i32 {
-return 42;
-    }
-
-    fn _s_Start_handler_returns_computed(&mut self, __e: &SystemReturnDefaultTestFrameEvent) -> i32 {
+    fn _s_Start_handler_returns_computed(&mut self, __e: &SystemReturnDefaultTestFrameEvent) {
 self._sv_count = self._sv_count + 1;
-return self._sv_count;
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self._sv_count)); }
+return;;
     }
 
-    fn _s_Start_get_count(&mut self, __e: &SystemReturnDefaultTestFrameEvent) -> i32 {
-return self._sv_count;
+    fn _s_Start_handler_sets_value(&mut self, __e: &SystemReturnDefaultTestFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(42)); }
+return;;
+    }
+
+    fn _s_Start_get_count(&mut self, __e: &SystemReturnDefaultTestFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self._sv_count)); }
+return;;
     }
 }
 

@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct WithParamsFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for WithParamsFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl WithParamsFrameEvent {
@@ -12,9 +20,6 @@ impl WithParamsFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -93,7 +98,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = WithParamsFrameEvent::new("$<");
+    let exit_event = WithParamsFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -151,16 +156,18 @@ match state_context {
     }
 
     pub fn start(&mut self, initial: i32) {
-let __e = WithParamsFrameEvent::new("start");
+let mut __e = WithParamsFrameEvent::new("start");
+__e.parameters.insert("initial".to_string(), Box::new(initial) as Box<dyn std::any::Any>);
+let __ctx = WithParamsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
             "Idle" => { self._s_Idle_start(&__e, initial); }
             "Running" => { self._s_Running_start(&__e, initial); }
             _ => {}
         }
-// Process any pending transitions (bypassed kernel)
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
-    let exit_event = WithParamsFrameEvent::new("$<");
+    let exit_event = WithParamsFrameEvent::new("<$");
     self.__router(&exit_event);
     self.__compartment = next_compartment;
     if self.__compartment.forward_event.is_none() {
@@ -177,19 +184,22 @@ while self.__next_compartment.is_some() {
         }
     }
 }
+self._context_stack.pop();
     }
 
     pub fn add(&mut self, value: i32) {
-let __e = WithParamsFrameEvent::new("add");
+let mut __e = WithParamsFrameEvent::new("add");
+__e.parameters.insert("value".to_string(), Box::new(value) as Box<dyn std::any::Any>);
+let __ctx = WithParamsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
             "Idle" => { self._s_Idle_add(&__e, value); }
             "Running" => { self._s_Running_add(&__e, value); }
             _ => {}
         }
-// Process any pending transitions (bypassed kernel)
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
-    let exit_event = WithParamsFrameEvent::new("$<");
+    let exit_event = WithParamsFrameEvent::new("<$");
     self.__router(&exit_event);
     self.__compartment = next_compartment;
     if self.__compartment.forward_event.is_none() {
@@ -206,24 +216,81 @@ while self.__next_compartment.is_some() {
         }
     }
 }
+self._context_stack.pop();
     }
 
     pub fn multiply(&mut self, a: i32, b: i32) -> i32 {
-let __e = WithParamsFrameEvent::new("multiply");
+let mut __e = WithParamsFrameEvent::new("multiply");
+__e.parameters.insert("a".to_string(), Box::new(a) as Box<dyn std::any::Any>);
+__e.parameters.insert("b".to_string(), Box::new(b) as Box<dyn std::any::Any>);
+let __ctx = WithParamsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Idle" => self._s_Idle_multiply(&__e, a, b),
-            "Running" => self._s_Running_multiply(&__e, a, b),
-            _ => Default::default(),
+            "Idle" => { self._s_Idle_multiply(&__e, a, b); }
+            "Running" => { self._s_Running_multiply(&__e, a, b); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = WithParamsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = WithParamsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = WithParamsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn get_total(&mut self) -> i32 {
-let __e = WithParamsFrameEvent::new("get_total");
+let mut __e = WithParamsFrameEvent::new("get_total");
+let __ctx = WithParamsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Idle" => self._s_Idle_get_total(&__e),
-            "Running" => self._s_Running_get_total(&__e),
-            _ => Default::default(),
+            "Idle" => { self._s_Idle_get_total(&__e); }
+            "Running" => { self._s_Running_get_total(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = WithParamsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = WithParamsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = WithParamsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_Idle(&mut self, __e: &WithParamsFrameEvent) {
@@ -240,10 +307,6 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Idle_get_total(&mut self, __e: &WithParamsFrameEvent) -> i32 {
-self.total
-    }
-
     fn _s_Idle_start(&mut self, __e: &WithParamsFrameEvent, initial: i32) {
 self.total = initial;
 println!("Started with initial value: {}", initial);
@@ -254,28 +317,32 @@ self.__transition(WithParamsCompartment::new("Running"));
 println!("Cannot add in Idle state");
     }
 
-    fn _s_Idle_multiply(&mut self, __e: &WithParamsFrameEvent, a: i32, b: i32) -> i32 {
-0
+    fn _s_Idle_get_total(&mut self, __e: &WithParamsFrameEvent) {
+self.total;
     }
 
-    fn _s_Running_add(&mut self, __e: &WithParamsFrameEvent, value: i32) {
-self.total += value;
-println!("Added {}, total is now {}", value, self.total);
-    }
-
-    fn _s_Running_multiply(&mut self, __e: &WithParamsFrameEvent, a: i32, b: i32) -> i32 {
-let result = a * b;
-self.total += result;
-println!("Multiplied {} * {} = {}, total is now {}", a, b, result, self.total);
-result
+    fn _s_Idle_multiply(&mut self, __e: &WithParamsFrameEvent, a: i32, b: i32) {
+0;
     }
 
     fn _s_Running_start(&mut self, __e: &WithParamsFrameEvent, initial: i32) {
 println!("Already running");
     }
 
-    fn _s_Running_get_total(&mut self, __e: &WithParamsFrameEvent) -> i32 {
-self.total
+    fn _s_Running_multiply(&mut self, __e: &WithParamsFrameEvent, a: i32, b: i32) {
+let result = a * b;
+self.total += result;
+println!("Multiplied {} * {} = {}, total is now {}", a, b, result, self.total);
+result;
+    }
+
+    fn _s_Running_get_total(&mut self, __e: &WithParamsFrameEvent) {
+self.total;
+    }
+
+    fn _s_Running_add(&mut self, __e: &WithParamsFrameEvent, value: i32) {
+self.total += value;
+println!("Added {}, total is now {}", value, self.total);
     }
 }
 

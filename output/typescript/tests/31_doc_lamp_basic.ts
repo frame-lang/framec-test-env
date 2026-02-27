@@ -5,12 +5,23 @@
 class LampFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class LampFrameContext {
+    public event: LampFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: LampFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -50,13 +61,13 @@ class Lamp {
     private _state_stack: Array<any>;
     private __compartment: LampCompartment;
     private __next_compartment: LampCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private color: string = "white";
     private switch_closed: boolean = false;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.color = "white";
         this.switch_closed = false;
         this.__compartment = new LampCompartment("Off");
@@ -113,31 +124,58 @@ class Lamp {
 
     public turnOn() {
         const __e = new LampFrameEvent("turnOn", null);
+        const __ctx = new LampFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public turnOff() {
         const __e = new LampFrameEvent("turnOff", null);
+        const __ctx = new LampFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public getColor(): string {
-        this._return_value = null;
         const __e = new LampFrameEvent("getColor", null);
+        const __ctx = new LampFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public setColor(color: string) {
-        const __e = new LampFrameEvent("setColor", {"0": color});
+        const __e = new LampFrameEvent("setColor", {"color": color});
+        const __ctx = new LampFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public isSwitchClosed(): boolean {
-        this._return_value = null;
         const __e = new LampFrameEvent("isSwitchClosed", null);
+        const __ctx = new LampFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
+    }
+
+    private _state_Off(__e: LampFrameEvent) {
+        if (__e._message === "getColor") {
+            this._context_stack[this._context_stack.length - 1]._return = this.color;
+            return;
+        } else if (__e._message === "isSwitchClosed") {
+            this._context_stack[this._context_stack.length - 1]._return = this.switch_closed;
+            return;
+        } else if (__e._message === "setColor") {
+            const color = __e._parameters?.["color"];
+            this.color = color
+        } else if (__e._message === "turnOn") {
+            const __compartment = new LampCompartment("On", this.__compartment.copy());
+            this.__transition(__compartment);
+        }
     }
 
     private _state_On(__e: LampFrameEvent) {
@@ -146,36 +184,16 @@ class Lamp {
         } else if (__e._message === "$>") {
             this.closeSwitch()
         } else if (__e._message === "getColor") {
-            this._return_value = this.color;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.color;
             return;
         } else if (__e._message === "isSwitchClosed") {
-            this._return_value = this.switch_closed;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.switch_closed;
             return;
         } else if (__e._message === "setColor") {
-            const color = __e._parameters?.["0"];
+            const color = __e._parameters?.["color"];
             this.color = color
         } else if (__e._message === "turnOff") {
             const __compartment = new LampCompartment("Off", this.__compartment.copy());
-            this.__transition(__compartment);
-        }
-    }
-
-    private _state_Off(__e: LampFrameEvent) {
-        if (__e._message === "getColor") {
-            this._return_value = this.color;
-            __e._return = this._return_value;
-            return;
-        } else if (__e._message === "isSwitchClosed") {
-            this._return_value = this.switch_closed;
-            __e._return = this._return_value;
-            return;
-        } else if (__e._message === "setColor") {
-            const color = __e._parameters?.["0"];
-            this.color = color
-        } else if (__e._message === "turnOn") {
-            const __compartment = new LampCompartment("On", this.__compartment.copy());
             this.__transition(__compartment);
         }
     }

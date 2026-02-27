@@ -1,3 +1,8 @@
+
+# Documentation Example: HSM with History (History203)
+# Refactored common gotoC behavior into parent state $AB
+
+
 from typing import Any, Optional, List, Dict, Callable
 
 class HistoryHSMFrameEvent:
@@ -158,13 +163,6 @@ class HistoryHSM:
         else:
             self._state_AB(__e)
 
-    def _state_AB(self, __e):
-        if __e._message == "gotoC":
-            self.log_msg("gotoC in $AB")
-            self._state_stack.append(self.__compartment.copy())
-            __compartment = HistoryHSMCompartment("C", parent_compartment=self.__compartment.copy())
-            self.__transition(__compartment)
-
     def _state_A(self, __e):
         if __e._message == "$>":
             self.log_msg("In $A")
@@ -181,6 +179,13 @@ class HistoryHSM:
         else:
             self._state_AB(__e)
 
+    def _state_AB(self, __e):
+        if __e._message == "gotoC":
+            self.log_msg("gotoC in $AB")
+            self._state_stack.append(self.__compartment.copy())
+            __compartment = HistoryHSMCompartment("C", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
+
     def _state_C(self, __e):
         if __e._message == "$>":
             self.log_msg("In $C")
@@ -192,7 +197,7 @@ class HistoryHSM:
             return
         elif __e._message == "goBack":
             self.log_msg("goBack")
-            self.__compartment = self._state_stack.pop()
+            self.__transition(self._state_stack.pop())
             return
 
     def log_msg(self, msg: str):

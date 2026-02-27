@@ -4,7 +4,13 @@ class EnterExitFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class EnterExitFrameContext:
+    def __init__(self, event: EnterExitFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class EnterExitCompartment:
@@ -30,7 +36,7 @@ class EnterExitCompartment:
 class EnterExit:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.log =         []
         self.__compartment = EnterExitCompartment("Off")
         self.__next_compartment = None
@@ -78,13 +84,17 @@ class EnterExit:
 
     def toggle(self):
         __e = EnterExitFrameEvent("toggle", None)
+        __ctx = EnterExitFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_log(self) -> list:
-        self._return_value = None
         __e = EnterExitFrameEvent("get_log", None)
+        __ctx = EnterExitFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_On(self, __e):
         if __e._message == "<$":
@@ -94,8 +104,7 @@ class EnterExit:
             self.log.append("enter:On")
             print("Entered On state")
         elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
         elif __e._message == "toggle":
             __compartment = EnterExitCompartment("Off", parent_compartment=self.__compartment.copy())
@@ -109,8 +118,7 @@ class EnterExit:
             self.log.append("enter:Off")
             print("Entered Off state")
         elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
         elif __e._message == "toggle":
             __compartment = EnterExitCompartment("On", parent_compartment=self.__compartment.copy())

@@ -119,7 +119,7 @@ class TransitionPopTest:
             return
         elif __e._message == "process":
             self.log.append("working:process:before_pop")
-            self.__compartment = self._state_stack.pop()
+            self.__transition(self._state_stack.pop())
             return
             # This should NOT execute because pop transitions away
             self.log.append("working:process:after_pop")

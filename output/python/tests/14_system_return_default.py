@@ -1,3 +1,8 @@
+
+# NOTE: Default return value syntax (method(): type = default) not yet implemented.
+# This test validates behavior when handler doesn't set system.return.
+
+
 from typing import Any, Optional, List, Dict, Callable
 
 class SystemReturnDefaultTestFrameEvent:
@@ -104,7 +109,8 @@ class SystemReturnDefaultTest:
 
     def _state_Start(self, __e):
         if __e._message == "$>":
-            self.__compartment.state_vars["count"] = 0
+            if "count" not in self.__compartment.state_vars:
+                self.__compartment.state_vars["count"] = 0
         elif __e._message == "get_count":
             self._context_stack[-1]._return = self.__compartment.state_vars["count"]
             return

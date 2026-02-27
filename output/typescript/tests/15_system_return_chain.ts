@@ -5,12 +5,23 @@
 class SystemReturnChainTestFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class SystemReturnChainTestFrameContext {
+    public event: SystemReturnChainTestFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: SystemReturnChainTestFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -50,11 +61,11 @@ class SystemReturnChainTest {
     private _state_stack: Array<any>;
     private __compartment: SystemReturnChainTestCompartment;
     private __next_compartment: SystemReturnChainTestCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.__compartment = new SystemReturnChainTestCompartment("Start");
         this.__next_compartment = null;
         const __frame_event = new SystemReturnChainTestFrameEvent("$>", null);
@@ -108,33 +119,35 @@ class SystemReturnChainTest {
     }
 
     public test_enter_sets(): string {
-        this._return_value = null;
         const __e = new SystemReturnChainTestFrameEvent("test_enter_sets", null);
+        const __ctx = new SystemReturnChainTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public test_exit_then_enter(): string {
-        this._return_value = null;
         const __e = new SystemReturnChainTestFrameEvent("test_exit_then_enter", null);
+        const __ctx = new SystemReturnChainTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public get_state(): string {
-        this._return_value = null;
         const __e = new SystemReturnChainTestFrameEvent("get_state", null);
+        const __ctx = new SystemReturnChainTestFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     private _state_EnterSetter(__e: SystemReturnChainTestFrameEvent) {
         if (__e._message === "$>") {
             // Enter handler sets return value
-            this._return_value = "from_enter";;
+            this._context_stack[this._context_stack.length - 1]._return = "from_enter";;
         } else if (__e._message === "get_state") {
-            this._return_value = "EnterSetter";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "EnterSetter";
             return;;
         }
     }
@@ -142,10 +155,9 @@ class SystemReturnChainTest {
     private _state_BothSet(__e: SystemReturnChainTestFrameEvent) {
         if (__e._message === "$>") {
             // Enter handler sets return - should overwrite exit's value
-            this._return_value = "enter_wins";;
+            this._context_stack[this._context_stack.length - 1]._return = "enter_wins";;
         } else if (__e._message === "get_state") {
-            this._return_value = "BothSet";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "BothSet";
             return;;
         }
     }
@@ -153,10 +165,9 @@ class SystemReturnChainTest {
     private _state_Start(__e: SystemReturnChainTestFrameEvent) {
         if (__e._message === "<$") {
             // Exit handler sets initial value
-            this._return_value = "from_exit";;
+            this._context_stack[this._context_stack.length - 1]._return = "from_exit";;
         } else if (__e._message === "get_state") {
-            this._return_value = "Start";
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = "Start";
             return;;
         } else if (__e._message === "test_enter_sets") {
             const __compartment = new SystemReturnChainTestCompartment("EnterSetter", this.__compartment.copy());

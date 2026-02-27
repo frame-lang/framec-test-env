@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct WithTransitionFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for WithTransitionFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl WithTransitionFrameEvent {
@@ -12,9 +20,6 @@ impl WithTransitionFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -91,7 +96,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = WithTransitionFrameEvent::new("$<");
+    let exit_event = WithTransitionFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -149,17 +154,70 @@ match state_context {
     }
 
     pub fn next(&mut self) {
-let __e = WithTransitionFrameEvent::new("next");
-self.__kernel(__e);
+let mut __e = WithTransitionFrameEvent::new("next");
+let __ctx = WithTransitionFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "First" => { self._s_First_next(&__e); }
+            "Second" => { self._s_Second_next(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = WithTransitionFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = WithTransitionFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = WithTransitionFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn get_state(&mut self) -> String {
-let __e = WithTransitionFrameEvent::new("get_state");
+let mut __e = WithTransitionFrameEvent::new("get_state");
+let __ctx = WithTransitionFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "First" => self._s_First_get_state(&__e),
-            "Second" => self._s_Second_get_state(&__e),
-            _ => Default::default(),
+            "First" => { self._s_First_get_state(&__e); }
+            "Second" => { self._s_Second_get_state(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = WithTransitionFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = WithTransitionFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = WithTransitionFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<String>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_First(&mut self, __e: &WithTransitionFrameEvent) {
@@ -183,12 +241,14 @@ println!("Transitioning: First -> Second");
 self.__transition(WithTransitionCompartment::new("Second"));
     }
 
-    fn _s_First_get_state(&mut self, __e: &WithTransitionFrameEvent) -> String {
-"First".to_string()
+    fn _s_First_get_state(&mut self, __e: &WithTransitionFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new("First".to_string())); }
+return;
     }
 
-    fn _s_Second_get_state(&mut self, __e: &WithTransitionFrameEvent) -> String {
-"Second".to_string()
+    fn _s_Second_get_state(&mut self, __e: &WithTransitionFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new("Second".to_string())); }
+return;
     }
 
     fn _s_Second_next(&mut self, __e: &WithTransitionFrameEvent) {

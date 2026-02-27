@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct WithInterfaceFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for WithInterfaceFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl WithInterfaceFrameEvent {
@@ -12,9 +20,6 @@ impl WithInterfaceFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -92,7 +97,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = WithInterfaceFrameEvent::new("$<");
+    let exit_event = WithInterfaceFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -146,20 +151,75 @@ match state_context {
 }
     }
 
-    pub fn greet(&mut self, name: &str) -> String {
-let __e = WithInterfaceFrameEvent::new("greet");
+    pub fn greet(&mut self, name: String) -> String {
+let mut __e = WithInterfaceFrameEvent::new("greet");
+__e.parameters.insert("name".to_string(), Box::new(name.clone()) as Box<dyn std::any::Any>);
+let __ctx = WithInterfaceFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Ready" => self._s_Ready_greet(&__e, name),
-            _ => Default::default(),
+            "Ready" => { self._s_Ready_greet(&__e, name); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = WithInterfaceFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = WithInterfaceFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = WithInterfaceFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<String>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn get_count(&mut self) -> i32 {
-let __e = WithInterfaceFrameEvent::new("get_count");
+let mut __e = WithInterfaceFrameEvent::new("get_count");
+let __ctx = WithInterfaceFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Ready" => self._s_Ready_get_count(&__e),
-            _ => Default::default(),
+            "Ready" => { self._s_Ready_get_count(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = WithInterfaceFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = WithInterfaceFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = WithInterfaceFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_Ready(&mut self, __e: &WithInterfaceFrameEvent) {
@@ -169,13 +229,15 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Ready_get_count(&mut self, __e: &WithInterfaceFrameEvent) -> i32 {
-self.call_count
+    fn _s_Ready_greet(&mut self, __e: &WithInterfaceFrameEvent, name: String) {
+self.call_count += 1;
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(format!("Hello, {}!", name))); }
+return;
     }
 
-    fn _s_Ready_greet(&mut self, __e: &WithInterfaceFrameEvent, name: &str) -> String {
-self.call_count += 1;
-format!("Hello, {}!", name)
+    fn _s_Ready_get_count(&mut self, __e: &WithInterfaceFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.call_count)); }
+return;
     }
 }
 
@@ -185,7 +247,7 @@ fn main() {
     let mut s = WithInterface::new();
 
     // Test interface method with parameter and return
-    let result = s.greet("World");
+    let result = s.greet("World".to_string());
     assert_eq!(result, "Hello, World!", "Expected 'Hello, World!', got '{}'", result);
     println!("greet('World') = {}", result);
 
@@ -195,10 +257,11 @@ fn main() {
     println!("get_count() = {}", count);
 
     // Call again to verify state
-    s.greet("Frame");
+    s.greet("Frame".to_string());
     let count2 = s.get_count();
     assert_eq!(count2, 2, "Expected count=2, got {}", count2);
     println!("After second call: get_count() = {}", count2);
 
     println!("PASS: Interface methods work correctly");
 }
+

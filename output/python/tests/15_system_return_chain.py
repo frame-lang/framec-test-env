@@ -1,10 +1,20 @@
+
+# Tests that system.return follows "last writer wins" across transition lifecycle
+
+
 from typing import Any, Optional, List, Dict, Callable
 
 class SystemReturnChainTestFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class SystemReturnChainTestFrameContext:
+    def __init__(self, event: SystemReturnChainTestFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class SystemReturnChainTestCompartment:
@@ -30,7 +40,7 @@ class SystemReturnChainTestCompartment:
 class SystemReturnChainTest:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.__compartment = SystemReturnChainTestCompartment("Start")
         self.__next_compartment = None
         __frame_event = SystemReturnChainTestFrameEvent("$>", None)
@@ -76,48 +86,48 @@ class SystemReturnChainTest:
         self.__next_compartment = next_compartment
 
     def test_enter_sets(self) -> str:
-        self._return_value = None
         __e = SystemReturnChainTestFrameEvent("test_enter_sets", None)
+        __ctx = SystemReturnChainTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def test_exit_then_enter(self) -> str:
-        self._return_value = None
         __e = SystemReturnChainTestFrameEvent("test_exit_then_enter", None)
+        __ctx = SystemReturnChainTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def get_state(self) -> str:
-        self._return_value = None
         __e = SystemReturnChainTestFrameEvent("get_state", None)
+        __ctx = SystemReturnChainTestFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def _state_EnterSetter(self, __e):
         if __e._message == "$>":
             # Enter handler sets return value
-            self._return_value = "from_enter"
+            self._context_stack[-1]._return = "from_enter"
         elif __e._message == "get_state":
-            self._return_value = "EnterSetter"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "EnterSetter"
             return
 
     def _state_BothSet(self, __e):
         if __e._message == "$>":
             # Enter handler sets return - should overwrite exit's value
-            self._return_value = "enter_wins"
+            self._context_stack[-1]._return = "enter_wins"
         elif __e._message == "get_state":
-            self._return_value = "BothSet"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "BothSet"
             return
 
     def _state_Start(self, __e):
         if __e._message == "<$":
             # Exit handler sets initial value
-            self._return_value = "from_exit"
+            self._context_stack[-1]._return = "from_exit"
         elif __e._message == "get_state":
-            self._return_value = "Start"
-            __e._return = self._return_value
+            self._context_stack[-1]._return = "Start"
             return
         elif __e._message == "test_enter_sets":
             __compartment = SystemReturnChainTestCompartment("EnterSetter", parent_compartment=self.__compartment.copy())

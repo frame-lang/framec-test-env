@@ -95,18 +95,6 @@ class StateParams:
         self.__kernel(__e)
         return self._context_stack.pop()._return
 
-    def _state_Counter(self, __e):
-        if __e._message == "$>":
-            self.__compartment.state_vars["count"] = 0
-            # Access state param via compartment - using string key "0"
-            # Note: double underscore for __compartment to match generated class field
-            self.__compartment.state_vars["count"] = self.__compartment.state_args["0"]
-            count_val = self.__compartment.state_vars["count"]
-            print(f"Counter entered with initial={count_val}")
-        elif __e._message == "get_value":
-            self._context_stack[-1]._return = self.__compartment.state_vars["count"]
-            return
-
     def _state_Idle(self, __e):
         if __e._message == "get_value":
             self._context_stack[-1]._return = 0
@@ -116,6 +104,19 @@ class StateParams:
             __compartment = StateParamsCompartment("Counter", parent_compartment=self.__compartment.copy())
             __compartment.state_args = {"0": val}
             self.__transition(__compartment)
+
+    def _state_Counter(self, __e):
+        if __e._message == "$>":
+            if "count" not in self.__compartment.state_vars:
+                self.__compartment.state_vars["count"] = 0
+            # Access state param via compartment - using string key "0"
+            # Note: double underscore for __compartment to match generated class field
+            self.__compartment.state_vars["count"] = self.__compartment.state_args["0"]
+            count_val = self.__compartment.state_vars["count"]
+            print(f"Counter entered with initial={count_val}")
+        elif __e._message == "get_value":
+            self._context_stack[-1]._return = self.__compartment.state_vars["count"]
+            return
 
 
 def main():

@@ -132,9 +132,11 @@ class StateParams {
 
     private _state_Counter(__e: StateParamsFrameEvent) {
         if (__e._message === "$>") {
-            this.__compartment.state_vars["count"] = 0;
+            if (!("count" in this.__compartment.state_vars)) {
+                this.__compartment.state_vars["count"] = 0;
+            }
             // Access state param via compartment - using string key "0"
-            this.__compartment.state_vars["count"] = this.__compartment.state_args["0"]
+            this.__compartment.state_vars["count"] = this.__compartment.state_args["0"];
             const count_val = this.__compartment.state_vars["count"]
             console.log(`Counter entered with initial=${count_val}`)
         } else if (__e._message === "get_value") {

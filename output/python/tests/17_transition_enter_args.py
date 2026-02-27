@@ -96,17 +96,6 @@ class TransitionEnterArgs:
         self.__kernel(__e)
         return self._context_stack.pop()._return
 
-    def _state_Active(self, __e):
-        if __e._message == "$>":
-            source = __e._parameters["source"]
-            value = __e._parameters["value"]
-            self.log.append(f"active:enter:{source}:{value}")
-        elif __e._message == "get_log":
-            self._context_stack[-1]._return = self.log
-            return
-        elif __e._message == "start":
-            self.log.append("active:start")
-
     def _state_Idle(self, __e):
         if __e._message == "get_log":
             self._context_stack[-1]._return = self.log
@@ -116,6 +105,17 @@ class TransitionEnterArgs:
             __compartment = TransitionEnterArgsCompartment("Active", parent_compartment=self.__compartment.copy())
             __compartment.enter_args = {str(i): v for i, v in enumerate(("from_idle", 42,))}
             self.__transition(__compartment)
+
+    def _state_Active(self, __e):
+        if __e._message == "$>":
+            source = __e._parameters["0"]
+            value = __e._parameters["1"]
+            self.log.append(f"active:enter:{source}:{value}")
+        elif __e._message == "get_log":
+            self._context_stack[-1]._return = self.log
+            return
+        elif __e._message == "start":
+            self.log.append("active:start")
 
 
 def main():

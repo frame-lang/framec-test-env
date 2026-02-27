@@ -1,13 +1,41 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct EnterExitFrameEvent {
     message: String,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for EnterExitFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl EnterExitFrameEvent {
     fn new(message: &str) -> Self {
-        Self { message: message.to_string() }
+        Self {
+            message: message.to_string(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
+}
+
+struct EnterExitFrameContext {
+    event: EnterExitFrameEvent,
+    _return: Option<Box<dyn std::any::Any>>,
+    _data: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl EnterExitFrameContext {
+    fn new(event: EnterExitFrameEvent, default_return: Option<Box<dyn std::any::Any>>) -> Self {
+        Self {
+            event,
+            _return: default_return,
+            _data: std::collections::HashMap::new(),
+        }
     }
 }
 
@@ -45,6 +73,7 @@ pub struct EnterExit {
     _state_stack: Vec<(String, EnterExitStateContext)>,
     __compartment: EnterExitCompartment,
     __next_compartment: Option<EnterExitCompartment>,
+    _context_stack: Vec<EnterExitFrameContext>,
     log: Vec<String>,
 }
 
@@ -52,6 +81,7 @@ impl EnterExit {
     pub fn new() -> Self {
         let mut this = Self {
             _state_stack: vec![],
+            _context_stack: vec![],
             log: Vec::new(),
             __compartment: EnterExitCompartment::new("Off"),
             __next_compartment: None,
@@ -68,7 +98,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = EnterExitFrameEvent::new("$<");
+    let exit_event = EnterExitFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -126,32 +156,75 @@ match state_context {
     }
 
     pub fn toggle(&mut self) {
-let __e = EnterExitFrameEvent::new("toggle");
-self.__kernel(__e);
+let mut __e = EnterExitFrameEvent::new("toggle");
+let __ctx = EnterExitFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Off" => { self._s_Off_toggle(&__e); }
+            "On" => { self._s_On_toggle(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = EnterExitFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = EnterExitFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = EnterExitFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn get_log(&mut self) -> Vec<String> {
-let __e = EnterExitFrameEvent::new("get_log");
+let mut __e = EnterExitFrameEvent::new("get_log");
+let __ctx = EnterExitFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Off" => self._s_Off_get_log(&__e),
-            "On" => self._s_On_get_log(&__e),
-            _ => Default::default(),
+            "Off" => { self._s_Off_get_log(&__e); }
+            "On" => { self._s_On_get_log(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = EnterExitFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = EnterExitFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = EnterExitFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
         }
     }
-
-    fn _state_On(&mut self, __e: &EnterExitFrameEvent) {
-match __e.message.as_str() {
-    "$<" => { self._s_On_exit(__e); }
-    "$>" => { self._s_On_enter(__e); }
-    "get_log" => { self._s_On_get_log(__e); }
-    "toggle" => { self._s_On_toggle(__e); }
-    _ => {}
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<Vec<String>>().unwrap()
+} else {
+    Default::default()
 }
     }
 
     fn _state_Off(&mut self, __e: &EnterExitFrameEvent) {
 match __e.message.as_str() {
-    "$<" => { self._s_Off_exit(__e); }
+    "<$" => { self._s_Off_exit(__e); }
     "$>" => { self._s_Off_enter(__e); }
     "get_log" => { self._s_Off_get_log(__e); }
     "toggle" => { self._s_Off_toggle(__e); }
@@ -159,13 +232,36 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_On_get_log(&mut self, __e: &EnterExitFrameEvent) -> Vec<String> {
-self.log.clone()
+    fn _state_On(&mut self, __e: &EnterExitFrameEvent) {
+match __e.message.as_str() {
+    "<$" => { self._s_On_exit(__e); }
+    "$>" => { self._s_On_enter(__e); }
+    "get_log" => { self._s_On_get_log(__e); }
+    "toggle" => { self._s_On_toggle(__e); }
+    _ => {}
+}
     }
 
-    fn _s_On_enter(&mut self, __e: &EnterExitFrameEvent) {
-self.log.push("enter:On".to_string());
-println!("Entered On state");
+    fn _s_Off_exit(&mut self, __e: &EnterExitFrameEvent) {
+self.log.push("exit:Off".to_string());
+println!("Exiting Off state");
+    }
+
+    fn _s_Off_enter(&mut self, __e: &EnterExitFrameEvent) {
+self.log.push("enter:Off".to_string());
+println!("Entered Off state");
+    }
+
+    fn _s_Off_toggle(&mut self, __e: &EnterExitFrameEvent) {
+self.__transition(EnterExitCompartment::new("On"));
+    }
+
+    fn _s_Off_get_log(&mut self, __e: &EnterExitFrameEvent) {
+self.log.clone();
+    }
+
+    fn _s_On_get_log(&mut self, __e: &EnterExitFrameEvent) {
+self.log.clone();
     }
 
     fn _s_On_toggle(&mut self, __e: &EnterExitFrameEvent) {
@@ -177,22 +273,9 @@ self.log.push("exit:On".to_string());
 println!("Exiting On state");
     }
 
-    fn _s_Off_get_log(&mut self, __e: &EnterExitFrameEvent) -> Vec<String> {
-self.log.clone()
-    }
-
-    fn _s_Off_toggle(&mut self, __e: &EnterExitFrameEvent) {
-self.__transition(EnterExitCompartment::new("On"));
-    }
-
-    fn _s_Off_enter(&mut self, __e: &EnterExitFrameEvent) {
-self.log.push("enter:Off".to_string());
-println!("Entered Off state");
-    }
-
-    fn _s_Off_exit(&mut self, __e: &EnterExitFrameEvent) {
-self.log.push("exit:Off".to_string());
-println!("Exiting Off state");
+    fn _s_On_enter(&mut self, __e: &EnterExitFrameEvent) {
+self.log.push("enter:On".to_string());
+println!("Entered On state");
     }
 }
 

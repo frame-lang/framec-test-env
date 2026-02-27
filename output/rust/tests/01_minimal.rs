@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct MinimalFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for MinimalFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl MinimalFrameEvent {
@@ -12,9 +20,6 @@ impl MinimalFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -90,7 +95,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = MinimalFrameEvent::new("$<");
+    let exit_event = MinimalFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -145,11 +150,38 @@ match state_context {
     }
 
     pub fn is_alive(&mut self) -> bool {
-let __e = MinimalFrameEvent::new("is_alive");
+let mut __e = MinimalFrameEvent::new("is_alive");
+let __ctx = MinimalFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Start" => self._s_Start_is_alive(&__e),
-            _ => Default::default(),
+            "Start" => { self._s_Start_is_alive(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = MinimalFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = MinimalFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = MinimalFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<bool>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_Start(&mut self, __e: &MinimalFrameEvent) {
@@ -159,8 +191,9 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Start_is_alive(&mut self, __e: &MinimalFrameEvent) -> bool {
-true
+    fn _s_Start_is_alive(&mut self, __e: &MinimalFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(true)); }
+return;
     }
 }
 

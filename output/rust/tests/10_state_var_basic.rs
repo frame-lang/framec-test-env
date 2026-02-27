@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct StateVarBasicFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for StateVarBasicFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl StateVarBasicFrameEvent {
@@ -12,9 +20,6 @@ impl StateVarBasicFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -97,7 +102,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = StateVarBasicFrameEvent::new("$<");
+    let exit_event = StateVarBasicFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -154,24 +159,103 @@ match state_context {
     }
 
     pub fn increment(&mut self) -> i32 {
-let __e = StateVarBasicFrameEvent::new("increment");
+let mut __e = StateVarBasicFrameEvent::new("increment");
+let __ctx = StateVarBasicFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Counter" => self._s_Counter_increment(&__e),
-            _ => Default::default(),
+            "Counter" => { self._s_Counter_increment(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = StateVarBasicFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = StateVarBasicFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = StateVarBasicFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn get_count(&mut self) -> i32 {
-let __e = StateVarBasicFrameEvent::new("get_count");
+let mut __e = StateVarBasicFrameEvent::new("get_count");
+let __ctx = StateVarBasicFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Counter" => self._s_Counter_get_count(&__e),
-            _ => Default::default(),
+            "Counter" => { self._s_Counter_get_count(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = StateVarBasicFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = StateVarBasicFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = StateVarBasicFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     pub fn reset(&mut self) {
-let __e = StateVarBasicFrameEvent::new("reset");
-self.__kernel(__e);
+let mut __e = StateVarBasicFrameEvent::new("reset");
+let __ctx = StateVarBasicFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Counter" => { self._s_Counter_reset(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = StateVarBasicFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = StateVarBasicFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = StateVarBasicFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     fn _state_Counter(&mut self, __e: &StateVarBasicFrameEvent) {
@@ -186,17 +270,17 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Counter_get_count(&mut self, __e: &StateVarBasicFrameEvent) -> i32 {
-self._sv_count
-    }
-
     fn _s_Counter_reset(&mut self, __e: &StateVarBasicFrameEvent) {
 self._sv_count = 0;
     }
 
-    fn _s_Counter_increment(&mut self, __e: &StateVarBasicFrameEvent) -> i32 {
+    fn _s_Counter_get_count(&mut self, __e: &StateVarBasicFrameEvent) {
+self._sv_count;
+    }
+
+    fn _s_Counter_increment(&mut self, __e: &StateVarBasicFrameEvent) {
 self._sv_count = self._sv_count + 1;
-self._sv_count
+self._sv_count;
     }
 }
 

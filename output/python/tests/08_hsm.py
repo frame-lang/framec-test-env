@@ -121,6 +121,8 @@ class HSMForward:
         elif __e._message == "get_log":
             self._context_stack[-1]._return = self.log
             return
+        else:
+            self._state_Parent(__e)
 
 
 def main():

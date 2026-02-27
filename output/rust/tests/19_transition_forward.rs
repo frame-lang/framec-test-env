@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct EventForwardTestFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for EventForwardTestFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl EventForwardTestFrameEvent {
@@ -12,9 +20,6 @@ impl EventForwardTestFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -93,7 +98,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = EventForwardTestFrameEvent::new("$<");
+    let exit_event = EventForwardTestFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -151,24 +156,69 @@ match state_context {
     }
 
     pub fn process(&mut self) {
-let __e = EventForwardTestFrameEvent::new("process");
-self.__kernel(__e);
+let mut __e = EventForwardTestFrameEvent::new("process");
+let __ctx = EventForwardTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Idle" => { self._s_Idle_process(&__e); }
+            "Working" => { self._s_Working_process(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = EventForwardTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = EventForwardTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = EventForwardTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn get_log(&mut self) -> Vec<String> {
-let __e = EventForwardTestFrameEvent::new("get_log");
+let mut __e = EventForwardTestFrameEvent::new("get_log");
+let __ctx = EventForwardTestFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Idle" => self._s_Idle_get_log(&__e),
-            "Working" => self._s_Working_get_log(&__e),
-            _ => Default::default(),
+            "Idle" => { self._s_Idle_get_log(&__e); }
+            "Working" => { self._s_Working_get_log(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = EventForwardTestFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = EventForwardTestFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = EventForwardTestFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
         }
     }
-
-    fn _state_Working(&mut self, __e: &EventForwardTestFrameEvent) {
-match __e.message.as_str() {
-    "get_log" => { self._s_Working_get_log(__e); }
-    "process" => { self._s_Working_process(__e); }
-    _ => {}
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<Vec<String>>().unwrap()
+} else {
+    Default::default()
 }
     }
 
@@ -180,16 +230,12 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Working_process(&mut self, __e: &EventForwardTestFrameEvent) {
-self.log.push("working:process".to_string());
-    }
-
-    fn _s_Working_get_log(&mut self, __e: &EventForwardTestFrameEvent) -> Vec<String> {
-return self.log.clone();
-    }
-
-    fn _s_Idle_get_log(&mut self, __e: &EventForwardTestFrameEvent) -> Vec<String> {
-return self.log.clone();
+    fn _state_Working(&mut self, __e: &EventForwardTestFrameEvent) {
+match __e.message.as_str() {
+    "get_log" => { self._s_Working_get_log(__e); }
+    "process" => { self._s_Working_process(__e); }
+    _ => {}
+}
     }
 
     fn _s_Idle_process(&mut self, __e: &EventForwardTestFrameEvent) {
@@ -200,6 +246,20 @@ self.__transition(__compartment);
 return;
 // This should NOT execute because -> => returns after dispatch
 self.log.push("idle:process:after".to_string());
+    }
+
+    fn _s_Idle_get_log(&mut self, __e: &EventForwardTestFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.log.clone())); }
+return;;
+    }
+
+    fn _s_Working_process(&mut self, __e: &EventForwardTestFrameEvent) {
+self.log.push("working:process".to_string());
+    }
+
+    fn _s_Working_get_log(&mut self, __e: &EventForwardTestFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.log.clone())); }
+return;;
     }
 }
 

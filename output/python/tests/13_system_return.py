@@ -111,7 +111,8 @@ class SystemReturnTest:
 
     def _state_Calculator(self, __e):
         if __e._message == "$>":
-            self.__compartment.state_vars["value"] = 0
+            if "value" not in self.__compartment.state_vars:
+                self.__compartment.state_vars["value"] = 0
         elif __e._message == "add":
             a = __e._parameters["a"]
             b = __e._parameters["b"]

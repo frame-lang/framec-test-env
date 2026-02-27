@@ -1,10 +1,20 @@
+
+# Documentation Example: Basic Lamp with enter/exit events
+
+
 from typing import Any, Optional, List, Dict, Callable
 
 class LampFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class LampFrameContext:
+    def __init__(self, event: LampFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class LampCompartment:
@@ -30,7 +40,7 @@ class LampCompartment:
 class Lamp:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.color = "white"
         self.switch_closed = False
         self.__compartment = LampCompartment("Off")
@@ -79,21 +89,31 @@ class Lamp:
 
     def turnOn(self):
         __e = LampFrameEvent("turnOn", None)
+        __ctx = LampFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def turnOff(self):
         __e = LampFrameEvent("turnOff", None)
+        __ctx = LampFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def getColor(self) -> str:
-        self._return_value = None
         __e = LampFrameEvent("getColor", None)
+        __ctx = LampFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
+        return self._context_stack.pop()._return
 
     def setColor(self, color: str):
-        __e = LampFrameEvent("setColor", {"0": color})
+        __e = LampFrameEvent("setColor", {"color": color})
+        __ctx = LampFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def _state_On(self, __e):
         if __e._message == "<$":
@@ -101,11 +121,10 @@ class Lamp:
         elif __e._message == "$>":
             self.closeSwitch()
         elif __e._message == "getColor":
-            self._return_value = self.color
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.color
             return
         elif __e._message == "setColor":
-            color = __e._parameters["0"]
+            color = __e._parameters["color"]
             self.color = color
         elif __e._message == "turnOff":
             __compartment = LampCompartment("Off", parent_compartment=self.__compartment.copy())
@@ -113,11 +132,10 @@ class Lamp:
 
     def _state_Off(self, __e):
         if __e._message == "getColor":
-            self._return_value = self.color
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.color
             return
         elif __e._message == "setColor":
-            color = __e._parameters["0"]
+            color = __e._parameters["color"]
             self.color = color
         elif __e._message == "turnOn":
             __compartment = LampCompartment("On", parent_compartment=self.__compartment.copy())

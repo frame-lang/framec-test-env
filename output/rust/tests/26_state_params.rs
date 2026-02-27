@@ -5,10 +5,18 @@
 
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct StateParamsFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for StateParamsFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl StateParamsFrameEvent {
@@ -17,9 +25,6 @@ impl StateParamsFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -103,7 +108,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = StateParamsFrameEvent::new("$<");
+    let exit_event = StateParamsFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -163,17 +168,69 @@ match state_context {
     }
 
     pub fn start(&mut self) {
-let __e = StateParamsFrameEvent::new("start");
-self.__kernel(__e);
+let mut __e = StateParamsFrameEvent::new("start");
+let __ctx = StateParamsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Idle" => { self._s_Idle_start(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = StateParamsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = StateParamsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = StateParamsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn get_value(&mut self) -> i32 {
-let __e = StateParamsFrameEvent::new("get_value");
+let mut __e = StateParamsFrameEvent::new("get_value");
+let __ctx = StateParamsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Idle" => self._s_Idle_get_value(&__e),
-            "Counter" => self._s_Counter_get_value(&__e),
-            _ => Default::default(),
+            "Idle" => { self._s_Idle_get_value(&__e); }
+            "Counter" => { self._s_Counter_get_value(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = StateParamsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = StateParamsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = StateParamsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_Idle(&mut self, __e: &StateParamsFrameEvent) {
@@ -195,18 +252,20 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Idle_get_value(&mut self, __e: &StateParamsFrameEvent) -> i32 {
-return 0
-    }
-
     fn _s_Idle_start(&mut self, __e: &StateParamsFrameEvent) {
 // For Rust, state params not yet wired up to compartment
 // Just testing basic transition for now
 self.__transition(StateParamsCompartment::new("Counter"));
     }
 
-    fn _s_Counter_get_value(&mut self, __e: &StateParamsFrameEvent) -> i32 {
-return self._sv_count
+    fn _s_Idle_get_value(&mut self, __e: &StateParamsFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(0)); }
+return;
+    }
+
+    fn _s_Counter_get_value(&mut self, __e: &StateParamsFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self._sv_count)); }
+return;
     }
 
     fn _s_Counter_enter(&mut self, __e: &StateParamsFrameEvent) {

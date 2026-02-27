@@ -5,12 +5,23 @@
 class LampHSMFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class LampHSMFrameContext {
+    public event: LampHSMFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: LampHSMFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -50,13 +61,13 @@ class LampHSM {
     private _state_stack: Array<any>;
     private __compartment: LampHSMCompartment;
     private __next_compartment: LampHSMCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private color: string = "white";
     private lamp_on: boolean = false;
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.color = "white";
         this.lamp_on = false;
         this.__compartment = new LampHSMCompartment("Off");
@@ -113,54 +124,47 @@ class LampHSM {
 
     public turnOn() {
         const __e = new LampHSMFrameEvent("turnOn", null);
+        const __ctx = new LampHSMFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public turnOff() {
         const __e = new LampHSMFrameEvent("turnOff", null);
+        const __ctx = new LampHSMFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public getColor(): string {
-        this._return_value = null;
         const __e = new LampHSMFrameEvent("getColor", null);
+        const __ctx = new LampHSMFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
     }
 
     public setColor(color: string) {
-        const __e = new LampHSMFrameEvent("setColor", {"0": color});
+        const __e = new LampHSMFrameEvent("setColor", {"color": color});
+        const __ctx = new LampHSMFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public isLampOn(): boolean {
-        this._return_value = null;
         const __e = new LampHSMFrameEvent("isLampOn", null);
+        const __ctx = new LampHSMFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
-    }
-
-    private _state_On(__e: LampHSMFrameEvent) {
-        if (__e._message === "<$") {
-            this.turnOffLamp()
-        } else if (__e._message === "$>") {
-            this.turnOnLamp()
-        } else if (__e._message === "isLampOn") {
-            this._return_value = this.lamp_on;
-            __e._return = this._return_value;
-            return;
-        } else if (__e._message === "turnOff") {
-            const __compartment = new LampHSMCompartment("Off", this.__compartment.copy());
-            this.__transition(__compartment);
-        } else {
-            this._state_ColorBehavior(__e);
-        }
+        return this._context_stack.pop()!._return;
     }
 
     private _state_Off(__e: LampHSMFrameEvent) {
         if (__e._message === "isLampOn") {
-            this._return_value = this.lamp_on;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.lamp_on;
             return;
         } else if (__e._message === "turnOn") {
             const __compartment = new LampHSMCompartment("On", this.__compartment.copy());
@@ -172,12 +176,27 @@ class LampHSM {
 
     private _state_ColorBehavior(__e: LampHSMFrameEvent) {
         if (__e._message === "getColor") {
-            this._return_value = this.color;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.color;
             return;
         } else if (__e._message === "setColor") {
-            const color = __e._parameters?.["0"];
+            const color = __e._parameters?.["color"];
             this.color = color
+        }
+    }
+
+    private _state_On(__e: LampHSMFrameEvent) {
+        if (__e._message === "<$") {
+            this.turnOffLamp()
+        } else if (__e._message === "$>") {
+            this.turnOnLamp()
+        } else if (__e._message === "isLampOn") {
+            this._context_stack[this._context_stack.length - 1]._return = this.lamp_on;
+            return;
+        } else if (__e._message === "turnOff") {
+            const __compartment = new LampHSMCompartment("Off", this.__compartment.copy());
+            this.__transition(__compartment);
+        } else {
+            this._state_ColorBehavior(__e);
         }
     }
 

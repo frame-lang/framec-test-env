@@ -149,6 +149,8 @@ class HSMForward {
         } else if (__e._message === "get_log") {
             this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;;
+        } else {
+            this._state_Parent(__e);
         }
     }
 

@@ -169,22 +169,6 @@ class HistoryHSM {
         return this._context_stack.pop()!._return;
     }
 
-    private _state_C(__e: HistoryHSMFrameEvent) {
-        if (__e._message === "$>") {
-            this.log_msg("In $C")
-        } else if (__e._message === "get_log") {
-            this._context_stack[this._context_stack.length - 1]._return = this.log;
-            return;
-        } else if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "C";
-            return;
-        } else if (__e._message === "goBack") {
-            this.log_msg("goBack")
-            this.__compartment = this._state_stack.pop()!;
-            return;
-        }
-    }
-
     private _state_A(__e: HistoryHSMFrameEvent) {
         if (__e._message === "$>") {
             this.log_msg("In $A")
@@ -221,6 +205,31 @@ class HistoryHSM {
         }
     }
 
+    private _state_AB(__e: HistoryHSMFrameEvent) {
+        if (__e._message === "gotoC") {
+            this.log_msg("gotoC in $AB")
+            this._state_stack.push(this.__compartment.copy());
+            const __compartment = new HistoryHSMCompartment("C", this.__compartment.copy());
+            this.__transition(__compartment);
+        }
+    }
+
+    private _state_C(__e: HistoryHSMFrameEvent) {
+        if (__e._message === "$>") {
+            this.log_msg("In $C")
+        } else if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "C";
+            return;
+        } else if (__e._message === "goBack") {
+            this.log_msg("goBack")
+            this.__transition(this._state_stack.pop()!);
+            return;
+        }
+    }
+
     private _state_Waiting(__e: HistoryHSMFrameEvent) {
         if (__e._message === "$>") {
             this.log_msg("In $Waiting")
@@ -237,15 +246,6 @@ class HistoryHSM {
         } else if (__e._message === "gotoB") {
             this.log_msg("gotoB")
             const __compartment = new HistoryHSMCompartment("B", this.__compartment.copy());
-            this.__transition(__compartment);
-        }
-    }
-
-    private _state_AB(__e: HistoryHSMFrameEvent) {
-        if (__e._message === "gotoC") {
-            this.log_msg("gotoC in $AB")
-            this._state_stack.push(this.__compartment.copy());
-            const __compartment = new HistoryHSMCompartment("C", this.__compartment.copy());
             this.__transition(__compartment);
         }
     }

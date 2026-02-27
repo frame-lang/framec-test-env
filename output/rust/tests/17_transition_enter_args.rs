@@ -5,10 +5,18 @@
 
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct TransitionEnterArgsFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for TransitionEnterArgsFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl TransitionEnterArgsFrameEvent {
@@ -17,9 +25,6 @@ impl TransitionEnterArgsFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -98,7 +103,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = TransitionEnterArgsFrameEvent::new("$<");
+    let exit_event = TransitionEnterArgsFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -156,24 +161,69 @@ match state_context {
     }
 
     pub fn start(&mut self) {
-let __e = TransitionEnterArgsFrameEvent::new("start");
-self.__kernel(__e);
+let mut __e = TransitionEnterArgsFrameEvent::new("start");
+let __ctx = TransitionEnterArgsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Idle" => { self._s_Idle_start(&__e); }
+            "Active" => { self._s_Active_start(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = TransitionEnterArgsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = TransitionEnterArgsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = TransitionEnterArgsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn get_count(&mut self) -> i32 {
-let __e = TransitionEnterArgsFrameEvent::new("get_count");
+let mut __e = TransitionEnterArgsFrameEvent::new("get_count");
+let __ctx = TransitionEnterArgsFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Idle" => self._s_Idle_get_count(&__e),
-            "Active" => self._s_Active_get_count(&__e),
-            _ => Default::default(),
+            "Idle" => { self._s_Idle_get_count(&__e); }
+            "Active" => { self._s_Active_get_count(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = TransitionEnterArgsFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = TransitionEnterArgsFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = TransitionEnterArgsFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
         }
     }
-
-    fn _state_Idle(&mut self, __e: &TransitionEnterArgsFrameEvent) {
-match __e.message.as_str() {
-    "get_count" => { self._s_Idle_get_count(__e); }
-    "start" => { self._s_Idle_start(__e); }
-    _ => {}
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<i32>().unwrap()
+} else {
+    Default::default()
 }
     }
 
@@ -186,25 +236,35 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Idle_start(&mut self, __e: &TransitionEnterArgsFrameEvent) {
-self.count = 1;
-self.__transition(TransitionEnterArgsCompartment::new("Active"));
+    fn _state_Idle(&mut self, __e: &TransitionEnterArgsFrameEvent) {
+match __e.message.as_str() {
+    "get_count" => { self._s_Idle_get_count(__e); }
+    "start" => { self._s_Idle_start(__e); }
+    _ => {}
+}
     }
 
-    fn _s_Idle_get_count(&mut self, __e: &TransitionEnterArgsFrameEvent) -> i32 {
-return self.count;
+    fn _s_Active_enter(&mut self, __e: &TransitionEnterArgsFrameEvent) {
+self.count = self.count + 1;
     }
 
     fn _s_Active_start(&mut self, __e: &TransitionEnterArgsFrameEvent) {
 self.count = self.count + 10;
     }
 
-    fn _s_Active_get_count(&mut self, __e: &TransitionEnterArgsFrameEvent) -> i32 {
-return self.count;
+    fn _s_Active_get_count(&mut self, __e: &TransitionEnterArgsFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.count)); }
+return;;
     }
 
-    fn _s_Active_enter(&mut self, __e: &TransitionEnterArgsFrameEvent) {
-self.count = self.count + 1;
+    fn _s_Idle_get_count(&mut self, __e: &TransitionEnterArgsFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.count)); }
+return;;
+    }
+
+    fn _s_Idle_start(&mut self, __e: &TransitionEnterArgsFrameEvent) {
+self.count = 1;
+self.__transition(TransitionEnterArgsCompartment::new("Active"));
     }
 }
 

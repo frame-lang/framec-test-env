@@ -126,26 +126,6 @@ class PersistRoundtrip:
         self.__kernel(__e)
         self._context_stack.pop()
 
-    def _state_Idle(self, __e):
-        if __e._message == "add_history":
-            msg = __e._parameters["msg"]
-            self.history.append("idle:" + msg)
-        elif __e._message == "get_counter":
-            self._context_stack[-1]._return = self.counter
-            return
-        elif __e._message == "get_state":
-            self._context_stack[-1]._return = "idle"
-            return
-        elif __e._message == "go_active":
-            self.history.append("idle->active")
-            __compartment = PersistRoundtripCompartment("Active", parent_compartment=self.__compartment.copy())
-            self.__transition(__compartment)
-        elif __e._message == "go_idle":
-            pass  # already idle
-        elif __e._message == "set_counter":
-            n = __e._parameters["n"]
-            self.counter = n
-
     def _state_Active(self, __e):
         if __e._message == "add_history":
             msg = __e._parameters["msg"]
@@ -165,6 +145,26 @@ class PersistRoundtrip:
         elif __e._message == "set_counter":
             n = __e._parameters["n"]
             self.counter = n * 2
+
+    def _state_Idle(self, __e):
+        if __e._message == "add_history":
+            msg = __e._parameters["msg"]
+            self.history.append("idle:" + msg)
+        elif __e._message == "get_counter":
+            self._context_stack[-1]._return = self.counter
+            return
+        elif __e._message == "get_state":
+            self._context_stack[-1]._return = "idle"
+            return
+        elif __e._message == "go_active":
+            self.history.append("idle->active")
+            __compartment = PersistRoundtripCompartment("Active", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
+        elif __e._message == "go_idle":
+            pass  # already idle
+        elif __e._message == "set_counter":
+            n = __e._parameters["n"]
+            self.counter = n
 
     def save_state(self) -> bytes:
         import pickle

@@ -109,20 +109,6 @@ class StateVarReentry:
         self.__kernel(__e)
         self._context_stack.pop()
 
-    def _state_Counter(self, __e):
-        if __e._message == "$>":
-            self.__compartment.state_vars["count"] = 0
-        elif __e._message == "get_count":
-            self._context_stack[-1]._return = self.__compartment.state_vars["count"]
-            return
-        elif __e._message == "go_other":
-            __compartment = StateVarReentryCompartment("Other", parent_compartment=self.__compartment.copy())
-            self.__transition(__compartment)
-        elif __e._message == "increment":
-            self.__compartment.state_vars["count"] = self.__compartment.state_vars["count"] + 1
-            self._context_stack[-1]._return = self.__compartment.state_vars["count"]
-            return
-
     def _state_Other(self, __e):
         if __e._message == "come_back":
             __compartment = StateVarReentryCompartment("Counter", parent_compartment=self.__compartment.copy())
@@ -132,6 +118,21 @@ class StateVarReentry:
             return
         elif __e._message == "increment":
             self._context_stack[-1]._return = -1
+            return
+
+    def _state_Counter(self, __e):
+        if __e._message == "$>":
+            if "count" not in self.__compartment.state_vars:
+                self.__compartment.state_vars["count"] = 0
+        elif __e._message == "get_count":
+            self._context_stack[-1]._return = self.__compartment.state_vars["count"]
+            return
+        elif __e._message == "go_other":
+            __compartment = StateVarReentryCompartment("Other", parent_compartment=self.__compartment.copy())
+            self.__transition(__compartment)
+        elif __e._message == "increment":
+            self.__compartment.state_vars["count"] = self.__compartment.state_vars["count"] + 1
+            self._context_stack[-1]._return = self.__compartment.state_vars["count"]
             return
 
 

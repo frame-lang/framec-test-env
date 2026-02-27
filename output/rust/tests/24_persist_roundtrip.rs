@@ -95,7 +95,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = PersistRoundtripFrameEvent::new("$<");
+    let exit_event = PersistRoundtripFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -181,7 +181,7 @@ match self.__compartment.state.as_str() {
 // Process any pending transitions (bypassed kernel)
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
-    let exit_event = PersistRoundtripFrameEvent::new("$<");
+    let exit_event = PersistRoundtripFrameEvent::new("<$");
     self.__router(&exit_event);
     self.__compartment = next_compartment;
     if self.__compartment.forward_event.is_none() {
@@ -219,7 +219,7 @@ match self.__compartment.state.as_str() {
 // Process any pending transitions (bypassed kernel)
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
-    let exit_event = PersistRoundtripFrameEvent::new("$<");
+    let exit_event = PersistRoundtripFrameEvent::new("<$");
     self.__router(&exit_event);
     self.__compartment = next_compartment;
     if self.__compartment.forward_event.is_none() {
@@ -247,17 +247,6 @@ match self.__compartment.state.as_str() {
         }
     }
 
-    fn _state_Active(&mut self, __e: &PersistRoundtripFrameEvent) {
-match __e.message.as_str() {
-    "get_counter" => { self._s_Active_get_counter(__e); }
-    "get_mode" => { self._s_Active_get_mode(__e); }
-    "get_state" => { self._s_Active_get_state(__e); }
-    "go_active" => { self._s_Active_go_active(__e); }
-    "go_idle" => { self._s_Active_go_idle(__e); }
-    _ => {}
-}
-    }
-
     fn _state_Idle(&mut self, __e: &PersistRoundtripFrameEvent) {
 match __e.message.as_str() {
     "get_counter" => { self._s_Idle_get_counter(__e); }
@@ -269,19 +258,42 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Active_set_counter(&mut self, __e: &PersistRoundtripFrameEvent, n: i32) {
-self.counter = n * 2;
+    fn _state_Active(&mut self, __e: &PersistRoundtripFrameEvent) {
+match __e.message.as_str() {
+    "get_counter" => { self._s_Active_get_counter(__e); }
+    "get_mode" => { self._s_Active_get_mode(__e); }
+    "get_state" => { self._s_Active_get_state(__e); }
+    "go_active" => { self._s_Active_go_active(__e); }
+    "go_idle" => { self._s_Active_go_idle(__e); }
+    _ => {}
+}
     }
 
-    fn _s_Active_set_mode(&mut self, __e: &PersistRoundtripFrameEvent, m: String) {
+    fn _s_Idle_set_mode(&mut self, __e: &PersistRoundtripFrameEvent, m: String) {
 self.mode = m;
     }
 
-    fn _s_Active_get_mode(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
+    fn _s_Idle_go_active(&mut self, __e: &PersistRoundtripFrameEvent) {
+self.__transition(PersistRoundtripCompartment::new("Active"));
+    }
+
+    fn _s_Idle_get_state(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
+return String::from("idle");
+    }
+
+    fn _s_Idle_get_mode(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
 return self.mode.clone();
     }
 
-    fn _s_Active_get_counter(&mut self, __e: &PersistRoundtripFrameEvent) -> i32 {
+    fn _s_Idle_go_idle(&mut self, __e: &PersistRoundtripFrameEvent) {
+// already idle;
+    }
+
+    fn _s_Idle_set_counter(&mut self, __e: &PersistRoundtripFrameEvent, n: i32) {
+self.counter = n;
+    }
+
+    fn _s_Idle_get_counter(&mut self, __e: &PersistRoundtripFrameEvent) -> i32 {
 return self.counter;
     }
 
@@ -293,36 +305,24 @@ return self.counter;
 self.__transition(PersistRoundtripCompartment::new("Idle"));
     }
 
+    fn _s_Active_set_mode(&mut self, __e: &PersistRoundtripFrameEvent, m: String) {
+self.mode = m;
+    }
+
+    fn _s_Active_get_mode(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
+return self.mode.clone();
+    }
+
     fn _s_Active_get_state(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
 return String::from("active");
     }
 
-    fn _s_Idle_get_state(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
-return String::from("idle");
-    }
-
-    fn _s_Idle_set_counter(&mut self, __e: &PersistRoundtripFrameEvent, n: i32) {
-self.counter = n;
-    }
-
-    fn _s_Idle_go_active(&mut self, __e: &PersistRoundtripFrameEvent) {
-self.__transition(PersistRoundtripCompartment::new("Active"));
-    }
-
-    fn _s_Idle_go_idle(&mut self, __e: &PersistRoundtripFrameEvent) {
-// already idle;
-    }
-
-    fn _s_Idle_get_counter(&mut self, __e: &PersistRoundtripFrameEvent) -> i32 {
+    fn _s_Active_get_counter(&mut self, __e: &PersistRoundtripFrameEvent) -> i32 {
 return self.counter;
     }
 
-    fn _s_Idle_set_mode(&mut self, __e: &PersistRoundtripFrameEvent, m: String) {
-self.mode = m;
-    }
-
-    fn _s_Idle_get_mode(&mut self, __e: &PersistRoundtripFrameEvent) -> String {
-return self.mode.clone();
+    fn _s_Active_set_counter(&mut self, __e: &PersistRoundtripFrameEvent, n: i32) {
+self.counter = n * 2;
     }
 
     pub fn save_state(&mut self) -> String {

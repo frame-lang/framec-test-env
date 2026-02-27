@@ -1,12 +1,23 @@
 class TransitionExitArgsFrameEvent {
     public _message: string;
     public _parameters: Record<string, any> | null;
-    public _return: any;
 
     constructor(message: string, parameters: Record<string, any> | null) {
         this._message = message;
         this._parameters = parameters;
-        this._return = null;
+    }
+}
+
+
+class TransitionExitArgsFrameContext {
+    public event: TransitionExitArgsFrameEvent;
+    public _return: any;
+    public _data: Record<string, any>;
+
+    constructor(event: TransitionExitArgsFrameEvent, default_return: any) {
+        this.event = event;
+        this._return = default_return;
+        this._data = {  };
     }
 }
 
@@ -46,12 +57,12 @@ class TransitionExitArgs {
     private _state_stack: Array<any>;
     private __compartment: TransitionExitArgsCompartment;
     private __next_compartment: TransitionExitArgsCompartment | null;
-    private _return_value: any;
+    private _context_stack: Array<any>;
     private log: string[] =     [];
 
     constructor() {
         this._state_stack = [];
-        this._return_value = null;
+        this._context_stack = [];
         this.log =         [];
         this.__compartment = new TransitionExitArgsCompartment("Active");
         this.__next_compartment = null;
@@ -107,14 +118,27 @@ class TransitionExitArgs {
 
     public leave() {
         const __e = new TransitionExitArgsFrameEvent("leave", null);
+        const __ctx = new TransitionExitArgsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
+        this._context_stack.pop();
     }
 
     public get_log(): string[] {
-        this._return_value = null;
         const __e = new TransitionExitArgsFrameEvent("get_log", null);
+        const __ctx = new TransitionExitArgsFrameContext(__e, null);
+        this._context_stack.push(__ctx);
         this.__kernel(__e);
-        return this._return_value;
+        return this._context_stack.pop()!._return;
+    }
+
+    private _state_Done(__e: TransitionExitArgsFrameEvent) {
+        if (__e._message === "$>") {
+            this.log.push("enter:done");
+        } else if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;;
+        }
     }
 
     private _state_Active(__e: TransitionExitArgsFrameEvent) {
@@ -123,24 +147,13 @@ class TransitionExitArgs {
             const code = __e._parameters?.["1"];
             this.log.push(`exit:${reason}:${code}`);
         } else if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;;
         } else if (__e._message === "leave") {
             this.log.push("leaving");
             this.__compartment.exit_args = Object.fromEntries(["cleanup", 42].map((v, i) => [String(i), v]));
             const __compartment = new TransitionExitArgsCompartment("Done", this.__compartment.copy());
             this.__transition(__compartment);
-        }
-    }
-
-    private _state_Done(__e: TransitionExitArgsFrameEvent) {
-        if (__e._message === "$>") {
-            this.log.push("enter:done");
-        } else if (__e._message === "get_log") {
-            this._return_value = this.log;
-            __e._return = this._return_value;
-            return;;
         }
     }
 }

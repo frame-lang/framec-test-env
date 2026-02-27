@@ -152,7 +152,9 @@ class SystemReturnReentrantTest {
 
     private _state_Start(__e: SystemReturnReentrantTestFrameEvent) {
         if (__e._message === "$>") {
-            this.__compartment.state_vars["log"] = "";
+            if (!("log" in this.__compartment.state_vars)) {
+                this.__compartment.state_vars["log"] = "";
+            }
         } else if (__e._message === "get_log") {
             this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["log"];
             return;;

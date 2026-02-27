@@ -140,7 +140,9 @@ class StateVarBasic {
 
     private _state_Counter(__e: StateVarBasicFrameEvent) {
         if (__e._message === "$>") {
-            this.__compartment.state_vars["count"] = 0;
+            if (!("count" in this.__compartment.state_vars)) {
+                this.__compartment.state_vars["count"] = 0;
+            }
         } else if (__e._message === "get_count") {
             this._context_stack[this._context_stack.length - 1]._return = this.__compartment.state_vars["count"];
             return;;

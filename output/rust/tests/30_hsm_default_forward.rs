@@ -1,9 +1,17 @@
 use std::collections::HashMap;
 
-#[derive(Clone, Debug)]
 struct HSMDefaultForwardFrameEvent {
     message: String,
-    parameters: std::collections::HashMap<String, String>,
+    parameters: std::collections::HashMap<String, Box<dyn std::any::Any>>,
+}
+
+impl Clone for HSMDefaultForwardFrameEvent {
+    fn clone(&self) -> Self {
+        Self {
+            message: self.message.clone(),
+            parameters: std::collections::HashMap::new(),
+        }
+    }
 }
 
 impl HSMDefaultForwardFrameEvent {
@@ -12,9 +20,6 @@ impl HSMDefaultForwardFrameEvent {
             message: message.to_string(),
             parameters: std::collections::HashMap::new(),
         }
-    }
-    fn with_parameters(message: &str, parameters: std::collections::HashMap<String, String>) -> Self {
-        Self { message: message.to_string(), parameters }
     }
 }
 
@@ -93,7 +98,7 @@ self.__router(&__e);
 while self.__next_compartment.is_some() {
     let next_compartment = self.__next_compartment.take().unwrap();
     // Exit current state
-    let exit_event = HSMDefaultForwardFrameEvent::new("$<");
+    let exit_event = HSMDefaultForwardFrameEvent::new("<$");
     self.__router(&exit_event);
     // Switch to new compartment
     self.__compartment = next_compartment;
@@ -151,22 +156,101 @@ match state_context {
     }
 
     pub fn handled_event(&mut self) {
-let __e = HSMDefaultForwardFrameEvent::new("handled_event");
-self.__kernel(__e);
+let mut __e = HSMDefaultForwardFrameEvent::new("handled_event");
+let __ctx = HSMDefaultForwardFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Child" => { self._s_Child_handled_event(&__e); }
+            "Parent" => { self._s_Parent_handled_event(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = HSMDefaultForwardFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = HSMDefaultForwardFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = HSMDefaultForwardFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn unhandled_event(&mut self) {
-let __e = HSMDefaultForwardFrameEvent::new("unhandled_event");
-self.__kernel(__e);
+let mut __e = HSMDefaultForwardFrameEvent::new("unhandled_event");
+let __ctx = HSMDefaultForwardFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
+match self.__compartment.state.as_str() {
+            "Child" => { self._s_Parent_unhandled_event(&__e); }
+            "Parent" => { self._s_Parent_unhandled_event(&__e); }
+            _ => {}
+        }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = HSMDefaultForwardFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = HSMDefaultForwardFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = HSMDefaultForwardFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+self._context_stack.pop();
     }
 
     pub fn get_log(&mut self) -> Vec<String> {
-let __e = HSMDefaultForwardFrameEvent::new("get_log");
+let mut __e = HSMDefaultForwardFrameEvent::new("get_log");
+let __ctx = HSMDefaultForwardFrameContext::new(__e.clone(), None);
+self._context_stack.push(__ctx);
 match self.__compartment.state.as_str() {
-            "Child" => self._s_Child_get_log(&__e),
-            "Parent" => self._s_Parent_get_log(&__e),
-            _ => Default::default(),
+            "Child" => { self._s_Child_get_log(&__e); }
+            "Parent" => { self._s_Parent_get_log(&__e); }
+            _ => {}
         }
+while self.__next_compartment.is_some() {
+    let next_compartment = self.__next_compartment.take().unwrap();
+    let exit_event = HSMDefaultForwardFrameEvent::new("<$");
+    self.__router(&exit_event);
+    self.__compartment = next_compartment;
+    if self.__compartment.forward_event.is_none() {
+        let enter_event = HSMDefaultForwardFrameEvent::new("$>");
+        self.__router(&enter_event);
+    } else {
+        let forward_event = self.__compartment.forward_event.take().unwrap();
+        if forward_event.message == "$>" {
+            self.__router(&forward_event);
+        } else {
+            let enter_event = HSMDefaultForwardFrameEvent::new("$>");
+            self.__router(&enter_event);
+            self.__router(&forward_event);
+        }
+    }
+}
+let __ctx = self._context_stack.pop().unwrap();
+if let Some(ret) = __ctx._return {
+    *ret.downcast::<Vec<String>>().unwrap()
+} else {
+    Default::default()
+}
     }
 
     fn _state_Parent(&mut self, __e: &HSMDefaultForwardFrameEvent) {
@@ -186,24 +270,26 @@ match __e.message.as_str() {
 }
     }
 
-    fn _s_Parent_unhandled_event(&mut self, __e: &HSMDefaultForwardFrameEvent) {
-self.log.push("Parent:unhandled_event".to_string());
-    }
-
-    fn _s_Parent_get_log(&mut self, __e: &HSMDefaultForwardFrameEvent) -> Vec<String> {
-return self.log.clone();
+    fn _s_Parent_get_log(&mut self, __e: &HSMDefaultForwardFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.log.clone())); }
+return;;
     }
 
     fn _s_Parent_handled_event(&mut self, __e: &HSMDefaultForwardFrameEvent) {
 self.log.push("Parent:handled_event".to_string());
     }
 
+    fn _s_Parent_unhandled_event(&mut self, __e: &HSMDefaultForwardFrameEvent) {
+self.log.push("Parent:unhandled_event".to_string());
+    }
+
     fn _s_Child_handled_event(&mut self, __e: &HSMDefaultForwardFrameEvent) {
 self.log.push("Child:handled_event".to_string());
     }
 
-    fn _s_Child_get_log(&mut self, __e: &HSMDefaultForwardFrameEvent) -> Vec<String> {
-return self.log.clone();
+    fn _s_Child_get_log(&mut self, __e: &HSMDefaultForwardFrameEvent) {
+if let Some(ctx) = self._context_stack.last_mut() { ctx._return = Some(Box::new(self.log.clone())); }
+return;;
     }
 }
 

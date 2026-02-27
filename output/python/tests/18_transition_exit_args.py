@@ -4,7 +4,13 @@ class TransitionExitArgsFrameEvent:
     def __init__(self, message: str, parameters):
         self._message = message
         self._parameters = parameters
-        self._return = None
+
+
+class TransitionExitArgsFrameContext:
+    def __init__(self, event: TransitionExitArgsFrameEvent, default_return):
+        self.event = event
+        self._return = default_return
+        self._data = {}
 
 
 class TransitionExitArgsCompartment:
@@ -30,7 +36,7 @@ class TransitionExitArgsCompartment:
 class TransitionExitArgs:
     def __init__(self):
         self._state_stack = []
-        self._return_value = None
+        self._context_stack = []
         self.log =         []
         self.__compartment = TransitionExitArgsCompartment("Active")
         self.__next_compartment = None
@@ -78,21 +84,17 @@ class TransitionExitArgs:
 
     def leave(self):
         __e = TransitionExitArgsFrameEvent("leave", None)
+        __ctx = TransitionExitArgsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
+        self._context_stack.pop()
 
     def get_log(self) -> list:
-        self._return_value = None
         __e = TransitionExitArgsFrameEvent("get_log", None)
+        __ctx = TransitionExitArgsFrameContext(__e, None)
+        self._context_stack.append(__ctx)
         self.__kernel(__e)
-        return self._return_value
-
-    def _state_Done(self, __e):
-        if __e._message == "$>":
-            self.log.append("enter:done")
-        elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
-            return
+        return self._context_stack.pop()._return
 
     def _state_Active(self, __e):
         if __e._message == "<$":
@@ -100,14 +102,20 @@ class TransitionExitArgs:
             code = __e._parameters["1"]
             self.log.append(f"exit:{reason}:{code}")
         elif __e._message == "get_log":
-            self._return_value = self.log
-            __e._return = self._return_value
+            self._context_stack[-1]._return = self.log
             return
         elif __e._message == "leave":
             self.log.append("leaving")
             self.__compartment.exit_args = {str(i): v for i, v in enumerate(("cleanup", 42,))}
             __compartment = TransitionExitArgsCompartment("Done", parent_compartment=self.__compartment.copy())
             self.__transition(__compartment)
+
+    def _state_Done(self, __e):
+        if __e._message == "$>":
+            self.log.append("enter:done")
+        elif __e._message == "get_log":
+            self._context_stack[-1]._return = self.log
+            return
 
 
 def main():
