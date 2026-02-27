@@ -1,16 +1,16 @@
-# Negative Tests
+# Compile-Error Tests
 
-Tests that verify certain Frame constructs **fail** to compile in target languages.
+Tests that verify certain Frame constructs **transpile successfully** but **fail to compile** in target languages.
 
 ## Purpose
 
-These tests ensure that Frame V4's native pass-through correctly rejects
-Frame-specific syntax that is not valid in the target language.
+These tests ensure that Frame V4's native pass-through correctly passes through
+Frame-specific syntax verbatim, and that the target compiler correctly rejects it.
 
 ## Running
 
 ```bash
-./run_negative_tests.sh
+./run_tests.sh
 ```
 
 Output is TAP (Test Anything Protocol) format for CI integration.
@@ -26,16 +26,16 @@ Output is TAP (Test Anything Protocol) format for CI integration.
 |------|-------------|----------------|
 | 01_domain_frame_syntax | Frame `var x: type` in domain | Syntax error in all languages |
 
-## Adding New Negative Tests
+## Adding New Compile-Error Tests
 
-1. Create test file with invalid Frame construct
-2. Add comment explaining expected error
-3. Run `./run_negative_tests.sh` to verify it fails correctly
+1. Create test file with Frame construct that produces invalid native code
+2. Add comment explaining expected compile error
+3. Run `./run_tests.sh` to verify compilation fails correctly
 
 ## How It Works
 
 For each test:
-1. Transpile Frame → target language
+1. Transpile Frame → target language (should succeed)
 2. Attempt to compile the generated code
 3. **PASS** if compilation **fails** (expected)
 4. **FAIL** if compilation **succeeds** (unexpected)

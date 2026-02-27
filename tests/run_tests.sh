@@ -13,11 +13,14 @@
 #   ./run_tests.sh --help             # Show help
 #
 # DIRECTORY CONVENTION:
-#   common/<category>/   - Tests for all languages (.fpy, .fts, .frs, .fc)
-#   python/<category>/   - Python-only tests (.fpy)
-#   typescript/<category>/ - TypeScript-only tests (.fts)
-#   rust/<category>/     - Rust-only tests (.frs)
-#   c/<category>/        - C-only tests (.fc)
+#   common/positive/<category>/   - Positive tests (transpile OK, compile OK, run OK)
+#   common/compile-error/         - Compile-error tests (transpile OK, compile fails)
+#   common/transpile-error/       - Transpile-error tests (transpiler rejects)
+#   common/runtime-error/         - Runtime-error tests (transpile OK, compile OK, run fails)
+#   python/<category>/            - Python-only tests (.fpy)
+#   typescript/<category>/        - TypeScript-only tests (.fts)
+#   rust/<category>/              - Rust-only tests (.frs)
+#   c/<category>/                 - C-only tests (.fc)
 #
 # FILE MARKERS (in first 10 lines of test file):
 #   # @skip              - Skip this test
@@ -246,7 +249,14 @@ run_test() {
 run_category() {
     local category_dir="$1"
     local category_name=$(basename "$category_dir")
-    local scope=$(basename "$(dirname "$category_dir")")  # common, python, typescript, rust, c
+    # Get scope - handle nested structure (common/positive/<category>)
+    local parent_dir=$(dirname "$category_dir")
+    local scope=$(basename "$parent_dir")
+    # If parent is 'positive', scope is actually 'common'
+    if [ "$scope" = "positive" ]; then
+        scope="common"
+        category_name="positive/$category_name"
+    fi
 
     # Skip if filtering by category and doesn't match
     if [ -n "$FILTER_CATEGORY" ] && [ "$category_name" != "$FILTER_CATEGORY" ]; then
@@ -334,7 +344,25 @@ echo "Output:     $TEST_ENV_ROOT/output/"
 [ -n "$FILTER_CATEGORY" ] && echo "Category:   $FILTER_CATEGORY"
 
 # Discover and run all categories
-for scope_dir in "$SCRIPT_DIR/common" "$SCRIPT_DIR/python" "$SCRIPT_DIR/typescript" "$SCRIPT_DIR/rust" "$SCRIPT_DIR/c"; do
+# Handle common/positive/* separately (nested structure)
+if [ -d "$SCRIPT_DIR/common/positive" ]; then
+    for category_dir in "$SCRIPT_DIR/common/positive"/*/; do
+        [ -d "$category_dir" ] || continue
+        run_category "$category_dir"
+    done
+fi
+
+# Run specialized error test runners
+for error_type in compile-error transpile-error runtime-error; do
+    error_dir="$SCRIPT_DIR/common/$error_type"
+    if [ -d "$error_dir" ] && [ -x "$error_dir/run_tests.sh" ]; then
+        echo -e "${BLUE}=== common/$error_type ===${NC}"
+        "$error_dir/run_tests.sh" 2>&1 | grep -v "^TAP version" | grep -v "^1\.\." | sed 's/^ok /  PASS - /' | sed 's/^not ok /  FAIL - /'
+    fi
+done
+
+# Language-specific test directories
+for scope_dir in "$SCRIPT_DIR/python" "$SCRIPT_DIR/typescript" "$SCRIPT_DIR/rust" "$SCRIPT_DIR/c"; do
     [ -d "$scope_dir" ] || continue
 
     for category_dir in "$scope_dir"/*/; do

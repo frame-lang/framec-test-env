@@ -1,11 +1,12 @@
 #!/bin/bash
-# Negative Test Runner - TAP format output
-# Tests that certain Frame constructs FAIL to compile in target languages
+# Compile-Error Test Runner - TAP format output
+# Tests that certain Frame constructs transpile OK but FAIL to compile
+# (Frame passes through invalid native syntax that the target compiler rejects)
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FRAMEC="${FRAMEC:-$(cd "$SCRIPT_DIR/../../../.." && pwd)/target/release/framec}"
+FRAMEC="${FRAMEC:-/Users/marktruluck/projects/frame_transpiler/target/release/framec}"
 TMPDIR="${TMPDIR:-/tmp}"
 
 # Colors (disabled if not tty)
@@ -30,9 +31,9 @@ TEST_NUM=0
 # Output TAP header
 echo "TAP version 13"
 
-# Helper: run negative test
-# Args: $1=source_file $2=expected_error_pattern
-run_negative_test() {
+# Helper: run compile-error test
+# Args: $1=source_file
+run_compile_error_test() {
     local src="$1"
     local name="$(basename "$src")"
     local ext="${src##*.}"
@@ -95,7 +96,7 @@ run_negative_test() {
 # Find and run all negative tests
 for src in "$SCRIPT_DIR"/*.fc "$SCRIPT_DIR"/*.fpy "$SCRIPT_DIR"/*.fts "$SCRIPT_DIR"/*.frs; do
     [ -f "$src" ] || continue
-    run_negative_test "$src"
+    run_compile_error_test "$src"
 done
 
 # TAP plan (at end for streaming)
@@ -103,7 +104,7 @@ echo "1..$TEST_NUM"
 echo ""
 
 # Summary
-echo "# Negative tests: $PASS passed, $FAIL failed, $SKIP skipped"
+echo "# Compile-error tests: $PASS passed, $FAIL failed, $SKIP skipped"
 
 if [ $FAIL -gt 0 ]; then
     exit 1
