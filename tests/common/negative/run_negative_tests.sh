@@ -5,7 +5,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FRAMEC="${FRAMEC:-$(cd "$SCRIPT_DIR/../../../../.." && pwd)/target/release/framec}"
+FRAMEC="${FRAMEC:-$(cd "$SCRIPT_DIR/../../../.." && pwd)/target/release/framec}"
 TMPDIR="${TMPDIR:-/tmp}"
 
 # Colors (disabled if not tty)
