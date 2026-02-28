@@ -1,23 +1,141 @@
-// @skip - Persistence (pickle) not available in C target
 @@target c
 
-// NOTE: This test is skipped for C target because pickle-based persistence
-// is a Python-specific feature. C would need a different serialization approach.
+// Test: Persistence roundtrip - save, modify original, restore should have old values
+// Tests: Independent instances after restore
 
-@@system PersistRoundtripSkipped {
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@persist
+@@system PersistRoundtrip {
     interface:
-        is_alive(): bool
+        go_active()
+        go_idle()
+        set_counter(n: int)
+        get_counter(): int
+        is_active(): int
+
+    domain:
+        counter: int = 0
 
     machine:
-        $Start {
-            is_alive(): bool {
-                return 1
+        $Idle {
+            go_active() {
+                -> $Active
+            }
+
+            go_idle() {
+                // already idle
+            }
+
+            set_counter(n: int) {
+                self->counter = n;
+            }
+
+            get_counter(): int {
+                return self->counter;
+            }
+
+            is_active(): int {
+                return 0;
+            }
+        }
+
+        $Active {
+            go_active() {
+                // already active
+            }
+
+            go_idle() {
+                -> $Idle
+            }
+
+            set_counter(n: int) {
+                self->counter = n * 2;  // doubled in active
+            }
+
+            get_counter(): int {
+                return self->counter;
+            }
+
+            is_active(): int {
+                return 1;
             }
         }
 }
 
 int main() {
-    printf("=== Test 24: Persist Roundtrip (SKIPPED - pickle not available in C) ===\n");
-    printf("SKIP: Persistence tests require Python pickle\n");
-    return 0;
+    printf("=== Test 24: Persist Roundtrip (cJSON) ===\n");
+    int pass = 1;
+
+    // Test 1: Build up state
+    PersistRoundtrip* s1 = @@PersistRoundtrip();
+    PersistRoundtrip_set_counter(s1, 5);
+    PersistRoundtrip_go_active(s1);
+    PersistRoundtrip_set_counter(s1, 3);  // Should be 6 (doubled)
+
+    if (!PersistRoundtrip_is_active(s1)) {
+        printf("FAIL: Expected active state\n");
+        pass = 0;
+    }
+    if (PersistRoundtrip_get_counter(s1) != 6) {
+        printf("FAIL: Expected counter 6, got %d\n", PersistRoundtrip_get_counter(s1));
+        pass = 0;
+    }
+    printf("1. Before save: active=%d, counter=%d\n",
+           PersistRoundtrip_is_active(s1), PersistRoundtrip_get_counter(s1));
+
+    // Test 2: Save state
+    char* json = PersistRoundtrip_save_state(s1);
+    printf("2. Saved JSON: %s\n", json);
+
+    // Test 3: Restore to new instance
+    PersistRoundtrip* s2 = PersistRoundtrip_restore_state(json);
+    free(json);
+
+    if (!PersistRoundtrip_is_active(s2)) {
+        printf("FAIL: Restored - expected active\n");
+        pass = 0;
+    }
+    if (PersistRoundtrip_get_counter(s2) != 6) {
+        printf("FAIL: Restored - expected 6, got %d\n", PersistRoundtrip_get_counter(s2));
+        pass = 0;
+    }
+    printf("3. Restored: active=%d, counter=%d\n",
+           PersistRoundtrip_is_active(s2), PersistRoundtrip_get_counter(s2));
+
+    // Test 4: Modify restored instance - should work independently
+    PersistRoundtrip_set_counter(s2, 2);  // Should be 4 (doubled in Active)
+    if (PersistRoundtrip_get_counter(s2) != 4) {
+        printf("FAIL: Expected 4 after set_counter(2), got %d\n", PersistRoundtrip_get_counter(s2));
+        pass = 0;
+    }
+    printf("4. After set_counter(2): %d\n", PersistRoundtrip_get_counter(s2));
+
+    // Test 5: Original unchanged
+    if (PersistRoundtrip_get_counter(s1) != 6) {
+        printf("FAIL: Original should still be 6, got %d\n", PersistRoundtrip_get_counter(s1));
+        pass = 0;
+    }
+    printf("5. Original unchanged: %d\n", PersistRoundtrip_get_counter(s1));
+
+    // Test 6: Transitions work after restore
+    PersistRoundtrip_go_idle(s2);
+    PersistRoundtrip_set_counter(s2, 10);  // Not doubled in Idle
+    if (PersistRoundtrip_get_counter(s2) != 10) {
+        printf("FAIL: Expected 10 in Idle, got %d\n", PersistRoundtrip_get_counter(s2));
+        pass = 0;
+    }
+    printf("6. After go_idle: active=%d, counter=%d\n",
+           PersistRoundtrip_is_active(s2), PersistRoundtrip_get_counter(s2));
+
+    PersistRoundtrip_destroy(s1);
+    PersistRoundtrip_destroy(s2);
+
+    if (pass) {
+        printf("PASS: persist_roundtrip\n");
+    }
+    return pass ? 0 : 1;
 }

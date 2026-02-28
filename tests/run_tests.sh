@@ -23,9 +23,9 @@
 #   c/<category>/                 - C-only tests (.fc)
 #
 # FILE MARKERS (in first 10 lines of test file):
-#   # @skip              - Skip this test
-#   # @known-fail        - Expected to fail (still runs, doesn't count as failure)
-#   # @timeout <seconds> - Custom timeout (default: 30)
+#   // @@skip              - Skip this test
+#   // @@known-fail        - Expected to fail (still runs, doesn't count as failure)
+#   // @@timeout <seconds> - Custom timeout (default: 30)
 #
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -124,16 +124,16 @@ lang_to_outext() {
     esac
 }
 
-# Check for markers in file
+# Check for markers in file (supports both @marker and @@marker for compatibility)
 check_marker() {
     local file="$1"
     local marker="$2"
-    head -10 "$file" 2>/dev/null | grep -q "@$marker"
+    head -10 "$file" 2>/dev/null | grep -qE "@@$marker|@$marker"
 }
 
 get_timeout() {
     local file="$1"
-    local timeout=$(head -10 "$file" 2>/dev/null | grep "@timeout" | sed 's/.*@timeout[[:space:]]*\([0-9]*\).*/\1/')
+    local timeout=$(head -10 "$file" 2>/dev/null | grep -E "@@timeout|@timeout" | sed 's/.*@@\?timeout[[:space:]]*\([0-9]*\).*/\1/')
     echo "${timeout:-30}"
 }
 
@@ -215,8 +215,16 @@ run_test() {
             ;;
         c)
             # Compile C with gcc
+            # Include cJSON for @@persist support (brew install cjson)
+            # Prioritize /opt/homebrew (arm64) over /usr/local (x86_64)
             local c_bin="$C_OUT/${test_name}"
-            if gcc -o "$c_bin" "$out_file" 2>&1; then
+            local cjson_flags=""
+            if [ -d "/opt/homebrew/include/cjson" ]; then
+                cjson_flags="-I/opt/homebrew/include -L/opt/homebrew/lib -lcjson"
+            elif [ -d "/usr/local/include/cjson" ]; then
+                cjson_flags="-I/usr/local/include -L/usr/local/lib -lcjson"
+            fi
+            if gcc -o "$c_bin" "$out_file" $cjson_flags 2>&1; then
                 run_output=$("$c_bin" 2>&1) || run_status=$?
             else
                 run_status=1

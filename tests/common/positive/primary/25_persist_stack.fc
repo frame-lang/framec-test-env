@@ -1,23 +1,161 @@
-// @skip - Persistence (pickle) not available in C target
 @@target c
 
-// NOTE: This test is skipped for C target because pickle-based persistence
-// is a Python-specific feature. C would need a different serialization approach.
+// Test: Persistence with state stack (push$/pop$)
+// Tests: Stack is preserved across save/restore
 
-@@system PersistStackSkipped {
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@persist
+@@system PersistStack {
     interface:
-        is_alive(): bool
+        push_and_go()
+        pop_back()
+        get_depth(): int
+        get_state_num(): int
+
+    domain:
+        depth: int = 0
 
     machine:
         $Start {
-            is_alive(): bool {
-                return 1
+            push_and_go() {
+                self->depth = self->depth + 1;
+                push$
+                -> $Middle
+            }
+
+            pop_back() {
+                // nothing to pop
+            }
+
+            get_depth(): int {
+                return self->depth;
+            }
+
+            get_state_num(): int {
+                return 1;  // Start = 1
+            }
+        }
+
+        $Middle {
+            push_and_go() {
+                self->depth = self->depth + 1;
+                push$
+                -> $End
+            }
+
+            pop_back() {
+                self->depth = self->depth - 1;
+                -> pop$
+            }
+
+            get_depth(): int {
+                return self->depth;
+            }
+
+            get_state_num(): int {
+                return 2;  // Middle = 2
+            }
+        }
+
+        $End {
+            push_and_go() {
+                // can't go further
+            }
+
+            pop_back() {
+                self->depth = self->depth - 1;
+                -> pop$
+            }
+
+            get_depth(): int {
+                return self->depth;
+            }
+
+            get_state_num(): int {
+                return 3;  // End = 3
             }
         }
 }
 
 int main() {
-    printf("=== Test 25: Persist Stack (SKIPPED - pickle not available in C) ===\n");
-    printf("SKIP: Persistence tests require Python pickle\n");
-    return 0;
+    printf("=== Test 25: Persist Stack (cJSON) ===\n");
+    int pass = 1;
+
+    // Test 1: Build up a stack
+    PersistStack* s1 = @@PersistStack();
+    if (PersistStack_get_state_num(s1) != 1) {
+        printf("FAIL: Expected state 1 (Start), got %d\n", PersistStack_get_state_num(s1));
+        pass = 0;
+    }
+
+    PersistStack_push_and_go(s1);  // Start -> Middle (push Start)
+    if (PersistStack_get_state_num(s1) != 2 || PersistStack_get_depth(s1) != 1) {
+        printf("FAIL: Expected state 2, depth 1\n");
+        pass = 0;
+    }
+
+    PersistStack_push_and_go(s1);  // Middle -> End (push Middle)
+    if (PersistStack_get_state_num(s1) != 3 || PersistStack_get_depth(s1) != 2) {
+        printf("FAIL: Expected state 3, depth 2\n");
+        pass = 0;
+    }
+    printf("1. Built stack: state=%d, depth=%d\n",
+           PersistStack_get_state_num(s1), PersistStack_get_depth(s1));
+
+    // Test 2: Save state (includes stack)
+    char* json = PersistStack_save_state(s1);
+    printf("2. Saved JSON: %s\n", json);
+
+    // Test 3: Restore and verify state
+    PersistStack* s2 = PersistStack_restore_state(json);
+    free(json);
+
+    if (PersistStack_get_state_num(s2) != 3) {
+        printf("FAIL: Restored - expected state 3, got %d\n", PersistStack_get_state_num(s2));
+        pass = 0;
+    }
+    if (PersistStack_get_depth(s2) != 2) {
+        printf("FAIL: Restored - expected depth 2, got %d\n", PersistStack_get_depth(s2));
+        pass = 0;
+    }
+    printf("3. Restored: state=%d, depth=%d\n",
+           PersistStack_get_state_num(s2), PersistStack_get_depth(s2));
+
+    // Test 4: Pop should work after restore
+    PersistStack_pop_back(s2);  // End -> Middle (pop)
+    if (PersistStack_get_state_num(s2) != 2) {
+        printf("FAIL: After pop - expected state 2, got %d\n", PersistStack_get_state_num(s2));
+        pass = 0;
+    }
+    if (PersistStack_get_depth(s2) != 1) {
+        printf("FAIL: After pop - expected depth 1, got %d\n", PersistStack_get_depth(s2));
+        pass = 0;
+    }
+    printf("4. After pop: state=%d, depth=%d\n",
+           PersistStack_get_state_num(s2), PersistStack_get_depth(s2));
+
+    // Test 5: Pop again
+    PersistStack_pop_back(s2);  // Middle -> Start (pop)
+    if (PersistStack_get_state_num(s2) != 1) {
+        printf("FAIL: After 2nd pop - expected state 1, got %d\n", PersistStack_get_state_num(s2));
+        pass = 0;
+    }
+    if (PersistStack_get_depth(s2) != 0) {
+        printf("FAIL: After 2nd pop - expected depth 0, got %d\n", PersistStack_get_depth(s2));
+        pass = 0;
+    }
+    printf("5. After 2nd pop: state=%d, depth=%d\n",
+           PersistStack_get_state_num(s2), PersistStack_get_depth(s2));
+
+    PersistStack_destroy(s1);
+    PersistStack_destroy(s2);
+
+    if (pass) {
+        printf("PASS: persist_stack\n");
+    }
+    return pass ? 0 : 1;
 }

@@ -119,9 +119,9 @@ Add markers in the first 10 lines of a test file to control behavior:
 
 ```frame
 @@target python_3
-# @skip - Do not run this test
-# @known-fail - Expected to fail (tracked bug)
-# @timeout 60 - Custom timeout in seconds (default: 30)
+// @@skip - Do not run this test
+// @@known-fail - Expected to fail (tracked bug)
+// @@timeout 60 - Custom timeout in seconds (default: 30)
 
 @@system MyTest {
     ...
@@ -132,9 +132,9 @@ Add markers in the first 10 lines of a test file to control behavior:
 
 | Marker | Effect |
 |--------|--------|
-| `# @skip` | Test is skipped entirely |
-| `# @known-fail` | Test runs but failure doesn't count against pass rate |
-| `# @timeout N` | Override default 30-second timeout |
+| `// @@skip` | Test is skipped entirely |
+| `// @@known-fail` | Test runs but failure doesn't count against pass rate |
+| `// @@timeout N` | Override default 30-second timeout |
 
 ## Test Counts
 
@@ -230,9 +230,9 @@ Generated files are written to:
 - Ensure file is in a category subdirectory, not directly in `common/`
 
 ### Test timing out?
-- Add `# @timeout 60` marker for longer timeout
+- Add `// @@timeout 60` marker for longer timeout
 - Check for infinite loops in test
 
 ### Need to skip a broken test?
-- Add `# @skip` marker temporarily
-- Or `# @known-fail` if it's a tracked bug
+- Add `// @@skip` marker temporarily
+- Or `// @@known-fail` if it's a tracked bug

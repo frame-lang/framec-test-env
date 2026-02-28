@@ -74,7 +74,7 @@ docker compose -f docker/docker-compose.yml up --build
 
 For complete documentation on:
 - Adding new tests
-- Test markers (@skip, @known-fail)
+- Test markers (@@skip, @@known-fail)
 - Directory conventions
 - Troubleshooting
 

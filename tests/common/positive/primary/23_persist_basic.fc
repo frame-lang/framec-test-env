@@ -1,23 +1,133 @@
-// @skip - Persistence (pickle) not available in C target
 @@target c
 
-// NOTE: This test is skipped for C target because pickle-based persistence
-// is a Python-specific feature. C would need a different serialization approach.
+// Test: Basic persistence with save_state/restore_state using cJSON
+// Tests: save_state returns JSON, restore_state recreates instance
 
-@@system PersistTestSkipped {
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@persist
+@@system PersistBasic {
     interface:
-        is_alive(): bool
+        set_value(v: int)
+        get_value(): int
+        go_active()
+        go_idle()
+
+    domain:
+        value: int = 0
 
     machine:
-        $Start {
-            is_alive(): bool {
-                return 1
+        $Idle {
+            set_value(v: int) {
+                self->value = v;
+            }
+
+            get_value(): int {
+                return self->value;
+            }
+
+            go_active() {
+                -> $Active
+            }
+
+            go_idle() {
+                // Already idle
+            }
+        }
+
+        $Active {
+            set_value(v: int) {
+                self->value = v * 2;  // Double in active state
+            }
+
+            get_value(): int {
+                return self->value;
+            }
+
+            go_active() {
+                // Already active
+            }
+
+            go_idle() {
+                -> $Idle
             }
         }
 }
 
 int main() {
-    printf("=== Test 23: Persist Basic (SKIPPED - pickle not available in C) ===\n");
-    printf("SKIP: Persistence tests require Python pickle\n");
-    return 0;
+    printf("=== Test 23: Persist Basic (cJSON) ===\n");
+    int pass = 1;
+
+    // Test 1: Create and modify system
+    PersistBasic* s1 = @@PersistBasic();
+    PersistBasic_set_value(s1, 10);
+    PersistBasic_go_active(s1);
+    PersistBasic_set_value(s1, 5);  // Should be doubled to 10 in Active state
+
+    int v1 = PersistBasic_get_value(s1);
+    if (v1 != 10) {
+        printf("FAIL: Expected 10 after doubling, got %d\n", v1);
+        pass = 0;
+    } else {
+        printf("1. Value after set_value(5) in Active: %d\n", v1);
+    }
+
+    // Test 2: Save state
+    char* json = PersistBasic_save_state(s1);
+    if (!json) {
+        printf("FAIL: save_state returned NULL\n");
+        pass = 0;
+    } else {
+        printf("2. Saved state: %s\n", json);
+    }
+
+    // Test 3: Restore state
+    PersistBasic* s2 = PersistBasic_restore_state(json);
+    free(json);
+
+    if (!s2) {
+        printf("FAIL: restore_state returned NULL\n");
+        pass = 0;
+    } else {
+        int v2 = PersistBasic_get_value(s2);
+        if (v2 != 10) {
+            printf("FAIL: Restored value expected 10, got %d\n", v2);
+            pass = 0;
+        } else {
+            printf("3. Restored value: %d\n", v2);
+        }
+
+        // Test 4: Verify state is preserved (Active state doubles)
+        PersistBasic_set_value(s2, 3);  // Should be doubled to 6
+        int v3 = PersistBasic_get_value(s2);
+        if (v3 != 6) {
+            printf("FAIL: Expected 6 after set_value(3) in Active, got %d\n", v3);
+            pass = 0;
+        } else {
+            printf("4. After set_value(3) in Active: %d\n", v3);
+        }
+
+        // Test 5: Transitions work after restore
+        PersistBasic_go_idle(s2);
+        PersistBasic_set_value(s2, 4);  // Not doubled in Idle
+        int v4 = PersistBasic_get_value(s2);
+        if (v4 != 4) {
+            printf("FAIL: Expected 4 in Idle, got %d\n", v4);
+            pass = 0;
+        } else {
+            printf("5. After go_idle, set_value(4): %d\n", v4);
+        }
+
+        PersistBasic_destroy(s2);
+    }
+
+    PersistBasic_destroy(s1);
+
+    if (pass) {
+        printf("PASS: persist_basic\n");
+    }
+    return pass ? 0 : 1;
 }
