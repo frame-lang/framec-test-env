@@ -7,7 +7,8 @@
 # See README.md for full documentation.
 #
 # USAGE:
-#   ./run_tests.sh                    # Run all tests
+#   ./run_tests.sh                    # Run all tests (sequential)
+#   ./run_tests.sh --parallel         # Run all tests in parallel
 #   ./run_tests.sh --python           # Run only Python tests
 #   ./run_tests.sh --category primary # Run only primary category
 #   ./run_tests.sh --help             # Show help
@@ -59,6 +60,8 @@ FILTER_LANG=""
 FILTER_CATEGORY=""
 VERBOSE=false
 COMPILE_ONLY=false
+PARALLEL=false
+JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # Parse arguments
 while [[ $# -gt 0 ]]; do
@@ -70,6 +73,8 @@ while [[ $# -gt 0 ]]; do
         --category|-c) FILTER_CATEGORY="$2"; shift ;;
         --verbose|-v) VERBOSE=true ;;
         --compile-only) COMPILE_ONLY=true ;;
+        --parallel|-p) PARALLEL=true ;;
+        --jobs|-j) JOBS="$2"; shift ;;
         --help|-h)
             echo "Frame V4 Test Runner"
             echo ""
@@ -83,6 +88,8 @@ while [[ $# -gt 0 ]]; do
             echo "  --category, -c NAME Run only tests in category NAME"
             echo "  --verbose, -v       Show detailed output"
             echo "  --compile-only      Only compile, don't run"
+            echo "  --parallel, -p      Run tests in parallel (all languages + all tests)"
+            echo "  --jobs, -j N        Number of parallel jobs (default: $JOBS)"
             echo "  --help, -h          Show this help"
             exit 0
             ;;
@@ -93,6 +100,10 @@ done
 
 # Create output directories
 mkdir -p "$PYTHON_OUT" "$TS_OUT" "$RUST_OUT" "$C_OUT"
+
+# Temp directory for parallel results
+RESULTS_DIR=$(mktemp -d)
+trap "rm -rf $RESULTS_DIR" EXIT
 
 # Language to framec target
 lang_to_target() {
@@ -124,6 +135,16 @@ lang_to_outext() {
     esac
 }
 
+# Language to source extension
+lang_to_srcext() {
+    case $1 in
+        python) echo "fpy" ;;
+        typescript) echo "fts" ;;
+        rust) echo "frs" ;;
+        c) echo "fc" ;;
+    esac
+}
+
 # Check for markers in file (supports both @marker and @@marker for compatibility)
 check_marker() {
     local file="$1"
@@ -151,10 +172,12 @@ get_counter() {
     eval "echo \$${lang}_${counter}"
 }
 
-# Run a single test
-run_test() {
+# Run a single test (used in both sequential and parallel modes)
+# In parallel mode, writes result to file instead of updating counters
+run_single_test() {
     local test_file="$1"
     local lang="$2"
+    local result_file="${3:-}"  # Optional: for parallel mode
     local test_name=$(basename "$test_file" | sed 's/\.f[a-z]*$//')
     local target=$(lang_to_target "$lang")
     local out_dir=$(lang_to_outdir "$lang")
@@ -164,8 +187,12 @@ run_test() {
 
     # Check markers
     if check_marker "$test_file" "skip"; then
-        echo -e "  ${YELLOW}SKIP${NC} [$lang] $test_name"
-        inc_counter "$lang" "skip"
+        if [ -n "$result_file" ]; then
+            echo "skip" > "$result_file"
+        else
+            echo -e "  ${YELLOW}SKIP${NC} [$lang] $test_name"
+            inc_counter "$lang" "skip"
+        fi
         return 0
     fi
 
@@ -181,21 +208,34 @@ run_test() {
 
     if [ $compile_status -ne 0 ] || [ ! -f "$out_file" ]; then
         if $is_known_fail; then
-            echo -e "  ${YELLOW}KNOWN-FAIL${NC} [$lang] $test_name (compile)"
-            inc_counter "$lang" "known"
-        else
-            echo -e "  ${RED}FAIL${NC} [$lang] $test_name (compile error)"
-            if $VERBOSE; then
-                echo "$compile_output" | head -5 | sed 's/^/    /'
+            if [ -n "$result_file" ]; then
+                echo "known" > "$result_file"
+            else
+                echo -e "  ${YELLOW}KNOWN-FAIL${NC} [$lang] $test_name (compile)"
+                inc_counter "$lang" "known"
             fi
-            inc_counter "$lang" "fail"
+        else
+            if [ -n "$result_file" ]; then
+                echo "fail" > "$result_file"
+                echo "$compile_output" >> "$result_file"
+            else
+                echo -e "  ${RED}FAIL${NC} [$lang] $test_name (compile error)"
+                if $VERBOSE; then
+                    echo "$compile_output" | head -5 | sed 's/^/    /'
+                fi
+                inc_counter "$lang" "fail"
+            fi
         fi
         return 1
     fi
 
     if $COMPILE_ONLY; then
-        echo -e "  ${GREEN}COMPILED${NC} [$lang] $test_name"
-        inc_counter "$lang" "pass"
+        if [ -n "$result_file" ]; then
+            echo "pass" > "$result_file"
+        else
+            echo -e "  ${GREEN}COMPILED${NC} [$lang] $test_name"
+            inc_counter "$lang" "pass"
+        fi
         return 0
     fi
 
@@ -215,8 +255,6 @@ run_test() {
             ;;
         c)
             # Compile C with gcc
-            # Include cJSON for @@persist support (brew install cjson)
-            # Prioritize /opt/homebrew (arm64) over /usr/local (x86_64)
             local c_bin="$C_OUT/${test_name}"
             local cjson_flags=""
             if [ -d "/opt/homebrew/include/cjson" ]; then
@@ -235,25 +273,134 @@ run_test() {
 
     # Check for PASS in output (legacy) or TAP ok format
     if echo "$run_output" | grep -qE "(^ok |PASS)"; then
-        echo -e "  ${GREEN}PASS${NC} [$lang] $test_name"
-        inc_counter "$lang" "pass"
+        if [ -n "$result_file" ]; then
+            echo "pass" > "$result_file"
+        else
+            echo -e "  ${GREEN}PASS${NC} [$lang] $test_name"
+            inc_counter "$lang" "pass"
+        fi
         return 0
     else
         if $is_known_fail; then
-            echo -e "  ${YELLOW}KNOWN-FAIL${NC} [$lang] $test_name"
-            inc_counter "$lang" "known"
-        else
-            echo -e "  ${RED}FAIL${NC} [$lang] $test_name"
-            if $VERBOSE; then
-                echo "$run_output" | head -5 | sed 's/^/    /'
+            if [ -n "$result_file" ]; then
+                echo "known" > "$result_file"
+            else
+                echo -e "  ${YELLOW}KNOWN-FAIL${NC} [$lang] $test_name"
+                inc_counter "$lang" "known"
             fi
-            inc_counter "$lang" "fail"
+        else
+            if [ -n "$result_file" ]; then
+                echo "fail" > "$result_file"
+                echo "$run_output" >> "$result_file"
+            else
+                echo -e "  ${RED}FAIL${NC} [$lang] $test_name"
+                if $VERBOSE; then
+                    echo "$run_output" | head -5 | sed 's/^/    /'
+                fi
+                inc_counter "$lang" "fail"
+            fi
         fi
         return 1
     fi
 }
 
-# Discover and run tests in a directory
+# Collect all test files for a language
+collect_tests_for_lang() {
+    local lang="$1"
+    local ext=$(lang_to_srcext "$lang")
+    local tests=""
+
+    # Common tests
+    if [ -d "$SCRIPT_DIR/common/positive" ]; then
+        for category_dir in "$SCRIPT_DIR/common/positive"/*/; do
+            [ -d "$category_dir" ] || continue
+            if [ -n "$FILTER_CATEGORY" ]; then
+                local cat_name=$(basename "$category_dir")
+                [ "$cat_name" != "$FILTER_CATEGORY" ] && continue
+            fi
+            for f in "$category_dir"/*.$ext; do
+                [ -f "$f" ] && tests="$tests$f"$'\n'
+            done
+        done
+    fi
+
+    # Language-specific tests
+    if [ -d "$SCRIPT_DIR/$lang" ]; then
+        for category_dir in "$SCRIPT_DIR/$lang"/*/; do
+            [ -d "$category_dir" ] || continue
+            if [ -n "$FILTER_CATEGORY" ]; then
+                local cat_name=$(basename "$category_dir")
+                [ "$cat_name" != "$FILTER_CATEGORY" ] && continue
+            fi
+            for f in "$category_dir"/*.$ext; do
+                [ -f "$f" ] && tests="$tests$f"$'\n'
+            done
+        done
+    fi
+
+    echo "$tests" | sort -u | grep -v '^$'
+}
+
+# Run all tests for a language in parallel (within the language)
+run_lang_parallel() {
+    local lang="$1"
+    local lang_results_dir="$RESULTS_DIR/$lang"
+    mkdir -p "$lang_results_dir"
+
+    local tests=$(collect_tests_for_lang "$lang")
+    [ -z "$tests" ] && return 0
+
+    local test_count=$(echo "$tests" | wc -l | tr -d ' ')
+    echo -e "${BLUE}[$lang] Running $test_count tests with $JOBS parallel jobs...${NC}"
+
+    # Export necessary variables for helper script
+    export FRAMEC TEST_ENV_ROOT
+
+    # Use helper script with xargs -P for parallel execution
+    echo "$tests" | while read test_file; do
+        [ -z "$test_file" ] && continue
+        local test_name=$(basename "$test_file" | sed 's/\.f[a-z]*$//')
+        echo "$test_file $lang $lang_results_dir/${test_name}.result"
+    done | xargs -P "$JOBS" -L 1 "$SCRIPT_DIR/run_single_test.sh"
+}
+
+# Aggregate results from parallel run
+aggregate_results() {
+    local lang="$1"
+    local lang_results_dir="$RESULTS_DIR/$lang"
+
+    [ -d "$lang_results_dir" ] || return
+
+    for result_file in "$lang_results_dir"/*.result; do
+        [ -f "$result_file" ] || continue
+        local test_name=$(basename "$result_file" .result)
+        local result=$(head -1 "$result_file")
+
+        case "$result" in
+            pass)
+                echo -e "  ${GREEN}PASS${NC} [$lang] $test_name"
+                inc_counter "$lang" "pass"
+                ;;
+            fail)
+                echo -e "  ${RED}FAIL${NC} [$lang] $test_name"
+                if $VERBOSE; then
+                    tail -n +2 "$result_file" | head -5 | sed 's/^/    /'
+                fi
+                inc_counter "$lang" "fail"
+                ;;
+            skip)
+                echo -e "  ${YELLOW}SKIP${NC} [$lang] $test_name"
+                inc_counter "$lang" "skip"
+                ;;
+            known)
+                echo -e "  ${YELLOW}KNOWN-FAIL${NC} [$lang] $test_name"
+                inc_counter "$lang" "known"
+                ;;
+        esac
+    done
+}
+
+# Discover and run tests in a directory (sequential mode)
 run_category() {
     local category_dir="$1"
     local category_name=$(basename "$category_dir")
@@ -336,7 +483,7 @@ run_category() {
             # Skip if file doesn't exist for this language
             [ -f "$test_file" ] || continue
 
-            run_test "$test_file" "$lang"
+            run_single_test "$test_file" "$lang"
         done
     done
 }
@@ -350,34 +497,105 @@ echo "Test root:  $SCRIPT_DIR"
 echo "Output:     $TEST_ENV_ROOT/output/"
 [ -n "$FILTER_LANG" ] && echo "Language:   $FILTER_LANG"
 [ -n "$FILTER_CATEGORY" ] && echo "Category:   $FILTER_CATEGORY"
+$PARALLEL && echo "Mode:       Parallel ($JOBS jobs)"
 
-# Discover and run all categories
-# Handle common/positive/* separately (nested structure)
-if [ -d "$SCRIPT_DIR/common/positive" ]; then
-    for category_dir in "$SCRIPT_DIR/common/positive"/*/; do
-        [ -d "$category_dir" ] || continue
-        run_category "$category_dir"
+if $PARALLEL; then
+    # ========================================
+    # PARALLEL MODE
+    # ========================================
+    echo ""
+    echo -e "${BLUE}Running all languages in parallel...${NC}"
+
+    # Determine which languages to run
+    if [ -n "$FILTER_LANG" ]; then
+        languages="$FILTER_LANG"
+    else
+        languages="python typescript rust c"
+    fi
+
+    # Phase 1: Transpile all tests first (all languages in parallel)
+    echo -e "${BLUE}Phase 1: Transpiling all tests...${NC}"
+    for lang in $languages; do
+        local tests=$(collect_tests_for_lang "$lang")
+        [ -z "$tests" ] && continue
+        local target=$(lang_to_target "$lang")
+        local out_dir=$(lang_to_outdir "$lang")
+        echo "$tests" | xargs -P "$JOBS" -I {} "$FRAMEC" compile -l "$target" -o "$out_dir" {} 2>/dev/null &
+    done
+    wait
+
+    # Phase 2: Build Rust binaries (single cargo build for all)
+    if echo "$languages" | grep -q "rust"; then
+        echo -e "${BLUE}[rust] Building all binaries...${NC}"
+        (cd "$RUST_CRATE" && cargo build --release --bins --jobs "$JOBS" 2>&1 | grep -E "Compiling|Finished|error" || true)
+    fi
+
+    echo -e "${BLUE}Phase 2: Running all tests...${NC}"
+
+    # Run all languages in parallel (each language runs its tests in parallel internally)
+    pids=""
+    for lang in $languages; do
+        (
+            run_lang_parallel "$lang"
+        ) &
+        pids="$pids $!"
+    done
+
+    # Wait for all languages to complete
+    for pid in $pids; do
+        wait $pid 2>/dev/null || true
+    done
+
+    echo ""
+    echo -e "${BLUE}Aggregating results...${NC}"
+
+    # Aggregate results from all languages
+    for lang in $languages; do
+        aggregate_results "$lang"
+    done
+
+    # Run error tests (these are usually quick and sequential is fine)
+    for error_type in compile-error transpile-error runtime-error; do
+        error_dir="$SCRIPT_DIR/common/$error_type"
+        if [ -d "$error_dir" ] && [ -x "$error_dir/run_tests.sh" ]; then
+            echo -e "${BLUE}=== common/$error_type ===${NC}"
+            "$error_dir/run_tests.sh" 2>&1 | grep -v "^TAP version" | grep -v "^1\.\." | sed 's/^ok /  PASS - /' | sed 's/^not ok /  FAIL - /'
+        fi
+    done
+
+else
+    # ========================================
+    # SEQUENTIAL MODE (original behavior)
+    # ========================================
+
+    # Discover and run all categories
+    # Handle common/positive/* separately (nested structure)
+    if [ -d "$SCRIPT_DIR/common/positive" ]; then
+        for category_dir in "$SCRIPT_DIR/common/positive"/*/; do
+            [ -d "$category_dir" ] || continue
+            run_category "$category_dir"
+        done
+    fi
+
+    # Run specialized error test runners
+    for error_type in compile-error transpile-error runtime-error; do
+        error_dir="$SCRIPT_DIR/common/$error_type"
+        if [ -d "$error_dir" ] && [ -x "$error_dir/run_tests.sh" ]; then
+            echo -e "${BLUE}=== common/$error_type ===${NC}"
+            "$error_dir/run_tests.sh" 2>&1 | grep -v "^TAP version" | grep -v "^1\.\." | sed 's/^ok /  PASS - /' | sed 's/^not ok /  FAIL - /'
+        fi
+    done
+
+    # Language-specific test directories
+    for scope_dir in "$SCRIPT_DIR/python" "$SCRIPT_DIR/typescript" "$SCRIPT_DIR/rust" "$SCRIPT_DIR/c"; do
+        [ -d "$scope_dir" ] || continue
+
+        for category_dir in "$scope_dir"/*/; do
+            [ -d "$category_dir" ] || continue
+            run_category "$category_dir"
+        done
     done
 fi
-
-# Run specialized error test runners
-for error_type in compile-error transpile-error runtime-error; do
-    error_dir="$SCRIPT_DIR/common/$error_type"
-    if [ -d "$error_dir" ] && [ -x "$error_dir/run_tests.sh" ]; then
-        echo -e "${BLUE}=== common/$error_type ===${NC}"
-        "$error_dir/run_tests.sh" 2>&1 | grep -v "^TAP version" | grep -v "^1\.\." | sed 's/^ok /  PASS - /' | sed 's/^not ok /  FAIL - /'
-    fi
-done
-
-# Language-specific test directories
-for scope_dir in "$SCRIPT_DIR/python" "$SCRIPT_DIR/typescript" "$SCRIPT_DIR/rust" "$SCRIPT_DIR/c"; do
-    [ -d "$scope_dir" ] || continue
-
-    for category_dir in "$scope_dir"/*/; do
-        [ -d "$category_dir" ] || continue
-        run_category "$category_dir"
-    done
-done
 
 # Summary
 echo ""

@@ -1,0 +1,110 @@
+#!/bin/bash
+#
+# Helper script to run a single Frame test
+# Called by run_tests.sh in parallel mode
+#
+# Usage: ./run_single_test.sh <test_file> <lang> <result_file>
+#
+
+test_file="$1"
+lang="$2"
+result_file="$3"
+
+# Environment (inherited from parent)
+FRAMEC="${FRAMEC:-/Users/marktruluck/projects/frame_transpiler/target/release/framec}"
+TEST_ENV_ROOT="${TEST_ENV_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
+
+PYTHON_OUT="$TEST_ENV_ROOT/output/python/tests"
+TS_OUT="$TEST_ENV_ROOT/output/typescript/tests"
+RUST_CRATE="$TEST_ENV_ROOT/output/rust"
+RUST_OUT="$RUST_CRATE/tests"
+C_OUT="$TEST_ENV_ROOT/output/c/tests"
+
+test_name=$(basename "$test_file" | sed 's/\.f[a-z]*$//')
+
+# Language mappings
+case $lang in
+    python) target="python_3"; out_dir="$PYTHON_OUT"; out_ext="py" ;;
+    typescript) target="typescript"; out_dir="$TS_OUT"; out_ext="ts" ;;
+    rust) target="rust"; out_dir="$RUST_OUT"; out_ext="rs" ;;
+    c) target="c"; out_dir="$C_OUT"; out_ext="c" ;;
+esac
+
+out_file="$out_dir/${test_name}.${out_ext}"
+
+# Check skip marker
+if head -10 "$test_file" 2>/dev/null | grep -qE "@@skip|@skip"; then
+    echo "skip" > "$result_file"
+    exit 0
+fi
+
+# Check known-fail marker
+is_known_fail=false
+if head -10 "$test_file" 2>/dev/null | grep -qE "@@known-fail|@known-fail"; then
+    is_known_fail=true
+fi
+
+# Transpile
+compile_output=$("$FRAMEC" compile -l "$target" -o "$out_dir" "$test_file" 2>&1)
+compile_status=$?
+
+if [ $compile_status -ne 0 ] || [ ! -f "$out_file" ]; then
+    if $is_known_fail; then
+        echo "known" > "$result_file"
+    else
+        echo "fail" > "$result_file"
+        echo "$compile_output" >> "$result_file"
+    fi
+    exit 0
+fi
+
+# Run
+run_output=""
+run_status=0
+
+case $lang in
+    python)
+        run_output=$(python3 "$out_file" 2>&1) || run_status=$?
+        ;;
+    typescript)
+        run_output=$(cd "$TEST_ENV_ROOT/output/typescript" && npx ts-node "tests/${test_name}.ts" 2>&1) || run_status=$?
+        ;;
+    rust)
+        # Run pre-built binary directly (cargo build was done before parallel execution)
+        rust_bin="$RUST_CRATE/target/release/$test_name"
+        if [ -x "$rust_bin" ]; then
+            run_output=$("$rust_bin" 2>&1) || run_status=$?
+        else
+            # Fallback to debug build
+            rust_bin="$RUST_CRATE/target/debug/$test_name"
+            if [ -x "$rust_bin" ]; then
+                run_output=$("$rust_bin" 2>&1) || run_status=$?
+            else
+                run_status=1
+                run_output="Rust binary not found: $test_name"
+            fi
+        fi
+        ;;
+    c)
+        c_bin="$C_OUT/${test_name}"
+        cjson_flags=""
+        [ -d "/opt/homebrew/include/cjson" ] && cjson_flags="-I/opt/homebrew/include -L/opt/homebrew/lib -lcjson"
+        [ -d "/usr/local/include/cjson" ] && cjson_flags="-I/usr/local/include -L/usr/local/lib -lcjson"
+        if gcc -o "$c_bin" "$out_file" $cjson_flags 2>&1; then
+            run_output=$("$c_bin" 2>&1) || run_status=$?
+        else
+            run_status=1
+            run_output="C compilation failed"
+        fi
+        ;;
+esac
+
+# Check result
+if echo "$run_output" | grep -qE "(^ok |PASS)"; then
+    echo "pass" > "$result_file"
+elif $is_known_fail; then
+    echo "known" > "$result_file"
+else
+    echo "fail" > "$result_file"
+    echo "$run_output" >> "$result_file"
+fi
