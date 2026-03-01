@@ -1,0 +1,117 @@
+@@target typescript
+
+// Test 51: HSM Persistence
+//
+// Tests that HSM parent compartment chain is properly saved and restored:
+// - Child state vars preserved
+// - Parent state vars preserved
+// - Parent compartment chain intact after restore
+// - Forwarding to parent still works after restore
+
+@@persist
+@@system HSMPersist {
+    interface:
+        increment_child()
+        increment_parent()
+        get_child_count(): number
+        get_parent_count(): number
+        get_state(): string
+
+    machine:
+        $Child => $Parent {
+            $.child_count: number = 0
+
+            increment_child() {
+                $.child_count = $.child_count + 1
+            }
+
+            increment_parent() {
+                // Forward to parent
+                => $^
+            }
+
+            get_child_count(): number {
+                return $.child_count
+            }
+
+            get_parent_count(): number {
+                // Forward to parent
+                => $^
+            }
+
+            get_state(): string {
+                return "Child"
+            }
+        }
+
+        $Parent {
+            $.parent_count: number = 100
+
+            increment_parent() {
+                $.parent_count = $.parent_count + 1
+            }
+
+            get_parent_count(): number {
+                return $.parent_count
+            }
+
+            get_state(): string {
+                return "Parent"
+            }
+        }
+}
+
+function main(): void {
+    console.log("=== Test 51: HSM Persistence ===");
+
+    // Create system and modify state vars at both levels
+    const s1 = new HSMPersist();
+
+    // Verify initial state
+    console.assert(s1.get_state() === "Child", `Expected Child, got ${s1.get_state()}`);
+    console.assert(s1.get_child_count() === 0, `Expected 0, got ${s1.get_child_count()}`);
+    console.assert(s1.get_parent_count() === 100, `Expected 100, got ${s1.get_parent_count()}`);
+    console.log("1. Initial state verified: Child with child_count=0, parent_count=100");
+
+    // Modify state vars at both levels
+    s1.increment_child();
+    s1.increment_child();
+    s1.increment_child();  // child_count = 3
+    s1.increment_parent();
+    s1.increment_parent();  // parent_count = 102
+
+    console.assert(s1.get_child_count() === 3, `Expected 3, got ${s1.get_child_count()}`);
+    console.assert(s1.get_parent_count() === 102, `Expected 102, got ${s1.get_parent_count()}`);
+    console.log(`2. After increments: child_count=${s1.get_child_count()}, parent_count=${s1.get_parent_count()}`);
+
+    // Save state
+    const data = s1.saveState();
+    console.assert(typeof data === "string", `Expected string, got ${typeof data}`);
+    console.log(`3. Saved state: ${data.length} chars`);
+
+    // Restore to new instance
+    const s2 = HSMPersist.restoreState(data);
+
+    // Verify restored state
+    console.assert(s2.get_state() === "Child", `Expected Child after restore, got ${s2.get_state()}`);
+    console.log(`4. Restored state: ${s2.get_state()}`);
+
+    // Verify child state var preserved
+    console.assert(s2.get_child_count() === 3, `Expected child_count=3, got ${s2.get_child_count()}`);
+    console.log(`5. Child state var preserved: child_count=${s2.get_child_count()}`);
+
+    // Verify parent state var preserved (requires parent compartment chain)
+    console.assert(s2.get_parent_count() === 102, `Expected parent_count=102, got ${s2.get_parent_count()}`);
+    console.log(`6. Parent state var preserved: parent_count=${s2.get_parent_count()}`);
+
+    // Verify state machine still works after restore
+    s2.increment_child();
+    s2.increment_parent();
+    console.assert(s2.get_child_count() === 4, `Expected 4, got ${s2.get_child_count()}`);
+    console.assert(s2.get_parent_count() === 103, `Expected 103, got ${s2.get_parent_count()}`);
+    console.log(`7. After post-restore increments: child_count=${s2.get_child_count()}, parent_count=${s2.get_parent_count()}`);
+
+    console.log("PASS: HSM persistence works correctly");
+}
+
+main();

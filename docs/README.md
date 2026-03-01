@@ -42,15 +42,15 @@ framepiler_test_env/
 | Rust | `.frs` | `@@target rust` | Active |
 | C | `.fc` | `@@target c` | In Progress |
 
-## Test Counts (2026-02-24)
+## Test Counts (2026-03-01)
 
 | Scope | Python | TypeScript | Rust | C |
 |-------|--------|------------|------|---|
-| common/ | 137 | 126 | 126 | 12 |
-| language-specific/ | 15 | 7 | 7 | 0 |
-| **Total** | **152** | **133** | **133** | **12** |
+| common/ | 130 | 121 | 123 | 139 |
+| language-specific/ | 15 | 6 | 7 | 0 |
+| **Total** | **145** | **127** | **130** | **139** |
 
-**Total test files: 430**
+**Total test files: 541 (100% passing)**
 
 ## Running Tests
 
@@ -74,7 +74,7 @@ docker compose -f docker/docker-compose.yml up --build
 
 For complete documentation on:
 - Adding new tests
-- Test markers (@@skip, @@known-fail)
+- Test markers (@@skip, @@xfail)
 - Directory conventions
 - Troubleshooting
 

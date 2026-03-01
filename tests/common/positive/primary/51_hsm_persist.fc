@@ -1,0 +1,128 @@
+@@target c
+
+// Test 51: HSM Persistence
+//
+// Tests that HSM parent compartment chain is properly saved and restored:
+// - Child state vars preserved
+// - Parent state vars preserved
+// - Parent compartment chain intact after restore
+// - Forwarding to parent still works after restore
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <assert.h>
+#include <cjson/cJSON.h>
+
+@@persist
+@@system HSMPersist {
+    interface:
+        increment_child()
+        increment_parent()
+        get_child_count(): int
+        get_parent_count(): int
+        get_state(): str
+
+    machine:
+        $Child => $Parent {
+            $.child_count: int = 0
+
+            increment_child() {
+                $.child_count = $.child_count + 1
+            }
+
+            increment_parent() {
+                // Forward to parent
+                => $^
+            }
+
+            get_child_count(): int {
+                return $.child_count
+            }
+
+            get_parent_count(): int {
+                // Forward to parent
+                => $^
+            }
+
+            get_state(): str {
+                return "Child"
+            }
+        }
+
+        $Parent {
+            $.parent_count: int = 100
+
+            increment_parent() {
+                $.parent_count = $.parent_count + 1
+            }
+
+            get_parent_count(): int {
+                return $.parent_count
+            }
+
+            get_state(): str {
+                return "Parent"
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 51: HSM Persistence ===\n");
+
+    // Create system and modify state vars at both levels
+    HSMPersist* s1 = @@HSMPersist();
+
+    // Verify initial state
+    assert(strcmp(HSMPersist_get_state(s1), "Child") == 0);
+    assert(HSMPersist_get_child_count(s1) == 0);
+    assert(HSMPersist_get_parent_count(s1) == 100);
+    printf("1. Initial state verified: Child with child_count=0, parent_count=100\n");
+
+    // Modify state vars at both levels
+    HSMPersist_increment_child(s1);
+    HSMPersist_increment_child(s1);
+    HSMPersist_increment_child(s1);  // child_count = 3
+    HSMPersist_increment_parent(s1);
+    HSMPersist_increment_parent(s1);  // parent_count = 102
+
+    assert(HSMPersist_get_child_count(s1) == 3);
+    assert(HSMPersist_get_parent_count(s1) == 102);
+    printf("2. After increments: child_count=%d, parent_count=%d\n",
+           HSMPersist_get_child_count(s1), HSMPersist_get_parent_count(s1));
+
+    // Save state
+    char* data = HSMPersist_save_state(s1);
+    assert(data != NULL);
+    printf("3. Saved state: %lu chars\n", strlen(data));
+
+    // Restore to new instance
+    HSMPersist* s2 = HSMPersist_restore_state(data);
+    free(data);
+
+    // Verify restored state
+    assert(strcmp(HSMPersist_get_state(s2), "Child") == 0);
+    printf("4. Restored state: %s\n", HSMPersist_get_state(s2));
+
+    // Verify child state var preserved
+    assert(HSMPersist_get_child_count(s2) == 3);
+    printf("5. Child state var preserved: child_count=%d\n", HSMPersist_get_child_count(s2));
+
+    // Verify parent state var preserved (requires parent compartment chain)
+    assert(HSMPersist_get_parent_count(s2) == 102);
+    printf("6. Parent state var preserved: parent_count=%d\n", HSMPersist_get_parent_count(s2));
+
+    // Verify state machine still works after restore
+    HSMPersist_increment_child(s2);
+    HSMPersist_increment_parent(s2);
+    assert(HSMPersist_get_child_count(s2) == 4);
+    assert(HSMPersist_get_parent_count(s2) == 103);
+    printf("7. After post-restore increments: child_count=%d, parent_count=%d\n",
+           HSMPersist_get_child_count(s2), HSMPersist_get_parent_count(s2));
+
+    HSMPersist_destroy(s1);
+    HSMPersist_destroy(s2);
+
+    printf("PASS: HSM persistence works correctly\n");
+    return 0;
+}

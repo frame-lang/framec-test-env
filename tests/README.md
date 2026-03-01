@@ -120,7 +120,7 @@ Add markers in the first 10 lines of a test file to control behavior:
 ```frame
 @@target python_3
 // @@skip - Do not run this test
-// @@known-fail - Expected to fail (tracked bug)
+// @@xfail - Expected to fail (runs, counts as failure)
 // @@timeout 60 - Custom timeout in seconds (default: 30)
 
 @@system MyTest {
@@ -133,16 +133,18 @@ Add markers in the first 10 lines of a test file to control behavior:
 | Marker | Effect |
 |--------|--------|
 | `// @@skip` | Test is skipped entirely |
-| `// @@known-fail` | Test runs but failure doesn't count against pass rate |
+| `// @@xfail` | Test runs, expected to fail (counts as failure in reporting) |
 | `// @@timeout N` | Override default 30-second timeout |
 
-## Test Counts
+## Test Counts (2026-03-01)
 
 | Scope | Python | TypeScript | Rust | C | Total |
 |-------|--------|------------|------|---|-------|
-| common/ | 131 | 122 | 123 | 139 | 515 |
+| common/ | 130 | 121 | 123 | 139 | 513 |
 | language-specific/ | 15 | 6 | 7 | 0 | 28 |
-| **Total** | **146** | **128** | **130** | **139** | **543** |
+| **Total** | **145** | **127** | **130** | **139** | **541** |
+
+**All 541 tests passing (100%)**
 
 ## Adding New Tests
 
@@ -235,4 +237,4 @@ Generated files are written to:
 
 ### Need to skip a broken test?
 - Add `// @@skip` marker temporarily
-- Or `// @@known-fail` if it's a tracked bug
+- Or `// @@xfail` if it's expected to fail (still counts as failure)

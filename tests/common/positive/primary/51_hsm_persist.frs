@@ -1,0 +1,114 @@
+@@target rust
+
+// Test 51: HSM Persistence
+//
+// Tests that HSM parent compartment chain is properly saved and restored:
+// - Child state vars preserved
+// - Parent state vars preserved
+// - Parent compartment chain intact after restore
+// - Forwarding to parent still works after restore
+
+@@persist
+@@system HSMPersist {
+    interface:
+        increment_child()
+        increment_parent()
+        get_child_count(): i32
+        get_parent_count(): i32
+        get_state(): String
+
+    machine:
+        $Child => $Parent {
+            $.child_count: i32 = 0
+
+            increment_child() {
+                $.child_count = $.child_count + 1
+            }
+
+            increment_parent() {
+                // Forward to parent
+                => $^
+            }
+
+            get_child_count(): i32 {
+                return $.child_count
+            }
+
+            get_parent_count(): i32 {
+                // Forward to parent
+                => $^
+            }
+
+            get_state(): String {
+                return "Child".to_string()
+            }
+        }
+
+        $Parent {
+            $.parent_count: i32 = 100
+
+            increment_parent() {
+                $.parent_count = $.parent_count + 1
+            }
+
+            get_parent_count(): i32 {
+                return $.parent_count
+            }
+
+            get_state(): String {
+                return "Parent".to_string()
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 51: HSM Persistence ===");
+
+    // Create system and modify state vars at both levels
+    let mut s1 = HSMPersist::new();
+
+    // Verify initial state
+    assert!(s1.get_state() == "Child", "Expected Child, got {}", s1.get_state());
+    assert!(s1.get_child_count() == 0, "Expected 0, got {}", s1.get_child_count());
+    assert!(s1.get_parent_count() == 100, "Expected 100, got {}", s1.get_parent_count());
+    println!("1. Initial state verified: Child with child_count=0, parent_count=100");
+
+    // Modify state vars at both levels
+    s1.increment_child();
+    s1.increment_child();
+    s1.increment_child();  // child_count = 3
+    s1.increment_parent();
+    s1.increment_parent();  // parent_count = 102
+
+    assert!(s1.get_child_count() == 3, "Expected 3, got {}", s1.get_child_count());
+    assert!(s1.get_parent_count() == 102, "Expected 102, got {}", s1.get_parent_count());
+    println!("2. After increments: child_count={}, parent_count={}", s1.get_child_count(), s1.get_parent_count());
+
+    // Save state
+    let data = s1.save_state();
+    println!("3. Saved state: {} chars", data.len());
+
+    // Restore to new instance
+    let mut s2 = HSMPersist::restore_state(&data);
+
+    // Verify restored state
+    assert!(s2.get_state() == "Child", "Expected Child after restore, got {}", s2.get_state());
+    println!("4. Restored state: {}", s2.get_state());
+
+    // Verify child state var preserved
+    assert!(s2.get_child_count() == 3, "Expected child_count=3, got {}", s2.get_child_count());
+    println!("5. Child state var preserved: child_count={}", s2.get_child_count());
+
+    // Verify parent state var preserved (requires parent compartment chain)
+    assert!(s2.get_parent_count() == 102, "Expected parent_count=102, got {}", s2.get_parent_count());
+    println!("6. Parent state var preserved: parent_count={}", s2.get_parent_count());
+
+    // Verify state machine still works after restore
+    s2.increment_child();
+    s2.increment_parent();
+    assert!(s2.get_child_count() == 4, "Expected 4, got {}", s2.get_child_count());
+    assert!(s2.get_parent_count() == 103, "Expected 103, got {}", s2.get_parent_count());
+    println!("7. After post-restore increments: child_count={}, parent_count={}", s2.get_child_count(), s2.get_parent_count());
+
+    println!("PASS: HSM persistence works correctly");
+}

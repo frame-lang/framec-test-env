@@ -1,0 +1,117 @@
+@@target python_3
+
+# Test 51: HSM Persistence
+#
+# Tests that HSM parent compartment chain is properly saved and restored:
+# - Child state vars preserved
+# - Parent state vars preserved
+# - Parent compartment chain intact after restore
+# - Forwarding to parent still works after restore
+
+@@persist
+@@system HSMPersist {
+    interface:
+        increment_child()
+        increment_parent()
+        get_child_count(): int
+        get_parent_count(): int
+        get_state(): str
+
+    machine:
+        $Child => $Parent {
+            $.child_count: int = 0
+
+            increment_child() {
+                $.child_count = $.child_count + 1
+            }
+
+            increment_parent() {
+                # Forward to parent
+                => $^
+            }
+
+            get_child_count(): int {
+                return $.child_count
+            }
+
+            get_parent_count(): int {
+                # Forward to parent
+                => $^
+            }
+
+            get_state(): str {
+                return "Child"
+            }
+        }
+
+        $Parent {
+            $.parent_count: int = 100
+
+            increment_parent() {
+                $.parent_count = $.parent_count + 1
+            }
+
+            get_parent_count(): int {
+                return $.parent_count
+            }
+
+            get_state(): str {
+                return "Parent"
+            }
+        }
+}
+
+def main():
+    print("=== Test 51: HSM Persistence ===")
+
+    # Create system and modify state vars at both levels
+    s1 = HSMPersist()
+
+    # Verify initial state
+    assert s1.get_state() == "Child", f"Expected Child, got {s1.get_state()}"
+    assert s1.get_child_count() == 0, f"Expected 0, got {s1.get_child_count()}"
+    assert s1.get_parent_count() == 100, f"Expected 100, got {s1.get_parent_count()}"
+    print("1. Initial state verified: Child with child_count=0, parent_count=100")
+
+    # Modify state vars at both levels
+    s1.increment_child()
+    s1.increment_child()
+    s1.increment_child()  # child_count = 3
+    s1.increment_parent()
+    s1.increment_parent()  # parent_count = 102
+
+    assert s1.get_child_count() == 3, f"Expected 3, got {s1.get_child_count()}"
+    assert s1.get_parent_count() == 102, f"Expected 102, got {s1.get_parent_count()}"
+    print(f"2. After increments: child_count={s1.get_child_count()}, parent_count={s1.get_parent_count()}")
+
+    # Save state
+    data = s1.save_state()
+    assert isinstance(data, bytes), f"Expected bytes, got {type(data)}"
+    print(f"3. Saved state: {len(data)} bytes")
+
+    # Restore to new instance
+    s2 = HSMPersist.restore_state(data)
+
+    # Verify restored state
+    assert s2.get_state() == "Child", f"Expected Child after restore, got {s2.get_state()}"
+    print(f"4. Restored state: {s2.get_state()}")
+
+    # Verify child state var preserved
+    assert s2.get_child_count() == 3, f"Expected child_count=3, got {s2.get_child_count()}"
+    print(f"5. Child state var preserved: child_count={s2.get_child_count()}")
+
+    # Verify parent state var preserved (requires parent compartment chain)
+    assert s2.get_parent_count() == 102, f"Expected parent_count=102, got {s2.get_parent_count()}"
+    print(f"6. Parent state var preserved: parent_count={s2.get_parent_count()}")
+
+    # Verify state machine still works after restore
+    s2.increment_child()
+    s2.increment_parent()
+    assert s2.get_child_count() == 4, f"Expected 4, got {s2.get_child_count()}"
+    assert s2.get_parent_count() == 103, f"Expected 103, got {s2.get_parent_count()}"
+    print(f"7. After post-restore increments: child_count={s2.get_child_count()}, parent_count={s2.get_parent_count()}")
+
+    print("PASS: HSM persistence works correctly")
+
+if __name__ == '__main__':
+    main()

@@ -38,10 +38,10 @@ if head -10 "$test_file" 2>/dev/null | grep -qE "@@skip|@skip"; then
     exit 0
 fi
 
-# Check known-fail marker
-is_known_fail=false
-if head -10 "$test_file" 2>/dev/null | grep -qE "@@known-fail|@known-fail"; then
-    is_known_fail=true
+# Check xfail marker
+is_xfail=false
+if head -10 "$test_file" 2>/dev/null | grep -qE "@@xfail|@xfail"; then
+    is_xfail=true
 fi
 
 # Transpile
@@ -49,7 +49,7 @@ compile_output=$("$FRAMEC" compile -l "$target" -o "$out_dir" "$test_file" 2>&1)
 compile_status=$?
 
 if [ $compile_status -ne 0 ] || [ ! -f "$out_file" ]; then
-    if $is_known_fail; then
+    if $is_xfail; then
         echo "known" > "$result_file"
     else
         echo "fail" > "$result_file"
@@ -107,7 +107,7 @@ esac
 # Check result
 if echo "$run_output" | grep -qE "(^ok |PASS)"; then
     echo "pass" > "$result_file"
-elif $is_known_fail; then
+elif $is_xfail; then
     echo "known" > "$result_file"
 else
     echo "fail" > "$result_file"

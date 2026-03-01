@@ -26,7 +26,7 @@
 #
 # FILE MARKERS (in first 10 lines of test file):
 #   // @@skip              - Skip this test
-#   // @@known-fail        - Expected to fail (still runs, doesn't count as failure)
+#   // @@xfail             - Expected to fail (runs, counts as failure)
 #   // @@timeout <seconds> - Custom timeout (default: 30)
 #
 
@@ -217,9 +217,9 @@ run_single_test() {
         return 0
     fi
 
-    local is_known_fail=false
-    if check_marker "$test_file" "known-fail"; then
-        is_known_fail=true
+    local is_xfail=false
+    if check_marker "$test_file" "xfail"; then
+        is_xfail=true
     fi
 
     # Compile using framec with proper flags
@@ -228,24 +228,20 @@ run_single_test() {
     local compile_status=$?
 
     if [ $compile_status -ne 0 ] || [ ! -f "$out_file" ]; then
-        if $is_known_fail; then
-            if [ -n "$result_file" ]; then
-                echo "known" > "$result_file"
-            else
-                echo -e "  ${YELLOW}KNOWN-FAIL${NC} [$lang] $test_name (compile)"
-                inc_counter "$lang" "known"
-            fi
+        # xfail tests are expected to fail - report them as XFAIL but count as failures
+        if [ -n "$result_file" ]; then
+            echo "fail" > "$result_file"
+            echo "$compile_output" >> "$result_file"
         else
-            if [ -n "$result_file" ]; then
-                echo "fail" > "$result_file"
-                echo "$compile_output" >> "$result_file"
+            if $is_xfail; then
+                echo -e "  ${YELLOW}XFAIL${NC} [$lang] $test_name (compile - expected failure)"
             else
                 echo -e "  ${RED}FAIL${NC} [$lang] $test_name (compile error)"
                 if $VERBOSE; then
                     echo "$compile_output" | head -5 | sed 's/^/    /'
                 fi
-                inc_counter "$lang" "fail"
             fi
+            inc_counter "$lang" "fail"
         fi
         return 1
     fi
@@ -302,24 +298,20 @@ run_single_test() {
         fi
         return 0
     else
-        if $is_known_fail; then
-            if [ -n "$result_file" ]; then
-                echo "known" > "$result_file"
-            else
-                echo -e "  ${YELLOW}KNOWN-FAIL${NC} [$lang] $test_name"
-                inc_counter "$lang" "known"
-            fi
+        # xfail tests are expected to fail - report them as XFAIL but count as failures
+        if [ -n "$result_file" ]; then
+            echo "fail" > "$result_file"
+            echo "$run_output" >> "$result_file"
         else
-            if [ -n "$result_file" ]; then
-                echo "fail" > "$result_file"
-                echo "$run_output" >> "$result_file"
+            if $is_xfail; then
+                echo -e "  ${YELLOW}XFAIL${NC} [$lang] $test_name (expected failure)"
             else
                 echo -e "  ${RED}FAIL${NC} [$lang] $test_name"
                 if $VERBOSE; then
                     echo "$run_output" | head -5 | sed 's/^/    /'
                 fi
-                inc_counter "$lang" "fail"
             fi
+            inc_counter "$lang" "fail"
         fi
         return 1
     fi
@@ -431,7 +423,7 @@ aggregate_results_first_pass() {
                 inc_counter "$lang" "skip"
                 ;;
             known)
-                echo -e "  ${YELLOW}KNOWN-FAIL${NC} [$lang] $test_name"
+                echo -e "  ${YELLOW}XFAIL${NC} [$lang] $test_name"
                 inc_counter "$lang" "known"
                 ;;
         esac
@@ -725,12 +717,12 @@ for lang in python typescript rust c; do
     total_skip=$((total_skip + s))
     total_known=$((total_known + k))
 
-    printf "%-12s ${GREEN}%3d passed${NC}  ${RED}%3d failed${NC}  ${YELLOW}%3d skipped${NC}  ${YELLOW}%3d known-fail${NC}\n" \
-        "$lang:" "$p" "$f" "$s" "$k"
+    printf "%-12s ${GREEN}%3d passed${NC}  ${RED}%3d failed${NC}  ${YELLOW}%3d skipped${NC}\n" \
+        "$lang:" "$p" "$f" "$s"
 done
 
 echo ""
-echo "Total: $total_pass passed, $total_fail failed, $total_skip skipped, $total_known known-fail"
+echo "Total: $total_pass passed, $total_fail failed, $total_skip skipped"
 
 # Exit with failure if any tests failed
 [ $total_fail -gt 0 ] && exit 1
