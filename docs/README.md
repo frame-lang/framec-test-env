@@ -46,11 +46,11 @@ framepiler_test_env/
 
 | Scope | Python | TypeScript | Rust | C |
 |-------|--------|------------|------|---|
-| common/ | 130 | 121 | 123 | 139 |
+| common/ | 129 | 120 | 123 | 139 |
 | language-specific/ | 15 | 6 | 7 | 0 |
-| **Total** | **145** | **127** | **130** | **139** |
+| **Total** | **144** | **126** | **130** | **139** |
 
-**Total test files: 541 (100% passing)**
+**Total test files: 539 (100% passing)**
 
 ## Running Tests
 
