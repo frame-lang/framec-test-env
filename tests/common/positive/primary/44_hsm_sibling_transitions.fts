@@ -1,0 +1,145 @@
+@@target typescript
+
+// Test 44: HSM Sibling Transitions
+//
+// Tests transitions between states sharing the same parent:
+// - Exit handler fires on source sibling
+// - Enter handler fires on target sibling
+// - Parent relationship preserved after transition
+
+@@system HSMSiblingTransitions {
+    interface:
+        go_to_b()
+        go_to_a()
+        forward_action()
+        get_log(): string[]
+        get_state(): str
+
+    domain:
+        log: string[] = []
+
+    machine:
+        $ChildA => $Parent {
+            $>() {
+                this.log.push("ChildA:enter")
+            }
+
+            <$() {
+                this.log.push("ChildA:exit")
+            }
+
+            go_to_b() {
+                this.log.push("ChildA:go_to_b")
+                -> $ChildB
+            }
+
+            forward_action() {
+                this.log.push("ChildA:forward")
+                => $^
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "ChildA"
+            }
+        }
+
+        $ChildB => $Parent {
+            $>() {
+                this.log.push("ChildB:enter")
+            }
+
+            <$() {
+                this.log.push("ChildB:exit")
+            }
+
+            go_to_a() {
+                this.log.push("ChildB:go_to_a")
+                -> $ChildA
+            }
+
+            forward_action() {
+                this.log.push("ChildB:forward")
+                => $^
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "ChildB"
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                this.log.push("Parent:forward_action")
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Parent"
+            }
+        }
+}
+
+function main() {
+    console.log("=== Test 44: HSM Sibling Transitions ===");
+    const s = new HSMSiblingTransitions();
+
+    // Initial state is ChildA with enter handler fired
+    let log = s.get_log();
+    if (!log.includes("ChildA:enter")) throw new Error(`Expected ChildA:enter on init, got ${JSON.stringify(log)}`);
+    if (s.get_state() !== "ChildA") throw new Error(`Expected ChildA, got ${s.get_state()}`);
+    console.log("TC1.4.0: Initial state ChildA with enter - PASS");
+
+    // TC1.4.1: Transition from ChildA to ChildB
+    s.go_to_b();
+    if (s.get_state() !== "ChildB") throw new Error(`Expected ChildB, got ${s.get_state()}`);
+    console.log("TC1.4.1: Transition A->B works - PASS");
+
+    // TC1.4.2: Exit handler fired on source
+    log = s.get_log();
+    if (!log.includes("ChildA:exit")) throw new Error(`Expected ChildA:exit, got ${JSON.stringify(log)}`);
+    console.log("TC1.4.2: Exit handler fires on source - PASS");
+
+    // TC1.4.3: Enter handler fired on target
+    if (!log.includes("ChildB:enter")) throw new Error(`Expected ChildB:enter, got ${JSON.stringify(log)}`);
+    console.log("TC1.4.3: Enter handler fires on target - PASS");
+
+    // TC1.4.4: Parent relationship preserved - ChildB can forward
+    s.forward_action();
+    log = s.get_log();
+    if (!log.includes("ChildB:forward")) throw new Error(`Expected ChildB:forward, got ${JSON.stringify(log)}`);
+    if (!log.includes("Parent:forward_action")) throw new Error(`Expected Parent handler, got ${JSON.stringify(log)}`);
+    console.log("TC1.4.4: Parent relationship preserved - PASS");
+
+    // TC1.4.5: Transition back to ChildA
+    s.go_to_a();
+    if (s.get_state() !== "ChildA") throw new Error(`Expected ChildA, got ${s.get_state()}`);
+    log = s.get_log();
+    const exitBCount = log.filter((x: string) => x === "ChildB:exit").length;
+    const enterACount = log.filter((x: string) => x === "ChildA:enter").length;
+    if (exitBCount !== 1) throw new Error(`Expected ChildB:exit once, got ${JSON.stringify(log)}`);
+    if (enterACount !== 2) throw new Error(`Expected ChildA:enter twice, got ${JSON.stringify(log)}`);
+    console.log("TC1.4.5: Transition B->A works with enter/exit - PASS");
+
+    // TC1.4.6: ChildA can still forward after returning
+    s.forward_action();
+    log = s.get_log();
+    if (!log.includes("ChildA:forward")) throw new Error(`Expected ChildA:forward, got ${JSON.stringify(log)}`);
+    const parentCount = log.filter((x: string) => x === "Parent:forward_action").length;
+    if (parentCount !== 2) throw new Error(`Expected 2 Parent handlers, got ${JSON.stringify(log)}`);
+    console.log("TC1.4.6: ChildA forwards after returning - PASS");
+
+    console.log("PASS: HSM sibling transitions work correctly");
+}
+
+main();

@@ -1,0 +1,120 @@
+@@target rust
+
+// Test 49: HSM Enter/Exit with Parameters
+//
+// Tests enter and exit handlers with parameters in HSM context:
+// - Exit params passed correctly
+// - Enter params passed to target state
+// - Transition syntax: (exit_args) -> (enter_args) $Target
+
+@@system HSMEnterExitParams {
+    interface:
+        go_to_a()
+        go_to_sibling()
+        go_back()
+        get_log(): Vec<String>
+        get_state(): String
+
+    domain:
+        log: Vec<String>
+
+    machine:
+        $Start {
+            go_to_a() {
+                -> ("starting") $ChildA
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Start".to_string()
+            }
+        }
+
+        $ChildA => $Parent {
+            $>(msg: String) {
+                self.log.push(format!("ChildA:enter({})", msg));
+            }
+
+            <$(reason: String) {
+                self.log.push(format!("ChildA:exit({})", reason));
+            }
+
+            go_to_sibling() {
+                ("leaving_A") -> ("arriving_B") $ChildB
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "ChildA".to_string()
+            }
+        }
+
+        $ChildB => $Parent {
+            $>(msg: String) {
+                self.log.push(format!("ChildB:enter({})", msg));
+            }
+
+            <$(reason: String) {
+                self.log.push(format!("ChildB:exit({})", reason));
+            }
+
+            go_back() {
+                ("leaving_B") -> ("returning_A") $ChildA
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "ChildB".to_string()
+            }
+        }
+
+        $Parent {
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Parent".to_string()
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 49: HSM Enter/Exit with Params ===");
+    let mut s = HSMEnterExitParams::new();
+
+    // First go to ChildA with enter params
+    s.go_to_a();
+    let log = s.get_log();
+    assert!(log.contains(&"ChildA:enter(starting)".to_string()), "Expected ChildA:enter(starting), got {:?}", log);
+    println!("TC2.5.0: Initial transition with enter params - PASS");
+
+    // TC2.5.1: Exit params passed correctly
+    s.go_to_sibling();
+    let log = s.get_log();
+    assert!(log.contains(&"ChildA:exit(leaving_A)".to_string()), "Expected exit with param, got {:?}", log);
+    println!("TC2.5.1: Exit params passed correctly - PASS");
+
+    // TC2.5.2: Enter params passed to target state
+    assert!(log.contains(&"ChildB:enter(arriving_B)".to_string()), "Expected enter with param, got {:?}", log);
+    assert!(s.get_state() == "ChildB", "Expected ChildB, got {}", s.get_state());
+    println!("TC2.5.2: Enter params passed to target - PASS");
+
+    // TC2.5.3: Return transition with different params
+    s.go_back();
+    let log = s.get_log();
+    assert!(log.contains(&"ChildB:exit(leaving_B)".to_string()), "Expected ChildB exit, got {:?}", log);
+    assert!(log.contains(&"ChildA:enter(returning_A)".to_string()), "Expected ChildA enter, got {:?}", log);
+    println!("TC2.5.3: Return transition with params - PASS");
+
+    println!("PASS: HSM enter/exit with params works correctly");
+}

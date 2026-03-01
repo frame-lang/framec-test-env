@@ -7,9 +7,10 @@
 # See README.md for full documentation.
 #
 # USAGE:
-#   ./run_tests.sh                    # Run all tests (sequential)
-#   ./run_tests.sh --parallel         # Run all tests in parallel
+#   ./run_tests.sh                    # Run all tests (parallel by default)
+#   ./run_tests.sh --serial           # Run all tests sequentially
 #   ./run_tests.sh --python           # Run only Python tests
+#   ./run_tests.sh --langs py,ts,rs   # Run only specified languages
 #   ./run_tests.sh --category primary # Run only primary category
 #   ./run_tests.sh --help             # Show help
 #
@@ -57,10 +58,11 @@ c_pass=0 c_fail=0 c_skip=0 c_known=0
 
 # Command line options
 FILTER_LANG=""
+FILTER_LANGS=""
 FILTER_CATEGORY=""
 VERBOSE=false
 COMPILE_ONLY=false
-PARALLEL=false
+PARALLEL=true  # Parallel is now the default
 JOBS=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
 
 # Parse arguments
@@ -70,9 +72,26 @@ while [[ $# -gt 0 ]]; do
         --typescript|--ts) FILTER_LANG="typescript" ;;
         --rust|--rs) FILTER_LANG="rust" ;;
         --c) FILTER_LANG="c" ;;
+        --langs|-l)
+            # Parse comma-separated language list (py,ts,rs,c -> python typescript rust c)
+            FILTER_LANGS=""
+            IFS=',' read -ra LANG_PARTS <<< "$2"
+            for part in "${LANG_PARTS[@]}"; do
+                case "$part" in
+                    py|python) FILTER_LANGS="$FILTER_LANGS python" ;;
+                    ts|typescript) FILTER_LANGS="$FILTER_LANGS typescript" ;;
+                    rs|rust) FILTER_LANGS="$FILTER_LANGS rust" ;;
+                    c) FILTER_LANGS="$FILTER_LANGS c" ;;
+                    *) echo "Unknown language: $part"; exit 1 ;;
+                esac
+            done
+            FILTER_LANGS=$(echo "$FILTER_LANGS" | xargs)  # Trim whitespace
+            shift
+            ;;
         --category|-c) FILTER_CATEGORY="$2"; shift ;;
         --verbose|-v) VERBOSE=true ;;
         --compile-only) COMPILE_ONLY=true ;;
+        --serial|-s) PARALLEL=false ;;
         --parallel|-p) PARALLEL=true ;;
         --jobs|-j) JOBS="$2"; shift ;;
         --help|-h)
@@ -85,10 +104,12 @@ while [[ $# -gt 0 ]]; do
             echo "  --typescript, --ts  Run only TypeScript tests"
             echo "  --rust, --rs        Run only Rust tests"
             echo "  --c                 Run only C tests"
+            echo "  --langs, -l LANGS   Run specified languages (comma-separated: py,ts,rs,c)"
             echo "  --category, -c NAME Run only tests in category NAME"
             echo "  --verbose, -v       Show detailed output"
             echo "  --compile-only      Only compile, don't run"
-            echo "  --parallel, -p      Run tests in parallel (all languages + all tests)"
+            echo "  --serial, -s        Run tests sequentially (default: parallel)"
+            echo "  --parallel, -p      Run tests in parallel (default)"
             echo "  --jobs, -j N        Number of parallel jobs (default: $JOBS)"
             echo "  --help, -h          Show this help"
             exit 0
@@ -357,24 +378,35 @@ run_lang_parallel() {
     export FRAMEC TEST_ENV_ROOT
 
     # Use helper script with xargs -P for parallel execution
+    # Use hash of full path for unique result filename to avoid collisions
     echo "$tests" | while read test_file; do
         [ -z "$test_file" ] && continue
+        # Create unique ID from path to avoid name collisions across directories
+        # Use cksum for portability (works on both macOS and Linux)
+        local unique_id=$(echo "$test_file" | cksum | cut -d' ' -f1)
         local test_name=$(basename "$test_file" | sed 's/\.f[a-z]*$//')
-        echo "$test_file $lang $lang_results_dir/${test_name}.result"
+        echo "$test_file $lang $lang_results_dir/${test_name}_${unique_id}.result"
     done | xargs -P "$JOBS" -L 1 "$SCRIPT_DIR/run_single_test.sh"
 }
 
-# Aggregate results from parallel run
-aggregate_results() {
+# Aggregate results from parallel run (first pass - collect failures for rerun)
+aggregate_results_first_pass() {
     local lang="$1"
     local lang_results_dir="$RESULTS_DIR/$lang"
+    local failures_file="$RESULTS_DIR/${lang}_failures.txt"
 
     [ -d "$lang_results_dir" ] || return
 
+    > "$failures_file"  # Clear failures file
+
     for result_file in "$lang_results_dir"/*.result; do
         [ -f "$result_file" ] || continue
-        local test_name=$(basename "$result_file" .result)
+        # Extract test name (remove _<cksum> suffix)
+        local filename=$(basename "$result_file" .result)
+        local test_name=$(echo "$filename" | sed 's/_[0-9]*$//')
         local result=$(head -1 "$result_file")
+        # Get original test file path from line 2 if stored, otherwise skip rerun
+        local test_path=$(sed -n '2p' "$result_file" 2>/dev/null | grep "^TEST_FILE:" | cut -d: -f2-)
 
         case "$result" in
             pass)
@@ -382,11 +414,17 @@ aggregate_results() {
                 inc_counter "$lang" "pass"
                 ;;
             fail)
-                echo -e "  ${RED}FAIL${NC} [$lang] $test_name"
-                if $VERBOSE; then
-                    tail -n +2 "$result_file" | head -5 | sed 's/^/    /'
+                # Don't print yet - collect for rerun
+                if [ -n "$test_path" ]; then
+                    echo "$test_path" >> "$failures_file"
+                else
+                    # Can't rerun without path, count as fail
+                    echo -e "  ${RED}FAIL${NC} [$lang] $test_name"
+                    if $VERBOSE; then
+                        tail -n +2 "$result_file" | head -5 | sed 's/^/    /'
+                    fi
+                    inc_counter "$lang" "fail"
                 fi
-                inc_counter "$lang" "fail"
                 ;;
             skip)
                 echo -e "  ${YELLOW}SKIP${NC} [$lang] $test_name"
@@ -398,6 +436,46 @@ aggregate_results() {
                 ;;
         esac
     done
+}
+
+# Rerun failed tests sequentially to confirm failures
+rerun_failures() {
+    local lang="$1"
+    local failures_file="$RESULTS_DIR/${lang}_failures.txt"
+
+    [ -f "$failures_file" ] || return
+    local failure_count=$(wc -l < "$failures_file" | tr -d ' ')
+    [ "$failure_count" -eq 0 ] && return
+
+    echo -e "  ${YELLOW}Rerunning $failure_count failed $lang tests...${NC}"
+
+    while read test_file; do
+        [ -z "$test_file" ] && continue
+        local test_name=$(basename "$test_file" | sed 's/\.f[a-z]*$//')
+
+        # Rerun the test sequentially
+        local rerun_result_file="$RESULTS_DIR/${lang}_rerun_${test_name}.result"
+        "$SCRIPT_DIR/run_single_test.sh" "$test_file" "$lang" "$rerun_result_file" 2>/dev/null
+
+        local result=$(head -1 "$rerun_result_file" 2>/dev/null)
+        case "$result" in
+            pass)
+                echo -e "  ${GREEN}PASS${NC} [$lang] $test_name (passed on rerun)"
+                inc_counter "$lang" "pass"
+                ;;
+            fail)
+                echo -e "  ${RED}FAIL${NC} [$lang] $test_name"
+                if $VERBOSE; then
+                    tail -n +2 "$rerun_result_file" | head -5 | sed 's/^/    /'
+                fi
+                inc_counter "$lang" "fail"
+                ;;
+            *)
+                echo -e "  ${RED}FAIL${NC} [$lang] $test_name (rerun failed)"
+                inc_counter "$lang" "fail"
+                ;;
+        esac
+    done < "$failures_file"
 }
 
 # Discover and run tests in a directory (sequential mode)
@@ -468,6 +546,10 @@ run_category() {
             if [ -n "$FILTER_LANG" ] && [ "$lang" != "$FILTER_LANG" ]; then
                 continue
             fi
+            # Skip if filtering by multiple languages and doesn't match
+            if [ -n "$FILTER_LANGS" ] && ! echo "$FILTER_LANGS" | grep -qw "$lang"; then
+                continue
+            fi
 
             # Get extension for this language
             local ext=""
@@ -496,8 +578,9 @@ echo "Transpiler: $FRAMEC"
 echo "Test root:  $SCRIPT_DIR"
 echo "Output:     $TEST_ENV_ROOT/output/"
 [ -n "$FILTER_LANG" ] && echo "Language:   $FILTER_LANG"
+[ -n "$FILTER_LANGS" ] && echo "Languages:  $FILTER_LANGS"
 [ -n "$FILTER_CATEGORY" ] && echo "Category:   $FILTER_CATEGORY"
-$PARALLEL && echo "Mode:       Parallel ($JOBS jobs)"
+$PARALLEL && echo "Mode:       Parallel ($JOBS jobs)" || echo "Mode:       Sequential"
 
 if $PARALLEL; then
     # ========================================
@@ -509,6 +592,8 @@ if $PARALLEL; then
     # Determine which languages to run
     if [ -n "$FILTER_LANG" ]; then
         languages="$FILTER_LANG"
+    elif [ -n "$FILTER_LANGS" ]; then
+        languages="$FILTER_LANGS"
     else
         languages="python typescript rust c"
     fi
@@ -516,10 +601,10 @@ if $PARALLEL; then
     # Phase 1: Transpile all tests first (all languages in parallel)
     echo -e "${BLUE}Phase 1: Transpiling all tests...${NC}"
     for lang in $languages; do
-        local tests=$(collect_tests_for_lang "$lang")
+        tests=$(collect_tests_for_lang "$lang")
         [ -z "$tests" ] && continue
-        local target=$(lang_to_target "$lang")
-        local out_dir=$(lang_to_outdir "$lang")
+        target=$(lang_to_target "$lang")
+        out_dir=$(lang_to_outdir "$lang")
         echo "$tests" | xargs -P "$JOBS" -I {} "$FRAMEC" compile -l "$target" -o "$out_dir" {} 2>/dev/null &
     done
     wait
@@ -549,10 +634,28 @@ if $PARALLEL; then
     echo ""
     echo -e "${BLUE}Aggregating results...${NC}"
 
-    # Aggregate results from all languages
+    # First pass: aggregate results and collect failures
     for lang in $languages; do
-        aggregate_results "$lang"
+        aggregate_results_first_pass "$lang"
     done
+
+    # Rerun any failures sequentially to confirm they're real failures
+    has_failures=false
+    for lang in $languages; do
+        failures_file="$RESULTS_DIR/${lang}_failures.txt"
+        if [ -f "$failures_file" ] && [ -s "$failures_file" ]; then
+            has_failures=true
+            break
+        fi
+    done
+
+    if $has_failures; then
+        echo ""
+        echo -e "${BLUE}Rerunning failures to confirm...${NC}"
+        for lang in $languages; do
+            rerun_failures "$lang"
+        done
+    fi
 
     # Run error tests (these are usually quick and sequential is fine)
     for error_type in compile-error transpile-error runtime-error; do

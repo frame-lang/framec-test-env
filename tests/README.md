@@ -140,9 +140,9 @@ Add markers in the first 10 lines of a test file to control behavior:
 
 | Scope | Python | TypeScript | Rust | C | Total |
 |-------|--------|------------|------|---|-------|
-| common/ | 137 | 126 | 126 | 12 | 401 |
-| language-specific/ | 15 | 7 | 7 | 0 | 29 |
-| **Total** | **152** | **133** | **133** | **12** | **430** |
+| common/ | 131 | 122 | 123 | 139 | 515 |
+| language-specific/ | 15 | 6 | 7 | 0 | 28 |
+| **Total** | **146** | **128** | **130** | **139** | **543** |
 
 ## Adding New Tests
 

@@ -1,0 +1,136 @@
+@@target python_3
+
+# Test 42: HSM Three-Level Hierarchy
+#
+# Tests 3+ level deep hierarchies:
+# - $Grandchild => $Child => $Parent
+# - Forward through multiple levels
+# - Each level's state variables remain isolated
+
+@@system HSMThreeLevels {
+    interface:
+        handle_at_grandchild()
+        forward_to_child()
+        forward_to_parent()
+        forward_through_all()
+        get_log(): list
+
+    domain:
+        log: list = []
+
+    machine:
+        $Grandchild => $Child {
+            $.grandchild_var: int = 1
+
+            handle_at_grandchild() {
+                val = $.grandchild_var
+                self.log.append(f"Grandchild:handled(var={val})")
+            }
+
+            forward_to_child() {
+                self.log.append("Grandchild:forward_to_child")
+                => $^
+            }
+
+            forward_to_parent() {
+                self.log.append("Grandchild:forward_to_parent")
+                => $^
+            }
+
+            forward_through_all() {
+                self.log.append("Grandchild:forward_through_all")
+                => $^
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+
+        $Child => $Parent {
+            $.child_var: int = 10
+
+            forward_to_child() {
+                val = $.child_var
+                self.log.append(f"Child:handled(var={val})")
+            }
+
+            forward_to_parent() {
+                val = $.child_var
+                self.log.append(f"Child:forward_to_parent(var={val})")
+                => $^
+            }
+
+            forward_through_all() {
+                val = $.child_var
+                self.log.append(f"Child:forward_through_all(var={val})")
+                => $^
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+
+        $Parent {
+            $.parent_var: int = 100
+
+            forward_to_parent() {
+                val = $.parent_var
+                self.log.append(f"Parent:handled(var={val})")
+            }
+
+            forward_through_all() {
+                val = $.parent_var
+                self.log.append(f"Parent:forward_through_all(var={val})")
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+}
+
+def main():
+    print("=== Test 42: HSM Three-Level Hierarchy ===")
+    s = HSMThreeLevels()
+
+    # TC1.2.1: Three-level hierarchy compiles
+    print("TC1.2.1: Three-level hierarchy compiles - PASS")
+
+    # TC1.2.2: Handle at grandchild (no forward)
+    s.handle_at_grandchild()
+    log = s.get_log()
+    assert "Grandchild:handled(var=1)" in log, f"Expected Grandchild handler, got {log}"
+    print(f"TC1.2.2: Grandchild handles locally - PASS")
+
+    # TC1.2.3: Forward from grandchild to child
+    s.forward_to_child()
+    log = s.get_log()
+    assert "Grandchild:forward_to_child" in log, f"Expected Grandchild forward, got {log}"
+    assert "Child:handled(var=10)" in log, f"Expected Child handler, got {log}"
+    print(f"TC1.2.3: Forward grandchild->child - PASS")
+
+    # TC1.2.4: Forward from grandchild through child to parent
+    s.forward_to_parent()
+    log = s.get_log()
+    assert "Grandchild:forward_to_parent" in log, f"Expected Grandchild forward, got {log}"
+    assert "Child:forward_to_parent(var=10)" in log, f"Expected Child forward, got {log}"
+    assert "Parent:handled(var=100)" in log, f"Expected Parent handler, got {log}"
+    print(f"TC1.2.4: Forward grandchild->child->parent - PASS")
+
+    # TC1.2.5: Forward through entire chain
+    s.forward_through_all()
+    log = s.get_log()
+    assert "Grandchild:forward_through_all" in log, f"Expected Grandchild, got {log}"
+    assert "Child:forward_through_all(var=10)" in log, f"Expected Child, got {log}"
+    assert "Parent:forward_through_all(var=100)" in log, f"Expected Parent, got {log}"
+    print(f"TC1.2.5: Full chain forward - PASS")
+
+    # Verify state variable isolation
+    print(f"TC1.2.6: State vars isolated (grandchild=1, child=10, parent=100) - PASS")
+
+    print("PASS: HSM three-level hierarchy works correctly")
+
+if __name__ == '__main__':
+    main()

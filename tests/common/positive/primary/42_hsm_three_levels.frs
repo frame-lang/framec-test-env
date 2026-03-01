@@ -1,0 +1,134 @@
+@@target rust
+
+// Test 42: HSM Three-Level Hierarchy
+//
+// Tests 3+ level deep hierarchies:
+// - $Grandchild => $Child => $Parent
+// - Forward through multiple levels
+// - Each level's state variables remain isolated
+
+@@system HSMThreeLevels {
+    interface:
+        handle_at_grandchild()
+        forward_to_child()
+        forward_to_parent()
+        forward_through_all()
+        get_log(): Vec<String>
+
+    domain:
+        log: Vec<String>
+
+    machine:
+        $Grandchild => $Child {
+            $.grandchild_var: i32 = 1
+
+            handle_at_grandchild() {
+                let val = $.grandchild_var;
+                self.log.push(format!("Grandchild:handled(var={})", val));
+            }
+
+            forward_to_child() {
+                self.log.push("Grandchild:forward_to_child".to_string());
+                => $^
+            }
+
+            forward_to_parent() {
+                self.log.push("Grandchild:forward_to_parent".to_string());
+                => $^
+            }
+
+            forward_through_all() {
+                self.log.push("Grandchild:forward_through_all".to_string());
+                => $^
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+        }
+
+        $Child => $Parent {
+            $.child_var: i32 = 10
+
+            forward_to_child() {
+                let val = $.child_var;
+                self.log.push(format!("Child:handled(var={})", val));
+            }
+
+            forward_to_parent() {
+                let val = $.child_var;
+                self.log.push(format!("Child:forward_to_parent(var={})", val));
+                => $^
+            }
+
+            forward_through_all() {
+                let val = $.child_var;
+                self.log.push(format!("Child:forward_through_all(var={})", val));
+                => $^
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+        }
+
+        $Parent {
+            $.parent_var: i32 = 100
+
+            forward_to_parent() {
+                let val = $.parent_var;
+                self.log.push(format!("Parent:handled(var={})", val));
+            }
+
+            forward_through_all() {
+                let val = $.parent_var;
+                self.log.push(format!("Parent:forward_through_all(var={})", val));
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 42: HSM Three-Level Hierarchy ===");
+    let mut s = HSMThreeLevels::new();
+
+    // TC1.2.1: Three-level hierarchy compiles
+    println!("TC1.2.1: Three-level hierarchy compiles - PASS");
+
+    // TC1.2.2: Handle at grandchild (no forward)
+    s.handle_at_grandchild();
+    let log = s.get_log();
+    assert!(log.contains(&"Grandchild:handled(var=1)".to_string()), "Expected Grandchild handler, got {:?}", log);
+    println!("TC1.2.2: Grandchild handles locally - PASS");
+
+    // TC1.2.3: Forward from grandchild to child
+    s.forward_to_child();
+    let log = s.get_log();
+    assert!(log.contains(&"Grandchild:forward_to_child".to_string()), "Expected Grandchild forward, got {:?}", log);
+    assert!(log.contains(&"Child:handled(var=10)".to_string()), "Expected Child handler, got {:?}", log);
+    println!("TC1.2.3: Forward grandchild->child - PASS");
+
+    // TC1.2.4: Forward from grandchild through child to parent
+    s.forward_to_parent();
+    let log = s.get_log();
+    assert!(log.contains(&"Grandchild:forward_to_parent".to_string()), "Expected Grandchild forward, got {:?}", log);
+    assert!(log.contains(&"Child:forward_to_parent(var=10)".to_string()), "Expected Child forward, got {:?}", log);
+    assert!(log.contains(&"Parent:handled(var=100)".to_string()), "Expected Parent handler, got {:?}", log);
+    println!("TC1.2.4: Forward grandchild->child->parent - PASS");
+
+    // TC1.2.5: Forward through entire chain
+    s.forward_through_all();
+    let log = s.get_log();
+    assert!(log.contains(&"Grandchild:forward_through_all".to_string()), "Expected Grandchild, got {:?}", log);
+    assert!(log.contains(&"Child:forward_through_all(var=10)".to_string()), "Expected Child, got {:?}", log);
+    assert!(log.contains(&"Parent:forward_through_all(var=100)".to_string()), "Expected Parent, got {:?}", log);
+    println!("TC1.2.5: Full chain forward - PASS");
+
+    // Verify state variable isolation
+    println!("TC1.2.6: State vars isolated (grandchild=1, child=10, parent=100) - PASS");
+
+    println!("PASS: HSM three-level hierarchy works correctly");
+}

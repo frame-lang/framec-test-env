@@ -1,0 +1,96 @@
+@@target rust
+
+// Test 45: HSM Enter in Child Only
+//
+// Tests enter handler in child only:
+// - Child has $>(), parent does not
+// - Child enter handler fires on entry
+// - No error when parent lacks enter handler
+// - Forward to parent works without parent having enter
+
+@@system HSMEnterChildOnly {
+    interface:
+        go_to_child()
+        forward_action()
+        get_log(): Vec<String>
+        get_state(): String
+
+    domain:
+        log: Vec<String>
+
+    machine:
+        $Start {
+            go_to_child() {
+                -> $Child
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Start".to_string()
+            }
+        }
+
+        $Child => $Parent {
+            $>() {
+                self.log.push("Child:enter".to_string());
+            }
+
+            forward_action() {
+                self.log.push("Child:forward".to_string());
+                => $^
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Child".to_string()
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                self.log.push("Parent:forward_action".to_string());
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Parent".to_string()
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 45: HSM Enter in Child Only ===");
+    let mut s = HSMEnterChildOnly::new();
+
+    // Start state has no enter
+    assert!(s.get_state() == "Start", "Expected Start, got {}", s.get_state());
+    println!("TC2.1.0: Initial state is Start - PASS");
+
+    // TC2.1.1: Child enter handler fires on entry
+    s.go_to_child();
+    let log = s.get_log();
+    assert!(log.contains(&"Child:enter".to_string()), "Expected Child:enter, got {:?}", log);
+    assert!(s.get_state() == "Child", "Expected Child, got {}", s.get_state());
+    println!("TC2.1.1: Child enter handler fires - PASS");
+
+    // TC2.1.2: No error when parent lacks enter (verified by compilation/execution)
+    println!("TC2.1.2: No error when parent lacks enter - PASS");
+
+    // TC2.1.3: Forward to parent works without parent having enter
+    s.forward_action();
+    let log = s.get_log();
+    assert!(log.contains(&"Child:forward".to_string()), "Expected Child:forward, got {:?}", log);
+    assert!(log.contains(&"Parent:forward_action".to_string()), "Expected Parent handler, got {:?}", log);
+    println!("TC2.1.3: Forward works without parent enter - PASS");
+
+    println!("PASS: HSM enter in child only works correctly");
+}

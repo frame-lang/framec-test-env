@@ -1,0 +1,158 @@
+@@target typescript
+
+// Test 50: HSM Omitted Handlers - Forwarding Behavior
+//
+// Tests behavior when handlers are omitted at various levels:
+// - Event not handled in child, not forwarded = silent ignore
+// - Event not handled in child, forwarded with `=> $^` = parent handles
+// - State-level `=> $^` forwards all unhandled events
+
+@@system HSMOmittedHandlers {
+    interface:
+        handled_by_child()
+        forwarded_explicitly()
+        unhandled_no_forward()
+        get_log(): string[]
+        get_state(): str
+
+    domain:
+        log: string[] = []
+
+    machine:
+        $Child => $Parent {
+            handled_by_child() {
+                this.log.push("Child:handled_by_child")
+            }
+
+            forwarded_explicitly() {
+                this.log.push("Child:before_forward")
+                => $^
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Child"
+            }
+        }
+
+        $Parent {
+            handled_by_child() {
+                this.log.push("Parent:handled_by_child")
+            }
+
+            forwarded_explicitly() {
+                this.log.push("Parent:forwarded_explicitly")
+            }
+
+            unhandled_no_forward() {
+                this.log.push("Parent:unhandled_no_forward")
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Parent"
+            }
+        }
+}
+
+@@system HSMDefaultForward {
+    interface:
+        child_handled()
+        parent_handled()
+        both_respond()
+        get_log(): string[]
+
+    domain:
+        log: string[] = []
+
+    machine:
+        $Child => $Parent {
+            child_handled() {
+                this.log.push("Child:child_handled")
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            => $^
+        }
+
+        $Parent {
+            child_handled() {
+                this.log.push("Parent:child_handled")
+            }
+
+            parent_handled() {
+                this.log.push("Parent:parent_handled")
+            }
+
+            both_respond() {
+                this.log.push("Parent:both_respond")
+            }
+
+            get_log(): list {
+                return this.log
+            }
+        }
+}
+
+function main() {
+    console.log("=== Test 50: HSM Omitted Handlers ===");
+
+    // Part 1: Explicit forwarding vs no forwarding
+    const s1 = new HSMOmittedHandlers();
+
+    // TC2.6.1: Event handled by child only
+    s1.handled_by_child();
+    let log = s1.get_log();
+    if (!log.includes("Child:handled_by_child")) throw new Error(`Expected Child handler, got ${JSON.stringify(log)}`);
+    if (log.includes("Parent:handled_by_child")) throw new Error(`Parent should NOT be called, got ${JSON.stringify(log)}`);
+    console.log("TC2.6.1: Handled by child, not forwarded - PASS");
+
+    // TC2.6.2: Event explicitly forwarded to parent
+    s1.forwarded_explicitly();
+    log = s1.get_log();
+    if (!log.includes("Child:before_forward")) throw new Error(`Expected Child forward, got ${JSON.stringify(log)}`);
+    if (!log.includes("Parent:forwarded_explicitly")) throw new Error(`Expected Parent handler, got ${JSON.stringify(log)}`);
+    console.log("TC2.6.2: Explicitly forwarded to parent - PASS");
+
+    // TC2.6.3: Unhandled event with no forward - silently ignored
+    // This should NOT crash and should NOT call parent
+    s1.unhandled_no_forward();
+    log = s1.get_log();
+    if (log.includes("Parent:unhandled_no_forward")) throw new Error(`Unhandled should be ignored, got ${JSON.stringify(log)}`);
+    console.log("TC2.6.3: Unhandled (no forward) is silently ignored - PASS");
+
+    // Part 2: State-level default forward
+    const s2 = new HSMDefaultForward();
+
+    // TC2.6.4: Event handled by child (no forward despite => $^)
+    s2.child_handled();
+    log = s2.get_log();
+    if (!log.includes("Child:child_handled")) throw new Error(`Expected Child handler, got ${JSON.stringify(log)}`);
+    if (log.includes("Parent:child_handled")) throw new Error(`Handled by child, not forwarded, got ${JSON.stringify(log)}`);
+    console.log("TC2.6.4: Child handles, not forwarded - PASS");
+
+    // TC2.6.5: Unhandled event forwarded via => $^
+    s2.parent_handled();
+    log = s2.get_log();
+    if (!log.includes("Parent:parent_handled")) throw new Error(`Expected Parent handler, got ${JSON.stringify(log)}`);
+    console.log("TC2.6.5: Unhandled forwarded via state-level => $^ - PASS");
+
+    // TC2.6.6: Another unhandled event forwarded
+    s2.both_respond();
+    log = s2.get_log();
+    if (!log.includes("Parent:both_respond")) throw new Error(`Expected Parent handler, got ${JSON.stringify(log)}`);
+    console.log("TC2.6.6: Default forward works for multiple events - PASS");
+
+    console.log("PASS: HSM omitted handlers work correctly");
+}
+
+main();

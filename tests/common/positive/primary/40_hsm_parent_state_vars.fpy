@@ -1,0 +1,70 @@
+@@target python_3
+
+# Test 40: HSM Parent State Variables
+#
+# This test validates that parent and child states in an HSM hierarchy
+# maintain SEPARATE compartments with independent state variables.
+#
+# EXPECTED ARCHITECTURE:
+# - Child has its own compartment: {state: "Child", state_vars: {child_count: 0}}
+# - Parent has its own compartment: {state: "Parent", state_vars: {parent_count: 100}}
+# - Child's compartment.parent_compartment -> Parent's compartment
+# - When child forwards to parent, parent accesses ITS OWN compartment
+#
+# CURRENT BUG:
+# - Only one compartment exists (the current state's)
+# - Parent's state vars are never initialized because we never transition TO parent
+# - When child forwards to parent, parent tries to access child's compartment
+# - Result: KeyError because parent_count doesn't exist in child's state_vars
+
+@@system HSMParentStateVars {
+    interface:
+        get_child_count(): int
+        get_parent_count(): int
+
+    machine:
+        $Child => $Parent {
+            $.child_count: int = 0
+
+            get_child_count(): int {
+                return $.child_count
+            }
+
+            get_parent_count(): int {
+                # Forward to parent - parent should use ITS compartment
+                => $^
+            }
+        }
+
+        $Parent {
+            $.parent_count: int = 100
+
+            get_parent_count(): int {
+                # This should return 100 from parent's compartment
+                return $.parent_count
+            }
+        }
+}
+
+def main():
+    print("=== Test 40: HSM Parent State Variables ===")
+    s = HSMParentStateVars()
+
+    # Child's state var should be 0 (from child's compartment)
+    child_count = s.get_child_count()
+    assert child_count == 0, f"Expected child_count=0, got {child_count}"
+    print(f"Child count: {child_count}")
+
+    # Parent's state var should be 100 (from parent's compartment)
+    # This FAILS with current implementation because:
+    # 1. Parent's compartment doesn't exist
+    # 2. Parent's $> handler was never called
+    # 3. Parent tries to access "parent_count" in child's state_vars
+    parent_count = s.get_parent_count()
+    assert parent_count == 100, f"Expected parent_count=100, got {parent_count}"
+    print(f"Parent count: {parent_count}")
+
+    print("PASS: HSM parent state variables work correctly")
+
+if __name__ == '__main__':
+    main()

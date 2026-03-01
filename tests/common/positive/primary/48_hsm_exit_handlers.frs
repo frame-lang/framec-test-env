@@ -1,0 +1,148 @@
+@@target rust
+
+// Test 48: HSM Exit Handlers
+//
+// Tests exit handlers in HSM context:
+// - Child exit fires when transitioning out of child
+// - Parent exit does NOT fire when transitioning out of child
+// - Exit handler can access child's state variables
+
+@@system HSMExitHandlers {
+    interface:
+        go_to_other()
+        go_to_parent()
+        go_to_child()
+        get_log(): Vec<String>
+        get_state(): String
+        get_child_var(): i32
+
+    domain:
+        log: Vec<String>
+
+    machine:
+        $Child => $Parent {
+            $.child_var: i32 = 42
+
+            $>() {
+                self.log.push("Child:enter".to_string());
+            }
+
+            <$() {
+                let val = $.child_var;
+                self.log.push(format!("Child:exit(var={})", val));
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Child".to_string()
+            }
+
+            get_child_var(): i32 {
+                return $.child_var
+            }
+        }
+
+        $Parent {
+            $>() {
+                self.log.push("Parent:enter".to_string());
+            }
+
+            <$() {
+                self.log.push("Parent:exit".to_string());
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Parent".to_string()
+            }
+
+            get_child_var(): i32 {
+                return -1
+            }
+        }
+
+        $Other {
+            $>() {
+                self.log.push("Other:enter".to_string());
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Other".to_string()
+            }
+
+            get_child_var(): i32 {
+                return -1
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 48: HSM Exit Handlers ===");
+    let mut s = HSMExitHandlers::new();
+
+    // Initial state is Child
+    let log = s.get_log();
+    assert!(log.contains(&"Child:enter".to_string()), "Expected Child:enter on init, got {:?}", log);
+    assert!(s.get_state() == "Child", "Expected Child, got {}", s.get_state());
+    println!("TC2.4.0: Initial state is Child with enter - PASS");
+
+    // TC2.4.1: Child exit fires when transitioning out of child
+    s.go_to_other();
+    let log = s.get_log();
+    assert!(log.contains(&"Child:exit(var=42)".to_string()), "Expected Child:exit, got {:?}", log);
+    assert!(log.contains(&"Other:enter".to_string()), "Expected Other:enter, got {:?}", log);
+    println!("TC2.4.1: Child exit fires when transitioning out - PASS");
+
+    // TC2.4.2: Parent exit does NOT fire when transitioning out of child
+    assert!(!log.contains(&"Parent:exit".to_string()), "Parent:exit should NOT fire for child exit, got {:?}", log);
+    println!("TC2.4.2: Parent exit NOT fired for child exit - PASS");
+
+    // TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
+    println!("TC2.4.3: Exit handler accesses state var (var=42) - PASS");
+
+    // TC2.4.4: Parent exit fires when transitioning out of Parent
+    s.go_to_parent();
+    let log = s.get_log();
+    assert!(log.contains(&"Parent:enter".to_string()), "Expected Parent:enter, got {:?}", log);
+
+    s.go_to_other();
+    let log = s.get_log();
+    assert!(log.contains(&"Parent:exit".to_string()), "Expected Parent:exit, got {:?}", log);
+    println!("TC2.4.4: Parent exit fires when leaving parent - PASS");
+
+    println!("PASS: HSM exit handlers work correctly");
+}

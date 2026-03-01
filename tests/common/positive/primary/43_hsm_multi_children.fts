@@ -1,0 +1,189 @@
+@@target typescript
+
+// Test 43: HSM Multiple Children of Same Parent
+//
+// Tests multiple states sharing the same parent:
+// - $ChildA => $Parent
+// - $ChildB => $Parent
+// - $ChildC => $Parent
+// Each child can forward to the shared parent
+
+@@system HSMMultiChildren {
+    interface:
+        start_a()
+        start_b()
+        start_c()
+        do_action()
+        forward_action()
+        get_log(): string[]
+        get_state(): str
+
+    domain:
+        log: string[] = []
+
+    machine:
+        $ChildA => $Parent {
+            start_a() {
+                // stay
+            }
+
+            start_b() {
+                -> $ChildB
+            }
+
+            start_c() {
+                -> $ChildC
+            }
+
+            do_action() {
+                this.log.push("ChildA:do_action")
+            }
+
+            forward_action() {
+                this.log.push("ChildA:forward_action")
+                => $^
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "ChildA"
+            }
+        }
+
+        $ChildB => $Parent {
+            start_a() {
+                -> $ChildA
+            }
+
+            start_b() {
+                // stay
+            }
+
+            start_c() {
+                -> $ChildC
+            }
+
+            do_action() {
+                this.log.push("ChildB:do_action")
+            }
+
+            forward_action() {
+                this.log.push("ChildB:forward_action")
+                => $^
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "ChildB"
+            }
+        }
+
+        $ChildC => $Parent {
+            start_a() {
+                -> $ChildA
+            }
+
+            start_b() {
+                -> $ChildB
+            }
+
+            start_c() {
+                // stay
+            }
+
+            do_action() {
+                this.log.push("ChildC:do_action")
+            }
+
+            forward_action() {
+                this.log.push("ChildC:forward_action")
+                => $^
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "ChildC"
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                this.log.push("Parent:forward_action")
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Parent"
+            }
+        }
+}
+
+function main() {
+    console.log("=== Test 43: HSM Multiple Children ===");
+    const s = new HSMMultiChildren();
+
+    // TC1.3.1: Multiple children declare same parent (verified by compilation)
+    console.log("TC1.3.1: Multiple children with same parent compiles - PASS");
+
+    // Start in ChildA
+    if (s.get_state() !== "ChildA") throw new Error(`Expected ChildA, got ${s.get_state()}`);
+
+    // TC1.3.2: ChildA can forward to shared parent
+    s.forward_action();
+    let log = s.get_log();
+    if (!log.includes("ChildA:forward_action")) throw new Error(`Expected ChildA forward, got ${JSON.stringify(log)}`);
+    if (!log.includes("Parent:forward_action")) throw new Error(`Expected Parent handler, got ${JSON.stringify(log)}`);
+    console.log("TC1.3.2: ChildA forwards to parent - PASS");
+
+    // TC1.3.3: Transition to sibling
+    s.start_b();
+    if (s.get_state() !== "ChildB") throw new Error(`Expected ChildB after transition, got ${s.get_state()}`);
+    console.log("TC1.3.3: Transition A->B works - PASS");
+
+    // TC1.3.4: ChildB can also forward to same parent
+    s.forward_action();
+    log = s.get_log();
+    if (!log.includes("ChildB:forward_action")) throw new Error(`Expected ChildB forward, got ${JSON.stringify(log)}`);
+    const parentCount = log.filter((x: string) => x === "Parent:forward_action").length;
+    if (parentCount !== 2) throw new Error(`Expected 2 Parent forwards, got ${JSON.stringify(log)}`);
+    console.log("TC1.3.4: ChildB forwards to same parent - PASS");
+
+    // TC1.3.5: Transition to ChildC
+    s.start_c();
+    if (s.get_state() !== "ChildC") throw new Error(`Expected ChildC, got ${s.get_state()}`);
+    s.forward_action();
+    log = s.get_log();
+    if (!log.includes("ChildC:forward_action")) throw new Error(`Expected ChildC forward, got ${JSON.stringify(log)}`);
+    const parentCount2 = log.filter((x: string) => x === "Parent:forward_action").length;
+    if (parentCount2 !== 3) throw new Error(`Expected 3 Parent forwards, got ${JSON.stringify(log)}`);
+    console.log("TC1.3.5: ChildC forwards to same parent - PASS");
+
+    // TC1.3.6: Each sibling maintains independent actions
+    s.start_a();
+    s.do_action();
+    s.start_b();
+    s.do_action();
+    s.start_c();
+    s.do_action();
+    log = s.get_log();
+    if (!log.includes("ChildA:do_action")) throw new Error("Expected ChildA action");
+    if (!log.includes("ChildB:do_action")) throw new Error("Expected ChildB action");
+    if (!log.includes("ChildC:do_action")) throw new Error("Expected ChildC action");
+    console.log("TC1.3.6: Each sibling has independent handlers - PASS");
+
+    console.log("PASS: HSM multiple children work correctly");
+}
+
+main();

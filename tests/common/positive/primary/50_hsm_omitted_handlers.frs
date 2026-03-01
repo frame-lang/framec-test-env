@@ -1,0 +1,156 @@
+@@target rust
+
+// Test 50: HSM Omitted Handlers - Forwarding Behavior
+//
+// Tests behavior when handlers are omitted at various levels:
+// - Event not handled in child, not forwarded = silent ignore
+// - Event not handled in child, forwarded with `=> $^` = parent handles
+// - State-level `=> $^` forwards all unhandled events
+
+@@system HSMOmittedHandlers {
+    interface:
+        handled_by_child()
+        forwarded_explicitly()
+        unhandled_no_forward()
+        get_log(): Vec<String>
+        get_state(): String
+
+    domain:
+        log: Vec<String>
+
+    machine:
+        $Child => $Parent {
+            handled_by_child() {
+                self.log.push("Child:handled_by_child".to_string());
+            }
+
+            forwarded_explicitly() {
+                self.log.push("Child:before_forward".to_string());
+                => $^
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Child".to_string()
+            }
+        }
+
+        $Parent {
+            handled_by_child() {
+                self.log.push("Parent:handled_by_child".to_string());
+            }
+
+            forwarded_explicitly() {
+                self.log.push("Parent:forwarded_explicitly".to_string());
+            }
+
+            unhandled_no_forward() {
+                self.log.push("Parent:unhandled_no_forward".to_string());
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Parent".to_string()
+            }
+        }
+}
+
+@@system HSMDefaultForward {
+    interface:
+        child_handled()
+        parent_handled()
+        both_respond()
+        get_log(): Vec<String>
+
+    domain:
+        log: Vec<String>
+
+    machine:
+        $Child => $Parent {
+            child_handled() {
+                self.log.push("Child:child_handled".to_string());
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            => $^
+        }
+
+        $Parent {
+            child_handled() {
+                self.log.push("Parent:child_handled".to_string());
+            }
+
+            parent_handled() {
+                self.log.push("Parent:parent_handled".to_string());
+            }
+
+            both_respond() {
+                self.log.push("Parent:both_respond".to_string());
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 50: HSM Omitted Handlers ===");
+
+    // Part 1: Explicit forwarding vs no forwarding
+    let mut s1 = HSMOmittedHandlers::new();
+
+    // TC2.6.1: Event handled by child only
+    s1.handled_by_child();
+    let log = s1.get_log();
+    assert!(log.contains(&"Child:handled_by_child".to_string()), "Expected Child handler, got {:?}", log);
+    assert!(!log.contains(&"Parent:handled_by_child".to_string()), "Parent should NOT be called, got {:?}", log);
+    println!("TC2.6.1: Handled by child, not forwarded - PASS");
+
+    // TC2.6.2: Event explicitly forwarded to parent
+    s1.forwarded_explicitly();
+    let log = s1.get_log();
+    assert!(log.contains(&"Child:before_forward".to_string()), "Expected Child forward, got {:?}", log);
+    assert!(log.contains(&"Parent:forwarded_explicitly".to_string()), "Expected Parent handler, got {:?}", log);
+    println!("TC2.6.2: Explicitly forwarded to parent - PASS");
+
+    // TC2.6.3: Unhandled event with no forward - silently ignored
+    // This should NOT crash and should NOT call parent
+    s1.unhandled_no_forward();
+    let log = s1.get_log();
+    assert!(!log.contains(&"Parent:unhandled_no_forward".to_string()), "Unhandled should be ignored, got {:?}", log);
+    println!("TC2.6.3: Unhandled (no forward) is silently ignored - PASS");
+
+    // Part 2: State-level default forward
+    let mut s2 = HSMDefaultForward::new();
+
+    // TC2.6.4: Event handled by child (no forward despite => $^)
+    s2.child_handled();
+    let log = s2.get_log();
+    assert!(log.contains(&"Child:child_handled".to_string()), "Expected Child handler, got {:?}", log);
+    assert!(!log.contains(&"Parent:child_handled".to_string()), "Handled by child, not forwarded, got {:?}", log);
+    println!("TC2.6.4: Child handles, not forwarded - PASS");
+
+    // TC2.6.5: Unhandled event forwarded via => $^
+    s2.parent_handled();
+    let log = s2.get_log();
+    assert!(log.contains(&"Parent:parent_handled".to_string()), "Expected Parent handler, got {:?}", log);
+    println!("TC2.6.5: Unhandled forwarded via state-level => $^ - PASS");
+
+    // TC2.6.6: Another unhandled event forwarded
+    s2.both_respond();
+    let log = s2.get_log();
+    assert!(log.contains(&"Parent:both_respond".to_string()), "Expected Parent handler, got {:?}", log);
+    println!("TC2.6.6: Default forward works for multiple events - PASS");
+
+    println!("PASS: HSM omitted handlers work correctly");
+}

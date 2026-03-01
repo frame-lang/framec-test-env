@@ -1,0 +1,104 @@
+@@target rust
+
+// Test 46: HSM Enter in Parent Only
+//
+// Tests enter handler in parent only:
+// - Parent has $>(), child does not
+// - Child enters without error (no enter handler)
+// - Parent's enter does NOT auto-fire when child is entered
+// - Parent enter only fires when transitioning directly TO parent
+
+@@system HSMEnterParentOnly {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): Vec<String>
+        get_state(): String
+
+    domain:
+        log: Vec<String>
+
+    machine:
+        $Start {
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Start".to_string()
+            }
+        }
+
+        $Child => $Parent {
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Child".to_string()
+            }
+        }
+
+        $Parent {
+            $>() {
+                self.log.push("Parent:enter".to_string());
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Parent".to_string()
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 46: HSM Enter in Parent Only ===");
+    let mut s = HSMEnterParentOnly::new();
+
+    // TC2.2.1: Child enters without error (no enter handler)
+    s.go_to_child();
+    assert!(s.get_state() == "Child", "Expected Child, got {}", s.get_state());
+    let log = s.get_log();
+    println!("TC2.2.1: Child enters without error (log: {:?}) - PASS", log);
+
+    // TC2.2.2: Parent's enter does NOT auto-fire when child is entered
+    assert!(!log.contains(&"Parent:enter".to_string()), "Parent:enter should NOT fire for child entry, got {:?}", log);
+    println!("TC2.2.2: Parent enter NOT auto-fired for child - PASS");
+
+    // TC2.2.3: Parent enter only fires when transitioning directly TO parent
+    s.go_to_parent();
+    assert!(s.get_state() == "Parent", "Expected Parent, got {}", s.get_state());
+    let log = s.get_log();
+    assert!(log.contains(&"Parent:enter".to_string()), "Expected Parent:enter when transitioning to Parent, got {:?}", log);
+    println!("TC2.2.3: Parent enter fires when transitioning to Parent - PASS");
+
+    // TC2.2.4: Going back to child from parent
+    s.go_to_child();
+    assert!(s.get_state() == "Child", "Expected Child, got {}", s.get_state());
+    let log = s.get_log();
+    // Parent enter should have fired only once (when we went to Parent)
+    let count = log.iter().filter(|x| *x == "Parent:enter").count();
+    assert!(count == 1, "Expected exactly 1 Parent:enter, got {:?}", log);
+    println!("TC2.2.4: Return to child, parent enter count unchanged - PASS");
+
+    println!("PASS: HSM enter in parent only works correctly");
+}

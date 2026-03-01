@@ -1,0 +1,143 @@
+@@target rust
+
+// Test 44: HSM Sibling Transitions
+//
+// Tests transitions between states sharing the same parent:
+// - Exit handler fires on source sibling
+// - Enter handler fires on target sibling
+// - Parent relationship preserved after transition
+
+@@system HSMSiblingTransitions {
+    interface:
+        go_to_b()
+        go_to_a()
+        forward_action()
+        get_log(): Vec<String>
+        get_state(): String
+
+    domain:
+        log: Vec<String>
+
+    machine:
+        $ChildA => $Parent {
+            $>() {
+                self.log.push("ChildA:enter".to_string());
+            }
+
+            <$() {
+                self.log.push("ChildA:exit".to_string());
+            }
+
+            go_to_b() {
+                self.log.push("ChildA:go_to_b".to_string());
+                -> $ChildB
+            }
+
+            forward_action() {
+                self.log.push("ChildA:forward".to_string());
+                => $^
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "ChildA".to_string()
+            }
+        }
+
+        $ChildB => $Parent {
+            $>() {
+                self.log.push("ChildB:enter".to_string());
+            }
+
+            <$() {
+                self.log.push("ChildB:exit".to_string());
+            }
+
+            go_to_a() {
+                self.log.push("ChildB:go_to_a".to_string());
+                -> $ChildA
+            }
+
+            forward_action() {
+                self.log.push("ChildB:forward".to_string());
+                => $^
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "ChildB".to_string()
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                self.log.push("Parent:forward_action".to_string());
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Parent".to_string()
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 44: HSM Sibling Transitions ===");
+    let mut s = HSMSiblingTransitions::new();
+
+    // Initial state is ChildA with enter handler fired
+    let log = s.get_log();
+    assert!(log.contains(&"ChildA:enter".to_string()), "Expected ChildA:enter on init, got {:?}", log);
+    assert!(s.get_state() == "ChildA", "Expected ChildA, got {}", s.get_state());
+    println!("TC1.4.0: Initial state ChildA with enter - PASS");
+
+    // TC1.4.1: Transition from ChildA to ChildB
+    s.go_to_b();
+    assert!(s.get_state() == "ChildB", "Expected ChildB, got {}", s.get_state());
+    println!("TC1.4.1: Transition A->B works - PASS");
+
+    // TC1.4.2: Exit handler fired on source
+    let log = s.get_log();
+    assert!(log.contains(&"ChildA:exit".to_string()), "Expected ChildA:exit, got {:?}", log);
+    println!("TC1.4.2: Exit handler fires on source - PASS");
+
+    // TC1.4.3: Enter handler fired on target
+    assert!(log.contains(&"ChildB:enter".to_string()), "Expected ChildB:enter, got {:?}", log);
+    println!("TC1.4.3: Enter handler fires on target - PASS");
+
+    // TC1.4.4: Parent relationship preserved - ChildB can forward
+    s.forward_action();
+    let log = s.get_log();
+    assert!(log.contains(&"ChildB:forward".to_string()), "Expected ChildB:forward, got {:?}", log);
+    assert!(log.contains(&"Parent:forward_action".to_string()), "Expected Parent handler, got {:?}", log);
+    println!("TC1.4.4: Parent relationship preserved - PASS");
+
+    // TC1.4.5: Transition back to ChildA
+    s.go_to_a();
+    assert!(s.get_state() == "ChildA", "Expected ChildA, got {}", s.get_state());
+    let log = s.get_log();
+    let exit_b_count = log.iter().filter(|x| *x == "ChildB:exit").count();
+    let enter_a_count = log.iter().filter(|x| *x == "ChildA:enter").count();
+    assert!(exit_b_count == 1, "Expected ChildB:exit once, got {:?}", log);
+    assert!(enter_a_count == 2, "Expected ChildA:enter twice, got {:?}", log);
+    println!("TC1.4.5: Transition B->A works with enter/exit - PASS");
+
+    // TC1.4.6: ChildA can still forward after returning
+    s.forward_action();
+    let log = s.get_log();
+    assert!(log.contains(&"ChildA:forward".to_string()), "Expected ChildA:forward, got {:?}", log);
+    let parent_count = log.iter().filter(|x| *x == "Parent:forward_action").count();
+    assert!(parent_count == 2, "Expected 2 Parent handlers, got {:?}", log);
+    println!("TC1.4.6: ChildA forwards after returning - PASS");
+
+    println!("PASS: HSM sibling transitions work correctly");
+}

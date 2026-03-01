@@ -53,6 +53,7 @@ if [ $compile_status -ne 0 ] || [ ! -f "$out_file" ]; then
         echo "known" > "$result_file"
     else
         echo "fail" > "$result_file"
+        echo "TEST_FILE:$test_file" >> "$result_file"
         echo "$compile_output" >> "$result_file"
     fi
     exit 0
@@ -88,8 +89,12 @@ case $lang in
     c)
         c_bin="$C_OUT/${test_name}"
         cjson_flags=""
-        [ -d "/opt/homebrew/include/cjson" ] && cjson_flags="-I/opt/homebrew/include -L/opt/homebrew/lib -lcjson"
-        [ -d "/usr/local/include/cjson" ] && cjson_flags="-I/usr/local/include -L/usr/local/lib -lcjson"
+        # Prefer /opt/homebrew (ARM64 Mac) over /usr/local (may be x86_64)
+        if [ -d "/opt/homebrew/include/cjson" ]; then
+            cjson_flags="-I/opt/homebrew/include -L/opt/homebrew/lib -lcjson"
+        elif [ -d "/usr/local/include/cjson" ]; then
+            cjson_flags="-I/usr/local/include -L/usr/local/lib -lcjson"
+        fi
         if gcc -o "$c_bin" "$out_file" $cjson_flags 2>&1; then
             run_output=$("$c_bin" 2>&1) || run_status=$?
         else
@@ -106,5 +111,6 @@ elif $is_known_fail; then
     echo "known" > "$result_file"
 else
     echo "fail" > "$result_file"
+    echo "TEST_FILE:$test_file" >> "$result_file"
     echo "$run_output" >> "$result_file"
 fi

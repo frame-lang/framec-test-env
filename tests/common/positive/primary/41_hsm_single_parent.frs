@@ -1,0 +1,92 @@
+@@target rust
+
+// Test 41: HSM Single Parent Relationship
+//
+// Tests basic child-parent HSM relationship:
+// - Child declares parent with `=> $Parent` syntax
+// - Child can forward events to parent
+// - Child remains current state after forward
+// - Parent handler executes and returns control
+
+@@system HSMSingleParent {
+    interface:
+        child_only()
+        forward_to_parent()
+        get_log(): Vec<String>
+        get_state(): String
+
+    domain:
+        log: Vec<String>
+
+    machine:
+        $Child => $Parent {
+            child_only() {
+                self.log.push("Child:child_only".to_string());
+            }
+
+            forward_to_parent() {
+                self.log.push("Child:before_forward".to_string());
+                => $^
+                self.log.push("Child:after_forward".to_string());
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Child".to_string()
+            }
+        }
+
+        $Parent {
+            forward_to_parent() {
+                self.log.push("Parent:forward_to_parent".to_string());
+            }
+
+            get_log(): Vec<String> {
+                return self.log.clone()
+            }
+
+            get_state(): String {
+                return "Parent".to_string()
+            }
+        }
+}
+
+fn main() {
+    println!("=== Test 41: HSM Single Parent ===");
+    let mut s = HSMSingleParent::new();
+
+    // TC1.1.1: Child declares parent with `=> $Parent` syntax (verified by compilation)
+    println!("TC1.1.1: Child-Parent relationship compiles - PASS");
+
+    // TC1.1.2: Child can forward events to parent
+    s.forward_to_parent();
+    let log = s.get_log();
+    assert!(log.contains(&"Child:before_forward".to_string()), "Expected Child:before_forward in log, got {:?}", log);
+    assert!(log.contains(&"Parent:forward_to_parent".to_string()), "Expected Parent:forward_to_parent in log, got {:?}", log);
+    println!("TC1.1.2: Child forwards to parent - PASS (log: {:?})", log);
+
+    // TC1.1.3: Child remains the current state (no transition occurs on forward)
+    let state = s.get_state();
+    assert!(state == "Child", "Expected state 'Child', got '{}'", state);
+    println!("TC1.1.3: Child remains current state after forward - PASS");
+
+    // TC1.1.4: Parent handler executes and returns control
+    // Verified by "Child:after_forward" appearing after parent execution
+    assert!(log.contains(&"Child:after_forward".to_string()), "Expected Child:after_forward in log (after parent), got {:?}", log);
+    let idx_parent = log.iter().position(|x| x == "Parent:forward_to_parent").unwrap();
+    let idx_after = log.iter().position(|x| x == "Child:after_forward").unwrap();
+    assert!(idx_after > idx_parent, "Expected Child:after_forward after Parent handler");
+    println!("TC1.1.4: Parent executes and returns control - PASS");
+
+    // TC1.1.5: Child-only event not forwarded
+    s.child_only();
+    let log = s.get_log();
+    let count = log.iter().filter(|x| *x == "Child:child_only").count();
+    assert!(count == 1, "Expected exactly 1 Child:child_only, got {:?}", log);
+    println!("TC1.1.5: Child-only event handled locally - PASS");
+
+    println!("PASS: HSM single parent relationship works correctly");
+}

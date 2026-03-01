@@ -1,0 +1,106 @@
+@@target typescript
+
+// Test 46: HSM Enter in Parent Only
+//
+// Tests enter handler in parent only:
+// - Parent has $>(), child does not
+// - Child enters without error (no enter handler)
+// - Parent's enter does NOT auto-fire when child is entered
+// - Parent enter only fires when transitioning directly TO parent
+
+@@system HSMEnterParentOnly {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): string[]
+        get_state(): str
+
+    domain:
+        log: string[] = []
+
+    machine:
+        $Start {
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Start"
+            }
+        }
+
+        $Child => $Parent {
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Child"
+            }
+        }
+
+        $Parent {
+            $>() {
+                this.log.push("Parent:enter")
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Parent"
+            }
+        }
+}
+
+function main() {
+    console.log("=== Test 46: HSM Enter in Parent Only ===");
+    const s = new HSMEnterParentOnly();
+
+    // TC2.2.1: Child enters without error (no enter handler)
+    s.go_to_child();
+    if (s.get_state() !== "Child") throw new Error(`Expected Child, got ${s.get_state()}`);
+    let log = s.get_log();
+    console.log(`TC2.2.1: Child enters without error (log: ${JSON.stringify(log)}) - PASS`);
+
+    // TC2.2.2: Parent's enter does NOT auto-fire when child is entered
+    if (log.includes("Parent:enter")) throw new Error(`Parent:enter should NOT fire for child entry, got ${JSON.stringify(log)}`);
+    console.log("TC2.2.2: Parent enter NOT auto-fired for child - PASS");
+
+    // TC2.2.3: Parent enter only fires when transitioning directly TO parent
+    s.go_to_parent();
+    if (s.get_state() !== "Parent") throw new Error(`Expected Parent, got ${s.get_state()}`);
+    log = s.get_log();
+    if (!log.includes("Parent:enter")) throw new Error(`Expected Parent:enter when transitioning to Parent, got ${JSON.stringify(log)}`);
+    console.log("TC2.2.3: Parent enter fires when transitioning to Parent - PASS");
+
+    // TC2.2.4: Going back to child from parent
+    s.go_to_child();
+    if (s.get_state() !== "Child") throw new Error(`Expected Child, got ${s.get_state()}`);
+    log = s.get_log();
+    // Parent enter should have fired only once (when we went to Parent)
+    const count = log.filter((x: string) => x === "Parent:enter").length;
+    if (count !== 1) throw new Error(`Expected exactly 1 Parent:enter, got ${JSON.stringify(log)}`);
+    console.log("TC2.2.4: Return to child, parent enter count unchanged - PASS");
+
+    console.log("PASS: HSM enter in parent only works correctly");
+}
+
+main();

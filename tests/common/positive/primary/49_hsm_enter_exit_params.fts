@@ -1,0 +1,122 @@
+@@target typescript
+
+// Test 49: HSM Enter/Exit with Parameters
+//
+// Tests enter and exit handlers with parameters in HSM context:
+// - Exit params passed correctly
+// - Enter params passed to target state
+// - Transition syntax: (exit_args) -> (enter_args) $Target
+
+@@system HSMEnterExitParams {
+    interface:
+        go_to_a()
+        go_to_sibling()
+        go_back()
+        get_log(): string[]
+        get_state(): str
+
+    domain:
+        log: string[] = []
+
+    machine:
+        $Start {
+            go_to_a() {
+                -> ("starting") $ChildA
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Start"
+            }
+        }
+
+        $ChildA => $Parent {
+            $>(msg: str) {
+                this.log.push(`ChildA:enter(${msg})`)
+            }
+
+            <$(reason: str) {
+                this.log.push(`ChildA:exit(${reason})`)
+            }
+
+            go_to_sibling() {
+                ("leaving_A") -> ("arriving_B") $ChildB
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "ChildA"
+            }
+        }
+
+        $ChildB => $Parent {
+            $>(msg: str) {
+                this.log.push(`ChildB:enter(${msg})`)
+            }
+
+            <$(reason: str) {
+                this.log.push(`ChildB:exit(${reason})`)
+            }
+
+            go_back() {
+                ("leaving_B") -> ("returning_A") $ChildA
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "ChildB"
+            }
+        }
+
+        $Parent {
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Parent"
+            }
+        }
+}
+
+function main() {
+    console.log("=== Test 49: HSM Enter/Exit with Params ===");
+    const s = new HSMEnterExitParams();
+
+    // First go to ChildA with enter params
+    s.go_to_a();
+    let log = s.get_log();
+    if (!log.includes("ChildA:enter(starting)")) throw new Error(`Expected ChildA:enter(starting), got ${JSON.stringify(log)}`);
+    console.log("TC2.5.0: Initial transition with enter params - PASS");
+
+    // TC2.5.1: Exit params passed correctly
+    s.go_to_sibling();
+    log = s.get_log();
+    if (!log.includes("ChildA:exit(leaving_A)")) throw new Error(`Expected exit with param, got ${JSON.stringify(log)}`);
+    console.log("TC2.5.1: Exit params passed correctly - PASS");
+
+    // TC2.5.2: Enter params passed to target state
+    if (!log.includes("ChildB:enter(arriving_B)")) throw new Error(`Expected enter with param, got ${JSON.stringify(log)}`);
+    if (s.get_state() !== "ChildB") throw new Error(`Expected ChildB, got ${s.get_state()}`);
+    console.log("TC2.5.2: Enter params passed to target - PASS");
+
+    // TC2.5.3: Return transition with different params
+    s.go_back();
+    log = s.get_log();
+    if (!log.includes("ChildB:exit(leaving_B)")) throw new Error(`Expected ChildB exit, got ${JSON.stringify(log)}`);
+    if (!log.includes("ChildA:enter(returning_A)")) throw new Error(`Expected ChildA enter, got ${JSON.stringify(log)}`);
+    console.log("TC2.5.3: Return transition with params - PASS");
+
+    console.log("PASS: HSM enter/exit with params works correctly");
+}
+
+main();
