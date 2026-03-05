@@ -33,6 +33,11 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FRAMEC="${FRAMEC:-/Users/marktruluck/projects/frame_transpiler/target/release/framec}"
 
+# Ensure cargo is in PATH (needed for Rust tests in non-login shells / CI)
+if [ -d "$HOME/.cargo/bin" ] && ! command -v cargo &>/dev/null; then
+    export PATH="$HOME/.cargo/bin:$PATH"
+fi
+
 # Test environment root
 TEST_ENV_ROOT="${FRAMEPILER_TEST_ENV:-$(cd "$SCRIPT_DIR/.." && pwd)}"
 
