@@ -10,6 +10,19 @@ test_file="$1"
 lang="$2"
 result_file="$3"
 
+# Ensure all tool directories are in PATH (non-login shells like CI / Claude Code
+# don't source the user's profile). Matches run_tests.sh — both need this so
+# python3, node, npx, cargo, gcc are always reachable.
+for __dir in "$HOME/.cargo/bin" "/usr/local/bin" "/opt/homebrew/bin"; do
+    if [ -d "$__dir" ]; then
+        case ":$PATH:" in
+            *":$__dir:"*) ;;
+            *) export PATH="$__dir:$PATH" ;;
+        esac
+    fi
+done
+unset __dir
+
 # Environment (inherited from parent)
 FRAMEC="${FRAMEC:-/Users/marktruluck/projects/frame_transpiler/target/release/framec}"
 TEST_ENV_ROOT="${TEST_ENV_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"

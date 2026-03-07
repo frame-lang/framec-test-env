@@ -33,10 +33,19 @@
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 FRAMEC="${FRAMEC:-/Users/marktruluck/projects/frame_transpiler/target/release/framec}"
 
-# Ensure cargo is in PATH (needed for Rust tests in non-login shells / CI)
-if [ -d "$HOME/.cargo/bin" ] && ! command -v cargo &>/dev/null; then
-    export PATH="$HOME/.cargo/bin:$PATH"
-fi
+# Ensure all tool directories are in PATH (non-login shells like CI / Claude Code
+# don't source the user's profile, so tools from homebrew, cargo, nvm, etc.
+# aren't on PATH). This is the ONE place to fix it — both this script and
+# run_single_test.sh (spawned by xargs -P) inherit this PATH.
+for __dir in "$HOME/.cargo/bin" "/usr/local/bin" "/opt/homebrew/bin"; do
+    if [ -d "$__dir" ]; then
+        case ":$PATH:" in
+            *":$__dir:"*) ;;  # already present
+            *) export PATH="$__dir:$PATH" ;;
+        esac
+    fi
+done
+unset __dir
 
 # Test environment root
 TEST_ENV_ROOT="${FRAMEPILER_TEST_ENV:-$(cd "$SCRIPT_DIR/.." && pwd)}"
