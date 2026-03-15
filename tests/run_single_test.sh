@@ -117,8 +117,21 @@ case $lang in
         ;;
 esac
 
-# Check result
-if echo "$run_output" | grep -qE "(^ok |PASS)"; then
+# Determine pass/fail:
+#   1. Non-zero exit code = definite failure
+#   2. TAP "not ok" lines = failure (even if exit code is 0)
+#   3. TAP "ok" lines or "PASS" string = pass
+#   4. No recognizable output = failure
+test_passed=false
+if [ $run_status -ne 0 ]; then
+    test_passed=false
+elif echo "$run_output" | grep -q "^not ok "; then
+    test_passed=false
+elif echo "$run_output" | grep -qE "(^ok |PASS)"; then
+    test_passed=true
+fi
+
+if $test_passed; then
     echo "pass" > "$result_file"
 elif $is_xfail; then
     echo "known" > "$result_file"

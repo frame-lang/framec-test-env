@@ -136,15 +136,15 @@ Add markers in the first 10 lines of a test file to control behavior:
 | `// @@xfail` | Test runs, expected to fail (counts as failure in reporting) |
 | `// @@timeout N` | Override default 30-second timeout |
 
-## Test Counts (2026-03-01)
+## Test Counts (2026-03-15)
 
 | Scope | Python | TypeScript | Rust | C | Total |
 |-------|--------|------------|------|---|-------|
-| common/ | 129 | 120 | 123 | 139 | 511 |
+| common/ | 131 | 122 | 125 | 141 | 519 |
 | language-specific/ | 15 | 6 | 7 | 0 | 28 |
-| **Total** | **144** | **126** | **130** | **139** | **539** |
+| **Total** | **146** | **128** | **132** | **141** | **547** |
 
-**All 539 tests passing (100%)**
+**All 547 tests passing (100%)**
 
 ## Adding New Tests
 
@@ -176,13 +176,17 @@ mkdir -p common/my_new_category
 
 ## Test Requirements
 
-A test **passes** if its output contains the string `PASS`.
+A test **passes** if:
+- Exit code is 0, AND
+- Output contains no TAP `not ok` lines, AND
+- Output contains `ok ` (TAP) or `PASS` (legacy)
 
 A test **fails** if:
 - Transpilation fails
 - Compilation fails (C, Rust)
-- Execution fails
-- Output does not contain `PASS`
+- Non-zero exit code
+- Output contains TAP `not ok` lines (even if `PASS` also appears)
+- Output contains no recognizable pass indicator
 
 ### Example Test Structure
 
