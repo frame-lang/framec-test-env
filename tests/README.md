@@ -69,18 +69,22 @@ tests/
 ├── run_tests.sh          # THE test runner (use this!)
 │
 ├── common/               # Tests for ALL languages
-│   ├── primary/          # Core reference tests (36 tests)
-│   ├── automata/         # Mealy/Moore machines
-│   ├── capabilities/     # Actions, operations, persistence
-│   ├── control_flow/     # If/else, while, forwards
-│   ├── core/             # Core language features
-│   ├── data_types/       # Lists, dicts, strings
-│   ├── exec_smoke/       # Execution smoke tests
-│   ├── interfaces/       # Interface methods
-│   ├── operators/        # Arithmetic, comparison, logical
-│   ├── scoping/          # Variable scoping
-│   ├── systems/          # State machines, HSM
-│   └── validator/        # Validation tests
+│   ├── positive/         # Positive tests (transpile + compile + run OK)
+│   │   ├── primary/      # Core reference tests (49 tests)
+│   │   ├── automata/     # Mealy/Moore machines
+│   │   ├── capabilities/ # Actions, operations, persistence
+│   │   ├── control_flow/ # If/else, while, forwards
+│   │   ├── core/         # Core language features
+│   │   ├── data_types/   # Lists, dicts, strings
+│   │   ├── exec_smoke/   # Execution smoke tests
+│   │   ├── interfaces/   # Interface methods
+│   │   ├── operators/    # Arithmetic, comparison, logical
+│   │   ├── scoping/      # Variable scoping
+│   │   ├── systems/      # State machines, HSM
+│   │   └── validator/    # Validation tests
+│   ├── compile-error/    # Expected compile failures
+│   ├── transpile-error/  # Expected transpile failures
+│   └── runtime-error/    # Expected runtime failures
 │
 ├── python/               # Python-only tests
 │   ├── async/
