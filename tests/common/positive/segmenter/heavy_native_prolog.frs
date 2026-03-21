@@ -1,0 +1,81 @@
+@@target rust
+
+// Test: Heavy native prolog and epilog with edge-case Rust syntax.
+// Tests that generic types (HashMap<String, String>) in impl blocks
+// do NOT confuse the segmenter's body closer.
+
+use std::collections::HashMap;
+
+// Mentions @@system and -> $State in comments
+// These should NOT be parsed as Frame
+
+struct NativeHelper {
+    template: &'static str,
+}
+
+impl NativeHelper {
+    fn new() -> Self {
+        Self {
+            template: "just a string",
+        }
+    }
+
+    fn process(&self, _data: &HashMap<String, String>) -> Option<String> {
+        let result = format!("key: value");
+        // Comment with -> $Transition and => $^ and push$
+        Some(result)
+    }
+}
+
+// Global-like constant
+fn get_config() -> HashMap<String, String> {
+    let mut m = HashMap::new();
+    m.insert("description".to_string(), "Config".to_string());
+    m.insert("pattern".to_string(), "start".to_string());
+    m
+}
+
+@@system HeavyNativeProlog {
+    interface:
+        run_test()
+
+    machine:
+        $Start {
+            run_test() {
+                let h = NativeHelper::new();
+                let config = get_config();
+                let result = h.process(&config);
+                if result.is_some() {
+                    println!("PASS: Heavy native prolog handled correctly");
+                } else {
+                    panic!("FAIL");
+                }
+            }
+        }
+}
+
+// Heavy epilog with generics
+struct PostSystem {
+    data: HashMap<String, String>,
+}
+
+impl PostSystem {
+    fn new() -> Self {
+        let mut data = HashMap::new();
+        data.insert("key".to_string(), "value".to_string());
+        Self { data }
+    }
+
+    fn run(&self) -> bool {
+        // -> $NotATransition
+        // => $^
+        !self.data.is_empty()
+    }
+}
+
+fn main() {
+    let mut s = HeavyNativeProlog::new();
+    s.run_test();
+    let p = PostSystem::new();
+    assert!(p.run());
+}

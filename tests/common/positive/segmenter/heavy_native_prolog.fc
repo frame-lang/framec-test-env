@@ -1,0 +1,68 @@
+@@target c
+
+// Test: Heavy native prolog and epilog with edge-case C syntax.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// Mentions @@system and -> $State in comments
+// These should NOT be parsed as Frame
+
+typedef struct {
+    const char* template_str;
+} NativeHelper;
+
+NativeHelper* NativeHelper_create() {
+    NativeHelper* h = (NativeHelper*)malloc(sizeof(NativeHelper));
+    // String with Frame-like tokens
+    h->template_str = "{\"@@target\": \"not_real\", \"-> $State\": \"just a string\"}";
+    return h;
+}
+
+const char* NativeHelper_process(NativeHelper* h) {
+    // Comment with -> $Transition and => $^ and push$
+    return "{\"key\": \"value with { braces }\"}";
+}
+
+// Global with @@ in string
+const char* GLOBAL_PATTERN = "-> $Start";
+const char* GLOBAL_DESC = "Config with @@system-like syntax";
+
+@@system HeavyNativeProlog {
+    interface:
+        run_test()
+
+    machine:
+        $Start {
+            run_test() {
+                NativeHelper* h = NativeHelper_create();
+                const char* result = NativeHelper_process(h);
+                if (result != NULL) {
+                    printf("PASS: Heavy native prolog handled correctly\n");
+                } else {
+                    printf("FAIL\n");
+                }
+                free(h);
+            }
+        }
+}
+
+// Heavy epilog
+typedef struct {
+    const char* data;
+} PostSystem;
+
+int post_run() {
+    // -> $NotATransition
+    // => $^
+    return 1;
+}
+
+int main() {
+    HeavyNativeProlog* s = HeavyNativeProlog_new();
+    HeavyNativeProlog_run_test(s);
+    HeavyNativeProlog_destroy(s);
+    if (!post_run()) { return 1; }
+    return 0;
+}

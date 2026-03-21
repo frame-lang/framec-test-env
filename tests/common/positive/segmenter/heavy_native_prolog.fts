@@ -1,0 +1,66 @@
+@@target typescript
+
+// Test: Heavy native prolog and epilog with edge-case TypeScript syntax.
+
+interface NativeInterface {
+    process(data: Record<string, any>): string | null;
+}
+
+class NativeHelper implements NativeInterface {
+    // Mentions @@system and -> $State in comments
+    // These should NOT be parsed as Frame
+
+    static TEMPLATE: string = `
+    {
+        "@@target": "not_real",
+        "-> $State": "just a string",
+        "push$": true
+    }
+    `;
+
+    process(data: Record<string, any>): string | null {
+        const result = JSON.stringify({"key": "value with { braces }"});
+        // Comment with -> $Transition and => $^ and push$
+        return result;
+    }
+}
+
+// Global with @@ in string
+const GLOBAL_CONFIG: Record<string, string> = {
+    "description": "Config with @@system-like syntax",
+    "pattern": "-> $Start",
+};
+
+@@system HeavyNativeProlog {
+    interface:
+        run_test()
+
+    machine:
+        $Start {
+            run_test() {
+                const h = new NativeHelper();
+                const result = h.process(GLOBAL_CONFIG);
+                if (result !== null) {
+                    console.log("PASS: Heavy native prolog handled correctly");
+                } else {
+                    throw new Error("FAIL");
+                }
+            }
+        }
+}
+
+// Heavy epilog
+class PostSystem {
+    data: Record<string, string> = {"@@system": "in dict", "-> $State": "in dict"};
+
+    run(): boolean {
+        // -> $NotATransition
+        // => $^
+        return true;
+    }
+}
+
+const s = new HeavyNativeProlog();
+s.run_test();
+const p = new PostSystem();
+if (!p.run()) { throw new Error("epilog failed"); }

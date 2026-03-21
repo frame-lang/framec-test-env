@@ -1,0 +1,90 @@
+@@target python_3
+
+# Test: Heavy native prolog and epilog with edge-case syntax.
+# Verifies the segmenter correctly identifies @@system boundaries
+# when surrounded by complex native code.
+
+import os
+import sys
+import json
+from typing import Any, Dict, List, Optional, Tuple
+
+# Decorator that mentions "system" and uses @ (not @@)
+def log_calls(func):
+    """Decorator — note the @ symbol is NOT @@"""
+    def wrapper(*args, **kwargs):
+        print(f"Calling {func.__name__}")
+        return func(*args, **kwargs)
+    return wrapper
+
+# Class with braces in docstrings and complex syntax
+class NativeHelper:
+    """Helper class with { braces } in docstring.
+
+    Also mentions @@system and -> $State in docs.
+    These should NOT be parsed as Frame.
+    """
+
+    TEMPLATE = """
+    {
+        "@@target": "not_real",
+        "-> $State": "just a string",
+        "push$": true
+    }
+    """
+
+    @staticmethod
+    def process(data: Dict[str, Any]) -> Optional[str]:
+        result = json.dumps({"key": "value with { braces }"})
+        # Comment with -> $Transition and => $^ and push$
+        return result
+
+    @log_calls
+    def method_with_decorator(self):
+        return "decorated"
+
+# Global with @@ in string
+GLOBAL_CONFIG = {
+    "description": "Config with @@system-like syntax",
+    "pattern": "-> $Start",
+}
+
+@@system HeavyNativeProlog {
+    interface:
+        run_test()
+
+    machine:
+        $Start {
+            run_test() {
+                h = NativeHelper()
+                result = h.process(GLOBAL_CONFIG)
+                if result is not None:
+                    print("PASS: Heavy native prolog handled correctly")
+                else:
+                    raise Exception("FAIL")
+            }
+        }
+}
+
+# Heavy epilog
+class PostSystem:
+    """Class defined after @@system block"""
+    def __init__(self):
+        self.data = {"@@system": "in dict", "-> $State": "in dict"}
+
+    def run(self):
+        # This mentions Frame constructs but is native code
+        # -> $NotATransition
+        # => $^
+        return True
+
+@log_calls
+def epilog_function():
+    """Function with @ decorator after system"""
+    p = PostSystem()
+    return p.run()
+
+if __name__ == '__main__':
+    s = HeavyNativeProlog()
+    s.run_test()
+    assert epilog_function() == True
