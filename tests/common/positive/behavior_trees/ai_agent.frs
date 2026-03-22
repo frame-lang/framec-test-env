@@ -1,0 +1,276 @@
+@@target rust
+
+// Behavior Tree implemented as HSM with tick-driven re-evaluation.
+//
+// Tree structure (Selector = priority-ordered, Sequence = ordered steps):
+//
+//   $Root (Selector)
+//   +-- $Survival (Selector -- highest priority)
+//   |   +-- $Flee (Action -- flee when health < 20)
+//   +-- $Combat (Sequence)
+//   |   +-- $Approach (Action -- move toward enemy)
+//   |   +-- $Attack (Action -- attack when in range)
+//   +-- $Idle (Selector -- lowest priority)
+//       +-- $Patrol (Action -- walk patrol route)
+//
+// On every tick:
+//   - Root checks conditions top-down (priority)
+//   - Transitions to highest-priority subtree whose condition is met
+//   - Leaf states check their preconditions each tick and => $^ if invalid
+//   - Domain vars act as blackboard
+
+@@system AiAgent {
+    interface:
+        tick()
+        get_state(): String = String::new()
+        get_action_log(): String = String::new()
+
+    machine:
+        $Root {
+            $>() {
+                self.action_log = String::new();
+            }
+
+            tick() {
+                // Selector: check conditions in priority order
+                if self.health < 20 {
+                    -> $Flee
+                }
+                if self.enemy_distance < 50 {
+                    -> $Approach
+                }
+                -> $Patrol
+            }
+
+            get_state(): String { return String::from("Root") }
+        }
+
+        $Flee {
+            $>() {
+                self.action_log = format!("{}flee,", self.action_log);
+            }
+
+            tick() {
+                // Precondition: still low health?
+                if self.health >= 20 {
+                    // Condition no longer met -- back to root for re-evaluation
+                    -> $Root
+                }
+
+                // Action: flee (increase distance, recover health)
+                self.enemy_distance = self.enemy_distance + 10;
+                self.health = self.health + 5;
+                self.action_log = format!("{}flee,", self.action_log);
+            }
+
+            get_state(): String { return String::from("Flee") }
+        }
+
+        $Approach {
+            $>() {
+                self.action_log = format!("{}approach,", self.action_log);
+            }
+
+            tick() {
+                // Survival interrupt: flee takes priority
+                if self.health < 20 {
+                    -> $Flee
+                }
+
+                // Precondition: enemy still visible?
+                if self.enemy_distance >= 50 {
+                    -> $Root
+                }
+
+                // Action: move closer
+                if self.enemy_distance > 5 {
+                    self.enemy_distance = self.enemy_distance - 10;
+                    self.action_log = format!("{}approach,", self.action_log);
+                } else {
+                    // In range -- sequence continues to Attack
+                    -> $Attack
+                }
+            }
+
+            get_state(): String { return String::from("Approach") }
+        }
+
+        $Attack {
+            $>() {
+                self.action_log = format!("{}attack,", self.action_log);
+            }
+
+            tick() {
+                // Survival interrupt
+                if self.health < 20 {
+                    -> $Flee
+                }
+
+                // Precondition: still in range?
+                if self.enemy_distance > 5 {
+                    // Enemy moved away -- go back to approach
+                    -> $Approach
+                }
+
+                // Precondition: enemy still alive?
+                if self.enemy_health <= 0 {
+                    // Victory -- back to idle
+                    self.enemy_distance = 100;
+                    -> $Root
+                }
+
+                // Action: attack
+                self.enemy_health = self.enemy_health - 25;
+                self.action_log = format!("{}attack,", self.action_log);
+            }
+
+            get_state(): String { return String::from("Attack") }
+        }
+
+        $Patrol {
+            $>() {
+                self.action_log = format!("{}patrol,", self.action_log);
+            }
+
+            tick() {
+                // Higher-priority interrupt: combat
+                if self.enemy_distance < 50 {
+                    -> $Approach
+                }
+
+                // Higher-priority interrupt: survival
+                if self.health < 20 {
+                    -> $Flee
+                }
+
+                // Action: patrol
+                self.patrol_step = self.patrol_step + 1;
+                self.action_log = format!("{}patrol,", self.action_log);
+            }
+
+            get_state(): String { return String::from("Patrol") }
+        }
+
+    domain:
+        health: i32
+        enemy_distance: i32
+        enemy_health: i32
+        patrol_step: i32
+        action_log: String
+}
+
+
+// ============================================================
+// Test Harness
+// ============================================================
+
+fn assert_state(agent: &mut AiAgent, expected: &str, label: &str) {
+    let actual = agent.get_state();
+    if actual != expected {
+        panic!("FAIL: {} — expected '{}', got '{}'", label, expected, actual);
+    }
+}
+
+fn test_priority_interrupt() {
+    let mut agent = AiAgent::new();
+
+    // Initialize domain vars (Rust default-inits to 0/empty)
+    agent.health = 100;
+    agent.enemy_distance = 100;
+    agent.enemy_health = 100;
+
+    // No enemy, full health -> should patrol
+    agent.tick();
+    assert_state(&mut agent, "Patrol", "initial patrol");
+
+    // Enemy appears at distance 30 -> should approach
+    agent.enemy_distance = 30;
+    agent.tick();
+    assert_state(&mut agent, "Approach", "enemy triggers approach");
+
+    // Health drops critically -> should flee (interrupts combat)
+    agent.health = 10;
+    agent.tick();
+    assert_state(&mut agent, "Flee", "low health interrupts combat");
+
+    // Health recovers -> flee transitions to root, then next tick re-evaluates
+    agent.health = 50;
+    agent.enemy_distance = 20;
+    agent.tick();  // Flee sees health OK -> transitions to Root
+    assert_state(&mut agent, "Root", "flee exits to root");
+    agent.tick();  // Root re-evaluates -> enemy near -> approach
+    assert_state(&mut agent, "Approach", "health recovered, back to combat");
+
+    println!("PASS: BT priority interrupt");
+}
+
+fn test_sequence_completion() {
+    let mut agent = AiAgent::new();
+
+    // Initialize domain vars
+    agent.health = 100;
+    agent.enemy_distance = 100;
+    agent.enemy_health = 100;
+
+    // Enemy at distance 30
+    agent.enemy_distance = 30;
+    agent.tick();
+    assert_state(&mut agent, "Approach", "start approach");
+
+    // Tick: approach reduces distance
+    agent.tick();
+    assert_state(&mut agent, "Approach", "still approaching");
+
+    // Tick: now close enough (distance <= 5) -> transitions to Attack
+    agent.enemy_distance = 5;
+    agent.tick();
+    assert_state(&mut agent, "Attack", "in range, attacking");
+
+    // Tick: attack deals damage
+    agent.tick();
+    assert_state(&mut agent, "Attack", "still attacking");
+
+    // Enemy dies -> Attack transitions to Root
+    agent.enemy_health = 0;
+    agent.tick();
+    assert_state(&mut agent, "Root", "enemy dead, back to root");
+    agent.tick();  // Root re-evaluates -> no enemy -> patrol
+    assert_state(&mut agent, "Patrol", "enemy dead, patrol");
+
+    println!("PASS: BT sequence completion");
+}
+
+fn test_re_evaluation() {
+    let mut agent = AiAgent::new();
+
+    // Initialize domain vars
+    agent.health = 100;
+    agent.enemy_distance = 100;
+    agent.enemy_health = 100;
+
+    // Enemy at distance 30 -> approach
+    agent.enemy_distance = 30;
+    agent.tick();
+    assert_state(&mut agent, "Approach", "approaching");
+
+    // Enemy runs away (distance > 50) -> back to root, then patrol
+    agent.enemy_distance = 60;
+    agent.tick();  // Approach sees no enemy -> Root
+    assert_state(&mut agent, "Root", "enemy fled, root");
+    agent.tick();  // Root -> patrol
+    assert_state(&mut agent, "Patrol", "enemy fled, patrol");
+
+    // Enemy comes back
+    agent.enemy_distance = 10;
+    agent.tick();
+    assert_state(&mut agent, "Approach", "enemy back, approach again");
+
+    println!("PASS: BT re-evaluation");
+}
+
+fn main() {
+    test_priority_interrupt();
+    test_sequence_completion();
+    test_re_evaluation();
+    println!("PASS: All behavior tree tests passed");
+}
