@@ -1,0 +1,199 @@
+@@target rust
+
+// TCP Connection State Machine (simplified RFC 793)
+
+@@system TcpServer {
+    interface:
+        listen()
+        receive_syn()
+        receive_ack()
+        receive_fin()
+        receive_data(data: String)
+        close()
+        get_state(): String = String::new()
+
+    machine:
+        $Closed {
+            get_state(): String { return String::from("Closed") }
+            listen() { -> $Listen }
+        }
+
+        $Listen {
+            get_state(): String { return String::from("Listen") }
+            receive_syn() { -> $SynReceived }
+        }
+
+        $SynReceived {
+            get_state(): String { return String::from("SynReceived") }
+            receive_ack() { -> $Established }
+        }
+
+        $Established {
+            get_state(): String { return String::from("Established") }
+            receive_data(data: String) { }
+            receive_fin() { -> $CloseWait }
+            close() { -> $FinWait1 }
+        }
+
+        $CloseWait {
+            get_state(): String { return String::from("CloseWait") }
+            close() { -> $LastAck }
+        }
+
+        $LastAck {
+            get_state(): String { return String::from("LastAck") }
+            receive_ack() { -> $Closed }
+        }
+
+        $FinWait1 {
+            get_state(): String { return String::from("FinWait1") }
+            receive_ack() { -> $FinWait2 }
+            receive_fin() { -> $Closing }
+        }
+
+        $FinWait2 {
+            get_state(): String { return String::from("FinWait2") }
+            receive_fin() { -> $TimeWait }
+        }
+
+        $Closing {
+            get_state(): String { return String::from("Closing") }
+            receive_ack() { -> $TimeWait }
+        }
+
+        $TimeWait {
+            get_state(): String { return String::from("TimeWait") }
+            receive_ack() { -> $Closed }
+        }
+}
+
+
+@@system TcpClient {
+    interface:
+        connect()
+        receive_syn_ack()
+        receive_ack()
+        receive_fin()
+        send_data(data: String)
+        close()
+        get_state(): String = String::new()
+
+    machine:
+        $Closed {
+            get_state(): String { return String::from("Closed") }
+            connect() { -> $SynSent }
+        }
+
+        $SynSent {
+            get_state(): String { return String::from("SynSent") }
+            receive_syn_ack() { -> $Established }
+        }
+
+        $Established {
+            get_state(): String { return String::from("Established") }
+            send_data(data: String) { }
+            close() { -> $FinWait1 }
+            receive_fin() { -> $CloseWait }
+        }
+
+        $FinWait1 {
+            get_state(): String { return String::from("FinWait1") }
+            receive_ack() { -> $FinWait2 }
+            receive_fin() { -> $Closing }
+        }
+
+        $FinWait2 {
+            get_state(): String { return String::from("FinWait2") }
+            receive_fin() { -> $TimeWait }
+        }
+
+        $Closing {
+            get_state(): String { return String::from("Closing") }
+            receive_ack() { -> $TimeWait }
+        }
+
+        $TimeWait {
+            get_state(): String { return String::from("TimeWait") }
+            receive_ack() { -> $Closed }
+        }
+
+        $CloseWait {
+            get_state(): String { return String::from("CloseWait") }
+            close() { -> $LastAck }
+        }
+
+        $LastAck {
+            get_state(): String { return String::from("LastAck") }
+            receive_ack() { -> $Closed }
+        }
+}
+
+fn assert_state(system_state: &str, expected: &str, label: &str) {
+    if system_state != expected {
+        panic!("FAIL: {} — expected '{}', got '{}'", label, expected, system_state);
+    }
+}
+
+fn main() {
+    // Happy path
+    let mut server = TcpServer::new();
+    let mut client = TcpClient::new();
+
+    assert_state(&server.get_state(), "Closed", "server initial");
+    assert_state(&client.get_state(), "Closed", "client initial");
+
+    server.listen();
+    assert_state(&server.get_state(), "Listen", "server listen");
+
+    client.connect();
+    assert_state(&client.get_state(), "SynSent", "client syn sent");
+
+    server.receive_syn();
+    assert_state(&server.get_state(), "SynReceived", "server syn received");
+
+    client.receive_syn_ack();
+    assert_state(&client.get_state(), "Established", "client established");
+
+    server.receive_ack();
+    assert_state(&server.get_state(), "Established", "server established");
+
+    client.send_data(String::from("hello"));
+    server.receive_data(String::from("hello"));
+
+    client.close();
+    server.receive_fin();
+    client.receive_ack();
+    server.close();
+    client.receive_fin();
+    server.receive_ack();
+    client.receive_ack();
+
+    assert_state(&server.get_state(), "Closed", "server closed");
+    assert_state(&client.get_state(), "Closed", "client closed");
+
+    println!("PASS: TCP happy path");
+
+    // Simultaneous close
+    let mut server2 = TcpServer::new();
+    let mut client2 = TcpClient::new();
+    server2.listen();
+    client2.connect();
+    server2.receive_syn();
+    client2.receive_syn_ack();
+    server2.receive_ack();
+
+    client2.close();
+    server2.close();
+    client2.receive_fin();
+    server2.receive_fin();
+    client2.receive_ack();
+    server2.receive_ack();
+    client2.receive_ack();
+    server2.receive_ack();
+
+    assert_state(&server2.get_state(), "Closed", "server2 closed");
+    assert_state(&client2.get_state(), "Closed", "client2 closed");
+
+    println!("PASS: TCP simultaneous close");
+    println!("PASS: All TCP connection tests passed");
+}

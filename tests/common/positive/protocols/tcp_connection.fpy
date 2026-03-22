@@ -1,0 +1,376 @@
+@@target python_3
+
+# TCP Connection State Machine (simplified RFC 793)
+# Two Frame systems — TcpClient and TcpServer — communicating through
+# direct method calls simulating packet exchange.
+
+@@system TcpServer {
+    interface:
+        listen()
+        receive_syn()
+        receive_ack()
+        receive_fin()
+        receive_data(data: str)
+        close()
+        get_state(): str = "Unknown"
+        get_last_data(): str = ""
+
+    machine:
+        $Closed {
+            get_state(): str { return "Closed" }
+
+            listen() {
+                -> $Listen
+            }
+        }
+
+        $Listen {
+            get_state(): str { return "Listen" }
+
+            receive_syn() {
+                # Send SYN-ACK (implicit — client will call receive_syn_ack)
+                -> $SynReceived
+            }
+        }
+
+        $SynReceived {
+            get_state(): str { return "SynReceived" }
+
+            receive_ack() {
+                -> $Established
+            }
+        }
+
+        $Established {
+            get_state(): str { return "Established" }
+            get_last_data(): str { return self.last_data }
+
+            receive_data(data: str) {
+                self.last_data = data
+            }
+
+            receive_fin() {
+                # Client initiated close
+                -> $CloseWait
+            }
+
+            close() {
+                # Server initiates close
+                -> $FinWait1
+            }
+        }
+
+        $CloseWait {
+            get_state(): str { return "CloseWait" }
+
+            close() {
+                # Server sends FIN
+                -> $LastAck
+            }
+        }
+
+        $LastAck {
+            get_state(): str { return "LastAck" }
+
+            receive_ack() {
+                -> $Closed
+            }
+        }
+
+        $FinWait1 {
+            get_state(): str { return "FinWait1" }
+
+            receive_ack() {
+                -> $FinWait2
+            }
+
+            receive_fin() {
+                # Simultaneous close
+                -> $Closing
+            }
+        }
+
+        $FinWait2 {
+            get_state(): str { return "FinWait2" }
+
+            receive_fin() {
+                -> $TimeWait
+            }
+        }
+
+        $Closing {
+            get_state(): str { return "Closing" }
+
+            receive_ack() {
+                -> $TimeWait
+            }
+        }
+
+        $TimeWait {
+            get_state(): str { return "TimeWait" }
+
+            # In real TCP, wait 2*MSL then close. We simulate with explicit call.
+            receive_ack() {
+                -> $Closed
+            }
+        }
+
+    domain:
+        last_data = ""
+}
+
+
+@@system TcpClient {
+    interface:
+        connect()
+        receive_syn_ack()
+        receive_ack()
+        receive_fin()
+        send_data(data: str)
+        close()
+        get_state(): str = "Unknown"
+
+    machine:
+        $Closed {
+            get_state(): str { return "Closed" }
+
+            connect() {
+                # Send SYN (implicit — server will receive via receive_syn)
+                -> $SynSent
+            }
+        }
+
+        $SynSent {
+            get_state(): str { return "SynSent" }
+
+            receive_syn_ack() {
+                # Send ACK (implicit — server will receive via receive_ack)
+                -> $Established
+            }
+        }
+
+        $Established {
+            get_state(): str { return "Established" }
+
+            send_data(data: str) {
+                # Data sent — server will receive via receive_data
+                self.sent_count = self.sent_count + 1
+            }
+
+            close() {
+                # Send FIN
+                -> $FinWait1
+            }
+
+            receive_fin() {
+                # Server initiated close
+                -> $CloseWait
+            }
+        }
+
+        $FinWait1 {
+            get_state(): str { return "FinWait1" }
+
+            receive_ack() {
+                -> $FinWait2
+            }
+
+            receive_fin() {
+                # Simultaneous close
+                -> $Closing
+            }
+        }
+
+        $FinWait2 {
+            get_state(): str { return "FinWait2" }
+
+            receive_fin() {
+                -> $TimeWait
+            }
+        }
+
+        $Closing {
+            get_state(): str { return "Closing" }
+
+            receive_ack() {
+                -> $TimeWait
+            }
+        }
+
+        $TimeWait {
+            get_state(): str { return "TimeWait" }
+
+            receive_ack() {
+                -> $Closed
+            }
+        }
+
+        $CloseWait {
+            get_state(): str { return "CloseWait" }
+
+            close() {
+                -> $LastAck
+            }
+        }
+
+        $LastAck {
+            get_state(): str { return "LastAck" }
+
+            receive_ack() {
+                -> $Closed
+            }
+        }
+
+    domain:
+        sent_count = 0
+}
+
+
+# ============================================================
+# Test Harness — drives the protocol and asserts state
+# ============================================================
+
+def assert_state(system, expected, label):
+    actual = system.get_state()
+    if actual != expected:
+        print(f"FAIL: {label} — expected '{expected}', got '{actual}'")
+        raise Exception(f"State assertion failed: {label}")
+
+def test_happy_path():
+    """Full connect → data → client close lifecycle"""
+    server = TcpServer()
+    client = TcpClient()
+
+    # Both start closed
+    assert_state(server, "Closed", "server initial")
+    assert_state(client, "Closed", "client initial")
+
+    # Server listens
+    server.listen()
+    assert_state(server, "Listen", "server listen")
+
+    # Client connects: SYN → SYN-ACK → ACK
+    client.connect()
+    assert_state(client, "SynSent", "client syn sent")
+
+    server.receive_syn()
+    assert_state(server, "SynReceived", "server syn received")
+
+    client.receive_syn_ack()
+    assert_state(client, "Established", "client established")
+
+    server.receive_ack()
+    assert_state(server, "Established", "server established")
+
+    # Data transfer
+    client.send_data("hello")
+    server.receive_data("hello")
+    client.send_data("world")
+    server.receive_data("world")
+
+    # Client initiates close: FIN → ACK → FIN → ACK
+    client.close()
+    assert_state(client, "FinWait1", "client fin wait 1")
+
+    server.receive_fin()
+    assert_state(server, "CloseWait", "server close wait")
+
+    client.receive_ack()
+    assert_state(client, "FinWait2", "client fin wait 2")
+
+    server.close()
+    assert_state(server, "LastAck", "server last ack")
+
+    client.receive_fin()
+    assert_state(client, "TimeWait", "client time wait")
+
+    server.receive_ack()
+    assert_state(server, "Closed", "server closed")
+
+    client.receive_ack()
+    assert_state(client, "Closed", "client closed")
+
+    print("PASS: TCP happy path")
+
+def test_server_close_first():
+    """Server initiates close"""
+    server = TcpServer()
+    client = TcpClient()
+
+    # Establish connection
+    server.listen()
+    client.connect()
+    server.receive_syn()
+    client.receive_syn_ack()
+    server.receive_ack()
+
+    assert_state(server, "Established", "both established")
+    assert_state(client, "Established", "both established")
+
+    # Server initiates close
+    server.close()
+    assert_state(server, "FinWait1", "server fin wait 1")
+
+    client.receive_fin()
+    assert_state(client, "CloseWait", "client close wait")
+
+    server.receive_ack()
+    assert_state(server, "FinWait2", "server fin wait 2")
+
+    client.close()
+    assert_state(client, "LastAck", "client last ack")
+
+    server.receive_fin()
+    assert_state(server, "TimeWait", "server time wait")
+
+    client.receive_ack()
+    assert_state(client, "Closed", "client closed")
+
+    server.receive_ack()
+    assert_state(server, "Closed", "server closed")
+
+    print("PASS: TCP server close first")
+
+def test_simultaneous_close():
+    """Both sides close at the same time"""
+    server = TcpServer()
+    client = TcpClient()
+
+    # Establish connection
+    server.listen()
+    client.connect()
+    server.receive_syn()
+    client.receive_syn_ack()
+    server.receive_ack()
+
+    # Both close simultaneously
+    client.close()
+    server.close()
+    assert_state(client, "FinWait1", "client fin wait 1")
+    assert_state(server, "FinWait1", "server fin wait 1")
+
+    # Each receives the other's FIN
+    client.receive_fin()
+    server.receive_fin()
+    assert_state(client, "Closing", "client closing")
+    assert_state(server, "Closing", "server closing")
+
+    # Each receives ACK
+    client.receive_ack()
+    server.receive_ack()
+    assert_state(client, "TimeWait", "client time wait")
+    assert_state(server, "TimeWait", "server time wait")
+
+    # Timeout → closed
+    client.receive_ack()
+    server.receive_ack()
+    assert_state(client, "Closed", "client closed")
+    assert_state(server, "Closed", "server closed")
+
+    print("PASS: TCP simultaneous close")
+
+if __name__ == '__main__':
+    test_happy_path()
+    test_server_close_first()
+    test_simultaneous_close()
+    print("PASS: All TCP connection tests passed")

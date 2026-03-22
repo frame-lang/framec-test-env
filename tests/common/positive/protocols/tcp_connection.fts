@@ -1,0 +1,235 @@
+@@target typescript
+
+// TCP Connection State Machine (simplified RFC 793)
+// Two Frame systems — TcpClient and TcpServer — communicating through
+// direct method calls simulating packet exchange.
+
+@@system TcpServer {
+    interface:
+        listen()
+        receive_syn()
+        receive_ack()
+        receive_fin()
+        receive_data(data: string)
+        close()
+        get_state(): string = "Unknown"
+
+    machine:
+        $Closed {
+            get_state(): string { return "Closed" }
+            listen() { -> $Listen }
+        }
+
+        $Listen {
+            get_state(): string { return "Listen" }
+            receive_syn() { -> $SynReceived }
+        }
+
+        $SynReceived {
+            get_state(): string { return "SynReceived" }
+            receive_ack() { -> $Established }
+        }
+
+        $Established {
+            get_state(): string { return "Established" }
+            receive_data(data: string) { this.last_data = data; }
+            receive_fin() { -> $CloseWait }
+            close() { -> $FinWait1 }
+        }
+
+        $CloseWait {
+            get_state(): string { return "CloseWait" }
+            close() { -> $LastAck }
+        }
+
+        $LastAck {
+            get_state(): string { return "LastAck" }
+            receive_ack() { -> $Closed }
+        }
+
+        $FinWait1 {
+            get_state(): string { return "FinWait1" }
+            receive_ack() { -> $FinWait2 }
+            receive_fin() { -> $Closing }
+        }
+
+        $FinWait2 {
+            get_state(): string { return "FinWait2" }
+            receive_fin() { -> $TimeWait }
+        }
+
+        $Closing {
+            get_state(): string { return "Closing" }
+            receive_ack() { -> $TimeWait }
+        }
+
+        $TimeWait {
+            get_state(): string { return "TimeWait" }
+            receive_ack() { -> $Closed }
+        }
+
+    domain:
+        last_data: string = ""
+}
+
+
+@@system TcpClient {
+    interface:
+        connect()
+        receive_syn_ack()
+        receive_ack()
+        receive_fin()
+        send_data(data: string)
+        close()
+        get_state(): string = "Unknown"
+
+    machine:
+        $Closed {
+            get_state(): string { return "Closed" }
+            connect() { -> $SynSent }
+        }
+
+        $SynSent {
+            get_state(): string { return "SynSent" }
+            receive_syn_ack() { -> $Established }
+        }
+
+        $Established {
+            get_state(): string { return "Established" }
+            send_data(data: string) { this.sent_count += 1; }
+            close() { -> $FinWait1 }
+            receive_fin() { -> $CloseWait }
+        }
+
+        $FinWait1 {
+            get_state(): string { return "FinWait1" }
+            receive_ack() { -> $FinWait2 }
+            receive_fin() { -> $Closing }
+        }
+
+        $FinWait2 {
+            get_state(): string { return "FinWait2" }
+            receive_fin() { -> $TimeWait }
+        }
+
+        $Closing {
+            get_state(): string { return "Closing" }
+            receive_ack() { -> $TimeWait }
+        }
+
+        $TimeWait {
+            get_state(): string { return "TimeWait" }
+            receive_ack() { -> $Closed }
+        }
+
+        $CloseWait {
+            get_state(): string { return "CloseWait" }
+            close() { -> $LastAck }
+        }
+
+        $LastAck {
+            get_state(): string { return "LastAck" }
+            receive_ack() { -> $Closed }
+        }
+
+    domain:
+        sent_count: number = 0
+}
+
+// ============================================================
+// Test Harness
+// ============================================================
+
+function assert_state(system: any, expected: string, label: string): void {
+    const actual = system.get_state();
+    if (actual !== expected) {
+        console.log(`FAIL: ${label} — expected '${expected}', got '${actual}'`);
+        throw new Error(`State assertion failed: ${label}`);
+    }
+}
+
+function test_happy_path(): void {
+    const server = new TcpServer();
+    const client = new TcpClient();
+
+    assert_state(server, "Closed", "server initial");
+    assert_state(client, "Closed", "client initial");
+
+    server.listen();
+    assert_state(server, "Listen", "server listen");
+
+    client.connect();
+    assert_state(client, "SynSent", "client syn sent");
+
+    server.receive_syn();
+    assert_state(server, "SynReceived", "server syn received");
+
+    client.receive_syn_ack();
+    assert_state(client, "Established", "client established");
+
+    server.receive_ack();
+    assert_state(server, "Established", "server established");
+
+    client.send_data("hello");
+    server.receive_data("hello");
+
+    client.close();
+    assert_state(client, "FinWait1", "client fin wait 1");
+
+    server.receive_fin();
+    assert_state(server, "CloseWait", "server close wait");
+
+    client.receive_ack();
+    assert_state(client, "FinWait2", "client fin wait 2");
+
+    server.close();
+    assert_state(server, "LastAck", "server last ack");
+
+    client.receive_fin();
+    assert_state(client, "TimeWait", "client time wait");
+
+    server.receive_ack();
+    assert_state(server, "Closed", "server closed");
+
+    client.receive_ack();
+    assert_state(client, "Closed", "client closed");
+
+    console.log("PASS: TCP happy path");
+}
+
+function test_simultaneous_close(): void {
+    const server = new TcpServer();
+    const client = new TcpClient();
+
+    server.listen();
+    client.connect();
+    server.receive_syn();
+    client.receive_syn_ack();
+    server.receive_ack();
+
+    client.close();
+    server.close();
+    assert_state(client, "FinWait1", "client fin wait 1");
+    assert_state(server, "FinWait1", "server fin wait 1");
+
+    client.receive_fin();
+    server.receive_fin();
+    assert_state(client, "Closing", "client closing");
+    assert_state(server, "Closing", "server closing");
+
+    client.receive_ack();
+    server.receive_ack();
+    assert_state(client, "TimeWait", "client time wait");
+    assert_state(server, "TimeWait", "server time wait");
+
+    client.receive_ack();
+    server.receive_ack();
+    assert_state(client, "Closed", "client closed");
+    assert_state(server, "Closed", "server closed");
+
+    console.log("PASS: TCP simultaneous close");
+}
+
+test_happy_path();
+test_simultaneous_close();
+console.log("PASS: All TCP connection tests passed");

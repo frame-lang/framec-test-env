@@ -1,0 +1,210 @@
+@@target c
+
+// TCP Connection State Machine (simplified RFC 793)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system TcpServer {
+    interface:
+        listen()
+        receive_syn()
+        receive_ack()
+        receive_fin()
+        receive_data(data: str)
+        close()
+        get_state(): str = ""
+
+    machine:
+        $Closed {
+            get_state(): str { return "Closed" }
+            listen() { -> $Listen }
+        }
+
+        $Listen {
+            get_state(): str { return "Listen" }
+            receive_syn() { -> $SynReceived }
+        }
+
+        $SynReceived {
+            get_state(): str { return "SynReceived" }
+            receive_ack() { -> $Established }
+        }
+
+        $Established {
+            get_state(): str { return "Established" }
+            receive_data(data: str) { }
+            receive_fin() { -> $CloseWait }
+            close() { -> $FinWait1 }
+        }
+
+        $CloseWait {
+            get_state(): str { return "CloseWait" }
+            close() { -> $LastAck }
+        }
+
+        $LastAck {
+            get_state(): str { return "LastAck" }
+            receive_ack() { -> $Closed }
+        }
+
+        $FinWait1 {
+            get_state(): str { return "FinWait1" }
+            receive_ack() { -> $FinWait2 }
+            receive_fin() { -> $Closing }
+        }
+
+        $FinWait2 {
+            get_state(): str { return "FinWait2" }
+            receive_fin() { -> $TimeWait }
+        }
+
+        $Closing {
+            get_state(): str { return "Closing" }
+            receive_ack() { -> $TimeWait }
+        }
+
+        $TimeWait {
+            get_state(): str { return "TimeWait" }
+            receive_ack() { -> $Closed }
+        }
+}
+
+
+@@system TcpClient {
+    interface:
+        connect()
+        receive_syn_ack()
+        receive_ack()
+        receive_fin()
+        send_data(data: str)
+        close()
+        get_state(): str = ""
+
+    machine:
+        $Closed {
+            get_state(): str { return "Closed" }
+            connect() { -> $SynSent }
+        }
+
+        $SynSent {
+            get_state(): str { return "SynSent" }
+            receive_syn_ack() { -> $Established }
+        }
+
+        $Established {
+            get_state(): str { return "Established" }
+            send_data(data: str) { }
+            close() { -> $FinWait1 }
+            receive_fin() { -> $CloseWait }
+        }
+
+        $FinWait1 {
+            get_state(): str { return "FinWait1" }
+            receive_ack() { -> $FinWait2 }
+            receive_fin() { -> $Closing }
+        }
+
+        $FinWait2 {
+            get_state(): str { return "FinWait2" }
+            receive_fin() { -> $TimeWait }
+        }
+
+        $Closing {
+            get_state(): str { return "Closing" }
+            receive_ack() { -> $TimeWait }
+        }
+
+        $TimeWait {
+            get_state(): str { return "TimeWait" }
+            receive_ack() { -> $Closed }
+        }
+
+        $CloseWait {
+            get_state(): str { return "CloseWait" }
+            close() { -> $LastAck }
+        }
+
+        $LastAck {
+            get_state(): str { return "LastAck" }
+            receive_ack() { -> $Closed }
+        }
+}
+
+
+void assert_state(const char* actual, const char* expected, const char* label) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main() {
+    TcpServer* server = TcpServer_new();
+    TcpClient* client = TcpClient_new();
+
+    assert_state((const char*)TcpServer_get_state(server), "Closed", "server initial");
+    assert_state((const char*)TcpClient_get_state(client), "Closed", "client initial");
+
+    TcpServer_listen(server);
+    assert_state((const char*)TcpServer_get_state(server), "Listen", "server listen");
+
+    TcpClient_connect(client);
+    assert_state((const char*)TcpClient_get_state(client), "SynSent", "client syn sent");
+
+    TcpServer_receive_syn(server);
+    assert_state((const char*)TcpServer_get_state(server), "SynReceived", "server syn received");
+
+    TcpClient_receive_syn_ack(client);
+    assert_state((const char*)TcpClient_get_state(client), "Established", "client established");
+
+    TcpServer_receive_ack(server);
+    assert_state((const char*)TcpServer_get_state(server), "Established", "server established");
+
+    TcpClient_send_data(client, "hello");
+    TcpServer_receive_data(server, "hello");
+
+    TcpClient_close(client);
+    TcpServer_receive_fin(server);
+    TcpClient_receive_ack(client);
+    TcpServer_close(server);
+    TcpClient_receive_fin(client);
+    TcpServer_receive_ack(server);
+    TcpClient_receive_ack(client);
+
+    assert_state((const char*)TcpServer_get_state(server), "Closed", "server closed");
+    assert_state((const char*)TcpClient_get_state(client), "Closed", "client closed");
+
+    printf("PASS: TCP happy path\n");
+
+    // Simultaneous close
+    TcpServer* s2 = TcpServer_new();
+    TcpClient* c2 = TcpClient_new();
+    TcpServer_listen(s2);
+    TcpClient_connect(c2);
+    TcpServer_receive_syn(s2);
+    TcpClient_receive_syn_ack(c2);
+    TcpServer_receive_ack(s2);
+
+    TcpClient_close(c2);
+    TcpServer_close(s2);
+    TcpClient_receive_fin(c2);
+    TcpServer_receive_fin(s2);
+    TcpClient_receive_ack(c2);
+    TcpServer_receive_ack(s2);
+    TcpClient_receive_ack(c2);
+    TcpServer_receive_ack(s2);
+
+    assert_state((const char*)TcpServer_get_state(s2), "Closed", "s2 closed");
+    assert_state((const char*)TcpClient_get_state(c2), "Closed", "c2 closed");
+
+    printf("PASS: TCP simultaneous close\n");
+    printf("PASS: All TCP connection tests passed\n");
+
+    TcpServer_destroy(server);
+    TcpClient_destroy(client);
+    TcpServer_destroy(s2);
+    TcpClient_destroy(c2);
+    return 0;
+}
