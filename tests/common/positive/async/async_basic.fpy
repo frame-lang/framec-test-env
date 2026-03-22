@@ -1,0 +1,46 @@
+@@target python_3
+
+# Test 1: Basic async dispatch chain
+# Validates: async interface method, await in handler, return value propagation
+
+import asyncio
+
+async def mock_lookup(key):
+    """Mock async I/O — yields to event loop then returns"""
+    await asyncio.sleep(0)
+    return f"value_for_{key}"
+
+@@system AsyncBasic {
+    interface:
+        async fetch(key: str): str
+        get_state(): str = "Unknown"
+
+    machine:
+        $Ready {
+            fetch(key: str): str {
+                result = await mock_lookup(key)
+                return result
+            }
+
+            get_state(): str {
+                return "Ready"
+            }
+        }
+}
+
+async def main():
+    s = @@AsyncBasic()
+    await s.init()
+
+    # Test async fetch
+    result = await s.fetch("test_key")
+    assert result == "value_for_test_key", f"Expected 'value_for_test_key', got '{result}'"
+
+    # Test sync method works through async kernel
+    state = await s.get_state()
+    assert state == "Ready", f"Expected 'Ready', got '{state}'"
+
+    print("PASS: async basic — dispatch chain and return values work")
+
+if __name__ == '__main__':
+    asyncio.run(main())

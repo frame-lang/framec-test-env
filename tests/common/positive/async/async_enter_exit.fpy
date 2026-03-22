@@ -1,0 +1,70 @@
+@@target python_3
+
+# Test 3: Async enter/exit lifecycle handlers
+# Validates: await works in $>() and <$() handlers
+
+import asyncio
+
+async def mock_setup():
+    await asyncio.sleep(0)
+    return "setup_done"
+
+async def mock_teardown():
+    await asyncio.sleep(0)
+    return "teardown_done"
+
+@@system AsyncEnterExit {
+    interface:
+        async start()
+        async stop()
+        get_log(): str = ""
+
+    machine:
+        $Idle {
+            get_log(): str { return self.log }
+
+            start() {
+                -> $Active
+            }
+        }
+
+        $Active {
+            $>() {
+                result = await mock_setup()
+                self.log = self.log + "enter:" + result + ","
+            }
+
+            <$() {
+                result = await mock_teardown()
+                self.log = self.log + "exit:" + result + ","
+            }
+
+            get_log(): str { return self.log }
+
+            stop() {
+                -> $Idle
+            }
+        }
+
+    domain:
+        log = ""
+}
+
+async def main():
+    s = @@AsyncEnterExit()
+    await s.init()
+
+    # Start — triggers $Active.$>()
+    await s.start()
+    log = await s.get_log()
+    assert "enter:setup_done" in log, f"Expected enter in log, got '{log}'"
+
+    # Stop — triggers $Active.<$() then transition
+    await s.stop()
+    log = await s.get_log()
+    assert "exit:teardown_done" in log, f"Expected exit in log, got '{log}'"
+
+    print("PASS: async enter/exit — lifecycle handlers with await work")
+
+if __name__ == '__main__':
+    asyncio.run(main())

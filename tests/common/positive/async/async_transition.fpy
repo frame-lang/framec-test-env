@@ -1,0 +1,60 @@
+@@target python_3
+
+# Test 2: Transition after await
+# Validates: -> $State works correctly after async handler body
+
+import asyncio
+
+async def mock_connect(url):
+    await asyncio.sleep(0)
+    return {"url": url, "status": "connected"}
+
+@@system AsyncTransition {
+    interface:
+        async connect(url: str)
+        async disconnect()
+        get_state(): str = "Unknown"
+
+    machine:
+        $Disconnected {
+            get_state(): str { return "Disconnected" }
+
+            connect(url: str) {
+                result = await mock_connect(url)
+                self.connection = result
+                -> $Connected
+            }
+        }
+
+        $Connected {
+            get_state(): str { return "Connected" }
+
+            disconnect() {
+                self.connection = None
+                -> $Disconnected
+            }
+        }
+
+    domain:
+        connection = None
+}
+
+async def main():
+    s = @@AsyncTransition()
+    await s.init()
+
+    # Initial state
+    assert await s.get_state() == "Disconnected"
+
+    # Connect — await then transition
+    await s.connect("ws://example.com")
+    assert await s.get_state() == "Connected"
+
+    # Disconnect — transition back
+    await s.disconnect()
+    assert await s.get_state() == "Disconnected"
+
+    print("PASS: async transition — state changes work after await")
+
+if __name__ == '__main__':
+    asyncio.run(main())
