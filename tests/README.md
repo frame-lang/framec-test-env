@@ -140,15 +140,15 @@ Add markers in the first 10 lines of a test file to control behavior:
 | `// @@xfail` | Test runs, expected to fail (counts as failure in reporting) |
 | `// @@timeout N` | Override default 30-second timeout |
 
-## Test Counts (2026-03-15)
+## Test Counts (2026-03-23)
 
 | Scope | Python | TypeScript | Rust | C | Total |
 |-------|--------|------------|------|---|-------|
-| common/ | 131 | 122 | 125 | 141 | 519 |
+| common/ | 146 | 137 | 140 | 147 | 570 |
 | language-specific/ | 15 | 6 | 7 | 0 | 28 |
-| **Total** | **146** | **128** | **132** | **141** | **547** |
+| **Total** | **161** | **143** | **147** | **147** | **598** |
 
-**All 547 tests passing (100%)**
+**All 598 tests passing (100%)**
 
 ## Adding New Tests
 

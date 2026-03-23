@@ -57,11 +57,11 @@ framepiler_test_env/
 
 | Scope | Python | TypeScript | Rust | C | Total |
 |-------|--------|------------|------|---|-------|
-| common/ | 131 | 122 | 125 | 141 | 519 |
+| common/ | 146 | 137 | 140 | 147 | 570 |
 | language-specific/ | 15 | 6 | 7 | 0 | 28 |
-| **Total** | **146** | **128** | **132** | **141** | **547** |
+| **Total** | **161** | **143** | **147** | **147** | **598** |
 
-All 547 tests passing (100%).
+All 598 tests passing (100%).
 
 ## File Extensions
 
@@ -74,4 +74,4 @@ All 547 tests passing (100%).
 
 All tests emit TAP (Test Anything Protocol) output for CI integration.
 
-Last verified: 2026-03-15 — Python 146, TypeScript 128, Rust 132, C 141 (547 total, 100% passing)
+Last verified: 2026-03-23 — Python 161, TypeScript 143, Rust 147, C 147 (598 total, 100% passing)
