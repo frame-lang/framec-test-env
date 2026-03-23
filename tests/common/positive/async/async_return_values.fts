@@ -1,0 +1,66 @@
+@@target typescript
+
+// Test 6: Return values through async chain
+// Validates: return sugar, @@:return, default return all work async
+
+async function mockMultiply(x: number, y: number): Promise<number> {
+    await Promise.resolve();
+    return x * y;
+}
+
+async function mockFetch(): Promise<string> {
+    await Promise.resolve();
+    return "fetched_data";
+}
+
+@@system AsyncReturn {
+    interface:
+        async compute(x: int): int
+        async with_default(): str = "default_value"
+        async get_data(): str
+
+    machine:
+        $Ready {
+            compute(x: int): int {
+                const result = await mockMultiply(x, 2)
+                return result
+            }
+
+            with_default(): str {
+                // Don't set @@:return — default should be used
+                // no-op
+            }
+
+            get_data(): str {
+                const data = await mockFetch()
+                @@:return = data
+            }
+        }
+}
+
+async function main(): Promise<void> {
+    let s = @@AsyncReturn();
+    await s.init();
+
+    // Test return sugar
+    let result: number = await s.compute(5);
+    if (result !== 10) {
+        throw new Error(`compute: expected 10, got ${result}`);
+    }
+
+    // Test default return value
+    let strResult: string = await s.with_default();
+    if (strResult !== "default_value") {
+        throw new Error(`default: expected 'default_value', got ${strResult}`);
+    }
+
+    // Test @@:return assignment
+    strResult = await s.get_data();
+    if (strResult !== "fetched_data") {
+        throw new Error(`get_data: expected 'fetched_data', got ${strResult}`);
+    }
+
+    console.log("PASS: async return values — sugar, default, and @@:return all work");
+}
+
+main();

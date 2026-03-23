@@ -1,0 +1,49 @@
+@@target typescript
+
+// Test 7: Nested async interface calls (reentrancy)
+// Validates: context stack handles nested async calls correctly
+
+async function mockFetch(): Promise<string> {
+    await Promise.resolve();
+    return "fetched";
+}
+
+@@system AsyncReentrant {
+    interface:
+        async outer(): str
+        async inner(): str
+
+    machine:
+        $Ready {
+            outer(): str {
+                const inner_result = await this.inner()
+                return "outer:" + inner_result
+            }
+
+            inner(): str {
+                const data = await mockFetch()
+                return "inner:" + data
+            }
+        }
+}
+
+async function main(): Promise<void> {
+    let s = @@AsyncReentrant();
+    await s.init();
+
+    // Direct inner call
+    let result = await s.inner();
+    if (result !== "inner:fetched") {
+        throw new Error(`inner: expected 'inner:fetched', got '${result}'`);
+    }
+
+    // Outer calls inner — nested async dispatch
+    result = await s.outer();
+    if (result !== "outer:inner:fetched") {
+        throw new Error(`outer: expected 'outer:inner:fetched', got '${result}'`);
+    }
+
+    console.log("PASS: async reentrant — nested calls work, context stack isolates returns");
+}
+
+main();

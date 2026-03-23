@@ -1,0 +1,59 @@
+@@target typescript
+
+// Test 4: Async HSM parent forward
+// Validates: => $^ dispatch is awaited in async mode
+
+async function mockTransform(data: string): Promise<string> {
+    await Promise.resolve();
+    return data.toUpperCase();
+}
+
+@@system AsyncHsm {
+    interface:
+        async process(data: str): str
+        async other(data: str): str
+
+    machine:
+        $Child => $Parent {
+            process(data: str): str {
+                const result = await mockTransform(data)
+                return "child:" + result
+            }
+
+            // Unhandled events forward to parent via default forward
+            => $^
+        }
+
+        $Parent {
+            process(data: str): str {
+                const result = await mockTransform(data)
+                return "parent:" + result
+            }
+
+            other(data: str): str {
+                const result = await mockTransform(data)
+                return "parent_other:" + result
+            }
+        }
+}
+
+async function main(): Promise<void> {
+    let s = @@AsyncHsm();
+    await s.init();
+
+    // Child handles process directly
+    let result = await s.process("hello");
+    if (result !== "child:HELLO") {
+        throw new Error(`Expected 'child:HELLO', got '${result}'`);
+    }
+
+    // Child doesn't handle 'other' — default forward to parent
+    result = await s.other("test");
+    if (result !== "parent_other:TEST") {
+        throw new Error(`Expected 'parent_other:TEST', got '${result}'`);
+    }
+
+    console.log("PASS: async HSM forward — default forward dispatches to parent");
+}
+
+main();
