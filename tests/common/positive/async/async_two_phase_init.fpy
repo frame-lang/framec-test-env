@@ -1,0 +1,55 @@
+@@target python_3
+
+# Test 10: Two-phase init
+# Validates: constructor is sync, init() fires async $>() enter event
+
+import asyncio
+
+async def mock_setup():
+    await asyncio.sleep(0)
+    return "initialized"
+
+@@system AsyncInit {
+    interface:
+        async do_work()
+        get_log(): str = ""
+
+    machine:
+        $Start {
+            $>() {
+                result = await mock_setup()
+                self.log = "entered:" + result + ","
+            }
+
+            get_log(): str { return self.log }
+
+            do_work() {
+                self.log = self.log + "work,"
+            }
+        }
+
+    domain:
+        log = ""
+}
+
+async def main():
+    s = @@AsyncInit()
+
+    # After constructor only — enter NOT fired yet
+    log = await s.get_log()
+    assert log == "", f"Before init: expected empty log, got '{log}'"
+
+    # After init() — enter fires
+    await s.init()
+    log = await s.get_log()
+    assert "entered:initialized" in log, f"After init: expected 'entered:initialized' in log, got '{log}'"
+
+    # After work
+    await s.do_work()
+    log = await s.get_log()
+    assert "work," in log, f"After work: expected 'work,' in log, got '{log}'"
+
+    print("PASS: async two-phase init — constructor sync, init() fires async enter")
+
+if __name__ == '__main__':
+    asyncio.run(main())

@@ -1,0 +1,46 @@
+@@target python_3
+
+# Test 7: Nested async interface calls (reentrancy)
+# Validates: context stack handles nested async calls correctly
+
+import asyncio
+
+async def mock_fetch():
+    await asyncio.sleep(0)
+    return "fetched"
+
+@@system AsyncReentrant {
+    interface:
+        async outer(): str
+        async inner(): str
+
+    machine:
+        $Ready {
+            outer(): str {
+                inner_result = await self.inner()
+                return "outer:" + inner_result
+            }
+
+            inner(): str {
+                data = await mock_fetch()
+                return "inner:" + data
+            }
+        }
+}
+
+async def main():
+    s = @@AsyncReentrant()
+    await s.init()
+
+    # Direct inner call
+    result = await s.inner()
+    assert result == "inner:fetched", f"inner: expected 'inner:fetched', got '{result}'"
+
+    # Outer calls inner — nested async dispatch
+    result = await s.outer()
+    assert result == "outer:inner:fetched", f"outer: expected 'outer:inner:fetched', got '{result}'"
+
+    print("PASS: async reentrant — nested calls work, context stack isolates returns")
+
+if __name__ == '__main__':
+    asyncio.run(main())

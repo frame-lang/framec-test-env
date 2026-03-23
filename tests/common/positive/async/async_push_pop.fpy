@@ -1,0 +1,66 @@
+@@target python_3
+
+# Test 5: Stack operations across async boundaries
+# Validates: push$/pop$ preserve compartment across async handlers
+
+import asyncio
+
+async def mock_compute():
+    await asyncio.sleep(0)
+    return 42
+
+async def mock_cleanup():
+    await asyncio.sleep(0)
+
+@@system AsyncPushPop {
+    interface:
+        async save_and_go()
+        async restore()
+        get_state(): str = "Unknown"
+        get_counter(): int = 0
+
+    machine:
+        $Main {
+            $.counter: int = 0
+
+            get_state(): str { return "Main" }
+            get_counter(): int { return $.counter }
+
+            save_and_go() {
+                $.counter = await mock_compute()
+                push$
+                -> $Temp
+            }
+        }
+
+        $Temp {
+            get_state(): str { return "Temp" }
+            get_counter(): int { return 0 }
+
+            restore() {
+                await mock_cleanup()
+                -> pop$
+            }
+        }
+}
+
+async def main():
+    s = @@AsyncPushPop()
+    await s.init()
+
+    assert await s.get_state() == "Main"
+    assert await s.get_counter() == 0
+
+    # Save state and go to Temp
+    await s.save_and_go()
+    assert await s.get_state() == "Temp"
+
+    # Restore — pop back to Main with preserved counter
+    await s.restore()
+    assert await s.get_state() == "Main"
+    assert await s.get_counter() == 42, f"Expected 42, got {await s.get_counter()}"
+
+    print("PASS: async push/pop — state vars preserved across async boundaries")
+
+if __name__ == '__main__':
+    asyncio.run(main())

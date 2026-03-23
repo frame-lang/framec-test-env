@@ -1,0 +1,56 @@
+@@target python_3
+
+# Test 4: Async HSM parent forward
+# Validates: => $^ dispatch is awaited in async mode
+
+import asyncio
+
+async def mock_transform(data):
+    await asyncio.sleep(0)
+    return data.upper()
+
+@@system AsyncHsm {
+    interface:
+        async process(data: str): str
+        async other(data: str): str
+
+    machine:
+        $Child => $Parent {
+            process(data: str): str {
+                result = await mock_transform(data)
+                return "child:" + result
+            }
+
+            # Unhandled events forward to parent via default forward
+            => $^
+        }
+
+        $Parent {
+            process(data: str): str {
+                result = await mock_transform(data)
+                return "parent:" + result
+            }
+
+            other(data: str): str {
+                result = await mock_transform(data)
+                return "parent_other:" + result
+            }
+        }
+}
+
+async def main():
+    s = @@AsyncHsm()
+    await s.init()
+
+    # Child handles process directly
+    result = await s.process("hello")
+    assert result == "child:HELLO", f"Expected 'child:HELLO', got '{result}'"
+
+    # Child doesn't handle 'other' — default forward to parent
+    result = await s.other("test")
+    assert result == "parent_other:TEST", f"Expected 'parent_other:TEST', got '{result}'"
+
+    print("PASS: async HSM forward — default forward dispatches to parent")
+
+if __name__ == '__main__':
+    asyncio.run(main())

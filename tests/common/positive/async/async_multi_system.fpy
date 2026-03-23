@@ -1,0 +1,71 @@
+@@target python_3
+
+# Test 9: Two async systems interacting
+# Validates: multiple async systems in one file
+
+import asyncio
+
+async def mock_generate():
+    await asyncio.sleep(0)
+    return "raw_data"
+
+async def mock_process(data):
+    await asyncio.sleep(0)
+    return "processed:" + data
+
+@@system AsyncProducer {
+    interface:
+        async produce(): str
+
+    machine:
+        $Ready {
+            produce(): str {
+                data = await mock_generate()
+                return data
+            }
+        }
+}
+
+@@system AsyncConsumer {
+    interface:
+        async consume(data: str)
+        get_result(): str = ""
+
+    machine:
+        $Waiting {
+            get_result(): str { return self.last_result }
+
+            consume(data: str) {
+                processed = await mock_process(data)
+                self.last_result = processed
+                -> $Done
+            }
+        }
+
+        $Done {
+            get_result(): str { return self.last_result }
+        }
+
+    domain:
+        last_result = ""
+}
+
+async def main():
+    producer = @@AsyncProducer()
+    consumer = @@AsyncConsumer()
+    await producer.init()
+    await consumer.init()
+
+    # Producer generates data
+    data = await producer.produce()
+    assert data == "raw_data", f"produce: expected 'raw_data', got '{data}'"
+
+    # Consumer processes it
+    await consumer.consume(data)
+    result = await consumer.get_result()
+    assert result == "processed:raw_data", f"consume: expected 'processed:raw_data', got '{result}'"
+
+    print("PASS: async multi-system — two async systems interact correctly")
+
+if __name__ == '__main__':
+    asyncio.run(main())

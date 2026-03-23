@@ -1,0 +1,60 @@
+@@target python_3
+
+# Test 6: Return values through async chain
+# Validates: return sugar, @@:return, default return all work async
+
+import asyncio
+
+async def mock_multiply(x, y):
+    await asyncio.sleep(0)
+    return x * y
+
+async def mock_fetch():
+    await asyncio.sleep(0)
+    return "fetched_data"
+
+@@system AsyncReturn {
+    interface:
+        async compute(x: int): int
+        async with_default(): str = "default_value"
+        async get_data(): str
+
+    machine:
+        $Ready {
+            compute(x: int): int {
+                result = await mock_multiply(x, 2)
+                return result
+            }
+
+            with_default(): str {
+                # Don't set @@:return — default should be used
+                pass
+            }
+
+            get_data(): str {
+                data = await mock_fetch()
+                @@:return = data
+            }
+        }
+}
+
+async def main():
+    s = @@AsyncReturn()
+    await s.init()
+
+    # Test return sugar
+    result = await s.compute(5)
+    assert result == 10, f"compute: expected 10, got {result}"
+
+    # Test default return value
+    result = await s.with_default()
+    assert result == "default_value", f"default: expected 'default_value', got {result}"
+
+    # Test @@:return assignment
+    result = await s.get_data()
+    assert result == "fetched_data", f"get_data: expected 'fetched_data', got {result}"
+
+    print("PASS: async return values — sugar, default, and @@:return all work")
+
+if __name__ == '__main__':
+    asyncio.run(main())
