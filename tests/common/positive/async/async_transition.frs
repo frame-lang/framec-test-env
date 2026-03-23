@@ -1,0 +1,57 @@
+@@target rust
+
+// Test 2: Transition after await
+// Validates: -> $State works correctly after async handler body
+
+async fn mock_connect(url: &str) -> String {
+    format!("connected:{}", url)
+}
+
+@@system AsyncTransition {
+    interface:
+        async connect(url: String)
+        async disconnect()
+        get_state(): String = String::new()
+
+    machine:
+        $Disconnected {
+            get_state(): String { return String::from("Disconnected") }
+
+            connect(url: String) {
+                let result = mock_connect(&url).await;
+                self.connection = Some(result);
+                -> $Connected
+            }
+        }
+
+        $Connected {
+            get_state(): String { return String::from("Connected") }
+
+            disconnect() {
+                self.connection = None;
+                -> $Disconnected
+            }
+        }
+
+    domain:
+        connection: Option<String> = None
+}
+
+#[tokio::main]
+async fn main() {
+    let mut s = @@AsyncTransition();
+    s.init().await;
+
+    // Initial state
+    assert_eq!(s.get_state().await, "Disconnected", "should start Disconnected");
+
+    // Connect — await then transition
+    s.connect(String::from("ws://example.com")).await;
+    assert_eq!(s.get_state().await, "Connected", "should be Connected after connect");
+
+    // Disconnect — transition back
+    s.disconnect().await;
+    assert_eq!(s.get_state().await, "Disconnected", "should be Disconnected after disconnect");
+
+    println!("PASS: async transition — state changes work after await");
+}

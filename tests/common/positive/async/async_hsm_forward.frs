@@ -1,0 +1,53 @@
+@@target rust
+
+// Test 4: Async HSM parent forward
+// Validates: => $^ dispatch is awaited in async mode
+
+async fn mock_transform(data: &str) -> String {
+    data.to_uppercase()
+}
+
+@@system AsyncHsm {
+    interface:
+        async process(data: String): String
+        async other(data: String): String
+
+    machine:
+        $Child => $Parent {
+            process(data: String): String {
+                let result = mock_transform(&data).await;
+                return format!("child:{}", result)
+            }
+
+            // Unhandled events forward to parent via default forward
+            => $^
+        }
+
+        $Parent {
+            process(data: String): String {
+                let result = mock_transform(&data).await;
+                return format!("parent:{}", result)
+            }
+
+            other(data: String): String {
+                let result = mock_transform(&data).await;
+                return format!("parent_other:{}", result)
+            }
+        }
+}
+
+#[tokio::main]
+async fn main() {
+    let mut s = @@AsyncHsm();
+    s.init().await;
+
+    // Child handles process directly
+    let result = s.process(String::from("hello")).await;
+    assert_eq!(result, "child:HELLO", "Expected 'child:HELLO', got '{}'", result);
+
+    // Child doesn't handle 'other' — default forward to parent
+    let result = s.other(String::from("test")).await;
+    assert_eq!(result, "parent_other:TEST", "Expected 'parent_other:TEST', got '{}'", result);
+
+    println!("PASS: async HSM forward — default forward dispatches to parent");
+}

@@ -1,0 +1,67 @@
+@@target rust
+
+// Test 3: Async enter/exit lifecycle handlers
+// Validates: await works in $>() and <$() handlers
+
+async fn mock_setup() -> String {
+    String::from("setup_done")
+}
+
+async fn mock_teardown() -> String {
+    String::from("teardown_done")
+}
+
+@@system AsyncEnterExit {
+    interface:
+        async start()
+        async stop()
+        get_log(): String = String::new()
+
+    machine:
+        $Idle {
+            get_log(): String { return self.log.clone() }
+
+            start() {
+                -> $Active
+            }
+        }
+
+        $Active {
+            $>() {
+                let result = mock_setup().await;
+                self.log = format!("{}enter:{},", self.log, result);
+            }
+
+            <$() {
+                let result = mock_teardown().await;
+                self.log = format!("{}exit:{},", self.log, result);
+            }
+
+            get_log(): String { return self.log.clone() }
+
+            stop() {
+                -> $Idle
+            }
+        }
+
+    domain:
+        log: String = String::new()
+}
+
+#[tokio::main]
+async fn main() {
+    let mut s = @@AsyncEnterExit();
+    s.init().await;
+
+    // Start — triggers $Active.$>()
+    s.start().await;
+    let log = s.get_log().await;
+    assert!(log.contains("enter:setup_done"), "Expected enter in log, got '{}'", log);
+
+    // Stop — triggers $Active.<$() then transition
+    s.stop().await;
+    let log = s.get_log().await;
+    assert!(log.contains("exit:teardown_done"), "Expected exit in log, got '{}'", log);
+
+    println!("PASS: async enter/exit — lifecycle handlers with await work");
+}

@@ -1,0 +1,52 @@
+@@target rust
+
+// Test 10: Two-phase init
+// Validates: constructor is sync, init() fires async $>() enter event
+
+async fn mock_setup() -> String {
+    String::from("initialized")
+}
+
+@@system AsyncInit {
+    interface:
+        async do_work()
+        get_log(): String = String::new()
+
+    machine:
+        $Start {
+            $>() {
+                let result = mock_setup().await;
+                self.log = format!("entered:{},", result);
+            }
+
+            get_log(): String { return self.log.clone() }
+
+            do_work() {
+                self.log = format!("{}work,", self.log);
+            }
+        }
+
+    domain:
+        log: String = String::new()
+}
+
+#[tokio::main]
+async fn main() {
+    let mut s = @@AsyncInit();
+
+    // After constructor only — enter NOT fired yet
+    let log = s.get_log().await;
+    assert_eq!(log, "", "Before init: expected empty log, got '{}'", log);
+
+    // After init() — enter fires
+    s.init().await;
+    let log = s.get_log().await;
+    assert!(log.contains("entered:initialized"), "After init: expected 'entered:initialized' in log, got '{}'", log);
+
+    // After work
+    s.do_work().await;
+    let log = s.get_log().await;
+    assert!(log.contains("work,"), "After work: expected 'work,' in log, got '{}'", log);
+
+    println!("PASS: async two-phase init — constructor sync, init() fires async enter");
+}

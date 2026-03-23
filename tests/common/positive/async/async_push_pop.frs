@@ -1,0 +1,63 @@
+@@target rust
+
+// Test 5: Stack operations across async boundaries
+// Validates: push$/pop$ preserve compartment across async handlers
+
+async fn mock_compute() -> i32 {
+    42
+}
+
+async fn mock_cleanup() {
+}
+
+@@system AsyncPushPop {
+    interface:
+        async save_and_go()
+        async restore()
+        get_state(): String = String::new()
+        get_counter(): i32 = 0
+
+    machine:
+        $Main {
+            $.counter: i32 = 0
+
+            get_state(): String { return String::from("Main") }
+            get_counter(): i32 { return $.counter }
+
+            save_and_go() {
+                $.counter = mock_compute().await;
+                push$
+                -> $Temp
+            }
+        }
+
+        $Temp {
+            get_state(): String { return String::from("Temp") }
+            get_counter(): i32 { return 0 }
+
+            restore() {
+                mock_cleanup().await;
+                -> pop$
+            }
+        }
+}
+
+#[tokio::main]
+async fn main() {
+    let mut s = @@AsyncPushPop();
+    s.init().await;
+
+    assert_eq!(s.get_state().await, "Main", "should start in Main");
+    assert_eq!(s.get_counter().await, 0, "counter should start at 0");
+
+    // Save state and go to Temp
+    s.save_and_go().await;
+    assert_eq!(s.get_state().await, "Temp", "should be in Temp");
+
+    // Restore — pop back to Main with preserved counter
+    s.restore().await;
+    assert_eq!(s.get_state().await, "Main", "should be back in Main");
+    assert_eq!(s.get_counter().await, 42, "counter should be preserved as 42");
+
+    println!("PASS: async push/pop — state vars preserved across async boundaries");
+}

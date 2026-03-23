@@ -1,0 +1,68 @@
+@@target rust
+
+// Test 9: Two async systems interacting
+// Validates: multiple async systems in one file
+
+async fn mock_generate() -> String {
+    String::from("raw_data")
+}
+
+async fn mock_process(data: &str) -> String {
+    format!("processed:{}", data)
+}
+
+@@system AsyncProducer {
+    interface:
+        async produce(): String
+
+    machine:
+        $Ready {
+            produce(): String {
+                let data = mock_generate().await;
+                return data
+            }
+        }
+}
+
+@@system AsyncConsumer {
+    interface:
+        async consume(data: String)
+        get_result(): String = String::new()
+
+    machine:
+        $Waiting {
+            get_result(): String { return self.last_result.clone() }
+
+            consume(data: String) {
+                let processed = mock_process(&data).await;
+                self.last_result = processed;
+                -> $Done
+            }
+        }
+
+        $Done {
+            get_result(): String { return self.last_result.clone() }
+        }
+
+    domain:
+        last_result: String = String::new()
+}
+
+#[tokio::main]
+async fn main() {
+    let mut producer = @@AsyncProducer();
+    let mut consumer = @@AsyncConsumer();
+    producer.init().await;
+    consumer.init().await;
+
+    // Producer generates data
+    let data = producer.produce().await;
+    assert_eq!(data, "raw_data", "produce: expected 'raw_data', got '{}'", data);
+
+    // Consumer processes it
+    consumer.consume(data).await;
+    let result = consumer.get_result().await;
+    assert_eq!(result, "processed:raw_data", "consume: expected 'processed:raw_data', got '{}'", result);
+
+    println!("PASS: async multi-system — two async systems interact correctly");
+}

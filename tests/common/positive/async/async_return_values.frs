@@ -1,0 +1,56 @@
+@@target rust
+
+// Test 6: Return values through async chain
+// Validates: return sugar, @@:return, default return all work async
+
+async fn mock_multiply(x: i32, y: i32) -> i32 {
+    x * y
+}
+
+async fn mock_fetch() -> String {
+    String::from("fetched_data")
+}
+
+@@system AsyncReturn {
+    interface:
+        async compute(x: i32): i32
+        async with_default(): String = String::from("default_value")
+        async get_data(): String
+
+    machine:
+        $Ready {
+            compute(x: i32): i32 {
+                let result = mock_multiply(x, 2).await;
+                return result
+            }
+
+            with_default(): String {
+                // Don't set @@:return — default should be used
+            }
+
+            get_data(): String {
+                let data = mock_fetch().await;
+                @@:return = data
+            }
+        }
+}
+
+#[tokio::main]
+async fn main() {
+    let mut s = @@AsyncReturn();
+    s.init().await;
+
+    // Test return sugar
+    let result = s.compute(5).await;
+    assert_eq!(result, 10, "compute: expected 10, got {}", result);
+
+    // Test default return value
+    let result = s.with_default().await;
+    assert_eq!(result, "default_value", "default: expected 'default_value', got '{}'", result);
+
+    // Test @@:return assignment
+    let result = s.get_data().await;
+    assert_eq!(result, "fetched_data", "get_data: expected 'fetched_data', got '{}'", result);
+
+    println!("PASS: async return values — sugar, default, and @@:return all work");
+}

@@ -1,0 +1,43 @@
+@@target rust
+
+// Test 7: Nested async interface calls (reentrancy)
+// Validates: context stack handles nested async calls correctly
+
+async fn mock_fetch() -> String {
+    String::from("fetched")
+}
+
+@@system AsyncReentrant {
+    interface:
+        async outer(): String
+        async inner(): String
+
+    machine:
+        $Ready {
+            outer(): String {
+                let inner_result = self.inner().await;
+                return format!("outer:{}", inner_result)
+            }
+
+            inner(): String {
+                let data = mock_fetch().await;
+                return format!("inner:{}", data)
+            }
+        }
+}
+
+#[tokio::main]
+async fn main() {
+    let mut s = @@AsyncReentrant();
+    s.init().await;
+
+    // Direct inner call
+    let result = s.inner().await;
+    assert_eq!(result, "inner:fetched", "inner: expected 'inner:fetched', got '{}'", result);
+
+    // Outer calls inner — nested async dispatch
+    let result = s.outer().await;
+    assert_eq!(result, "outer:inner:fetched", "outer: expected 'outer:inner:fetched', got '{}'", result);
+
+    println!("PASS: async reentrant — nested calls work, context stack isolates returns");
+}
