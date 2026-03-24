@@ -56,6 +56,7 @@ TS_OUT="$TEST_ENV_ROOT/output/typescript/tests"
 RUST_CRATE="$TEST_ENV_ROOT/output/rust"
 RUST_OUT="$RUST_CRATE/tests"
 C_OUT="$TEST_ENV_ROOT/output/c/tests"
+CPP_OUT="$TEST_ENV_ROOT/output/cpp/tests"
 
 # Colors
 RED='\033[0;31m'
@@ -86,6 +87,7 @@ while [[ $# -gt 0 ]]; do
         --typescript|--ts) FILTER_LANG="typescript" ;;
         --rust|--rs) FILTER_LANG="rust" ;;
         --c) FILTER_LANG="c" ;;
+        --cpp|--c++) FILTER_LANG="cpp" ;;
         --langs|-l)
             # Parse comma-separated language list (py,ts,rs,c -> python typescript rust c)
             FILTER_LANGS=""
@@ -134,7 +136,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Create output directories
-mkdir -p "$PYTHON_OUT" "$TS_OUT" "$RUST_OUT" "$C_OUT"
+mkdir -p "$PYTHON_OUT" "$TS_OUT" "$RUST_OUT" "$C_OUT" "$CPP_OUT"
 
 # Temp directory for parallel results
 RESULTS_DIR=$(mktemp -d)
@@ -147,6 +149,7 @@ lang_to_target() {
         typescript) echo "typescript" ;;
         rust) echo "rust" ;;
         c) echo "c" ;;
+        cpp) echo "cpp_17" ;;
     esac
 }
 
@@ -157,6 +160,7 @@ lang_to_outdir() {
         typescript) echo "$TS_OUT" ;;
         rust) echo "$RUST_OUT" ;;
         c) echo "$C_OUT" ;;
+        cpp) echo "$CPP_OUT" ;;
     esac
 }
 
@@ -167,6 +171,7 @@ lang_to_outext() {
         typescript) echo "ts" ;;
         rust) echo "rs" ;;
         c) echo "c" ;;
+        cpp) echo "cpp" ;;
     esac
 }
 
@@ -177,6 +182,7 @@ lang_to_srcext() {
         typescript) echo "fts" ;;
         rust) echo "frs" ;;
         c) echo "fc" ;;
+        cpp) echo "fcpp" ;;
     esac
 }
 
@@ -517,7 +523,7 @@ run_category() {
 
     # Check if directory has test files
     local has_tests=false
-    for ext in fpy fts frs fc; do
+    for ext in fpy fts frs fc fcpp; do
         if ls "$category_dir"/*.$ext 1>/dev/null 2>&1; then
             has_tests=true
             break
@@ -534,7 +540,7 @@ run_category() {
     # Determine which languages to test based on scope
     local languages=""
     case $scope in
-        common) languages="python typescript rust c" ;;
+        common) languages="python typescript rust c cpp" ;;
         python) languages="python" ;;
         typescript) languages="typescript" ;;
         rust) languages="rust" ;;
@@ -543,7 +549,7 @@ run_category() {
 
     # Get unique test names from all language files
     local test_names=""
-    for ext in fpy fts frs fc; do
+    for ext in fpy fts frs fc fcpp; do
         for f in "$category_dir"/*.$ext; do
             [ -f "$f" ] || continue
             local name=$(basename "$f" | sed 's/\.f[a-z]*$//')
@@ -577,6 +583,7 @@ run_category() {
                 typescript) ext="fts" ;;
                 rust) ext="frs" ;;
                 c) ext="fc" ;;
+                cpp) ext="fcpp" ;;
             esac
 
             local test_file="$category_dir/${test_name}.${ext}"
@@ -614,7 +621,7 @@ if $PARALLEL; then
     elif [ -n "$FILTER_LANGS" ]; then
         languages="$FILTER_LANGS"
     else
-        languages="python typescript rust c"
+        languages="python typescript rust c cpp"
     fi
 
     # Phase 1: Transpile all tests first (all languages in parallel)
@@ -730,7 +737,7 @@ total_fail=0
 total_skip=0
 total_known=0
 
-for lang in python typescript rust c; do
+for lang in python typescript rust c cpp; do
     p=$(get_counter "$lang" "pass")
     f=$(get_counter "$lang" "fail")
     s=$(get_counter "$lang" "skip")

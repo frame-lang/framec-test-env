@@ -32,6 +32,7 @@ TS_OUT="$TEST_ENV_ROOT/output/typescript/tests"
 RUST_CRATE="$TEST_ENV_ROOT/output/rust"
 RUST_OUT="$RUST_CRATE/tests"
 C_OUT="$TEST_ENV_ROOT/output/c/tests"
+CPP_OUT="$TEST_ENV_ROOT/output/cpp/tests"
 
 test_name=$(basename "$test_file" | sed 's/\.f[a-z]*$//')
 
@@ -41,6 +42,7 @@ case $lang in
     typescript) target="typescript"; out_dir="$TS_OUT"; out_ext="ts" ;;
     rust) target="rust"; out_dir="$RUST_OUT"; out_ext="rs" ;;
     c) target="c"; out_dir="$C_OUT"; out_ext="c" ;;
+    cpp) target="cpp_17"; out_dir="$CPP_OUT"; out_ext="cpp" ;;
 esac
 
 out_file="$out_dir/${test_name}.${out_ext}"
@@ -113,6 +115,15 @@ case $lang in
         else
             run_status=1
             run_output="C compilation failed"
+        fi
+        ;;
+    cpp)
+        cpp_bin="$CPP_OUT/${test_name}"
+        if g++ -std=c++17 -o "$cpp_bin" "$out_file" 2>&1; then
+            run_output=$("$cpp_bin" 2>&1) || run_status=$?
+        else
+            run_status=1
+            run_output="C++ compilation failed"
         fi
         ;;
 esac
