@@ -1,0 +1,61 @@
+@@target cpp_17
+
+#include <iostream>
+#include <cassert>
+
+@@system HSMDefaultForward {
+    interface:
+        handled_event(): void
+        unhandled_event(): void
+        get_log_code(): int
+
+    machine:
+        $Child => $Parent {
+            handled_event() {
+                self->log_code = self->log_code + 1;  // "Child:handled_event"
+            }
+
+            get_log_code(): int {
+                return self->log_code;
+            }
+
+            => $^
+        }
+
+        $Parent {
+            handled_event() {
+                self->log_code = self->log_code + 10;  // "Parent:handled_event"
+            }
+
+            unhandled_event() {
+                self->log_code = self->log_code + 100;  // "Parent:unhandled_event"
+            }
+
+            get_log_code(): int {
+                return self->log_code;
+            }
+        }
+    domain:
+        int log_code
+}
+
+int main() {
+    std::cout << "=== Test 30: HSM State-Level Default Forward ===" << std::endl;
+    HSMDefaultForward s;
+
+    s.handled_event();
+    int log_code = s.get_log_code();
+    // Child handles it: +1
+    assert(log_code == 1);
+    std::cout << "After handled_event: log_code = " << log_code << std::endl;
+
+    s.unhandled_event();
+    log_code = s.get_log_code();
+    // Child doesn't handle it, forwards to Parent: +100
+    // Total: 1 + 100 = 101
+    assert(log_code == 101);
+    std::cout << "After unhandled_event (forwarded): log_code = " << log_code << std::endl;
+
+    std::cout << "PASS: HSM state-level default forward works correctly" << std::endl;
+    return 0;
+}

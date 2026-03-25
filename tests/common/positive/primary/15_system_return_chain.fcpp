@@ -1,0 +1,80 @@
+@@target cpp_17
+
+#include <iostream>
+#include <cassert>
+
+// Tests that @@:return follows "last writer wins" across transition lifecycle
+
+@@system SystemReturnChainTest {
+    interface:
+        test_enter_sets(): int
+        test_exit_then_enter(): int
+        get_state(): int
+
+    machine:
+        $Start {
+            test_enter_sets(): int {
+                -> $EnterSetter
+            }
+
+            test_exit_then_enter(): int {
+                -> $BothSet
+            }
+
+            get_state(): int {
+                return 1;
+            }
+
+            <$() {
+                // Exit handler sets initial value (10)
+                @@:return = 10;
+            }
+        }
+
+        $EnterSetter {
+            $>() {
+                // Enter handler sets return value (20)
+                @@:return = 20;
+            }
+
+            get_state(): int {
+                return 2;
+            }
+        }
+
+        $BothSet {
+            $>() {
+                // Enter handler sets return - should overwrite exit's value (30)
+                @@:return = 30;
+            }
+
+            get_state(): int {
+                return 3;
+            }
+        }
+}
+
+int main() {
+    std::cout << "=== Test 15: System Return Chain (Last Writer Wins) ===" << std::endl;
+
+    // Test 1: Start exit + EnterSetter enter
+    // Start's exit sets 10, EnterSetter's enter sets 20
+    // Enter should win (last writer)
+    SystemReturnChainTest s1;
+    int result = s1.test_enter_sets();
+    assert(result == 20);
+    int state = s1.get_state();
+    assert(state == 2);
+    std::cout << "1. Exit set then enter set - enter wins: " << result << std::endl;
+
+    // Test 2: Both handlers set, enter wins
+    SystemReturnChainTest s2;
+    result = s2.test_exit_then_enter();
+    assert(result == 30);
+    state = s2.get_state();
+    assert(state == 3);
+    std::cout << "2. Both set - enter wins: " << result << std::endl;
+
+    std::cout << "PASS: System return chain (last writer wins) works correctly" << std::endl;
+    return 0;
+}

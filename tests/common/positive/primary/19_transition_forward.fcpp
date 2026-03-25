@@ -1,0 +1,55 @@
+@@target cpp_17
+
+#include <iostream>
+#include <cassert>
+
+@@system EventForwardTest {
+    interface:
+        process(): void
+        get_log_code(): int
+
+    machine:
+        $Idle {
+            process() {
+                self->log_code = self->log_code + 1;  // "idle:process:before"
+                -> => $Working
+                // This should NOT execute because -> => returns after dispatch
+                self->log_code = self->log_code + 100;  // "idle:process:after"
+            }
+
+            get_log_code(): int {
+                return self->log_code;
+            }
+        }
+
+        $Working {
+            process() {
+                self->log_code = self->log_code + 10;  // "working:process"
+            }
+
+            get_log_code(): int {
+                return self->log_code;
+            }
+        }
+    domain:
+        int log_code
+}
+
+int main() {
+    std::cout << "=== Test 19: Transition Forward ===" << std::endl;
+    EventForwardTest s;
+    s.process();
+    int log_code = s.get_log_code();
+    std::cout << "Log code: " << log_code << std::endl;
+
+    // After transition-forward:
+    // - Idle logs +1 ("idle:process:before")
+    // - Transition to Working
+    // - Working handles process(), logs +10 ("working:process")
+    // - Return prevents +100 ("idle:process:after")
+    // Expected: 1 + 10 = 11
+    assert(log_code == 11);
+
+    std::cout << "PASS: Transition forward works correctly" << std::endl;
+    return 0;
+}

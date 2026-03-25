@@ -1,0 +1,80 @@
+@@target cpp_17
+
+#include <iostream>
+#include <cassert>
+
+@@system ForwardEnterFirst {
+    interface:
+        process(): void
+        get_counter(): int
+        get_log_code(): int
+
+    machine:
+        $Idle {
+            process() {
+                -> => $Working
+            }
+
+            get_counter(): int {
+                return -1;
+            }
+
+            get_log_code(): int {
+                return self->log_code;
+            }
+        }
+
+        $Working {
+            $.counter: int = 100
+
+            $>() {
+                self->log_code = self->log_code + 1;  // "Working:enter"
+            }
+
+            process() {
+                self->log_code = self->log_code + 10;  // "Working:process:counter=100"
+                $.counter = $.counter + 1;
+            }
+
+            get_counter(): int {
+                return $.counter;
+            }
+
+            get_log_code(): int {
+                return self->log_code;
+            }
+        }
+    domain:
+        int log_code
+}
+
+int main() {
+    std::cout << "=== Test 29: Forward Enter First ===" << std::endl;
+    ForwardEnterFirst s;
+
+    // Initial state is Idle
+    int counter = s.get_counter();
+    assert(counter == -1);
+
+    // Call process - should forward to Working
+    // Correct behavior: $> runs first (inits counter=100, logs +1)
+    // Then process runs (logs +10, increments to 101)
+    s.process();
+
+    // Check counter was initialized and incremented
+    counter = s.get_counter();
+    int log_code = s.get_log_code();
+    std::cout << "Counter after forward: " << counter << std::endl;
+    std::cout << "Log code: " << log_code << std::endl;
+
+    // Verify $> ran first (log_code has +1)
+    // Verify process ran after $> (log_code has +10)
+    // Total should be 11
+    assert(log_code == 11);
+
+    // Verify counter was incremented from 100 to 101
+    assert(counter == 101);
+
+    std::cout << "PASS: Forward sends $> first for non-$> events" << std::endl;
+    return 0;
+}
