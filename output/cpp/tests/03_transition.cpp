@@ -89,8 +89,8 @@ private:
     void _state_A(TransitionTestFrameEvent& __e) {
         if (__e._message == "next") {
             {
-            auto __compartment = std::make_unique<TransitionTestCompartment>("B");
-            __transition(std::move(__compartment));
+            auto __comp = std::make_unique<TransitionTestCompartment>("B");
+            __transition(std::move(__comp));
             return;
             }
             return;
@@ -106,8 +106,8 @@ private:
     void _state_B(TransitionTestFrameEvent& __e) {
         if (__e._message == "next") {
             {
-            auto __compartment = std::make_unique<TransitionTestCompartment>("C");
-            __transition(std::move(__compartment));
+            auto __comp = std::make_unique<TransitionTestCompartment>("C");
+            __transition(std::move(__comp));
             return;
             }
             return;

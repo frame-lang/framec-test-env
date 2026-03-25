@@ -1,0 +1,88 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system EnterExit {
+    interface:
+        toggle()
+        get_log_count(): int
+
+    machine:
+        $Off {
+            $>() {
+                enter_off_count += 1;
+                std::cout << "Entered Off state" << std::endl;
+            }
+
+            <$() {
+                exit_off_count += 1;
+                std::cout << "Exiting Off state" << std::endl;
+            }
+
+            toggle() {
+                -> $On
+            }
+
+            get_log_count(): int {
+                // Return encoded counts: enter_off * 1000 + exit_off * 100 + enter_on * 10 + exit_on
+                int result = enter_off_count * 1000 + exit_off_count * 100 + enter_on_count * 10 + exit_on_count;
+                return result;
+            }
+        }
+
+        $On {
+            $>() {
+                enter_on_count += 1;
+                std::cout << "Entered On state" << std::endl;
+            }
+
+            <$() {
+                exit_on_count += 1;
+                std::cout << "Exiting On state" << std::endl;
+            }
+
+            toggle() {
+                -> $Off
+            }
+
+            get_log_count(): int {
+                int result = enter_off_count * 1000 + exit_off_count * 100 + enter_on_count * 10 + exit_on_count;
+                return result;
+            }
+        }
+    domain:
+        int enter_off_count = 0;
+        int exit_off_count = 0;
+        int enter_on_count = 0;
+        int exit_on_count = 0;
+}
+
+int main() {
+    std::cout << "=== Test 05: Enter/Exit Handlers ===" << std::endl;
+    EnterExit s;
+
+    // Initial enter should have been called (enter_off_count = 1)
+    int log = s.get_log_count();
+    // Expected: 1*1000 + 0*100 + 0*10 + 0 = 1000
+    assert(log == 1000);
+    std::cout << "After construction: log_count = " << log << " (enter_off=1)" << std::endl;
+
+    // Toggle to On - should exit Off, enter On
+    s.toggle();
+    log = s.get_log_count();
+    // Expected: 1*1000 + 1*100 + 1*10 + 0 = 1110
+    assert(log == 1110);
+    std::cout << "After toggle to On: log_count = " << log << " (enter_off=1, exit_off=1, enter_on=1)" << std::endl;
+
+    // Toggle back to Off - should exit On, enter Off
+    s.toggle();
+    log = s.get_log_count();
+    // Expected: 2*1000 + 1*100 + 1*10 + 1 = 2111
+    assert(log == 2111);
+    std::cout << "After toggle to Off: log_count = " << log << " (enter_off=2, exit_off=1, enter_on=1, exit_on=1)" << std::endl;
+
+    std::cout << "PASS: 05 enter exit" << std::endl;
+    return 0;
+}

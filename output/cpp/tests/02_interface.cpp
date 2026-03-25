@@ -1,0 +1,159 @@
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include <any>
+#include <memory>
+
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+class WithInterfaceFrameEvent {
+public:
+    std::string _message;
+    std::unordered_map<std::string, std::any> _parameters;
+
+    WithInterfaceFrameEvent(const std::string& message, std::unordered_map<std::string, std::any> params = {})
+        : _message(message), _parameters(std::move(params)) {}
+};
+
+class WithInterfaceFrameContext {
+public:
+    WithInterfaceFrameEvent _event;
+    std::any _return;
+    std::unordered_map<std::string, std::any> _data;
+
+    WithInterfaceFrameContext(WithInterfaceFrameEvent event, std::any default_return = {})
+        : _event(std::move(event)), _return(std::move(default_return)) {}
+};
+
+class WithInterfaceCompartment {
+public:
+    std::string state;
+    std::unordered_map<std::string, std::any> state_args;
+    std::unordered_map<std::string, std::any> state_vars;
+    std::unordered_map<std::string, std::any> enter_args;
+    std::unordered_map<std::string, std::any> exit_args;
+    std::unique_ptr<WithInterfaceFrameEvent> forward_event;
+    std::unique_ptr<WithInterfaceCompartment> parent_compartment;
+
+    explicit WithInterfaceCompartment(const std::string& state) : state(state) {}
+};
+
+class WithInterface {
+private:
+    std::unique_ptr<WithInterfaceCompartment> __compartment;
+    std::unique_ptr<WithInterfaceCompartment> __next_compartment;
+    std::vector<std::unique_ptr<WithInterfaceCompartment>> _state_stack;
+    std::vector<WithInterfaceFrameContext> _context_stack;
+
+    int call_count = 0;;
+
+    void __kernel(WithInterfaceFrameEvent& __e) {
+        __router(__e);
+        while (__next_compartment) {
+            auto next_compartment = std::move(__next_compartment);
+            WithInterfaceFrameEvent exit_event("<$");
+            __router(exit_event);
+            __compartment = std::move(next_compartment);
+            if (!__compartment->forward_event) {
+                WithInterfaceFrameEvent enter_event("$>");
+                __router(enter_event);
+            } else {
+                auto forward_event = std::move(__compartment->forward_event);
+                if (forward_event->_message == "$>") {
+                    __router(*forward_event);
+                } else {
+                    WithInterfaceFrameEvent enter_event("$>");
+                    __router(enter_event);
+                    __router(*forward_event);
+                }
+            }
+        }
+    }
+
+    void __router(WithInterfaceFrameEvent& __e) {
+        const auto& state_name = __compartment->state;
+        if (state_name == "Ready") {
+            _state_Ready(__e);
+        }
+    }
+
+    void __transition(std::unique_ptr<WithInterfaceCompartment> next) {
+        __next_compartment = std::move(next);
+    }
+
+    void _state_Ready(WithInterfaceFrameEvent& __e) {
+        if (__e._message == "greet") {
+            auto name = std::any_cast<std::string>(__e._parameters.at("name"));
+            {
+            call_count += 1;
+            _context_stack.back()._return = std::string("Hello, ") + name + std::string("!");
+            return;
+            }
+            return;
+        } else if (__e._message == "get_count") {
+            {
+            _context_stack.back()._return = call_count;
+            return;
+            }
+            return;
+        }
+    }
+
+public:
+    WithInterface() {
+        __compartment = std::make_unique<WithInterfaceCompartment>("Ready");
+        call_count = 0;;
+        WithInterfaceFrameEvent __frame_event("$>");
+        __kernel(__frame_event);
+    }
+
+    std::string greet(std::string name) {
+        std::unordered_map<std::string, std::any> __params;
+        __params["name"] = name;
+        WithInterfaceFrameEvent __e("greet", std::move(__params));
+        WithInterfaceFrameContext __ctx(std::move(__e), std::any(std::string()));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        auto __result = std::any_cast<std::string>(std::move(_context_stack.back()._return));
+        _context_stack.pop_back();
+        return __result;
+    }
+
+    int get_count() {
+        WithInterfaceFrameEvent __e("get_count");
+        WithInterfaceFrameContext __ctx(std::move(__e), std::any(int()));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        auto __result = std::any_cast<int>(std::move(_context_stack.back()._return));
+        _context_stack.pop_back();
+        return __result;
+    }
+
+};
+
+int main() {
+    std::cout << "=== Test 02: Interface Methods ===" << std::endl;
+    WithInterface s;
+
+    // Test interface method with parameter and return
+    std::string result = s.greet("World");
+    assert(result == "Hello, World!");
+    std::cout << "greet('World') = " << result << std::endl;
+
+    // Test domain variable access through interface
+    int count = s.get_count();
+    assert(count == 1);
+    std::cout << "get_count() = " << count << std::endl;
+
+    // Call again to verify state
+    s.greet("Frame");
+    int count2 = s.get_count();
+    assert(count2 == 2);
+    std::cout << "After second call: get_count() = " << count2 << std::endl;
+
+    std::cout << "PASS: 02 interface" << std::endl;
+    return 0;
+}
