@@ -51,8 +51,8 @@ private:
     std::vector<std::unique_ptr<LogicalTestCompartment>> _state_stack;
     std::vector<LogicalTestFrameContext> _context_stack;
 
-    a: bool = true;
-    b: bool = false;
+    bool a = true;
+    bool b = false;
 
     void __kernel(LogicalTestFrameEvent& __e) {
         __router(__e);

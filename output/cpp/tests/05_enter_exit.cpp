@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<EnterExitCompartment>> _state_stack;
     std::vector<EnterExitFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(EnterExitFrameEvent& __e) {
         __router(__e);
@@ -91,13 +91,13 @@ private:
     void _state_Off(EnterExitFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            log.push_back("enter:Off");
+            event_log.push_back("enter:Off");
             printf("Entered Off state\n");
             }
             return;
         } else if (__e._message == "<$") {
             {
-            log.push_back("exit:Off");
+            event_log.push_back("exit:Off");
             printf("Exiting Off state\n");
             }
             return;
@@ -110,7 +110,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -120,13 +120,13 @@ private:
     void _state_On(EnterExitFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            log.push_back("enter:On");
+            event_log.push_back("enter:On");
             printf("Entered On state\n");
             }
             return;
         } else if (__e._message == "<$") {
             {
-            log.push_back("exit:On");
+            event_log.push_back("exit:On");
             printf("Exiting On state\n");
             }
             return;
@@ -139,7 +139,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -149,7 +149,7 @@ private:
 public:
     EnterExit() {
         __compartment = std::make_unique<EnterExitCompartment>("Off");
-        log = {};
+        event_log = {};
         EnterExitFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }

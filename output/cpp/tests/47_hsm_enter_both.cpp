@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<HSMEnterBothCompartment>> _state_stack;
     std::vector<HSMEnterBothFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(HSMEnterBothFrameEvent& __e) {
         __router(__e);
@@ -107,7 +107,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -123,7 +123,7 @@ private:
     void _state_Child(HSMEnterBothFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            log.push_back("Child:enter");
+            event_log.push_back("Child:enter");
             }
             return;
         } else if (__e._message == "go_to_parent") {
@@ -135,7 +135,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -151,7 +151,7 @@ private:
     void _state_Parent(HSMEnterBothFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            log.push_back("Parent:enter");
+            event_log.push_back("Parent:enter");
             }
             return;
         } else if (__e._message == "go_to_child") {
@@ -163,7 +163,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -179,7 +179,7 @@ private:
 public:
     HSMEnterBoth() {
         __compartment = std::make_unique<HSMEnterBothCompartment>("Start");
-        log = {};
+        event_log = {};
         HSMEnterBothFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }

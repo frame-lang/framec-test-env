@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<HSMExitHandlersCompartment>> _state_stack;
     std::vector<HSMExitHandlersFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(HSMExitHandlersFrameEvent& __e) {
         __router(__e);
@@ -93,13 +93,13 @@ private:
     void _state_Child(HSMExitHandlersFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            log.push_back("Child:enter");
+            event_log.push_back("Child:enter");
             }
             return;
         } else if (__e._message == "<$") {
             {
             int val = std::any_cast<int>(__compartment->state_vars["child_var"]);
-            log.push_back(std::string("Child:exit(var=") + std::to_string(val) + ")");
+            event_log.push_back(std::string("Child:exit(var=") + std::to_string(val) + ")");
             }
             return;
         } else if (__e._message == "go_to_other") {
@@ -118,7 +118,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -140,12 +140,12 @@ private:
     void _state_Parent(HSMExitHandlersFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            log.push_back("Parent:enter");
+            event_log.push_back("Parent:enter");
             }
             return;
         } else if (__e._message == "<$") {
             {
-            log.push_back("Parent:exit");
+            event_log.push_back("Parent:exit");
             }
             return;
         } else if (__e._message == "go_to_child") {
@@ -164,7 +164,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -186,7 +186,7 @@ private:
     void _state_Other(HSMExitHandlersFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            log.push_back("Other:enter");
+            event_log.push_back("Other:enter");
             }
             return;
         } else if (__e._message == "go_to_child") {
@@ -205,7 +205,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -228,7 +228,7 @@ public:
     HSMExitHandlers() {
         __compartment = std::make_unique<HSMExitHandlersCompartment>("Child");
         __compartment->state_vars["child_var"] = 42;
-        log = {};
+        event_log = {};
         HSMExitHandlersFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }

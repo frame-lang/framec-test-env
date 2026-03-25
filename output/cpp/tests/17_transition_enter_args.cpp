@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<TransitionEnterArgsCompartment>> _state_stack;
     std::vector<TransitionEnterArgsFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(TransitionEnterArgsFrameEvent& __e) {
         __router(__e);
@@ -91,13 +91,13 @@ private:
     void _state_Idle(TransitionEnterArgsFrameEvent& __e) {
         if (__e._message == "start") {
             {
-            log.push_back("idle:start");
+            event_log.push_back("idle:start");
             -> ("from_idle", 42) $Active
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -107,17 +107,17 @@ private:
     void _state_Active(TransitionEnterArgsFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            log.push_back(std::string("active:enter:") + source + ":" + std::to_string(value));
+            event_log.push_back(std::string("active:enter:") + source + ":" + std::to_string(value));
             }
             return;
         } else if (__e._message == "start") {
             {
-            log.push_back("active:start");
+            event_log.push_back("active:start");
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -127,7 +127,7 @@ private:
 public:
     TransitionEnterArgs() {
         __compartment = std::make_unique<TransitionEnterArgsCompartment>("Idle");
-        log = {};
+        event_log = {};
         TransitionEnterArgsFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }

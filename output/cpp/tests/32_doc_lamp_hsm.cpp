@@ -50,8 +50,8 @@ private:
     std::vector<std::unique_ptr<LampHSMCompartment>> _state_stack;
     std::vector<LampHSMFrameContext> _context_stack;
 
-    color: std::string = "white";
-    lamp_on: bool = false;
+    std::string color = "white";
+    bool lamp_on = false;
 
     void __kernel(LampHSMFrameEvent& __e) {
         __router(__e);

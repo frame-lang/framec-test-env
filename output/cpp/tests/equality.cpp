@@ -51,8 +51,8 @@ private:
     std::vector<std::unique_ptr<EqualityTestCompartment>> _state_stack;
     std::vector<EqualityTestFrameContext> _context_stack;
 
-    a: int = 5;
-    b: int = 5;
+    int a = 5;
+    int b = 5;
 
     void __kernel(EqualityTestFrameEvent& __e) {
         __router(__e);

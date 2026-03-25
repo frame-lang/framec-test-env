@@ -51,7 +51,7 @@ private:
     std::vector<std::unique_ptr<MealyMachineCompartment>> _state_stack;
     std::vector<MealyMachineFrameContext> _context_stack;
 
-    last_output: number = -1;
+    int last_output = -1;
 
     void __kernel(MealyMachineFrameEvent& __e) {
         __router(__e);
@@ -181,7 +181,7 @@ public:
         }
     }
 
-    number get_last_output() {
+    int get_last_output() {
         {
         return last_output;
         }

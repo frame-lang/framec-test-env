@@ -48,8 +48,8 @@ private:
     std::vector<std::unique_ptr<DomainVarsCompartment>> _state_stack;
     std::vector<DomainVarsFrameContext> _context_stack;
 
-    count: int = 0;
-    name: std::string = "counter";
+    int count = 0;
+    std::string name = "counter";
 
     void __kernel(DomainVarsFrameEvent& __e) {
         __router(__e);

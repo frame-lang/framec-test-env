@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<ForwardEnterFirstCompartment>> _state_stack;
     std::vector<ForwardEnterFirstFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(ForwardEnterFirstFrameEvent& __e) {
         __router(__e);
@@ -102,7 +102,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -112,12 +112,12 @@ private:
     void _state_Working(ForwardEnterFirstFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            log.push_back("Working:enter");
+            event_log.push_back("Working:enter");
             }
             return;
         } else if (__e._message == "process") {
             {
-            log.push_back(std::string("Working:process:counter=") + std::to_string(std::any_cast<int>(__compartment->state_vars["counter"])));
+            event_log.push_back(std::string("Working:process:counter=") + std::to_string(std::any_cast<int>(__compartment->state_vars["counter"])));
             __compartment->state_vars["counter"] = std::any(std::any_cast<int>(__compartment->state_vars["counter"]) + 1);
             }
             return;
@@ -129,7 +129,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -139,7 +139,7 @@ private:
 public:
     ForwardEnterFirst() {
         __compartment = std::make_unique<ForwardEnterFirstCompartment>("Idle");
-        log = {};
+        event_log = {};
         ForwardEnterFirstFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }

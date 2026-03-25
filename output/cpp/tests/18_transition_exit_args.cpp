@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<TransitionExitArgsCompartment>> _state_stack;
     std::vector<TransitionExitArgsFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(TransitionExitArgsFrameEvent& __e) {
         __router(__e);
@@ -91,18 +91,18 @@ private:
     void _state_Active(TransitionExitArgsFrameEvent& __e) {
         if (__e._message == "<$") {
             {
-            log.push_back(std::string("exit:") + reason + ":" + std::to_string(code));
+            event_log.push_back(std::string("exit:") + reason + ":" + std::to_string(code));
             }
             return;
         } else if (__e._message == "leave") {
             {
-            log.push_back("leaving");
+            event_log.push_back("leaving");
             ("cleanup", 42) -> $Done
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -112,12 +112,12 @@ private:
     void _state_Done(TransitionExitArgsFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            log.push_back("enter:done");
+            event_log.push_back("enter:done");
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -127,7 +127,7 @@ private:
 public:
     TransitionExitArgs() {
         __compartment = std::make_unique<TransitionExitArgsCompartment>("Active");
-        log = {};
+        event_log = {};
         TransitionExitArgsFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }

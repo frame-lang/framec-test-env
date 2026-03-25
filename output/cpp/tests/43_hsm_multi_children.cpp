@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<HSMMultiChildrenCompartment>> _state_stack;
     std::vector<HSMMultiChildrenFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(HSMMultiChildrenFrameEvent& __e) {
         __router(__e);
@@ -114,19 +114,19 @@ private:
             return;
         } else if (__e._message == "do_action") {
             {
-            log.push_back("ChildA:do_action");
+            event_log.push_back("ChildA:do_action");
             }
             return;
         } else if (__e._message == "forward_action") {
             {
-            log.push_back("ChildA:forward_action");
+            event_log.push_back("ChildA:forward_action");
             _state_Parent(__e);
             return;
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -161,19 +161,19 @@ private:
             return;
         } else if (__e._message == "do_action") {
             {
-            log.push_back("ChildB:do_action");
+            event_log.push_back("ChildB:do_action");
             }
             return;
         } else if (__e._message == "forward_action") {
             {
-            log.push_back("ChildB:forward_action");
+            event_log.push_back("ChildB:forward_action");
             _state_Parent(__e);
             return;
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -208,19 +208,19 @@ private:
             return;
         } else if (__e._message == "do_action") {
             {
-            log.push_back("ChildC:do_action");
+            event_log.push_back("ChildC:do_action");
             }
             return;
         } else if (__e._message == "forward_action") {
             {
-            log.push_back("ChildC:forward_action");
+            event_log.push_back("ChildC:forward_action");
             _state_Parent(__e);
             return;
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -236,12 +236,12 @@ private:
     void _state_Parent(HSMMultiChildrenFrameEvent& __e) {
         if (__e._message == "forward_action") {
             {
-            log.push_back("Parent:forward_action");
+            event_log.push_back("Parent:forward_action");
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -257,7 +257,7 @@ private:
 public:
     HSMMultiChildren() {
         __compartment = std::make_unique<HSMMultiChildrenCompartment>("ChildA");
-        log = {};
+        event_log = {};
         HSMMultiChildrenFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }

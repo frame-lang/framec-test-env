@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<HSMOmittedHandlersCompartment>> _state_stack;
     std::vector<HSMOmittedHandlersFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(HSMOmittedHandlersFrameEvent& __e) {
         __router(__e);
@@ -91,19 +91,19 @@ private:
     void _state_Child(HSMOmittedHandlersFrameEvent& __e) {
         if (__e._message == "handled_by_child") {
             {
-            log.push_back("Child:handled_by_child");
+            event_log.push_back("Child:handled_by_child");
             }
             return;
         } else if (__e._message == "forwarded_explicitly") {
             {
-            log.push_back("Child:before_forward");
+            event_log.push_back("Child:before_forward");
             _state_Parent(__e);
             return;
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -119,22 +119,22 @@ private:
     void _state_Parent(HSMOmittedHandlersFrameEvent& __e) {
         if (__e._message == "handled_by_child") {
             {
-            log.push_back("Parent:handled_by_child");
+            event_log.push_back("Parent:handled_by_child");
             }
             return;
         } else if (__e._message == "forwarded_explicitly") {
             {
-            log.push_back("Parent:forwarded_explicitly");
+            event_log.push_back("Parent:forwarded_explicitly");
             }
             return;
         } else if (__e._message == "unhandled_no_forward") {
             {
-            log.push_back("Parent:unhandled_no_forward");
+            event_log.push_back("Parent:unhandled_no_forward");
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -150,7 +150,7 @@ private:
 public:
     HSMOmittedHandlers() {
         __compartment = std::make_unique<HSMOmittedHandlersCompartment>("Child");
-        log = {};
+        event_log = {};
         HSMOmittedHandlersFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -240,7 +240,7 @@ private:
     std::vector<std::unique_ptr<HSMDefaultForwardCompartment>> _state_stack;
     std::vector<HSMDefaultForwardFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(HSMDefaultForwardFrameEvent& __e) {
         __router(__e);
@@ -281,12 +281,12 @@ private:
     void _state_Child(HSMDefaultForwardFrameEvent& __e) {
         if (__e._message == "child_handled") {
             {
-            log.push_back("Child:child_handled");
+            event_log.push_back("Child:child_handled");
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -298,22 +298,22 @@ private:
     void _state_Parent(HSMDefaultForwardFrameEvent& __e) {
         if (__e._message == "child_handled") {
             {
-            log.push_back("Parent:child_handled");
+            event_log.push_back("Parent:child_handled");
             }
             return;
         } else if (__e._message == "parent_handled") {
             {
-            log.push_back("Parent:parent_handled");
+            event_log.push_back("Parent:parent_handled");
             }
             return;
         } else if (__e._message == "both_respond") {
             {
-            log.push_back("Parent:both_respond");
+            event_log.push_back("Parent:both_respond");
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -323,7 +323,7 @@ private:
 public:
     HSMDefaultForward() {
         __compartment = std::make_unique<HSMDefaultForwardCompartment>("Child");
-        log = {};
+        event_log = {};
         HSMDefaultForwardFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }

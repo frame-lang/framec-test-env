@@ -51,7 +51,7 @@ private:
     std::vector<std::unique_ptr<MooreMachineCompartment>> _state_stack;
     std::vector<MooreMachineFrameContext> _context_stack;
 
-    current_output: number = 0;
+    int current_output = 0;
 
     void __kernel(MooreMachineFrameEvent& __e) {
         __router(__e);
@@ -240,7 +240,7 @@ public:
         }
     }
 
-    number get_output() {
+    int get_output() {
         {
         return current_output;
         }

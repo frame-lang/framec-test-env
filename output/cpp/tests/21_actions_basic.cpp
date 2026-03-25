@@ -49,7 +49,7 @@ private:
     std::vector<std::unique_ptr<ActionsTestCompartment>> _state_stack;
     std::vector<ActionsTestFrameContext> _context_stack;
 
-    log: std::string = "";
+    std::string event_log = "";
 
     void __kernel(ActionsTestFrameEvent& __e) {
         __router(__e);
@@ -100,7 +100,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -110,7 +110,7 @@ private:
 public:
     ActionsTest() {
         __compartment = std::make_unique<ActionsTestCompartment>("Ready");
-        log = "";
+        event_log = "";
         ActionsTestFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -139,7 +139,7 @@ public:
 
     void __log_event() {
         {
-        log = log + msg + ";";
+        event_log = event_log + msg + ";";
         }
     }
 

@@ -48,7 +48,7 @@ private:
     std::vector<std::unique_ptr<WithInterfaceCompartment>> _state_stack;
     std::vector<WithInterfaceFrameContext> _context_stack;
 
-    call_count: int = 0;
+    int call_count = 0;
 
     void __kernel(WithInterfaceFrameEvent& __e) {
         __router(__e);

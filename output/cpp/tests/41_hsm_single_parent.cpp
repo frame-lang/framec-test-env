@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<HSMSingleParentCompartment>> _state_stack;
     std::vector<HSMSingleParentFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(HSMSingleParentFrameEvent& __e) {
         __router(__e);
@@ -91,20 +91,20 @@ private:
     void _state_Child(HSMSingleParentFrameEvent& __e) {
         if (__e._message == "child_only") {
             {
-            log.push_back("Child:child_only");
+            event_log.push_back("Child:child_only");
             }
             return;
         } else if (__e._message == "forward_to_parent") {
             {
-            log.push_back("Child:before_forward");
+            event_log.push_back("Child:before_forward");
             _state_Parent(__e);
             return;
-            log.push_back("Child:after_forward");
+            event_log.push_back("Child:after_forward");
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -120,12 +120,12 @@ private:
     void _state_Parent(HSMSingleParentFrameEvent& __e) {
         if (__e._message == "forward_to_parent") {
             {
-            log.push_back("Parent:forward_to_parent");
+            event_log.push_back("Parent:forward_to_parent");
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -141,7 +141,7 @@ private:
 public:
     HSMSingleParent() {
         __compartment = std::make_unique<HSMSingleParentCompartment>("Child");
-        log = {};
+        event_log = {};
         HSMSingleParentFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }

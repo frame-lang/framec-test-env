@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<HSMEnterChildOnlyCompartment>> _state_stack;
     std::vector<HSMEnterChildOnlyFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(HSMEnterChildOnlyFrameEvent& __e) {
         __router(__e);
@@ -100,7 +100,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -116,19 +116,19 @@ private:
     void _state_Child(HSMEnterChildOnlyFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            log.push_back("Child:enter");
+            event_log.push_back("Child:enter");
             }
             return;
         } else if (__e._message == "forward_action") {
             {
-            log.push_back("Child:forward");
+            event_log.push_back("Child:forward");
             _state_Parent(__e);
             return;
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -144,12 +144,12 @@ private:
     void _state_Parent(HSMEnterChildOnlyFrameEvent& __e) {
         if (__e._message == "forward_action") {
             {
-            log.push_back("Parent:forward_action");
+            event_log.push_back("Parent:forward_action");
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -165,7 +165,7 @@ private:
 public:
     HSMEnterChildOnly() {
         __compartment = std::make_unique<HSMEnterChildOnlyCompartment>("Start");
-        log = {};
+        event_log = {};
         HSMEnterChildOnlyFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }

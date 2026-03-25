@@ -48,7 +48,7 @@ private:
     std::vector<std::unique_ptr<OperationsTestCompartment>> _state_stack;
     std::vector<OperationsTestFrameContext> _context_stack;
 
-    last_result: int = 0;
+    int last_result = 0;
 
     void __kernel(OperationsTestFrameEvent& __e) {
         __router(__e);

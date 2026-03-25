@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<TransitionPopTestCompartment>> _state_stack;
     std::vector<TransitionPopTestFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(TransitionPopTestFrameEvent& __e) {
         __router(__e);
@@ -91,7 +91,7 @@ private:
     void _state_Idle(TransitionPopTestFrameEvent& __e) {
         if (__e._message == "start") {
             {
-            log.push_back("idle:start:push");
+            event_log.push_back("idle:start:push");
             `push$
             auto __comp = std::make_unique<TransitionPopTestCompartment>("Working");
             __transition(std::move(__comp));
@@ -100,7 +100,7 @@ private:
             return;
         } else if (__e._message == "process") {
             {
-            log.push_back("idle:process");
+            event_log.push_back("idle:process");
             }
             return;
         } else if (__e._message == "get_state") {
@@ -111,7 +111,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -121,13 +121,13 @@ private:
     void _state_Working(TransitionPopTestFrameEvent& __e) {
         if (__e._message == "process") {
             {
-            log.push_back("working:process:before_pop");
+            event_log.push_back("working:process:before_pop");
             auto __popped = std::move(_state_stack.back());
             _state_stack.pop_back();
             __transition(std::move(__popped));
             return;
             // This should NOT execute because pop transitions away
-            log.push_back("working:process:after_pop");
+            event_log.push_back("working:process:after_pop");
             }
             return;
         } else if (__e._message == "get_state") {
@@ -138,7 +138,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -148,7 +148,7 @@ private:
 public:
     TransitionPopTest() {
         __compartment = std::make_unique<TransitionPopTestCompartment>("Idle");
-        log = {};
+        event_log = {};
         TransitionPopTestFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }

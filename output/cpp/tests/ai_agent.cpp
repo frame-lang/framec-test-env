@@ -67,11 +67,11 @@ private:
     std::vector<std::unique_ptr<AiAgentCompartment>> _state_stack;
     std::vector<AiAgentFrameContext> _context_stack;
 
-    health: number = 100;
-    enemy_distance: number = 100;
-    enemy_health: number = 100;
-    patrol_step: number = 0;
-    action_log: string = "";
+    int health = 100;
+    int enemy_distance = 100;
+    int enemy_health = 100;
+    int patrol_step = 0;
+    std::string action_log = "";
 
     void __kernel(AiAgentFrameEvent& __e) {
         __router(__e);

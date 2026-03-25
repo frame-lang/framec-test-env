@@ -52,7 +52,7 @@ private:
     std::vector<std::unique_ptr<HistoryHSMCompartment>> _state_stack;
     std::vector<HistoryHSMFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(HistoryHSMFrameEvent& __e) {
         __router(__e);
@@ -126,7 +126,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -155,7 +155,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -186,7 +186,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -233,7 +233,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -243,7 +243,7 @@ private:
 public:
     HistoryHSM() {
         __compartment = std::make_unique<HistoryHSMCompartment>("Waiting");
-        log = {};
+        event_log = {};
         HistoryHSMFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -302,7 +302,7 @@ public:
 
     void log_msg() {
         {
-        log.push_back(msg);
+        event_log.push_back(msg);
         }
     }
 

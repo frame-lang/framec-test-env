@@ -51,7 +51,7 @@ private:
     std::vector<std::unique_ptr<CalculatorCompartment>> _state_stack;
     std::vector<CalculatorFrameContext> _context_stack;
 
-    result: int = 0;
+    int result = 0;
 
     void __kernel(CalculatorFrameEvent& __e) {
         __router(__e);
@@ -178,7 +178,7 @@ private:
     std::vector<std::unique_ptr<CounterCompartment>> _state_stack;
     std::vector<CounterFrameContext> _context_stack;
 
-    count: int = 0;
+    int count = 0;
 
     void __kernel(CounterFrameEvent& __e) {
         __router(__e);

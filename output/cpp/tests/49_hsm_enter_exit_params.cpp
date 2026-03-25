@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<HSMEnterExitParamsCompartment>> _state_stack;
     std::vector<HSMEnterExitParamsFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(HSMEnterExitParamsFrameEvent& __e) {
         __router(__e);
@@ -100,7 +100,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -116,12 +116,12 @@ private:
     void _state_ChildA(HSMEnterExitParamsFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            log.push_back(std::string("ChildA:enter(") + msg + ")");
+            event_log.push_back(std::string("ChildA:enter(") + msg + ")");
             }
             return;
         } else if (__e._message == "<$") {
             {
-            log.push_back(std::string("ChildA:exit(") + reason + ")");
+            event_log.push_back(std::string("ChildA:exit(") + reason + ")");
             }
             return;
         } else if (__e._message == "go_to_sibling") {
@@ -131,7 +131,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -147,12 +147,12 @@ private:
     void _state_ChildB(HSMEnterExitParamsFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            log.push_back(std::string("ChildB:enter(") + msg + ")");
+            event_log.push_back(std::string("ChildB:enter(") + msg + ")");
             }
             return;
         } else if (__e._message == "<$") {
             {
-            log.push_back(std::string("ChildB:exit(") + reason + ")");
+            event_log.push_back(std::string("ChildB:exit(") + reason + ")");
             }
             return;
         } else if (__e._message == "go_back") {
@@ -162,7 +162,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -178,7 +178,7 @@ private:
     void _state_Parent(HSMEnterExitParamsFrameEvent& __e) {
         if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -194,7 +194,7 @@ private:
 public:
     HSMEnterExitParams() {
         __compartment = std::make_unique<HSMEnterExitParamsCompartment>("Start");
-        log = {};
+        event_log = {};
         HSMEnterExitParamsFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }

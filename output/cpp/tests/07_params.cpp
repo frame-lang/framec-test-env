@@ -48,7 +48,7 @@ private:
     std::vector<std::unique_ptr<WithParamsCompartment>> _state_stack;
     std::vector<WithParamsFrameContext> _context_stack;
 
-    total: int = 0;
+    int total = 0;
 
     void __kernel(WithParamsFrameEvent& __e) {
         __router(__e);

@@ -51,8 +51,8 @@ private:
     std::vector<std::unique_ptr<ComparisonTestCompartment>> _state_stack;
     std::vector<ComparisonTestFrameContext> _context_stack;
 
-    a: int = 5;
-    b: int = 3;
+    int a = 5;
+    int b = 3;
 
     void __kernel(ComparisonTestFrameEvent& __e) {
         __router(__e);

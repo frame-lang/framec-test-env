@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<EventForwardTestCompartment>> _state_stack;
     std::vector<EventForwardTestFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(EventForwardTestFrameEvent& __e) {
         __router(__e);
@@ -91,15 +91,15 @@ private:
     void _state_Idle(EventForwardTestFrameEvent& __e) {
         if (__e._message == "process") {
             {
-            log.push_back("idle:process:before");
+            event_log.push_back("idle:process:before");
             -> => $Working
             // This should NOT execute because -> => returns after dispatch
-            log.push_back("idle:process:after");
+            event_log.push_back("idle:process:after");
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -109,12 +109,12 @@ private:
     void _state_Working(EventForwardTestFrameEvent& __e) {
         if (__e._message == "process") {
             {
-            log.push_back("working:process");
+            event_log.push_back("working:process");
             }
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -124,7 +124,7 @@ private:
 public:
     EventForwardTest() {
         __compartment = std::make_unique<EventForwardTestCompartment>("Idle");
-        log = {};
+        event_log = {};
         EventForwardTestFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }

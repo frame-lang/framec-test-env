@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<TcpServerCompartment>> _state_stack;
     std::vector<TcpServerFrameContext> _context_stack;
 
-    last_data: std::string = "";
+    std::string last_data = "";
 
     void __kernel(TcpServerFrameEvent& __e) {
         __router(__e);
@@ -324,7 +324,7 @@ private:
     std::vector<std::unique_ptr<TcpClientCompartment>> _state_stack;
     std::vector<TcpClientFrameContext> _context_stack;
 
-    sent_count: int = 0;
+    int sent_count = 0;
 
     void __kernel(TcpClientFrameEvent& __e) {
         __router(__e);

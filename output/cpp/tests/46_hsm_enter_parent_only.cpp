@@ -50,7 +50,7 @@ private:
     std::vector<std::unique_ptr<HSMEnterParentOnlyCompartment>> _state_stack;
     std::vector<HSMEnterParentOnlyFrameContext> _context_stack;
 
-    log: std::vector<std::string> = {};
+    std::vector<std::string> event_log = {};
 
     void __kernel(HSMEnterParentOnlyFrameEvent& __e) {
         __router(__e);
@@ -107,7 +107,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -130,7 +130,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -146,7 +146,7 @@ private:
     void _state_Parent(HSMEnterParentOnlyFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            log.push_back("Parent:enter");
+            event_log.push_back("Parent:enter");
             }
             return;
         } else if (__e._message == "go_to_child") {
@@ -158,7 +158,7 @@ private:
             return;
         } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = log;
+            _context_stack.back()._return = event_log;
             return;
             }
             return;
@@ -174,7 +174,7 @@ private:
 public:
     HSMEnterParentOnly() {
         __compartment = std::make_unique<HSMEnterParentOnlyCompartment>("Start");
-        log = {};
+        event_log = {};
         HSMEnterParentOnlyFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }

@@ -50,8 +50,8 @@ private:
     std::vector<std::unique_ptr<LampCompartment>> _state_stack;
     std::vector<LampFrameContext> _context_stack;
 
-    color: std::string = "white";
-    switch_closed: bool = false;
+    std::string color = "white";
+    bool switch_closed = false;
 
     void __kernel(LampFrameEvent& __e) {
         __router(__e);

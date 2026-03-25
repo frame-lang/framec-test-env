@@ -51,7 +51,7 @@ private:
     std::vector<std::unique_ptr<TernaryTestCompartment>> _state_stack;
     std::vector<TernaryTestFrameContext> _context_stack;
 
-    cond: bool = true;
+    bool cond = true;
 
     void __kernel(TernaryTestFrameEvent& __e) {
         __router(__e);
