@@ -6,10 +6,8 @@
 
 
 #include <iostream>
-#include <cstdio>
-
-void step();
-void done();
+#include <string>
+#include <cassert>
 
 class SFrameEvent {
 public:
@@ -89,13 +87,12 @@ private:
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             {
-            int cond = 0;
             while (cond) {
             _state_P(__e);
             return;
-            step();
+            step()
             }
-            done();
+            done()
             }
             return;
         }
@@ -111,20 +108,33 @@ public:
         __kernel(__frame_event);
     }
 
+    void e() {
+        SFrameEvent __e("e");
+        SFrameContext __ctx(std::move(__e));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
+    }
+
 };
 
 // Stub functions for placeholder calls
 void native() {}
 void x() {}
-void step() {}
 void done() {}
+void step() {}
+bool cond = false;
 
 // TAP test harness
 int main() {
     printf("TAP version 14\n");
     printf("1..1\n");
-    S s;
-    s.e();
-    printf("ok 1 - while_forward_then_native\n");
+    try {
+        S s;
+        s.e();
+        printf("ok 1 - while_forward_then_native\n");
+    } catch (...) {
+        printf("not ok 1 - while_forward_then_native\n");
+    }
     return 0;
 }

@@ -1,0 +1,133 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <vector>
+#include <algorithm>
+
+@@system HSMEnterExitParams {
+    interface:
+        go_to_a()
+        go_to_sibling()
+        go_back()
+        get_log(): std::vector<std::string>
+        get_state(): std::string
+
+    machine:
+        $Start {
+            go_to_a() {
+                -> ("starting") $ChildA
+            }
+
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+
+            get_state(): std::string {
+                return std::string("Start");
+            }
+        }
+
+        $ChildA => $Parent {
+            $>(msg: std::string) {
+                log.push_back(std::string("ChildA:enter(") + msg + ")");
+            }
+
+            <$(reason: std::string) {
+                log.push_back(std::string("ChildA:exit(") + reason + ")");
+            }
+
+            go_to_sibling() {
+                ("leaving_A") -> ("arriving_B") $ChildB
+            }
+
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+
+            get_state(): std::string {
+                return std::string("ChildA");
+            }
+        }
+
+        $ChildB => $Parent {
+            $>(msg: std::string) {
+                log.push_back(std::string("ChildB:enter(") + msg + ")");
+            }
+
+            <$(reason: std::string) {
+                log.push_back(std::string("ChildB:exit(") + reason + ")");
+            }
+
+            go_back() {
+                ("leaving_B") -> ("returning_A") $ChildA
+            }
+
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+
+            get_state(): std::string {
+                return std::string("ChildB");
+            }
+        }
+
+        $Parent {
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+
+            get_state(): std::string {
+                return std::string("Parent");
+            }
+        }
+    domain:
+        log: std::vector<std::string> = {}
+}
+
+int main() {
+    printf("=== Test 49: HSM Enter/Exit with Params ===\n");
+    HSMEnterExitParams s;
+
+    s.go_to_a();
+    auto log = s.get_log();
+    if (std::find(log.begin(), log.end(), "ChildA:enter(starting)") == log.end()) {
+        printf("FAIL: Expected ChildA:enter(starting)\n");
+        assert(false);
+    }
+    printf("TC2.5.0: Initial transition with enter params - PASS\n");
+
+    s.go_to_sibling();
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "ChildA:exit(leaving_A)") == log.end()) {
+        printf("FAIL: Expected exit with param\n");
+        assert(false);
+    }
+    printf("TC2.5.1: Exit params passed correctly - PASS\n");
+
+    if (std::find(log.begin(), log.end(), "ChildB:enter(arriving_B)") == log.end()) {
+        printf("FAIL: Expected enter with param\n");
+        assert(false);
+    }
+    if (s.get_state() != "ChildB") {
+        printf("FAIL: Expected ChildB\n");
+        assert(false);
+    }
+    printf("TC2.5.2: Enter params passed to target - PASS\n");
+
+    s.go_back();
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "ChildB:exit(leaving_B)") == log.end()) {
+        printf("FAIL: Expected ChildB exit\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "ChildA:enter(returning_A)") == log.end()) {
+        printf("FAIL: Expected ChildA enter\n");
+        assert(false);
+    }
+    printf("TC2.5.3: Return transition with params - PASS\n");
+
+    printf("PASS: HSM enter/exit with params works correctly\n");
+    return 0;
+}

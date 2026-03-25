@@ -8,6 +8,8 @@
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <vector>
+#include <algorithm>
 
 class TransitionEnterArgsFrameEvent {
 public:
@@ -48,7 +50,7 @@ private:
     std::vector<std::unique_ptr<TransitionEnterArgsCompartment>> _state_stack;
     std::vector<TransitionEnterArgsFrameContext> _context_stack;
 
-    int source_value;
+    log: std::vector<std::string> = {};
 
     void __kernel(TransitionEnterArgsFrameEvent& __e) {
         __router(__e);
@@ -89,13 +91,13 @@ private:
     void _state_Idle(TransitionEnterArgsFrameEvent& __e) {
         if (__e._message == "start") {
             {
-            // Transition with enter args: (source, value) -> $Active
+            log.push_back("idle:start");
             -> ("from_idle", 42) $Active
             }
             return;
-        } else if (__e._message == "get_source_value") {
+        } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = self->source_value;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -105,19 +107,17 @@ private:
     void _state_Active(TransitionEnterArgsFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            // Store value in domain for verification
-            self->source_value = value;
-            std::cout << "active:enter:source=" << source << ",value=" << value << std::endl;
+            log.push_back(std::string("active:enter:") + source + ":" + std::to_string(value));
             }
             return;
         } else if (__e._message == "start") {
             {
-            std::cout << "active:start" << std::endl;
+            log.push_back("active:start");
             }
             return;
-        } else if (__e._message == "get_source_value") {
+        } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = self->source_value;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -127,6 +127,7 @@ private:
 public:
     TransitionEnterArgs() {
         __compartment = std::make_unique<TransitionEnterArgsCompartment>("Idle");
+        log = {};
         TransitionEnterArgsFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -136,17 +137,15 @@ public:
         TransitionEnterArgsFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<void>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
-        return __result;
     }
 
-    int get_source_value() {
-        TransitionEnterArgsFrameEvent __e("get_source_value");
-        TransitionEnterArgsFrameContext __ctx(std::move(__e), std::any(int()));
+    std::vector<std::string> get_log() {
+        TransitionEnterArgsFrameEvent __e("get_log");
+        TransitionEnterArgsFrameContext __ctx(std::move(__e), std::any(std::vector<std::string>()));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<int>(std::move(_context_stack.back()._return));
+        auto __result = std::any_cast<std::vector<std::string>>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
         return __result;
     }
@@ -154,19 +153,27 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 17: Transition Enter Args ===" << std::endl;
+    printf("=== Test 17: Transition Enter Args ===\n");
     TransitionEnterArgs s;
 
-    // Initial state is Idle
-    int value = s.get_source_value();
-    assert(value == 0);
+    auto log = s.get_log();
+    if (log.size() != 0) {
+        printf("FAIL: Expected empty log\n");
+        assert(false);
+    }
 
-    // Transition to Active with args
     s.start();
-    value = s.get_source_value();
-    assert(value == 42);
-    std::cout << "After transition: source_value = " << value << std::endl;
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "idle:start") == log.end()) {
+        printf("FAIL: Expected 'idle:start' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "active:enter:from_idle:42") == log.end()) {
+        printf("FAIL: Expected 'active:enter:from_idle:42' in log\n");
+        assert(false);
+    }
+    printf("Log after transition: idle:start, active:enter:from_idle:42\n");
 
-    std::cout << "PASS: Transition enter args work correctly" << std::endl;
+    printf("PASS: Transition enter args work correctly\n");
     return 0;
 }

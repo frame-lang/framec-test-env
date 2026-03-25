@@ -6,6 +6,7 @@
 
 
 #include <iostream>
+#include <string>
 #include <cassert>
 
 class StateVarPushPopFrameEvent {
@@ -99,9 +100,7 @@ private:
             return;
         } else if (__e._message == "save_and_go") {
             {
-            _state_stack.push_back(std::make_unique<StateVarPushPopCompartment>(__compartment->state));
-            _state_stack.back()->state_vars = __compartment->state_vars;
-            _state_stack.back()->state_args = __compartment->state_args;
+            `push$
             auto __comp = std::make_unique<StateVarPushPopCompartment>("Other");
             __transition(std::move(__comp));
             return;
@@ -113,10 +112,7 @@ private:
     void _state_Other(StateVarPushPopFrameEvent& __e) {
         if (__e._message == "restore") {
             {
-            auto __popped = std::move(_state_stack.back());
-            _state_stack.pop_back();
-            __transition(std::move(__popped));
-            return;
+            `-> pop$
             }
             return;
         } else if (__e._message == "increment") {
@@ -168,9 +164,7 @@ public:
         StateVarPushPopFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<void>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
-        return __result;
     }
 
     void restore() {
@@ -178,54 +172,61 @@ public:
         StateVarPushPopFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<void>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
-        return __result;
     }
 
 };
 
 int main() {
-    std::cout << "=== Test 12: State Variable Push/Pop ===" << std::endl;
+    printf("=== Test 12: State Variable Push/Pop ===\n");
     StateVarPushPop s;
 
-    // Increment counter to 3
     s.increment();
     s.increment();
     s.increment();
     int count = s.get_count();
-    assert(count == 3);
-    std::cout << "Counter before push: " << count << std::endl;
+    if (count != 3) {
+        printf("FAIL: Expected 3, got %d\n", count);
+        assert(false);
+    }
+    printf("Counter before push: %d\n", count);
 
-    // Push and go to Other state
     s.save_and_go();
-    std::cout << "Pushed and transitioned to Other" << std::endl;
+    printf("Pushed and transitioned to Other\n");
 
-    // In Other state, count should be 100 (Other's state var)
     count = s.get_count();
-    assert(count == 100);
-    std::cout << "Other state count: " << count << std::endl;
+    if (count != 100) {
+        printf("FAIL: Expected 100 in Other state, got %d\n", count);
+        assert(false);
+    }
+    printf("Other state count: %d\n", count);
 
-    // Increment in Other
     s.increment();
     count = s.get_count();
-    assert(count == 101);
-    std::cout << "Other state after increment: " << count << std::endl;
+    if (count != 101) {
+        printf("FAIL: Expected 101 after increment, got %d\n", count);
+        assert(false);
+    }
+    printf("Other state after increment: %d\n", count);
 
-    // Pop back - should restore Counter with count=3
     s.restore();
-    std::cout << "Popped back to Counter" << std::endl;
+    printf("Popped back to Counter\n");
 
     count = s.get_count();
-    assert(count == 3);
-    std::cout << "Counter after pop: " << count << std::endl;
+    if (count != 3) {
+        printf("FAIL: Expected 3 after pop (preserved), got %d\n", count);
+        assert(false);
+    }
+    printf("Counter after pop: %d\n", count);
 
-    // Increment to verify it works
     s.increment();
     count = s.get_count();
-    assert(count == 4);
-    std::cout << "Counter after increment: " << count << std::endl;
+    if (count != 4) {
+        printf("FAIL: Expected 4, got %d\n", count);
+        assert(false);
+    }
+    printf("Counter after increment: %d\n", count);
 
-    std::cout << "PASS: State variables preserved across push/pop" << std::endl;
+    printf("PASS: State variables preserved across push/pop\n");
     return 0;
 }

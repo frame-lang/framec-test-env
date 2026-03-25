@@ -87,7 +87,7 @@ private:
     void _state_Main(StackOpsFrameEvent& __e) {
         if (__e._message == "push_and_go") {
             {
-            std::cout << "Pushing Main to stack, going to Sub" << std::endl;
+            printf("Pushing Main to stack, going to Sub\n");
             _state_stack.push_back(std::make_unique<StackOpsCompartment>(__compartment->state));
             _state_stack.back()->state_vars = __compartment->state_vars;
             _state_stack.back()->state_args = __compartment->state_args;
@@ -98,7 +98,7 @@ private:
             return;
         } else if (__e._message == "pop_back") {
             {
-            std::cout << "Cannot pop - nothing on stack in Main" << std::endl;
+            printf("Cannot pop - nothing on stack in Main\n");
             }
             return;
         } else if (__e._message == "do_work") {
@@ -119,12 +119,12 @@ private:
     void _state_Sub(StackOpsFrameEvent& __e) {
         if (__e._message == "push_and_go") {
             {
-            std::cout << "Already in Sub" << std::endl;
+            printf("Already in Sub\n");
             }
             return;
         } else if (__e._message == "pop_back") {
             {
-            std::cout << "Popping back to previous state" << std::endl;
+            printf("Popping back to previous state\n");
             auto __popped = std::move(_state_stack.back());
             _state_stack.pop_back();
             __transition(std::move(__popped));
@@ -192,36 +192,46 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 09: Stack Push/Pop ===" << std::endl;
+    printf("=== Test 09: Stack Push/Pop ===\n");
     StackOps s;
 
-    // Initial state should be Main
     std::string state = s.get_state();
-    assert(state == "Main");
-    std::cout << "Initial state: " << state << std::endl;
+    if (state != "Main") {
+        printf("FAIL: Expected 'Main', got '%s'\n", state.c_str());
+        assert(false);
+    }
+    printf("Initial state: %s\n", state.c_str());
 
-    // Do work in Main
     std::string work = s.do_work();
-    assert(work == "Working in Main");
-    std::cout << "do_work(): " << work << std::endl;
+    if (work != "Working in Main") {
+        printf("FAIL: Expected 'Working in Main', got '%s'\n", work.c_str());
+        assert(false);
+    }
+    printf("do_work(): %s\n", work.c_str());
 
-    // Push and go to Sub
     s.push_and_go();
     state = s.get_state();
-    assert(state == "Sub");
-    std::cout << "After push_and_go(): " << state << std::endl;
+    if (state != "Sub") {
+        printf("FAIL: Expected 'Sub', got '%s'\n", state.c_str());
+        assert(false);
+    }
+    printf("After push_and_go(): %s\n", state.c_str());
 
-    // Do work in Sub
     work = s.do_work();
-    assert(work == "Working in Sub");
-    std::cout << "do_work(): " << work << std::endl;
+    if (work != "Working in Sub") {
+        printf("FAIL: Expected 'Working in Sub', got '%s'\n", work.c_str());
+        assert(false);
+    }
+    printf("do_work(): %s\n", work.c_str());
 
-    // Pop back to Main
     s.pop_back();
     state = s.get_state();
-    assert(state == "Main");
-    std::cout << "After pop_back(): " << state << std::endl;
+    if (state != "Main") {
+        printf("FAIL: Expected 'Main' after pop, got '%s'\n", state.c_str());
+        assert(false);
+    }
+    printf("After pop_back(): %s\n", state.c_str());
 
-    std::cout << "PASS: 09 stack" << std::endl;
+    printf("PASS: Stack push/pop works correctly\n");
     return 0;
 }

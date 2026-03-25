@@ -6,7 +6,8 @@
 
 
 #include <iostream>
-#include <cstdio>
+#include <string>
+#include <cassert>
 
 class SFrameEvent {
 public:
@@ -88,12 +89,12 @@ private:
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             {
-            int x = 2;
-            if (x == 1) {
+            let v = 2
+            if (v == 1) {
             auto __comp = std::make_unique<SCompartment>("B()");
             __transition(std::move(__comp));
             return;
-            } else if (x == 2) {
+            } else if (v == 2) {
             _state_P(__e);
             return;
             } else {
@@ -119,17 +120,30 @@ public:
         __kernel(__frame_event);
     }
 
+    void e() {
+        SFrameEvent __e("e");
+        SFrameContext __ctx(std::move(__e));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
+    }
+
 };
 
 // Stub functions for placeholder calls
-void native() {}
+void native_func() {}
+void x_func() {}
 
 // TAP test harness
 int main() {
     printf("TAP version 14\n");
     printf("1..1\n");
-    S s;
-    s.e();
-    printf("ok 1 - elif_chain_forward_else_transition_exec\n");
+    try {
+        S s;
+        s.e();
+        printf("ok 1 - elif_chain_forward_else_transition_exec\n");
+    } catch (...) {
+        printf("not ok 1 - elif_chain_forward_else_transition_exec\n");
+    }
     return 0;
 }

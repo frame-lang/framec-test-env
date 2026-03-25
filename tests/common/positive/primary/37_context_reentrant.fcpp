@@ -1,0 +1,83 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+// Test: Context Stack Reentrancy
+// Validates that nested interface calls maintain separate contexts
+
+@@system ContextReentrantTest {
+    interface:
+        outer(x: int): std::string
+        inner(y: int): std::string
+        deeply_nested(z: int): std::string
+        get_both(a: int, b: int): std::string
+
+    machine:
+        $Ready {
+            outer(x: int): std::string {
+                @@:return = std::string("outer_initial");
+                std::string inner_result = this->inner(@@.x * 10);
+                @@:return = std::string("outer:") + std::to_string(@@.x) + ",inner:" + inner_result;
+            }
+
+            inner(y: int): std::string {
+                @@:return = std::to_string(@@.y);
+            }
+
+            deeply_nested(z: int): std::string {
+                std::string outer_result = this->outer(@@.z);
+                @@:return = std::string("deep:") + std::to_string(@@.z) + "," + outer_result;
+            }
+
+            get_both(a: int, b: int): std::string {
+                std::string result_a = this->inner(@@.a);
+                std::string result_b = this->inner(@@.b);
+                @@:return = std::string("a=") + std::to_string(@@.a) + ",b=" + std::to_string(@@.b) + ",results=" + result_a + "+" + result_b;
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 37: Context Reentrant ===\n");
+    ContextReentrantTest s;
+
+    // Test 1: Simple nesting
+    std::string result = s.outer(5);
+    std::string expected = "outer:5,inner:50";
+    if (result != expected) {
+        printf("FAIL: Expected '%s', got '%s'\n", expected.c_str(), result.c_str());
+        assert(false);
+    }
+    printf("1. outer(5) = '%s'\n", result.c_str());
+
+    // Test 2: Inner alone
+    result = s.inner(42);
+    if (result != "42") {
+        printf("FAIL: Expected '42', got '%s'\n", result.c_str());
+        assert(false);
+    }
+    printf("2. inner(42) = '%s'\n", result.c_str());
+
+    // Test 3: Deep nesting
+    result = s.deeply_nested(3);
+    expected = "deep:3,outer:3,inner:30";
+    if (result != expected) {
+        printf("FAIL: Expected '%s', got '%s'\n", expected.c_str(), result.c_str());
+        assert(false);
+    }
+    printf("3. deeply_nested(3) = '%s'\n", result.c_str());
+
+    // Test 4: Multiple inner calls
+    result = s.get_both(10, 20);
+    expected = "a=10,b=20,results=10+20";
+    if (result != expected) {
+        printf("FAIL: Expected '%s', got '%s'\n", expected.c_str(), result.c_str());
+        assert(false);
+    }
+    printf("4. get_both(10, 20) = '%s'\n", result.c_str());
+
+    printf("PASS: Context reentrant works correctly\n");
+    return 0;
+}

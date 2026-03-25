@@ -8,6 +8,8 @@
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <vector>
+#include <algorithm>
 
 class EnterExitFrameEvent {
 public:
@@ -48,10 +50,7 @@ private:
     std::vector<std::unique_ptr<EnterExitCompartment>> _state_stack;
     std::vector<EnterExitFrameContext> _context_stack;
 
-    int enter_off_count = 0;;
-    int exit_off_count = 0;;
-    int enter_on_count = 0;;
-    int exit_on_count = 0;;
+    log: std::vector<std::string> = {};
 
     void __kernel(EnterExitFrameEvent& __e) {
         __router(__e);
@@ -92,14 +91,14 @@ private:
     void _state_Off(EnterExitFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            enter_off_count += 1;
-            std::cout << "Entered Off state" << std::endl;
+            log.push_back("enter:Off");
+            printf("Entered Off state\n");
             }
             return;
         } else if (__e._message == "<$") {
             {
-            exit_off_count += 1;
-            std::cout << "Exiting Off state" << std::endl;
+            log.push_back("exit:Off");
+            printf("Exiting Off state\n");
             }
             return;
         } else if (__e._message == "toggle") {
@@ -109,11 +108,9 @@ private:
             return;
             }
             return;
-        } else if (__e._message == "get_log_count") {
+        } else if (__e._message == "get_log") {
             {
-            // Return encoded counts: enter_off * 1000 + exit_off * 100 + enter_on * 10 + exit_on
-            int result = enter_off_count * 1000 + exit_off_count * 100 + enter_on_count * 10 + exit_on_count;
-            _context_stack.back()._return = result;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -123,14 +120,14 @@ private:
     void _state_On(EnterExitFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            enter_on_count += 1;
-            std::cout << "Entered On state" << std::endl;
+            log.push_back("enter:On");
+            printf("Entered On state\n");
             }
             return;
         } else if (__e._message == "<$") {
             {
-            exit_on_count += 1;
-            std::cout << "Exiting On state" << std::endl;
+            log.push_back("exit:On");
+            printf("Exiting On state\n");
             }
             return;
         } else if (__e._message == "toggle") {
@@ -140,10 +137,9 @@ private:
             return;
             }
             return;
-        } else if (__e._message == "get_log_count") {
+        } else if (__e._message == "get_log") {
             {
-            int result = enter_off_count * 1000 + exit_off_count * 100 + enter_on_count * 10 + exit_on_count;
-            _context_stack.back()._return = result;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -153,10 +149,7 @@ private:
 public:
     EnterExit() {
         __compartment = std::make_unique<EnterExitCompartment>("Off");
-        enter_off_count = 0;;
-        exit_off_count = 0;;
-        enter_on_count = 0;;
-        exit_on_count = 0;;
+        log = {};
         EnterExitFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -169,12 +162,12 @@ public:
         _context_stack.pop_back();
     }
 
-    int get_log_count() {
-        EnterExitFrameEvent __e("get_log_count");
-        EnterExitFrameContext __ctx(std::move(__e), std::any(int()));
+    std::vector<std::string> get_log() {
+        EnterExitFrameEvent __e("get_log");
+        EnterExitFrameContext __ctx(std::move(__e), std::any(std::vector<std::string>()));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<int>(std::move(_context_stack.back()._return));
+        auto __result = std::any_cast<std::vector<std::string>>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
         return __result;
     }
@@ -182,29 +175,41 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 05: Enter/Exit Handlers ===" << std::endl;
+    printf("=== Test 05: Enter/Exit Handlers ===\n");
     EnterExit s;
 
-    // Initial enter should have been called (enter_off_count = 1)
-    int log = s.get_log_count();
-    // Expected: 1*1000 + 0*100 + 0*10 + 0 = 1000
-    assert(log == 1000);
-    std::cout << "After construction: log_count = " << log << " (enter_off=1)" << std::endl;
+    auto log = s.get_log();
+    if (std::find(log.begin(), log.end(), "enter:Off") == log.end()) {
+        printf("FAIL: Expected 'enter:Off' in log\n");
+        assert(false);
+    }
+    printf("After construction: enter:Off found\n");
 
-    // Toggle to On - should exit Off, enter On
     s.toggle();
-    log = s.get_log_count();
-    // Expected: 1*1000 + 1*100 + 1*10 + 0 = 1110
-    assert(log == 1110);
-    std::cout << "After toggle to On: log_count = " << log << " (enter_off=1, exit_off=1, enter_on=1)" << std::endl;
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "exit:Off") == log.end()) {
+        printf("FAIL: Expected 'exit:Off' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "enter:On") == log.end()) {
+        printf("FAIL: Expected 'enter:On' in log\n");
+        assert(false);
+    }
+    printf("After toggle to On: exit:Off and enter:On found\n");
 
-    // Toggle back to Off - should exit On, enter Off
     s.toggle();
-    log = s.get_log_count();
-    // Expected: 2*1000 + 1*100 + 1*10 + 1 = 2111
-    assert(log == 2111);
-    std::cout << "After toggle to Off: log_count = " << log << " (enter_off=2, exit_off=1, enter_on=1, exit_on=1)" << std::endl;
+    log = s.get_log();
+    int enterOffCount = std::count(log.begin(), log.end(), "enter:Off");
+    if (enterOffCount != 2) {
+        printf("FAIL: Expected 2 'enter:Off' entries, got %d\n", enterOffCount);
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "exit:On") == log.end()) {
+        printf("FAIL: Expected 'exit:On' in log\n");
+        assert(false);
+    }
+    printf("After toggle to Off: correct enter/exit sequence\n");
 
-    std::cout << "PASS: 05 enter exit" << std::endl;
+    printf("PASS: Enter/Exit handlers work correctly\n");
     return 0;
 }

@@ -6,6 +6,7 @@
 
 
 #include <iostream>
+#include <string>
 #include <cassert>
 
 class StateParamsFrameEvent {
@@ -102,10 +103,17 @@ private:
     }
 
     void _state_Counter(StateParamsFrameEvent& __e) {
-        if (__e._message == "get_value") {
+        if (__e._message == "$>") {
             {
-            int v = (int)(intptr_t)StateParams_FrameDict_get(self->__compartment->state_args, "0");
-            _context_stack.back()._return = v;
+            // Access state param via compartment - using string key "0"
+            __compartment->state_vars["count"] = std::any(this->__compartment->state_args["0"]);
+            int count_val = std::any_cast<int>(__compartment->state_vars["count"]);
+            printf("Counter entered with initial=%d\n", count_val);
+            }
+            return;
+        } else if (__e._message == "get_value") {
+            {
+            _context_stack.back()._return = std::any_cast<int>(__compartment->state_vars["count"]);
             return;
             }
             return;
@@ -126,9 +134,7 @@ public:
         StateParamsFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<void>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
-        return __result;
     }
 
     int get_value() {
@@ -144,18 +150,24 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 26: State Parameters ===" << std::endl;
+    printf("=== Test 26: State Parameters ===\n");
     StateParams s;
 
     int val = s.get_value();
-    std::cout << "Initial value: " << val << std::endl;
-    assert(val == 0);
+    if (val != 0) {
+        printf("FAIL: Expected 0 in Idle, got %d\n", val);
+        assert(false);
+    }
+    printf("Initial value: %d\n", val);
 
     s.start(42);
     val = s.get_value();
-    std::cout << "Value after transition: " << val << std::endl;
-    assert(val == 42);
+    if (val != 42) {
+        printf("FAIL: Expected 42 in Counter from state param, got %d\n", val);
+        assert(false);
+    }
+    printf("Value after transition: %d\n", val);
 
-    std::cout << "PASS: State parameters work correctly" << std::endl;
+    printf("PASS: State parameters work correctly\n");
     return 0;
 }

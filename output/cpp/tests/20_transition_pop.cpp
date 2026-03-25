@@ -6,7 +6,10 @@
 
 
 #include <iostream>
+#include <string>
 #include <cassert>
+#include <vector>
+#include <algorithm>
 
 class TransitionPopTestFrameEvent {
 public:
@@ -47,7 +50,7 @@ private:
     std::vector<std::unique_ptr<TransitionPopTestCompartment>> _state_stack;
     std::vector<TransitionPopTestFrameContext> _context_stack;
 
-    int log_code;
+    log: std::vector<std::string> = {};
 
     void __kernel(TransitionPopTestFrameEvent& __e) {
         __router(__e);
@@ -88,10 +91,8 @@ private:
     void _state_Idle(TransitionPopTestFrameEvent& __e) {
         if (__e._message == "start") {
             {
-            self->log_code = self->log_code + 1;  // "idle:start:push"
-            _state_stack.push_back(std::make_unique<TransitionPopTestCompartment>(__compartment->state));
-            _state_stack.back()->state_vars = __compartment->state_vars;
-            _state_stack.back()->state_args = __compartment->state_args;
+            log.push_back("idle:start:push");
+            `push$
             auto __comp = std::make_unique<TransitionPopTestCompartment>("Working");
             __transition(std::move(__comp));
             return;
@@ -99,18 +100,18 @@ private:
             return;
         } else if (__e._message == "process") {
             {
-            self->log_code = self->log_code + 10;  // "idle:process"
+            log.push_back("idle:process");
             }
             return;
         } else if (__e._message == "get_state") {
             {
-            _context_stack.back()._return = 1;
+            _context_stack.back()._return = std::string("Idle");
             return;
             }
             return;
-        } else if (__e._message == "get_log_code") {
+        } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = self->log_code;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -120,24 +121,24 @@ private:
     void _state_Working(TransitionPopTestFrameEvent& __e) {
         if (__e._message == "process") {
             {
-            self->log_code = self->log_code + 100;  // "working:process:before_pop"
+            log.push_back("working:process:before_pop");
             auto __popped = std::move(_state_stack.back());
             _state_stack.pop_back();
             __transition(std::move(__popped));
             return;
             // This should NOT execute because pop transitions away
-            self->log_code = self->log_code + 1000;  // "working:process:after_pop"
+            log.push_back("working:process:after_pop");
             }
             return;
         } else if (__e._message == "get_state") {
             {
-            _context_stack.back()._return = 2;
+            _context_stack.back()._return = std::string("Working");
             return;
             }
             return;
-        } else if (__e._message == "get_log_code") {
+        } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = self->log_code;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -147,6 +148,7 @@ private:
 public:
     TransitionPopTest() {
         __compartment = std::make_unique<TransitionPopTestCompartment>("Idle");
+        log = {};
         TransitionPopTestFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -156,9 +158,7 @@ public:
         TransitionPopTestFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<void>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
-        return __result;
     }
 
     void process() {
@@ -166,27 +166,25 @@ public:
         TransitionPopTestFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<void>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
-        return __result;
     }
 
-    int get_state() {
+    std::string get_state() {
         TransitionPopTestFrameEvent __e("get_state");
-        TransitionPopTestFrameContext __ctx(std::move(__e), std::any(int()));
+        TransitionPopTestFrameContext __ctx(std::move(__e), std::any(std::string()));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<int>(std::move(_context_stack.back()._return));
+        auto __result = std::any_cast<std::string>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
         return __result;
     }
 
-    int get_log_code() {
-        TransitionPopTestFrameEvent __e("get_log_code");
-        TransitionPopTestFrameContext __ctx(std::move(__e), std::any(int()));
+    std::vector<std::string> get_log() {
+        TransitionPopTestFrameEvent __e("get_log");
+        TransitionPopTestFrameContext __ctx(std::move(__e), std::any(std::vector<std::string>()));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<int>(std::move(_context_stack.back()._return));
+        auto __result = std::any_cast<std::vector<std::string>>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
         return __result;
     }
@@ -194,33 +192,43 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 20: Transition Pop ===" << std::endl;
+    printf("=== Test 20: Transition Pop (C++) ===\n");
     TransitionPopTest s;
 
-    // Initial state should be Idle (1)
-    int state = s.get_state();
-    assert(state == 1);
-    std::cout << "Initial state: " << state << " (Idle)" << std::endl;
+    if (s.get_state() != "Idle") {
+        printf("FAIL: Expected 'Idle', got '%s'\n", s.get_state().c_str());
+        assert(false);
+    }
+    printf("Initial state: %s\n", s.get_state().c_str());
 
-    // start() pushes Idle, transitions to Working
     s.start();
-    state = s.get_state();
-    assert(state == 2);
-    std::cout << "After start(): " << state << " (Working)" << std::endl;
+    if (s.get_state() != "Working") {
+        printf("FAIL: Expected 'Working', got '%s'\n", s.get_state().c_str());
+        assert(false);
+    }
+    printf("After start(): %s\n", s.get_state().c_str());
 
-    // process() in Working does pop transition back to Idle
     s.process();
-    state = s.get_state();
-    assert(state == 1);
-    std::cout << "After process() with pop: " << state << " (Idle)" << std::endl;
+    if (s.get_state() != "Idle") {
+        printf("FAIL: Expected 'Idle' after pop, got '%s'\n", s.get_state().c_str());
+        assert(false);
+    }
+    printf("After process() with pop: %s\n", s.get_state().c_str());
 
-    int log_code = s.get_log_code();
-    std::cout << "Log code: " << log_code << std::endl;
+    auto log = s.get_log();
+    if (std::find(log.begin(), log.end(), "idle:start:push") == log.end()) {
+        printf("FAIL: Expected 'idle:start:push' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "working:process:before_pop") == log.end()) {
+        printf("FAIL: Expected 'working:process:before_pop' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "working:process:after_pop") != log.end()) {
+        printf("FAIL: Should NOT have 'working:process:after_pop' in log\n");
+        assert(false);
+    }
 
-    // Verify log contents: 1 (idle:start) + 100 (working:process:before_pop) = 101
-    // Should NOT have +1000 (working:process:after_pop)
-    assert(log_code == 101);
-
-    std::cout << "PASS: Transition pop works correctly" << std::endl;
+    printf("PASS: Transition pop works correctly\n");
     return 0;
 }

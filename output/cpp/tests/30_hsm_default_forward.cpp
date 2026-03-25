@@ -6,7 +6,10 @@
 
 
 #include <iostream>
+#include <string>
 #include <cassert>
+#include <vector>
+#include <algorithm>
 
 class HSMDefaultForwardFrameEvent {
 public:
@@ -47,7 +50,7 @@ private:
     std::vector<std::unique_ptr<HSMDefaultForwardCompartment>> _state_stack;
     std::vector<HSMDefaultForwardFrameContext> _context_stack;
 
-    int log_code;
+    log: std::vector<std::string> = {};
 
     void __kernel(HSMDefaultForwardFrameEvent& __e) {
         __router(__e);
@@ -88,12 +91,12 @@ private:
     void _state_Child(HSMDefaultForwardFrameEvent& __e) {
         if (__e._message == "handled_event") {
             {
-            self->log_code = self->log_code + 1;  // "Child:handled_event"
+            log.push_back("Child:handled_event");
             }
             return;
-        } else if (__e._message == "get_log_code") {
+        } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = self->log_code;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -105,17 +108,17 @@ private:
     void _state_Parent(HSMDefaultForwardFrameEvent& __e) {
         if (__e._message == "handled_event") {
             {
-            self->log_code = self->log_code + 10;  // "Parent:handled_event"
+            log.push_back("Parent:handled_event");
             }
             return;
         } else if (__e._message == "unhandled_event") {
             {
-            self->log_code = self->log_code + 100;  // "Parent:unhandled_event"
+            log.push_back("Parent:unhandled_event");
             }
             return;
-        } else if (__e._message == "get_log_code") {
+        } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = self->log_code;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -125,6 +128,7 @@ private:
 public:
     HSMDefaultForward() {
         __compartment = std::make_unique<HSMDefaultForwardCompartment>("Child");
+        log = {};
         HSMDefaultForwardFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -134,9 +138,7 @@ public:
         HSMDefaultForwardFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<void>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
-        return __result;
     }
 
     void unhandled_event() {
@@ -144,17 +146,15 @@ public:
         HSMDefaultForwardFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<void>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
-        return __result;
     }
 
-    int get_log_code() {
-        HSMDefaultForwardFrameEvent __e("get_log_code");
-        HSMDefaultForwardFrameContext __ctx(std::move(__e), std::any(int()));
+    std::vector<std::string> get_log() {
+        HSMDefaultForwardFrameEvent __e("get_log");
+        HSMDefaultForwardFrameContext __ctx(std::move(__e), std::any(std::vector<std::string>()));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<int>(std::move(_context_stack.back()._return));
+        auto __result = std::any_cast<std::vector<std::string>>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
         return __result;
     }
@@ -162,22 +162,25 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 30: HSM State-Level Default Forward ===" << std::endl;
+    printf("=== Test 30: HSM State-Level Default Forward ===\n");
     HSMDefaultForward s;
 
     s.handled_event();
-    int log_code = s.get_log_code();
-    // Child handles it: +1
-    assert(log_code == 1);
-    std::cout << "After handled_event: log_code = " << log_code << std::endl;
+    auto log = s.get_log();
+    if (std::find(log.begin(), log.end(), "Child:handled_event") == log.end()) {
+        printf("FAIL: Expected 'Child:handled_event' in log\n");
+        assert(false);
+    }
+    printf("After handled_event: Child:handled_event found\n");
 
     s.unhandled_event();
-    log_code = s.get_log_code();
-    // Child doesn't handle it, forwards to Parent: +100
-    // Total: 1 + 100 = 101
-    assert(log_code == 101);
-    std::cout << "After unhandled_event (forwarded): log_code = " << log_code << std::endl;
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "Parent:unhandled_event") == log.end()) {
+        printf("FAIL: Expected 'Parent:unhandled_event' in log (forwarded)\n");
+        assert(false);
+    }
+    printf("After unhandled_event (forwarded): Parent:unhandled_event found\n");
 
-    std::cout << "PASS: HSM state-level default forward works correctly" << std::endl;
+    printf("PASS: HSM state-level default forward works correctly\n");
     return 0;
 }

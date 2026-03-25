@@ -48,7 +48,7 @@ private:
     std::vector<std::unique_ptr<WithInterfaceCompartment>> _state_stack;
     std::vector<WithInterfaceFrameContext> _context_stack;
 
-    int call_count = 0;;
+    call_count: int = 0;
 
     void __kernel(WithInterfaceFrameEvent& __e) {
         __router(__e);
@@ -89,7 +89,7 @@ private:
             auto name = std::any_cast<std::string>(__e._parameters.at("name"));
             {
             call_count += 1;
-            _context_stack.back()._return = std::string("Hello, ") + name + std::string("!");
+            _context_stack.back()._return = std::string("Hello, ") + name + "!";
             return;
             }
             return;
@@ -105,7 +105,7 @@ private:
 public:
     WithInterface() {
         __compartment = std::make_unique<WithInterfaceCompartment>("Ready");
-        call_count = 0;;
+        call_count = 0;
         WithInterfaceFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -135,25 +135,31 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 02: Interface Methods ===" << std::endl;
+    printf("=== Test 02: Interface Methods ===\n");
     WithInterface s;
 
-    // Test interface method with parameter and return
     std::string result = s.greet("World");
-    assert(result == "Hello, World!");
-    std::cout << "greet('World') = " << result << std::endl;
+    if (result != "Hello, World!") {
+        printf("FAIL: Expected 'Hello, World!', got '%s'\n", result.c_str());
+        assert(false);
+    }
+    printf("greet('World') = %s\n", result.c_str());
 
-    // Test domain variable access through interface
     int count = s.get_count();
-    assert(count == 1);
-    std::cout << "get_count() = " << count << std::endl;
+    if (count != 1) {
+        printf("FAIL: Expected count=1, got %d\n", count);
+        assert(false);
+    }
+    printf("get_count() = %d\n", count);
 
-    // Call again to verify state
     s.greet("Frame");
     int count2 = s.get_count();
-    assert(count2 == 2);
-    std::cout << "After second call: get_count() = " << count2 << std::endl;
+    if (count2 != 2) {
+        printf("FAIL: Expected count=2, got %d\n", count2);
+        assert(false);
+    }
+    printf("After second call: get_count() = %d\n", count2);
 
-    std::cout << "PASS: 02 interface" << std::endl;
+    printf("PASS: Interface methods work correctly\n");
     return 0;
 }

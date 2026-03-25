@@ -3,58 +3,69 @@
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <vector>
+#include <algorithm>
 
 @@system TransitionExitArgs {
     interface:
-        leave(): void
-        get_exit_code(): int
+        leave()
+        get_log(): std::vector<std::string>
 
     machine:
         $Active {
             <$(reason: std::string, code: int) {
-                std::cout << "exit:reason=" << reason << ",code=" << code << std::endl;
-                self->exit_code = code;
+                log.push_back(std::string("exit:") + reason + ":" + std::to_string(code));
             }
 
             leave() {
-                std::cout << "leaving" << std::endl;
+                log.push_back("leaving");
                 ("cleanup", 42) -> $Done
             }
 
-            get_exit_code(): int {
-                return self->exit_code;
+            get_log(): std::vector<std::string> {
+                return log;
             }
         }
 
         $Done {
             $>() {
-                std::cout << "enter:done" << std::endl;
-                self->enter_done = 1;
+                log.push_back("enter:done");
             }
 
-            get_exit_code(): int {
-                return self->exit_code;
+            get_log(): std::vector<std::string> {
+                return log;
             }
         }
     domain:
-        int exit_code
-        int enter_done
+        log: std::vector<std::string> = {}
 }
 
 int main() {
-    std::cout << "=== Test 18: Transition Exit Args ===" << std::endl;
+    printf("=== Test 18: Transition Exit Args ===\n");
     TransitionExitArgs s;
 
-    // Initial state is Active
-    int code = s.get_exit_code();
-    assert(code == 0);
+    auto log = s.get_log();
+    if (log.size() != 0) {
+        printf("FAIL: Expected empty log\n");
+        assert(false);
+    }
 
-    // Leave - should call exit handler with args
     s.leave();
-    code = s.get_exit_code();
-    assert(code == 42);
-    std::cout << "After transition: exit_code = " << code << std::endl;
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "leaving") == log.end()) {
+        printf("FAIL: Expected 'leaving' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "exit:cleanup:42") == log.end()) {
+        printf("FAIL: Expected 'exit:cleanup:42' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "enter:done") == log.end()) {
+        printf("FAIL: Expected 'enter:done' in log\n");
+        assert(false);
+    }
+    printf("Log after transition: leaving, exit:cleanup:42, enter:done\n");
 
-    std::cout << "PASS: Transition exit args work correctly" << std::endl;
+    printf("PASS: Transition exit args work correctly\n");
     return 0;
 }

@@ -6,6 +6,7 @@
 
 
 #include <iostream>
+#include <string>
 #include <cassert>
 
 // Tests that @@:return follows "last writer wins" across transition lifecycle
@@ -90,8 +91,7 @@ private:
     void _state_Start(SystemReturnChainTestFrameEvent& __e) {
         if (__e._message == "<$") {
             {
-            // Exit handler sets initial value (10)
-            _context_stack.back()._return = 10;
+            _context_stack.back()._return = std::string("from_exit");
             }
             return;
         } else if (__e._message == "test_enter_sets") {
@@ -110,7 +110,7 @@ private:
             return;
         } else if (__e._message == "get_state") {
             {
-            _context_stack.back()._return = 1;
+            _context_stack.back()._return = std::string("Start");
             return;
             }
             return;
@@ -120,13 +120,12 @@ private:
     void _state_EnterSetter(SystemReturnChainTestFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            // Enter handler sets return value (20)
-            _context_stack.back()._return = 20;
+            _context_stack.back()._return = std::string("from_enter");
             }
             return;
         } else if (__e._message == "get_state") {
             {
-            _context_stack.back()._return = 2;
+            _context_stack.back()._return = std::string("EnterSetter");
             return;
             }
             return;
@@ -136,13 +135,12 @@ private:
     void _state_BothSet(SystemReturnChainTestFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            // Enter handler sets return - should overwrite exit's value (30)
-            _context_stack.back()._return = 30;
+            _context_stack.back()._return = std::string("enter_wins");
             }
             return;
         } else if (__e._message == "get_state") {
             {
-            _context_stack.back()._return = 3;
+            _context_stack.back()._return = std::string("BothSet");
             return;
             }
             return;
@@ -156,32 +154,32 @@ public:
         __kernel(__frame_event);
     }
 
-    int test_enter_sets() {
+    std::string test_enter_sets() {
         SystemReturnChainTestFrameEvent __e("test_enter_sets");
-        SystemReturnChainTestFrameContext __ctx(std::move(__e), std::any(int()));
+        SystemReturnChainTestFrameContext __ctx(std::move(__e), std::any(std::string()));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<int>(std::move(_context_stack.back()._return));
+        auto __result = std::any_cast<std::string>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
         return __result;
     }
 
-    int test_exit_then_enter() {
+    std::string test_exit_then_enter() {
         SystemReturnChainTestFrameEvent __e("test_exit_then_enter");
-        SystemReturnChainTestFrameContext __ctx(std::move(__e), std::any(int()));
+        SystemReturnChainTestFrameContext __ctx(std::move(__e), std::any(std::string()));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<int>(std::move(_context_stack.back()._return));
+        auto __result = std::any_cast<std::string>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
         return __result;
     }
 
-    int get_state() {
+    std::string get_state() {
         SystemReturnChainTestFrameEvent __e("get_state");
-        SystemReturnChainTestFrameContext __ctx(std::move(__e), std::any(int()));
+        SystemReturnChainTestFrameContext __ctx(std::move(__e), std::any(std::string()));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<int>(std::move(_context_stack.back()._return));
+        auto __result = std::any_cast<std::string>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
         return __result;
     }
@@ -189,26 +187,32 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 15: System Return Chain (Last Writer Wins) ===" << std::endl;
+    printf("=== Test 15: System Return Chain (Last Writer Wins) ===\n");
 
-    // Test 1: Start exit + EnterSetter enter
-    // Start's exit sets 10, EnterSetter's enter sets 20
-    // Enter should win (last writer)
     SystemReturnChainTest s1;
-    int result = s1.test_enter_sets();
-    assert(result == 20);
-    int state = s1.get_state();
-    assert(state == 2);
-    std::cout << "1. Exit set then enter set - enter wins: " << result << std::endl;
+    std::string result1 = s1.test_enter_sets();
+    if (result1 != "from_enter") {
+        printf("FAIL: Expected 'from_enter', got '%s'\n", result1.c_str());
+        assert(false);
+    }
+    if (s1.get_state() != "EnterSetter") {
+        printf("FAIL: Expected state 'EnterSetter'\n");
+        assert(false);
+    }
+    printf("1. Exit set then enter set - enter wins: '%s'\n", result1.c_str());
 
-    // Test 2: Both handlers set, enter wins
     SystemReturnChainTest s2;
-    result = s2.test_exit_then_enter();
-    assert(result == 30);
-    state = s2.get_state();
-    assert(state == 3);
-    std::cout << "2. Both set - enter wins: " << result << std::endl;
+    std::string result2 = s2.test_exit_then_enter();
+    if (result2 != "enter_wins") {
+        printf("FAIL: Expected 'enter_wins', got '%s'\n", result2.c_str());
+        assert(false);
+    }
+    if (s2.get_state() != "BothSet") {
+        printf("FAIL: Expected state 'BothSet'\n");
+        assert(false);
+    }
+    printf("2. Both set - enter wins: '%s'\n", result2.c_str());
 
-    std::cout << "PASS: System return chain (last writer wins) works correctly" << std::endl;
+    printf("PASS: System return chain (last writer wins) works correctly\n");
     return 0;
 }

@@ -3,62 +3,72 @@
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <vector>
+#include <algorithm>
 
 @@system HSMForward {
     interface:
         event_a()
         event_b()
-        get_count(): int
+        get_log(): std::vector<std::string>
 
     machine:
         $Child => $Parent {
             event_a() {
-                count += 1;
+                log.push_back("Child:event_a");
             }
 
             event_b() {
-                count += 10;
+                log.push_back("Child:event_b_forward");
                 => $^
             }
 
-            get_count(): int {
-                return count;
+            get_log(): std::vector<std::string> {
+                return log;
             }
         }
 
         $Parent {
             event_a() {
-                count += 100;
+                log.push_back("Parent:event_a");
             }
 
             event_b() {
-                count += 1000;
+                log.push_back("Parent:event_b");
             }
 
-            get_count(): int {
-                return count;
+            get_log(): std::vector<std::string> {
+                return log;
             }
         }
     domain:
-        int count = 0;
+        log: std::vector<std::string> = {}
 }
 
 int main() {
-    std::cout << "=== Test 08: HSM Forward ===" << std::endl;
+    printf("=== Test 08: HSM Forward ===\n");
     HSMForward s;
 
-    // event_a should be handled by Child (no forward)
     s.event_a();
-    int count = s.get_count();
-    assert(count == 1);
-    std::cout << "After event_a: count = " << count << " (expected 1)" << std::endl;
+    auto log = s.get_log();
+    if (std::find(log.begin(), log.end(), "Child:event_a") == log.end()) {
+        printf("FAIL: Expected 'Child:event_a' in log\n");
+        assert(false);
+    }
+    printf("After event_a: Child:event_a found\n");
 
-    // event_b should forward to Parent (+10 in Child, +1000 in Parent)
     s.event_b();
-    count = s.get_count();
-    assert(count == 1011);
-    std::cout << "After event_b (forwarded): count = " << count << " (expected 1011)" << std::endl;
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "Child:event_b_forward") == log.end()) {
+        printf("FAIL: Expected 'Child:event_b_forward' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "Parent:event_b") == log.end()) {
+        printf("FAIL: Expected 'Parent:event_b' in log (forwarded)\n");
+        assert(false);
+    }
+    printf("After event_b (forwarded): Child:event_b_forward and Parent:event_b found\n");
 
-    std::cout << "PASS: 08 hsm" << std::endl;
+    printf("PASS: HSM forward works correctly\n");
     return 0;
 }

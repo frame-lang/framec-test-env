@@ -8,6 +8,8 @@
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <vector>
+#include <algorithm>
 
 class TransitionExitArgsFrameEvent {
 public:
@@ -48,8 +50,7 @@ private:
     std::vector<std::unique_ptr<TransitionExitArgsCompartment>> _state_stack;
     std::vector<TransitionExitArgsFrameContext> _context_stack;
 
-    int exit_code;
-    int enter_done;
+    log: std::vector<std::string> = {};
 
     void __kernel(TransitionExitArgsFrameEvent& __e) {
         __router(__e);
@@ -90,19 +91,18 @@ private:
     void _state_Active(TransitionExitArgsFrameEvent& __e) {
         if (__e._message == "<$") {
             {
-            std::cout << "exit:reason=" << reason << ",code=" << code << std::endl;
-            self->exit_code = code;
+            log.push_back(std::string("exit:") + reason + ":" + std::to_string(code));
             }
             return;
         } else if (__e._message == "leave") {
             {
-            std::cout << "leaving" << std::endl;
+            log.push_back("leaving");
             ("cleanup", 42) -> $Done
             }
             return;
-        } else if (__e._message == "get_exit_code") {
+        } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = self->exit_code;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -112,13 +112,12 @@ private:
     void _state_Done(TransitionExitArgsFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            std::cout << "enter:done" << std::endl;
-            self->enter_done = 1;
+            log.push_back("enter:done");
             }
             return;
-        } else if (__e._message == "get_exit_code") {
+        } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = self->exit_code;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -128,6 +127,7 @@ private:
 public:
     TransitionExitArgs() {
         __compartment = std::make_unique<TransitionExitArgsCompartment>("Active");
+        log = {};
         TransitionExitArgsFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -137,17 +137,15 @@ public:
         TransitionExitArgsFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<void>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
-        return __result;
     }
 
-    int get_exit_code() {
-        TransitionExitArgsFrameEvent __e("get_exit_code");
-        TransitionExitArgsFrameContext __ctx(std::move(__e), std::any(int()));
+    std::vector<std::string> get_log() {
+        TransitionExitArgsFrameEvent __e("get_log");
+        TransitionExitArgsFrameContext __ctx(std::move(__e), std::any(std::vector<std::string>()));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<int>(std::move(_context_stack.back()._return));
+        auto __result = std::any_cast<std::vector<std::string>>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
         return __result;
     }
@@ -155,19 +153,31 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 18: Transition Exit Args ===" << std::endl;
+    printf("=== Test 18: Transition Exit Args ===\n");
     TransitionExitArgs s;
 
-    // Initial state is Active
-    int code = s.get_exit_code();
-    assert(code == 0);
+    auto log = s.get_log();
+    if (log.size() != 0) {
+        printf("FAIL: Expected empty log\n");
+        assert(false);
+    }
 
-    // Leave - should call exit handler with args
     s.leave();
-    code = s.get_exit_code();
-    assert(code == 42);
-    std::cout << "After transition: exit_code = " << code << std::endl;
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "leaving") == log.end()) {
+        printf("FAIL: Expected 'leaving' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "exit:cleanup:42") == log.end()) {
+        printf("FAIL: Expected 'exit:cleanup:42' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "enter:done") == log.end()) {
+        printf("FAIL: Expected 'enter:done' in log\n");
+        assert(false);
+    }
+    printf("Log after transition: leaving, exit:cleanup:42, enter:done\n");
 
-    std::cout << "PASS: Transition exit args work correctly" << std::endl;
+    printf("PASS: Transition exit args work correctly\n");
     return 0;
 }

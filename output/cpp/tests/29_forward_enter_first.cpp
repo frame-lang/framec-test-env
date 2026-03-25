@@ -6,7 +6,10 @@
 
 
 #include <iostream>
+#include <string>
 #include <cassert>
+#include <vector>
+#include <algorithm>
 
 class ForwardEnterFirstFrameEvent {
 public:
@@ -47,7 +50,7 @@ private:
     std::vector<std::unique_ptr<ForwardEnterFirstCompartment>> _state_stack;
     std::vector<ForwardEnterFirstFrameContext> _context_stack;
 
-    int log_code;
+    log: std::vector<std::string> = {};
 
     void __kernel(ForwardEnterFirstFrameEvent& __e) {
         __router(__e);
@@ -97,9 +100,9 @@ private:
             return;
             }
             return;
-        } else if (__e._message == "get_log_code") {
+        } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = self->log_code;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -109,12 +112,12 @@ private:
     void _state_Working(ForwardEnterFirstFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            self->log_code = self->log_code + 1;  // "Working:enter"
+            log.push_back("Working:enter");
             }
             return;
         } else if (__e._message == "process") {
             {
-            self->log_code = self->log_code + 10;  // "Working:process:counter=100"
+            log.push_back(std::string("Working:process:counter=") + std::to_string(std::any_cast<int>(__compartment->state_vars["counter"])));
             __compartment->state_vars["counter"] = std::any(std::any_cast<int>(__compartment->state_vars["counter"]) + 1);
             }
             return;
@@ -124,9 +127,9 @@ private:
             return;
             }
             return;
-        } else if (__e._message == "get_log_code") {
+        } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = self->log_code;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -136,6 +139,7 @@ private:
 public:
     ForwardEnterFirst() {
         __compartment = std::make_unique<ForwardEnterFirstCompartment>("Idle");
+        log = {};
         ForwardEnterFirstFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -145,9 +149,7 @@ public:
         ForwardEnterFirstFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<void>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
-        return __result;
     }
 
     int get_counter() {
@@ -160,12 +162,12 @@ public:
         return __result;
     }
 
-    int get_log_code() {
-        ForwardEnterFirstFrameEvent __e("get_log_code");
-        ForwardEnterFirstFrameContext __ctx(std::move(__e), std::any(int()));
+    std::vector<std::string> get_log() {
+        ForwardEnterFirstFrameEvent __e("get_log");
+        ForwardEnterFirstFrameContext __ctx(std::move(__e), std::any(std::vector<std::string>()));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<int>(std::move(_context_stack.back()._return));
+        auto __result = std::any_cast<std::vector<std::string>>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
         return __result;
     }
@@ -173,32 +175,42 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 29: Forward Enter First ===" << std::endl;
+    printf("=== Test 29: Forward Enter First ===\n");
     ForwardEnterFirst s;
 
-    // Initial state is Idle
-    int counter = s.get_counter();
-    assert(counter == -1);
+    if (s.get_counter() != -1) {
+        printf("FAIL: Expected -1 in Idle\n");
+        assert(false);
+    }
 
-    // Call process - should forward to Working
-    // Correct behavior: $> runs first (inits counter=100, logs +1)
-    // Then process runs (logs +10, increments to 101)
     s.process();
 
-    // Check counter was initialized and incremented
-    counter = s.get_counter();
-    int log_code = s.get_log_code();
-    std::cout << "Counter after forward: " << counter << std::endl;
-    std::cout << "Log code: " << log_code << std::endl;
+    int counter = s.get_counter();
+    auto log = s.get_log();
+    printf("Counter after forward: %d\n", counter);
 
-    // Verify $> ran first (log_code has +1)
-    // Verify process ran after $> (log_code has +10)
-    // Total should be 11
-    assert(log_code == 11);
+    if (std::find(log.begin(), log.end(), "Working:enter") == log.end()) {
+        printf("FAIL: Expected 'Working:enter' in log\n");
+        assert(false);
+    }
 
-    // Verify counter was incremented from 100 to 101
-    assert(counter == 101);
+    if (std::find(log.begin(), log.end(), "Working:process:counter=100") == log.end()) {
+        printf("FAIL: Expected 'Working:process:counter=100' in log\n");
+        assert(false);
+    }
 
-    std::cout << "PASS: Forward sends $> first for non-$> events" << std::endl;
+    if (counter != 101) {
+        printf("FAIL: Expected counter=101, got %d\n", counter);
+        assert(false);
+    }
+
+    auto enterIt = std::find(log.begin(), log.end(), "Working:enter");
+    auto processIt = std::find(log.begin(), log.end(), "Working:process:counter=100");
+    if (enterIt >= processIt) {
+        printf("FAIL: $> should run before process\n");
+        assert(false);
+    }
+
+    printf("PASS: Forward sends $> first for non-$> events\n");
     return 0;
 }

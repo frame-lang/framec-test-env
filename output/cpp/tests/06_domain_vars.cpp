@@ -48,8 +48,8 @@ private:
     std::vector<std::unique_ptr<DomainVarsCompartment>> _state_stack;
     std::vector<DomainVarsFrameContext> _context_stack;
 
-    int count = 0;;
-    std::string name = "counter";;
+    count: int = 0;
+    name: std::string = "counter";
 
     void __kernel(DomainVarsFrameEvent& __e) {
         __router(__e);
@@ -89,13 +89,13 @@ private:
         if (__e._message == "increment") {
             {
             count += 1;
-            std::cout << name << ": incremented to " << count << std::endl;
+            printf("%s: incremented to %d\n", name.c_str(), count);
             }
             return;
         } else if (__e._message == "decrement") {
             {
             count -= 1;
-            std::cout << name << ": decremented to " << count << std::endl;
+            printf("%s: decremented to %d\n", name.c_str(), count);
             }
             return;
         } else if (__e._message == "get_count") {
@@ -108,7 +108,7 @@ private:
             auto value = std::any_cast<int>(__e._parameters.at("value"));
             {
             count = value;
-            std::cout << name << ": set to " << count << std::endl;
+            printf("%s: set to %d\n", name.c_str(), count);
             }
             return;
         }
@@ -117,8 +117,8 @@ private:
 public:
     DomainVars() {
         __compartment = std::make_unique<DomainVarsCompartment>("Counting");
-        count = 0;;
-        name = "counter";;
+        count = 0;
+        name = "counter";
         DomainVarsFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -162,34 +162,45 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 06: Domain Variables ===" << std::endl;
+    printf("=== Test 06: Domain Variables ===\n");
     DomainVars s;
 
-    // Initial value should be 0
     int count = s.get_count();
-    assert(count == 0);
-    std::cout << "Initial count: " << count << std::endl;
-
-    // Increment
-    s.increment();
-    count = s.get_count();
-    assert(count == 1);
+    if (count != 0) {
+        printf("FAIL: Expected initial count=0, got %d\n", count);
+        assert(false);
+    }
+    printf("Initial count: %d\n", count);
 
     s.increment();
     count = s.get_count();
-    assert(count == 2);
+    if (count != 1) {
+        printf("FAIL: Expected count=1, got %d\n", count);
+        assert(false);
+    }
 
-    // Decrement
+    s.increment();
+    count = s.get_count();
+    if (count != 2) {
+        printf("FAIL: Expected count=2, got %d\n", count);
+        assert(false);
+    }
+
     s.decrement();
     count = s.get_count();
-    assert(count == 1);
+    if (count != 1) {
+        printf("FAIL: Expected count=1, got %d\n", count);
+        assert(false);
+    }
 
-    // Set directly
     s.set_count(100);
     count = s.get_count();
-    assert(count == 100);
+    if (count != 100) {
+        printf("FAIL: Expected count=100, got %d\n", count);
+        assert(false);
+    }
 
-    std::cout << "Final count: " << count << std::endl;
-    std::cout << "PASS: 06 domain vars" << std::endl;
+    printf("Final count: %d\n", count);
+    printf("PASS: Domain variables work correctly\n");
     return 0;
 }

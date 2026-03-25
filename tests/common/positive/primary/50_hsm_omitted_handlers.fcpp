@@ -1,0 +1,174 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <vector>
+#include <algorithm>
+
+@@system HSMOmittedHandlers {
+    interface:
+        handled_by_child()
+        forwarded_explicitly()
+        unhandled_no_forward()
+        get_log(): std::vector<std::string>
+        get_state(): std::string
+
+    machine:
+        $Child => $Parent {
+            handled_by_child() {
+                log.push_back("Child:handled_by_child");
+            }
+
+            forwarded_explicitly() {
+                log.push_back("Child:before_forward");
+                => $^
+            }
+
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+
+            get_state(): std::string {
+                return std::string("Child");
+            }
+        }
+
+        $Parent {
+            handled_by_child() {
+                log.push_back("Parent:handled_by_child");
+            }
+
+            forwarded_explicitly() {
+                log.push_back("Parent:forwarded_explicitly");
+            }
+
+            unhandled_no_forward() {
+                log.push_back("Parent:unhandled_no_forward");
+            }
+
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+
+            get_state(): std::string {
+                return std::string("Parent");
+            }
+        }
+    domain:
+        log: std::vector<std::string> = {}
+}
+
+@@system HSMDefaultForward {
+    interface:
+        child_handled()
+        parent_handled()
+        both_respond()
+        get_log(): std::vector<std::string>
+
+    machine:
+        $Child => $Parent {
+            child_handled() {
+                log.push_back("Child:child_handled");
+            }
+
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+
+            => $^
+        }
+
+        $Parent {
+            child_handled() {
+                log.push_back("Parent:child_handled");
+            }
+
+            parent_handled() {
+                log.push_back("Parent:parent_handled");
+            }
+
+            both_respond() {
+                log.push_back("Parent:both_respond");
+            }
+
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+        }
+    domain:
+        log: std::vector<std::string> = {}
+}
+
+int main() {
+    printf("=== Test 50: HSM Omitted Handlers ===\n");
+
+    // Part 1: Explicit forwarding vs no forwarding
+    HSMOmittedHandlers s1;
+
+    s1.handled_by_child();
+    auto log = s1.get_log();
+    if (std::find(log.begin(), log.end(), "Child:handled_by_child") == log.end()) {
+        printf("FAIL: Expected Child handler\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "Parent:handled_by_child") != log.end()) {
+        printf("FAIL: Parent should NOT be called\n");
+        assert(false);
+    }
+    printf("TC2.6.1: Handled by child, not forwarded - PASS\n");
+
+    s1.forwarded_explicitly();
+    log = s1.get_log();
+    if (std::find(log.begin(), log.end(), "Child:before_forward") == log.end()) {
+        printf("FAIL: Expected Child forward\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "Parent:forwarded_explicitly") == log.end()) {
+        printf("FAIL: Expected Parent handler\n");
+        assert(false);
+    }
+    printf("TC2.6.2: Explicitly forwarded to parent - PASS\n");
+
+    s1.unhandled_no_forward();
+    log = s1.get_log();
+    if (std::find(log.begin(), log.end(), "Parent:unhandled_no_forward") != log.end()) {
+        printf("FAIL: Unhandled should be ignored\n");
+        assert(false);
+    }
+    printf("TC2.6.3: Unhandled (no forward) is silently ignored - PASS\n");
+
+    // Part 2: State-level default forward
+    HSMDefaultForward s2;
+
+    s2.child_handled();
+    log = s2.get_log();
+    if (std::find(log.begin(), log.end(), "Child:child_handled") == log.end()) {
+        printf("FAIL: Expected Child handler\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "Parent:child_handled") != log.end()) {
+        printf("FAIL: Handled by child, not forwarded\n");
+        assert(false);
+    }
+    printf("TC2.6.4: Child handles, not forwarded - PASS\n");
+
+    s2.parent_handled();
+    log = s2.get_log();
+    if (std::find(log.begin(), log.end(), "Parent:parent_handled") == log.end()) {
+        printf("FAIL: Expected Parent handler\n");
+        assert(false);
+    }
+    printf("TC2.6.5: Unhandled forwarded via state-level => $^ - PASS\n");
+
+    s2.both_respond();
+    log = s2.get_log();
+    if (std::find(log.begin(), log.end(), "Parent:both_respond") == log.end()) {
+        printf("FAIL: Expected Parent handler\n");
+        assert(false);
+    }
+    printf("TC2.6.6: Default forward works for multiple events - PASS\n");
+
+    printf("PASS: HSM omitted handlers work correctly\n");
+    return 0;
+}

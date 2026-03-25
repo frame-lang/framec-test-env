@@ -51,7 +51,7 @@ private:
     std::vector<std::unique_ptr<MooreMachineCompartment>> _state_stack;
     std::vector<MooreMachineFrameContext> _context_stack;
 
-    int current_output = 0;;
+    current_output: number = 0;
 
     void __kernel(MooreMachineFrameEvent& __e) {
         __router(__e);
@@ -98,7 +98,7 @@ private:
     void _state_Q0(MooreMachineFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            set_output(0);
+            this.set_output(0);
             }
             return;
         } else if (__e._message == "i_0") {
@@ -121,7 +121,7 @@ private:
     void _state_Q1(MooreMachineFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            set_output(0);
+            this.set_output(0);
             }
             return;
         } else if (__e._message == "i_0") {
@@ -144,7 +144,7 @@ private:
     void _state_Q2(MooreMachineFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            set_output(0);
+            this.set_output(0);
             }
             return;
         } else if (__e._message == "i_0") {
@@ -167,7 +167,7 @@ private:
     void _state_Q3(MooreMachineFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            set_output(1);
+            this.set_output(1);
             }
             return;
         } else if (__e._message == "i_0") {
@@ -190,7 +190,7 @@ private:
     void _state_Q4(MooreMachineFrameEvent& __e) {
         if (__e._message == "$>") {
             {
-            set_output(1);
+            this.set_output(1);
             }
             return;
         } else if (__e._message == "i_0") {
@@ -213,7 +213,7 @@ private:
 public:
     MooreMachine() {
         __compartment = std::make_unique<MooreMachineCompartment>("Q0");
-        current_output = 0;;
+        current_output = 0;
         MooreMachineFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -240,7 +240,7 @@ public:
         }
     }
 
-    int get_output() {
+    number get_output() {
         {
         return current_output;
         }
@@ -249,51 +249,50 @@ public:
 };
 
 int main() {
-    std::cout << "TAP version 14" << std::endl;
-    std::cout << "1..5" << std::endl;
+    printf("TAP version 14\n");
+    printf("1..5\n");
 
     MooreMachine m;
 
     // Initial state Q0 has output 0
     if (m.get_output() == 0) {
-        std::cout << "ok 1 - moore initial state Q0 has output 0" << std::endl;
+        printf("ok 1 - moore initial state Q0 has output 0\n");
     } else {
-        std::cout << "not ok 1 - moore initial state Q0 has output 0 # got " << m.get_output() << std::endl;
+        printf("not ok 1 - moore initial state Q0 has output 0 # got %d\n", m.get_output());
     }
 
     // i_0: Q0 -> Q1 (output 0)
     m.i_0();
     if (m.get_output() == 0) {
-        std::cout << "ok 2 - moore Q1 has output 0" << std::endl;
+        printf("ok 2 - moore Q1 has output 0\n");
     } else {
-        std::cout << "not ok 2 - moore Q1 has output 0 # got " << m.get_output() << std::endl;
+        printf("not ok 2 - moore Q1 has output 0 # got %d\n", m.get_output());
     }
 
     // i_1: Q1 -> Q3 (output 1)
     m.i_1();
     if (m.get_output() == 1) {
-        std::cout << "ok 3 - moore Q3 has output 1" << std::endl;
+        printf("ok 3 - moore Q3 has output 1\n");
     } else {
-        std::cout << "not ok 3 - moore Q3 has output 1 # got " << m.get_output() << std::endl;
+        printf("not ok 3 - moore Q3 has output 1 # got %d\n", m.get_output());
     }
 
     // i_0: Q3 -> Q4 (output 1)
     m.i_0();
     if (m.get_output() == 1) {
-        std::cout << "ok 4 - moore Q4 has output 1" << std::endl;
+        printf("ok 4 - moore Q4 has output 1\n");
     } else {
-        std::cout << "not ok 4 - moore Q4 has output 1 # got " << m.get_output() << std::endl;
+        printf("not ok 4 - moore Q4 has output 1 # got %d\n", m.get_output());
     }
 
     // i_0: Q4 -> Q1 (output 0)
     m.i_0();
     if (m.get_output() == 0) {
-        std::cout << "ok 5 - moore Q1 has output 0 again" << std::endl;
+        printf("ok 5 - moore Q1 has output 0 again\n");
     } else {
-        std::cout << "not ok 5 - moore Q1 has output 0 again # got " << m.get_output() << std::endl;
+        printf("not ok 5 - moore Q1 has output 0 again # got %d\n", m.get_output());
     }
 
-    std::cout << "# PASS - Moore machine outputs depend ONLY on state" << std::endl;
-
+    printf("# PASS - Moore machine outputs depend ONLY on state\n");
     return 0;
 }

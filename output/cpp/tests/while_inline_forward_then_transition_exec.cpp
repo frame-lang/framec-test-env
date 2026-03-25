@@ -6,7 +6,8 @@
 
 
 #include <iostream>
-#include <cstdio>
+#include <string>
+#include <cassert>
 
 class SFrameEvent {
 public:
@@ -88,14 +89,14 @@ private:
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             {
-            int i = 0;
+            int i = 0
             while (i < 1) {
             _state_P(__e);
             return;
+            }
             auto __comp = std::make_unique<SCompartment>("B()");
             __transition(std::move(__comp));
             return;
-            }
             }
             return;
         }
@@ -114,6 +115,14 @@ public:
         __kernel(__frame_event);
     }
 
+    void e() {
+        SFrameEvent __e("e");
+        SFrameContext __ctx(std::move(__e));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
+    }
+
 };
 
 // Stub functions for placeholder calls
@@ -124,8 +133,12 @@ void x() {}
 int main() {
     printf("TAP version 14\n");
     printf("1..1\n");
-    S s;
-    s.e();
-    printf("ok 1 - while_inline_forward_then_transition_exec\n");
+    try {
+        S s;
+        s.e();
+        printf("ok 1 - while_inline_forward_then_transition_exec\n");
+    } catch (...) {
+        printf("not ok 1 - while_inline_forward_then_transition_exec\n");
+    }
     return 0;
 }

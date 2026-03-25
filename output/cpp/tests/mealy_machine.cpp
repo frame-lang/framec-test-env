@@ -51,7 +51,7 @@ private:
     std::vector<std::unique_ptr<MealyMachineCompartment>> _state_stack;
     std::vector<MealyMachineFrameContext> _context_stack;
 
-    int last_output = 0;;
+    last_output: number = -1;
 
     void __kernel(MealyMachineFrameEvent& __e) {
         __router(__e);
@@ -94,7 +94,7 @@ private:
     void _state_Q0(MealyMachineFrameEvent& __e) {
         if (__e._message == "i_0") {
             {
-            emit_output(0);
+            this.emit_output(0);
             auto __comp = std::make_unique<MealyMachineCompartment>("Q1");
             __transition(std::move(__comp));
             return;
@@ -102,7 +102,7 @@ private:
             return;
         } else if (__e._message == "i_1") {
             {
-            emit_output(0);
+            this.emit_output(0);
             auto __comp = std::make_unique<MealyMachineCompartment>("Q2");
             __transition(std::move(__comp));
             return;
@@ -114,7 +114,7 @@ private:
     void _state_Q1(MealyMachineFrameEvent& __e) {
         if (__e._message == "i_0") {
             {
-            emit_output(0);
+            this.emit_output(0);
             auto __comp = std::make_unique<MealyMachineCompartment>("Q1");
             __transition(std::move(__comp));
             return;
@@ -122,7 +122,7 @@ private:
             return;
         } else if (__e._message == "i_1") {
             {
-            emit_output(1);
+            this.emit_output(1);
             auto __comp = std::make_unique<MealyMachineCompartment>("Q2");
             __transition(std::move(__comp));
             return;
@@ -134,7 +134,7 @@ private:
     void _state_Q2(MealyMachineFrameEvent& __e) {
         if (__e._message == "i_0") {
             {
-            emit_output(1);
+            this.emit_output(1);
             auto __comp = std::make_unique<MealyMachineCompartment>("Q1");
             __transition(std::move(__comp));
             return;
@@ -142,7 +142,7 @@ private:
             return;
         } else if (__e._message == "i_1") {
             {
-            emit_output(0);
+            this.emit_output(0);
             auto __comp = std::make_unique<MealyMachineCompartment>("Q2");
             __transition(std::move(__comp));
             return;
@@ -154,7 +154,7 @@ private:
 public:
     MealyMachine() {
         __compartment = std::make_unique<MealyMachineCompartment>("Q0");
-        last_output = 0;;
+        last_output = -1;
         MealyMachineFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -181,7 +181,7 @@ public:
         }
     }
 
-    int get_last_output() {
+    number get_last_output() {
         {
         return last_output;
         }
@@ -190,41 +190,39 @@ public:
 };
 
 int main() {
-    std::cout << "TAP version 14" << std::endl;
-    std::cout << "1..4" << std::endl;
+    printf("TAP version 14\n");
+    printf("1..4\n");
 
     MealyMachine m;
 
-    // Test sequence: i_0, i_0, i_1, i_0
     m.i_0();  // Q0 -> Q1, output 0
     if (m.get_last_output() == 0) {
-        std::cout << "ok 1 - mealy i_0 from Q0 outputs 0" << std::endl;
+        printf("ok 1 - mealy i_0 from Q0 outputs 0\n");
     } else {
-        std::cout << "not ok 1 - mealy i_0 from Q0 outputs 0 # got " << m.get_last_output() << std::endl;
+        printf("not ok 1 - mealy i_0 from Q0 outputs 0 # got %d\n", m.get_last_output());
     }
 
     m.i_0();  // Q1 -> Q1, output 0
     if (m.get_last_output() == 0) {
-        std::cout << "ok 2 - mealy i_0 from Q1 outputs 0" << std::endl;
+        printf("ok 2 - mealy i_0 from Q1 outputs 0\n");
     } else {
-        std::cout << "not ok 2 - mealy i_0 from Q1 outputs 0 # got " << m.get_last_output() << std::endl;
+        printf("not ok 2 - mealy i_0 from Q1 outputs 0 # got %d\n", m.get_last_output());
     }
 
     m.i_1();  // Q1 -> Q2, output 1
     if (m.get_last_output() == 1) {
-        std::cout << "ok 3 - mealy i_1 from Q1 outputs 1" << std::endl;
+        printf("ok 3 - mealy i_1 from Q1 outputs 1\n");
     } else {
-        std::cout << "not ok 3 - mealy i_1 from Q1 outputs 1 # got " << m.get_last_output() << std::endl;
+        printf("not ok 3 - mealy i_1 from Q1 outputs 1 # got %d\n", m.get_last_output());
     }
 
     m.i_0();  // Q2 -> Q1, output 1
     if (m.get_last_output() == 1) {
-        std::cout << "ok 4 - mealy i_0 from Q2 outputs 1" << std::endl;
+        printf("ok 4 - mealy i_0 from Q2 outputs 1\n");
     } else {
-        std::cout << "not ok 4 - mealy i_0 from Q2 outputs 1 # got " << m.get_last_output() << std::endl;
+        printf("not ok 4 - mealy i_0 from Q2 outputs 1 # got %d\n", m.get_last_output());
     }
 
-    std::cout << "# PASS - Mealy machine outputs depend on state AND input" << std::endl;
-
+    printf("# PASS - Mealy machine outputs depend on state AND input\n");
     return 0;
 }

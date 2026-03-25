@@ -3,57 +3,65 @@
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <vector>
+#include <algorithm>
 
 @@system TransitionEnterArgs {
     interface:
-        start(): void
-        get_source_value(): int
+        start()
+        get_log(): std::vector<std::string>
 
     machine:
         $Idle {
             start() {
-                // Transition with enter args: (source, value) -> $Active
+                log.push_back("idle:start");
                 -> ("from_idle", 42) $Active
             }
 
-            get_source_value(): int {
-                return self->source_value;
+            get_log(): std::vector<std::string> {
+                return log;
             }
         }
 
         $Active {
             $>(source: std::string, value: int) {
-                // Store value in domain for verification
-                self->source_value = value;
-                std::cout << "active:enter:source=" << source << ",value=" << value << std::endl;
+                log.push_back(std::string("active:enter:") + source + ":" + std::to_string(value));
             }
 
             start() {
-                std::cout << "active:start" << std::endl;
+                log.push_back("active:start");
             }
 
-            get_source_value(): int {
-                return self->source_value;
+            get_log(): std::vector<std::string> {
+                return log;
             }
         }
     domain:
-        int source_value
+        log: std::vector<std::string> = {}
 }
 
 int main() {
-    std::cout << "=== Test 17: Transition Enter Args ===" << std::endl;
+    printf("=== Test 17: Transition Enter Args ===\n");
     TransitionEnterArgs s;
 
-    // Initial state is Idle
-    int value = s.get_source_value();
-    assert(value == 0);
+    auto log = s.get_log();
+    if (log.size() != 0) {
+        printf("FAIL: Expected empty log\n");
+        assert(false);
+    }
 
-    // Transition to Active with args
     s.start();
-    value = s.get_source_value();
-    assert(value == 42);
-    std::cout << "After transition: source_value = " << value << std::endl;
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "idle:start") == log.end()) {
+        printf("FAIL: Expected 'idle:start' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "active:enter:from_idle:42") == log.end()) {
+        printf("FAIL: Expected 'active:enter:from_idle:42' in log\n");
+        assert(false);
+    }
+    printf("Log after transition: idle:start, active:enter:from_idle:42\n");
 
-    std::cout << "PASS: Transition enter args work correctly" << std::endl;
+    printf("PASS: Transition enter args work correctly\n");
     return 0;
 }

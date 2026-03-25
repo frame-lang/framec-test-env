@@ -1,55 +1,62 @@
 @@target cpp_17
 
 #include <iostream>
+#include <string>
 #include <cassert>
+#include <vector>
+#include <algorithm>
 
 @@system EventForwardTest {
     interface:
-        process(): void
-        get_log_code(): int
+        process()
+        get_log(): std::vector<std::string>
 
     machine:
         $Idle {
             process() {
-                self->log_code = self->log_code + 1;  // "idle:process:before"
+                log.push_back("idle:process:before");
                 -> => $Working
                 // This should NOT execute because -> => returns after dispatch
-                self->log_code = self->log_code + 100;  // "idle:process:after"
+                log.push_back("idle:process:after");
             }
 
-            get_log_code(): int {
-                return self->log_code;
+            get_log(): std::vector<std::string> {
+                return log;
             }
         }
 
         $Working {
             process() {
-                self->log_code = self->log_code + 10;  // "working:process"
+                log.push_back("working:process");
             }
 
-            get_log_code(): int {
-                return self->log_code;
+            get_log(): std::vector<std::string> {
+                return log;
             }
         }
     domain:
-        int log_code
+        log: std::vector<std::string> = {}
 }
 
 int main() {
-    std::cout << "=== Test 19: Transition Forward ===" << std::endl;
+    printf("=== Test 19: Transition Forward (C++) ===\n");
     EventForwardTest s;
     s.process();
-    int log_code = s.get_log_code();
-    std::cout << "Log code: " << log_code << std::endl;
+    auto log = s.get_log();
 
-    // After transition-forward:
-    // - Idle logs +1 ("idle:process:before")
-    // - Transition to Working
-    // - Working handles process(), logs +10 ("working:process")
-    // - Return prevents +100 ("idle:process:after")
-    // Expected: 1 + 10 = 11
-    assert(log_code == 11);
+    if (std::find(log.begin(), log.end(), "idle:process:before") == log.end()) {
+        printf("FAIL: Expected 'idle:process:before' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "working:process") == log.end()) {
+        printf("FAIL: Expected 'working:process' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "idle:process:after") != log.end()) {
+        printf("FAIL: Should NOT have 'idle:process:after' in log\n");
+        assert(false);
+    }
 
-    std::cout << "PASS: Transition forward works correctly" << std::endl;
+    printf("PASS: Transition forward works correctly\n");
     return 0;
 }

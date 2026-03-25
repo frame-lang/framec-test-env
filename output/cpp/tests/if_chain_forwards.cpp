@@ -6,17 +6,8 @@
 
 
 #include <iostream>
-#include <cstdio>
-
-// Condition variables
-bool a = true;
-bool b = false;
-
-// Forward declarations for stub functions
-void native();
-void x();
-void y();
-void z();
+#include <string>
+#include <cassert>
 
 class SFrameEvent {
 public:
@@ -99,15 +90,15 @@ private:
             if (a) {
             _state_P(__e);
             return;
-            x();
+            x_func()
             } else if (b) {
             _state_P(__e);
             return;
-            y();
+            y_func()
             } else {
             _state_P(__e);
             return;
-            z();
+            z_func()
             }
             }
             return;
@@ -124,20 +115,34 @@ public:
         __kernel(__frame_event);
     }
 
+    void e() {
+        SFrameEvent __e("e");
+        SFrameContext __ctx(std::move(__e));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
+    }
+
 };
 
 // Stub functions for placeholder calls
-void native() {}
-void x() {}
-void y() {}
-void z() {}
+void native_func() {}
+void x_func() {}
+void y_func() {}
+void z_func() {}
+bool a = true;
+bool b = false;
 
 // TAP test harness
 int main() {
     printf("TAP version 14\n");
     printf("1..1\n");
-    S s;
-    s.e();
-    printf("ok 1 - if_chain_forwards\n");
+    try {
+        S s;
+        s.e();
+        printf("ok 1 - if_chain_forwards\n");
+    } catch (...) {
+        printf("not ok 1 - if_chain_forwards\n");
+    }
     return 0;
 }

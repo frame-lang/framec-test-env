@@ -6,7 +6,10 @@
 
 
 #include <iostream>
+#include <string>
 #include <cassert>
+#include <vector>
+#include <algorithm>
 
 class EventForwardTestFrameEvent {
 public:
@@ -47,7 +50,7 @@ private:
     std::vector<std::unique_ptr<EventForwardTestCompartment>> _state_stack;
     std::vector<EventForwardTestFrameContext> _context_stack;
 
-    int log_code;
+    log: std::vector<std::string> = {};
 
     void __kernel(EventForwardTestFrameEvent& __e) {
         __router(__e);
@@ -88,15 +91,15 @@ private:
     void _state_Idle(EventForwardTestFrameEvent& __e) {
         if (__e._message == "process") {
             {
-            self->log_code = self->log_code + 1;  // "idle:process:before"
+            log.push_back("idle:process:before");
             -> => $Working
             // This should NOT execute because -> => returns after dispatch
-            self->log_code = self->log_code + 100;  // "idle:process:after"
+            log.push_back("idle:process:after");
             }
             return;
-        } else if (__e._message == "get_log_code") {
+        } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = self->log_code;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -106,12 +109,12 @@ private:
     void _state_Working(EventForwardTestFrameEvent& __e) {
         if (__e._message == "process") {
             {
-            self->log_code = self->log_code + 10;  // "working:process"
+            log.push_back("working:process");
             }
             return;
-        } else if (__e._message == "get_log_code") {
+        } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = self->log_code;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -121,6 +124,7 @@ private:
 public:
     EventForwardTest() {
         __compartment = std::make_unique<EventForwardTestCompartment>("Idle");
+        log = {};
         EventForwardTestFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -130,17 +134,15 @@ public:
         EventForwardTestFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<void>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
-        return __result;
     }
 
-    int get_log_code() {
-        EventForwardTestFrameEvent __e("get_log_code");
-        EventForwardTestFrameContext __ctx(std::move(__e), std::any(int()));
+    std::vector<std::string> get_log() {
+        EventForwardTestFrameEvent __e("get_log");
+        EventForwardTestFrameContext __ctx(std::move(__e), std::any(std::vector<std::string>()));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<int>(std::move(_context_stack.back()._return));
+        auto __result = std::any_cast<std::vector<std::string>>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
         return __result;
     }
@@ -148,20 +150,24 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 19: Transition Forward ===" << std::endl;
+    printf("=== Test 19: Transition Forward (C++) ===\n");
     EventForwardTest s;
     s.process();
-    int log_code = s.get_log_code();
-    std::cout << "Log code: " << log_code << std::endl;
+    auto log = s.get_log();
 
-    // After transition-forward:
-    // - Idle logs +1 ("idle:process:before")
-    // - Transition to Working
-    // - Working handles process(), logs +10 ("working:process")
-    // - Return prevents +100 ("idle:process:after")
-    // Expected: 1 + 10 = 11
-    assert(log_code == 11);
+    if (std::find(log.begin(), log.end(), "idle:process:before") == log.end()) {
+        printf("FAIL: Expected 'idle:process:before' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "working:process") == log.end()) {
+        printf("FAIL: Expected 'working:process' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "idle:process:after") != log.end()) {
+        printf("FAIL: Should NOT have 'idle:process:after' in log\n");
+        assert(false);
+    }
 
-    std::cout << "PASS: Transition forward works correctly" << std::endl;
+    printf("PASS: Transition forward works correctly\n");
     return 0;
 }

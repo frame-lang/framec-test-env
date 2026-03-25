@@ -6,7 +6,8 @@
 
 
 #include <iostream>
-#include <cstdio>
+#include <string>
+#include <cassert>
 
 class SFrameEvent {
 public:
@@ -86,10 +87,7 @@ private:
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             {
-            auto __popped = std::move(_state_stack.back());
-            _state_stack.pop_back();
-            __transition(std::move(__popped));
-            return;
+            push$  // Push current state to stack
             auto __comp = std::make_unique<SCompartment>("B()");
             __transition(std::move(__comp));
             return;
@@ -99,6 +97,15 @@ private:
     }
 
     void _state_B(SFrameEvent& __e) {
+        if (__e._message == "e") {
+            {
+            auto __popped = std::move(_state_stack.back());
+            _state_stack.pop_back();
+            __transition(std::move(__popped));
+            return;
+            }
+            return;
+        }
     }
 
 public:
@@ -106,6 +113,14 @@ public:
         __compartment = std::make_unique<SCompartment>("A");
         SFrameEvent __frame_event("$>");
         __kernel(__frame_event);
+    }
+
+    void e() {
+        SFrameEvent __e("e");
+        SFrameContext __ctx(std::move(__e));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
 };
@@ -118,8 +133,13 @@ void x() {}
 int main() {
     printf("TAP version 14\n");
     printf("1..1\n");
-    S s;
-    s.e();
-    printf("ok 1 - stack_pop_then_transition_exec\n");
+    try {
+        S s;
+        s.e();  // Push A to stack and transition to B
+        s.e();  // Pop from stack and transition back to A
+        printf("ok 1 - stack_pop_then_transition_exec\n");
+    } catch (...) {
+        printf("not ok 1 - stack_pop_then_transition_exec\n");
+    }
     return 0;
 }

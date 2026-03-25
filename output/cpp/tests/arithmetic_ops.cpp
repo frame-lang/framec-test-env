@@ -106,15 +106,30 @@ public:
         __kernel(__frame_event);
     }
 
+    void e() {
+        SFrameEvent __e("e");
+        SFrameContext __ctx(std::move(__e));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
+    }
+
 };
 
+// Stub functions for placeholder calls
+void native() {}
+void x() {}
+
+// TAP test harness
 int main() {
-    std::cout << "=== Test: Arithmetic Operators ===" << std::endl;
-    S s;
-
-    // Call event handler that exercises arithmetic operators
-    s.e();
-
-    std::cout << "PASS: arithmetic_ops" << std::endl;
+    printf("TAP version 14\n");
+    printf("1..1\n");
+    try {
+        S s;
+        s.e();
+        printf("ok 1 - arithmetic_ops\n");
+    } catch (...) {
+        printf("not ok 1 - arithmetic_ops\n");
+    }
     return 0;
 }

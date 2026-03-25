@@ -8,64 +8,65 @@
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <stdexcept>
 
-class ActionTestFrameEvent {
+class ActionsTestFrameEvent {
 public:
     std::string _message;
     std::unordered_map<std::string, std::any> _parameters;
 
-    ActionTestFrameEvent(const std::string& message, std::unordered_map<std::string, std::any> params = {})
+    ActionsTestFrameEvent(const std::string& message, std::unordered_map<std::string, std::any> params = {})
         : _message(message), _parameters(std::move(params)) {}
 };
 
-class ActionTestFrameContext {
+class ActionsTestFrameContext {
 public:
-    ActionTestFrameEvent _event;
+    ActionsTestFrameEvent _event;
     std::any _return;
     std::unordered_map<std::string, std::any> _data;
 
-    ActionTestFrameContext(ActionTestFrameEvent event, std::any default_return = {})
+    ActionsTestFrameContext(ActionsTestFrameEvent event, std::any default_return = {})
         : _event(std::move(event)), _return(std::move(default_return)) {}
 };
 
-class ActionTestCompartment {
+class ActionsTestCompartment {
 public:
     std::string state;
     std::unordered_map<std::string, std::any> state_args;
     std::unordered_map<std::string, std::any> state_vars;
     std::unordered_map<std::string, std::any> enter_args;
     std::unordered_map<std::string, std::any> exit_args;
-    std::unique_ptr<ActionTestFrameEvent> forward_event;
-    std::unique_ptr<ActionTestCompartment> parent_compartment;
+    std::unique_ptr<ActionsTestFrameEvent> forward_event;
+    std::unique_ptr<ActionsTestCompartment> parent_compartment;
 
-    explicit ActionTestCompartment(const std::string& state) : state(state) {}
+    explicit ActionsTestCompartment(const std::string& state) : state(state) {}
 };
 
-class ActionTest {
+class ActionsTest {
 private:
-    std::unique_ptr<ActionTestCompartment> __compartment;
-    std::unique_ptr<ActionTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<ActionTestCompartment>> _state_stack;
-    std::vector<ActionTestFrameContext> _context_stack;
+    std::unique_ptr<ActionsTestCompartment> __compartment;
+    std::unique_ptr<ActionsTestCompartment> __next_compartment;
+    std::vector<std::unique_ptr<ActionsTestCompartment>> _state_stack;
+    std::vector<ActionsTestFrameContext> _context_stack;
 
-    int action_count;
+    log: std::string = "";
 
-    void __kernel(ActionTestFrameEvent& __e) {
+    void __kernel(ActionsTestFrameEvent& __e) {
         __router(__e);
         while (__next_compartment) {
             auto next_compartment = std::move(__next_compartment);
-            ActionTestFrameEvent exit_event("<$");
+            ActionsTestFrameEvent exit_event("<$");
             __router(exit_event);
             __compartment = std::move(next_compartment);
             if (!__compartment->forward_event) {
-                ActionTestFrameEvent enter_event("$>");
+                ActionsTestFrameEvent enter_event("$>");
                 __router(enter_event);
             } else {
                 auto forward_event = std::move(__compartment->forward_event);
                 if (forward_event->_message == "$>") {
                     __router(*forward_event);
                 } else {
-                    ActionTestFrameEvent enter_event("$>");
+                    ActionsTestFrameEvent enter_event("$>");
                     __router(enter_event);
                     __router(*forward_event);
                 }
@@ -73,22 +74,33 @@ private:
         }
     }
 
-    void __router(ActionTestFrameEvent& __e) {
+    void __router(ActionsTestFrameEvent& __e) {
         const auto& state_name = __compartment->state;
-        if (state_name == "Start") {
-            _state_Start(__e);
+        if (state_name == "Ready") {
+            _state_Ready(__e);
         }
     }
 
-    void __transition(std::unique_ptr<ActionTestCompartment> next) {
+    void __transition(std::unique_ptr<ActionsTestCompartment> next) {
         __next_compartment = std::move(next);
     }
 
-    void _state_Start(ActionTestFrameEvent& __e) {
-        if (__e._message == "do_work") {
+    void _state_Ready(ActionsTestFrameEvent& __e) {
+        if (__e._message == "process") {
+            auto value = std::any_cast<int>(__e._parameters.at("value"));
             {
-            ActionTest_log_action(self, "Starting work");
-            _context_stack.back()._return = self->action_count;
+            this->__log_event("start");
+            this->__validate_positive(value);
+            this->__log_event("valid");
+            int result = value * 2;
+            this->__log_event("done");
+            _context_stack.back()._return = result;
+            return;
+            }
+            return;
+        } else if (__e._message == "get_log") {
+            {
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -96,15 +108,18 @@ private:
     }
 
 public:
-    ActionTest() {
-        __compartment = std::make_unique<ActionTestCompartment>("Start");
-        ActionTestFrameEvent __frame_event("$>");
+    ActionsTest() {
+        __compartment = std::make_unique<ActionsTestCompartment>("Ready");
+        log = "";
+        ActionsTestFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
 
-    int do_work() {
-        ActionTestFrameEvent __e("do_work");
-        ActionTestFrameContext __ctx(std::move(__e), std::any(int()));
+    int process(int value) {
+        std::unordered_map<std::string, std::any> __params;
+        __params["value"] = value;
+        ActionsTestFrameEvent __e("process", std::move(__params));
+        ActionsTestFrameContext __ctx(std::move(__e), std::any(int()));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
         auto __result = std::any_cast<int>(std::move(_context_stack.back()._return));
@@ -112,27 +127,69 @@ public:
         return __result;
     }
 
-    void log_action() {
+    std::string get_log() {
+        ActionsTestFrameEvent __e("get_log");
+        ActionsTestFrameContext __ctx(std::move(__e), std::any(std::string()));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        auto __result = std::any_cast<std::string>(std::move(_context_stack.back()._return));
+        _context_stack.pop_back();
+        return __result;
+    }
+
+    void __log_event() {
         {
-        std::cout << "Action: " << msg << std::endl;
-        self->action_count = self->action_count + 1;
+        log = log + msg + ";";
+        }
+    }
+
+    void __validate_positive() {
+        {
+        if (n < 0) {
+        throw std::runtime_error("Value must be positive");
+        }
         }
     }
 
 };
 
 int main() {
-    std::cout << "=== Test 21: Basic Actions ===" << std::endl;
-    ActionTest a;
+    printf("=== Test 21: Actions Basic (C++) ===\n");
+    ActionsTest s;
 
-    int count = a.do_work();
-    std::cout << "Action count: " << count << std::endl;
-    assert(count == 1);
+    // Test 1: Actions are called correctly
+    int result = s.process(5);
+    if (result != 10) {
+        printf("FAIL: Expected 10, got %d\n", result);
+        assert(false);
+    }
+    printf("1. process(5) = %d\n", result);
 
-    count = a.do_work();
-    std::cout << "Action count: " << count << std::endl;
-    assert(count == 2);
+    // Test 2: Log shows action calls
+    std::string log = s.get_log();
+    if (log.find("start") == std::string::npos) {
+        printf("FAIL: Missing 'start' in log: %s\n", log.c_str());
+        assert(false);
+    }
+    if (log.find("valid") == std::string::npos) {
+        printf("FAIL: Missing 'valid' in log: %s\n", log.c_str());
+        assert(false);
+    }
+    if (log.find("done") == std::string::npos) {
+        printf("FAIL: Missing 'done' in log: %s\n", log.c_str());
+        assert(false);
+    }
+    printf("2. Log: %s\n", log.c_str());
 
-    std::cout << "PASS: Basic actions work correctly" << std::endl;
+    // Test 3: Action with validation
+    try {
+        s.process(-1);
+        printf("FAIL: Should have thrown exception\n");
+        assert(false);
+    } catch (const std::runtime_error& e) {
+        printf("3. Validation caught: %s\n", e.what());
+    }
+
+    printf("PASS: Actions basic works correctly\n");
     return 0;
 }

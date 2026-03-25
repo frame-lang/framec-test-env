@@ -1,0 +1,62 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <map>
+
+// Test: Heavy native prolog and epilog with edge-case C++ syntax.
+
+class NativeHelper {
+    // Mentions @@system and -> $State in comments
+    // These should NOT be parsed as Frame
+public:
+    std::string process(const std::map<std::string, std::string>& data) {
+        // Comment with -> $Transition and => $^ and push$
+        return std::string("{\"key\": \"value with { braces }\"}");
+    }
+};
+
+// Global with @@ in string
+std::map<std::string, std::string> GLOBAL_CONFIG = {
+    {"description", "Config with @@system-like syntax"},
+    {"pattern", "-> $Start"},
+};
+
+@@system HeavyNativeProlog {
+    interface:
+        run_test()
+
+    machine:
+        $Start {
+            run_test() {
+                NativeHelper h;
+                std::string result = h.process(GLOBAL_CONFIG);
+                if (result.length() > 0) {
+                    printf("PASS: Heavy native prolog handled correctly\n");
+                } else {
+                    assert(false);
+                }
+            }
+        }
+}
+
+// Heavy epilog
+class PostSystem {
+public:
+    std::map<std::string, std::string> data = {{"@@system", "in dict"}, {"-> $State", "in dict"}};
+
+    bool run() {
+        // -> $NotATransition
+        // => $^
+        return true;
+    }
+};
+
+int main() {
+    HeavyNativeProlog s;
+    s.run_test();
+    PostSystem p;
+    if (!p.run()) { assert(false); }
+    return 0;
+}

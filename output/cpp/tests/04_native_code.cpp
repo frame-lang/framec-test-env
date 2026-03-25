@@ -91,19 +91,17 @@ private:
         if (__e._message == "compute") {
             auto value = std::any_cast<int>(__e._parameters.at("value"));
             {
-            // Native code with local variables
             int temp = value + 10;
             int result = helper_function(temp);
-            std::cout << "Computed: " << value << " -> " << result << std::endl;
+            printf("Computed: %d -> %d\n", value, result);
             _context_stack.back()._return = result;
             return;
             }
             return;
         } else if (__e._message == "use_math") {
             {
-            // Using imported math functions
             double result = sqrt(16.0) + M_PI;
-            std::cout << "Math result: " << result << std::endl;
+            printf("Math result: %f\n", result);
             _context_stack.back()._return = result;
             return;
             }
@@ -143,21 +141,25 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 04: Native Code Preservation ===" << std::endl;
+    printf("=== Test 04: Native Code Preservation ===\n");
     NativeCode s;
 
-    // Test native code in handler with helper function
     int result = s.compute(5);
-    int expected = (5 + 10) * 2;  // 30
-    assert(result == expected);
-    std::cout << "compute(5) = " << result << std::endl;
+    int expected = (5 + 10) * 2;
+    if (result != expected) {
+        printf("FAIL: Expected %d, got %d\n", expected, result);
+        assert(false);
+    }
+    printf("compute(5) = %d\n", result);
 
-    // Test imported module usage
-    double math_result = s.use_math();
-    double expected_math = sqrt(16.0) + M_PI;
-    assert(std::abs(math_result - expected_math) < 0.001);
-    std::cout << "use_math() = " << math_result << std::endl;
+    double mathResult = s.use_math();
+    double expectedMath = sqrt(16.0) + M_PI;
+    if (fabs(mathResult - expectedMath) >= 0.001) {
+        printf("FAIL: Expected ~%f, got %f\n", expectedMath, mathResult);
+        assert(false);
+    }
+    printf("use_math() = %f\n", mathResult);
 
-    std::cout << "PASS: 04 native code" << std::endl;
+    printf("PASS: Native code preservation works correctly\n");
     return 0;
 }

@@ -101,7 +101,7 @@ private:
         } else if (__e._message == "greet") {
             auto name = std::any_cast<std::string>(__e._parameters.at("name"));
             {
-            _context_stack.back()._return = std::string("Hello, ") + name + std::string("!");
+            _context_stack.back()._return = std::string("Hello, ") + name + "!";
             return;
             }
             return;
@@ -174,29 +174,37 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 13: System Return ===" << std::endl;
+    printf("=== Test 13: System Return ===\n");
     SystemReturnTest calc;
 
-    // Test return sugar
     int result = calc.add(3, 5);
-    assert(result == 8);
-    std::cout << "add(3, 5) = " << result << std::endl;
+    if (result != 8) {
+        printf("FAIL: Expected 8, got %d\n", result);
+        assert(false);
+    }
+    printf("add(3, 5) = %d\n", result);
 
-    // Test @@:return = expr
     result = calc.multiply(4, 7);
-    assert(result == 28);
-    std::cout << "multiply(4, 7) = " << result << std::endl;
+    if (result != 28) {
+        printf("FAIL: Expected 28, got %d\n", result);
+        assert(false);
+    }
+    printf("multiply(4, 7) = %d\n", result);
 
-    // Test string return
     std::string greeting = calc.greet("World");
-    assert(greeting == "Hello, World!");
-    std::cout << "greet('World') = " << greeting << std::endl;
+    if (greeting != "Hello, World!") {
+        printf("FAIL: Expected 'Hello, World!', got '%s'\n", greeting.c_str());
+        assert(false);
+    }
+    printf("greet('World') = %s\n", greeting.c_str());
 
-    // Test return with state variable
     int value = calc.get_value();
-    assert(value == 42);
-    std::cout << "get_value() = " << value << std::endl;
+    if (value != 42) {
+        printf("FAIL: Expected 42, got %d\n", value);
+        assert(false);
+    }
+    printf("get_value() = %d\n", value);
 
-    std::cout << "PASS: 13 system return" << std::endl;
+    printf("PASS: System return works correctly\n");
     return 0;
 }

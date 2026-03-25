@@ -6,7 +6,8 @@
 
 
 #include <iostream>
-#include <cstdio>
+#include <string>
+#include <cassert>
 
 class SysXFrameEvent {
 public:
@@ -86,7 +87,7 @@ private:
     void _state_A(SysXFrameEvent& __e) {
         if (__e._message == "e") {
             {
-            auto __comp = std::make_unique<SysXCompartment>("B");
+            auto __comp = std::make_unique<SysXCompartment>("B()");
             __transition(std::move(__comp));
             return;
             }
@@ -104,6 +105,14 @@ public:
         __kernel(__frame_event);
     }
 
+    void e() {
+        SysXFrameEvent __e("e");
+        SysXFrameContext __ctx(std::move(__e));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
+    }
+
 };
 
 // Stub functions for placeholder calls
@@ -114,8 +123,12 @@ void x() {}
 int main() {
     printf("TAP version 14\n");
     printf("1..1\n");
-    SysX s;
-    s.e();
-    printf("ok 1 - transition_state_id_exec\n");
+    try {
+        SysX s;
+        s.e();
+        printf("ok 1 - transition_state_id_exec\n");
+    } catch (...) {
+        printf("not ok 1 - transition_state_id_exec\n");
+    }
     return 0;
 }

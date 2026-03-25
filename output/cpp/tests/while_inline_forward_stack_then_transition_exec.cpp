@@ -6,7 +6,8 @@
 
 
 #include <iostream>
-#include <cstdio>
+#include <string>
+#include <cassert>
 
 class SFrameEvent {
 public:
@@ -72,12 +73,12 @@ private:
 
     void __router(SFrameEvent& __e) {
         const auto& state_name = __compartment->state;
-        if (state_name == "A") {
+        if (state_name == "P") {
+            _state_P(__e);
+        } else if (state_name == "A") {
             _state_A(__e);
         } else if (state_name == "B") {
             _state_B(__e);
-        } else if (state_name == "P") {
-            _state_P(__e);
         }
     }
 
@@ -85,20 +86,26 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_P(SFrameEvent& __e) {
+    }
+
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             {
             int i = 0;
-            while (i < 1) {
-            _state_P(__e);
-            return;
+            while (i < 2) {
+            if (i == 0) {
             _state_stack.push_back(std::make_unique<SCompartment>(__compartment->state));
             _state_stack.back()->state_vars = __compartment->state_vars;
             _state_stack.back()->state_args = __compartment->state_args;
+            _state_P(__e);
+            return;
+            }
+            i = i + 1;
+            }
             auto __comp = std::make_unique<SCompartment>("B()");
             __transition(std::move(__comp));
             return;
-            }
             }
             return;
         }
@@ -107,28 +114,33 @@ private:
     void _state_B(SFrameEvent& __e) {
     }
 
-    void _state_P(SFrameEvent& __e) {
-    }
-
 public:
     S() {
-        __compartment = std::make_unique<SCompartment>("A");
+        __compartment = std::make_unique<SCompartment>("P");
         SFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
 
-};
+    void e() {
+        SFrameEvent __e("e");
+        SFrameContext __ctx(std::move(__e));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
+    }
 
-// Stub functions for placeholder calls
-void native() {}
-void x() {}
+};
 
 // TAP test harness
 int main() {
     printf("TAP version 14\n");
     printf("1..1\n");
-    S s;
-    s.e();
-    printf("ok 1 - while_inline_forward_stack_then_transition_exec\n");
+    try {
+        S s;
+        s.e();
+        printf("ok 1 - while_inline_forward_stack_then_transition_exec\n");
+    } catch (...) {
+        printf("not ok 1 - while_inline_forward_stack_then_transition_exec\n");
+    }
     return 0;
 }

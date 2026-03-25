@@ -3,41 +3,80 @@
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <stdexcept>
 
-@@system ActionTest {
+@@system ActionsTest {
     interface:
-        do_work(): int
+        process(value: int): int
+        get_log(): std::string
 
     machine:
-        $Start {
-            do_work(): int {
-                ActionTest_log_action(self, "Starting work");
-                return self->action_count;
+        $Ready {
+            process(value: int): int {
+                this->__log_event("start");
+                this->__validate_positive(value);
+                this->__log_event("valid");
+                int result = value * 2;
+                this->__log_event("done");
+                return result;
+            }
+
+            get_log(): std::string {
+                return log;
             }
         }
-
     actions:
-        log_action(msg: std::string) {
-            std::cout << "Action: " << msg << std::endl;
-            self->action_count = self->action_count + 1;
+        __log_event(msg: std::string) {
+            log = log + msg + ";";
         }
 
+        __validate_positive(n: int) {
+            if (n < 0) {
+                throw std::runtime_error("Value must be positive");
+            }
+        }
     domain:
-        int action_count
+        log: std::string = ""
+
 }
 
 int main() {
-    std::cout << "=== Test 21: Basic Actions ===" << std::endl;
-    ActionTest a;
+    printf("=== Test 21: Actions Basic (C++) ===\n");
+    ActionsTest s;
 
-    int count = a.do_work();
-    std::cout << "Action count: " << count << std::endl;
-    assert(count == 1);
+    // Test 1: Actions are called correctly
+    int result = s.process(5);
+    if (result != 10) {
+        printf("FAIL: Expected 10, got %d\n", result);
+        assert(false);
+    }
+    printf("1. process(5) = %d\n", result);
 
-    count = a.do_work();
-    std::cout << "Action count: " << count << std::endl;
-    assert(count == 2);
+    // Test 2: Log shows action calls
+    std::string log = s.get_log();
+    if (log.find("start") == std::string::npos) {
+        printf("FAIL: Missing 'start' in log: %s\n", log.c_str());
+        assert(false);
+    }
+    if (log.find("valid") == std::string::npos) {
+        printf("FAIL: Missing 'valid' in log: %s\n", log.c_str());
+        assert(false);
+    }
+    if (log.find("done") == std::string::npos) {
+        printf("FAIL: Missing 'done' in log: %s\n", log.c_str());
+        assert(false);
+    }
+    printf("2. Log: %s\n", log.c_str());
 
-    std::cout << "PASS: Basic actions work correctly" << std::endl;
+    // Test 3: Action with validation
+    try {
+        s.process(-1);
+        printf("FAIL: Should have thrown exception\n");
+        assert(false);
+    } catch (const std::runtime_error& e) {
+        printf("3. Validation caught: %s\n", e.what());
+    }
+
+    printf("PASS: Actions basic works correctly\n");
     return 0;
 }

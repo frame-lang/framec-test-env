@@ -90,7 +90,7 @@ private:
             {
             _state_P(__e);
             return;
-            // str(n) would be converted but we just verify forwarding works
+            std::to_string(n)
             }
             return;
         }
@@ -106,16 +106,31 @@ public:
         __kernel(__frame_event);
     }
 
+    void ev(int n) {
+        std::unordered_map<std::string, std::any> __params;
+        __params["n"] = n;
+        SFrameEvent __e("ev", std::move(__params));
+        SFrameContext __ctx(std::move(__e));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
+    }
+
 };
 
+// Stub functions for placeholder calls
+void native() {}
+void x() {}
+
+// TAP test harness
 int main() {
-    std::cout << "=== Test: Interface With Param ===" << std::endl;
-    S s;
-
-    // The test mainly verifies the system compiles with HSM forwarding
-    // and parameter handling
-    std::cout << "System created with HSM forwarding and params" << std::endl;
-
-    std::cout << "PASS: Interface with param compiles correctly" << std::endl;
+    printf("TAP version 14\n");
+    printf("1..1\n");
+    try {
+        S s;
+        printf("ok 1 - interface_with_param\n");
+    } catch (...) {
+        printf("not ok 1 - interface_with_param\n");
+    }
     return 0;
 }

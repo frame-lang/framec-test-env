@@ -1,0 +1,194 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <vector>
+#include <algorithm>
+
+@@system HSMMultiChildren {
+    interface:
+        start_a()
+        start_b()
+        start_c()
+        do_action()
+        forward_action()
+        get_log(): std::vector<std::string>
+        get_state(): std::string
+
+    machine:
+        $ChildA => $Parent {
+            start_a() {
+                // stay
+            }
+            start_b() {
+                -> $ChildB
+            }
+            start_c() {
+                -> $ChildC
+            }
+            do_action() {
+                log.push_back("ChildA:do_action");
+            }
+            forward_action() {
+                log.push_back("ChildA:forward_action");
+                => $^
+            }
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+            get_state(): std::string {
+                return std::string("ChildA");
+            }
+        }
+
+        $ChildB => $Parent {
+            start_a() {
+                -> $ChildA
+            }
+            start_b() {
+                // stay
+            }
+            start_c() {
+                -> $ChildC
+            }
+            do_action() {
+                log.push_back("ChildB:do_action");
+            }
+            forward_action() {
+                log.push_back("ChildB:forward_action");
+                => $^
+            }
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+            get_state(): std::string {
+                return std::string("ChildB");
+            }
+        }
+
+        $ChildC => $Parent {
+            start_a() {
+                -> $ChildA
+            }
+            start_b() {
+                -> $ChildB
+            }
+            start_c() {
+                // stay
+            }
+            do_action() {
+                log.push_back("ChildC:do_action");
+            }
+            forward_action() {
+                log.push_back("ChildC:forward_action");
+                => $^
+            }
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+            get_state(): std::string {
+                return std::string("ChildC");
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                log.push_back("Parent:forward_action");
+            }
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+            get_state(): std::string {
+                return std::string("Parent");
+            }
+        }
+    domain:
+        log: std::vector<std::string> = {}
+}
+
+int main() {
+    printf("=== Test 43: HSM Multiple Children ===\n");
+    HSMMultiChildren s;
+
+    printf("TC1.3.1: Multiple children with same parent compiles - PASS\n");
+
+    if (s.get_state() != "ChildA") {
+        printf("FAIL: Expected ChildA, got %s\n", s.get_state().c_str());
+        assert(false);
+    }
+
+    s.forward_action();
+    auto log = s.get_log();
+    if (std::find(log.begin(), log.end(), "ChildA:forward_action") == log.end()) {
+        printf("FAIL: Expected ChildA forward\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "Parent:forward_action") == log.end()) {
+        printf("FAIL: Expected Parent handler\n");
+        assert(false);
+    }
+    printf("TC1.3.2: ChildA forwards to parent - PASS\n");
+
+    s.start_b();
+    if (s.get_state() != "ChildB") {
+        printf("FAIL: Expected ChildB\n");
+        assert(false);
+    }
+    printf("TC1.3.3: Transition A->B works - PASS\n");
+
+    s.forward_action();
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "ChildB:forward_action") == log.end()) {
+        printf("FAIL: Expected ChildB forward\n");
+        assert(false);
+    }
+    int parentCount = std::count(log.begin(), log.end(), "Parent:forward_action");
+    if (parentCount != 2) {
+        printf("FAIL: Expected 2 Parent forwards\n");
+        assert(false);
+    }
+    printf("TC1.3.4: ChildB forwards to same parent - PASS\n");
+
+    s.start_c();
+    if (s.get_state() != "ChildC") {
+        printf("FAIL: Expected ChildC\n");
+        assert(false);
+    }
+    s.forward_action();
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "ChildC:forward_action") == log.end()) {
+        printf("FAIL: Expected ChildC forward\n");
+        assert(false);
+    }
+    int parentCount2 = std::count(log.begin(), log.end(), "Parent:forward_action");
+    if (parentCount2 != 3) {
+        printf("FAIL: Expected 3 Parent forwards\n");
+        assert(false);
+    }
+    printf("TC1.3.5: ChildC forwards to same parent - PASS\n");
+
+    s.start_a();
+    s.do_action();
+    s.start_b();
+    s.do_action();
+    s.start_c();
+    s.do_action();
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "ChildA:do_action") == log.end()) {
+        printf("FAIL: Expected ChildA action\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "ChildB:do_action") == log.end()) {
+        printf("FAIL: Expected ChildB action\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "ChildC:do_action") == log.end()) {
+        printf("FAIL: Expected ChildC action\n");
+        assert(false);
+    }
+    printf("TC1.3.6: Each sibling has independent handlers - PASS\n");
+
+    printf("PASS: HSM multiple children work correctly\n");
+    return 0;
+}

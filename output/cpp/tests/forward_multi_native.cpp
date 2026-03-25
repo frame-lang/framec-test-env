@@ -6,10 +6,8 @@
 
 
 #include <iostream>
-#include <cstdio>
-
-void a();
-void b();
+#include <string>
+#include <cassert>
 
 class SFrameEvent {
 public:
@@ -91,8 +89,8 @@ private:
             {
             _state_P(__e);
             return;
-            a();
-            b();
+            a_func()
+            b_func()
             }
             return;
         }
@@ -108,20 +106,32 @@ public:
         __kernel(__frame_event);
     }
 
+    void e() {
+        SFrameEvent __e("e");
+        SFrameContext __ctx(std::move(__e));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
+    }
+
 };
 
 // Stub functions for placeholder calls
-void native() {}
-void x() {}
-void a() {}
-void b() {}
+void native_func() {}
+void x_func() {}
+void a_func() {}
+void b_func() {}
 
 // TAP test harness
 int main() {
     printf("TAP version 14\n");
     printf("1..1\n");
-    S s;
-    s.e();
-    printf("ok 1 - forward_multi_native\n");
+    try {
+        S s;
+        s.e();
+        printf("ok 1 - forward_multi_native\n");
+    } catch (...) {
+        printf("not ok 1 - forward_multi_native\n");
+    }
     return 0;
 }

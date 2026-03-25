@@ -1,0 +1,159 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <vector>
+#include <algorithm>
+
+@@system HSMSiblingTransitions {
+    interface:
+        go_to_b()
+        go_to_a()
+        forward_action()
+        get_log(): std::vector<std::string>
+        get_state(): std::string
+
+    machine:
+        $ChildA => $Parent {
+            $>() {
+                log.push_back("ChildA:enter");
+            }
+            <$() {
+                log.push_back("ChildA:exit");
+            }
+            go_to_b() {
+                log.push_back("ChildA:go_to_b");
+                -> $ChildB
+            }
+            forward_action() {
+                log.push_back("ChildA:forward");
+                => $^
+            }
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+            get_state(): std::string {
+                return std::string("ChildA");
+            }
+        }
+
+        $ChildB => $Parent {
+            $>() {
+                log.push_back("ChildB:enter");
+            }
+            <$() {
+                log.push_back("ChildB:exit");
+            }
+            go_to_a() {
+                log.push_back("ChildB:go_to_a");
+                -> $ChildA
+            }
+            forward_action() {
+                log.push_back("ChildB:forward");
+                => $^
+            }
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+            get_state(): std::string {
+                return std::string("ChildB");
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                log.push_back("Parent:forward_action");
+            }
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+            get_state(): std::string {
+                return std::string("Parent");
+            }
+        }
+    domain:
+        log: std::vector<std::string> = {}
+}
+
+int main() {
+    printf("=== Test 44: HSM Sibling Transitions ===\n");
+    HSMSiblingTransitions s;
+
+    auto log = s.get_log();
+    if (std::find(log.begin(), log.end(), "ChildA:enter") == log.end()) {
+        printf("FAIL: Expected ChildA:enter on init\n");
+        assert(false);
+    }
+    if (s.get_state() != "ChildA") {
+        printf("FAIL: Expected ChildA\n");
+        assert(false);
+    }
+    printf("TC1.4.0: Initial state ChildA with enter - PASS\n");
+
+    s.go_to_b();
+    if (s.get_state() != "ChildB") {
+        printf("FAIL: Expected ChildB\n");
+        assert(false);
+    }
+    printf("TC1.4.1: Transition A->B works - PASS\n");
+
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "ChildA:exit") == log.end()) {
+        printf("FAIL: Expected ChildA:exit\n");
+        assert(false);
+    }
+    printf("TC1.4.2: Exit handler fires on source - PASS\n");
+
+    if (std::find(log.begin(), log.end(), "ChildB:enter") == log.end()) {
+        printf("FAIL: Expected ChildB:enter\n");
+        assert(false);
+    }
+    printf("TC1.4.3: Enter handler fires on target - PASS\n");
+
+    s.forward_action();
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "ChildB:forward") == log.end()) {
+        printf("FAIL: Expected ChildB:forward\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "Parent:forward_action") == log.end()) {
+        printf("FAIL: Expected Parent handler\n");
+        assert(false);
+    }
+    printf("TC1.4.4: Parent relationship preserved - PASS\n");
+
+    s.go_to_a();
+    if (s.get_state() != "ChildA") {
+        printf("FAIL: Expected ChildA\n");
+        assert(false);
+    }
+    log = s.get_log();
+    int exitBCount = std::count(log.begin(), log.end(), "ChildB:exit");
+    int enterACount = std::count(log.begin(), log.end(), "ChildA:enter");
+    if (exitBCount != 1) {
+        printf("FAIL: Expected ChildB:exit once\n");
+        assert(false);
+    }
+    if (enterACount != 2) {
+        printf("FAIL: Expected ChildA:enter twice\n");
+        assert(false);
+    }
+    printf("TC1.4.5: Transition B->A works with enter/exit - PASS\n");
+
+    s.forward_action();
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "ChildA:forward") == log.end()) {
+        printf("FAIL: Expected ChildA:forward\n");
+        assert(false);
+    }
+    int parentCount = std::count(log.begin(), log.end(), "Parent:forward_action");
+    if (parentCount != 2) {
+        printf("FAIL: Expected 2 Parent handlers\n");
+        assert(false);
+    }
+    printf("TC1.4.6: ChildA forwards after returning - PASS\n");
+
+    printf("PASS: HSM sibling transitions work correctly\n");
+    return 0;
+}

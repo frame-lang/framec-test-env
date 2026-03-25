@@ -6,7 +6,8 @@
 
 
 #include <iostream>
-#include <cstdio>
+#include <string>
+#include <cassert>
 
 class SFrameEvent {
 public:
@@ -91,7 +92,7 @@ private:
             return;
         } else if (__e._message == "g") {
             auto x = std::any_cast<std::string>(__e._parameters.at("x"));
-            { }
+            { ; }
             return;
         }
     }
@@ -110,18 +111,43 @@ public:
         __kernel(__frame_event);
     }
 
+    void e(std::string p, std::string q) {
+        std::unordered_map<std::string, std::any> __params;
+        __params["p"] = p;
+        __params["q"] = q;
+        SFrameEvent __e("e", std::move(__params));
+        SFrameContext __ctx(std::move(__e));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
+    }
+
+    void g(std::string x) {
+        std::unordered_map<std::string, std::any> __params;
+        __params["x"] = x;
+        SFrameEvent __e("g", std::move(__params));
+        SFrameContext __ctx(std::move(__e));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
+    }
+
 };
 
 // Stub functions for placeholder calls
 void native() {}
-void x_func() {}
+void x() {}
 
 // TAP test harness
 int main() {
     printf("TAP version 14\n");
     printf("1..1\n");
-    S s;
-    s.e(0, 0);
-    printf("ok 1 - multi_handler_manifest\n");
+    try {
+        S s;
+        s.e();
+        printf("ok 1 - multi_handler_manifest\n");
+    } catch (...) {
+        printf("not ok 1 - multi_handler_manifest\n");
+    }
     return 0;
 }

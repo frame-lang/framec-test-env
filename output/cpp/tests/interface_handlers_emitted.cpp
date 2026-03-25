@@ -84,7 +84,7 @@ private:
 
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
-            { }
+            { ; }
             return;
         }
     }
@@ -105,19 +105,25 @@ public:
     }
 
     void doThing() {
-        { }
+        { ; }
     }
 
 };
 
+// Stub functions for placeholder calls
+void native() {}
+void x() {}
+
+// TAP test harness
 int main() {
-    std::cout << "=== Test: Interface Handlers Emitted ===" << std::endl;
-    S s;
-
-    // Test that interface method e() is callable
-    s.e();
-    std::cout << "Called s.e()" << std::endl;
-
-    std::cout << "PASS: Interface handlers emitted correctly" << std::endl;
+    printf("TAP version 14\n");
+    printf("1..1\n");
+    try {
+        S s;
+        s.e();
+        printf("ok 1 - interface_handlers_emitted\n");
+    } catch (...) {
+        printf("not ok 1 - interface_handlers_emitted\n");
+    }
     return 0;
 }

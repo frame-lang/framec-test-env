@@ -1,84 +1,97 @@
 @@target cpp_17
 
 #include <iostream>
+#include <string>
 #include <cassert>
+#include <vector>
+#include <algorithm>
 
 @@system TransitionPopTest {
     interface:
-        start(): void
-        process(): void
-        get_state(): int
-        get_log_code(): int
+        start()
+        process()
+        get_state(): std::string
+        get_log(): std::vector<std::string>
 
     machine:
         $Idle {
             start() {
-                self->log_code = self->log_code + 1;  // "idle:start:push"
-                push$
+                log.push_back("idle:start:push");
+                `push$
                 -> $Working
             }
 
             process() {
-                self->log_code = self->log_code + 10;  // "idle:process"
+                log.push_back("idle:process");
             }
 
-            get_state(): int {
-                return 1
+            get_state(): std::string {
+                return std::string("Idle");
             }
 
-            get_log_code(): int {
-                return self->log_code;
+            get_log(): std::vector<std::string> {
+                return log;
             }
         }
 
         $Working {
             process() {
-                self->log_code = self->log_code + 100;  // "working:process:before_pop"
+                log.push_back("working:process:before_pop");
                 -> pop$
                 // This should NOT execute because pop transitions away
-                self->log_code = self->log_code + 1000;  // "working:process:after_pop"
+                log.push_back("working:process:after_pop");
             }
 
-            get_state(): int {
-                return 2
+            get_state(): std::string {
+                return std::string("Working");
             }
 
-            get_log_code(): int {
-                return self->log_code;
+            get_log(): std::vector<std::string> {
+                return log;
             }
         }
     domain:
-        int log_code
+        log: std::vector<std::string> = {}
 }
 
 int main() {
-    std::cout << "=== Test 20: Transition Pop ===" << std::endl;
+    printf("=== Test 20: Transition Pop (C++) ===\n");
     TransitionPopTest s;
 
-    // Initial state should be Idle (1)
-    int state = s.get_state();
-    assert(state == 1);
-    std::cout << "Initial state: " << state << " (Idle)" << std::endl;
+    if (s.get_state() != "Idle") {
+        printf("FAIL: Expected 'Idle', got '%s'\n", s.get_state().c_str());
+        assert(false);
+    }
+    printf("Initial state: %s\n", s.get_state().c_str());
 
-    // start() pushes Idle, transitions to Working
     s.start();
-    state = s.get_state();
-    assert(state == 2);
-    std::cout << "After start(): " << state << " (Working)" << std::endl;
+    if (s.get_state() != "Working") {
+        printf("FAIL: Expected 'Working', got '%s'\n", s.get_state().c_str());
+        assert(false);
+    }
+    printf("After start(): %s\n", s.get_state().c_str());
 
-    // process() in Working does pop transition back to Idle
     s.process();
-    state = s.get_state();
-    assert(state == 1);
-    std::cout << "After process() with pop: " << state << " (Idle)" << std::endl;
+    if (s.get_state() != "Idle") {
+        printf("FAIL: Expected 'Idle' after pop, got '%s'\n", s.get_state().c_str());
+        assert(false);
+    }
+    printf("After process() with pop: %s\n", s.get_state().c_str());
 
-    int log_code = s.get_log_code();
-    std::cout << "Log code: " << log_code << std::endl;
+    auto log = s.get_log();
+    if (std::find(log.begin(), log.end(), "idle:start:push") == log.end()) {
+        printf("FAIL: Expected 'idle:start:push' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "working:process:before_pop") == log.end()) {
+        printf("FAIL: Expected 'working:process:before_pop' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "working:process:after_pop") != log.end()) {
+        printf("FAIL: Should NOT have 'working:process:after_pop' in log\n");
+        assert(false);
+    }
 
-    // Verify log contents: 1 (idle:start) + 100 (working:process:before_pop) = 101
-    // Should NOT have +1000 (working:process:after_pop)
-    assert(log_code == 101);
-
-    std::cout << "PASS: Transition pop works correctly" << std::endl;
+    printf("PASS: Transition pop works correctly\n");
     return 0;
 }

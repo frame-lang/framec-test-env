@@ -8,6 +8,8 @@
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <vector>
+#include <algorithm>
 
 class HSMForwardFrameEvent {
 public:
@@ -48,7 +50,7 @@ private:
     std::vector<std::unique_ptr<HSMForwardCompartment>> _state_stack;
     std::vector<HSMForwardFrameContext> _context_stack;
 
-    int count = 0;;
+    log: std::vector<std::string> = {};
 
     void __kernel(HSMForwardFrameEvent& __e) {
         __router(__e);
@@ -89,19 +91,19 @@ private:
     void _state_Child(HSMForwardFrameEvent& __e) {
         if (__e._message == "event_a") {
             {
-            count += 1;
+            log.push_back("Child:event_a");
             }
             return;
         } else if (__e._message == "event_b") {
             {
-            count += 10;
+            log.push_back("Child:event_b_forward");
             _state_Parent(__e);
             return;
             }
             return;
-        } else if (__e._message == "get_count") {
+        } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = count;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -111,17 +113,17 @@ private:
     void _state_Parent(HSMForwardFrameEvent& __e) {
         if (__e._message == "event_a") {
             {
-            count += 100;
+            log.push_back("Parent:event_a");
             }
             return;
         } else if (__e._message == "event_b") {
             {
-            count += 1000;
+            log.push_back("Parent:event_b");
             }
             return;
-        } else if (__e._message == "get_count") {
+        } else if (__e._message == "get_log") {
             {
-            _context_stack.back()._return = count;
+            _context_stack.back()._return = log;
             return;
             }
             return;
@@ -131,7 +133,7 @@ private:
 public:
     HSMForward() {
         __compartment = std::make_unique<HSMForwardCompartment>("Child");
-        count = 0;;
+        log = {};
         HSMForwardFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -152,12 +154,12 @@ public:
         _context_stack.pop_back();
     }
 
-    int get_count() {
-        HSMForwardFrameEvent __e("get_count");
-        HSMForwardFrameContext __ctx(std::move(__e), std::any(int()));
+    std::vector<std::string> get_log() {
+        HSMForwardFrameEvent __e("get_log");
+        HSMForwardFrameContext __ctx(std::move(__e), std::any(std::vector<std::string>()));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<int>(std::move(_context_stack.back()._return));
+        auto __result = std::any_cast<std::vector<std::string>>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
         return __result;
     }
@@ -165,21 +167,29 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 08: HSM Forward ===" << std::endl;
+    printf("=== Test 08: HSM Forward ===\n");
     HSMForward s;
 
-    // event_a should be handled by Child (no forward)
     s.event_a();
-    int count = s.get_count();
-    assert(count == 1);
-    std::cout << "After event_a: count = " << count << " (expected 1)" << std::endl;
+    auto log = s.get_log();
+    if (std::find(log.begin(), log.end(), "Child:event_a") == log.end()) {
+        printf("FAIL: Expected 'Child:event_a' in log\n");
+        assert(false);
+    }
+    printf("After event_a: Child:event_a found\n");
 
-    // event_b should forward to Parent (+10 in Child, +1000 in Parent)
     s.event_b();
-    count = s.get_count();
-    assert(count == 1011);
-    std::cout << "After event_b (forwarded): count = " << count << " (expected 1011)" << std::endl;
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "Child:event_b_forward") == log.end()) {
+        printf("FAIL: Expected 'Child:event_b_forward' in log\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "Parent:event_b") == log.end()) {
+        printf("FAIL: Expected 'Parent:event_b' in log (forwarded)\n");
+        assert(false);
+    }
+    printf("After event_b (forwarded): Child:event_b_forward and Parent:event_b found\n");
 
-    std::cout << "PASS: 08 hsm" << std::endl;
+    printf("PASS: HSM forward works correctly\n");
     return 0;
 }

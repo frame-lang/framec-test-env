@@ -1,0 +1,102 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <vector>
+
+// Test: Context Data (@@:data)
+// Validates call-scoped data that persists across handler -> <$ -> $> chain
+
+@@system ContextDataTest {
+    interface:
+        process_with_data(value: int): std::string
+        check_data_isolation(): std::string
+        transition_preserves_data(x: int): std::string
+
+    machine:
+        $Start {
+            process_with_data(value: int): std::string {
+                @@:data["input"] = @@.value;
+                @@:data["trace"] = std::vector<std::string>{"handler"};
+
+                @@:return = std::string("processed:") + std::to_string(@@:data["input"]);
+            }
+
+            check_data_isolation(): std::string {
+                @@:data["outer"] = std::string("outer_value");
+                std::string inner_result = this->process_with_data(99);
+                @@:return = std::string("outer_data=") + @@:data["outer"] + ",inner=" + inner_result;
+            }
+
+            transition_preserves_data(x: int): std::string {
+                @@:data["started_in"] = std::string("Start");
+                @@:data["value"] = @@.x;
+                @@:data["trace"] = std::vector<std::string>{"handler"};
+                -> $End
+            }
+
+            <$() {
+                auto& trace = @@:data["trace"];
+                trace.push_back("exit");
+            }
+        }
+
+        $End {
+            $>() {
+                auto& trace = @@:data["trace"];
+                trace.push_back("enter");
+                @@:data["ended_in"] = std::string("End");
+
+                std::string trace_str = "";
+                for (size_t i = 0; i < trace.size(); i++) {
+                    if (i > 0) trace_str += ",";
+                    trace_str += trace[i];
+                }
+                @@:return = std::string("from=") + @@:data["started_in"] + ",to=" + @@:data["ended_in"] + ",value=" + std::to_string(@@:data["value"]) + ",trace=" + trace_str;
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 38: Context Data ===\n");
+
+    // Test 1: Basic data set/get
+    ContextDataTest s1;
+    std::string result = s1.process_with_data(42);
+    if (result != "processed:42") {
+        printf("FAIL: Expected 'processed:42', got '%s'\n", result.c_str());
+        assert(false);
+    }
+    printf("1. process_with_data(42) = '%s'\n", result.c_str());
+
+    // Test 2: Data isolation
+    ContextDataTest s2;
+    result = s2.check_data_isolation();
+    std::string expected = "outer_data=outer_value,inner=processed:99";
+    if (result != expected) {
+        printf("FAIL: Expected '%s', got '%s'\n", expected.c_str(), result.c_str());
+        assert(false);
+    }
+    printf("2. check_data_isolation() = '%s'\n", result.c_str());
+
+    // Test 3: Data preserved across transition
+    ContextDataTest s3;
+    result = s3.transition_preserves_data(100);
+    if (result.find("from=Start") == std::string::npos) {
+        printf("FAIL: Expected 'from=Start' in '%s'\n", result.c_str());
+        assert(false);
+    }
+    if (result.find("to=End") == std::string::npos) {
+        printf("FAIL: Expected 'to=End' in '%s'\n", result.c_str());
+        assert(false);
+    }
+    if (result.find("value=100") == std::string::npos) {
+        printf("FAIL: Expected 'value=100' in '%s'\n", result.c_str());
+        assert(false);
+    }
+    printf("3. transition_preserves_data(100) = '%s'\n", result.c_str());
+
+    printf("PASS: Context data works correctly\n");
+    return 0;
+}

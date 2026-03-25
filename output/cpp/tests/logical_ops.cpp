@@ -5,65 +5,71 @@
 #include <memory>
 
 
+// Test: Logical operators in Frame handlers
+// Tests: &&, ||, !
+
 #include <iostream>
 #include <string>
 #include <cassert>
 
-class SFrameEvent {
+class LogicalTestFrameEvent {
 public:
     std::string _message;
     std::unordered_map<std::string, std::any> _parameters;
 
-    SFrameEvent(const std::string& message, std::unordered_map<std::string, std::any> params = {})
+    LogicalTestFrameEvent(const std::string& message, std::unordered_map<std::string, std::any> params = {})
         : _message(message), _parameters(std::move(params)) {}
 };
 
-class SFrameContext {
+class LogicalTestFrameContext {
 public:
-    SFrameEvent _event;
+    LogicalTestFrameEvent _event;
     std::any _return;
     std::unordered_map<std::string, std::any> _data;
 
-    SFrameContext(SFrameEvent event, std::any default_return = {})
+    LogicalTestFrameContext(LogicalTestFrameEvent event, std::any default_return = {})
         : _event(std::move(event)), _return(std::move(default_return)) {}
 };
 
-class SCompartment {
+class LogicalTestCompartment {
 public:
     std::string state;
     std::unordered_map<std::string, std::any> state_args;
     std::unordered_map<std::string, std::any> state_vars;
     std::unordered_map<std::string, std::any> enter_args;
     std::unordered_map<std::string, std::any> exit_args;
-    std::unique_ptr<SFrameEvent> forward_event;
-    std::unique_ptr<SCompartment> parent_compartment;
+    std::unique_ptr<LogicalTestFrameEvent> forward_event;
+    std::unique_ptr<LogicalTestCompartment> parent_compartment;
 
-    explicit SCompartment(const std::string& state) : state(state) {}
+    explicit LogicalTestCompartment(const std::string& state) : state(state) {}
 };
 
-class S {
+class LogicalTest {
 private:
-    std::unique_ptr<SCompartment> __compartment;
-    std::unique_ptr<SCompartment> __next_compartment;
-    std::vector<std::unique_ptr<SCompartment>> _state_stack;
-    std::vector<SFrameContext> _context_stack;
+    std::unique_ptr<LogicalTestCompartment> __compartment;
+    std::unique_ptr<LogicalTestCompartment> __next_compartment;
+    std::vector<std::unique_ptr<LogicalTestCompartment>> _state_stack;
+    std::vector<LogicalTestFrameContext> _context_stack;
 
-    void __kernel(SFrameEvent& __e) {
+    a: bool = true;
+    b: bool = false;
+
+    void __kernel(LogicalTestFrameEvent& __e) {
         __router(__e);
         while (__next_compartment) {
             auto next_compartment = std::move(__next_compartment);
-            SFrameEvent exit_event("<$");
+            LogicalTestFrameEvent exit_event("<$");
             __router(exit_event);
             __compartment = std::move(next_compartment);
             if (!__compartment->forward_event) {
-                SFrameEvent enter_event("$>");
+                LogicalTestFrameEvent enter_event("$>");
                 __router(enter_event);
             } else {
                 auto forward_event = std::move(__compartment->forward_event);
                 if (forward_event->_message == "$>") {
                     __router(*forward_event);
                 } else {
-                    SFrameEvent enter_event("$>");
+                    LogicalTestFrameEvent enter_event("$>");
                     __router(enter_event);
                     __router(*forward_event);
                 }
@@ -71,58 +77,161 @@ private:
         }
     }
 
-    void __router(SFrameEvent& __e) {
+    void __router(LogicalTestFrameEvent& __e) {
         const auto& state_name = __compartment->state;
-        if (state_name == "A") {
-            _state_A(__e);
-        } else if (state_name == "P") {
-            _state_P(__e);
+        if (state_name == "Ready") {
+            _state_Ready(__e);
         }
     }
 
-    void __transition(std::unique_ptr<SCompartment> next) {
+    void __transition(std::unique_ptr<LogicalTestCompartment> next) {
         __next_compartment = std::move(next);
     }
 
-    void _state_A(SFrameEvent& __e) {
-        if (__e._message == "e") {
+    void _state_Ready(LogicalTestFrameEvent& __e) {
+        if (__e._message == "test_and") {
             {
-            int a = 1;
-            int b = 0;
             if (a && b) {
-            _state_P(__e);
-            return;
-            } else if (a || b) {
-            _state_P(__e);
-            return;
+            _context_stack.back()._return = true;
             } else {
-            _state_P(__e);
-            return;
+            _context_stack.back()._return = false;
             }
+            }
+            return;
+        } else if (__e._message == "test_or") {
+            {
+            if (a || b) {
+            _context_stack.back()._return = true;
+            } else {
+            _context_stack.back()._return = false;
+            }
+            }
+            return;
+        } else if (__e._message == "test_not") {
+            {
+            if (!a) {
+            _context_stack.back()._return = true;
+            } else {
+            _context_stack.back()._return = false;
+            }
+            }
+            return;
+        } else if (__e._message == "set_values") {
+            auto x = std::any_cast<bool>(__e._parameters.at("x"));
+            auto y = std::any_cast<bool>(__e._parameters.at("y"));
+            {
+            a = x;
+            b = y;
             }
             return;
         }
     }
 
-    void _state_P(SFrameEvent& __e) {
+public:
+    LogicalTest() {
+        __compartment = std::make_unique<LogicalTestCompartment>("Ready");
+        a = true;
+        b = false;
+        LogicalTestFrameEvent __frame_event("$>");
+        __kernel(__frame_event);
     }
 
-public:
-    S() {
-        __compartment = std::make_unique<SCompartment>("A");
-        SFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+    bool test_and() {
+        LogicalTestFrameEvent __e("test_and");
+        LogicalTestFrameContext __ctx(std::move(__e), std::any(bool()));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        auto __result = std::any_cast<bool>(std::move(_context_stack.back()._return));
+        _context_stack.pop_back();
+        return __result;
+    }
+
+    bool test_or() {
+        LogicalTestFrameEvent __e("test_or");
+        LogicalTestFrameContext __ctx(std::move(__e), std::any(bool()));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        auto __result = std::any_cast<bool>(std::move(_context_stack.back()._return));
+        _context_stack.pop_back();
+        return __result;
+    }
+
+    bool test_not() {
+        LogicalTestFrameEvent __e("test_not");
+        LogicalTestFrameContext __ctx(std::move(__e), std::any(bool()));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        auto __result = std::any_cast<bool>(std::move(_context_stack.back()._return));
+        _context_stack.pop_back();
+        return __result;
+    }
+
+    void set_values(bool x, bool y) {
+        std::unordered_map<std::string, std::any> __params;
+        __params["x"] = x;
+        __params["y"] = y;
+        LogicalTestFrameEvent __e("set_values", std::move(__params));
+        LogicalTestFrameContext __ctx(std::move(__e));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
 };
 
 int main() {
-    std::cout << "=== Test: Logical Operators ===" << std::endl;
-    S s;
+    printf("TAP version 14\n");
+    printf("1..6\n");
 
-    // Call event handler that exercises logical operators
-    s.e();
+    LogicalTest s;
 
-    std::cout << "PASS: logical_ops" << std::endl;
+    // a=true, b=false: true && false = false
+    if (!s.test_and()) {
+        printf("ok 1 - true && false is false\n");
+    } else {
+        printf("not ok 1 - true && false is false\n");
+    }
+
+    // a=true, b=false: true || false = true
+    if (s.test_or()) {
+        printf("ok 2 - true || false is true\n");
+    } else {
+        printf("not ok 2 - true || false is true\n");
+    }
+
+    // a=true: !true = false
+    if (!s.test_not()) {
+        printf("ok 3 - !true is false\n");
+    } else {
+        printf("not ok 3 - !true is false\n");
+    }
+
+    // Change values: a=true, b=true
+    s.set_values(true, true);
+
+    // true && true = true
+    if (s.test_and()) {
+        printf("ok 4 - true && true is true\n");
+    } else {
+        printf("not ok 4 - true && true is true\n");
+    }
+
+    // Change values: a=false, b=false
+    s.set_values(false, false);
+
+    // false || false = false
+    if (!s.test_or()) {
+        printf("ok 5 - false || false is false\n");
+    } else {
+        printf("not ok 5 - false || false is false\n");
+    }
+
+    // !false = true
+    if (s.test_not()) {
+        printf("ok 6 - !false is true\n");
+    } else {
+        printf("not ok 6 - !false is true\n");
+    }
+
     return 0;
 }

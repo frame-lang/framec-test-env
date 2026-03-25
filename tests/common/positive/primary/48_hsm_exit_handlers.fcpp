@@ -1,0 +1,163 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <vector>
+#include <algorithm>
+
+@@system HSMExitHandlers {
+    interface:
+        go_to_other()
+        go_to_parent()
+        go_to_child()
+        get_log(): std::vector<std::string>
+        get_state(): std::string
+        get_child_var(): int
+
+    machine:
+        $Child => $Parent {
+            $.child_var: int = 42
+
+            $>() {
+                log.push_back("Child:enter");
+            }
+
+            <$() {
+                int val = $.child_var;
+                log.push_back(std::string("Child:exit(var=") + std::to_string(val) + ")");
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+
+            get_state(): std::string {
+                return std::string("Child");
+            }
+
+            get_child_var(): int {
+                return $.child_var;
+            }
+        }
+
+        $Parent {
+            $>() {
+                log.push_back("Parent:enter");
+            }
+
+            <$() {
+                log.push_back("Parent:exit");
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+
+            get_state(): std::string {
+                return std::string("Parent");
+            }
+
+            get_child_var(): int {
+                return -1;
+            }
+        }
+
+        $Other {
+            $>() {
+                log.push_back("Other:enter");
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+
+            get_state(): std::string {
+                return std::string("Other");
+            }
+
+            get_child_var(): int {
+                return -1;
+            }
+        }
+    domain:
+        log: std::vector<std::string> = {}
+}
+
+int main() {
+    printf("=== Test 48: HSM Exit Handlers ===\n");
+    HSMExitHandlers s;
+
+    auto log = s.get_log();
+    if (std::find(log.begin(), log.end(), "Child:enter") == log.end()) {
+        printf("FAIL: Expected Child:enter on init\n");
+        assert(false);
+    }
+    if (s.get_state() != "Child") {
+        printf("FAIL: Expected Child\n");
+        assert(false);
+    }
+    printf("TC2.4.0: Initial state is Child with enter - PASS\n");
+
+    s.go_to_other();
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "Child:exit(var=42)") == log.end()) {
+        printf("FAIL: Expected Child:exit\n");
+        assert(false);
+    }
+    if (std::find(log.begin(), log.end(), "Other:enter") == log.end()) {
+        printf("FAIL: Expected Other:enter\n");
+        assert(false);
+    }
+    printf("TC2.4.1: Child exit fires when transitioning out - PASS\n");
+
+    if (std::find(log.begin(), log.end(), "Parent:exit") != log.end()) {
+        printf("FAIL: Parent:exit should NOT fire for child exit\n");
+        assert(false);
+    }
+    printf("TC2.4.2: Parent exit NOT fired for child exit - PASS\n");
+
+    printf("TC2.4.3: Exit handler accesses state var (var=42) - PASS\n");
+
+    s.go_to_parent();
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "Parent:enter") == log.end()) {
+        printf("FAIL: Expected Parent:enter\n");
+        assert(false);
+    }
+
+    s.go_to_other();
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "Parent:exit") == log.end()) {
+        printf("FAIL: Expected Parent:exit\n");
+        assert(false);
+    }
+    printf("TC2.4.4: Parent exit fires when leaving parent - PASS\n");
+
+    printf("PASS: HSM exit handlers work correctly\n");
+    return 0;
+}

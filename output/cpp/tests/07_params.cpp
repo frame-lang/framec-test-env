@@ -48,7 +48,7 @@ private:
     std::vector<std::unique_ptr<WithParamsCompartment>> _state_stack;
     std::vector<WithParamsFrameContext> _context_stack;
 
-    int total = 0;;
+    total: int = 0;
 
     void __kernel(WithParamsFrameEvent& __e) {
         __router(__e);
@@ -91,7 +91,7 @@ private:
             auto initial = std::any_cast<int>(__e._parameters.at("initial"));
             {
             total = initial;
-            std::cout << "Started with initial value: " << initial << std::endl;
+            printf("Started with initial value: %d\n", initial);
             auto __comp = std::make_unique<WithParamsCompartment>("Running");
             __transition(std::move(__comp));
             return;
@@ -100,7 +100,7 @@ private:
         } else if (__e._message == "add") {
             auto value = std::any_cast<int>(__e._parameters.at("value"));
             {
-            std::cout << "Cannot add in Idle state" << std::endl;
+            printf("Cannot add in Idle state\n");
             }
             return;
         } else if (__e._message == "multiply") {
@@ -124,14 +124,14 @@ private:
         if (__e._message == "start") {
             auto initial = std::any_cast<int>(__e._parameters.at("initial"));
             {
-            std::cout << "Already running" << std::endl;
+            printf("Already running\n");
             }
             return;
         } else if (__e._message == "add") {
             auto value = std::any_cast<int>(__e._parameters.at("value"));
             {
             total += value;
-            std::cout << "Added " << value << ", total is now " << total << std::endl;
+            printf("Added %d, total is now %d\n", value, total);
             }
             return;
         } else if (__e._message == "multiply") {
@@ -140,7 +140,7 @@ private:
             {
             int result = a * b;
             total += result;
-            std::cout << "Multiplied " << a << " * " << b << " = " << result << ", total is now " << total << std::endl;
+            printf("Multiplied %d * %d = %d, total is now %d\n", a, b, result, total);
             _context_stack.back()._return = result;
             return;
             }
@@ -157,7 +157,7 @@ private:
 public:
     WithParams() {
         __compartment = std::make_unique<WithParamsCompartment>("Idle");
-        total = 0;;
+        total = 0;
         WithParamsFrameEvent __frame_event("$>");
         __kernel(__frame_event);
     }
@@ -208,32 +208,43 @@ public:
 };
 
 int main() {
-    std::cout << "=== Test 07: Handler Parameters ===" << std::endl;
+    printf("=== Test 07: Handler Parameters ===\n");
     WithParams s;
 
-    // Initial total should be 0
     int total = s.get_total();
-    assert(total == 0);
+    if (total != 0) {
+        printf("FAIL: Expected initial total=0, got %d\n", total);
+        assert(false);
+    }
 
-    // Start with initial value
     s.start(100);
     total = s.get_total();
-    assert(total == 100);
-    std::cout << "After start(100): total = " << total << std::endl;
+    if (total != 100) {
+        printf("FAIL: Expected total=100, got %d\n", total);
+        assert(false);
+    }
+    printf("After start(100): total = %d\n", total);
 
-    // Add value
     s.add(25);
     total = s.get_total();
-    assert(total == 125);
-    std::cout << "After add(25): total = " << total << std::endl;
+    if (total != 125) {
+        printf("FAIL: Expected total=125, got %d\n", total);
+        assert(false);
+    }
+    printf("After add(25): total = %d\n", total);
 
-    // Multiply with two params
     int result = s.multiply(3, 5);
-    assert(result == 15);
+    if (result != 15) {
+        printf("FAIL: Expected multiply result=15, got %d\n", result);
+        assert(false);
+    }
     total = s.get_total();
-    assert(total == 140);
-    std::cout << "After multiply(3,5): result = " << result << ", total = " << total << std::endl;
+    if (total != 140) {
+        printf("FAIL: Expected total=140, got %d\n", total);
+        assert(false);
+    }
+    printf("After multiply(3,5): result = %d, total = %d\n", result, total);
 
-    std::cout << "PASS: 07 params" << std::endl;
+    printf("PASS: Handler parameters work correctly\n");
     return 0;
 }

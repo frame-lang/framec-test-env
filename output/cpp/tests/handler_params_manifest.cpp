@@ -6,7 +6,8 @@
 
 
 #include <iostream>
-#include <cstdio>
+#include <string>
+#include <cassert>
 
 class SFrameEvent {
 public:
@@ -110,17 +111,33 @@ public:
         __kernel(__frame_event);
     }
 
+    void e(std::string x, std::string y) {
+        std::unordered_map<std::string, std::any> __params;
+        __params["x"] = x;
+        __params["y"] = y;
+        SFrameEvent __e("e", std::move(__params));
+        SFrameContext __ctx(std::move(__e));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
+    }
+
 };
 
 // Stub functions for placeholder calls
-void native() {}
+void native_func() {}
+void x_func() {}
 
 // TAP test harness
 int main() {
     printf("TAP version 14\n");
     printf("1..1\n");
-    S s;
-    // Note: e() takes parameters, but for manifest test we just check compilation
-    printf("ok 1 - handler_params_manifest\n");
+    try {
+        S s;
+        s.e();
+        printf("ok 1 - handler_params_manifest\n");
+    } catch (...) {
+        printf("not ok 1 - handler_params_manifest\n");
+    }
     return 0;
 }

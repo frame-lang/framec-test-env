@@ -1,0 +1,107 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <vector>
+#include <algorithm>
+
+@@system HSMEnterParentOnly {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): std::vector<std::string>
+        get_state(): std::string
+
+    machine:
+        $Start {
+            go_to_child() {
+                -> $Child
+            }
+            go_to_parent() {
+                -> $Parent
+            }
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+            get_state(): std::string {
+                return std::string("Start");
+            }
+        }
+
+        $Child => $Parent {
+            go_to_parent() {
+                -> $Parent
+            }
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+            get_state(): std::string {
+                return std::string("Child");
+            }
+        }
+
+        $Parent {
+            $>() {
+                log.push_back("Parent:enter");
+            }
+            go_to_child() {
+                -> $Child
+            }
+            get_log(): std::vector<std::string> {
+                return log;
+            }
+            get_state(): std::string {
+                return std::string("Parent");
+            }
+        }
+    domain:
+        log: std::vector<std::string> = {}
+}
+
+int main() {
+    printf("=== Test 46: HSM Enter in Parent Only ===\n");
+    HSMEnterParentOnly s;
+
+    s.go_to_child();
+    if (s.get_state() != "Child") {
+        printf("FAIL: Expected Child\n");
+        assert(false);
+    }
+    auto log = s.get_log();
+    printf("TC2.2.1: Child enters without error - PASS\n");
+
+    if (std::find(log.begin(), log.end(), "Parent:enter") != log.end()) {
+        printf("FAIL: Parent:enter should NOT fire for child entry\n");
+        assert(false);
+    }
+    printf("TC2.2.2: Parent enter NOT auto-fired for child - PASS\n");
+
+    s.go_to_parent();
+    if (s.get_state() != "Parent") {
+        printf("FAIL: Expected Parent\n");
+        assert(false);
+    }
+    log = s.get_log();
+    if (std::find(log.begin(), log.end(), "Parent:enter") == log.end()) {
+        printf("FAIL: Expected Parent:enter when transitioning to Parent\n");
+        assert(false);
+    }
+    printf("TC2.2.3: Parent enter fires when transitioning to Parent - PASS\n");
+
+    s.go_to_child();
+    if (s.get_state() != "Child") {
+        printf("FAIL: Expected Child\n");
+        assert(false);
+    }
+    log = s.get_log();
+    int count = std::count(log.begin(), log.end(), "Parent:enter");
+    if (count != 1) {
+        printf("FAIL: Expected exactly 1 Parent:enter\n");
+        assert(false);
+    }
+    printf("TC2.2.4: Return to child, parent enter count unchanged - PASS\n");
+
+    printf("PASS: HSM enter in parent only works correctly\n");
+    return 0;
+}

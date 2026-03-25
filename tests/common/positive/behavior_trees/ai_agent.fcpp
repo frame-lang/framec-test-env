@@ -1,0 +1,272 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+// Behavior Tree implemented as HSM with tick-driven re-evaluation.
+//
+// Tree structure (Selector = priority-ordered, Sequence = ordered steps):
+//
+//   $Root (Selector)
+//   +-- $Survival (Selector -- highest priority)
+//   |   +-- $Flee (Action -- flee when health < 20)
+//   +-- $Combat (Sequence)
+//   |   +-- $Approach (Action -- move toward enemy)
+//   |   +-- $Attack (Action -- attack when in range)
+//   +-- $Idle (Selector -- lowest priority)
+//       +-- $Patrol (Action -- walk patrol route)
+//
+// On every tick:
+//   - Root checks conditions top-down (priority)
+//   - Transitions to highest-priority subtree whose condition is met
+//   - Leaf states check their preconditions each tick and => $^ if invalid
+//   - Domain vars act as blackboard
+
+@@system AiAgent {
+    operations:
+        set_health(v: number) { health = v; }
+        set_enemy_distance(v: number) { enemy_distance = v; }
+        set_enemy_health(v: number) { enemy_health = v; }
+
+    interface:
+        tick()
+        get_state(): string = "Unknown"
+        get_action_log(): string = ""
+
+    machine:
+        $Root {
+            $>() {
+                action_log = "";
+            }
+
+            tick() {
+                // Selector: check conditions in priority order
+                if (health < 20) {
+                    -> $Flee
+                }
+                if (enemy_distance < 50) {
+                    -> $Approach
+                }
+                -> $Patrol
+            }
+
+            get_state(): string { return std::string("Root") }
+        }
+
+        $Flee {
+            $>() {
+                action_log = action_log + "flee,";
+            }
+
+            tick() {
+                // Precondition: still low health?
+                if (health >= 20) {
+                    // Condition no longer met -- back to root for re-evaluation
+                    -> $Root
+                }
+
+                // Action: flee (increase distance, recover health)
+                enemy_distance = enemy_distance + 10;
+                health = health + 5;
+                action_log = action_log + "flee,";
+            }
+
+            get_state(): string { return std::string("Flee") }
+        }
+
+        $Approach {
+            $>() {
+                action_log = action_log + "approach,";
+            }
+
+            tick() {
+                // Survival interrupt: flee takes priority
+                if (health < 20) {
+                    -> $Flee
+                }
+
+                // Precondition: enemy still visible?
+                if (enemy_distance >= 50) {
+                    -> $Root
+                }
+
+                // Action: move closer
+                if (enemy_distance > 5) {
+                    enemy_distance = enemy_distance - 10;
+                    action_log = action_log + "approach,";
+                } else {
+                    // In range -- sequence continues to Attack
+                    -> $Attack
+                }
+            }
+
+            get_state(): string { return std::string("Approach") }
+        }
+
+        $Attack {
+            $>() {
+                action_log = action_log + "attack,";
+            }
+
+            tick() {
+                // Survival interrupt
+                if (health < 20) {
+                    -> $Flee
+                }
+
+                // Precondition: still in range?
+                if (enemy_distance > 5) {
+                    // Enemy moved away -- go back to approach
+                    -> $Approach
+                }
+
+                // Precondition: enemy still alive?
+                if (enemy_health <= 0) {
+                    // Victory -- back to idle
+                    enemy_distance = 100;
+                    -> $Root
+                }
+
+                // Action: attack
+                enemy_health = enemy_health - 25;
+                action_log = action_log + "attack,";
+            }
+
+            get_state(): string { return std::string("Attack") }
+        }
+
+        $Patrol {
+            $>() {
+                action_log = action_log + "patrol,";
+            }
+
+            tick() {
+                // Higher-priority interrupt: combat
+                if (enemy_distance < 50) {
+                    -> $Approach
+                }
+
+                // Higher-priority interrupt: survival
+                if (health < 20) {
+                    -> $Flee
+                }
+
+                // Action: patrol
+                patrol_step = patrol_step + 1;
+                action_log = action_log + "patrol,";
+            }
+
+            get_state(): string { return std::string("Patrol") }
+        }
+
+    domain:
+        health: number = 100
+        enemy_distance: number = 100
+        enemy_health: number = 100
+        patrol_step: number = 0
+        action_log: string = ""
+}
+
+
+// ============================================================
+// Test Harness
+// ============================================================
+
+void assert_state(AiAgent& agent, const std::string& expected, const std::string& label) {
+    auto actual = agent.get_state();
+    if (actual != expected) {
+        printf("FAIL: %s — expected '%s', got '%s'\n", label.c_str(), expected.c_str(), actual.c_str());
+        assert(false && "State assertion failed");
+    }
+}
+
+void test_priority_interrupt() {
+    AiAgent agent;
+
+    // No enemy, full health -> should patrol
+    agent.tick();
+    assert_state(agent, "Patrol", "initial patrol");
+
+    // Enemy appears at distance 30 -> should approach
+    agent.set_enemy_distance(30);
+    agent.tick();
+    assert_state(agent, "Approach", "enemy triggers approach");
+
+    // Health drops critically -> should flee (interrupts combat)
+    agent.set_health(10);
+    agent.tick();
+    assert_state(agent, "Flee", "low health interrupts combat");
+
+    // Health recovers -> flee transitions to root, then next tick re-evaluates
+    agent.set_health(50);
+    agent.set_enemy_distance(20);
+    agent.tick();  // Flee sees health OK -> transitions to Root
+    assert_state(agent, "Root", "flee exits to root");
+    agent.tick();  // Root re-evaluates -> enemy near -> approach
+    assert_state(agent, "Approach", "health recovered, back to combat");
+
+    printf("PASS: BT priority interrupt\n");
+}
+
+void test_sequence_completion() {
+    AiAgent agent;
+
+    // Enemy at distance 30
+    agent.set_enemy_distance(30);
+    agent.tick();
+    assert_state(agent, "Approach", "start approach");
+
+    // Tick: approach reduces distance
+    agent.tick();
+    assert_state(agent, "Approach", "still approaching");
+
+    // Tick: now close enough (distance <= 5) -> transitions to Attack
+    agent.set_enemy_distance(5);
+    agent.tick();
+    assert_state(agent, "Attack", "in range, attacking");
+
+    // Tick: attack deals damage
+    agent.tick();
+    assert_state(agent, "Attack", "still attacking");
+
+    // Enemy dies -> Attack transitions to Root
+    agent.set_enemy_health(0);
+    agent.tick();
+    assert_state(agent, "Root", "enemy dead, back to root");
+    agent.tick();  // Root re-evaluates -> no enemy -> patrol
+    assert_state(agent, "Patrol", "enemy dead, patrol");
+
+    printf("PASS: BT sequence completion\n");
+}
+
+void test_re_evaluation() {
+    AiAgent agent;
+
+    // Enemy at distance 30 -> approach
+    agent.set_enemy_distance(30);
+    agent.tick();
+    assert_state(agent, "Approach", "approaching");
+
+    // Enemy runs away (distance > 50) -> back to root, then patrol
+    agent.set_enemy_distance(60);
+    agent.tick();  // Approach sees no enemy -> Root
+    assert_state(agent, "Root", "enemy fled, root");
+    agent.tick();  // Root -> patrol
+    assert_state(agent, "Patrol", "enemy fled, patrol");
+
+    // Enemy comes back
+    agent.set_enemy_distance(10);
+    agent.tick();
+    assert_state(agent, "Approach", "enemy back, approach again");
+
+    printf("PASS: BT re-evaluation\n");
+}
+
+int main() {
+    test_priority_interrupt();
+    test_sequence_completion();
+    test_re_evaluation();
+    printf("PASS: All behavior tree tests passed\n");
+    return 0;
+}

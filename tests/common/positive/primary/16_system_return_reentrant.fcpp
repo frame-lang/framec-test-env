@@ -1,0 +1,90 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+// Tests that nested interface calls maintain separate return contexts
+
+@@system SystemReturnReentrantTest {
+    interface:
+        outer_call(): std::string
+        inner_call(): std::string
+        nested_call(): std::string
+        get_log(): std::string
+
+    machine:
+        $Start {
+            $.log: std::string = ""
+
+            outer_call(): std::string {
+                $.log = $.log + "outer_start,";
+                std::string inner_result = this->inner_call();
+                $.log = $.log + "outer_after_inner,";
+                return std::string("outer_result:") + inner_result;
+            }
+
+            inner_call(): std::string {
+                $.log = $.log + "inner,";
+                return std::string("inner_result");
+            }
+
+            nested_call(): std::string {
+                $.log = $.log + "nested_start,";
+                std::string result1 = this->inner_call();
+                std::string result2 = this->outer_call();
+                $.log = $.log + "nested_end,";
+                return std::string("nested:") + result1 + "+" + result2;
+            }
+
+            get_log(): std::string {
+                return $.log;
+            }
+        }
+}
+
+int main() {
+    printf("=== Test 16: System Return Reentrant (Nested Calls) ===\n");
+
+    SystemReturnReentrantTest s1;
+    std::string result1 = s1.inner_call();
+    if (result1 != "inner_result") {
+        printf("FAIL: Expected 'inner_result', got '%s'\n", result1.c_str());
+        assert(false);
+    }
+    printf("1. inner_call() = '%s'\n", result1.c_str());
+
+    SystemReturnReentrantTest s2;
+    std::string result2 = s2.outer_call();
+    if (result2 != "outer_result:inner_result") {
+        printf("FAIL: Expected 'outer_result:inner_result', got '%s'\n", result2.c_str());
+        assert(false);
+    }
+    std::string log2 = s2.get_log();
+    if (log2.find("outer_start") == std::string::npos) {
+        printf("FAIL: Missing outer_start in log: %s\n", log2.c_str());
+        assert(false);
+    }
+    if (log2.find("inner") == std::string::npos) {
+        printf("FAIL: Missing inner in log: %s\n", log2.c_str());
+        assert(false);
+    }
+    if (log2.find("outer_after_inner") == std::string::npos) {
+        printf("FAIL: Missing outer_after_inner in log: %s\n", log2.c_str());
+        assert(false);
+    }
+    printf("2. outer_call() = '%s'\n", result2.c_str());
+    printf("   Log: '%s'\n", log2.c_str());
+
+    SystemReturnReentrantTest s3;
+    std::string result3 = s3.nested_call();
+    std::string expected = "nested:inner_result+outer_result:inner_result";
+    if (result3 != expected) {
+        printf("FAIL: Expected '%s', got '%s'\n", expected.c_str(), result3.c_str());
+        assert(false);
+    }
+    printf("3. nested_call() = '%s'\n", result3.c_str());
+
+    printf("PASS: System return reentrant (nested calls) works correctly\n");
+    return 0;
+}
