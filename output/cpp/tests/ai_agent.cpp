@@ -118,75 +118,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Attack(AiAgentFrameEvent& __e) {
-        if (__e._message == "$>") {
-            action_log = action_log + "attack,";
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Attack"));
-            return;
-        } else if (__e._message == "tick") {
-            // Survival interrupt
-            if (health < 20) {
-                auto __new_compartment = std::make_unique<AiAgentCompartment>("Flee");
-                __new_compartment->parent_compartment = __compartment->clone();
-                __transition(std::move(__new_compartment));
-                return;
-            }
-
-            // Precondition: still in range?
-            if (enemy_distance > 5) {
-                // Enemy moved away -- go back to approach
-                auto __new_compartment = std::make_unique<AiAgentCompartment>("Approach");
-                __new_compartment->parent_compartment = __compartment->clone();
-                __transition(std::move(__new_compartment));
-                return;
-            }
-
-            // Precondition: enemy still alive?
-            if (enemy_health <= 0) {
-                // Victory -- back to idle
-                enemy_distance = 100;
-                auto __new_compartment = std::make_unique<AiAgentCompartment>("Root");
-                __new_compartment->parent_compartment = __compartment->clone();
-                __transition(std::move(__new_compartment));
-                return;
-            }
-
-            // Action: attack
-            enemy_health = enemy_health - 25;
-            action_log = action_log + "attack,";
-        }
-    }
-
-    void _state_Patrol(AiAgentFrameEvent& __e) {
-        if (__e._message == "$>") {
-            action_log = action_log + "patrol,";
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Patrol"));
-            return;
-        } else if (__e._message == "tick") {
-            // Higher-priority interrupt: combat
-            if (enemy_distance < 50) {
-                auto __new_compartment = std::make_unique<AiAgentCompartment>("Approach");
-                __new_compartment->parent_compartment = __compartment->clone();
-                __transition(std::move(__new_compartment));
-                return;
-            }
-
-            // Higher-priority interrupt: survival
-            if (health < 20) {
-                auto __new_compartment = std::make_unique<AiAgentCompartment>("Flee");
-                __new_compartment->parent_compartment = __compartment->clone();
-                __transition(std::move(__new_compartment));
-                return;
-            }
-
-            // Action: patrol
-            patrol_step = patrol_step + 1;
-            action_log = action_log + "patrol,";
-        }
-    }
-
     void _state_Approach(AiAgentFrameEvent& __e) {
         if (__e._message == "$>") {
             action_log = action_log + "approach,";
@@ -248,6 +179,75 @@ private:
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
+        }
+    }
+
+    void _state_Patrol(AiAgentFrameEvent& __e) {
+        if (__e._message == "$>") {
+            action_log = action_log + "patrol,";
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Patrol"));
+            return;
+        } else if (__e._message == "tick") {
+            // Higher-priority interrupt: combat
+            if (enemy_distance < 50) {
+                auto __new_compartment = std::make_unique<AiAgentCompartment>("Approach");
+                __new_compartment->parent_compartment = __compartment->clone();
+                __transition(std::move(__new_compartment));
+                return;
+            }
+
+            // Higher-priority interrupt: survival
+            if (health < 20) {
+                auto __new_compartment = std::make_unique<AiAgentCompartment>("Flee");
+                __new_compartment->parent_compartment = __compartment->clone();
+                __transition(std::move(__new_compartment));
+                return;
+            }
+
+            // Action: patrol
+            patrol_step = patrol_step + 1;
+            action_log = action_log + "patrol,";
+        }
+    }
+
+    void _state_Attack(AiAgentFrameEvent& __e) {
+        if (__e._message == "$>") {
+            action_log = action_log + "attack,";
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Attack"));
+            return;
+        } else if (__e._message == "tick") {
+            // Survival interrupt
+            if (health < 20) {
+                auto __new_compartment = std::make_unique<AiAgentCompartment>("Flee");
+                __new_compartment->parent_compartment = __compartment->clone();
+                __transition(std::move(__new_compartment));
+                return;
+            }
+
+            // Precondition: still in range?
+            if (enemy_distance > 5) {
+                // Enemy moved away -- go back to approach
+                auto __new_compartment = std::make_unique<AiAgentCompartment>("Approach");
+                __new_compartment->parent_compartment = __compartment->clone();
+                __transition(std::move(__new_compartment));
+                return;
+            }
+
+            // Precondition: enemy still alive?
+            if (enemy_health <= 0) {
+                // Victory -- back to idle
+                enemy_distance = 100;
+                auto __new_compartment = std::make_unique<AiAgentCompartment>("Root");
+                __new_compartment->parent_compartment = __compartment->clone();
+                __transition(std::move(__new_compartment));
+                return;
+            }
+
+            // Action: attack
+            enemy_health = enemy_health - 25;
+            action_log = action_log + "attack,";
         }
     }
 

@@ -95,6 +95,15 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_Done(TransitionExitArgsFrameEvent& __e) {
+        if (__e._message == "$>") {
+            event_log.push_back("enter:done");
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        }
+    }
+
     void _state_Active(TransitionExitArgsFrameEvent& __e) {
         if (__e._message == "<$") {
             auto reason = std::any_cast<std::string>(__compartment->exit_args["0"]);
@@ -111,15 +120,6 @@ private:
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
-        }
-    }
-
-    void _state_Done(TransitionExitArgsFrameEvent& __e) {
-        if (__e._message == "$>") {
-            event_log.push_back("enter:done");
-        } else if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
         }
     }
 

@@ -94,10 +94,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_P(SFrameEvent& __e) {
-
-    }
-
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             std::vector<int> a = {1, 2};
@@ -105,6 +101,10 @@ private:
             _state_P(__e);
             a.size();
         }
+    }
+
+    void _state_P(SFrameEvent& __e) {
+
     }
 
 public:

@@ -93,16 +93,16 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_P(SFrameEvent& __e) {
+
+    }
+
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             int x = 1 + 2 - 3 * 4 / 5;
             x += 2;
             _state_P(__e);
         }
-    }
-
-    void _state_P(SFrameEvent& __e) {
-
     }
 
 public:

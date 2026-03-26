@@ -95,6 +95,15 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_Working(EventForwardTestFrameEvent& __e) {
+        if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "process") {
+            event_log.push_back("working:process");
+        }
+    }
+
     void _state_Idle(EventForwardTestFrameEvent& __e) {
         if (__e._message == "get_log") {
             _context_stack.back()._return = std::any(event_log);
@@ -108,15 +117,6 @@ private:
             return;
             // This should NOT execute because -> => returns after dispatch
             event_log.push_back("idle:process:after");
-        }
-    }
-
-    void _state_Working(EventForwardTestFrameEvent& __e) {
-        if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "process") {
-            event_log.push_back("working:process");
         }
     }
 

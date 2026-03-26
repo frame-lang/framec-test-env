@@ -93,6 +93,11 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_B(SFrameEvent& __e) {
+        if (__e._message == "e") {
+        }
+    }
+
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             _state_stack.push_back(__compartment->clone());
@@ -103,11 +108,6 @@ private:
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
-        }
-    }
-
-    void _state_B(SFrameEvent& __e) {
-        if (__e._message == "e") {
         }
     }
 

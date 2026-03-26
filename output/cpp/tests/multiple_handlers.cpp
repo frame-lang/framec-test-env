@@ -93,16 +93,16 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_P(SFrameEvent& __e) {
-
-    }
-
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e1") {
             _state_P(__e);;
         } else if (__e._message == "e2") {
             _state_P(__e);;
         }
+    }
+
+    void _state_P(SFrameEvent& __e) {
+
     }
 
 public:
@@ -118,16 +118,16 @@ public:
         _context_stack.pop_back();
     }
 
-    void e2() {
-        SFrameEvent __e("e2");
+    void e1() {
+        SFrameEvent __e("e1");
         SFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
 
-    void e1() {
-        SFrameEvent __e("e1");
+    void e2() {
+        SFrameEvent __e("e2");
         SFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);

@@ -97,6 +97,20 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_Off(LampHSMFrameEvent& __e) {
+        if (__e._message == "isLampOn") {
+            _context_stack.back()._return = std::any(lamp_on);
+            return;;
+        } else if (__e._message == "turnOn") {
+            auto __new_compartment = std::make_unique<LampHSMCompartment>("On");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else {
+            _state_ColorBehavior(__e);
+        }
+    }
+
     void _state_ColorBehavior(LampHSMFrameEvent& __e) {
         if (__e._message == "getColor") {
             _context_stack.back()._return = std::any(color);
@@ -117,20 +131,6 @@ private:
             return;;
         } else if (__e._message == "turnOff") {
             auto __new_compartment = std::make_unique<LampHSMCompartment>("Off");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        } else {
-            _state_ColorBehavior(__e);
-        }
-    }
-
-    void _state_Off(LampHSMFrameEvent& __e) {
-        if (__e._message == "isLampOn") {
-            _context_stack.back()._return = std::any(lamp_on);
-            return;;
-        } else if (__e._message == "turnOn") {
-            auto __new_compartment = std::make_unique<LampHSMCompartment>("On");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;

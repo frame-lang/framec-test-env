@@ -93,25 +93,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Other(StateVarPushPopFrameEvent& __e) {
-        auto* __sv_comp = __compartment.get();
-        while (__sv_comp && __sv_comp->state != "Other") { __sv_comp = __sv_comp->parent_compartment.get(); }
-        if (__e._message == "$>") {
-            if (__compartment->state_vars.count("other_count") == 0) { __compartment->state_vars["other_count"] = std::any(100); }
-        } else if (__e._message == "get_count") {
-            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["other_count"]));
-            return;;
-        } else if (__e._message == "increment") {
-            __sv_comp->state_vars["other_count"] = std::any(std::any_cast<int>(__sv_comp->state_vars["other_count"]) + 1);
-            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["other_count"]));
-            return;;
-        } else if (__e._message == "restore") {
-            auto __popped = std::move(_state_stack.back()); _state_stack.pop_back();
-            __transition(std::move(__popped));
-            return;
-        }
-    }
-
     void _state_Counter(StateVarPushPopFrameEvent& __e) {
         auto* __sv_comp = __compartment.get();
         while (__sv_comp && __sv_comp->state != "Counter") { __sv_comp = __sv_comp->parent_compartment.get(); }
@@ -129,6 +110,25 @@ private:
             auto __new_compartment = std::make_unique<StateVarPushPopCompartment>("Other");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
+    void _state_Other(StateVarPushPopFrameEvent& __e) {
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Other") { __sv_comp = __sv_comp->parent_compartment.get(); }
+        if (__e._message == "$>") {
+            if (__compartment->state_vars.count("other_count") == 0) { __compartment->state_vars["other_count"] = std::any(100); }
+        } else if (__e._message == "get_count") {
+            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["other_count"]));
+            return;;
+        } else if (__e._message == "increment") {
+            __sv_comp->state_vars["other_count"] = std::any(std::any_cast<int>(__sv_comp->state_vars["other_count"]) + 1);
+            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["other_count"]));
+            return;;
+        } else if (__e._message == "restore") {
+            auto __popped = std::move(_state_stack.back()); _state_stack.pop_back();
+            __transition(std::move(__popped));
             return;
         }
     }

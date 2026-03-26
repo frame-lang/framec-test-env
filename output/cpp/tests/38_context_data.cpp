@@ -8,7 +8,6 @@
 #include <iostream>
 #include <string>
 #include <cassert>
-#include <vector>
 
 // Test: Context Data (@@:data)
 // Validates call-scoped data that persists across handler -> <$ -> $> chain
@@ -97,44 +96,40 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_End(ContextDataTestFrameEvent& __e) {
-        if (__e._message == "$>") {
-            auto& trace = _context_stack.back()._data["trace"];
-            trace.push_back("enter");
-            _context_stack.back()._data["ended_in"] = std::any(std::string("End"));
-
-            std::string trace_str = "";
-            for (size_t i = 0; i < trace.size(); i++) {
-                if (i > 0) trace_str += ",";
-                trace_str += trace[i];
-            }
-            _context_stack.back()._return = std::any(std::string("from=") + std::any_cast<int>(this->_context_stack.back()._data["started_in"]) + ",to=" + std::any_cast<int>(this->_context_stack.back()._data["ended_in"]) + ",value=" + std::to_string(std::any_cast<int>(this->_context_stack.back()._data["value"])) + ",trace=" + trace_str);
-        }
-    }
-
     void _state_Start(ContextDataTestFrameEvent& __e) {
         if (__e._message == "<$") {
-            auto& trace = _context_stack.back()._data["trace"];
-            trace.push_back("exit");
+            auto trace = std::any_cast<std::string>(_context_stack.back()._data["trace"]);
+            _context_stack.back()._data["trace"] = std::any(trace + ",exit");
         } else if (__e._message == "check_data_isolation") {
             _context_stack.back()._data["outer"] = std::any(std::string("outer_value"));
             std::string inner_result = this->process_with_data(99);
-            _context_stack.back()._return = std::any(std::string("outer_data=") + std::any_cast<int>(this->_context_stack.back()._data["outer"]) + ",inner=" + inner_result);
+            _context_stack.back()._return = std::any(std::string("outer_data=") + std::any_cast<std::string>(_context_stack.back()._data["outer"]) + ",inner=" + inner_result);
         } else if (__e._message == "process_with_data") {
             auto value = std::any_cast<int>(__e._parameters.at("value"));
             _context_stack.back()._data["input"] = std::any(value);
-            _context_stack.back()._data["trace"] = std::any(std::vector<std::string>{"handler"});
+            _context_stack.back()._data["trace"] = std::any(std::string("handler"));
 
-            _context_stack.back()._return = std::any(std::string("processed:") + std::to_string(std::any_cast<int>(this->_context_stack.back()._data["input"])));
+            _context_stack.back()._return = std::any(std::string("processed:") + std::to_string(std::any_cast<int>(_context_stack.back()._data["input"])));
         } else if (__e._message == "transition_preserves_data") {
             auto x = std::any_cast<int>(__e._parameters.at("x"));
             _context_stack.back()._data["started_in"] = std::any(std::string("Start"));
             _context_stack.back()._data["value"] = std::any(x);
-            _context_stack.back()._data["trace"] = std::any(std::vector<std::string>{"handler"});
+            _context_stack.back()._data["trace"] = std::any(std::string("handler"));
             auto __new_compartment = std::make_unique<ContextDataTestCompartment>("End");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
+        }
+    }
+
+    void _state_End(ContextDataTestFrameEvent& __e) {
+        if (__e._message == "$>") {
+            auto trace = std::any_cast<std::string>(_context_stack.back()._data["trace"]);
+            trace += ",enter";
+            _context_stack.back()._data["trace"] = std::any(trace);
+            _context_stack.back()._data["ended_in"] = std::any(std::string("End"));
+
+            _context_stack.back()._return = std::any(std::string("from=") + std::any_cast<std::string>(_context_stack.back()._data["started_in"]) + ",to=" + std::any_cast<std::string>(_context_stack.back()._data["ended_in"]) + ",value=" + std::to_string(std::any_cast<int>(_context_stack.back()._data["value"])) + ",trace=" + trace);
         }
     }
 
