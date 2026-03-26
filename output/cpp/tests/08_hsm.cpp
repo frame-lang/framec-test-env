@@ -41,16 +41,23 @@ public:
     std::unique_ptr<HSMForwardCompartment> parent_compartment;
 
     explicit HSMForwardCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<HSMForwardCompartment> clone() const {
+        auto c = std::make_unique<HSMForwardCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class HSMForward {
 private:
+    std::vector<std::unique_ptr<HSMForwardCompartment>> _state_stack;
     std::unique_ptr<HSMForwardCompartment> __compartment;
     std::unique_ptr<HSMForwardCompartment> __next_compartment;
-    std::vector<std::unique_ptr<HSMForwardCompartment>> _state_stack;
     std::vector<HSMForwardFrameContext> _context_stack;
-
-    std::vector<std::string> event_log = {};
 
     void __kernel(HSMForwardFrameEvent& __e) {
         __router(__e);
@@ -90,52 +97,40 @@ private:
 
     void _state_Child(HSMForwardFrameEvent& __e) {
         if (__e._message == "event_a") {
-            {
             event_log.push_back("Child:event_a");
-            }
-            return;
         } else if (__e._message == "event_b") {
-            {
             event_log.push_back("Child:event_b_forward");
             _state_Parent(__e);
-            return;
-            }
-            return;
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(event_log);
+            return;;
         }
     }
 
     void _state_Parent(HSMForwardFrameEvent& __e) {
         if (__e._message == "event_a") {
-            {
             event_log.push_back("Parent:event_a");
-            }
-            return;
         } else if (__e._message == "event_b") {
-            {
             event_log.push_back("Parent:event_b");
-            }
-            return;
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(event_log);
+            return;;
         }
     }
 
 public:
+    std::vector<std::string> event_log = {};
+
     HSMForward() {
+        // HSM: Create parent compartment chain
+        auto __parent_comp_0 = std::make_unique<HSMForwardCompartment>("Parent");
         __compartment = std::make_unique<HSMForwardCompartment>("Child");
-        event_log = {};
+        __compartment->parent_compartment = std::move(__parent_comp_0);
         HSMForwardFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        HSMForwardFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void event_a() {
@@ -163,7 +158,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

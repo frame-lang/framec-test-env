@@ -39,13 +39,22 @@ public:
     std::unique_ptr<SCompartment> parent_compartment;
 
     explicit SCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<SCompartment> clone() const {
+        auto c = std::make_unique<SCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class S {
 private:
+    std::vector<std::unique_ptr<SCompartment>> _state_stack;
     std::unique_ptr<SCompartment> __compartment;
     std::unique_ptr<SCompartment> __next_compartment;
-    std::vector<std::unique_ptr<SCompartment>> _state_stack;
     std::vector<SFrameContext> _context_stack;
 
     void __kernel(SFrameEvent& __e) {
@@ -84,13 +93,8 @@ private:
 
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
-            {
             // native prelude
-            _state_stack.push_back(std::make_unique<SCompartment>(__compartment->state));
-            _state_stack.back()->state_vars = __compartment->state_vars;
-            _state_stack.back()->state_args = __compartment->state_args;
-            }
-            return;
+            _state_stack.push_back(__compartment->clone());
         }
     }
 
@@ -98,7 +102,10 @@ public:
     S() {
         __compartment = std::make_unique<SCompartment>("A");
         SFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        SFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void e() {
@@ -108,7 +115,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 // TAP test harness

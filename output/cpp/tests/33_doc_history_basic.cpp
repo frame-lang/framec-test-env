@@ -41,13 +41,22 @@ public:
     std::unique_ptr<HistoryBasicCompartment> parent_compartment;
 
     explicit HistoryBasicCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<HistoryBasicCompartment> clone() const {
+        auto c = std::make_unique<HistoryBasicCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class HistoryBasic {
 private:
+    std::vector<std::unique_ptr<HistoryBasicCompartment>> _state_stack;
     std::unique_ptr<HistoryBasicCompartment> __compartment;
     std::unique_ptr<HistoryBasicCompartment> __next_compartment;
-    std::vector<std::unique_ptr<HistoryBasicCompartment>> _state_stack;
     std::vector<HistoryBasicFrameContext> _context_stack;
 
     void __kernel(HistoryBasicFrameEvent& __e) {
@@ -88,67 +97,44 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_C(HistoryBasicFrameEvent& __e) {
+        if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("C"));
+            return;;
+        } else if (__e._message == "return_back") {
+            auto __popped = std::move(_state_stack.back()); _state_stack.pop_back();
+            __transition(std::move(__popped));
+            return;
+        }
+    }
+
     void _state_A(HistoryBasicFrameEvent& __e) {
-        if (__e._message == "gotoC_from_A") {
-            {
-            _state_stack.push_back(std::make_unique<HistoryBasicCompartment>(__compartment->state));
-            _state_stack.back()->state_vars = __compartment->state_vars;
-            _state_stack.back()->state_args = __compartment->state_args;
-            auto __comp = std::make_unique<HistoryBasicCompartment>("C");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
+        if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("A"));
+            return;;
         } else if (__e._message == "gotoB") {
-            {
-            auto __comp = std::make_unique<HistoryBasicCompartment>("B");
-            __transition(std::move(__comp));
+            auto __new_compartment = std::make_unique<HistoryBasicCompartment>("B");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
-            }
-            return;
-        } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("A");
-            return;
-            }
+        } else if (__e._message == "gotoC_from_A") {
+            _state_stack.push_back(__compartment->clone());
+            auto __new_compartment = std::make_unique<HistoryBasicCompartment>("C");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_B(HistoryBasicFrameEvent& __e) {
-        if (__e._message == "gotoC_from_B") {
-            {
-            _state_stack.push_back(std::make_unique<HistoryBasicCompartment>(__compartment->state));
-            _state_stack.back()->state_vars = __compartment->state_vars;
-            _state_stack.back()->state_args = __compartment->state_args;
-            auto __comp = std::make_unique<HistoryBasicCompartment>("C");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
-        } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("B");
-            return;
-            }
-            return;
-        }
-    }
-
-    void _state_C(HistoryBasicFrameEvent& __e) {
-        if (__e._message == "return_back") {
-            {
-            auto __popped = std::move(_state_stack.back());
-            _state_stack.pop_back();
-            __transition(std::move(__popped));
-            return;
-            }
-            return;
-        } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("C");
-            return;
-            }
+        if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("B"));
+            return;;
+        } else if (__e._message == "gotoC_from_B") {
+            _state_stack.push_back(__compartment->clone());
+            auto __new_compartment = std::make_unique<HistoryBasicCompartment>("C");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
@@ -157,7 +143,10 @@ public:
     HistoryBasic() {
         __compartment = std::make_unique<HistoryBasicCompartment>("A");
         HistoryBasicFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        HistoryBasicFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void gotoC_from_A() {
@@ -201,7 +190,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

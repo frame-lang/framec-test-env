@@ -41,16 +41,23 @@ public:
     std::unique_ptr<TransitionPopTestCompartment> parent_compartment;
 
     explicit TransitionPopTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<TransitionPopTestCompartment> clone() const {
+        auto c = std::make_unique<TransitionPopTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class TransitionPopTest {
 private:
+    std::vector<std::unique_ptr<TransitionPopTestCompartment>> _state_stack;
     std::unique_ptr<TransitionPopTestCompartment> __compartment;
     std::unique_ptr<TransitionPopTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<TransitionPopTestCompartment>> _state_stack;
     std::vector<TransitionPopTestFrameContext> _context_stack;
-
-    std::vector<std::string> event_log = {};
 
     void __kernel(TransitionPopTestFrameEvent& __e) {
         __router(__e);
@@ -88,69 +95,52 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Idle(TransitionPopTestFrameEvent& __e) {
-        if (__e._message == "start") {
-            {
-            event_log.push_back("idle:start:push");
-            `push$
-            auto __comp = std::make_unique<TransitionPopTestCompartment>("Working");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
-        } else if (__e._message == "process") {
-            {
-            event_log.push_back("idle:process");
-            }
-            return;
-        } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("Idle");
-            return;
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
-        }
-    }
-
     void _state_Working(TransitionPopTestFrameEvent& __e) {
-        if (__e._message == "process") {
-            {
+        if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Working"));
+            return;;
+        } else if (__e._message == "process") {
             event_log.push_back("working:process:before_pop");
-            auto __popped = std::move(_state_stack.back());
-            _state_stack.pop_back();
+            auto __popped = std::move(_state_stack.back()); _state_stack.pop_back();
             __transition(std::move(__popped));
             return;
             // This should NOT execute because pop transitions away
             event_log.push_back("working:process:after_pop");
-            }
-            return;
+        }
+    }
+
+    void _state_Idle(TransitionPopTestFrameEvent& __e) {
+        if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
         } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("Working");
-            return;
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
+            _context_stack.back()._return = std::any(std::string("Idle"));
+            return;;
+        } else if (__e._message == "process") {
+            event_log.push_back("idle:process");
+        } else if (__e._message == "start") {
+            event_log.push_back("idle:start:push");
+            _state_stack.push_back(__compartment->clone());
+            auto __new_compartment = std::make_unique<TransitionPopTestCompartment>("Working");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
 public:
+    std::vector<std::string> event_log = {};
+
     TransitionPopTest() {
         __compartment = std::make_unique<TransitionPopTestCompartment>("Idle");
-        event_log = {};
         TransitionPopTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        TransitionPopTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void start() {
@@ -188,7 +178,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

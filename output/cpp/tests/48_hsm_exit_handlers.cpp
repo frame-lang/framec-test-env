@@ -41,16 +41,23 @@ public:
     std::unique_ptr<HSMExitHandlersCompartment> parent_compartment;
 
     explicit HSMExitHandlersCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<HSMExitHandlersCompartment> clone() const {
+        auto c = std::make_unique<HSMExitHandlersCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class HSMExitHandlers {
 private:
+    std::vector<std::unique_ptr<HSMExitHandlersCompartment>> _state_stack;
     std::unique_ptr<HSMExitHandlersCompartment> __compartment;
     std::unique_ptr<HSMExitHandlersCompartment> __next_compartment;
-    std::vector<std::unique_ptr<HSMExitHandlersCompartment>> _state_stack;
     std::vector<HSMExitHandlersFrameContext> _context_stack;
-
-    std::vector<std::string> event_log = {};
 
     void __kernel(HSMExitHandlersFrameEvent& __e) {
         __router(__e);
@@ -91,146 +98,101 @@ private:
     }
 
     void _state_Child(HSMExitHandlersFrameEvent& __e) {
-        if (__e._message == "$>") {
-            {
-            event_log.push_back("Child:enter");
-            }
-            return;
-        } else if (__e._message == "<$") {
-            {
-            int val = std::any_cast<int>(__compartment->state_vars["child_var"]);
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Child") { __sv_comp = __sv_comp->parent_compartment.get(); }
+        if (__e._message == "<$") {
+            int val = std::any_cast<int>(__sv_comp->state_vars["child_var"]);
             event_log.push_back(std::string("Child:exit(var=") + std::to_string(val) + ")");
-            }
-            return;
+        } else if (__e._message == "$>") {
+            if (__compartment->state_vars.count("child_var") == 0) { __compartment->state_vars["child_var"] = std::any(42); }
+            event_log.push_back("Child:enter");
+        } else if (__e._message == "get_child_var") {
+            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["child_var"]));
+            return;;
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Child"));
+            return;;
         } else if (__e._message == "go_to_other") {
-            {
-            auto __comp = std::make_unique<HSMExitHandlersCompartment>("Other");
-            __transition(std::move(__comp));
-            return;
-            }
+            auto __new_compartment = std::make_unique<HSMExitHandlersCompartment>("Other");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         } else if (__e._message == "go_to_parent") {
-            {
-            auto __comp = std::make_unique<HSMExitHandlersCompartment>("Parent");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
-        } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("Child");
-            return;
-            }
-            return;
-        } else if (__e._message == "get_child_var") {
-            {
-            _context_stack.back()._return = std::any_cast<int>(__compartment->state_vars["child_var"]);
-            return;
-            }
+            auto __new_compartment = std::make_unique<HSMExitHandlersCompartment>("Parent");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_Parent(HSMExitHandlersFrameEvent& __e) {
-        if (__e._message == "$>") {
-            {
-            event_log.push_back("Parent:enter");
-            }
-            return;
-        } else if (__e._message == "<$") {
-            {
+        if (__e._message == "<$") {
             event_log.push_back("Parent:exit");
-            }
-            return;
+        } else if (__e._message == "$>") {
+            event_log.push_back("Parent:enter");
+        } else if (__e._message == "get_child_var") {
+            _context_stack.back()._return = std::any(-1);
+            return;;
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Parent"));
+            return;;
         } else if (__e._message == "go_to_child") {
-            {
-            auto __comp = std::make_unique<HSMExitHandlersCompartment>("Child");
-            __transition(std::move(__comp));
-            return;
-            }
+            auto __new_compartment = std::make_unique<HSMExitHandlersCompartment>("Child");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         } else if (__e._message == "go_to_other") {
-            {
-            auto __comp = std::make_unique<HSMExitHandlersCompartment>("Other");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
-        } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("Parent");
-            return;
-            }
-            return;
-        } else if (__e._message == "get_child_var") {
-            {
-            _context_stack.back()._return = -1;
-            return;
-            }
+            auto __new_compartment = std::make_unique<HSMExitHandlersCompartment>("Other");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_Other(HSMExitHandlersFrameEvent& __e) {
         if (__e._message == "$>") {
-            {
             event_log.push_back("Other:enter");
-            }
-            return;
+        } else if (__e._message == "get_child_var") {
+            _context_stack.back()._return = std::any(-1);
+            return;;
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Other"));
+            return;;
         } else if (__e._message == "go_to_child") {
-            {
-            auto __comp = std::make_unique<HSMExitHandlersCompartment>("Child");
-            __transition(std::move(__comp));
-            return;
-            }
+            auto __new_compartment = std::make_unique<HSMExitHandlersCompartment>("Child");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         } else if (__e._message == "go_to_parent") {
-            {
-            auto __comp = std::make_unique<HSMExitHandlersCompartment>("Parent");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
-        } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("Other");
-            return;
-            }
-            return;
-        } else if (__e._message == "get_child_var") {
-            {
-            _context_stack.back()._return = -1;
-            return;
-            }
+            auto __new_compartment = std::make_unique<HSMExitHandlersCompartment>("Parent");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
 public:
+    std::vector<std::string> event_log = {};
+
     HSMExitHandlers() {
+        // HSM: Create parent compartment chain
+        auto __parent_comp_0 = std::make_unique<HSMExitHandlersCompartment>("Parent");
         __compartment = std::make_unique<HSMExitHandlersCompartment>("Child");
-        __compartment->state_vars["child_var"] = 42;
-        event_log = {};
+        __compartment->parent_compartment = std::move(__parent_comp_0);
         HSMExitHandlersFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        HSMExitHandlersFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void go_to_other() {
@@ -286,7 +248,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

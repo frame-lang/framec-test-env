@@ -42,16 +42,23 @@ public:
     std::unique_ptr<TernaryTestCompartment> parent_compartment;
 
     explicit TernaryTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<TernaryTestCompartment> clone() const {
+        auto c = std::make_unique<TernaryTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class TernaryTest {
 private:
+    std::vector<std::unique_ptr<TernaryTestCompartment>> _state_stack;
     std::unique_ptr<TernaryTestCompartment> __compartment;
     std::unique_ptr<TernaryTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<TernaryTestCompartment>> _state_stack;
     std::vector<TernaryTestFrameContext> _context_stack;
-
-    bool cond = true;
 
     void __kernel(TernaryTestFrameEvent& __e) {
         __router(__e);
@@ -89,26 +96,24 @@ private:
 
     void _state_Ready(TernaryTestFrameEvent& __e) {
         if (__e._message == "get_value") {
-            {
             auto result = cond ? 100 : 200;
-            _context_stack.back()._return = result;
-            }
-            return;
+            _context_stack.back()._return = std::any(result);
         } else if (__e._message == "set_condition") {
             auto c = std::any_cast<bool>(__e._parameters.at("c"));
-            {
             cond = c;
-            }
-            return;
         }
     }
 
 public:
+    bool cond = true;
+
     TernaryTest() {
         __compartment = std::make_unique<TernaryTestCompartment>("Ready");
-        cond = true;
         TernaryTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        TernaryTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     int get_value() {
@@ -130,7 +135,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 int main() {

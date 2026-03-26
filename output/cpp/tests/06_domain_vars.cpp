@@ -39,17 +39,23 @@ public:
     std::unique_ptr<DomainVarsCompartment> parent_compartment;
 
     explicit DomainVarsCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<DomainVarsCompartment> clone() const {
+        auto c = std::make_unique<DomainVarsCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class DomainVars {
 private:
+    std::vector<std::unique_ptr<DomainVarsCompartment>> _state_stack;
     std::unique_ptr<DomainVarsCompartment> __compartment;
     std::unique_ptr<DomainVarsCompartment> __next_compartment;
-    std::vector<std::unique_ptr<DomainVarsCompartment>> _state_stack;
     std::vector<DomainVarsFrameContext> _context_stack;
-
-    int count = 0;
-    std::string name = "counter";
 
     void __kernel(DomainVarsFrameEvent& __e) {
         __router(__e);
@@ -86,41 +92,33 @@ private:
     }
 
     void _state_Counting(DomainVarsFrameEvent& __e) {
-        if (__e._message == "increment") {
-            {
-            count += 1;
-            printf("%s: incremented to %d\n", name.c_str(), count);
-            }
-            return;
-        } else if (__e._message == "decrement") {
-            {
+        if (__e._message == "decrement") {
             count -= 1;
             printf("%s: decremented to %d\n", name.c_str(), count);
-            }
-            return;
         } else if (__e._message == "get_count") {
-            {
-            _context_stack.back()._return = count;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(count);
+            return;;
+        } else if (__e._message == "increment") {
+            count += 1;
+            printf("%s: incremented to %d\n", name.c_str(), count);
         } else if (__e._message == "set_count") {
             auto value = std::any_cast<int>(__e._parameters.at("value"));
-            {
             count = value;
             printf("%s: set to %d\n", name.c_str(), count);
-            }
-            return;
         }
     }
 
 public:
+    int count = 0;
+    std::string name = "counter";
+
     DomainVars() {
         __compartment = std::make_unique<DomainVarsCompartment>("Counting");
-        count = 0;
-        name = "counter";
         DomainVarsFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        DomainVarsFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void increment() {
@@ -158,7 +156,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 int main() {

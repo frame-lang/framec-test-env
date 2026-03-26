@@ -42,17 +42,23 @@ public:
     std::unique_ptr<ComparisonTestCompartment> parent_compartment;
 
     explicit ComparisonTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<ComparisonTestCompartment> clone() const {
+        auto c = std::make_unique<ComparisonTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class ComparisonTest {
 private:
+    std::vector<std::unique_ptr<ComparisonTestCompartment>> _state_stack;
     std::unique_ptr<ComparisonTestCompartment> __compartment;
     std::unique_ptr<ComparisonTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<ComparisonTestCompartment>> _state_stack;
     std::vector<ComparisonTestFrameContext> _context_stack;
-
-    int a = 5;
-    int b = 3;
 
     void __kernel(ComparisonTestFrameEvent& __e) {
         __router(__e);
@@ -89,78 +95,61 @@ private:
     }
 
     void _state_Ready(ComparisonTestFrameEvent& __e) {
-        if (__e._message == "test_greater") {
-            {
-            if (a > b) {
-            _context_stack.back()._return = true;
-            } else {
-            _context_stack.back()._return = false;
-            }
-            }
-            return;
-        } else if (__e._message == "test_less") {
-            {
-            if (a < b) {
-            _context_stack.back()._return = true;
-            } else {
-            _context_stack.back()._return = false;
-            }
-            }
-            return;
-        } else if (__e._message == "test_greater_equal") {
-            {
-            if (a >= b) {
-            _context_stack.back()._return = true;
-            } else {
-            _context_stack.back()._return = false;
-            }
-            }
-            return;
-        } else if (__e._message == "test_less_equal") {
-            {
-            if (a <= b) {
-            _context_stack.back()._return = true;
-            } else {
-            _context_stack.back()._return = false;
-            }
-            }
-            return;
-        } else if (__e._message == "test_equal") {
-            {
-            if (a == b) {
-            _context_stack.back()._return = true;
-            } else {
-            _context_stack.back()._return = false;
-            }
-            }
-            return;
-        } else if (__e._message == "test_not_equal") {
-            {
-            if (a != b) {
-            _context_stack.back()._return = true;
-            } else {
-            _context_stack.back()._return = false;
-            }
-            }
-            return;
-        } else if (__e._message == "set_values") {
+        if (__e._message == "set_values") {
             auto x = std::any_cast<int>(__e._parameters.at("x"));
             auto y = std::any_cast<int>(__e._parameters.at("y"));
-            {
             a = x;
             b = y;
+        } else if (__e._message == "test_equal") {
+            if (a == b) {
+                _context_stack.back()._return = std::any(true);
+            } else {
+                _context_stack.back()._return = std::any(false);
             }
-            return;
+        } else if (__e._message == "test_greater") {
+            if (a > b) {
+                _context_stack.back()._return = std::any(true);
+            } else {
+                _context_stack.back()._return = std::any(false);
+            }
+        } else if (__e._message == "test_greater_equal") {
+            if (a >= b) {
+                _context_stack.back()._return = std::any(true);
+            } else {
+                _context_stack.back()._return = std::any(false);
+            }
+        } else if (__e._message == "test_less") {
+            if (a < b) {
+                _context_stack.back()._return = std::any(true);
+            } else {
+                _context_stack.back()._return = std::any(false);
+            }
+        } else if (__e._message == "test_less_equal") {
+            if (a <= b) {
+                _context_stack.back()._return = std::any(true);
+            } else {
+                _context_stack.back()._return = std::any(false);
+            }
+        } else if (__e._message == "test_not_equal") {
+            if (a != b) {
+                _context_stack.back()._return = std::any(true);
+            } else {
+                _context_stack.back()._return = std::any(false);
+            }
         }
     }
 
 public:
+    int a = 5;
+    int b = 3;
+
     ComparisonTest() {
         __compartment = std::make_unique<ComparisonTestCompartment>("Ready");
-        a = 5;
-        b = 3;
         ComparisonTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        ComparisonTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     bool test_greater() {
@@ -233,7 +222,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 int main() {

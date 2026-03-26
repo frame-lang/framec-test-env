@@ -52,13 +52,22 @@ public:
     std::unique_ptr<FrameTokensInCommentsCompartment> parent_compartment;
 
     explicit FrameTokensInCommentsCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<FrameTokensInCommentsCompartment> clone() const {
+        auto c = std::make_unique<FrameTokensInCommentsCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class FrameTokensInComments {
 private:
+    std::vector<std::unique_ptr<FrameTokensInCommentsCompartment>> _state_stack;
     std::unique_ptr<FrameTokensInCommentsCompartment> __compartment;
     std::unique_ptr<FrameTokensInCommentsCompartment> __next_compartment;
-    std::vector<std::unique_ptr<FrameTokensInCommentsCompartment>> _state_stack;
     std::vector<FrameTokensInCommentsFrameContext> _context_stack;
 
     void __kernel(FrameTokensInCommentsFrameEvent& __e) {
@@ -97,7 +106,6 @@ private:
 
     void _state_Start(FrameTokensInCommentsFrameEvent& __e) {
         if (__e._message == "run_test") {
-            {
             // -> $FakeState
             // => $^
             // push$
@@ -105,8 +113,6 @@ private:
             /* @@:return = 99 */
             int x = 1; // -> $InlineComment
             printf("PASS: Frame tokens in comments correctly ignored\n");
-            }
-            return;
         }
     }
 
@@ -114,7 +120,10 @@ public:
     FrameTokensInComments() {
         __compartment = std::make_unique<FrameTokensInCommentsCompartment>("Start");
         FrameTokensInCommentsFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        FrameTokensInCommentsFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void run_test() {
@@ -124,7 +133,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 int main() {

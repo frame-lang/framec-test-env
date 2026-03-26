@@ -41,17 +41,23 @@ public:
     std::unique_ptr<LampHSMCompartment> parent_compartment;
 
     explicit LampHSMCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<LampHSMCompartment> clone() const {
+        auto c = std::make_unique<LampHSMCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class LampHSM {
 private:
+    std::vector<std::unique_ptr<LampHSMCompartment>> _state_stack;
     std::unique_ptr<LampHSMCompartment> __compartment;
     std::unique_ptr<LampHSMCompartment> __next_compartment;
-    std::vector<std::unique_ptr<LampHSMCompartment>> _state_stack;
     std::vector<LampHSMFrameContext> _context_stack;
-
-    std::string color = "white";
-    bool lamp_on = false;
 
     void __kernel(LampHSMFrameEvent& __e) {
         __router(__e);
@@ -91,77 +97,70 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Off(LampHSMFrameEvent& __e) {
-        if (__e._message == "turnOn") {
-            {
-            auto __comp = std::make_unique<LampHSMCompartment>("On");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
-        } else if (__e._message == "isLampOn") {
-            {
-            _context_stack.back()._return = lamp_on;
-            return;
-            }
-            return;
-        } else if (true) {
-            _state_ColorBehavior(__e);
+    void _state_ColorBehavior(LampHSMFrameEvent& __e) {
+        if (__e._message == "getColor") {
+            _context_stack.back()._return = std::any(color);
+            return;;
+        } else if (__e._message == "setColor") {
+            auto color = std::any_cast<std::string>(__e._parameters.at("color"));
+            this->color = color;
         }
     }
 
     void _state_On(LampHSMFrameEvent& __e) {
-        if (__e._message == "$>") {
-            {
-            this->turnOnLamp();
-            }
-            return;
-        } else if (__e._message == "<$") {
-            {
+        if (__e._message == "<$") {
             this->turnOffLamp();
-            }
-            return;
-        } else if (__e._message == "turnOff") {
-            {
-            auto __comp = std::make_unique<LampHSMCompartment>("Off");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
+        } else if (__e._message == "$>") {
+            this->turnOnLamp();
         } else if (__e._message == "isLampOn") {
-            {
-            _context_stack.back()._return = lamp_on;
+            _context_stack.back()._return = std::any(lamp_on);
+            return;;
+        } else if (__e._message == "turnOff") {
+            auto __new_compartment = std::make_unique<LampHSMCompartment>("Off");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
-            }
-            return;
-        } else if (true) {
+        } else {
             _state_ColorBehavior(__e);
         }
     }
 
-    void _state_ColorBehavior(LampHSMFrameEvent& __e) {
-        if (__e._message == "getColor") {
-            {
-            _context_stack.back()._return = color;
+    void _state_Off(LampHSMFrameEvent& __e) {
+        if (__e._message == "isLampOn") {
+            _context_stack.back()._return = std::any(lamp_on);
+            return;;
+        } else if (__e._message == "turnOn") {
+            auto __new_compartment = std::make_unique<LampHSMCompartment>("On");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
-            }
-            return;
-        } else if (__e._message == "setColor") {
-            auto color = std::any_cast<std::string>(__e._parameters.at("color"));
-            {
-            this->color = color;
-            }
-            return;
+        } else {
+            _state_ColorBehavior(__e);
         }
     }
 
+    void turnOnLamp() {
+                    lamp_on = true;
+    }
+
+    void turnOffLamp() {
+                    lamp_on = false;
+    }
+
 public:
+    std::string color = "white";
+    bool lamp_on = false;
+
     LampHSM() {
+        // HSM: Create parent compartment chain
+        auto __parent_comp_0 = std::make_unique<LampHSMCompartment>("ColorBehavior");
         __compartment = std::make_unique<LampHSMCompartment>("Off");
-        color = "white";
-        lamp_on = false;
+        __compartment->parent_compartment = std::move(__parent_comp_0);
         LampHSMFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        LampHSMFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void turnOn() {
@@ -209,19 +208,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
-    void turnOnLamp() {
-        {
-        lamp_on = true;
-        }
-    }
-
-    void turnOffLamp() {
-        {
-        lamp_on = false;
-        }
-    }
-
 };
 
 int main() {

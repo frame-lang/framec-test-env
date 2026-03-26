@@ -39,13 +39,22 @@ public:
     std::unique_ptr<HSMParentStateVarsCompartment> parent_compartment;
 
     explicit HSMParentStateVarsCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<HSMParentStateVarsCompartment> clone() const {
+        auto c = std::make_unique<HSMParentStateVarsCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class HSMParentStateVars {
 private:
+    std::vector<std::unique_ptr<HSMParentStateVarsCompartment>> _state_stack;
     std::unique_ptr<HSMParentStateVarsCompartment> __compartment;
     std::unique_ptr<HSMParentStateVarsCompartment> __next_compartment;
-    std::vector<std::unique_ptr<HSMParentStateVarsCompartment>> _state_stack;
     std::vector<HSMParentStateVarsFrameContext> _context_stack;
 
     void __kernel(HSMParentStateVarsFrameEvent& __e) {
@@ -85,37 +94,41 @@ private:
     }
 
     void _state_Child(HSMParentStateVarsFrameEvent& __e) {
-        if (__e._message == "get_child_count") {
-            {
-            _context_stack.back()._return = std::any_cast<int>(__compartment->state_vars["child_count"]);
-            return;
-            }
-            return;
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Child") { __sv_comp = __sv_comp->parent_compartment.get(); }
+        if (__e._message == "$>") {
+            if (__compartment->state_vars.count("child_count") == 0) { __compartment->state_vars["child_count"] = std::any(0); }
+        } else if (__e._message == "get_child_count") {
+            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["child_count"]));
+            return;;
         } else if (__e._message == "get_parent_count") {
-            {
             _state_Parent(__e);
-            return;
-            }
-            return;
         }
     }
 
     void _state_Parent(HSMParentStateVarsFrameEvent& __e) {
-        if (__e._message == "get_parent_count") {
-            {
-            _context_stack.back()._return = std::any_cast<int>(__compartment->state_vars["parent_count"]);
-            return;
-            }
-            return;
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Parent") { __sv_comp = __sv_comp->parent_compartment.get(); }
+        if (__e._message == "$>") {
+            if (__compartment->state_vars.count("parent_count") == 0) { __compartment->state_vars["parent_count"] = std::any(100); }
+        } else if (__e._message == "get_parent_count") {
+            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["parent_count"]));
+            return;;
         }
     }
 
 public:
     HSMParentStateVars() {
+        // HSM: Create parent compartment chain
+        auto __parent_comp_0 = std::make_unique<HSMParentStateVarsCompartment>("Parent");
+        __parent_comp_0->state_vars["parent_count"] = std::any(100);
         __compartment = std::make_unique<HSMParentStateVarsCompartment>("Child");
-        __compartment->state_vars["child_count"] = 0;
+        __compartment->parent_compartment = std::move(__parent_comp_0);
         HSMParentStateVarsFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        HSMParentStateVarsFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     int get_child_count() {
@@ -137,7 +150,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

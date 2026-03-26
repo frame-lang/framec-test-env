@@ -41,16 +41,23 @@ public:
     std::unique_ptr<TransitionEnterArgsCompartment> parent_compartment;
 
     explicit TransitionEnterArgsCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<TransitionEnterArgsCompartment> clone() const {
+        auto c = std::make_unique<TransitionEnterArgsCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class TransitionEnterArgs {
 private:
+    std::vector<std::unique_ptr<TransitionEnterArgsCompartment>> _state_stack;
     std::unique_ptr<TransitionEnterArgsCompartment> __compartment;
     std::unique_ptr<TransitionEnterArgsCompartment> __next_compartment;
-    std::vector<std::unique_ptr<TransitionEnterArgsCompartment>> _state_stack;
     std::vector<TransitionEnterArgsFrameContext> _context_stack;
-
-    std::vector<std::string> event_log = {};
 
     void __kernel(TransitionEnterArgsFrameEvent& __e) {
         __router(__e);
@@ -88,48 +95,44 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Idle(TransitionEnterArgsFrameEvent& __e) {
-        if (__e._message == "start") {
-            {
-            event_log.push_back("idle:start");
-            -> ("from_idle", 42) $Active
-            }
-            return;
+    void _state_Active(TransitionEnterArgsFrameEvent& __e) {
+        if (__e._message == "$>") {
+            auto source = std::any_cast<std::string>(__compartment->enter_args["0"]);
+            auto value = std::any_cast<int>(__compartment->enter_args["1"]);
+            event_log.push_back(std::string("active:enter:") + source + ":" + std::to_string(value));
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "start") {
+            event_log.push_back("active:start");
         }
     }
 
-    void _state_Active(TransitionEnterArgsFrameEvent& __e) {
-        if (__e._message == "$>") {
-            {
-            event_log.push_back(std::string("active:enter:") + source + ":" + std::to_string(value));
-            }
-            return;
+    void _state_Idle(TransitionEnterArgsFrameEvent& __e) {
+        if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
         } else if (__e._message == "start") {
-            {
-            event_log.push_back("active:start");
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
+            event_log.push_back("idle:start");
+            auto __new_compartment = std::make_unique<TransitionEnterArgsCompartment>("Active");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __new_compartment->enter_args["0"] = std::any(std::string("from_idle"));
+            __new_compartment->enter_args["1"] = std::any(42);
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
 public:
+    std::vector<std::string> event_log = {};
+
     TransitionEnterArgs() {
         __compartment = std::make_unique<TransitionEnterArgsCompartment>("Idle");
-        event_log = {};
         TransitionEnterArgsFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        TransitionEnterArgsFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void start() {
@@ -149,7 +152,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

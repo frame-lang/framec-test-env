@@ -42,17 +42,23 @@ public:
     std::unique_ptr<LogicalTestCompartment> parent_compartment;
 
     explicit LogicalTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<LogicalTestCompartment> clone() const {
+        auto c = std::make_unique<LogicalTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class LogicalTest {
 private:
+    std::vector<std::unique_ptr<LogicalTestCompartment>> _state_stack;
     std::unique_ptr<LogicalTestCompartment> __compartment;
     std::unique_ptr<LogicalTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<LogicalTestCompartment>> _state_stack;
     std::vector<LogicalTestFrameContext> _context_stack;
-
-    bool a = true;
-    bool b = false;
 
     void __kernel(LogicalTestFrameEvent& __e) {
         __router(__e);
@@ -89,51 +95,43 @@ private:
     }
 
     void _state_Ready(LogicalTestFrameEvent& __e) {
-        if (__e._message == "test_and") {
-            {
-            if (a && b) {
-            _context_stack.back()._return = true;
-            } else {
-            _context_stack.back()._return = false;
-            }
-            }
-            return;
-        } else if (__e._message == "test_or") {
-            {
-            if (a || b) {
-            _context_stack.back()._return = true;
-            } else {
-            _context_stack.back()._return = false;
-            }
-            }
-            return;
-        } else if (__e._message == "test_not") {
-            {
-            if (!a) {
-            _context_stack.back()._return = true;
-            } else {
-            _context_stack.back()._return = false;
-            }
-            }
-            return;
-        } else if (__e._message == "set_values") {
+        if (__e._message == "set_values") {
             auto x = std::any_cast<bool>(__e._parameters.at("x"));
             auto y = std::any_cast<bool>(__e._parameters.at("y"));
-            {
             a = x;
             b = y;
+        } else if (__e._message == "test_and") {
+            if (a && b) {
+                _context_stack.back()._return = std::any(true);
+            } else {
+                _context_stack.back()._return = std::any(false);
             }
-            return;
+        } else if (__e._message == "test_not") {
+            if (!a) {
+                _context_stack.back()._return = std::any(true);
+            } else {
+                _context_stack.back()._return = std::any(false);
+            }
+        } else if (__e._message == "test_or") {
+            if (a || b) {
+                _context_stack.back()._return = std::any(true);
+            } else {
+                _context_stack.back()._return = std::any(false);
+            }
         }
     }
 
 public:
+    bool a = true;
+    bool b = false;
+
     LogicalTest() {
         __compartment = std::make_unique<LogicalTestCompartment>("Ready");
-        a = true;
-        b = false;
         LogicalTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        LogicalTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     bool test_and() {
@@ -176,7 +174,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 int main() {

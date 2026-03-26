@@ -42,13 +42,22 @@ public:
     std::unique_ptr<ContextBasicTestCompartment> parent_compartment;
 
     explicit ContextBasicTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<ContextBasicTestCompartment> clone() const {
+        auto c = std::make_unique<ContextBasicTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class ContextBasicTest {
 private:
+    std::vector<std::unique_ptr<ContextBasicTestCompartment>> _state_stack;
     std::unique_ptr<ContextBasicTestCompartment> __compartment;
     std::unique_ptr<ContextBasicTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<ContextBasicTestCompartment>> _state_stack;
     std::vector<ContextBasicTestFrameContext> _context_stack;
 
     void __kernel(ContextBasicTestFrameEvent& __e) {
@@ -89,22 +98,13 @@ private:
         if (__e._message == "add") {
             auto a = std::any_cast<int>(__e._parameters.at("a"));
             auto b = std::any_cast<int>(__e._parameters.at("b"));
-            {
-            _context_stack.back()._return = @@.a + @@.b;
-            }
-            return;
+            _context_stack.back()._return = std::any(a + b);
         } else if (__e._message == "get_event_name") {
-            {
-            _context_stack.back()._return = @@:event;
-            }
-            return;
+            _context_stack.back()._return = std::any(this->_context_stack.back()._event._message);
         } else if (__e._message == "greet") {
             auto name = std::any_cast<std::string>(__e._parameters.at("name"));
-            {
-            std::string result = std::string("Hello, ") + @@.name + "!";
-            _context_stack.back()._return = result;
-            }
-            return;
+            std::string result = std::string("Hello, ") + name + "!";
+            _context_stack.back()._return = std::any(result);
         }
     }
 
@@ -112,7 +112,10 @@ public:
     ContextBasicTest() {
         __compartment = std::make_unique<ContextBasicTestCompartment>("Ready");
         ContextBasicTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        ContextBasicTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     int add(int a, int b) {
@@ -149,7 +152,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

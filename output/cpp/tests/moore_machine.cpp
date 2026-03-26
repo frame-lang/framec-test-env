@@ -42,16 +42,23 @@ public:
     std::unique_ptr<MooreMachineCompartment> parent_compartment;
 
     explicit MooreMachineCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<MooreMachineCompartment> clone() const {
+        auto c = std::make_unique<MooreMachineCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class MooreMachine {
 private:
+    std::vector<std::unique_ptr<MooreMachineCompartment>> _state_stack;
     std::unique_ptr<MooreMachineCompartment> __compartment;
     std::unique_ptr<MooreMachineCompartment> __next_compartment;
-    std::vector<std::unique_ptr<MooreMachineCompartment>> _state_stack;
     std::vector<MooreMachineFrameContext> _context_stack;
-
-    int current_output = 0;
 
     void __kernel(MooreMachineFrameEvent& __e) {
         __router(__e);
@@ -97,125 +104,98 @@ private:
 
     void _state_Q0(MooreMachineFrameEvent& __e) {
         if (__e._message == "$>") {
-            {
-            this.set_output(0);
-            }
-            return;
+            this->set_output(0);
         } else if (__e._message == "i_0") {
-            {
-            auto __comp = std::make_unique<MooreMachineCompartment>("Q1");
-            __transition(std::move(__comp));
-            return;
-            }
+            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q1");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         } else if (__e._message == "i_1") {
-            {
-            auto __comp = std::make_unique<MooreMachineCompartment>("Q2");
-            __transition(std::move(__comp));
-            return;
-            }
+            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q2");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_Q1(MooreMachineFrameEvent& __e) {
         if (__e._message == "$>") {
-            {
-            this.set_output(0);
-            }
-            return;
+            this->set_output(0);
         } else if (__e._message == "i_0") {
-            {
-            auto __comp = std::make_unique<MooreMachineCompartment>("Q1");
-            __transition(std::move(__comp));
-            return;
-            }
+            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q1");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         } else if (__e._message == "i_1") {
-            {
-            auto __comp = std::make_unique<MooreMachineCompartment>("Q3");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
-        }
-    }
-
-    void _state_Q2(MooreMachineFrameEvent& __e) {
-        if (__e._message == "$>") {
-            {
-            this.set_output(0);
-            }
-            return;
-        } else if (__e._message == "i_0") {
-            {
-            auto __comp = std::make_unique<MooreMachineCompartment>("Q4");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
-        } else if (__e._message == "i_1") {
-            {
-            auto __comp = std::make_unique<MooreMachineCompartment>("Q2");
-            __transition(std::move(__comp));
-            return;
-            }
+            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q3");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_Q3(MooreMachineFrameEvent& __e) {
         if (__e._message == "$>") {
-            {
-            this.set_output(1);
-            }
-            return;
+            this->set_output(1);
         } else if (__e._message == "i_0") {
-            {
-            auto __comp = std::make_unique<MooreMachineCompartment>("Q4");
-            __transition(std::move(__comp));
-            return;
-            }
+            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q4");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         } else if (__e._message == "i_1") {
-            {
-            auto __comp = std::make_unique<MooreMachineCompartment>("Q2");
-            __transition(std::move(__comp));
+            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q2");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
-            }
+        }
+    }
+
+    void _state_Q2(MooreMachineFrameEvent& __e) {
+        if (__e._message == "$>") {
+            this->set_output(0);
+        } else if (__e._message == "i_0") {
+            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q4");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else if (__e._message == "i_1") {
+            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q2");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_Q4(MooreMachineFrameEvent& __e) {
         if (__e._message == "$>") {
-            {
-            this.set_output(1);
-            }
-            return;
+            this->set_output(1);
         } else if (__e._message == "i_0") {
-            {
-            auto __comp = std::make_unique<MooreMachineCompartment>("Q1");
-            __transition(std::move(__comp));
-            return;
-            }
+            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q1");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         } else if (__e._message == "i_1") {
-            {
-            auto __comp = std::make_unique<MooreMachineCompartment>("Q3");
-            __transition(std::move(__comp));
-            return;
-            }
+            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q3");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
+    void set_output(int value) {
+                    current_output = value;
+    }
+
 public:
+    int current_output = 0;
+
     MooreMachine() {
         __compartment = std::make_unique<MooreMachineCompartment>("Q0");
-        current_output = 0;
         MooreMachineFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        MooreMachineFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void i_0() {
@@ -234,18 +214,9 @@ public:
         _context_stack.pop_back();
     }
 
-    void set_output() {
-        {
-        current_output = value;
-        }
-    }
-
     int get_output() {
-        {
-        return current_output;
-        }
+                    return current_output;
     }
-
 };
 
 int main() {

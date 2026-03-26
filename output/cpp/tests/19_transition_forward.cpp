@@ -41,16 +41,23 @@ public:
     std::unique_ptr<EventForwardTestCompartment> parent_compartment;
 
     explicit EventForwardTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<EventForwardTestCompartment> clone() const {
+        auto c = std::make_unique<EventForwardTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class EventForwardTest {
 private:
+    std::vector<std::unique_ptr<EventForwardTestCompartment>> _state_stack;
     std::unique_ptr<EventForwardTestCompartment> __compartment;
     std::unique_ptr<EventForwardTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<EventForwardTestCompartment>> _state_stack;
     std::vector<EventForwardTestFrameContext> _context_stack;
-
-    std::vector<std::string> event_log = {};
 
     void __kernel(EventForwardTestFrameEvent& __e) {
         __router(__e);
@@ -89,44 +96,40 @@ private:
     }
 
     void _state_Idle(EventForwardTestFrameEvent& __e) {
-        if (__e._message == "process") {
-            {
+        if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "process") {
             event_log.push_back("idle:process:before");
-            -> => $Working
+            auto __new_compartment = std::make_unique<EventForwardTestCompartment>("Working");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __new_compartment->forward_event = std::make_unique<EventForwardTestFrameEvent>(__e);
+            __transition(std::move(__new_compartment));
+            return;
             // This should NOT execute because -> => returns after dispatch
             event_log.push_back("idle:process:after");
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
         }
     }
 
     void _state_Working(EventForwardTestFrameEvent& __e) {
-        if (__e._message == "process") {
-            {
+        if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "process") {
             event_log.push_back("working:process");
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
         }
     }
 
 public:
+    std::vector<std::string> event_log = {};
+
     EventForwardTest() {
         __compartment = std::make_unique<EventForwardTestCompartment>("Idle");
-        event_log = {};
         EventForwardTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        EventForwardTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void process() {
@@ -146,7 +149,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

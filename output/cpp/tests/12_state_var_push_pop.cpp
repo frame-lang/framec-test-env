@@ -39,13 +39,22 @@ public:
     std::unique_ptr<StateVarPushPopCompartment> parent_compartment;
 
     explicit StateVarPushPopCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<StateVarPushPopCompartment> clone() const {
+        auto c = std::make_unique<StateVarPushPopCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class StateVarPushPop {
 private:
+    std::vector<std::unique_ptr<StateVarPushPopCompartment>> _state_stack;
     std::unique_ptr<StateVarPushPopCompartment> __compartment;
     std::unique_ptr<StateVarPushPopCompartment> __next_compartment;
-    std::vector<std::unique_ptr<StateVarPushPopCompartment>> _state_stack;
     std::vector<StateVarPushPopFrameContext> _context_stack;
 
     void __kernel(StateVarPushPopFrameEvent& __e) {
@@ -84,49 +93,42 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Counter(StateVarPushPopFrameEvent& __e) {
-        if (__e._message == "increment") {
-            {
-            __compartment->state_vars["count"] = std::any(std::any_cast<int>(__compartment->state_vars["count"]) + 1);
-            _context_stack.back()._return = std::any_cast<int>(__compartment->state_vars["count"]);
-            return;
-            }
-            return;
+    void _state_Other(StateVarPushPopFrameEvent& __e) {
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Other") { __sv_comp = __sv_comp->parent_compartment.get(); }
+        if (__e._message == "$>") {
+            if (__compartment->state_vars.count("other_count") == 0) { __compartment->state_vars["other_count"] = std::any(100); }
         } else if (__e._message == "get_count") {
-            {
-            _context_stack.back()._return = std::any_cast<int>(__compartment->state_vars["count"]);
-            return;
-            }
-            return;
-        } else if (__e._message == "save_and_go") {
-            {
-            `push$
-            auto __comp = std::make_unique<StateVarPushPopCompartment>("Other");
-            __transition(std::move(__comp));
-            return;
-            }
+            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["other_count"]));
+            return;;
+        } else if (__e._message == "increment") {
+            __sv_comp->state_vars["other_count"] = std::any(std::any_cast<int>(__sv_comp->state_vars["other_count"]) + 1);
+            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["other_count"]));
+            return;;
+        } else if (__e._message == "restore") {
+            auto __popped = std::move(_state_stack.back()); _state_stack.pop_back();
+            __transition(std::move(__popped));
             return;
         }
     }
 
-    void _state_Other(StateVarPushPopFrameEvent& __e) {
-        if (__e._message == "restore") {
-            {
-            `-> pop$
-            }
-            return;
-        } else if (__e._message == "increment") {
-            {
-            __compartment->state_vars["other_count"] = std::any(std::any_cast<int>(__compartment->state_vars["other_count"]) + 1);
-            _context_stack.back()._return = std::any_cast<int>(__compartment->state_vars["other_count"]);
-            return;
-            }
-            return;
+    void _state_Counter(StateVarPushPopFrameEvent& __e) {
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Counter") { __sv_comp = __sv_comp->parent_compartment.get(); }
+        if (__e._message == "$>") {
+            if (__compartment->state_vars.count("count") == 0) { __compartment->state_vars["count"] = std::any(0); }
         } else if (__e._message == "get_count") {
-            {
-            _context_stack.back()._return = std::any_cast<int>(__compartment->state_vars["other_count"]);
-            return;
-            }
+            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["count"]));
+            return;;
+        } else if (__e._message == "increment") {
+            __sv_comp->state_vars["count"] = std::any(std::any_cast<int>(__sv_comp->state_vars["count"]) + 1);
+            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["count"]));
+            return;;
+        } else if (__e._message == "save_and_go") {
+            _state_stack.push_back(__compartment->clone());
+            auto __new_compartment = std::make_unique<StateVarPushPopCompartment>("Other");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
@@ -134,9 +136,11 @@ private:
 public:
     StateVarPushPop() {
         __compartment = std::make_unique<StateVarPushPopCompartment>("Counter");
-        __compartment->state_vars["count"] = 0;
         StateVarPushPopFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        StateVarPushPopFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     int increment() {
@@ -174,7 +178,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 int main() {

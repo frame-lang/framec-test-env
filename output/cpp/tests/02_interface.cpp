@@ -39,16 +39,23 @@ public:
     std::unique_ptr<WithInterfaceCompartment> parent_compartment;
 
     explicit WithInterfaceCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<WithInterfaceCompartment> clone() const {
+        auto c = std::make_unique<WithInterfaceCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class WithInterface {
 private:
+    std::vector<std::unique_ptr<WithInterfaceCompartment>> _state_stack;
     std::unique_ptr<WithInterfaceCompartment> __compartment;
     std::unique_ptr<WithInterfaceCompartment> __next_compartment;
-    std::vector<std::unique_ptr<WithInterfaceCompartment>> _state_stack;
     std::vector<WithInterfaceFrameContext> _context_stack;
-
-    int call_count = 0;
 
     void __kernel(WithInterfaceFrameEvent& __e) {
         __router(__e);
@@ -85,29 +92,27 @@ private:
     }
 
     void _state_Ready(WithInterfaceFrameEvent& __e) {
-        if (__e._message == "greet") {
+        if (__e._message == "get_count") {
+            _context_stack.back()._return = std::any(call_count);
+            return;;
+        } else if (__e._message == "greet") {
             auto name = std::any_cast<std::string>(__e._parameters.at("name"));
-            {
             call_count += 1;
-            _context_stack.back()._return = std::string("Hello, ") + name + "!";
-            return;
-            }
-            return;
-        } else if (__e._message == "get_count") {
-            {
-            _context_stack.back()._return = call_count;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(std::string("Hello, ") + name + "!");
+            return;;
         }
     }
 
 public:
+    int call_count = 0;
+
     WithInterface() {
         __compartment = std::make_unique<WithInterfaceCompartment>("Ready");
-        call_count = 0;
         WithInterfaceFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        WithInterfaceFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     std::string greet(std::string name) {
@@ -131,7 +136,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

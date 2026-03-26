@@ -39,16 +39,23 @@ public:
     std::unique_ptr<WithParamsCompartment> parent_compartment;
 
     explicit WithParamsCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<WithParamsCompartment> clone() const {
+        auto c = std::make_unique<WithParamsCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class WithParams {
 private:
+    std::vector<std::unique_ptr<WithParamsCompartment>> _state_stack;
     std::unique_ptr<WithParamsCompartment> __compartment;
     std::unique_ptr<WithParamsCompartment> __next_compartment;
-    std::vector<std::unique_ptr<WithParamsCompartment>> _state_stack;
     std::vector<WithParamsFrameContext> _context_stack;
-
-    int total = 0;
 
     void __kernel(WithParamsFrameEvent& __e) {
         __router(__e);
@@ -87,79 +94,60 @@ private:
     }
 
     void _state_Idle(WithParamsFrameEvent& __e) {
-        if (__e._message == "start") {
-            auto initial = std::any_cast<int>(__e._parameters.at("initial"));
-            {
-            total = initial;
-            printf("Started with initial value: %d\n", initial);
-            auto __comp = std::make_unique<WithParamsCompartment>("Running");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
-        } else if (__e._message == "add") {
+        if (__e._message == "add") {
             auto value = std::any_cast<int>(__e._parameters.at("value"));
-            {
             printf("Cannot add in Idle state\n");
-            }
-            return;
+        } else if (__e._message == "get_total") {
+            _context_stack.back()._return = std::any(total);
+            return;;
         } else if (__e._message == "multiply") {
             auto a = std::any_cast<int>(__e._parameters.at("a"));
             auto b = std::any_cast<int>(__e._parameters.at("b"));
-            {
-            _context_stack.back()._return = 0;
-            return;
-            }
-            return;
-        } else if (__e._message == "get_total") {
-            {
-            _context_stack.back()._return = total;
-            return;
-            }
+            _context_stack.back()._return = std::any(0);
+            return;;
+        } else if (__e._message == "start") {
+            auto initial = std::any_cast<int>(__e._parameters.at("initial"));
+            total = initial;
+            printf("Started with initial value: %d\n", initial);
+            auto __new_compartment = std::make_unique<WithParamsCompartment>("Running");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_Running(WithParamsFrameEvent& __e) {
-        if (__e._message == "start") {
-            auto initial = std::any_cast<int>(__e._parameters.at("initial"));
-            {
-            printf("Already running\n");
-            }
-            return;
-        } else if (__e._message == "add") {
+        if (__e._message == "add") {
             auto value = std::any_cast<int>(__e._parameters.at("value"));
-            {
             total += value;
             printf("Added %d, total is now %d\n", value, total);
-            }
-            return;
+        } else if (__e._message == "get_total") {
+            _context_stack.back()._return = std::any(total);
+            return;;
         } else if (__e._message == "multiply") {
             auto a = std::any_cast<int>(__e._parameters.at("a"));
             auto b = std::any_cast<int>(__e._parameters.at("b"));
-            {
             int result = a * b;
             total += result;
             printf("Multiplied %d * %d = %d, total is now %d\n", a, b, result, total);
-            _context_stack.back()._return = result;
-            return;
-            }
-            return;
-        } else if (__e._message == "get_total") {
-            {
-            _context_stack.back()._return = total;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(result);
+            return;;
+        } else if (__e._message == "start") {
+            auto initial = std::any_cast<int>(__e._parameters.at("initial"));
+            printf("Already running\n");
         }
     }
 
 public:
+    int total = 0;
+
     WithParams() {
         __compartment = std::make_unique<WithParamsCompartment>("Idle");
-        total = 0;
         WithParamsFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        WithParamsFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void start(int initial) {
@@ -204,7 +192,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

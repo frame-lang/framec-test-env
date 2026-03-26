@@ -42,13 +42,22 @@ public:
     std::unique_ptr<SystemReturnDefaultTestCompartment> parent_compartment;
 
     explicit SystemReturnDefaultTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<SystemReturnDefaultTestCompartment> clone() const {
+        auto c = std::make_unique<SystemReturnDefaultTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class SystemReturnDefaultTest {
 private:
+    std::vector<std::unique_ptr<SystemReturnDefaultTestCompartment>> _state_stack;
     std::unique_ptr<SystemReturnDefaultTestCompartment> __compartment;
     std::unique_ptr<SystemReturnDefaultTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<SystemReturnDefaultTestCompartment>> _state_stack;
     std::vector<SystemReturnDefaultTestFrameContext> _context_stack;
 
     void __kernel(SystemReturnDefaultTestFrameEvent& __e) {
@@ -86,33 +95,30 @@ private:
     }
 
     void _state_Start(SystemReturnDefaultTestFrameEvent& __e) {
-        if (__e._message == "handler_sets_value") {
-            {
-            _context_stack.back()._return = std::string("set_by_handler");
-            return;
-            }
-            return;
-        } else if (__e._message == "handler_no_return") {
-            {
-            // Does not set return - should return empty/default
-            __compartment->state_vars["count"] = std::any(std::any_cast<int>(__compartment->state_vars["count"]) + 1);
-            }
-            return;
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Start") { __sv_comp = __sv_comp->parent_compartment.get(); }
+        if (__e._message == "$>") {
+            if (__compartment->state_vars.count("count") == 0) { __compartment->state_vars["count"] = std::any(0); }
         } else if (__e._message == "get_count") {
-            {
-            _context_stack.back()._return = std::any_cast<int>(__compartment->state_vars["count"]);
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["count"]));
+            return;;
+        } else if (__e._message == "handler_no_return") {
+            // Does not set return - should return empty/default
+            __sv_comp->state_vars["count"] = std::any(std::any_cast<int>(__sv_comp->state_vars["count"]) + 1);
+        } else if (__e._message == "handler_sets_value") {
+            _context_stack.back()._return = std::any(std::string("set_by_handler"));
+            return;;
         }
     }
 
 public:
     SystemReturnDefaultTest() {
         __compartment = std::make_unique<SystemReturnDefaultTestCompartment>("Start");
-        __compartment->state_vars["count"] = 0;
         SystemReturnDefaultTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        SystemReturnDefaultTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     std::string handler_sets_value() {
@@ -144,7 +150,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

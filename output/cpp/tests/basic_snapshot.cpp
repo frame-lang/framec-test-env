@@ -9,6 +9,9 @@
 #include <string>
 #include <cassert>
 
+// Forward declarations for functions used in handlers
+void native();
+
 class SFrameEvent {
 public:
     std::string _message;
@@ -39,13 +42,22 @@ public:
     std::unique_ptr<SCompartment> parent_compartment;
 
     explicit SCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<SCompartment> clone() const {
+        auto c = std::make_unique<SCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class S {
 private:
+    std::vector<std::unique_ptr<SCompartment>> _state_stack;
     std::unique_ptr<SCompartment> __compartment;
     std::unique_ptr<SCompartment> __next_compartment;
-    std::vector<std::unique_ptr<SCompartment>> _state_stack;
     std::vector<SFrameContext> _context_stack;
 
     void __kernel(SFrameEvent& __e) {
@@ -84,13 +96,10 @@ private:
 
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
-            auto x = std::any_cast<std::string>(__e._parameters.at("x"));
-            auto y = std::any_cast<std::string>(__e._parameters.at("y"));
-            auto z = std::any_cast<std::string>(__e._parameters.at("z"));
-            {
-            native()
-            }
-            return;
+            auto x = __e._parameters.at("x");
+            auto y = __e._parameters.at("y");
+            auto z = __e._parameters.at("z");
+            native();
         }
     }
 
@@ -98,10 +107,13 @@ public:
     S() {
         __compartment = std::make_unique<SCompartment>("A");
         SFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        SFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
-    void e(std::string x, std::string y, std::string z) {
+    void e(std::any x, std::any y, std::any z) {
         std::unordered_map<std::string, std::any> __params;
         __params["x"] = x;
         __params["y"] = y;
@@ -112,7 +124,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 // Stub functions for placeholder calls
@@ -125,7 +136,7 @@ int main() {
     printf("1..1\n");
     try {
         S s;
-        s.e();
+        s.e("a", "b", "c");
         printf("ok 1 - basic_snapshot\n");
     } catch (...) {
         printf("not ok 1 - basic_snapshot\n");

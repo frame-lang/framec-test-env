@@ -58,13 +58,22 @@ public:
     std::unique_ptr<HeavyNativePrologCompartment> parent_compartment;
 
     explicit HeavyNativePrologCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<HeavyNativePrologCompartment> clone() const {
+        auto c = std::make_unique<HeavyNativePrologCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class HeavyNativeProlog {
 private:
+    std::vector<std::unique_ptr<HeavyNativePrologCompartment>> _state_stack;
     std::unique_ptr<HeavyNativePrologCompartment> __compartment;
     std::unique_ptr<HeavyNativePrologCompartment> __next_compartment;
-    std::vector<std::unique_ptr<HeavyNativePrologCompartment>> _state_stack;
     std::vector<HeavyNativePrologFrameContext> _context_stack;
 
     void __kernel(HeavyNativePrologFrameEvent& __e) {
@@ -103,16 +112,13 @@ private:
 
     void _state_Start(HeavyNativePrologFrameEvent& __e) {
         if (__e._message == "run_test") {
-            {
             NativeHelper h;
             std::string result = h.process(GLOBAL_CONFIG);
             if (result.length() > 0) {
-            printf("PASS: Heavy native prolog handled correctly\n");
+                printf("PASS: Heavy native prolog handled correctly\n");
             } else {
-            assert(false);
+                assert(false);
             }
-            }
-            return;
         }
     }
 
@@ -120,7 +126,10 @@ public:
     HeavyNativeProlog() {
         __compartment = std::make_unique<HeavyNativePrologCompartment>("Start");
         HeavyNativePrologFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        HeavyNativePrologFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void run_test() {
@@ -130,7 +139,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 // Heavy epilog

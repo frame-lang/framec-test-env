@@ -39,13 +39,22 @@ public:
     std::unique_ptr<StateParamsCompartment> parent_compartment;
 
     explicit StateParamsCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<StateParamsCompartment> clone() const {
+        auto c = std::make_unique<StateParamsCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class StateParams {
 private:
+    std::vector<std::unique_ptr<StateParamsCompartment>> _state_stack;
     std::unique_ptr<StateParamsCompartment> __compartment;
     std::unique_ptr<StateParamsCompartment> __next_compartment;
-    std::vector<std::unique_ptr<StateParamsCompartment>> _state_stack;
     std::vector<StateParamsFrameContext> _context_stack;
 
     void __kernel(StateParamsFrameEvent& __e) {
@@ -85,38 +94,31 @@ private:
     }
 
     void _state_Idle(StateParamsFrameEvent& __e) {
-        if (__e._message == "start") {
+        if (__e._message == "get_value") {
+            _context_stack.back()._return = std::any(0);
+            return;;
+        } else if (__e._message == "start") {
             auto val = std::any_cast<int>(__e._parameters.at("val"));
-            {
-            auto __comp = std::make_unique<StateParamsCompartment>("Counter(val)");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
-        } else if (__e._message == "get_value") {
-            {
-            _context_stack.back()._return = 0;
-            return;
-            }
+            auto __new_compartment = std::make_unique<StateParamsCompartment>("Counter");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __new_compartment->state_args["0"] = std::any(val);
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_Counter(StateParamsFrameEvent& __e) {
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Counter") { __sv_comp = __sv_comp->parent_compartment.get(); }
         if (__e._message == "$>") {
-            {
+            if (__compartment->state_vars.count("count") == 0) { __compartment->state_vars["count"] = std::any(0); }
             // Access state param via compartment - using string key "0"
-            __compartment->state_vars["count"] = std::any(this->__compartment->state_args["0"]);
-            int count_val = std::any_cast<int>(__compartment->state_vars["count"]);
+            __sv_comp->state_vars["count"] = std::any(this->__compartment->state_args["0"]);
+            int count_val = std::any_cast<int>(__sv_comp->state_vars["count"]);
             printf("Counter entered with initial=%d\n", count_val);
-            }
-            return;
         } else if (__e._message == "get_value") {
-            {
-            _context_stack.back()._return = std::any_cast<int>(__compartment->state_vars["count"]);
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["count"]));
+            return;;
         }
     }
 
@@ -124,7 +126,10 @@ public:
     StateParams() {
         __compartment = std::make_unique<StateParamsCompartment>("Idle");
         StateParamsFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        StateParamsFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void start(int val) {
@@ -146,7 +151,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

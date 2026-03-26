@@ -44,13 +44,22 @@ public:
     std::unique_ptr<NativeCodeCompartment> parent_compartment;
 
     explicit NativeCodeCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<NativeCodeCompartment> clone() const {
+        auto c = std::make_unique<NativeCodeCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class NativeCode {
 private:
+    std::vector<std::unique_ptr<NativeCodeCompartment>> _state_stack;
     std::unique_ptr<NativeCodeCompartment> __compartment;
     std::unique_ptr<NativeCodeCompartment> __next_compartment;
-    std::vector<std::unique_ptr<NativeCodeCompartment>> _state_stack;
     std::vector<NativeCodeFrameContext> _context_stack;
 
     void __kernel(NativeCodeFrameEvent& __e) {
@@ -90,22 +99,16 @@ private:
     void _state_Active(NativeCodeFrameEvent& __e) {
         if (__e._message == "compute") {
             auto value = std::any_cast<int>(__e._parameters.at("value"));
-            {
             int temp = value + 10;
             int result = helper_function(temp);
             printf("Computed: %d -> %d\n", value, result);
-            _context_stack.back()._return = result;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(result);
+            return;;
         } else if (__e._message == "use_math") {
-            {
             double result = sqrt(16.0) + M_PI;
             printf("Math result: %f\n", result);
-            _context_stack.back()._return = result;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(result);
+            return;;
         }
     }
 
@@ -113,7 +116,10 @@ public:
     NativeCode() {
         __compartment = std::make_unique<NativeCodeCompartment>("Active");
         NativeCodeFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        NativeCodeFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     int compute(int value) {
@@ -137,7 +143,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

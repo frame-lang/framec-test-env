@@ -41,17 +41,23 @@ public:
     std::unique_ptr<LampCompartment> parent_compartment;
 
     explicit LampCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<LampCompartment> clone() const {
+        auto c = std::make_unique<LampCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class Lamp {
 private:
+    std::vector<std::unique_ptr<LampCompartment>> _state_stack;
     std::unique_ptr<LampCompartment> __compartment;
     std::unique_ptr<LampCompartment> __next_compartment;
-    std::vector<std::unique_ptr<LampCompartment>> _state_stack;
     std::vector<LampFrameContext> _context_stack;
-
-    std::string color = "white";
-    bool switch_closed = false;
 
     void __kernel(LampFrameEvent& __e) {
         __router(__e);
@@ -90,80 +96,64 @@ private:
     }
 
     void _state_Off(LampFrameEvent& __e) {
-        if (__e._message == "turnOn") {
-            {
-            auto __comp = std::make_unique<LampCompartment>("On");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
-        } else if (__e._message == "getColor") {
-            {
-            _context_stack.back()._return = color;
-            return;
-            }
-            return;
+        if (__e._message == "getColor") {
+            _context_stack.back()._return = std::any(color);
+            return;;
+        } else if (__e._message == "isSwitchClosed") {
+            _context_stack.back()._return = std::any(switch_closed);
+            return;;
         } else if (__e._message == "setColor") {
             auto color = std::any_cast<std::string>(__e._parameters.at("color"));
-            {
             this->color = color;
-            }
-            return;
-        } else if (__e._message == "isSwitchClosed") {
-            {
-            _context_stack.back()._return = switch_closed;
-            return;
-            }
+        } else if (__e._message == "turnOn") {
+            auto __new_compartment = std::make_unique<LampCompartment>("On");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_On(LampFrameEvent& __e) {
-        if (__e._message == "$>") {
-            {
-            this->closeSwitch();
-            }
-            return;
-        } else if (__e._message == "<$") {
-            {
+        if (__e._message == "<$") {
             this->openSwitch();
-            }
-            return;
-        } else if (__e._message == "turnOff") {
-            {
-            auto __comp = std::make_unique<LampCompartment>("Off");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
+        } else if (__e._message == "$>") {
+            this->closeSwitch();
         } else if (__e._message == "getColor") {
-            {
-            _context_stack.back()._return = color;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(color);
+            return;;
+        } else if (__e._message == "isSwitchClosed") {
+            _context_stack.back()._return = std::any(switch_closed);
+            return;;
         } else if (__e._message == "setColor") {
             auto color = std::any_cast<std::string>(__e._parameters.at("color"));
-            {
             this->color = color;
-            }
-            return;
-        } else if (__e._message == "isSwitchClosed") {
-            {
-            _context_stack.back()._return = switch_closed;
-            return;
-            }
+        } else if (__e._message == "turnOff") {
+            auto __new_compartment = std::make_unique<LampCompartment>("Off");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
+    void closeSwitch() {
+                    switch_closed = true;
+    }
+
+    void openSwitch() {
+                    switch_closed = false;
+    }
+
 public:
+    std::string color = "white";
+    bool switch_closed = false;
+
     Lamp() {
         __compartment = std::make_unique<LampCompartment>("Off");
-        color = "white";
-        switch_closed = false;
         LampFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        LampFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void turnOn() {
@@ -211,19 +201,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
-    void closeSwitch() {
-        {
-        switch_closed = true;
-        }
-    }
-
-    void openSwitch() {
-        {
-        switch_closed = false;
-        }
-    }
-
 };
 
 int main() {

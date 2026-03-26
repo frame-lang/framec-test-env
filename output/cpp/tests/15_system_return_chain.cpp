@@ -41,13 +41,22 @@ public:
     std::unique_ptr<SystemReturnChainTestCompartment> parent_compartment;
 
     explicit SystemReturnChainTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<SystemReturnChainTestCompartment> clone() const {
+        auto c = std::make_unique<SystemReturnChainTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class SystemReturnChainTest {
 private:
+    std::vector<std::unique_ptr<SystemReturnChainTestCompartment>> _state_stack;
     std::unique_ptr<SystemReturnChainTestCompartment> __compartment;
     std::unique_ptr<SystemReturnChainTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<SystemReturnChainTestCompartment>> _state_stack;
     std::vector<SystemReturnChainTestFrameContext> _context_stack;
 
     void __kernel(SystemReturnChainTestFrameEvent& __e) {
@@ -90,60 +99,38 @@ private:
 
     void _state_Start(SystemReturnChainTestFrameEvent& __e) {
         if (__e._message == "<$") {
-            {
-            _context_stack.back()._return = std::string("from_exit");
-            }
-            return;
+            _context_stack.back()._return = std::any(std::string("from_exit"));
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Start"));
+            return;;
         } else if (__e._message == "test_enter_sets") {
-            {
-            auto __comp = std::make_unique<SystemReturnChainTestCompartment>("EnterSetter");
-            __transition(std::move(__comp));
-            return;
-            }
+            auto __new_compartment = std::make_unique<SystemReturnChainTestCompartment>("EnterSetter");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         } else if (__e._message == "test_exit_then_enter") {
-            {
-            auto __comp = std::make_unique<SystemReturnChainTestCompartment>("BothSet");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
-        } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("Start");
-            return;
-            }
+            auto __new_compartment = std::make_unique<SystemReturnChainTestCompartment>("BothSet");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_EnterSetter(SystemReturnChainTestFrameEvent& __e) {
         if (__e._message == "$>") {
-            {
-            _context_stack.back()._return = std::string("from_enter");
-            }
-            return;
+            _context_stack.back()._return = std::any(std::string("from_enter"));
         } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("EnterSetter");
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(std::string("EnterSetter"));
+            return;;
         }
     }
 
     void _state_BothSet(SystemReturnChainTestFrameEvent& __e) {
         if (__e._message == "$>") {
-            {
-            _context_stack.back()._return = std::string("enter_wins");
-            }
-            return;
+            _context_stack.back()._return = std::any(std::string("enter_wins"));
         } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("BothSet");
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(std::string("BothSet"));
+            return;;
         }
     }
 
@@ -151,7 +138,10 @@ public:
     SystemReturnChainTest() {
         __compartment = std::make_unique<SystemReturnChainTestCompartment>("Start");
         SystemReturnChainTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        SystemReturnChainTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     std::string test_enter_sets() {
@@ -183,7 +173,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

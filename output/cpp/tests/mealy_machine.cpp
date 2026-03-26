@@ -42,16 +42,23 @@ public:
     std::unique_ptr<MealyMachineCompartment> parent_compartment;
 
     explicit MealyMachineCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<MealyMachineCompartment> clone() const {
+        auto c = std::make_unique<MealyMachineCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class MealyMachine {
 private:
+    std::vector<std::unique_ptr<MealyMachineCompartment>> _state_stack;
     std::unique_ptr<MealyMachineCompartment> __compartment;
     std::unique_ptr<MealyMachineCompartment> __next_compartment;
-    std::vector<std::unique_ptr<MealyMachineCompartment>> _state_stack;
     std::vector<MealyMachineFrameContext> _context_stack;
-
-    int last_output = -1;
 
     void __kernel(MealyMachineFrameEvent& __e) {
         __router(__e);
@@ -91,72 +98,68 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Q0(MealyMachineFrameEvent& __e) {
+    void _state_Q2(MealyMachineFrameEvent& __e) {
         if (__e._message == "i_0") {
-            {
-            this.emit_output(0);
-            auto __comp = std::make_unique<MealyMachineCompartment>("Q1");
-            __transition(std::move(__comp));
-            return;
-            }
+            this->emit_output(1);
+            auto __new_compartment = std::make_unique<MealyMachineCompartment>("Q1");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         } else if (__e._message == "i_1") {
-            {
-            this.emit_output(0);
-            auto __comp = std::make_unique<MealyMachineCompartment>("Q2");
-            __transition(std::move(__comp));
-            return;
-            }
+            this->emit_output(0);
+            auto __new_compartment = std::make_unique<MealyMachineCompartment>("Q2");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_Q1(MealyMachineFrameEvent& __e) {
         if (__e._message == "i_0") {
-            {
-            this.emit_output(0);
-            auto __comp = std::make_unique<MealyMachineCompartment>("Q1");
-            __transition(std::move(__comp));
-            return;
-            }
+            this->emit_output(0);
+            auto __new_compartment = std::make_unique<MealyMachineCompartment>("Q1");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         } else if (__e._message == "i_1") {
-            {
-            this.emit_output(1);
-            auto __comp = std::make_unique<MealyMachineCompartment>("Q2");
-            __transition(std::move(__comp));
-            return;
-            }
+            this->emit_output(1);
+            auto __new_compartment = std::make_unique<MealyMachineCompartment>("Q2");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
-    void _state_Q2(MealyMachineFrameEvent& __e) {
+    void _state_Q0(MealyMachineFrameEvent& __e) {
         if (__e._message == "i_0") {
-            {
-            this.emit_output(1);
-            auto __comp = std::make_unique<MealyMachineCompartment>("Q1");
-            __transition(std::move(__comp));
-            return;
-            }
+            this->emit_output(0);
+            auto __new_compartment = std::make_unique<MealyMachineCompartment>("Q1");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         } else if (__e._message == "i_1") {
-            {
-            this.emit_output(0);
-            auto __comp = std::make_unique<MealyMachineCompartment>("Q2");
-            __transition(std::move(__comp));
-            return;
-            }
+            this->emit_output(0);
+            auto __new_compartment = std::make_unique<MealyMachineCompartment>("Q2");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
+    }
+
+    void emit_output(int value) {
+                    last_output = value;
     }
 
 public:
+    int last_output = -1;
+
     MealyMachine() {
         __compartment = std::make_unique<MealyMachineCompartment>("Q0");
-        last_output = -1;
         MealyMachineFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        MealyMachineFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void i_0() {
@@ -175,18 +178,9 @@ public:
         _context_stack.pop_back();
     }
 
-    void emit_output() {
-        {
-        last_output = value;
-        }
-    }
-
     int get_last_output() {
-        {
-        return last_output;
-        }
+                    return last_output;
     }
-
 };
 
 int main() {

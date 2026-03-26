@@ -41,16 +41,23 @@ public:
     std::unique_ptr<HSMEnterChildOnlyCompartment> parent_compartment;
 
     explicit HSMEnterChildOnlyCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<HSMEnterChildOnlyCompartment> clone() const {
+        auto c = std::make_unique<HSMEnterChildOnlyCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class HSMEnterChildOnly {
 private:
+    std::vector<std::unique_ptr<HSMEnterChildOnlyCompartment>> _state_stack;
     std::unique_ptr<HSMEnterChildOnlyCompartment> __compartment;
     std::unique_ptr<HSMEnterChildOnlyCompartment> __next_compartment;
-    std::vector<std::unique_ptr<HSMEnterChildOnlyCompartment>> _state_stack;
     std::vector<HSMEnterChildOnlyFrameContext> _context_stack;
-
-    std::vector<std::string> event_log = {};
 
     void __kernel(HSMEnterChildOnlyFrameEvent& __e) {
         __router(__e);
@@ -90,84 +97,58 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Start(HSMEnterChildOnlyFrameEvent& __e) {
-        if (__e._message == "go_to_child") {
-            {
-            auto __comp = std::make_unique<HSMEnterChildOnlyCompartment>("Child");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
+    void _state_Parent(HSMEnterChildOnlyFrameEvent& __e) {
+        if (__e._message == "forward_action") {
+            event_log.push_back("Parent:forward_action");
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(event_log);
+            return;;
         } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("Start");
-            return;
-            }
+            _context_stack.back()._return = std::any(std::string("Parent"));
+            return;;
+        }
+    }
+
+    void _state_Start(HSMEnterChildOnlyFrameEvent& __e) {
+        if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Start"));
+            return;;
+        } else if (__e._message == "go_to_child") {
+            auto __new_compartment = std::make_unique<HSMEnterChildOnlyCompartment>("Child");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_Child(HSMEnterChildOnlyFrameEvent& __e) {
         if (__e._message == "$>") {
-            {
             event_log.push_back("Child:enter");
-            }
-            return;
         } else if (__e._message == "forward_action") {
-            {
             event_log.push_back("Child:forward");
             _state_Parent(__e);
-            return;
-            }
-            return;
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(event_log);
+            return;;
         } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("Child");
-            return;
-            }
-            return;
-        }
-    }
-
-    void _state_Parent(HSMEnterChildOnlyFrameEvent& __e) {
-        if (__e._message == "forward_action") {
-            {
-            event_log.push_back("Parent:forward_action");
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
-        } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("Parent");
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(std::string("Child"));
+            return;;
         }
     }
 
 public:
+    std::vector<std::string> event_log = {};
+
     HSMEnterChildOnly() {
         __compartment = std::make_unique<HSMEnterChildOnlyCompartment>("Start");
-        event_log = {};
         HSMEnterChildOnlyFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        HSMEnterChildOnlyFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void go_to_child() {
@@ -205,7 +186,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

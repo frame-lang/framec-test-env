@@ -40,16 +40,23 @@ public:
     std::unique_ptr<ActionsTestCompartment> parent_compartment;
 
     explicit ActionsTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<ActionsTestCompartment> clone() const {
+        auto c = std::make_unique<ActionsTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class ActionsTest {
 private:
+    std::vector<std::unique_ptr<ActionsTestCompartment>> _state_stack;
     std::unique_ptr<ActionsTestCompartment> __compartment;
     std::unique_ptr<ActionsTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<ActionsTestCompartment>> _state_stack;
     std::vector<ActionsTestFrameContext> _context_stack;
-
-    std::string event_log = "";
 
     void __kernel(ActionsTestFrameEvent& __e) {
         __router(__e);
@@ -86,33 +93,41 @@ private:
     }
 
     void _state_Ready(ActionsTestFrameEvent& __e) {
-        if (__e._message == "process") {
+        if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "process") {
             auto value = std::any_cast<int>(__e._parameters.at("value"));
-            {
             this->__log_event("start");
             this->__validate_positive(value);
             this->__log_event("valid");
             int result = value * 2;
             this->__log_event("done");
-            _context_stack.back()._return = result;
-            return;
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(result);
+            return;;
         }
     }
 
+    void __log_event(std::string msg) {
+                    event_log = event_log + msg + ";";
+    }
+
+    void __validate_positive(int n) {
+                    if (n < 0) {
+                        throw std::runtime_error("Value must be positive");
+                    }
+    }
+
 public:
+    std::string event_log = "";
+
     ActionsTest() {
         __compartment = std::make_unique<ActionsTestCompartment>("Ready");
-        event_log = "";
         ActionsTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        ActionsTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     int process(int value) {
@@ -136,21 +151,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
-    void __log_event() {
-        {
-        event_log = event_log + msg + ";";
-        }
-    }
-
-    void __validate_positive() {
-        {
-        if (n < 0) {
-        throw std::runtime_error("Value must be positive");
-        }
-        }
-    }
-
 };
 
 int main() {

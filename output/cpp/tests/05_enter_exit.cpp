@@ -41,16 +41,23 @@ public:
     std::unique_ptr<EnterExitCompartment> parent_compartment;
 
     explicit EnterExitCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<EnterExitCompartment> clone() const {
+        auto c = std::make_unique<EnterExitCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class EnterExit {
 private:
+    std::vector<std::unique_ptr<EnterExitCompartment>> _state_stack;
     std::unique_ptr<EnterExitCompartment> __compartment;
     std::unique_ptr<EnterExitCompartment> __next_compartment;
-    std::vector<std::unique_ptr<EnterExitCompartment>> _state_stack;
     std::vector<EnterExitFrameContext> _context_stack;
-
-    std::vector<std::string> event_log = {};
 
     void __kernel(EnterExitFrameEvent& __e) {
         __router(__e);
@@ -89,69 +96,51 @@ private:
     }
 
     void _state_Off(EnterExitFrameEvent& __e) {
-        if (__e._message == "$>") {
-            {
-            event_log.push_back("enter:Off");
-            printf("Entered Off state\n");
-            }
-            return;
-        } else if (__e._message == "<$") {
-            {
+        if (__e._message == "<$") {
             event_log.push_back("exit:Off");
             printf("Exiting Off state\n");
-            }
-            return;
-        } else if (__e._message == "toggle") {
-            {
-            auto __comp = std::make_unique<EnterExitCompartment>("On");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
+        } else if (__e._message == "$>") {
+            event_log.push_back("enter:Off");
+            printf("Entered Off state\n");
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "toggle") {
+            auto __new_compartment = std::make_unique<EnterExitCompartment>("On");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_On(EnterExitFrameEvent& __e) {
-        if (__e._message == "$>") {
-            {
-            event_log.push_back("enter:On");
-            printf("Entered On state\n");
-            }
-            return;
-        } else if (__e._message == "<$") {
-            {
+        if (__e._message == "<$") {
             event_log.push_back("exit:On");
             printf("Exiting On state\n");
-            }
-            return;
-        } else if (__e._message == "toggle") {
-            {
-            auto __comp = std::make_unique<EnterExitCompartment>("Off");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
+        } else if (__e._message == "$>") {
+            event_log.push_back("enter:On");
+            printf("Entered On state\n");
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "toggle") {
+            auto __new_compartment = std::make_unique<EnterExitCompartment>("Off");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
 public:
+    std::vector<std::string> event_log = {};
+
     EnterExit() {
         __compartment = std::make_unique<EnterExitCompartment>("Off");
-        event_log = {};
         EnterExitFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        EnterExitFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void toggle() {
@@ -171,7 +160,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

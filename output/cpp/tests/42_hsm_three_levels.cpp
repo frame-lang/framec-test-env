@@ -41,16 +41,23 @@ public:
     std::unique_ptr<HSMThreeLevelsCompartment> parent_compartment;
 
     explicit HSMThreeLevelsCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<HSMThreeLevelsCompartment> clone() const {
+        auto c = std::make_unique<HSMThreeLevelsCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class HSMThreeLevels {
 private:
+    std::vector<std::unique_ptr<HSMThreeLevelsCompartment>> _state_stack;
     std::unique_ptr<HSMThreeLevelsCompartment> __compartment;
     std::unique_ptr<HSMThreeLevelsCompartment> __next_compartment;
-    std::vector<std::unique_ptr<HSMThreeLevelsCompartment>> _state_stack;
     std::vector<HSMThreeLevelsFrameContext> _context_stack;
-
-    std::vector<std::string> event_log = {};
 
     void __kernel(HSMThreeLevelsFrameEvent& __e) {
         __router(__e);
@@ -91,103 +98,84 @@ private:
     }
 
     void _state_Grandchild(HSMThreeLevelsFrameEvent& __e) {
-        if (__e._message == "handle_at_grandchild") {
-            {
-            int val = std::any_cast<int>(__compartment->state_vars["grandchild_var"]);
-            event_log.push_back(std::string("Grandchild:handled(var=") + std::to_string(val) + ")");
-            }
-            return;
-        } else if (__e._message == "forward_to_child") {
-            {
-            event_log.push_back("Grandchild:forward_to_child");
-            _state_Child(__e);
-            return;
-            }
-            return;
-        } else if (__e._message == "forward_to_parent") {
-            {
-            event_log.push_back("Grandchild:forward_to_parent");
-            _state_Child(__e);
-            return;
-            }
-            return;
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Grandchild") { __sv_comp = __sv_comp->parent_compartment.get(); }
+        if (__e._message == "$>") {
+            if (__compartment->state_vars.count("grandchild_var") == 0) { __compartment->state_vars["grandchild_var"] = std::any(1); }
         } else if (__e._message == "forward_through_all") {
-            {
             event_log.push_back("Grandchild:forward_through_all");
             _state_Child(__e);
-            return;
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
-        }
-    }
-
-    void _state_Child(HSMThreeLevelsFrameEvent& __e) {
-        if (__e._message == "forward_to_child") {
-            {
-            int val = std::any_cast<int>(__compartment->state_vars["child_var"]);
-            event_log.push_back(std::string("Child:handled(var=") + std::to_string(val) + ")");
-            }
-            return;
+        } else if (__e._message == "forward_to_child") {
+            event_log.push_back("Grandchild:forward_to_child");
+            _state_Child(__e);
         } else if (__e._message == "forward_to_parent") {
-            {
-            int val = std::any_cast<int>(__compartment->state_vars["child_var"]);
-            event_log.push_back(std::string("Child:forward_to_parent(var=") + std::to_string(val) + ")");
-            _state_Parent(__e);
-            return;
-            }
-            return;
-        } else if (__e._message == "forward_through_all") {
-            {
-            int val = std::any_cast<int>(__compartment->state_vars["child_var"]);
-            event_log.push_back(std::string("Child:forward_through_all(var=") + std::to_string(val) + ")");
-            _state_Parent(__e);
-            return;
-            }
-            return;
+            event_log.push_back("Grandchild:forward_to_parent");
+            _state_Child(__e);
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "handle_at_grandchild") {
+            int val = std::any_cast<int>(__sv_comp->state_vars["grandchild_var"]);
+            event_log.push_back(std::string("Grandchild:handled(var=") + std::to_string(val) + ")");
         }
     }
 
     void _state_Parent(HSMThreeLevelsFrameEvent& __e) {
-        if (__e._message == "forward_to_parent") {
-            {
-            int val = std::any_cast<int>(__compartment->state_vars["parent_var"]);
-            event_log.push_back(std::string("Parent:handled(var=") + std::to_string(val) + ")");
-            }
-            return;
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Parent") { __sv_comp = __sv_comp->parent_compartment.get(); }
+        if (__e._message == "$>") {
+            if (__compartment->state_vars.count("parent_var") == 0) { __compartment->state_vars["parent_var"] = std::any(100); }
         } else if (__e._message == "forward_through_all") {
-            {
-            int val = std::any_cast<int>(__compartment->state_vars["parent_var"]);
+            int val = std::any_cast<int>(__sv_comp->state_vars["parent_var"]);
             event_log.push_back(std::string("Parent:forward_through_all(var=") + std::to_string(val) + ")");
-            }
-            return;
+        } else if (__e._message == "forward_to_parent") {
+            int val = std::any_cast<int>(__sv_comp->state_vars["parent_var"]);
+            event_log.push_back(std::string("Parent:handled(var=") + std::to_string(val) + ")");
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        }
+    }
+
+    void _state_Child(HSMThreeLevelsFrameEvent& __e) {
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Child") { __sv_comp = __sv_comp->parent_compartment.get(); }
+        if (__e._message == "$>") {
+            if (__compartment->state_vars.count("child_var") == 0) { __compartment->state_vars["child_var"] = std::any(10); }
+        } else if (__e._message == "forward_through_all") {
+            int val = std::any_cast<int>(__sv_comp->state_vars["child_var"]);
+            event_log.push_back(std::string("Child:forward_through_all(var=") + std::to_string(val) + ")");
+            _state_Parent(__e);
+        } else if (__e._message == "forward_to_child") {
+            int val = std::any_cast<int>(__sv_comp->state_vars["child_var"]);
+            event_log.push_back(std::string("Child:handled(var=") + std::to_string(val) + ")");
+        } else if (__e._message == "forward_to_parent") {
+            int val = std::any_cast<int>(__sv_comp->state_vars["child_var"]);
+            event_log.push_back(std::string("Child:forward_to_parent(var=") + std::to_string(val) + ")");
+            _state_Parent(__e);
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
         }
     }
 
 public:
+    std::vector<std::string> event_log = {};
+
     HSMThreeLevels() {
+        // HSM: Create parent compartment chain
+        auto __parent_comp_0 = std::make_unique<HSMThreeLevelsCompartment>("Parent");
+        __parent_comp_0->state_vars["parent_var"] = std::any(100);
+        auto __parent_comp_1 = std::make_unique<HSMThreeLevelsCompartment>("Child");
+        __parent_comp_1->parent_compartment = std::move(__parent_comp_0);
+        __parent_comp_1->state_vars["child_var"] = std::any(10);
         __compartment = std::make_unique<HSMThreeLevelsCompartment>("Grandchild");
-        __compartment->state_vars["grandchild_var"] = 1;
-        event_log = {};
+        __compartment->parent_compartment = std::move(__parent_comp_1);
         HSMThreeLevelsFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        HSMThreeLevelsFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void handle_at_grandchild() {
@@ -231,7 +219,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

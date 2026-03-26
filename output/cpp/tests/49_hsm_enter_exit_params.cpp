@@ -41,16 +41,23 @@ public:
     std::unique_ptr<HSMEnterExitParamsCompartment> parent_compartment;
 
     explicit HSMEnterExitParamsCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<HSMEnterExitParamsCompartment> clone() const {
+        auto c = std::make_unique<HSMEnterExitParamsCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class HSMEnterExitParams {
 private:
+    std::vector<std::unique_ptr<HSMEnterExitParamsCompartment>> _state_stack;
     std::unique_ptr<HSMEnterExitParamsCompartment> __compartment;
     std::unique_ptr<HSMEnterExitParamsCompartment> __next_compartment;
-    std::vector<std::unique_ptr<HSMEnterExitParamsCompartment>> _state_stack;
     std::vector<HSMEnterExitParamsFrameContext> _context_stack;
-
-    std::vector<std::string> event_log = {};
 
     void __kernel(HSMEnterExitParamsFrameEvent& __e) {
         __router(__e);
@@ -93,110 +100,87 @@ private:
     }
 
     void _state_Start(HSMEnterExitParamsFrameEvent& __e) {
-        if (__e._message == "go_to_a") {
-            {
-            -> ("starting") $ChildA
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+        if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
         } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("Start");
-            return;
-            }
-            return;
-        }
-    }
-
-    void _state_ChildA(HSMEnterExitParamsFrameEvent& __e) {
-        if (__e._message == "$>") {
-            {
-            event_log.push_back(std::string("ChildA:enter(") + msg + ")");
-            }
-            return;
-        } else if (__e._message == "<$") {
-            {
-            event_log.push_back(std::string("ChildA:exit(") + reason + ")");
-            }
-            return;
-        } else if (__e._message == "go_to_sibling") {
-            {
-            ("leaving_A") -> ("arriving_B") $ChildB
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
-        } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("ChildA");
-            return;
-            }
-            return;
-        }
-    }
-
-    void _state_ChildB(HSMEnterExitParamsFrameEvent& __e) {
-        if (__e._message == "$>") {
-            {
-            event_log.push_back(std::string("ChildB:enter(") + msg + ")");
-            }
-            return;
-        } else if (__e._message == "<$") {
-            {
-            event_log.push_back(std::string("ChildB:exit(") + reason + ")");
-            }
-            return;
-        } else if (__e._message == "go_back") {
-            {
-            ("leaving_B") -> ("returning_A") $ChildA
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
-        } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("ChildB");
-            return;
-            }
+            _context_stack.back()._return = std::any(std::string("Start"));
+            return;;
+        } else if (__e._message == "go_to_a") {
+            auto __new_compartment = std::make_unique<HSMEnterExitParamsCompartment>("ChildA");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __new_compartment->enter_args["0"] = std::any(std::string("starting"));
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_Parent(HSMEnterExitParamsFrameEvent& __e) {
         if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(event_log);
+            return;;
         } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("Parent");
+            _context_stack.back()._return = std::any(std::string("Parent"));
+            return;;
+        }
+    }
+
+    void _state_ChildA(HSMEnterExitParamsFrameEvent& __e) {
+        if (__e._message == "<$") {
+            auto reason = std::any_cast<std::string>(__compartment->exit_args["0"]);
+            event_log.push_back(std::string("ChildA:exit(") + reason + ")");
+        } else if (__e._message == "$>") {
+            auto msg = std::any_cast<std::string>(__compartment->enter_args["0"]);
+            event_log.push_back(std::string("ChildA:enter(") + msg + ")");
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("ChildA"));
+            return;;
+        } else if (__e._message == "go_to_sibling") {
+            __compartment->exit_args["0"] = std::any(std::string("leaving_A"));
+            auto __new_compartment = std::make_unique<HSMEnterExitParamsCompartment>("ChildB");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __new_compartment->enter_args["0"] = std::any(std::string("arriving_B"));
+            __transition(std::move(__new_compartment));
             return;
-            }
+        }
+    }
+
+    void _state_ChildB(HSMEnterExitParamsFrameEvent& __e) {
+        if (__e._message == "<$") {
+            auto reason = std::any_cast<std::string>(__compartment->exit_args["0"]);
+            event_log.push_back(std::string("ChildB:exit(") + reason + ")");
+        } else if (__e._message == "$>") {
+            auto msg = std::any_cast<std::string>(__compartment->enter_args["0"]);
+            event_log.push_back(std::string("ChildB:enter(") + msg + ")");
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("ChildB"));
+            return;;
+        } else if (__e._message == "go_back") {
+            __compartment->exit_args["0"] = std::any(std::string("leaving_B"));
+            auto __new_compartment = std::make_unique<HSMEnterExitParamsCompartment>("ChildA");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __new_compartment->enter_args["0"] = std::any(std::string("returning_A"));
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
 public:
+    std::vector<std::string> event_log = {};
+
     HSMEnterExitParams() {
         __compartment = std::make_unique<HSMEnterExitParamsCompartment>("Start");
-        event_log = {};
         HSMEnterExitParamsFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        HSMEnterExitParamsFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void go_to_a() {
@@ -242,7 +226,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

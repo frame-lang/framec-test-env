@@ -39,16 +39,23 @@ public:
     std::unique_ptr<OperationsTestCompartment> parent_compartment;
 
     explicit OperationsTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<OperationsTestCompartment> clone() const {
+        auto c = std::make_unique<OperationsTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class OperationsTest {
 private:
+    std::vector<std::unique_ptr<OperationsTestCompartment>> _state_stack;
     std::unique_ptr<OperationsTestCompartment> __compartment;
     std::unique_ptr<OperationsTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<OperationsTestCompartment>> _state_stack;
     std::vector<OperationsTestFrameContext> _context_stack;
-
-    int last_result = 0;
 
     void __kernel(OperationsTestFrameEvent& __e) {
         __router(__e);
@@ -88,29 +95,27 @@ private:
         if (__e._message == "compute") {
             auto a = std::any_cast<int>(__e._parameters.at("a"));
             auto b = std::any_cast<int>(__e._parameters.at("b"));
-            {
             int sum_val = this->add(a, b);
             int prod_val = this->multiply(a, b);
             int last_result = sum_val + prod_val;
-            _context_stack.back()._return = last_result;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(last_result);
+            return;;
         } else if (__e._message == "get_last_result") {
-            {
-            _context_stack.back()._return = last_result;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(last_result);
+            return;;
         }
     }
 
 public:
+    int last_result = 0;
+
     OperationsTest() {
         __compartment = std::make_unique<OperationsTestCompartment>("Ready");
-        last_result = 0;
         OperationsTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        OperationsTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     int compute(int a, int b) {
@@ -136,33 +141,24 @@ public:
         return __result;
     }
 
-    int add() {
-        {
-        return x + y;
-        }
+    int add(int x, int y) {
+                    return x + y;
     }
 
-    int multiply() {
-        {
-        return x * y;
-        }
+    int multiply(int x, int y) {
+                    return x * y;
     }
 
-    static int factorial() {
-        {
-        if (n <= 1) {
-        return 1;
-        }
-        return n * OperationsTest::factorial(n - 1);
-        }
+    static int factorial(int n) {
+                    if (n <= 1) {
+                        return 1;
+                    }
+                    return n * OperationsTest::factorial(n - 1);
     }
 
-    static bool is_even() {
-        {
-        return n % 2 == 0;
-        }
+    static bool is_even(int n) {
+                    return n % 2 == 0;
     }
-
 };
 
 int main() {

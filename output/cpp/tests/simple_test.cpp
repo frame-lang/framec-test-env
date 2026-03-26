@@ -40,13 +40,22 @@ public:
     std::unique_ptr<SimpleDockerCompartment> parent_compartment;
 
     explicit SimpleDockerCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<SimpleDockerCompartment> clone() const {
+        auto c = std::make_unique<SimpleDockerCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class SimpleDocker {
 private:
+    std::vector<std::unique_ptr<SimpleDockerCompartment>> _state_stack;
     std::unique_ptr<SimpleDockerCompartment> __compartment;
     std::unique_ptr<SimpleDockerCompartment> __next_compartment;
-    std::vector<std::unique_ptr<SimpleDockerCompartment>> _state_stack;
     std::vector<SimpleDockerFrameContext> _context_stack;
 
     void __kernel(SimpleDockerFrameEvent& __e) {
@@ -87,24 +96,26 @@ private:
 
     void _state_Start(SimpleDockerFrameEvent& __e) {
         if (__e._message == "run") {
-            {
-            printf("SUCCESS: Hello from Docker\n")
-            auto __comp = std::make_unique<SimpleDockerCompartment>("End");
-            __transition(std::move(__comp));
-            return;
-            }
+            printf("SUCCESS: Hello from Docker\n");
+            auto __new_compartment = std::make_unique<SimpleDockerCompartment>("End");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_End(SimpleDockerFrameEvent& __e) {
+
     }
 
 public:
     SimpleDocker() {
         __compartment = std::make_unique<SimpleDockerCompartment>("Start");
         SimpleDockerFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        SimpleDockerFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void run() {
@@ -112,11 +123,8 @@ public:
         SimpleDockerFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
-        auto __result = std::any_cast<void>(std::move(_context_stack.back()._return));
         _context_stack.pop_back();
-        return __result;
     }
-
 };
 
 // Stub functions for placeholder calls

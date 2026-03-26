@@ -43,13 +43,22 @@ public:
     std::unique_ptr<NestedBracesCompartment> parent_compartment;
 
     explicit NestedBracesCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<NestedBracesCompartment> clone() const {
+        auto c = std::make_unique<NestedBracesCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class NestedBraces {
 private:
+    std::vector<std::unique_ptr<NestedBracesCompartment>> _state_stack;
     std::unique_ptr<NestedBracesCompartment> __compartment;
     std::unique_ptr<NestedBracesCompartment> __next_compartment;
-    std::vector<std::unique_ptr<NestedBracesCompartment>> _state_stack;
     std::vector<NestedBracesFrameContext> _context_stack;
 
     void __kernel(NestedBracesFrameEvent& __e) {
@@ -88,24 +97,23 @@ private:
 
     void _state_Start(NestedBracesFrameEvent& __e) {
         if (__e._message == "run_test") {
-            {
             // String containing braces
             std::string s1 = "string with { braces }";
             std::string s2 = "nested { { { braces } } }";
             std::string s3 = "{\"json\": \"in string\"}";
+
             // Multi-level nesting
             std::map<int, std::map<std::string, int>> result;
             for (int i = 0; i < 3; i++) {
-            result[i] = {{"level", i}};
+                result[i] = {{"level", i}};
             }
+
             if (result.size() == 3) {
-            printf("PASS: Nested braces handled correctly\n");
+                printf("PASS: Nested braces handled correctly\n");
             } else {
-            printf("FAIL: Wrong result count\n");
-            assert(false);
+                printf("FAIL: Wrong result count\n");
+                assert(false);
             }
-            }
-            return;
         }
     }
 
@@ -113,7 +121,10 @@ public:
     NestedBraces() {
         __compartment = std::make_unique<NestedBracesCompartment>("Start");
         NestedBracesFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        NestedBracesFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void run_test() {
@@ -123,7 +134,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 int main() {

@@ -39,13 +39,22 @@ public:
     std::unique_ptr<SystemReturnTestCompartment> parent_compartment;
 
     explicit SystemReturnTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<SystemReturnTestCompartment> clone() const {
+        auto c = std::make_unique<SystemReturnTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class SystemReturnTest {
 private:
+    std::vector<std::unique_ptr<SystemReturnTestCompartment>> _state_stack;
     std::unique_ptr<SystemReturnTestCompartment> __compartment;
     std::unique_ptr<SystemReturnTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<SystemReturnTestCompartment>> _state_stack;
     std::vector<SystemReturnTestFrameContext> _context_stack;
 
     void __kernel(SystemReturnTestFrameEvent& __e) {
@@ -83,44 +92,38 @@ private:
     }
 
     void _state_Calculator(SystemReturnTestFrameEvent& __e) {
-        if (__e._message == "add") {
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Calculator") { __sv_comp = __sv_comp->parent_compartment.get(); }
+        if (__e._message == "$>") {
+            if (__compartment->state_vars.count("value") == 0) { __compartment->state_vars["value"] = std::any(0); }
+        } else if (__e._message == "add") {
             auto a = std::any_cast<int>(__e._parameters.at("a"));
             auto b = std::any_cast<int>(__e._parameters.at("b"));
-            {
-            _context_stack.back()._return = a + b;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(a + b);
+            return;;
+        } else if (__e._message == "get_value") {
+            __sv_comp->state_vars["value"] = std::any(42);
+            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["value"]));
+            return;;
+        } else if (__e._message == "greet") {
+            auto name = std::any_cast<std::string>(__e._parameters.at("name"));
+            _context_stack.back()._return = std::any(std::string("Hello, ") + name + "!");
+            return;;
         } else if (__e._message == "multiply") {
             auto a = std::any_cast<int>(__e._parameters.at("a"));
             auto b = std::any_cast<int>(__e._parameters.at("b"));
-            {
-            _context_stack.back()._return = a * b;
-            }
-            return;
-        } else if (__e._message == "greet") {
-            auto name = std::any_cast<std::string>(__e._parameters.at("name"));
-            {
-            _context_stack.back()._return = std::string("Hello, ") + name + "!";
-            return;
-            }
-            return;
-        } else if (__e._message == "get_value") {
-            {
-            __compartment->state_vars["value"] = std::any(42);
-            _context_stack.back()._return = std::any_cast<int>(__compartment->state_vars["value"]);
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(a * b);
         }
     }
 
 public:
     SystemReturnTest() {
         __compartment = std::make_unique<SystemReturnTestCompartment>("Calculator");
-        __compartment->state_vars["value"] = 0;
         SystemReturnTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        SystemReturnTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     int add(int a, int b) {
@@ -170,7 +173,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

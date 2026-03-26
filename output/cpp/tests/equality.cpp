@@ -42,17 +42,23 @@ public:
     std::unique_ptr<EqualityTestCompartment> parent_compartment;
 
     explicit EqualityTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<EqualityTestCompartment> clone() const {
+        auto c = std::make_unique<EqualityTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class EqualityTest {
 private:
+    std::vector<std::unique_ptr<EqualityTestCompartment>> _state_stack;
     std::unique_ptr<EqualityTestCompartment> __compartment;
     std::unique_ptr<EqualityTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<EqualityTestCompartment>> _state_stack;
     std::vector<EqualityTestFrameContext> _context_stack;
-
-    int a = 5;
-    int b = 5;
 
     void __kernel(EqualityTestFrameEvent& __e) {
         __router(__e);
@@ -89,42 +95,37 @@ private:
     }
 
     void _state_Ready(EqualityTestFrameEvent& __e) {
-        if (__e._message == "test_equal") {
-            {
-            if (a == b) {
-            _context_stack.back()._return = true;
-            } else {
-            _context_stack.back()._return = false;
-            }
-            }
-            return;
-        } else if (__e._message == "test_not_equal") {
-            {
-            if (a != b) {
-            _context_stack.back()._return = true;
-            } else {
-            _context_stack.back()._return = false;
-            }
-            }
-            return;
-        } else if (__e._message == "set_values") {
+        if (__e._message == "set_values") {
             auto x = std::any_cast<int>(__e._parameters.at("x"));
             auto y = std::any_cast<int>(__e._parameters.at("y"));
-            {
             a = x;
             b = y;
+        } else if (__e._message == "test_equal") {
+            if (a == b) {
+                _context_stack.back()._return = std::any(true);
+            } else {
+                _context_stack.back()._return = std::any(false);
             }
-            return;
+        } else if (__e._message == "test_not_equal") {
+            if (a != b) {
+                _context_stack.back()._return = std::any(true);
+            } else {
+                _context_stack.back()._return = std::any(false);
+            }
         }
     }
 
 public:
+    int a = 5;
+    int b = 5;
+
     EqualityTest() {
         __compartment = std::make_unique<EqualityTestCompartment>("Ready");
-        a = 5;
-        b = 5;
         EqualityTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        EqualityTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     bool test_equal() {
@@ -157,7 +158,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 int main() {

@@ -42,13 +42,22 @@ public:
     std::unique_ptr<ReturnInitTestCompartment> parent_compartment;
 
     explicit ReturnInitTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<ReturnInitTestCompartment> clone() const {
+        auto c = std::make_unique<ReturnInitTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class ReturnInitTest {
 private:
+    std::vector<std::unique_ptr<ReturnInitTestCompartment>> _state_stack;
     std::unique_ptr<ReturnInitTestCompartment> __compartment;
     std::unique_ptr<ReturnInitTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<ReturnInitTestCompartment>> _state_stack;
     std::vector<ReturnInitTestFrameContext> _context_stack;
 
     void __kernel(ReturnInitTestFrameEvent& __e) {
@@ -87,64 +96,36 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Start(ReturnInitTestFrameEvent& __e) {
+    void _state_Active(ReturnInitTestFrameEvent& __e) {
         if (__e._message == "$>") {
-            {
-            // Start state enter (no-op)
-            }
-            return;
-        } else if (__e._message == "get_status") {
-            {
-            // Don't set return - should use default "unknown"
-            }
-            return;
+            // Active state enter (no-op)
         } else if (__e._message == "get_count") {
-            {
-            // Don't set return - should use default 0
-            }
-            return;
+            _context_stack.back()._return = std::any(42);
         } else if (__e._message == "get_flag") {
-            {
-            // Don't set return - should use default false
-            }
-            return;
+            _context_stack.back()._return = std::any(true);
+        } else if (__e._message == "get_status") {
+            _context_stack.back()._return = std::any(std::string("active"));
         } else if (__e._message == "trigger") {
-            {
-            auto __comp = std::make_unique<ReturnInitTestCompartment>("Active");
-            __transition(std::move(__comp));
-            return;
-            }
+            auto __new_compartment = std::make_unique<ReturnInitTestCompartment>("Start");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
-    void _state_Active(ReturnInitTestFrameEvent& __e) {
+    void _state_Start(ReturnInitTestFrameEvent& __e) {
         if (__e._message == "$>") {
-            {
-            // Active state enter (no-op)
-            }
-            return;
-        } else if (__e._message == "get_status") {
-            {
-            _context_stack.back()._return = std::string("active");
-            }
-            return;
+            // Start state enter (no-op)
         } else if (__e._message == "get_count") {
-            {
-            _context_stack.back()._return = 42;
-            }
-            return;
+            // Don't set return - should use default 0
         } else if (__e._message == "get_flag") {
-            {
-            _context_stack.back()._return = true;
-            }
-            return;
+            // Don't set return - should use default false
+        } else if (__e._message == "get_status") {
+            // Don't set return - should use default "unknown"
         } else if (__e._message == "trigger") {
-            {
-            auto __comp = std::make_unique<ReturnInitTestCompartment>("Start");
-            __transition(std::move(__comp));
-            return;
-            }
+            auto __new_compartment = std::make_unique<ReturnInitTestCompartment>("Active");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
@@ -153,12 +134,15 @@ public:
     ReturnInitTest() {
         __compartment = std::make_unique<ReturnInitTestCompartment>("Start");
         ReturnInitTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        ReturnInitTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     std::string get_status() {
         ReturnInitTestFrameEvent __e("get_status");
-        ReturnInitTestFrameContext __ctx(std::move(__e), std::any("unknown"));
+        ReturnInitTestFrameContext __ctx(std::move(__e), std::any(std::string("unknown")));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
         auto __result = std::any_cast<std::string>(std::move(_context_stack.back()._return));
@@ -193,7 +177,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 int main() {

@@ -39,13 +39,22 @@ public:
     std::unique_ptr<SCompartment> parent_compartment;
 
     explicit SCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<SCompartment> clone() const {
+        auto c = std::make_unique<SCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class S {
 private:
+    std::vector<std::unique_ptr<SCompartment>> _state_stack;
     std::unique_ptr<SCompartment> __compartment;
     std::unique_ptr<SCompartment> __next_compartment;
-    std::vector<std::unique_ptr<SCompartment>> _state_stack;
     std::vector<SFrameContext> _context_stack;
 
     void __kernel(SFrameEvent& __e) {
@@ -84,25 +93,27 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_A(SFrameEvent& __e) {
-        if (__e._message == "e") {
-            {
-            auto __comp = std::make_unique<SCompartment>("B()  // comment ok");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
-        }
+    void _state_B(SFrameEvent& __e) {
+
     }
 
-    void _state_B(SFrameEvent& __e) {
+    void _state_A(SFrameEvent& __e) {
+        if (__e._message == "e") {
+            auto __new_compartment = std::make_unique<SCompartment>("B");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;// comment ok
+        }
     }
 
 public:
     S() {
         __compartment = std::make_unique<SCompartment>("A");
         SFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        SFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void e() {
@@ -112,7 +123,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 // Stub functions for placeholder calls

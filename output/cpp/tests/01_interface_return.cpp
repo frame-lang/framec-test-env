@@ -40,13 +40,22 @@ public:
     std::unique_ptr<InterfaceReturnCompartment> parent_compartment;
 
     explicit InterfaceReturnCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<InterfaceReturnCompartment> clone() const {
+        auto c = std::make_unique<InterfaceReturnCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class InterfaceReturn {
 private:
+    std::vector<std::unique_ptr<InterfaceReturnCompartment>> _state_stack;
     std::unique_ptr<InterfaceReturnCompartment> __compartment;
     std::unique_ptr<InterfaceReturnCompartment> __next_compartment;
-    std::vector<std::unique_ptr<InterfaceReturnCompartment>> _state_stack;
     std::vector<InterfaceReturnFrameContext> _context_stack;
 
     void __kernel(InterfaceReturnFrameEvent& __e) {
@@ -85,84 +94,54 @@ private:
 
     void _state_Active(InterfaceReturnFrameEvent& __e) {
         if (__e._message == "bool_return") {
-            {
-            _context_stack.back()._return = true;
-            return;
-            }
-            return;
-        } else if (__e._message == "int_return") {
-            {
-            _context_stack.back()._return = 42;
-            return;
-            }
-            return;
-        } else if (__e._message == "string_return") {
-            {
-            _context_stack.back()._return = std::string("Frame");
-            return;
-            }
-            return;
-        } else if (__e._message == "conditional_return") {
-            auto x = std::any_cast<int>(__e._parameters.at("x"));
-            {
-            if (x < 0) {
-            _context_stack.back()._return = std::string("negative");
-            return;
-            } else if (x == 0) {
-            _context_stack.back()._return = std::string("zero");
-            return;
-            } else {
-            _context_stack.back()._return = std::string("positive");
-            return;
-            }
-            }
-            return;
+            _context_stack.back()._return = std::any(true);
+            return;;
         } else if (__e._message == "computed_return") {
             auto a = std::any_cast<int>(__e._parameters.at("a"));
             auto b = std::any_cast<int>(__e._parameters.at("b"));
-            {
             int result = a * b + 10;
-            _context_stack.back()._return = result;
-            return;
-            }
-            return;
-        } else if (__e._message == "explicit_bool") {
-            {
-            _context_stack.back()._return = true;
-            }
-            return;
-        } else if (__e._message == "explicit_int") {
-            {
-            _context_stack.back()._return = 42;
-            }
-            return;
-        } else if (__e._message == "explicit_string") {
-            {
-            _context_stack.back()._return = std::string("Frame");
-            }
-            return;
-        } else if (__e._message == "explicit_conditional") {
+            _context_stack.back()._return = std::any(result);
+            return;;
+        } else if (__e._message == "conditional_return") {
             auto x = std::any_cast<int>(__e._parameters.at("x"));
-            {
             if (x < 0) {
-            _context_stack.back()._return = std::string("negative");
-            return;
+                _context_stack.back()._return = std::any(std::string("negative"));
+                return;;
             } else if (x == 0) {
-            _context_stack.back()._return = std::string("zero");
-            return;
+                _context_stack.back()._return = std::any(std::string("zero"));
+                return;;
             } else {
-            _context_stack.back()._return = std::string("positive");
+                _context_stack.back()._return = std::any(std::string("positive"));
+                return;;
             }
-            }
-            return;
+        } else if (__e._message == "explicit_bool") {
+            _context_stack.back()._return = std::any(true);
         } else if (__e._message == "explicit_computed") {
             auto a = std::any_cast<int>(__e._parameters.at("a"));
             auto b = std::any_cast<int>(__e._parameters.at("b"));
-            {
             int result = a * b + 10;
-            _context_stack.back()._return = result;
+            _context_stack.back()._return = std::any(result);
+        } else if (__e._message == "explicit_conditional") {
+            auto x = std::any_cast<int>(__e._parameters.at("x"));
+            if (x < 0) {
+                _context_stack.back()._return = std::any(std::string("negative"));
+                return;
+            } else if (x == 0) {
+                _context_stack.back()._return = std::any(std::string("zero"));
+                return;
+            } else {
+                _context_stack.back()._return = std::any(std::string("positive"));
             }
-            return;
+        } else if (__e._message == "explicit_int") {
+            _context_stack.back()._return = std::any(42);
+        } else if (__e._message == "explicit_string") {
+            _context_stack.back()._return = std::any(std::string("Frame"));
+        } else if (__e._message == "int_return") {
+            _context_stack.back()._return = std::any(42);
+            return;;
+        } else if (__e._message == "string_return") {
+            _context_stack.back()._return = std::any(std::string("Frame"));
+            return;;
         }
     }
 
@@ -170,7 +149,10 @@ public:
     InterfaceReturn() {
         __compartment = std::make_unique<InterfaceReturnCompartment>("Active");
         InterfaceReturnFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        InterfaceReturnFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     bool bool_return() {
@@ -282,7 +264,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

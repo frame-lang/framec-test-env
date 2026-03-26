@@ -42,13 +42,22 @@ public:
     std::unique_ptr<ContextReentrantTestCompartment> parent_compartment;
 
     explicit ContextReentrantTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<ContextReentrantTestCompartment> clone() const {
+        auto c = std::make_unique<ContextReentrantTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class ContextReentrantTest {
 private:
+    std::vector<std::unique_ptr<ContextReentrantTestCompartment>> _state_stack;
     std::unique_ptr<ContextReentrantTestCompartment> __compartment;
     std::unique_ptr<ContextReentrantTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<ContextReentrantTestCompartment>> _state_stack;
     std::vector<ContextReentrantTestFrameContext> _context_stack;
 
     void __kernel(ContextReentrantTestFrameEvent& __e) {
@@ -86,36 +95,24 @@ private:
     }
 
     void _state_Ready(ContextReentrantTestFrameEvent& __e) {
-        if (__e._message == "outer") {
-            auto x = std::any_cast<int>(__e._parameters.at("x"));
-            {
-            _context_stack.back()._return = std::string("outer_initial");
-            std::string inner_result = this->inner(@@.x * 10);
-            _context_stack.back()._return = std::string("outer:") + std::to_string(@@.x) + ",inner:" + inner_result;
-            }
-            return;
-        } else if (__e._message == "inner") {
-            auto y = std::any_cast<int>(__e._parameters.at("y"));
-            {
-            _context_stack.back()._return = std::to_string(@@.y);
-            }
-            return;
-        } else if (__e._message == "deeply_nested") {
+        if (__e._message == "deeply_nested") {
             auto z = std::any_cast<int>(__e._parameters.at("z"));
-            {
-            std::string outer_result = this->outer(@@.z);
-            _context_stack.back()._return = std::string("deep:") + std::to_string(@@.z) + "," + outer_result;
-            }
-            return;
+            std::string outer_result = this->outer(z);
+            _context_stack.back()._return = std::any(std::string("deep:") + std::to_string(z) + "," + outer_result);
         } else if (__e._message == "get_both") {
             auto a = std::any_cast<int>(__e._parameters.at("a"));
             auto b = std::any_cast<int>(__e._parameters.at("b"));
-            {
-            std::string result_a = this->inner(@@.a);
-            std::string result_b = this->inner(@@.b);
-            _context_stack.back()._return = std::string("a=") + std::to_string(@@.a) + ",b=" + std::to_string(@@.b) + ",results=" + result_a + "+" + result_b;
-            }
-            return;
+            std::string result_a = this->inner(a);
+            std::string result_b = this->inner(b);
+            _context_stack.back()._return = std::any(std::string("a=") + std::to_string(a) + ",b=" + std::to_string(b) + ",results=" + result_a + "+" + result_b);
+        } else if (__e._message == "inner") {
+            auto y = std::any_cast<int>(__e._parameters.at("y"));
+            _context_stack.back()._return = std::any(std::to_string(y));
+        } else if (__e._message == "outer") {
+            auto x = std::any_cast<int>(__e._parameters.at("x"));
+            _context_stack.back()._return = std::any(std::string("outer_initial"));
+            std::string inner_result = this->inner(x * 10);
+            _context_stack.back()._return = std::any(std::string("outer:") + std::to_string(x) + ",inner:" + inner_result);
         }
     }
 
@@ -123,7 +120,10 @@ public:
     ContextReentrantTest() {
         __compartment = std::make_unique<ContextReentrantTestCompartment>("Ready");
         ContextReentrantTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        ContextReentrantTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     std::string outer(int x) {
@@ -174,7 +174,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

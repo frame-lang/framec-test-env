@@ -41,16 +41,23 @@ public:
     std::unique_ptr<HSMDefaultForwardCompartment> parent_compartment;
 
     explicit HSMDefaultForwardCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<HSMDefaultForwardCompartment> clone() const {
+        auto c = std::make_unique<HSMDefaultForwardCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class HSMDefaultForward {
 private:
+    std::vector<std::unique_ptr<HSMDefaultForwardCompartment>> _state_stack;
     std::unique_ptr<HSMDefaultForwardCompartment> __compartment;
     std::unique_ptr<HSMDefaultForwardCompartment> __next_compartment;
-    std::vector<std::unique_ptr<HSMDefaultForwardCompartment>> _state_stack;
     std::vector<HSMDefaultForwardFrameContext> _context_stack;
-
-    std::vector<std::string> event_log = {};
 
     void __kernel(HSMDefaultForwardFrameEvent& __e) {
         __router(__e);
@@ -89,48 +96,40 @@ private:
     }
 
     void _state_Child(HSMDefaultForwardFrameEvent& __e) {
-        if (__e._message == "handled_event") {
-            {
+        if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "handled_event") {
             event_log.push_back("Child:handled_event");
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
-        } else if (true) {
+        } else {
             _state_Parent(__e);
         }
     }
 
     void _state_Parent(HSMDefaultForwardFrameEvent& __e) {
-        if (__e._message == "handled_event") {
-            {
+        if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "handled_event") {
             event_log.push_back("Parent:handled_event");
-            }
-            return;
         } else if (__e._message == "unhandled_event") {
-            {
             event_log.push_back("Parent:unhandled_event");
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
         }
     }
 
 public:
+    std::vector<std::string> event_log = {};
+
     HSMDefaultForward() {
+        // HSM: Create parent compartment chain
+        auto __parent_comp_0 = std::make_unique<HSMDefaultForwardCompartment>("Parent");
         __compartment = std::make_unique<HSMDefaultForwardCompartment>("Child");
-        event_log = {};
+        __compartment->parent_compartment = std::move(__parent_comp_0);
         HSMDefaultForwardFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        HSMDefaultForwardFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void handled_event() {
@@ -158,7 +157,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

@@ -41,16 +41,23 @@ public:
     std::unique_ptr<HSMSingleParentCompartment> parent_compartment;
 
     explicit HSMSingleParentCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<HSMSingleParentCompartment> clone() const {
+        auto c = std::make_unique<HSMSingleParentCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class HSMSingleParent {
 private:
+    std::vector<std::unique_ptr<HSMSingleParentCompartment>> _state_stack;
     std::unique_ptr<HSMSingleParentCompartment> __compartment;
     std::unique_ptr<HSMSingleParentCompartment> __next_compartment;
-    std::vector<std::unique_ptr<HSMSingleParentCompartment>> _state_stack;
     std::vector<HSMSingleParentFrameContext> _context_stack;
-
-    std::vector<std::string> event_log = {};
 
     void __kernel(HSMSingleParentFrameEvent& __e) {
         __router(__e);
@@ -88,62 +95,47 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Child(HSMSingleParentFrameEvent& __e) {
-        if (__e._message == "child_only") {
-            {
-            event_log.push_back("Child:child_only");
-            }
-            return;
-        } else if (__e._message == "forward_to_parent") {
-            {
-            event_log.push_back("Child:before_forward");
-            _state_Parent(__e);
-            return;
-            event_log.push_back("Child:after_forward");
-            }
-            return;
+    void _state_Parent(HSMSingleParentFrameEvent& __e) {
+        if (__e._message == "forward_to_parent") {
+            event_log.push_back("Parent:forward_to_parent");
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(event_log);
+            return;;
         } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("Child");
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(std::string("Parent"));
+            return;;
         }
     }
 
-    void _state_Parent(HSMSingleParentFrameEvent& __e) {
-        if (__e._message == "forward_to_parent") {
-            {
-            event_log.push_back("Parent:forward_to_parent");
-            }
-            return;
+    void _state_Child(HSMSingleParentFrameEvent& __e) {
+        if (__e._message == "child_only") {
+            event_log.push_back("Child:child_only");
+        } else if (__e._message == "forward_to_parent") {
+            event_log.push_back("Child:before_forward");
+            _state_Parent(__e);
+            event_log.push_back("Child:after_forward");
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(event_log);
+            return;;
         } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("Parent");
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(std::string("Child"));
+            return;;
         }
     }
 
 public:
+    std::vector<std::string> event_log = {};
+
     HSMSingleParent() {
+        // HSM: Create parent compartment chain
+        auto __parent_comp_0 = std::make_unique<HSMSingleParentCompartment>("Parent");
         __compartment = std::make_unique<HSMSingleParentCompartment>("Child");
-        event_log = {};
+        __compartment->parent_compartment = std::move(__parent_comp_0);
         HSMSingleParentFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        HSMSingleParentFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void child_only() {
@@ -181,7 +173,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

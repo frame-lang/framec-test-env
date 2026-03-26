@@ -41,16 +41,23 @@ public:
     std::unique_ptr<TransitionExitArgsCompartment> parent_compartment;
 
     explicit TransitionExitArgsCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<TransitionExitArgsCompartment> clone() const {
+        auto c = std::make_unique<TransitionExitArgsCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class TransitionExitArgs {
 private:
+    std::vector<std::unique_ptr<TransitionExitArgsCompartment>> _state_stack;
     std::unique_ptr<TransitionExitArgsCompartment> __compartment;
     std::unique_ptr<TransitionExitArgsCompartment> __next_compartment;
-    std::vector<std::unique_ptr<TransitionExitArgsCompartment>> _state_stack;
     std::vector<TransitionExitArgsFrameContext> _context_stack;
-
-    std::vector<std::string> event_log = {};
 
     void __kernel(TransitionExitArgsFrameEvent& __e) {
         __router(__e);
@@ -90,46 +97,42 @@ private:
 
     void _state_Active(TransitionExitArgsFrameEvent& __e) {
         if (__e._message == "<$") {
-            {
+            auto reason = std::any_cast<std::string>(__compartment->exit_args["0"]);
+            auto code = std::any_cast<int>(__compartment->exit_args["1"]);
             event_log.push_back(std::string("exit:") + reason + ":" + std::to_string(code));
-            }
-            return;
-        } else if (__e._message == "leave") {
-            {
-            event_log.push_back("leaving");
-            ("cleanup", 42) -> $Done
-            }
-            return;
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "leave") {
+            event_log.push_back("leaving");
+            __compartment->exit_args["0"] = std::any(std::string("cleanup"));
+            __compartment->exit_args["1"] = std::any(42);
+            auto __new_compartment = std::make_unique<TransitionExitArgsCompartment>("Done");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_Done(TransitionExitArgsFrameEvent& __e) {
         if (__e._message == "$>") {
-            {
             event_log.push_back("enter:done");
-            }
-            return;
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(event_log);
+            return;;
         }
     }
 
 public:
+    std::vector<std::string> event_log = {};
+
     TransitionExitArgs() {
         __compartment = std::make_unique<TransitionExitArgsCompartment>("Active");
-        event_log = {};
         TransitionExitArgsFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        TransitionExitArgsFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void leave() {
@@ -149,7 +152,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

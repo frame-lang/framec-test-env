@@ -41,13 +41,22 @@ public:
     std::unique_ptr<SystemReturnReentrantTestCompartment> parent_compartment;
 
     explicit SystemReturnReentrantTestCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<SystemReturnReentrantTestCompartment> clone() const {
+        auto c = std::make_unique<SystemReturnReentrantTestCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class SystemReturnReentrantTest {
 private:
+    std::vector<std::unique_ptr<SystemReturnReentrantTestCompartment>> _state_stack;
     std::unique_ptr<SystemReturnReentrantTestCompartment> __compartment;
     std::unique_ptr<SystemReturnReentrantTestCompartment> __next_compartment;
-    std::vector<std::unique_ptr<SystemReturnReentrantTestCompartment>> _state_stack;
     std::vector<SystemReturnReentrantTestFrameContext> _context_stack;
 
     void __kernel(SystemReturnReentrantTestFrameEvent& __e) {
@@ -85,47 +94,41 @@ private:
     }
 
     void _state_Start(SystemReturnReentrantTestFrameEvent& __e) {
-        if (__e._message == "outer_call") {
-            {
-            __compartment->state_vars["log"] = std::any(std::any_cast<int>(__compartment->state_vars["log"]) + "outer_start,");
-            std::string inner_result = this->inner_call();
-            __compartment->state_vars["log"] = std::any(std::any_cast<int>(__compartment->state_vars["log"]) + "outer_after_inner,");
-            _context_stack.back()._return = std::string("outer_result:") + inner_result;
-            return;
-            }
-            return;
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Start") { __sv_comp = __sv_comp->parent_compartment.get(); }
+        if (__e._message == "$>") {
+            if (__compartment->state_vars.count("log") == 0) { __compartment->state_vars["log"] = std::any(std::string("")); }
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(std::any_cast<std::string>(__sv_comp->state_vars["log"]));
+            return;;
         } else if (__e._message == "inner_call") {
-            {
-            __compartment->state_vars["log"] = std::any(std::any_cast<int>(__compartment->state_vars["log"]) + "inner,");
-            _context_stack.back()._return = std::string("inner_result");
-            return;
-            }
-            return;
+            __sv_comp->state_vars["log"] = std::any(std::any_cast<std::string>(__sv_comp->state_vars["log"]) + "inner,");
+            _context_stack.back()._return = std::any(std::string("inner_result"));
+            return;;
         } else if (__e._message == "nested_call") {
-            {
-            __compartment->state_vars["log"] = std::any(std::any_cast<int>(__compartment->state_vars["log"]) + "nested_start,");
+            __sv_comp->state_vars["log"] = std::any(std::any_cast<std::string>(__sv_comp->state_vars["log"]) + "nested_start,");
             std::string result1 = this->inner_call();
             std::string result2 = this->outer_call();
-            __compartment->state_vars["log"] = std::any(std::any_cast<int>(__compartment->state_vars["log"]) + "nested_end,");
-            _context_stack.back()._return = std::string("nested:") + result1 + "+" + result2;
-            return;
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = std::any_cast<int>(__compartment->state_vars["log"]);
-            return;
-            }
-            return;
+            __sv_comp->state_vars["log"] = std::any(std::any_cast<std::string>(__sv_comp->state_vars["log"]) + "nested_end,");
+            _context_stack.back()._return = std::any(std::string("nested:") + result1 + "+" + result2);
+            return;;
+        } else if (__e._message == "outer_call") {
+            __sv_comp->state_vars["log"] = std::any(std::any_cast<std::string>(__sv_comp->state_vars["log"]) + "outer_start,");
+            std::string inner_result = this->inner_call();
+            __sv_comp->state_vars["log"] = std::any(std::any_cast<std::string>(__sv_comp->state_vars["log"]) + "outer_after_inner,");
+            _context_stack.back()._return = std::any(std::string("outer_result:") + inner_result);
+            return;;
         }
     }
 
 public:
     SystemReturnReentrantTest() {
         __compartment = std::make_unique<SystemReturnReentrantTestCompartment>("Start");
-        __compartment->state_vars["log"] = "";
         SystemReturnReentrantTestFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        SystemReturnReentrantTestFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     std::string outer_call() {
@@ -167,7 +170,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {

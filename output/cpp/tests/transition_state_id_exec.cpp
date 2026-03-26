@@ -39,13 +39,22 @@ public:
     std::unique_ptr<SysXCompartment> parent_compartment;
 
     explicit SysXCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<SysXCompartment> clone() const {
+        auto c = std::make_unique<SysXCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class SysX {
 private:
+    std::vector<std::unique_ptr<SysXCompartment>> _state_stack;
     std::unique_ptr<SysXCompartment> __compartment;
     std::unique_ptr<SysXCompartment> __next_compartment;
-    std::vector<std::unique_ptr<SysXCompartment>> _state_stack;
     std::vector<SysXFrameContext> _context_stack;
 
     void __kernel(SysXFrameEvent& __e) {
@@ -86,23 +95,25 @@ private:
 
     void _state_A(SysXFrameEvent& __e) {
         if (__e._message == "e") {
-            {
-            auto __comp = std::make_unique<SysXCompartment>("B()");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
+            auto __new_compartment = std::make_unique<SysXCompartment>("B");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;;
         }
     }
 
     void _state_B(SysXFrameEvent& __e) {
+
     }
 
 public:
     SysX() {
         __compartment = std::make_unique<SysXCompartment>("A");
         SysXFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        SysXFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void e() {
@@ -112,7 +123,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 // Stub functions for placeholder calls

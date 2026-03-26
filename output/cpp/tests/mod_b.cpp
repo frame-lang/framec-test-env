@@ -39,13 +39,22 @@ public:
     std::unique_ptr<S2Compartment> parent_compartment;
 
     explicit S2Compartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<S2Compartment> clone() const {
+        auto c = std::make_unique<S2Compartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class S2 {
 private:
+    std::vector<std::unique_ptr<S2Compartment>> _state_stack;
     std::unique_ptr<S2Compartment> __compartment;
     std::unique_ptr<S2Compartment> __next_compartment;
-    std::vector<std::unique_ptr<S2Compartment>> _state_stack;
     std::vector<S2FrameContext> _context_stack;
 
     void __kernel(S2FrameEvent& __e) {
@@ -84,7 +93,9 @@ private:
 
     void _state_A(S2FrameEvent& __e) {
         if (__e._message == "e") {
-            { -> $A() }
+            auto __new_compartment = std::make_unique<S2Compartment>("A");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
@@ -93,7 +104,10 @@ public:
     S2() {
         __compartment = std::make_unique<S2Compartment>("A");
         S2FrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        S2FrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void e() {
@@ -103,7 +117,6 @@ public:
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
-
 };
 
 // Stub functions for placeholder calls

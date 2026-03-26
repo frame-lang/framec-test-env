@@ -42,16 +42,23 @@ public:
     std::unique_ptr<CalculatorCompartment> parent_compartment;
 
     explicit CalculatorCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<CalculatorCompartment> clone() const {
+        auto c = std::make_unique<CalculatorCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class Calculator {
 private:
+    std::vector<std::unique_ptr<CalculatorCompartment>> _state_stack;
     std::unique_ptr<CalculatorCompartment> __compartment;
     std::unique_ptr<CalculatorCompartment> __next_compartment;
-    std::vector<std::unique_ptr<CalculatorCompartment>> _state_stack;
     std::vector<CalculatorFrameContext> _context_stack;
-
-    int result = 0;
 
     void __kernel(CalculatorFrameEvent& __e) {
         __router(__e);
@@ -91,27 +98,25 @@ private:
         if (__e._message == "add") {
             auto a = std::any_cast<int>(__e._parameters.at("a"));
             auto b = std::any_cast<int>(__e._parameters.at("b"));
-            {
             result = a + b;
-            _context_stack.back()._return = result;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(result);
+            return;;
         } else if (__e._message == "get_result") {
-            {
-            _context_stack.back()._return = result;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(result);
+            return;;
         }
     }
 
 public:
+    int result = 0;
+
     Calculator() {
         __compartment = std::make_unique<CalculatorCompartment>("Ready");
-        result = 0;
         CalculatorFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        CalculatorFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     int add(int a, int b) {
@@ -136,7 +141,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 class CounterFrameEvent {
@@ -169,16 +173,23 @@ public:
     std::unique_ptr<CounterCompartment> parent_compartment;
 
     explicit CounterCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<CounterCompartment> clone() const {
+        auto c = std::make_unique<CounterCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class Counter {
 private:
+    std::vector<std::unique_ptr<CounterCompartment>> _state_stack;
     std::unique_ptr<CounterCompartment> __compartment;
     std::unique_ptr<CounterCompartment> __next_compartment;
-    std::vector<std::unique_ptr<CounterCompartment>> _state_stack;
     std::vector<CounterFrameContext> _context_stack;
-
-    int count = 0;
 
     void __kernel(CounterFrameEvent& __e) {
         __router(__e);
@@ -215,26 +226,24 @@ private:
     }
 
     void _state_Active(CounterFrameEvent& __e) {
-        if (__e._message == "increment") {
-            {
+        if (__e._message == "get_count") {
+            _context_stack.back()._return = std::any(count);
+            return;;
+        } else if (__e._message == "increment") {
             count = count + 1;
-            }
-            return;
-        } else if (__e._message == "get_count") {
-            {
-            _context_stack.back()._return = count;
-            return;
-            }
-            return;
         }
     }
 
 public:
+    int count = 0;
+
     Counter() {
         __compartment = std::make_unique<CounterCompartment>("Active");
-        count = 0;
         CounterFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        CounterFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void increment() {
@@ -254,14 +263,13 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {
     printf("=== Test 39: Tagged System Instantiation ===\n");
 
-    Calculator calc = new Calculator();
-    Counter counter = new Counter();
+    Calculator calc = Calculator();
+    Counter counter = Counter();
 
     int result = calc.add(3, 4);
     if (result != 7) {

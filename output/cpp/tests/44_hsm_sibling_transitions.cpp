@@ -41,16 +41,23 @@ public:
     std::unique_ptr<HSMSiblingTransitionsCompartment> parent_compartment;
 
     explicit HSMSiblingTransitionsCompartment(const std::string& state) : state(state) {}
+
+    std::unique_ptr<HSMSiblingTransitionsCompartment> clone() const {
+        auto c = std::make_unique<HSMSiblingTransitionsCompartment>(state);
+        c->state_args = state_args;
+        c->state_vars = state_vars;
+        c->enter_args = enter_args;
+        c->exit_args = exit_args;
+        return c;
+    }
 };
 
 class HSMSiblingTransitions {
 private:
+    std::vector<std::unique_ptr<HSMSiblingTransitionsCompartment>> _state_stack;
     std::unique_ptr<HSMSiblingTransitionsCompartment> __compartment;
     std::unique_ptr<HSMSiblingTransitionsCompartment> __next_compartment;
-    std::vector<std::unique_ptr<HSMSiblingTransitionsCompartment>> _state_stack;
     std::vector<HSMSiblingTransitionsFrameContext> _context_stack;
-
-    std::vector<std::string> event_log = {};
 
     void __kernel(HSMSiblingTransitionsFrameEvent& __e) {
         __router(__e);
@@ -90,115 +97,77 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_Parent(HSMSiblingTransitionsFrameEvent& __e) {
+        if (__e._message == "forward_action") {
+            event_log.push_back("Parent:forward_action");
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Parent"));
+            return;;
+        }
+    }
+
     void _state_ChildA(HSMSiblingTransitionsFrameEvent& __e) {
-        if (__e._message == "$>") {
-            {
-            event_log.push_back("ChildA:enter");
-            }
-            return;
-        } else if (__e._message == "<$") {
-            {
+        if (__e._message == "<$") {
             event_log.push_back("ChildA:exit");
-            }
-            return;
-        } else if (__e._message == "go_to_b") {
-            {
-            event_log.push_back("ChildA:go_to_b");
-            auto __comp = std::make_unique<HSMSiblingTransitionsCompartment>("ChildB");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
+        } else if (__e._message == "$>") {
+            event_log.push_back("ChildA:enter");
         } else if (__e._message == "forward_action") {
-            {
             event_log.push_back("ChildA:forward");
             _state_Parent(__e);
-            return;
-            }
-            return;
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(event_log);
+            return;;
         } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("ChildA");
-            return;
-            }
+            _context_stack.back()._return = std::any(std::string("ChildA"));
+            return;;
+        } else if (__e._message == "go_to_b") {
+            event_log.push_back("ChildA:go_to_b");
+            auto __new_compartment = std::make_unique<HSMSiblingTransitionsCompartment>("ChildB");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
     void _state_ChildB(HSMSiblingTransitionsFrameEvent& __e) {
-        if (__e._message == "$>") {
-            {
-            event_log.push_back("ChildB:enter");
-            }
-            return;
-        } else if (__e._message == "<$") {
-            {
+        if (__e._message == "<$") {
             event_log.push_back("ChildB:exit");
-            }
-            return;
-        } else if (__e._message == "go_to_a") {
-            {
-            event_log.push_back("ChildB:go_to_a");
-            auto __comp = std::make_unique<HSMSiblingTransitionsCompartment>("ChildA");
-            __transition(std::move(__comp));
-            return;
-            }
-            return;
+        } else if (__e._message == "$>") {
+            event_log.push_back("ChildB:enter");
         } else if (__e._message == "forward_action") {
-            {
             event_log.push_back("ChildB:forward");
             _state_Parent(__e);
-            return;
-            }
-            return;
         } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
+            _context_stack.back()._return = std::any(event_log);
+            return;;
         } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("ChildB");
-            return;
-            }
-            return;
-        }
-    }
-
-    void _state_Parent(HSMSiblingTransitionsFrameEvent& __e) {
-        if (__e._message == "forward_action") {
-            {
-            event_log.push_back("Parent:forward_action");
-            }
-            return;
-        } else if (__e._message == "get_log") {
-            {
-            _context_stack.back()._return = event_log;
-            return;
-            }
-            return;
-        } else if (__e._message == "get_state") {
-            {
-            _context_stack.back()._return = std::string("Parent");
-            return;
-            }
+            _context_stack.back()._return = std::any(std::string("ChildB"));
+            return;;
+        } else if (__e._message == "go_to_a") {
+            event_log.push_back("ChildB:go_to_a");
+            auto __new_compartment = std::make_unique<HSMSiblingTransitionsCompartment>("ChildA");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
             return;
         }
     }
 
 public:
+    std::vector<std::string> event_log = {};
+
     HSMSiblingTransitions() {
+        // HSM: Create parent compartment chain
+        auto __parent_comp_0 = std::make_unique<HSMSiblingTransitionsCompartment>("Parent");
         __compartment = std::make_unique<HSMSiblingTransitionsCompartment>("ChildA");
-        event_log = {};
+        __compartment->parent_compartment = std::move(__parent_comp_0);
         HSMSiblingTransitionsFrameEvent __frame_event("$>");
-        __kernel(__frame_event);
+        HSMSiblingTransitionsFrameContext __ctx(std::move(__frame_event));
+        _context_stack.push_back(std::move(__ctx));
+        __kernel(_context_stack.back()._event);
+        _context_stack.pop_back();
     }
 
     void go_to_b() {
@@ -244,7 +213,6 @@ public:
         _context_stack.pop_back();
         return __result;
     }
-
 };
 
 int main() {
