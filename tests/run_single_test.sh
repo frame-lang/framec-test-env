@@ -151,8 +151,13 @@ case $lang in
             javac_cmd="javac"
             java_cmd="java"
         fi
-        if $javac_cmd -d "$JAVA_OUT" "$out_file" 2>&1; then
-            run_output=$($java_cmd -cp "$JAVA_OUT" Main 2>&1) || run_status=$?
+        java_json_jar="$TEST_ENV_ROOT/output/java/lib/json.jar"
+        java_cp="$JAVA_OUT"
+        if [ -f "$java_json_jar" ]; then
+            java_cp="$JAVA_OUT:$java_json_jar"
+        fi
+        if $javac_cmd -cp "$java_cp" -d "$JAVA_OUT" "$out_file" 2>&1; then
+            run_output=$($java_cmd -cp "$java_cp" Main 2>&1) || run_status=$?
         else
             run_status=1
             run_output="Java compilation failed"

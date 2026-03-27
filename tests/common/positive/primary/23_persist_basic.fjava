@@ -1,2 +1,72 @@
-// @@skip - Java does not have nlohmann/json equivalent for persist tests
 @@target java
+
+import java.util.*;
+
+@@persist
+@@system PersistTest {
+    interface:
+        set_value(v: int)
+        get_value(): int
+        go_active()
+        go_idle()
+
+    machine:
+        $Idle {
+            set_value(v: int) { value = v; }
+            get_value(): int { return value; }
+            go_active() { -> $Active }
+            go_idle() { }
+        }
+
+        $Active {
+            set_value(v: int) { value = v * 2; }
+            get_value(): int { return value; }
+            go_active() { }
+            go_idle() { -> $Idle }
+        }
+    domain:
+        int value = 0
+        String name = "default"
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 23: Persist Basic (Java) ===");
+
+        var s1 = new PersistTest();
+        s1.set_value(10);
+        s1.go_active();
+        s1.set_value(5);
+
+        String json = s1.save_state();
+        var data = new org.json.JSONObject(json);
+        if (!data.getJSONObject("_compartment").getString("state").equals("Active")) {
+            System.out.println("FAIL: Expected Active"); System.exit(1);
+        }
+        if (data.getInt("value") != 10) {
+            System.out.println("FAIL: Expected value 10"); System.exit(1);
+        }
+        System.out.println("1. Saved: " + json);
+
+        var s2 = PersistTest.restore_state(json);
+        if (s2.get_value() != 10) {
+            System.out.println("FAIL: Restored value " + s2.get_value()); System.exit(1);
+        }
+        System.out.println("2. Restored value: " + s2.get_value());
+
+        s2.set_value(3);
+        if (s2.get_value() != 6) {
+            System.out.println("FAIL: Expected 6, got " + s2.get_value()); System.exit(1);
+        }
+        System.out.println("3. After set_value(3) in Active: " + s2.get_value());
+
+        s2.go_idle();
+        s2.set_value(4);
+        if (s2.get_value() != 4) {
+            System.out.println("FAIL: Expected 4, got " + s2.get_value()); System.exit(1);
+        }
+        System.out.println("4. After go_idle, set_value(4): " + s2.get_value());
+
+        System.out.println("PASS: Persist basic works correctly");
+    }
+}

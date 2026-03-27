@@ -169,6 +169,30 @@ class HSMThreeLevels {
         return __result;
     }
 
+    private void _state_Child(HSMThreeLevelsFrameEvent __e) {
+        var __sv_comp = __compartment;
+        while (__sv_comp != null && !__sv_comp.state.equals("Child")) { __sv_comp = __sv_comp.parent_compartment; }
+        if (__e._message.equals("$>")) {
+            if (!__sv_comp.state_vars.containsKey("child_var")) {
+                __sv_comp.state_vars.put("child_var", 10);
+            }
+        } else if (__e._message.equals("forward_through_all")) {
+            int val = (int) __sv_comp.state_vars.get("child_var");
+            this.log.add("Child:forward_through_all(var=" + val + ")");
+            _state_Parent(__e);
+        } else if (__e._message.equals("forward_to_child")) {
+            int val = (int) __sv_comp.state_vars.get("child_var");
+            this.log.add("Child:handled(var=" + val + ")");
+        } else if (__e._message.equals("forward_to_parent")) {
+            int val = (int) __sv_comp.state_vars.get("child_var");
+            this.log.add("Child:forward_to_parent(var=" + val + ")");
+            _state_Parent(__e);
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        }
+    }
+
     private void _state_Grandchild(HSMThreeLevelsFrameEvent __e) {
         var __sv_comp = __compartment;
         while (__sv_comp != null && !__sv_comp.state.equals("Grandchild")) { __sv_comp = __sv_comp.parent_compartment; }
@@ -207,30 +231,6 @@ class HSMThreeLevels {
         } else if (__e._message.equals("forward_to_parent")) {
             int val = (int) __sv_comp.state_vars.get("parent_var");
             this.log.add("Parent:handled(var=" + val + ")");
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        }
-    }
-
-    private void _state_Child(HSMThreeLevelsFrameEvent __e) {
-        var __sv_comp = __compartment;
-        while (__sv_comp != null && !__sv_comp.state.equals("Child")) { __sv_comp = __sv_comp.parent_compartment; }
-        if (__e._message.equals("$>")) {
-            if (!__sv_comp.state_vars.containsKey("child_var")) {
-                __sv_comp.state_vars.put("child_var", 10);
-            }
-        } else if (__e._message.equals("forward_through_all")) {
-            int val = (int) __sv_comp.state_vars.get("child_var");
-            this.log.add("Child:forward_through_all(var=" + val + ")");
-            _state_Parent(__e);
-        } else if (__e._message.equals("forward_to_child")) {
-            int val = (int) __sv_comp.state_vars.get("child_var");
-            this.log.add("Child:handled(var=" + val + ")");
-        } else if (__e._message.equals("forward_to_parent")) {
-            int val = (int) __sv_comp.state_vars.get("child_var");
-            this.log.add("Child:forward_to_parent(var=" + val + ")");
-            _state_Parent(__e);
         } else if (__e._message.equals("get_log")) {
             _context_stack.get(_context_stack.size() - 1)._return = this.log;
             return;

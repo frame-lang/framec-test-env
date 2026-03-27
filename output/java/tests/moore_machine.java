@@ -143,6 +143,22 @@ class MooreMachine {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
+    private void _state_Q0(MooreMachineFrameEvent __e) {
+        if (__e._message.equals("$>")) {
+            this.set_output(0);
+        } else if (__e._message.equals("i_0")) {
+            var __compartment = new MooreMachineCompartment("Q1");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        } else if (__e._message.equals("i_1")) {
+            var __compartment = new MooreMachineCompartment("Q2");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
     private void _state_Q2(MooreMachineFrameEvent __e) {
         if (__e._message.equals("$>")) {
             this.set_output(0);
@@ -175,9 +191,9 @@ class MooreMachine {
         }
     }
 
-    private void _state_Q1(MooreMachineFrameEvent __e) {
+    private void _state_Q4(MooreMachineFrameEvent __e) {
         if (__e._message.equals("$>")) {
-            this.set_output(0);
+            this.set_output(1);
         } else if (__e._message.equals("i_0")) {
             var __compartment = new MooreMachineCompartment("Q1");
             __compartment.parent_compartment = this.__compartment.copy();
@@ -191,25 +207,9 @@ class MooreMachine {
         }
     }
 
-    private void _state_Q0(MooreMachineFrameEvent __e) {
+    private void _state_Q1(MooreMachineFrameEvent __e) {
         if (__e._message.equals("$>")) {
             this.set_output(0);
-        } else if (__e._message.equals("i_0")) {
-            var __compartment = new MooreMachineCompartment("Q1");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        } else if (__e._message.equals("i_1")) {
-            var __compartment = new MooreMachineCompartment("Q2");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
-    private void _state_Q4(MooreMachineFrameEvent __e) {
-        if (__e._message.equals("$>")) {
-            this.set_output(1);
         } else if (__e._message.equals("i_0")) {
             var __compartment = new MooreMachineCompartment("Q1");
             __compartment.parent_compartment = this.__compartment.copy();

@@ -1,2 +1,94 @@
-// @@skip - Java does not have nlohmann/json equivalent for persist tests
 @@target java
+
+import java.util.*;
+
+@@persist
+@@system PersistStack {
+    interface:
+        push_and_go()
+        pop_back()
+        get_state(): String
+        get_depth(): int
+
+    machine:
+        $Start {
+            push_and_go() {
+                depth = depth + 1;
+                push$
+                -> $Middle
+            }
+            pop_back() { }
+            get_state(): String { return "start"; }
+            get_depth(): int { return depth; }
+        }
+
+        $Middle {
+            push_and_go() {
+                depth = depth + 1;
+                push$
+                -> $End
+            }
+            pop_back() {
+                depth = depth - 1;
+                -> pop$
+            }
+            get_state(): String { return "middle"; }
+            get_depth(): int { return depth; }
+        }
+
+        $End {
+            push_and_go() { }
+            pop_back() {
+                depth = depth - 1;
+                -> pop$
+            }
+            get_state(): String { return "end"; }
+            get_depth(): int { return depth; }
+        }
+    domain:
+        int depth = 0
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 25: Persist Stack (Java) ===");
+
+        var s1 = new PersistStack();
+        s1.push_and_go();
+        s1.push_and_go();
+        if (!s1.get_state().equals("end") || s1.get_depth() != 2) {
+            System.out.println("FAIL: build"); System.exit(1);
+        }
+        System.out.println("1. Built stack: " + s1.get_state() + ", depth=" + s1.get_depth());
+
+        String json = s1.save_state();
+        var data = new org.json.JSONObject(json);
+        if (!data.getJSONObject("_compartment").getString("state").equals("End")) {
+            System.out.println("FAIL: saved state"); System.exit(1);
+        }
+        if (data.getJSONArray("_state_stack").length() != 2) {
+            System.out.println("FAIL: stack size"); System.exit(1);
+        }
+        System.out.println("2. Saved");
+
+        var s2 = PersistStack.restore_state(json);
+        if (!s2.get_state().equals("end") || s2.get_depth() != 2) {
+            System.out.println("FAIL: restored"); System.exit(1);
+        }
+        System.out.println("3. Restored: " + s2.get_state() + ", depth=" + s2.get_depth());
+
+        s2.pop_back();
+        if (!s2.get_state().equals("middle") || s2.get_depth() != 1) {
+            System.out.println("FAIL: pop1"); System.exit(1);
+        }
+        System.out.println("4. After pop: " + s2.get_state() + ", depth=" + s2.get_depth());
+
+        s2.pop_back();
+        if (!s2.get_state().equals("start") || s2.get_depth() != 0) {
+            System.out.println("FAIL: pop2"); System.exit(1);
+        }
+        System.out.println("5. After 2nd pop: " + s2.get_state() + ", depth=" + s2.get_depth());
+
+        System.out.println("PASS: Persist stack works correctly");
+    }
+}

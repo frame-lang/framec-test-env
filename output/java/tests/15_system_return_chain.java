@@ -151,6 +151,26 @@ class SystemReturnChainTest {
         return __result;
     }
 
+    private void _state_BothSet(SystemReturnChainTestFrameEvent __e) {
+        if (__e._message.equals("$>")) {
+            // Enter handler sets return - should overwrite exit's value
+            _context_stack.get(_context_stack.size() - 1)._return = "enter_wins";
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "BothSet";
+            return;
+        }
+    }
+
+    private void _state_EnterSetter(SystemReturnChainTestFrameEvent __e) {
+        if (__e._message.equals("$>")) {
+            // Enter handler sets return value
+            _context_stack.get(_context_stack.size() - 1)._return = "from_enter";
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "EnterSetter";
+            return;
+        }
+    }
+
     private void _state_Start(SystemReturnChainTestFrameEvent __e) {
         if (__e._message.equals("<$")) {
             // Exit handler sets initial value
@@ -167,26 +187,6 @@ class SystemReturnChainTest {
             var __compartment = new SystemReturnChainTestCompartment("BothSet");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
-            return;
-        }
-    }
-
-    private void _state_EnterSetter(SystemReturnChainTestFrameEvent __e) {
-        if (__e._message.equals("$>")) {
-            // Enter handler sets return value
-            _context_stack.get(_context_stack.size() - 1)._return = "from_enter";
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "EnterSetter";
-            return;
-        }
-    }
-
-    private void _state_BothSet(SystemReturnChainTestFrameEvent __e) {
-        if (__e._message.equals("$>")) {
-            // Enter handler sets return - should overwrite exit's value
-            _context_stack.get(_context_stack.size() - 1)._return = "enter_wins";
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "BothSet";
             return;
         }
     }

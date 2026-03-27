@@ -135,24 +135,24 @@ class WithTransition {
         return __result;
     }
 
-    private void _state_Second(WithTransitionFrameEvent __e) {
-        if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Second";
-            return;
-        } else if (__e._message.equals("next")) {
-            var __compartment = new WithTransitionCompartment("First");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
     private void _state_First(WithTransitionFrameEvent __e) {
         if (__e._message.equals("get_state")) {
             _context_stack.get(_context_stack.size() - 1)._return = "First";
             return;
         } else if (__e._message.equals("next")) {
             var __compartment = new WithTransitionCompartment("Second");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
+    private void _state_Second(WithTransitionFrameEvent __e) {
+        if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Second";
+            return;
+        } else if (__e._message.equals("next")) {
+            var __compartment = new WithTransitionCompartment("First");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;

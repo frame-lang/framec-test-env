@@ -1,2 +1,85 @@
-// @@skip - Java does not have nlohmann/json equivalent for persist tests
 @@target java
+
+import java.util.*;
+
+@@persist
+@@system PersistRoundtrip {
+    interface:
+        set_counter(v: int)
+        get_counter(): int
+        go_active()
+        go_idle()
+        get_state(): String
+        add_history(entry: String)
+        get_history(): String
+
+    machine:
+        $Idle {
+            set_counter(v: int) { counter = v; }
+            get_counter(): int { return counter; }
+            go_active() {
+                this.add_history("idle->active");
+                -> $Active
+            }
+            go_idle() { }
+            get_state(): String { return "idle"; }
+            add_history(entry: String) { history = history + entry + ","; }
+            get_history(): String { return history; }
+        }
+
+        $Active {
+            set_counter(v: int) { counter = v * 2; }
+            get_counter(): int { return counter; }
+            go_active() { }
+            go_idle() {
+                this.add_history("active->idle");
+                -> $Idle
+            }
+            get_state(): String { return "active"; }
+            add_history(entry: String) { history = history + entry + ","; }
+            get_history(): String { return history; }
+        }
+    domain:
+        int counter = 0
+        String history = ""
+        String mode = "normal"
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 24: Persist Roundtrip (Java) ===");
+
+        var s1 = new PersistRoundtrip();
+        s1.add_history("idle:start");
+        s1.go_active();
+        s1.set_counter(3);
+        s1.add_history("active:work");
+
+        if (!s1.get_state().equals("active")) { System.out.println("FAIL: state"); System.exit(1); }
+        if (s1.get_counter() != 6) { System.out.println("FAIL: counter " + s1.get_counter()); System.exit(1); }
+        System.out.println("1. State: " + s1.get_state() + ", counter: " + s1.get_counter());
+        System.out.println("   History: " + s1.get_history());
+
+        String json = s1.save_state();
+        System.out.println("2. Saved");
+
+        var s2 = PersistRoundtrip.restore_state(json);
+        if (!s2.get_state().equals("active")) { System.out.println("FAIL: restored state"); System.exit(1); }
+        if (s2.get_counter() != 6) { System.out.println("FAIL: restored counter"); System.exit(1); }
+        System.out.println("3. Restored: " + s2.get_state() + ", counter: " + s2.get_counter());
+
+        s2.set_counter(2);
+        if (s2.get_counter() != 4) { System.out.println("FAIL: post-restore counter"); System.exit(1); }
+        System.out.println("4. Counter after set_counter(2): " + s2.get_counter());
+
+        if (!s2.get_history().contains("idle:start")) { System.out.println("FAIL: history"); System.exit(1); }
+        System.out.println("5. History preserved: " + s2.get_history());
+
+        s2.go_idle();
+        s2.set_counter(10);
+        if (s2.get_counter() != 10) { System.out.println("FAIL: idle counter"); System.exit(1); }
+        System.out.println("6. After go_idle: " + s2.get_state() + ", counter: " + s2.get_counter());
+
+        System.out.println("PASS: Persist roundtrip works correctly");
+    }
+}

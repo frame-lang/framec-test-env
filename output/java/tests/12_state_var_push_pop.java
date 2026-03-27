@@ -153,27 +153,6 @@ class StateVarPushPop {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
-    private void _state_Other(StateVarPushPopFrameEvent __e) {
-        var __sv_comp = __compartment;
-        while (__sv_comp != null && !__sv_comp.state.equals("Other")) { __sv_comp = __sv_comp.parent_compartment; }
-        if (__e._message.equals("$>")) {
-            if (!__sv_comp.state_vars.containsKey("other_count")) {
-                __sv_comp.state_vars.put("other_count", 100);
-            }
-        } else if (__e._message.equals("get_count")) {
-            _context_stack.get(_context_stack.size() - 1)._return = (int) __sv_comp.state_vars.get("other_count");
-            return;
-        } else if (__e._message.equals("increment")) {
-            __sv_comp.state_vars.put("other_count", (int) __sv_comp.state_vars.get("other_count") + 1);
-            _context_stack.get(_context_stack.size() - 1)._return = (int) __sv_comp.state_vars.get("other_count");
-            return;
-        } else if (__e._message.equals("restore")) {
-            var __popped = _state_stack.remove(_state_stack.size() - 1);
-            __transition(__popped);
-            return;
-        }
-    }
-
     private void _state_Counter(StateVarPushPopFrameEvent __e) {
         var __sv_comp = __compartment;
         while (__sv_comp != null && !__sv_comp.state.equals("Counter")) { __sv_comp = __sv_comp.parent_compartment; }
@@ -193,6 +172,27 @@ class StateVarPushPop {
             var __compartment = new StateVarPushPopCompartment("Other");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
+            return;
+        }
+    }
+
+    private void _state_Other(StateVarPushPopFrameEvent __e) {
+        var __sv_comp = __compartment;
+        while (__sv_comp != null && !__sv_comp.state.equals("Other")) { __sv_comp = __sv_comp.parent_compartment; }
+        if (__e._message.equals("$>")) {
+            if (!__sv_comp.state_vars.containsKey("other_count")) {
+                __sv_comp.state_vars.put("other_count", 100);
+            }
+        } else if (__e._message.equals("get_count")) {
+            _context_stack.get(_context_stack.size() - 1)._return = (int) __sv_comp.state_vars.get("other_count");
+            return;
+        } else if (__e._message.equals("increment")) {
+            __sv_comp.state_vars.put("other_count", (int) __sv_comp.state_vars.get("other_count") + 1);
+            _context_stack.get(_context_stack.size() - 1)._return = (int) __sv_comp.state_vars.get("other_count");
+            return;
+        } else if (__e._message.equals("restore")) {
+            var __popped = _state_stack.remove(_state_stack.size() - 1);
+            __transition(__popped);
             return;
         }
     }

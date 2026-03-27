@@ -166,24 +166,24 @@ class HSMEnterExitParams {
         return __result;
     }
 
-    private void _state_ChildA(HSMEnterExitParamsFrameEvent __e) {
+    private void _state_ChildB(HSMEnterExitParamsFrameEvent __e) {
         if (__e._message.equals("<$")) {
             var reason = (String) __compartment.exit_args.get("0");
-            this.log.add("ChildA:exit(" + reason + ")");
+            this.log.add("ChildB:exit(" + reason + ")");
         } else if (__e._message.equals("$>")) {
             var msg = (String) __compartment.enter_args.get("0");
-            this.log.add("ChildA:enter(" + msg + ")");
+            this.log.add("ChildB:enter(" + msg + ")");
         } else if (__e._message.equals("get_log")) {
             _context_stack.get(_context_stack.size() - 1)._return = this.log;
             return;
         } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "ChildA";
+            _context_stack.get(_context_stack.size() - 1)._return = "ChildB";
             return;
-        } else if (__e._message.equals("go_to_sibling")) {
-            __compartment.exit_args.put("0", "leaving_A");
-            var __compartment = new HSMEnterExitParamsCompartment("ChildB");
+        } else if (__e._message.equals("go_back")) {
+            __compartment.exit_args.put("0", "leaving_B");
+            var __compartment = new HSMEnterExitParamsCompartment("ChildA");
             __compartment.parent_compartment = this.__compartment.copy();
-            __compartment.enter_args.put("0", "arriving_B");
+            __compartment.enter_args.put("0", "returning_A");
             __transition(__compartment);
             return;
         }
@@ -205,24 +205,24 @@ class HSMEnterExitParams {
         }
     }
 
-    private void _state_ChildB(HSMEnterExitParamsFrameEvent __e) {
+    private void _state_ChildA(HSMEnterExitParamsFrameEvent __e) {
         if (__e._message.equals("<$")) {
             var reason = (String) __compartment.exit_args.get("0");
-            this.log.add("ChildB:exit(" + reason + ")");
+            this.log.add("ChildA:exit(" + reason + ")");
         } else if (__e._message.equals("$>")) {
             var msg = (String) __compartment.enter_args.get("0");
-            this.log.add("ChildB:enter(" + msg + ")");
+            this.log.add("ChildA:enter(" + msg + ")");
         } else if (__e._message.equals("get_log")) {
             _context_stack.get(_context_stack.size() - 1)._return = this.log;
             return;
         } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "ChildB";
+            _context_stack.get(_context_stack.size() - 1)._return = "ChildA";
             return;
-        } else if (__e._message.equals("go_back")) {
-            __compartment.exit_args.put("0", "leaving_B");
-            var __compartment = new HSMEnterExitParamsCompartment("ChildA");
+        } else if (__e._message.equals("go_to_sibling")) {
+            __compartment.exit_args.put("0", "leaving_A");
+            var __compartment = new HSMEnterExitParamsCompartment("ChildB");
             __compartment.parent_compartment = this.__compartment.copy();
-            __compartment.enter_args.put("0", "returning_A");
+            __compartment.enter_args.put("0", "arriving_B");
             __transition(__compartment);
             return;
         }

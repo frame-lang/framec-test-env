@@ -167,29 +167,6 @@ class HSMSiblingTransitions {
         return __result;
     }
 
-    private void _state_ChildA(HSMSiblingTransitionsFrameEvent __e) {
-        if (__e._message.equals("<$")) {
-            this.log.add("ChildA:exit");
-        } else if (__e._message.equals("$>")) {
-            this.log.add("ChildA:enter");
-        } else if (__e._message.equals("forward_action")) {
-            this.log.add("ChildA:forward");
-            _state_Parent(__e);
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "ChildA";
-            return;
-        } else if (__e._message.equals("go_to_b")) {
-            this.log.add("ChildA:go_to_b");
-            var __compartment = new HSMSiblingTransitionsCompartment("ChildB");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
     private void _state_ChildB(HSMSiblingTransitionsFrameEvent __e) {
         if (__e._message.equals("<$")) {
             this.log.add("ChildB:exit");
@@ -221,6 +198,29 @@ class HSMSiblingTransitions {
             return;
         } else if (__e._message.equals("get_state")) {
             _context_stack.get(_context_stack.size() - 1)._return = "Parent";
+            return;
+        }
+    }
+
+    private void _state_ChildA(HSMSiblingTransitionsFrameEvent __e) {
+        if (__e._message.equals("<$")) {
+            this.log.add("ChildA:exit");
+        } else if (__e._message.equals("$>")) {
+            this.log.add("ChildA:enter");
+        } else if (__e._message.equals("forward_action")) {
+            this.log.add("ChildA:forward");
+            _state_Parent(__e);
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "ChildA";
+            return;
+        } else if (__e._message.equals("go_to_b")) {
+            this.log.add("ChildA:go_to_b");
+            var __compartment = new HSMSiblingTransitionsCompartment("ChildB");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
             return;
         }
     }

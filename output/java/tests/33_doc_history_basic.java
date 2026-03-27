@@ -161,24 +161,6 @@ class HistoryBasic {
         return __result;
     }
 
-    private void _state_A(HistoryBasicFrameEvent __e) {
-        if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "A";
-            return;
-        } else if (__e._message.equals("gotoB")) {
-            var __compartment = new HistoryBasicCompartment("B");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        } else if (__e._message.equals("gotoC_from_A")) {
-            _state_stack.add(__compartment.copy());
-            var __compartment = new HistoryBasicCompartment("C");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
     private void _state_C(HistoryBasicFrameEvent __e) {
         if (__e._message.equals("get_state")) {
             _context_stack.get(_context_stack.size() - 1)._return = "C";
@@ -195,6 +177,24 @@ class HistoryBasic {
             _context_stack.get(_context_stack.size() - 1)._return = "B";
             return;
         } else if (__e._message.equals("gotoC_from_B")) {
+            _state_stack.add(__compartment.copy());
+            var __compartment = new HistoryBasicCompartment("C");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
+    private void _state_A(HistoryBasicFrameEvent __e) {
+        if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "A";
+            return;
+        } else if (__e._message.equals("gotoB")) {
+            var __compartment = new HistoryBasicCompartment("B");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        } else if (__e._message.equals("gotoC_from_A")) {
             _state_stack.add(__compartment.copy());
             var __compartment = new HistoryBasicCompartment("C");
             __compartment.parent_compartment = this.__compartment.copy();

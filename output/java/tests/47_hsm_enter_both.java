@@ -173,6 +173,23 @@ class HSMEnterBoth {
         }
     }
 
+    private void _state_Parent(HSMEnterBothFrameEvent __e) {
+        if (__e._message.equals("$>")) {
+            this.log.add("Parent:enter");
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Parent";
+            return;
+        } else if (__e._message.equals("go_to_child")) {
+            var __compartment = new HSMEnterBothCompartment("Child");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
     private void _state_Start(HSMEnterBothFrameEvent __e) {
         if (__e._message.equals("get_log")) {
             _context_stack.get(_context_stack.size() - 1)._return = this.log;
@@ -187,23 +204,6 @@ class HSMEnterBoth {
             return;
         } else if (__e._message.equals("go_to_parent")) {
             var __compartment = new HSMEnterBothCompartment("Parent");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
-    private void _state_Parent(HSMEnterBothFrameEvent __e) {
-        if (__e._message.equals("$>")) {
-            this.log.add("Parent:enter");
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Parent";
-            return;
-        } else if (__e._message.equals("go_to_child")) {
-            var __compartment = new HSMEnterBothCompartment("Child");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;
