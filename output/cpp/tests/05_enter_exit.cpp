@@ -96,24 +96,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_On(EnterExitFrameEvent& __e) {
-        if (__e._message == "<$") {
-            event_log.push_back("exit:On");
-            printf("Exiting On state\n");
-        } else if (__e._message == "$>") {
-            event_log.push_back("enter:On");
-            printf("Entered On state\n");
-        } else if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "toggle") {
-            auto __new_compartment = std::make_unique<EnterExitCompartment>("Off");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
     void _state_Off(EnterExitFrameEvent& __e) {
         if (__e._message == "<$") {
             event_log.push_back("exit:Off");
@@ -126,6 +108,24 @@ private:
             return;;
         } else if (__e._message == "toggle") {
             auto __new_compartment = std::make_unique<EnterExitCompartment>("On");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
+    void _state_On(EnterExitFrameEvent& __e) {
+        if (__e._message == "<$") {
+            event_log.push_back("exit:On");
+            printf("Exiting On state\n");
+        } else if (__e._message == "$>") {
+            event_log.push_back("enter:On");
+            printf("Entered On state\n");
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "toggle") {
+            auto __new_compartment = std::make_unique<EnterExitCompartment>("Off");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;

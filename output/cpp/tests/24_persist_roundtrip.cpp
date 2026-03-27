@@ -95,33 +95,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Active(PersistRoundtripFrameEvent& __e) {
-        if (__e._message == "add_history") {
-            auto msg = std::any_cast<std::string>(__e._parameters.at("msg"));
-            this->history = this->history + std::string("active:") + msg + std::string(",");
-        } else if (__e._message == "get_counter") {
-            _context_stack.back()._return = std::any(this->counter);
-            return;;
-        } else if (__e._message == "get_history") {
-            _context_stack.back()._return = std::any(this->history);
-            return;;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("active"));
-            return;;
-        } else if (__e._message == "go_active") {
-            // already active
-        } else if (__e._message == "go_idle") {
-            this->history = this->history + "active->idle,";
-            auto __new_compartment = std::make_unique<PersistRoundtripCompartment>("Idle");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        } else if (__e._message == "set_counter") {
-            auto n = std::any_cast<int>(__e._parameters.at("n"));
-            this->counter = n * 2;
-        }
-    }
-
     void _state_Idle(PersistRoundtripFrameEvent& __e) {
         if (__e._message == "add_history") {
             auto msg = std::any_cast<std::string>(__e._parameters.at("msg"));
@@ -146,6 +119,33 @@ private:
         } else if (__e._message == "set_counter") {
             auto n = std::any_cast<int>(__e._parameters.at("n"));
             this->counter = n;
+        }
+    }
+
+    void _state_Active(PersistRoundtripFrameEvent& __e) {
+        if (__e._message == "add_history") {
+            auto msg = std::any_cast<std::string>(__e._parameters.at("msg"));
+            this->history = this->history + std::string("active:") + msg + std::string(",");
+        } else if (__e._message == "get_counter") {
+            _context_stack.back()._return = std::any(this->counter);
+            return;;
+        } else if (__e._message == "get_history") {
+            _context_stack.back()._return = std::any(this->history);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("active"));
+            return;;
+        } else if (__e._message == "go_active") {
+            // already active
+        } else if (__e._message == "go_idle") {
+            this->history = this->history + "active->idle,";
+            auto __new_compartment = std::make_unique<PersistRoundtripCompartment>("Idle");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else if (__e._message == "set_counter") {
+            auto n = std::any_cast<int>(__e._parameters.at("n"));
+            this->counter = n * 2;
         }
     }
 

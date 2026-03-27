@@ -103,6 +103,22 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_Parent(HSMPersistFrameEvent& __e) {
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Parent") { __sv_comp = __sv_comp->parent_compartment.get(); }
+        if (__e._message == "$>") {
+            if (__compartment->state_vars.count("parent_count") == 0) { __compartment->state_vars["parent_count"] = std::any(100); }
+        } else if (__e._message == "get_parent_count") {
+            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["parent_count"]));
+            return;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Parent"));
+            return;
+        } else if (__e._message == "increment_parent") {
+            __sv_comp->state_vars["parent_count"] = std::any(std::any_cast<int>(__sv_comp->state_vars["parent_count"]) + 1);
+        }
+    }
+
     void _state_Child(HSMPersistFrameEvent& __e) {
         auto* __sv_comp = __compartment.get();
         while (__sv_comp && __sv_comp->state != "Child") { __sv_comp = __sv_comp->parent_compartment.get(); }
@@ -122,22 +138,6 @@ private:
         } else if (__e._message == "increment_parent") {
             // Forward to parent
             _state_Parent(__e);
-        }
-    }
-
-    void _state_Parent(HSMPersistFrameEvent& __e) {
-        auto* __sv_comp = __compartment.get();
-        while (__sv_comp && __sv_comp->state != "Parent") { __sv_comp = __sv_comp->parent_compartment.get(); }
-        if (__e._message == "$>") {
-            if (__compartment->state_vars.count("parent_count") == 0) { __compartment->state_vars["parent_count"] = std::any(100); }
-        } else if (__e._message == "get_parent_count") {
-            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["parent_count"]));
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Parent"));
-            return;
-        } else if (__e._message == "increment_parent") {
-            __sv_comp->state_vars["parent_count"] = std::any(std::any_cast<int>(__sv_comp->state_vars["parent_count"]) + 1);
         }
     }
 

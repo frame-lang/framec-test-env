@@ -119,29 +119,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Flee(AiAgentFrameEvent& __e) {
-        if (__e._message == "$>") {
-            action_log = action_log + "flee,";
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Flee"));
-            return;
-        } else if (__e._message == "tick") {
-            // Precondition: still low health?
-            if (health >= 20) {
-                // Condition no longer met -- back to root for re-evaluation
-                auto __new_compartment = std::make_unique<AiAgentCompartment>("Root");
-                __new_compartment->parent_compartment = __compartment->clone();
-                __transition(std::move(__new_compartment));
-                return;
-            }
-
-            // Action: flee (increase distance, recover health)
-            enemy_distance = enemy_distance + 10;
-            health = health + 5;
-            action_log = action_log + "flee,";
-        }
-    }
-
     void _state_Root(AiAgentFrameEvent& __e) {
         if (__e._message == "$>") {
             action_log = "";
@@ -232,6 +209,29 @@ private:
             // Action: patrol
             patrol_step = patrol_step + 1;
             action_log = action_log + "patrol,";
+        }
+    }
+
+    void _state_Flee(AiAgentFrameEvent& __e) {
+        if (__e._message == "$>") {
+            action_log = action_log + "flee,";
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Flee"));
+            return;
+        } else if (__e._message == "tick") {
+            // Precondition: still low health?
+            if (health >= 20) {
+                // Condition no longer met -- back to root for re-evaluation
+                auto __new_compartment = std::make_unique<AiAgentCompartment>("Root");
+                __new_compartment->parent_compartment = __compartment->clone();
+                __transition(std::move(__new_compartment));
+                return;
+            }
+
+            // Action: flee (increase distance, recover health)
+            enemy_distance = enemy_distance + 10;
+            health = health + 5;
+            action_log = action_log + "flee,";
         }
     }
 

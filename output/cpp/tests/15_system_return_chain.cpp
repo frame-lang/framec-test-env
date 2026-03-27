@@ -98,6 +98,15 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_BothSet(SystemReturnChainTestFrameEvent& __e) {
+        if (__e._message == "$>") {
+            _context_stack.back()._return = std::any(std::string("enter_wins"));
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("BothSet"));
+            return;;
+        }
+    }
+
     void _state_Start(SystemReturnChainTestFrameEvent& __e) {
         if (__e._message == "<$") {
             _context_stack.back()._return = std::any(std::string("from_exit"));
@@ -122,15 +131,6 @@ private:
             _context_stack.back()._return = std::any(std::string("from_enter"));
         } else if (__e._message == "get_state") {
             _context_stack.back()._return = std::any(std::string("EnterSetter"));
-            return;;
-        }
-    }
-
-    void _state_BothSet(SystemReturnChainTestFrameEvent& __e) {
-        if (__e._message == "$>") {
-            _context_stack.back()._return = std::any(std::string("enter_wins"));
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("BothSet"));
             return;;
         }
     }

@@ -94,6 +94,11 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_B(SFrameEvent& __e) {
+        if (__e._message == "e") {
+        }
+    }
+
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             auto p = __e._parameters.at("p");
@@ -105,11 +110,6 @@ private:
         } else if (__e._message == "g") {
             auto x = __e._parameters.at("x");
             ;
-        }
-    }
-
-    void _state_B(SFrameEvent& __e) {
-        if (__e._message == "e") {
         }
     }
 

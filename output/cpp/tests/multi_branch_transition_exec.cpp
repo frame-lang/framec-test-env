@@ -96,11 +96,11 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_C(SFrameEvent& __e) {
+    void _state_B(SFrameEvent& __e) {
 
     }
 
-    void _state_B(SFrameEvent& __e) {
+    void _state_C(SFrameEvent& __e) {
 
     }
 

@@ -96,22 +96,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Idle(ForwardEnterFirstFrameEvent& __e) {
-        if (__e._message == "get_counter") {
-            _context_stack.back()._return = std::any(-1);
-            return;;
-        } else if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "process") {
-            auto __new_compartment = std::make_unique<ForwardEnterFirstCompartment>("Working");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __new_compartment->forward_event = std::make_unique<ForwardEnterFirstFrameEvent>(__e);
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
     void _state_Working(ForwardEnterFirstFrameEvent& __e) {
         auto* __sv_comp = __compartment.get();
         while (__sv_comp && __sv_comp->state != "Working") { __sv_comp = __sv_comp->parent_compartment.get(); }
@@ -127,6 +111,22 @@ private:
         } else if (__e._message == "process") {
             event_log.push_back(std::string("Working:process:counter=") + std::to_string(std::any_cast<int>(__sv_comp->state_vars["counter"])));
             __sv_comp->state_vars["counter"] = std::any(std::any_cast<int>(__sv_comp->state_vars["counter"]) + 1);
+        }
+    }
+
+    void _state_Idle(ForwardEnterFirstFrameEvent& __e) {
+        if (__e._message == "get_counter") {
+            _context_stack.back()._return = std::any(-1);
+            return;;
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "process") {
+            auto __new_compartment = std::make_unique<ForwardEnterFirstCompartment>("Working");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __new_compartment->forward_event = std::make_unique<ForwardEnterFirstFrameEvent>(__e);
+            __transition(std::move(__new_compartment));
+            return;
         }
     }
 

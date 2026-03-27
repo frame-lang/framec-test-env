@@ -98,14 +98,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_D(SFrameEvent& __e) {
-
-    }
-
-    void _state_C(SFrameEvent& __e) {
-
-    }
-
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             if (false) {
@@ -128,6 +120,14 @@ private:
     }
 
     void _state_B(SFrameEvent& __e) {
+
+    }
+
+    void _state_D(SFrameEvent& __e) {
+
+    }
+
+    void _state_C(SFrameEvent& __e) {
 
     }
 

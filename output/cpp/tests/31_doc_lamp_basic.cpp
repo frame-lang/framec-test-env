@@ -96,24 +96,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Off(LampFrameEvent& __e) {
-        if (__e._message == "getColor") {
-            _context_stack.back()._return = std::any(color);
-            return;;
-        } else if (__e._message == "isSwitchClosed") {
-            _context_stack.back()._return = std::any(switch_closed);
-            return;;
-        } else if (__e._message == "setColor") {
-            auto color = std::any_cast<std::string>(__e._parameters.at("color"));
-            this->color = color;
-        } else if (__e._message == "turnOn") {
-            auto __new_compartment = std::make_unique<LampCompartment>("On");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
     void _state_On(LampFrameEvent& __e) {
         if (__e._message == "<$") {
             this->openSwitch();
@@ -130,6 +112,24 @@ private:
             this->color = color;
         } else if (__e._message == "turnOff") {
             auto __new_compartment = std::make_unique<LampCompartment>("Off");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
+    void _state_Off(LampFrameEvent& __e) {
+        if (__e._message == "getColor") {
+            _context_stack.back()._return = std::any(color);
+            return;;
+        } else if (__e._message == "isSwitchClosed") {
+            _context_stack.back()._return = std::any(switch_closed);
+            return;;
+        } else if (__e._message == "setColor") {
+            auto color = std::any_cast<std::string>(__e._parameters.at("color"));
+            this->color = color;
+        } else if (__e._message == "turnOn") {
+            auto __new_compartment = std::make_unique<LampCompartment>("On");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;

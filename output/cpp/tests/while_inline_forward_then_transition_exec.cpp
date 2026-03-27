@@ -96,10 +96,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_B(SFrameEvent& __e) {
-
-    }
-
     void _state_P(SFrameEvent& __e) {
 
     }
@@ -115,6 +111,10 @@ private:
             __transition(std::move(__new_compartment));
             return;
         }
+    }
+
+    void _state_B(SFrameEvent& __e) {
+
     }
 
 public:

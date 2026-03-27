@@ -95,23 +95,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Idle(PersistTestFrameEvent& __e) {
-        if (__e._message == "get_value") {
-            _context_stack.back()._return = std::any(value);
-            return;;
-        } else if (__e._message == "go_active") {
-            auto __new_compartment = std::make_unique<PersistTestCompartment>("Active");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        } else if (__e._message == "go_idle") {
-            // Already idle
-        } else if (__e._message == "set_value") {
-            auto v = std::any_cast<int>(__e._parameters.at("v"));
-            value = v;
-        }
-    }
-
     void _state_Active(PersistTestFrameEvent& __e) {
         if (__e._message == "get_value") {
             _context_stack.back()._return = std::any(value);
@@ -126,6 +109,23 @@ private:
         } else if (__e._message == "set_value") {
             auto v = std::any_cast<int>(__e._parameters.at("v"));
             value = v * 2;
+        }
+    }
+
+    void _state_Idle(PersistTestFrameEvent& __e) {
+        if (__e._message == "get_value") {
+            _context_stack.back()._return = std::any(value);
+            return;;
+        } else if (__e._message == "go_active") {
+            auto __new_compartment = std::make_unique<PersistTestCompartment>("Active");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else if (__e._message == "go_idle") {
+            // Already idle
+        } else if (__e._message == "set_value") {
+            auto v = std::any_cast<int>(__e._parameters.at("v"));
+            value = v;
         }
     }
 

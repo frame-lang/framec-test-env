@@ -96,17 +96,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Child(HSMDefaultForwardFrameEvent& __e) {
-        if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "handled_event") {
-            event_log.push_back("Child:handled_event");
-        } else {
-            _state_Parent(__e);
-        }
-    }
-
     void _state_Parent(HSMDefaultForwardFrameEvent& __e) {
         if (__e._message == "get_log") {
             _context_stack.back()._return = std::any(event_log);
@@ -115,6 +104,17 @@ private:
             event_log.push_back("Parent:handled_event");
         } else if (__e._message == "unhandled_event") {
             event_log.push_back("Parent:unhandled_event");
+        }
+    }
+
+    void _state_Child(HSMDefaultForwardFrameEvent& __e) {
+        if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "handled_event") {
+            event_log.push_back("Child:handled_event");
+        } else {
+            _state_Parent(__e);
         }
     }
 

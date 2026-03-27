@@ -97,25 +97,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Start(PersistStackFrameEvent& __e) {
-        if (__e._message == "get_depth") {
-            _context_stack.back()._return = std::any(this->depth);
-            return;;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("start"));
-            return;;
-        } else if (__e._message == "pop_back") {
-            // nothing to pop
-        } else if (__e._message == "push_and_go") {
-            this->depth = this->depth + 1;
-            _state_stack.push_back(__compartment->clone());
-            auto __new_compartment = std::make_unique<PersistStackCompartment>("Middle");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
     void _state_Middle(PersistStackFrameEvent& __e) {
         if (__e._message == "get_depth") {
             _context_stack.back()._return = std::any(this->depth);
@@ -132,6 +113,25 @@ private:
             this->depth = this->depth + 1;
             _state_stack.push_back(__compartment->clone());
             auto __new_compartment = std::make_unique<PersistStackCompartment>("End");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
+    void _state_Start(PersistStackFrameEvent& __e) {
+        if (__e._message == "get_depth") {
+            _context_stack.back()._return = std::any(this->depth);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("start"));
+            return;;
+        } else if (__e._message == "pop_back") {
+            // nothing to pop
+        } else if (__e._message == "push_and_go") {
+            this->depth = this->depth + 1;
+            _state_stack.push_back(__compartment->clone());
+            auto __new_compartment = std::make_unique<PersistStackCompartment>("Middle");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
