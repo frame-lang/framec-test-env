@@ -33,6 +33,16 @@ RUST_CRATE="$TEST_ENV_ROOT/output/rust"
 RUST_OUT="$RUST_CRATE/tests"
 C_OUT="$TEST_ENV_ROOT/output/c/tests"
 CPP_OUT="$TEST_ENV_ROOT/output/cpp/tests"
+JAVA_OUT="$TEST_ENV_ROOT/output/java/tests"
+
+# Java 17 — find JDK
+JAVA_HOME_17=""
+for __jdir in "/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home" "/opt/homebrew/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home" "/usr/lib/jvm/java-17-openjdk-amd64"; do
+    if [ -x "$__jdir/bin/javac" ]; then
+        JAVA_HOME_17="$__jdir"
+        break
+    fi
+done
 
 test_name=$(basename "$test_file" | sed 's/\.f[a-z]*$//')
 
@@ -43,6 +53,7 @@ case $lang in
     rust) target="rust"; out_dir="$RUST_OUT"; out_ext="rs" ;;
     c) target="c"; out_dir="$C_OUT"; out_ext="c" ;;
     cpp) target="cpp_17"; out_dir="$CPP_OUT"; out_ext="cpp" ;;
+    java) target="java"; out_dir="$JAVA_OUT"; out_ext="java" ;;
 esac
 
 out_file="$out_dir/${test_name}.${out_ext}"
@@ -130,6 +141,21 @@ case $lang in
         else
             run_status=1
             run_output="C++ compilation failed"
+        fi
+        ;;
+    java)
+        if [ -n "$JAVA_HOME_17" ]; then
+            javac_cmd="$JAVA_HOME_17/bin/javac"
+            java_cmd="$JAVA_HOME_17/bin/java"
+        else
+            javac_cmd="javac"
+            java_cmd="java"
+        fi
+        if $javac_cmd -d "$JAVA_OUT" "$out_file" 2>&1; then
+            run_output=$($java_cmd -cp "$JAVA_OUT" Main 2>&1) || run_status=$?
+        else
+            run_status=1
+            run_output="Java compilation failed"
         fi
         ;;
 esac

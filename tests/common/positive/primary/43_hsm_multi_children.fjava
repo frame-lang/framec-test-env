@@ -1,0 +1,224 @@
+@@target java
+
+import java.util.*;
+
+@@system HSMMultiChildren {
+    interface:
+        start_a()
+        start_b()
+        start_c()
+        do_action()
+        forward_action()
+        get_log(): ArrayList
+        get_state(): String
+
+    machine:
+        $ChildA => $Parent {
+            start_a() {
+                // stay
+            }
+
+            start_b() {
+                -> $ChildB
+            }
+
+            start_c() {
+                -> $ChildC
+            }
+
+            do_action() {
+                this.log.add("ChildA:do_action");
+            }
+
+            forward_action() {
+                this.log.add("ChildA:forward_action");
+                => $^
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "ChildA";
+            }
+        }
+
+        $ChildB => $Parent {
+            start_a() {
+                -> $ChildA
+            }
+
+            start_b() {
+                // stay
+            }
+
+            start_c() {
+                -> $ChildC
+            }
+
+            do_action() {
+                this.log.add("ChildB:do_action");
+            }
+
+            forward_action() {
+                this.log.add("ChildB:forward_action");
+                => $^
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "ChildB";
+            }
+        }
+
+        $ChildC => $Parent {
+            start_a() {
+                -> $ChildA
+            }
+
+            start_b() {
+                -> $ChildB
+            }
+
+            start_c() {
+                // stay
+            }
+
+            do_action() {
+                this.log.add("ChildC:do_action");
+            }
+
+            forward_action() {
+                this.log.add("ChildC:forward_action");
+                => $^
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "ChildC";
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                this.log.add("Parent:forward_action");
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "Parent";
+            }
+        }
+    domain:
+        ArrayList log = new ArrayList()
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 43: HSM Multiple Children ===");
+        var s = @@HSMMultiChildren();
+
+        // TC1.3.1: Multiple children declare same parent (verified by compilation)
+        System.out.println("TC1.3.1: Multiple children with same parent compiles - PASS");
+
+        // Start in ChildA
+        if (!s.get_state().equals("ChildA")) {
+            System.out.println("FAIL: Expected ChildA, got " + s.get_state());
+            System.exit(1);
+        }
+
+        // TC1.3.2: ChildA can forward to shared parent
+        s.forward_action();
+        ArrayList log = s.get_log();
+        if (!log.contains("ChildA:forward_action")) {
+            System.out.println("FAIL: Expected ChildA forward, got " + log);
+            System.exit(1);
+        }
+        if (!log.contains("Parent:forward_action")) {
+            System.out.println("FAIL: Expected Parent handler, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC1.3.2: ChildA forwards to parent - PASS");
+
+        // TC1.3.3: Transition to sibling
+        s.start_b();
+        if (!s.get_state().equals("ChildB")) {
+            System.out.println("FAIL: Expected ChildB after transition, got " + s.get_state());
+            System.exit(1);
+        }
+        System.out.println("TC1.3.3: Transition A->B works - PASS");
+
+        // TC1.3.4: ChildB can also forward to same parent
+        s.forward_action();
+        log = s.get_log();
+        if (!log.contains("ChildB:forward_action")) {
+            System.out.println("FAIL: Expected ChildB forward, got " + log);
+            System.exit(1);
+        }
+        int parentCount = 0;
+        for (Object item : log) {
+            if (item.equals("Parent:forward_action")) parentCount++;
+        }
+        if (parentCount != 2) {
+            System.out.println("FAIL: Expected 2 Parent forwards, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC1.3.4: ChildB forwards to same parent - PASS");
+
+        // TC1.3.5: Transition to ChildC
+        s.start_c();
+        if (!s.get_state().equals("ChildC")) {
+            System.out.println("FAIL: Expected ChildC, got " + s.get_state());
+            System.exit(1);
+        }
+        s.forward_action();
+        log = s.get_log();
+        if (!log.contains("ChildC:forward_action")) {
+            System.out.println("FAIL: Expected ChildC forward, got " + log);
+            System.exit(1);
+        }
+        int parentCount2 = 0;
+        for (Object item : log) {
+            if (item.equals("Parent:forward_action")) parentCount2++;
+        }
+        if (parentCount2 != 3) {
+            System.out.println("FAIL: Expected 3 Parent forwards, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC1.3.5: ChildC forwards to same parent - PASS");
+
+        // TC1.3.6: Each sibling maintains independent actions
+        s.start_a();
+        s.do_action();
+        s.start_b();
+        s.do_action();
+        s.start_c();
+        s.do_action();
+        log = s.get_log();
+        if (!log.contains("ChildA:do_action")) {
+            System.out.println("FAIL: Expected ChildA action");
+            System.exit(1);
+        }
+        if (!log.contains("ChildB:do_action")) {
+            System.out.println("FAIL: Expected ChildB action");
+            System.exit(1);
+        }
+        if (!log.contains("ChildC:do_action")) {
+            System.out.println("FAIL: Expected ChildC action");
+            System.exit(1);
+        }
+        System.out.println("TC1.3.6: Each sibling has independent handlers - PASS");
+
+        System.out.println("PASS: HSM multiple children work correctly");
+    }
+}

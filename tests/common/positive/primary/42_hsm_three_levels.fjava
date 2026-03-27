@@ -1,0 +1,157 @@
+@@target java
+
+import java.util.*;
+
+@@system HSMThreeLevels {
+    interface:
+        handle_at_grandchild()
+        forward_to_child()
+        forward_to_parent()
+        forward_through_all()
+        get_log(): ArrayList
+
+    machine:
+        $Grandchild => $Child {
+            $.grandchild_var: int = 1
+
+            handle_at_grandchild() {
+                int val = $.grandchild_var;
+                this.log.add("Grandchild:handled(var=" + val + ")");
+            }
+
+            forward_to_child() {
+                this.log.add("Grandchild:forward_to_child");
+                => $^
+            }
+
+            forward_to_parent() {
+                this.log.add("Grandchild:forward_to_parent");
+                => $^
+            }
+
+            forward_through_all() {
+                this.log.add("Grandchild:forward_through_all");
+                => $^
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+        }
+
+        $Child => $Parent {
+            $.child_var: int = 10
+
+            forward_to_child() {
+                int val = $.child_var;
+                this.log.add("Child:handled(var=" + val + ")");
+            }
+
+            forward_to_parent() {
+                int val = $.child_var;
+                this.log.add("Child:forward_to_parent(var=" + val + ")");
+                => $^
+            }
+
+            forward_through_all() {
+                int val = $.child_var;
+                this.log.add("Child:forward_through_all(var=" + val + ")");
+                => $^
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+        }
+
+        $Parent {
+            $.parent_var: int = 100
+
+            forward_to_parent() {
+                int val = $.parent_var;
+                this.log.add("Parent:handled(var=" + val + ")");
+            }
+
+            forward_through_all() {
+                int val = $.parent_var;
+                this.log.add("Parent:forward_through_all(var=" + val + ")");
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+        }
+    domain:
+        ArrayList log = new ArrayList()
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 42: HSM Three-Level Hierarchy ===");
+        var s = @@HSMThreeLevels();
+
+        // TC1.2.1: Three-level hierarchy compiles
+        System.out.println("TC1.2.1: Three-level hierarchy compiles - PASS");
+
+        // TC1.2.2: Handle at grandchild (no forward)
+        s.handle_at_grandchild();
+        ArrayList log = s.get_log();
+        if (!log.contains("Grandchild:handled(var=1)")) {
+            System.out.println("FAIL: Expected Grandchild handler, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC1.2.2: Grandchild handles locally - PASS");
+
+        // TC1.2.3: Forward from grandchild to child
+        s.forward_to_child();
+        log = s.get_log();
+        if (!log.contains("Grandchild:forward_to_child")) {
+            System.out.println("FAIL: Expected Grandchild forward, got " + log);
+            System.exit(1);
+        }
+        if (!log.contains("Child:handled(var=10)")) {
+            System.out.println("FAIL: Expected Child handler, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC1.2.3: Forward grandchild->child - PASS");
+
+        // TC1.2.4: Forward from grandchild through child to parent
+        s.forward_to_parent();
+        log = s.get_log();
+        if (!log.contains("Grandchild:forward_to_parent")) {
+            System.out.println("FAIL: Expected Grandchild forward, got " + log);
+            System.exit(1);
+        }
+        if (!log.contains("Child:forward_to_parent(var=10)")) {
+            System.out.println("FAIL: Expected Child forward, got " + log);
+            System.exit(1);
+        }
+        if (!log.contains("Parent:handled(var=100)")) {
+            System.out.println("FAIL: Expected Parent handler, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC1.2.4: Forward grandchild->child->parent - PASS");
+
+        // TC1.2.5: Forward through entire chain
+        s.forward_through_all();
+        log = s.get_log();
+        if (!log.contains("Grandchild:forward_through_all")) {
+            System.out.println("FAIL: Expected Grandchild, got " + log);
+            System.exit(1);
+        }
+        if (!log.contains("Child:forward_through_all(var=10)")) {
+            System.out.println("FAIL: Expected Child, got " + log);
+            System.exit(1);
+        }
+        if (!log.contains("Parent:forward_through_all(var=100)")) {
+            System.out.println("FAIL: Expected Parent, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC1.2.5: Full chain forward - PASS");
+
+        // Verify state variable isolation
+        System.out.println("TC1.2.6: State vars isolated (grandchild=1, child=10, parent=100) - PASS");
+
+        System.out.println("PASS: HSM three-level hierarchy works correctly");
+    }
+}

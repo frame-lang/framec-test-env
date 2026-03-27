@@ -1,0 +1,134 @@
+@@target java
+
+import java.util.*;
+
+@@system HSMEnterExitParams {
+    interface:
+        go_to_a()
+        go_to_sibling()
+        go_back()
+        get_log(): ArrayList
+        get_state(): String
+
+    machine:
+        $Start {
+            go_to_a() {
+                -> ("starting") $ChildA
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "Start";
+            }
+        }
+
+        $ChildA => $Parent {
+            $>(msg: String) {
+                this.log.add("ChildA:enter(" + msg + ")");
+            }
+
+            <$(reason: String) {
+                this.log.add("ChildA:exit(" + reason + ")");
+            }
+
+            go_to_sibling() {
+                ("leaving_A") -> ("arriving_B") $ChildB
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "ChildA";
+            }
+        }
+
+        $ChildB => $Parent {
+            $>(msg: String) {
+                this.log.add("ChildB:enter(" + msg + ")");
+            }
+
+            <$(reason: String) {
+                this.log.add("ChildB:exit(" + reason + ")");
+            }
+
+            go_back() {
+                ("leaving_B") -> ("returning_A") $ChildA
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "ChildB";
+            }
+        }
+
+        $Parent {
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "Parent";
+            }
+        }
+    domain:
+        ArrayList log = new ArrayList()
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 49: HSM Enter/Exit with Params ===");
+        var s = @@HSMEnterExitParams();
+
+        // First go to ChildA with enter params
+        s.go_to_a();
+        ArrayList log = s.get_log();
+        if (!log.contains("ChildA:enter(starting)")) {
+            System.out.println("FAIL: Expected ChildA:enter(starting), got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.5.0: Initial transition with enter params - PASS");
+
+        // TC2.5.1: Exit params passed correctly
+        s.go_to_sibling();
+        log = s.get_log();
+        if (!log.contains("ChildA:exit(leaving_A)")) {
+            System.out.println("FAIL: Expected exit with param, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.5.1: Exit params passed correctly - PASS");
+
+        // TC2.5.2: Enter params passed to target state
+        if (!log.contains("ChildB:enter(arriving_B)")) {
+            System.out.println("FAIL: Expected enter with param, got " + log);
+            System.exit(1);
+        }
+        if (!s.get_state().equals("ChildB")) {
+            System.out.println("FAIL: Expected ChildB, got " + s.get_state());
+            System.exit(1);
+        }
+        System.out.println("TC2.5.2: Enter params passed to target - PASS");
+
+        // TC2.5.3: Return transition with different params
+        s.go_back();
+        log = s.get_log();
+        if (!log.contains("ChildB:exit(leaving_B)")) {
+            System.out.println("FAIL: Expected ChildB exit, got " + log);
+            System.exit(1);
+        }
+        if (!log.contains("ChildA:enter(returning_A)")) {
+            System.out.println("FAIL: Expected ChildA enter, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.5.3: Return transition with params - PASS");
+
+        System.out.println("PASS: HSM enter/exit with params works correctly");
+    }
+}

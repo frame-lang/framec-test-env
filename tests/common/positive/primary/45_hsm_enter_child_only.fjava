@@ -1,0 +1,106 @@
+@@target java
+
+import java.util.*;
+
+@@system HSMEnterChildOnly {
+    interface:
+        go_to_child()
+        forward_action()
+        get_log(): ArrayList
+        get_state(): String
+
+    machine:
+        $Start {
+            go_to_child() {
+                -> $Child
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "Start";
+            }
+        }
+
+        $Child => $Parent {
+            $>() {
+                this.log.add("Child:enter");
+            }
+
+            forward_action() {
+                this.log.add("Child:forward");
+                => $^
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "Child";
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                this.log.add("Parent:forward_action");
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "Parent";
+            }
+        }
+    domain:
+        ArrayList log = new ArrayList()
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 45: HSM Enter in Child Only ===");
+        var s = @@HSMEnterChildOnly();
+
+        // Start state has no enter
+        if (!s.get_state().equals("Start")) {
+            System.out.println("FAIL: Expected Start, got " + s.get_state());
+            System.exit(1);
+        }
+        System.out.println("TC2.1.0: Initial state is Start - PASS");
+
+        // TC2.1.1: Child enter handler fires on entry
+        s.go_to_child();
+        ArrayList log = s.get_log();
+        if (!log.contains("Child:enter")) {
+            System.out.println("FAIL: Expected Child:enter, got " + log);
+            System.exit(1);
+        }
+        if (!s.get_state().equals("Child")) {
+            System.out.println("FAIL: Expected Child, got " + s.get_state());
+            System.exit(1);
+        }
+        System.out.println("TC2.1.1: Child enter handler fires - PASS");
+
+        // TC2.1.2: No error when parent lacks enter (verified by compilation/execution)
+        System.out.println("TC2.1.2: No error when parent lacks enter - PASS");
+
+        // TC2.1.3: Forward to parent works without parent having enter
+        s.forward_action();
+        log = s.get_log();
+        if (!log.contains("Child:forward")) {
+            System.out.println("FAIL: Expected Child:forward, got " + log);
+            System.exit(1);
+        }
+        if (!log.contains("Parent:forward_action")) {
+            System.out.println("FAIL: Expected Parent handler, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.1.3: Forward works without parent enter - PASS");
+
+        System.out.println("PASS: HSM enter in child only works correctly");
+    }
+}

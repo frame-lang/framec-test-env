@@ -1,0 +1,165 @@
+@@target java
+
+import java.util.*;
+
+@@system HSMExitHandlers {
+    interface:
+        go_to_other()
+        go_to_parent()
+        go_to_child()
+        get_log(): ArrayList
+        get_state(): String
+        get_child_var(): int
+
+    machine:
+        $Child => $Parent {
+            $.child_var: int = 42
+
+            $>() {
+                this.log.add("Child:enter");
+            }
+
+            <$() {
+                int val = $.child_var;
+                this.log.add("Child:exit(var=" + val + ")");
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "Child";
+            }
+
+            get_child_var(): int {
+                return $.child_var;
+            }
+        }
+
+        $Parent {
+            $>() {
+                this.log.add("Parent:enter");
+            }
+
+            <$() {
+                this.log.add("Parent:exit");
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "Parent";
+            }
+
+            get_child_var(): int {
+                return -1;
+            }
+        }
+
+        $Other {
+            $>() {
+                this.log.add("Other:enter");
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "Other";
+            }
+
+            get_child_var(): int {
+                return -1;
+            }
+        }
+    domain:
+        ArrayList log = new ArrayList()
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 48: HSM Exit Handlers ===");
+        var s = @@HSMExitHandlers();
+
+        // Initial state is Child
+        ArrayList log = s.get_log();
+        if (!log.contains("Child:enter")) {
+            System.out.println("FAIL: Expected Child:enter on init, got " + log);
+            System.exit(1);
+        }
+        if (!s.get_state().equals("Child")) {
+            System.out.println("FAIL: Expected Child, got " + s.get_state());
+            System.exit(1);
+        }
+        System.out.println("TC2.4.0: Initial state is Child with enter - PASS");
+
+        // TC2.4.1: Child exit fires when transitioning out of child
+        s.go_to_other();
+        log = s.get_log();
+        if (!log.contains("Child:exit(var=42)")) {
+            System.out.println("FAIL: Expected Child:exit, got " + log);
+            System.exit(1);
+        }
+        if (!log.contains("Other:enter")) {
+            System.out.println("FAIL: Expected Other:enter, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.4.1: Child exit fires when transitioning out - PASS");
+
+        // TC2.4.2: Parent exit does NOT fire when transitioning out of child
+        if (log.contains("Parent:exit")) {
+            System.out.println("FAIL: Parent:exit should NOT fire for child exit, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.4.2: Parent exit NOT fired for child exit - PASS");
+
+        // TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
+        System.out.println("TC2.4.3: Exit handler accesses state var (var=42) - PASS");
+
+        // TC2.4.4: Parent exit fires when transitioning out of Parent
+        s.go_to_parent();
+        log = s.get_log();
+        if (!log.contains("Parent:enter")) {
+            System.out.println("FAIL: Expected Parent:enter, got " + log);
+            System.exit(1);
+        }
+
+        s.go_to_other();
+        log = s.get_log();
+        if (!log.contains("Parent:exit")) {
+            System.out.println("FAIL: Expected Parent:exit, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.4.4: Parent exit fires when leaving parent - PASS");
+
+        System.out.println("PASS: HSM exit handlers work correctly");
+    }
+}

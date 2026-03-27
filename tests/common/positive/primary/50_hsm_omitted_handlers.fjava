@@ -1,0 +1,177 @@
+@@target java
+
+import java.util.*;
+
+@@system HSMOmittedHandlers {
+    interface:
+        handled_by_child()
+        forwarded_explicitly()
+        unhandled_no_forward()
+        get_log(): ArrayList
+        get_state(): String
+
+    machine:
+        $Child => $Parent {
+            handled_by_child() {
+                this.log.add("Child:handled_by_child");
+            }
+
+            forwarded_explicitly() {
+                this.log.add("Child:before_forward");
+                => $^
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "Child";
+            }
+        }
+
+        $Parent {
+            handled_by_child() {
+                this.log.add("Parent:handled_by_child");
+            }
+
+            forwarded_explicitly() {
+                this.log.add("Parent:forwarded_explicitly");
+            }
+
+            unhandled_no_forward() {
+                this.log.add("Parent:unhandled_no_forward");
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "Parent";
+            }
+        }
+    domain:
+        ArrayList log = new ArrayList()
+}
+
+@@system HSMDefaultForward2 {
+    interface:
+        child_handled()
+        parent_handled()
+        both_respond()
+        get_log(): ArrayList
+
+    machine:
+        $Child => $Parent {
+            child_handled() {
+                this.log.add("Child:child_handled");
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            => $^
+        }
+
+        $Parent {
+            child_handled() {
+                this.log.add("Parent:child_handled");
+            }
+
+            parent_handled() {
+                this.log.add("Parent:parent_handled");
+            }
+
+            both_respond() {
+                this.log.add("Parent:both_respond");
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+        }
+    domain:
+        ArrayList log = new ArrayList()
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 50: HSM Omitted Handlers ===");
+
+        // Part 1: Explicit forwarding vs no forwarding
+        var s1 = @@HSMOmittedHandlers();
+
+        // TC2.6.1: Event handled by child only
+        s1.handled_by_child();
+        ArrayList log = s1.get_log();
+        if (!log.contains("Child:handled_by_child")) {
+            System.out.println("FAIL: Expected Child handler, got " + log);
+            System.exit(1);
+        }
+        if (log.contains("Parent:handled_by_child")) {
+            System.out.println("FAIL: Parent should NOT be called, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.6.1: Handled by child, not forwarded - PASS");
+
+        // TC2.6.2: Event explicitly forwarded to parent
+        s1.forwarded_explicitly();
+        log = s1.get_log();
+        if (!log.contains("Child:before_forward")) {
+            System.out.println("FAIL: Expected Child forward, got " + log);
+            System.exit(1);
+        }
+        if (!log.contains("Parent:forwarded_explicitly")) {
+            System.out.println("FAIL: Expected Parent handler, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.6.2: Explicitly forwarded to parent - PASS");
+
+        // TC2.6.3: Unhandled event with no forward - silently ignored
+        s1.unhandled_no_forward();
+        log = s1.get_log();
+        if (log.contains("Parent:unhandled_no_forward")) {
+            System.out.println("FAIL: Unhandled should be ignored, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.6.3: Unhandled (no forward) is silently ignored - PASS");
+
+        // Part 2: State-level default forward
+        var s2 = @@HSMDefaultForward2();
+
+        // TC2.6.4: Event handled by child (no forward despite => $^)
+        s2.child_handled();
+        log = s2.get_log();
+        if (!log.contains("Child:child_handled")) {
+            System.out.println("FAIL: Expected Child handler, got " + log);
+            System.exit(1);
+        }
+        if (log.contains("Parent:child_handled")) {
+            System.out.println("FAIL: Handled by child, not forwarded, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.6.4: Child handles, not forwarded - PASS");
+
+        // TC2.6.5: Unhandled event forwarded via => $^
+        s2.parent_handled();
+        log = s2.get_log();
+        if (!log.contains("Parent:parent_handled")) {
+            System.out.println("FAIL: Expected Parent handler, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.6.5: Unhandled forwarded via state-level => $^ - PASS");
+
+        // TC2.6.6: Another unhandled event forwarded
+        s2.both_respond();
+        log = s2.get_log();
+        if (!log.contains("Parent:both_respond")) {
+            System.out.println("FAIL: Expected Parent handler, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.6.6: Default forward works for multiple events - PASS");
+
+        System.out.println("PASS: HSM omitted handlers work correctly");
+    }
+}

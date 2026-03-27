@@ -1,0 +1,119 @@
+@@target java
+
+import java.util.*;
+
+@@system HSMEnterParentOnly {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): ArrayList
+        get_state(): String
+
+    machine:
+        $Start {
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "Start";
+            }
+        }
+
+        $Child => $Parent {
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "Child";
+            }
+        }
+
+        $Parent {
+            $>() {
+                this.log.add("Parent:enter");
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+
+            get_state(): String {
+                return "Parent";
+            }
+        }
+    domain:
+        ArrayList log = new ArrayList()
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 46: HSM Enter in Parent Only ===");
+        var s = @@HSMEnterParentOnly();
+
+        // TC2.2.1: Child enters without error (no enter handler)
+        s.go_to_child();
+        if (!s.get_state().equals("Child")) {
+            System.out.println("FAIL: Expected Child, got " + s.get_state());
+            System.exit(1);
+        }
+        ArrayList log = s.get_log();
+        System.out.println("TC2.2.1: Child enters without error (log: " + log + ") - PASS");
+
+        // TC2.2.2: Parent's enter does NOT auto-fire when child is entered
+        if (log.contains("Parent:enter")) {
+            System.out.println("FAIL: Parent:enter should NOT fire for child entry, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.2.2: Parent enter NOT auto-fired for child - PASS");
+
+        // TC2.2.3: Parent enter only fires when transitioning directly TO parent
+        s.go_to_parent();
+        if (!s.get_state().equals("Parent")) {
+            System.out.println("FAIL: Expected Parent, got " + s.get_state());
+            System.exit(1);
+        }
+        log = s.get_log();
+        if (!log.contains("Parent:enter")) {
+            System.out.println("FAIL: Expected Parent:enter when transitioning to Parent, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.2.3: Parent enter fires when transitioning to Parent - PASS");
+
+        // TC2.2.4: Going back to child from parent
+        s.go_to_child();
+        if (!s.get_state().equals("Child")) {
+            System.out.println("FAIL: Expected Child, got " + s.get_state());
+            System.exit(1);
+        }
+        log = s.get_log();
+        int count = 0;
+        for (Object item : log) {
+            if (item.equals("Parent:enter")) count++;
+        }
+        if (count != 1) {
+            System.out.println("FAIL: Expected exactly 1 Parent:enter, got " + log);
+            System.exit(1);
+        }
+        System.out.println("TC2.2.4: Return to child, parent enter count unchanged - PASS");
+
+        System.out.println("PASS: HSM enter in parent only works correctly");
+    }
+}

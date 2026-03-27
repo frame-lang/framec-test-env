@@ -1,0 +1,103 @@
+@@target java
+
+import java.util.*;
+
+@@system StateVarPushPop {
+    interface:
+        increment(): int
+        get_count(): int
+        save_and_go()
+        restore()
+
+    machine:
+        $Counter {
+            $.count: int = 0
+
+            increment(): int {
+                $.count = $.count + 1;
+                return $.count;
+            }
+
+            get_count(): int {
+                return $.count;
+            }
+
+            save_and_go() {
+                `push$
+                -> $Other
+            }
+        }
+
+        $Other {
+            $.other_count: int = 100
+
+            restore() {
+                `-> pop$
+            }
+
+            increment(): int {
+                $.other_count = $.other_count + 1;
+                return $.other_count;
+            }
+
+            get_count(): int {
+                return $.other_count;
+            }
+        }
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 12: State Variable Push/Pop ===");
+        var s = new StateVarPushPop();
+
+        // Increment counter to 3
+        s.increment();
+        s.increment();
+        s.increment();
+        int count = (int) s.get_count();
+        if (count != 3) {
+            throw new RuntimeException("Expected 3, got " + count);
+        }
+        System.out.println("Counter before push: " + count);
+
+        // Push and go to Other state
+        s.save_and_go();
+        System.out.println("Pushed and transitioned to Other");
+
+        // In Other state, count should be 100 (Other's state var)
+        count = (int) s.get_count();
+        if (count != 100) {
+            throw new RuntimeException("Expected 100 in Other state, got " + count);
+        }
+        System.out.println("Other state count: " + count);
+
+        // Increment in Other
+        s.increment();
+        count = (int) s.get_count();
+        if (count != 101) {
+            throw new RuntimeException("Expected 101 after increment, got " + count);
+        }
+        System.out.println("Other state after increment: " + count);
+
+        // Pop back - should restore Counter with count=3
+        s.restore();
+        System.out.println("Popped back to Counter");
+
+        count = (int) s.get_count();
+        if (count != 3) {
+            throw new RuntimeException("Expected 3 after pop (preserved), got " + count);
+        }
+        System.out.println("Counter after pop: " + count);
+
+        // Increment to verify it works
+        s.increment();
+        count = (int) s.get_count();
+        if (count != 4) {
+            throw new RuntimeException("Expected 4, got " + count);
+        }
+        System.out.println("Counter after increment: " + count);
+
+        System.out.println("PASS: State variables preserved across push/pop");
+    }
+}

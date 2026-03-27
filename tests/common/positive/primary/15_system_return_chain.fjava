@@ -1,0 +1,88 @@
+@@target java
+
+import java.util.*;
+
+// Tests that @@:return follows "last writer wins" across transition lifecycle
+
+@@system SystemReturnChainTest {
+    interface:
+        test_enter_sets(): String
+        test_exit_then_enter(): String
+        get_state(): String
+
+    machine:
+        $Start {
+            test_enter_sets(): String {
+                -> $EnterSetter
+            }
+
+            test_exit_then_enter(): String {
+                -> $BothSet
+            }
+
+            get_state(): String {
+                return "Start";
+            }
+
+            <$() {
+                // Exit handler sets initial value
+                @@:return = "from_exit";
+            }
+        }
+
+        $EnterSetter {
+            $>() {
+                // Enter handler sets return value
+                @@:return = "from_enter";
+            }
+
+            get_state(): String {
+                return "EnterSetter";
+            }
+        }
+
+        $BothSet {
+            $>() {
+                // Enter handler sets return - should overwrite exit's value
+                @@:return = "enter_wins";
+            }
+
+            get_state(): String {
+                return "BothSet";
+            }
+        }
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 15: System Return Chain (Last Writer Wins) ===");
+
+        // Test 1: Start exit + EnterSetter enter
+        // Start's exit sets "from_exit", EnterSetter's enter sets "from_enter"
+        // Enter should win (last writer)
+        var s1 = new SystemReturnChainTest();
+        String result1 = (String) s1.test_enter_sets();
+        if (!"from_enter".equals(result1)) {
+            throw new RuntimeException("Expected 'from_enter', got '" + result1 + "'");
+        }
+        String state1 = (String) s1.get_state();
+        if (!"EnterSetter".equals(state1)) {
+            throw new RuntimeException("Expected state 'EnterSetter'");
+        }
+        System.out.println("1. Exit set then enter set - enter wins: '" + result1 + "'");
+
+        // Test 2: Both handlers set, enter wins
+        var s2 = new SystemReturnChainTest();
+        String result2 = (String) s2.test_exit_then_enter();
+        if (!"enter_wins".equals(result2)) {
+            throw new RuntimeException("Expected 'enter_wins', got '" + result2 + "'");
+        }
+        String state2 = (String) s2.get_state();
+        if (!"BothSet".equals(state2)) {
+            throw new RuntimeException("Expected state 'BothSet'");
+        }
+        System.out.println("2. Both set - enter wins: '" + result2 + "'");
+
+        System.out.println("PASS: System return chain (last writer wins) works correctly");
+    }
+}

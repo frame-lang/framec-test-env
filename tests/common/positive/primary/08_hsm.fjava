@@ -1,0 +1,71 @@
+@@target java
+
+import java.util.*;
+
+@@system HSMForward {
+    interface:
+        event_a()
+        event_b()
+        get_log(): ArrayList<String>
+
+    machine:
+        $Child => $Parent {
+            event_a() {
+                this.log.add("Child:event_a");
+            }
+
+            event_b() {
+                this.log.add("Child:event_b_forward");
+                => $^
+            }
+
+            get_log(): ArrayList<String> {
+                return this.log;
+            }
+        }
+
+        $Parent {
+            event_a() {
+                this.log.add("Parent:event_a");
+            }
+
+            event_b() {
+                this.log.add("Parent:event_b");
+            }
+
+            get_log(): ArrayList<String> {
+                return this.log;
+            }
+        }
+    domain:
+        ArrayList<String> log = new ArrayList<>()
+}
+
+class Main {
+    @SuppressWarnings("unchecked")
+    public static void main(String[] args) {
+        System.out.println("=== Test 08: HSM Forward ===");
+        var s = new HSMForward();
+
+        // event_a should be handled by Child (no forward)
+        s.event_a();
+        ArrayList<String> log = (ArrayList<String>) s.get_log();
+        if (!log.contains("Child:event_a")) {
+            throw new RuntimeException("Expected 'Child:event_a' in log, got " + log);
+        }
+        System.out.println("After event_a: " + log);
+
+        // event_b should forward to Parent
+        s.event_b();
+        log = (ArrayList<String>) s.get_log();
+        if (!log.contains("Child:event_b_forward")) {
+            throw new RuntimeException("Expected 'Child:event_b_forward' in log, got " + log);
+        }
+        if (!log.contains("Parent:event_b")) {
+            throw new RuntimeException("Expected 'Parent:event_b' in log (forwarded), got " + log);
+        }
+        System.out.println("After event_b (forwarded): " + log);
+
+        System.out.println("PASS: HSM forward works correctly");
+    }
+}

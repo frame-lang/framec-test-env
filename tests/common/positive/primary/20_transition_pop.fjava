@@ -1,0 +1,100 @@
+@@target java
+
+import java.util.*;
+
+@@system TransitionPopTest {
+    interface:
+        start()
+        process()
+        get_state(): String
+        get_log(): ArrayList
+
+    machine:
+        $Idle {
+            start() {
+                this.log.add("idle:start:push");
+                `push$
+                -> $Working
+            }
+
+            process() {
+                this.log.add("idle:process");
+            }
+
+            get_state(): String {
+                return "Idle";
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+        }
+
+        $Working {
+            process() {
+                this.log.add("working:process:before_pop");
+                -> pop$
+                // This should NOT execute because pop transitions away
+                this.log.add("working:process:after_pop");
+            }
+
+            get_state(): String {
+                return "Working";
+            }
+
+            get_log(): ArrayList {
+                return this.log;
+            }
+        }
+    domain:
+        ArrayList log = new ArrayList()
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 20: Transition Pop (Java) ===");
+        var s = @@TransitionPopTest();
+
+        // Initial state should be Idle
+        if (!s.get_state().equals("Idle")) {
+            System.out.println("FAIL: Expected 'Idle', got '" + s.get_state() + "'");
+            System.exit(1);
+        }
+        System.out.println("Initial state: " + s.get_state());
+
+        // start() pushes Idle, transitions to Working
+        s.start();
+        if (!s.get_state().equals("Working")) {
+            System.out.println("FAIL: Expected 'Working', got '" + s.get_state() + "'");
+            System.exit(1);
+        }
+        System.out.println("After start(): " + s.get_state());
+
+        // process() in Working does pop transition back to Idle
+        s.process();
+        if (!s.get_state().equals("Idle")) {
+            System.out.println("FAIL: Expected 'Idle' after pop, got '" + s.get_state() + "'");
+            System.exit(1);
+        }
+        System.out.println("After process() with pop: " + s.get_state());
+
+        ArrayList log = s.get_log();
+        System.out.println("Log: " + log);
+
+        // Verify log contents
+        if (!log.contains("idle:start:push")) {
+            System.out.println("FAIL: Expected 'idle:start:push' in log");
+            System.exit(1);
+        }
+        if (!log.contains("working:process:before_pop")) {
+            System.out.println("FAIL: Expected 'working:process:before_pop' in log");
+            System.exit(1);
+        }
+        if (log.contains("working:process:after_pop")) {
+            System.out.println("FAIL: Should NOT have 'working:process:after_pop' in log");
+            System.exit(1);
+        }
+
+        System.out.println("PASS: Transition pop works correctly");
+    }
+}
