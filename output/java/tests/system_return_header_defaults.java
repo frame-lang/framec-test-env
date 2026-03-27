@@ -128,7 +128,7 @@ class SystemReturnHeaderDefaultsJava {
         return __result;
     }
 
-    public int a2(Object a) {
+    public int a2(int a) {
         HashMap<String, Object> __params = new HashMap<>();
         __params.put("a", a);
         SystemReturnHeaderDefaultsJavaFrameEvent __e = new SystemReturnHeaderDefaultsJavaFrameEvent("a2", __params);
@@ -140,11 +140,11 @@ class SystemReturnHeaderDefaultsJava {
         return __result;
     }
 
-    public int a3(Object a) {
+    public int a3(int a) {
         HashMap<String, Object> __params = new HashMap<>();
         __params.put("a", a);
         SystemReturnHeaderDefaultsJavaFrameEvent __e = new SystemReturnHeaderDefaultsJavaFrameEvent("a3", __params);
-        SystemReturnHeaderDefaultsJavaFrameContext __ctx = new SystemReturnHeaderDefaultsJavaFrameContext(__e, this.x + a);
+        SystemReturnHeaderDefaultsJavaFrameContext __ctx = new SystemReturnHeaderDefaultsJavaFrameContext(__e, x + a);
         _context_stack.add(__ctx);
         __kernel(_context_stack.get(_context_stack.size() - 1)._event);
         var __result = (int) _context_stack.get(_context_stack.size() - 1)._return;
@@ -154,24 +154,24 @@ class SystemReturnHeaderDefaultsJava {
 
     private void _state_Idle(SystemReturnHeaderDefaultsJavaFrameEvent __e) {
         if (__e._message.equals("a1")) {
-            if (this.x < 5) {
+            if (x < 5) {
                 return;
             } else {
                 _context_stack.get(_context_stack.size() - 1)._return = 0;
                 return;
             }
         } else if (__e._message.equals("a2")) {
-            var a = (Any) __e._parameters.get("a");
+            var a = (int) __e._parameters.get("a");
             return;
         } else if (__e._message.equals("a3")) {
-            var a = (Any) __e._parameters.get("a");
+            var a = (int) __e._parameters.get("a");
             _context_stack.get(_context_stack.size() - 1)._return = a;
             return;
         }
     }
 
-    private void bump_x(Object delta) {
-                    this.x = this.x + delta;
+    private void bump_x(int delta) {
+                    x = x + delta;
     }
 }
 
@@ -180,7 +180,10 @@ class Main {
         System.out.println("TAP version 14");
         System.out.println("1..1");
         try {
-            SystemReturnHeaderDefaultsJava s = new SystemReturnHeaderDefaultsJava();
+            var s = new SystemReturnHeaderDefaultsJava();
+            if (s.a1() != 10) { System.out.println("not ok 1 # a1 failed"); return; }
+            if (s.a2(42) != 42) { System.out.println("not ok 1 # a2 failed"); return; }
+            if (s.a3(7) != 7) { System.out.println("not ok 1 # a3 failed"); return; }
             System.out.println("ok 1 - system_return_header_defaults");
         } catch (Exception ex) {
             System.out.println("not ok 1 - system_return_header_defaults # " + ex);

@@ -129,7 +129,7 @@ class S {
         }
     }
 
-    public void calc(Object x, Object y) {
+    public int calc(int x, int y) {
          return x + y; 
     }
 }

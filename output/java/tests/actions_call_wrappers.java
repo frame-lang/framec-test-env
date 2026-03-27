@@ -130,7 +130,7 @@ class CallMismatch {
         }
     }
 
-    private void log(Object message) {
+    private void log(String message) {
                     // log sink
                     this.last = message;
     }

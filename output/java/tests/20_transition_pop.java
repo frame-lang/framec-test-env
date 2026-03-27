@@ -185,8 +185,6 @@ class TransitionPopTest {
             var __popped = _state_stack.remove(_state_stack.size() - 1);
             __transition(__popped);
             return;
-            // This should NOT execute because pop transitions away
-            this.log.add("working:process:after_pop");
         }
     }
 }

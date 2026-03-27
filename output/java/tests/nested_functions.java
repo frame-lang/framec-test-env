@@ -128,6 +128,10 @@ class S {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
+    private void _state_P(SFrameEvent __e) {
+
+    }
+
     private void _state_A(SFrameEvent __e) {
         if (__e._message.equals("e")) {
             // Java doesn't support nested functions; use lambdas
@@ -137,10 +141,6 @@ class S {
             _state_P(__e);
             outer.get();
         }
-    }
-
-    private void _state_P(SFrameEvent __e) {
-
     }
 }
 

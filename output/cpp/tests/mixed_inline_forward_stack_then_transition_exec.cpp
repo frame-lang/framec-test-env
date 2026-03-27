@@ -108,11 +108,11 @@ private:
         }
     }
 
-    void _state_P(SFrameEvent& __e) {
+    void _state_B(SFrameEvent& __e) {
 
     }
 
-    void _state_B(SFrameEvent& __e) {
+    void _state_P(SFrameEvent& __e) {
 
     }
 

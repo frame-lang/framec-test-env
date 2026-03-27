@@ -157,18 +157,6 @@ class HSMSingleParent {
         return __result;
     }
 
-    private void _state_Parent(HSMSingleParentFrameEvent __e) {
-        if (__e._message.equals("forward_to_parent")) {
-            this.log.add("Parent:forward_to_parent");
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Parent";
-            return;
-        }
-    }
-
     private void _state_Child(HSMSingleParentFrameEvent __e) {
         if (__e._message.equals("child_only")) {
             this.log.add("Child:child_only");
@@ -181,6 +169,18 @@ class HSMSingleParent {
             return;
         } else if (__e._message.equals("get_state")) {
             _context_stack.get(_context_stack.size() - 1)._return = "Child";
+            return;
+        }
+    }
+
+    private void _state_Parent(HSMSingleParentFrameEvent __e) {
+        if (__e._message.equals("forward_to_parent")) {
+            this.log.add("Parent:forward_to_parent");
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Parent";
             return;
         }
     }

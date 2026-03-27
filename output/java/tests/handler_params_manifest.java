@@ -135,8 +135,8 @@ class S {
 
     private void _state_A(SFrameEvent __e) {
         if (__e._message.equals("e")) {
-            var x = (Any) __e._parameters.get("x");
-            var y = (Any) __e._parameters.get("y");
+            var x = (Object) __e._parameters.get("x");
+            var y = (Object) __e._parameters.get("y");
             var __compartment = new SCompartment("B");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
@@ -151,7 +151,7 @@ class Main {
         System.out.println("1..1");
         try {
             S s = new S();
-            s.e();
+            s.e(0, 0);
             System.out.println("ok 1 - handler_params_manifest");
         } catch (Exception ex) {
             System.out.println("not ok 1 - handler_params_manifest # " + ex);

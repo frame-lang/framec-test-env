@@ -94,21 +94,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Other(StateVarReentryFrameEvent& __e) {
-        if (__e._message == "come_back") {
-            auto __new_compartment = std::make_unique<StateVarReentryCompartment>("Counter");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        } else if (__e._message == "get_count") {
-            _context_stack.back()._return = std::any(-1);
-            return;;
-        } else if (__e._message == "increment") {
-            _context_stack.back()._return = std::any(-1);
-            return;;
-        }
-    }
-
     void _state_Counter(StateVarReentryFrameEvent& __e) {
         auto* __sv_comp = __compartment.get();
         while (__sv_comp && __sv_comp->state != "Counter") { __sv_comp = __sv_comp->parent_compartment.get(); }
@@ -125,6 +110,21 @@ private:
         } else if (__e._message == "increment") {
             __sv_comp->state_vars["count"] = std::any(std::any_cast<int>(__sv_comp->state_vars["count"]) + 1);
             _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["count"]));
+            return;;
+        }
+    }
+
+    void _state_Other(StateVarReentryFrameEvent& __e) {
+        if (__e._message == "come_back") {
+            auto __new_compartment = std::make_unique<StateVarReentryCompartment>("Counter");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else if (__e._message == "get_count") {
+            _context_stack.back()._return = std::any(-1);
+            return;;
+        } else if (__e._message == "increment") {
+            _context_stack.back()._return = std::any(-1);
             return;;
         }
     }

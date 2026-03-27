@@ -131,10 +131,6 @@ class S {
             var __popped = _state_stack.remove(_state_stack.size() - 1);
             __transition(__popped);
             return;
-            var __compartment = new SCompartment("B");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
         }
     }
 

@@ -96,18 +96,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Parent(HSMSingleParentFrameEvent& __e) {
-        if (__e._message == "forward_to_parent") {
-            event_log.push_back("Parent:forward_to_parent");
-        } else if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Parent"));
-            return;;
-        }
-    }
-
     void _state_Child(HSMSingleParentFrameEvent& __e) {
         if (__e._message == "child_only") {
             event_log.push_back("Child:child_only");
@@ -120,6 +108,18 @@ private:
             return;;
         } else if (__e._message == "get_state") {
             _context_stack.back()._return = std::any(std::string("Child"));
+            return;;
+        }
+    }
+
+    void _state_Parent(HSMSingleParentFrameEvent& __e) {
+        if (__e._message == "forward_to_parent") {
+            event_log.push_back("Parent:forward_to_parent");
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Parent"));
             return;;
         }
     }

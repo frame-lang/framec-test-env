@@ -3,6 +3,12 @@ import java.util.*;
 
 import java.util.*;
 
+class Stubs {
+    static boolean cond = false;
+    static void step() {}
+    static void done() {}
+}
+
 class SFrameEvent {
     String _message;
     HashMap<String, Object> _parameters;
@@ -130,11 +136,11 @@ class S {
 
     private void _state_A(SFrameEvent __e) {
         if (__e._message.equals("e")) {
-            while (cond) {
+            while (Stubs.cond) {
                 _state_P(__e);
-                step();
+                Stubs.step();
             }
-            done();
+            Stubs.done();
         }
     }
 
@@ -144,10 +150,6 @@ class S {
 }
 
 class Main {
-    static boolean cond = false;
-    static void step() {}
-    static void done() {}
-
     public static void main(String[] args) {
         System.out.println("TAP version 14");
         System.out.println("1..1");

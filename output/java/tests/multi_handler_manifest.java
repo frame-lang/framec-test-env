@@ -117,16 +117,6 @@ class S {
         __next_compartment = next;
     }
 
-    public void g(Object x) {
-        HashMap<String, Object> __params = new HashMap<>();
-        __params.put("x", x);
-        SFrameEvent __e = new SFrameEvent("g", __params);
-        SFrameContext __ctx = new SFrameContext(__e, null);
-        _context_stack.add(__ctx);
-        __kernel(_context_stack.get(_context_stack.size() - 1)._event);
-        _context_stack.remove(_context_stack.size() - 1);
-    }
-
     public void e(Object p, Object q) {
         HashMap<String, Object> __params = new HashMap<>();
         __params.put("p", p);
@@ -138,16 +128,26 @@ class S {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
+    public void g(Object x) {
+        HashMap<String, Object> __params = new HashMap<>();
+        __params.put("x", x);
+        SFrameEvent __e = new SFrameEvent("g", __params);
+        SFrameContext __ctx = new SFrameContext(__e, null);
+        _context_stack.add(__ctx);
+        __kernel(_context_stack.get(_context_stack.size() - 1)._event);
+        _context_stack.remove(_context_stack.size() - 1);
+    }
+
     private void _state_A(SFrameEvent __e) {
         if (__e._message.equals("e")) {
-            var p = (Any) __e._parameters.get("p");
-            var q = (Any) __e._parameters.get("q");
+            var p = (Object) __e._parameters.get("p");
+            var q = (Object) __e._parameters.get("q");
             var __compartment = new SCompartment("B");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;
         } else if (__e._message.equals("g")) {
-            var x = (Any) __e._parameters.get("x");
+            var x = (Object) __e._parameters.get("x");
             ;
         }
     }
@@ -164,7 +164,7 @@ class Main {
         System.out.println("1..1");
         try {
             S s = new S();
-            s.e();
+            s.e(0, 0);
             System.out.println("ok 1 - multi_handler_manifest");
         } catch (Exception ex) {
             System.out.println("not ok 1 - multi_handler_manifest # " + ex);

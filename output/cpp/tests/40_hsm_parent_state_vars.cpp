@@ -94,6 +94,17 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_Parent(HSMParentStateVarsFrameEvent& __e) {
+        auto* __sv_comp = __compartment.get();
+        while (__sv_comp && __sv_comp->state != "Parent") { __sv_comp = __sv_comp->parent_compartment.get(); }
+        if (__e._message == "$>") {
+            if (__compartment->state_vars.count("parent_count") == 0) { __compartment->state_vars["parent_count"] = std::any(100); }
+        } else if (__e._message == "get_parent_count") {
+            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["parent_count"]));
+            return;;
+        }
+    }
+
     void _state_Child(HSMParentStateVarsFrameEvent& __e) {
         auto* __sv_comp = __compartment.get();
         while (__sv_comp && __sv_comp->state != "Child") { __sv_comp = __sv_comp->parent_compartment.get(); }
@@ -104,17 +115,6 @@ private:
             return;;
         } else if (__e._message == "get_parent_count") {
             _state_Parent(__e);
-        }
-    }
-
-    void _state_Parent(HSMParentStateVarsFrameEvent& __e) {
-        auto* __sv_comp = __compartment.get();
-        while (__sv_comp && __sv_comp->state != "Parent") { __sv_comp = __sv_comp->parent_compartment.get(); }
-        if (__e._message == "$>") {
-            if (__compartment->state_vars.count("parent_count") == 0) { __compartment->state_vars["parent_count"] = std::any(100); }
-        } else if (__e._message == "get_parent_count") {
-            _context_stack.back()._return = std::any(std::any_cast<int>(__sv_comp->state_vars["parent_count"]));
-            return;;
         }
     }
 

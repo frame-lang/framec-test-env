@@ -170,20 +170,6 @@ class LampHSM {
         return __result;
     }
 
-    private void _state_Off(LampHSMFrameEvent __e) {
-        if (__e._message.equals("isLampOn")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.lamp_on;
-            return;
-        } else if (__e._message.equals("turnOn")) {
-            var __compartment = new LampHSMCompartment("On");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        } else {
-            _state_ColorBehavior(__e);
-        }
-    }
-
     private void _state_On(LampHSMFrameEvent __e) {
         if (__e._message.equals("<$")) {
             this.turnOffLamp();
@@ -209,6 +195,20 @@ class LampHSM {
         } else if (__e._message.equals("setColor")) {
             var color = (String) __e._parameters.get("color");
             this.color = color;
+        }
+    }
+
+    private void _state_Off(LampHSMFrameEvent __e) {
+        if (__e._message.equals("isLampOn")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.lamp_on;
+            return;
+        } else if (__e._message.equals("turnOn")) {
+            var __compartment = new LampHSMCompartment("On");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        } else {
+            _state_ColorBehavior(__e);
         }
     }
 

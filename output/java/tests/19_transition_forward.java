@@ -136,6 +136,15 @@ class EventForwardTest {
         return __result;
     }
 
+    private void _state_Working(EventForwardTestFrameEvent __e) {
+        if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else if (__e._message.equals("process")) {
+            this.log.add("working:process");
+        }
+    }
+
     private void _state_Idle(EventForwardTestFrameEvent __e) {
         if (__e._message.equals("get_log")) {
             _context_stack.get(_context_stack.size() - 1)._return = this.log;
@@ -147,17 +156,6 @@ class EventForwardTest {
             __compartment.forward_event = __e;
             __transition(__compartment);
             return;
-            // This should NOT execute because -> => returns after dispatch
-            this.log.add("idle:process:after");
-        }
-    }
-
-    private void _state_Working(EventForwardTestFrameEvent __e) {
-        if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else if (__e._message.equals("process")) {
-            this.log.add("working:process");
         }
     }
 }

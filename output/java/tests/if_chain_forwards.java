@@ -3,6 +3,14 @@ import java.util.*;
 
 import java.util.*;
 
+class Stubs {
+    static boolean a = true;
+    static boolean b = false;
+    static void x() {}
+    static void y() {}
+    static void z() {}
+}
+
 class SFrameEvent {
     String _message;
     HashMap<String, Object> _parameters;
@@ -128,33 +136,27 @@ class S {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
-    private void _state_P(SFrameEvent __e) {
-
-    }
-
     private void _state_A(SFrameEvent __e) {
         if (__e._message.equals("e")) {
-            if (a) {
+            if (Stubs.a) {
                 _state_P(__e);
-                x();
-            } else if (b) {
+                Stubs.x();
+            } else if (Stubs.b) {
                 _state_P(__e);
-                y();
+                Stubs.y();
             } else {
                 _state_P(__e);
-                z();
+                Stubs.z();
             }
         }
+    }
+
+    private void _state_P(SFrameEvent __e) {
+
     }
 }
 
 class Main {
-    static boolean a = true;
-    static boolean b = false;
-    static void x() {}
-    static void y() {}
-    static void z() {}
-
     public static void main(String[] args) {
         System.out.println("TAP version 14");
         System.out.println("1..1");

@@ -349,17 +349,6 @@ class HSMDefaultForward2 {
         return __result;
     }
 
-    private void _state_Child(HSMDefaultForward2FrameEvent __e) {
-        if (__e._message.equals("child_handled")) {
-            this.log.add("Child:child_handled");
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else {
-            _state_Parent(__e);
-        }
-    }
-
     private void _state_Parent(HSMDefaultForward2FrameEvent __e) {
         if (__e._message.equals("both_respond")) {
             this.log.add("Parent:both_respond");
@@ -370,6 +359,17 @@ class HSMDefaultForward2 {
             return;
         } else if (__e._message.equals("parent_handled")) {
             this.log.add("Parent:parent_handled");
+        }
+    }
+
+    private void _state_Child(HSMDefaultForward2FrameEvent __e) {
+        if (__e._message.equals("child_handled")) {
+            this.log.add("Child:child_handled");
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else {
+            _state_Parent(__e);
         }
     }
 }

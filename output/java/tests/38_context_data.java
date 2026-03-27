@@ -167,7 +167,7 @@ class ContextDataTest {
         } else if (__e._message.equals("process_with_data")) {
             var value = (int) __e._parameters.get("value");
             // Set data in handler
-            _context_stack.get(_context_stack.size() - 1)._data.put("input", _context_stack.get(_context_stack.size() - 1)._event._parameters.get("value"));
+            _context_stack.get(_context_stack.size() - 1)._data.put("input", value);
             _context_stack.get(_context_stack.size() - 1)._data.put("trace", new ArrayList(Arrays.asList("handler")));
 
             _context_stack.get(_context_stack.size() - 1)._return = "processed:" + _context_stack.get(_context_stack.size() - 1)._data.get("input");
@@ -175,7 +175,7 @@ class ContextDataTest {
             var x = (int) __e._parameters.get("x");
             // Set data, transition, verify data available in lifecycle handlers
             _context_stack.get(_context_stack.size() - 1)._data.put("started_in", "Start");
-            _context_stack.get(_context_stack.size() - 1)._data.put("value", _context_stack.get(_context_stack.size() - 1)._event._parameters.get("x"));
+            _context_stack.get(_context_stack.size() - 1)._data.put("value", x);
             _context_stack.get(_context_stack.size() - 1)._data.put("trace", new ArrayList(Arrays.asList("handler")));
             var __compartment = new ContextDataTestCompartment("End");
             __compartment.parent_compartment = this.__compartment.copy();

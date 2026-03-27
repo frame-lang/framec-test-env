@@ -155,14 +155,14 @@ class ContextBasicTest {
             var a = (int) __e._parameters.get("a");
             var b = (int) __e._parameters.get("b");
             // Access params via @@ shorthand
-            _context_stack.get(_context_stack.size() - 1)._return = _context_stack.get(_context_stack.size() - 1)._event._parameters.get("a") + _context_stack.get(_context_stack.size() - 1)._event._parameters.get("b");
+            _context_stack.get(_context_stack.size() - 1)._return = a + b;
         } else if (__e._message.equals("get_event_name")) {
             // Access event name
             _context_stack.get(_context_stack.size() - 1)._return = _context_stack.get(_context_stack.size() - 1)._event._message;
         } else if (__e._message.equals("greet")) {
             var name = (String) __e._parameters.get("name");
             // Mix param access and return
-            String result = "Hello, " + _context_stack.get(_context_stack.size() - 1)._event._parameters.get("name") + "!";
+            String result = "Hello, " + name + "!";
             _context_stack.get(_context_stack.size() - 1)._return = result;
         }
     }

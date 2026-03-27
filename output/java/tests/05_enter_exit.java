@@ -136,24 +136,6 @@ class EnterExit {
         return __result;
     }
 
-    private void _state_Off(EnterExitFrameEvent __e) {
-        if (__e._message.equals("<$")) {
-            this.log.add("exit:Off");
-            System.out.println("Exiting Off state");
-        } else if (__e._message.equals("$>")) {
-            this.log.add("enter:Off");
-            System.out.println("Entered Off state");
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else if (__e._message.equals("toggle")) {
-            var __compartment = new EnterExitCompartment("On");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
     private void _state_On(EnterExitFrameEvent __e) {
         if (__e._message.equals("<$")) {
             this.log.add("exit:On");
@@ -166,6 +148,24 @@ class EnterExit {
             return;
         } else if (__e._message.equals("toggle")) {
             var __compartment = new EnterExitCompartment("Off");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
+    private void _state_Off(EnterExitFrameEvent __e) {
+        if (__e._message.equals("<$")) {
+            this.log.add("exit:Off");
+            System.out.println("Exiting Off state");
+        } else if (__e._message.equals("$>")) {
+            this.log.add("enter:Off");
+            System.out.println("Entered Off state");
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else if (__e._message.equals("toggle")) {
+            var __compartment = new EnterExitCompartment("On");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;

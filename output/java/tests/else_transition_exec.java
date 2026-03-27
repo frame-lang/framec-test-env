@@ -3,6 +3,10 @@ import java.util.*;
 
 import java.util.*;
 
+class Stubs {
+    static void native_stub() {}
+}
+
 class SFrameEvent {
     String _message;
     HashMap<String, Object> _parameters;
@@ -125,10 +129,14 @@ class S {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
+    private void _state_B(SFrameEvent __e) {
+
+    }
+
     private void _state_A(SFrameEvent __e) {
         if (__e._message.equals("e")) {
             if (false) {
-                native_stub();
+                Stubs.native_stub();
             } else {
                 var __compartment = new SCompartment("B");
                 __compartment.parent_compartment = this.__compartment.copy();
@@ -137,15 +145,9 @@ class S {
             }
         }
     }
-
-    private void _state_B(SFrameEvent __e) {
-
-    }
 }
 
 class Main {
-    static void native_stub() {}
-
     public static void main(String[] args) {
         System.out.println("TAP version 14");
         System.out.println("1..1");

@@ -168,32 +168,32 @@ class ContextReentrantTest {
         if (__e._message.equals("deeply_nested")) {
             var z = (int) __e._parameters.get("z");
             // 3 levels deep
-            String outer_result = this.outer(_context_stack.get(_context_stack.size() - 1)._event._parameters.get("z"));
-            _context_stack.get(_context_stack.size() - 1)._return = "deep:" + _context_stack.get(_context_stack.size() - 1)._event._parameters.get("z") + "," + outer_result;
+            String outer_result = this.outer(z);
+            _context_stack.get(_context_stack.size() - 1)._return = "deep:" + z + "," + outer_result;
         } else if (__e._message.equals("get_both")) {
             var a = (int) __e._parameters.get("a");
             var b = (int) __e._parameters.get("b");
             // Test that we can access multiple params
-            String result_a = this.inner(_context_stack.get(_context_stack.size() - 1)._event._parameters.get("a"));
-            String result_b = this.inner(_context_stack.get(_context_stack.size() - 1)._event._parameters.get("b"));
+            String result_a = this.inner(a);
+            String result_b = this.inner(b);
             // After both inner calls, @@.a and @@.b should still be our params
-            _context_stack.get(_context_stack.size() - 1)._return = "a=" + _context_stack.get(_context_stack.size() - 1)._event._parameters.get("a") + ",b=" + _context_stack.get(_context_stack.size() - 1)._event._parameters.get("b") + ",results=" + result_a + "+" + result_b;
+            _context_stack.get(_context_stack.size() - 1)._return = "a=" + a + ",b=" + b + ",results=" + result_a + "+" + result_b;
         } else if (__e._message.equals("inner")) {
             var y = (int) __e._parameters.get("y");
             // Inner has its own context
             // @@.y should be inner's param, not outer's
-            _context_stack.get(_context_stack.size() - 1)._return = String.valueOf(_context_stack.get(_context_stack.size() - 1)._event._parameters.get("y"));
+            _context_stack.get(_context_stack.size() - 1)._return = String.valueOf(y);
         } else if (__e._message.equals("outer")) {
             var x = (int) __e._parameters.get("x");
             // Set our return before calling inner
             _context_stack.get(_context_stack.size() - 1)._return = "outer_initial";
 
             // Call inner - should NOT clobber our return
-            String inner_result = this.inner(_context_stack.get(_context_stack.size() - 1)._event._parameters.get("x") * 10);
+            String inner_result = this.inner(x * 10);
 
             // Our return should still be accessible
             // Update it with combined result
-            _context_stack.get(_context_stack.size() - 1)._return = "outer:" + _context_stack.get(_context_stack.size() - 1)._event._parameters.get("x") + ",inner:" + inner_result;
+            _context_stack.get(_context_stack.size() - 1)._return = "outer:" + x + ",inner:" + inner_result;
         }
     }
 }

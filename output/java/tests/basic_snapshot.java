@@ -3,6 +3,10 @@ import java.util.*;
 
 import java.util.*;
 
+class Stubs {
+    static void native_stub() {}
+}
+
 class SFrameEvent {
     String _message;
     HashMap<String, Object> _parameters;
@@ -129,23 +133,21 @@ class S {
 
     private void _state_A(SFrameEvent __e) {
         if (__e._message.equals("e")) {
-            var x = (Any) __e._parameters.get("x");
-            var y = (Any) __e._parameters.get("y");
-            var z = (Any) __e._parameters.get("z");
-            native_stub();
+            var x = (Object) __e._parameters.get("x");
+            var y = (Object) __e._parameters.get("y");
+            var z = (Object) __e._parameters.get("z");
+            Stubs.native_stub();
         }
     }
 }
 
 class Main {
-    static void native_stub() {}
-
     public static void main(String[] args) {
         System.out.println("TAP version 14");
         System.out.println("1..1");
         try {
             S s = new S();
-            s.e();
+            s.e("a", "b", "c");
             System.out.println("ok 1 - basic_snapshot");
         } catch (Exception ex) {
             System.out.println("not ok 1 - basic_snapshot # " + ex);

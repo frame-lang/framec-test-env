@@ -94,18 +94,18 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_B(PFrameEvent& __e) {
-        if (__e._message == "e") {
-            ;
-        }
-    }
-
     void _state_A(PFrameEvent& __e) {
         if (__e._message == "e") {
             auto __new_compartment = std::make_unique<PCompartment>("B");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
+        }
+    }
+
+    void _state_B(PFrameEvent& __e) {
+        if (__e._message == "e") {
+            ;
         }
     }
 

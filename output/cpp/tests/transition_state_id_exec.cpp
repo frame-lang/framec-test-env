@@ -94,6 +94,10 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_B(SysXFrameEvent& __e) {
+
+    }
+
     void _state_A(SysXFrameEvent& __e) {
         if (__e._message == "e") {
             auto __new_compartment = std::make_unique<SysXCompartment>("B");
@@ -101,10 +105,6 @@ private:
             __transition(std::move(__new_compartment));
             return;;
         }
-    }
-
-    void _state_B(SysXFrameEvent& __e) {
-
     }
 
 public:

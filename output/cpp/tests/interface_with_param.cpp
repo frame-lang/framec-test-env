@@ -94,16 +94,16 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_P(SFrameEvent& __e) {
-
-    }
-
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "ev") {
             auto n = std::any_cast<int>(__e._parameters.at("n"));
             _state_P(__e);
             std::to_string(n);
         }
+    }
+
+    void _state_P(SFrameEvent& __e) {
+
     }
 
 public:

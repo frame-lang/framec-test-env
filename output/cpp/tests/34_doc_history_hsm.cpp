@@ -104,6 +104,17 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_AB(HistoryHSMFrameEvent& __e) {
+        if (__e._message == "gotoC") {
+            this->log_msg("gotoC in $AB");
+            _state_stack.push_back(__compartment->clone());
+            auto __new_compartment = std::make_unique<HistoryHSMCompartment>("C");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
     void _state_B(HistoryHSMFrameEvent& __e) {
         if (__e._message == "$>") {
             this->log_msg("In $B");
@@ -121,6 +132,43 @@ private:
             return;
         } else {
             _state_AB(__e);
+        }
+    }
+
+    void _state_A(HistoryHSMFrameEvent& __e) {
+        if (__e._message == "$>") {
+            this->log_msg("In $A");
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("A"));
+            return;;
+        } else if (__e._message == "gotoB") {
+            this->log_msg("gotoB");
+            auto __new_compartment = std::make_unique<HistoryHSMCompartment>("B");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else {
+            _state_AB(__e);
+        }
+    }
+
+    void _state_C(HistoryHSMFrameEvent& __e) {
+        if (__e._message == "$>") {
+            this->log_msg("In $C");
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("C"));
+            return;;
+        } else if (__e._message == "goBack") {
+            this->log_msg("goBack");
+            auto __popped = std::move(_state_stack.back()); _state_stack.pop_back();
+            __transition(std::move(__popped));
+            return;
         }
     }
 
@@ -145,54 +193,6 @@ private:
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
-        }
-    }
-
-    void _state_AB(HistoryHSMFrameEvent& __e) {
-        if (__e._message == "gotoC") {
-            this->log_msg("gotoC in $AB");
-            _state_stack.push_back(__compartment->clone());
-            auto __new_compartment = std::make_unique<HistoryHSMCompartment>("C");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
-    void _state_C(HistoryHSMFrameEvent& __e) {
-        if (__e._message == "$>") {
-            this->log_msg("In $C");
-        } else if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("C"));
-            return;;
-        } else if (__e._message == "goBack") {
-            this->log_msg("goBack");
-            auto __popped = std::move(_state_stack.back()); _state_stack.pop_back();
-            __transition(std::move(__popped));
-            return;
-        }
-    }
-
-    void _state_A(HistoryHSMFrameEvent& __e) {
-        if (__e._message == "$>") {
-            this->log_msg("In $A");
-        } else if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("A"));
-            return;;
-        } else if (__e._message == "gotoB") {
-            this->log_msg("gotoB");
-            auto __new_compartment = std::make_unique<HistoryHSMCompartment>("B");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        } else {
-            _state_AB(__e);
         }
     }
 

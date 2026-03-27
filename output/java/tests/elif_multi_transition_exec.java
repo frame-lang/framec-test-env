@@ -129,15 +129,7 @@ class S {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
-    private void _state_B(SFrameEvent __e) {
-
-    }
-
     private void _state_C(SFrameEvent __e) {
-
-    }
-
-    private void _state_D(SFrameEvent __e) {
 
     }
 
@@ -160,6 +152,14 @@ class S {
                 return;
             }
         }
+    }
+
+    private void _state_B(SFrameEvent __e) {
+
+    }
+
+    private void _state_D(SFrameEvent __e) {
+
     }
 }
 

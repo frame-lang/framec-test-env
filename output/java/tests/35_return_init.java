@@ -155,23 +155,6 @@ class ReturnInitTest {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
-    private void _state_Active(ReturnInitTestFrameEvent __e) {
-        if (__e._message.equals("$>")) {
-            // Active state enter (no-op)
-        } else if (__e._message.equals("get_count")) {
-            _context_stack.get(_context_stack.size() - 1)._return = 42;
-        } else if (__e._message.equals("get_flag")) {
-            _context_stack.get(_context_stack.size() - 1)._return = true;
-        } else if (__e._message.equals("get_status")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "active";
-        } else if (__e._message.equals("trigger")) {
-            var __compartment = new ReturnInitTestCompartment("Start");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
     private void _state_Start(ReturnInitTestFrameEvent __e) {
         if (__e._message.equals("$>")) {
             // Start state enter (no-op)
@@ -183,6 +166,23 @@ class ReturnInitTest {
             // Don't set return - should use default "unknown"
         } else if (__e._message.equals("trigger")) {
             var __compartment = new ReturnInitTestCompartment("Active");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
+    private void _state_Active(ReturnInitTestFrameEvent __e) {
+        if (__e._message.equals("$>")) {
+            // Active state enter (no-op)
+        } else if (__e._message.equals("get_count")) {
+            _context_stack.get(_context_stack.size() - 1)._return = 42;
+        } else if (__e._message.equals("get_flag")) {
+            _context_stack.get(_context_stack.size() - 1)._return = true;
+        } else if (__e._message.equals("get_status")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "active";
+        } else if (__e._message.equals("trigger")) {
+            var __compartment = new ReturnInitTestCompartment("Start");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;

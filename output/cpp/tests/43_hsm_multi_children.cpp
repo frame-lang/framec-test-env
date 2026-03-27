@@ -127,6 +127,33 @@ private:
         }
     }
 
+    void _state_ChildB(HSMMultiChildrenFrameEvent& __e) {
+        if (__e._message == "do_action") {
+            event_log.push_back("ChildB:do_action");
+        } else if (__e._message == "forward_action") {
+            event_log.push_back("ChildB:forward_action");
+            _state_Parent(__e);
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("ChildB"));
+            return;;
+        } else if (__e._message == "start_a") {
+            auto __new_compartment = std::make_unique<HSMMultiChildrenCompartment>("ChildA");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else if (__e._message == "start_b") {
+            // stay
+        } else if (__e._message == "start_c") {
+            auto __new_compartment = std::make_unique<HSMMultiChildrenCompartment>("ChildC");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
     void _state_Parent(HSMMultiChildrenFrameEvent& __e) {
         if (__e._message == "forward_action") {
             event_log.push_back("Parent:forward_action");
@@ -158,33 +185,6 @@ private:
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
-        } else if (__e._message == "start_c") {
-            auto __new_compartment = std::make_unique<HSMMultiChildrenCompartment>("ChildC");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
-    void _state_ChildB(HSMMultiChildrenFrameEvent& __e) {
-        if (__e._message == "do_action") {
-            event_log.push_back("ChildB:do_action");
-        } else if (__e._message == "forward_action") {
-            event_log.push_back("ChildB:forward_action");
-            _state_Parent(__e);
-        } else if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("ChildB"));
-            return;;
-        } else if (__e._message == "start_a") {
-            auto __new_compartment = std::make_unique<HSMMultiChildrenCompartment>("ChildA");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        } else if (__e._message == "start_b") {
-            // stay
         } else if (__e._message == "start_c") {
             auto __new_compartment = std::make_unique<HSMMultiChildrenCompartment>("ChildC");
             __new_compartment->parent_compartment = __compartment->clone();

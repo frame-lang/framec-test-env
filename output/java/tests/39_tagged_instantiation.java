@@ -271,9 +271,7 @@ class Counter {
         CounterFrameContext __ctx = new CounterFrameContext(__e, null);
         _context_stack.add(__ctx);
         __kernel(_context_stack.get(_context_stack.size() - 1)._event);
-        var __result = (void) _context_stack.get(_context_stack.size() - 1)._return;
         _context_stack.remove(_context_stack.size() - 1);
-        return __result;
     }
 
     public int get_count() {
