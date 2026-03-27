@@ -3,6 +3,7 @@
 #include <vector>
 #include <any>
 #include <memory>
+#include <functional>
 
 
 #include <iostream>
@@ -118,6 +119,56 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_Flee(AiAgentFrameEvent& __e) {
+        if (__e._message == "$>") {
+            action_log = action_log + "flee,";
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Flee"));
+            return;
+        } else if (__e._message == "tick") {
+            // Precondition: still low health?
+            if (health >= 20) {
+                // Condition no longer met -- back to root for re-evaluation
+                auto __new_compartment = std::make_unique<AiAgentCompartment>("Root");
+                __new_compartment->parent_compartment = __compartment->clone();
+                __transition(std::move(__new_compartment));
+                return;
+            }
+
+            // Action: flee (increase distance, recover health)
+            enemy_distance = enemy_distance + 10;
+            health = health + 5;
+            action_log = action_log + "flee,";
+        }
+    }
+
+    void _state_Root(AiAgentFrameEvent& __e) {
+        if (__e._message == "$>") {
+            action_log = "";
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Root"));
+            return;
+        } else if (__e._message == "tick") {
+            // Selector: check conditions in priority order
+            if (health < 20) {
+                auto __new_compartment = std::make_unique<AiAgentCompartment>("Flee");
+                __new_compartment->parent_compartment = __compartment->clone();
+                __transition(std::move(__new_compartment));
+                return;
+            }
+            if (enemy_distance < 50) {
+                auto __new_compartment = std::make_unique<AiAgentCompartment>("Approach");
+                __new_compartment->parent_compartment = __compartment->clone();
+                __transition(std::move(__new_compartment));
+                return;
+            }
+            auto __new_compartment = std::make_unique<AiAgentCompartment>("Patrol");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
     void _state_Approach(AiAgentFrameEvent& __e) {
         if (__e._message == "$>") {
             action_log = action_log + "approach,";
@@ -152,33 +203,6 @@ private:
                 __transition(std::move(__new_compartment));
                 return;
             }
-        }
-    }
-
-    void _state_Root(AiAgentFrameEvent& __e) {
-        if (__e._message == "$>") {
-            action_log = "";
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Root"));
-            return;
-        } else if (__e._message == "tick") {
-            // Selector: check conditions in priority order
-            if (health < 20) {
-                auto __new_compartment = std::make_unique<AiAgentCompartment>("Flee");
-                __new_compartment->parent_compartment = __compartment->clone();
-                __transition(std::move(__new_compartment));
-                return;
-            }
-            if (enemy_distance < 50) {
-                auto __new_compartment = std::make_unique<AiAgentCompartment>("Approach");
-                __new_compartment->parent_compartment = __compartment->clone();
-                __transition(std::move(__new_compartment));
-                return;
-            }
-            auto __new_compartment = std::make_unique<AiAgentCompartment>("Patrol");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
         }
     }
 
@@ -248,29 +272,6 @@ private:
             // Action: attack
             enemy_health = enemy_health - 25;
             action_log = action_log + "attack,";
-        }
-    }
-
-    void _state_Flee(AiAgentFrameEvent& __e) {
-        if (__e._message == "$>") {
-            action_log = action_log + "flee,";
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Flee"));
-            return;
-        } else if (__e._message == "tick") {
-            // Precondition: still low health?
-            if (health >= 20) {
-                // Condition no longer met -- back to root for re-evaluation
-                auto __new_compartment = std::make_unique<AiAgentCompartment>("Root");
-                __new_compartment->parent_compartment = __compartment->clone();
-                __transition(std::move(__new_compartment));
-                return;
-            }
-
-            // Action: flee (increase distance, recover health)
-            enemy_distance = enemy_distance + 10;
-            health = health + 5;
-            action_log = action_log + "flee,";
         }
     }
 

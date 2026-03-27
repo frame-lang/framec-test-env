@@ -3,6 +3,7 @@
 #include <vector>
 #include <any>
 #include <memory>
+#include <functional>
 
 
 
@@ -94,6 +95,10 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_End(SimpleDockerFrameEvent& __e) {
+
+    }
+
     void _state_Start(SimpleDockerFrameEvent& __e) {
         if (__e._message == "run") {
             printf("SUCCESS: Hello from Docker\n");
@@ -102,10 +107,6 @@ private:
             __transition(std::move(__new_compartment));
             return;
         }
-    }
-
-    void _state_End(SimpleDockerFrameEvent& __e) {
-
     }
 
 public:

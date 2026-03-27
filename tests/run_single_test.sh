@@ -119,7 +119,13 @@ case $lang in
         ;;
     cpp)
         cpp_bin="$CPP_OUT/${test_name}"
-        if g++ -std=c++17 -o "$cpp_bin" "$out_file" 2>&1; then
+        cpp_json_flags=""
+        if [ -d "/opt/homebrew/include/nlohmann" ]; then
+            cpp_json_flags="-I/opt/homebrew/include"
+        elif [ -d "/usr/local/include/nlohmann" ]; then
+            cpp_json_flags="-I/usr/local/include"
+        fi
+        if g++ -std=c++17 $cpp_json_flags -o "$cpp_bin" "$out_file" 2>&1; then
             run_output=$("$cpp_bin" 2>&1) || run_status=$?
         else
             run_status=1

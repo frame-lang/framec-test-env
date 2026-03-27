@@ -3,6 +3,7 @@
 #include <vector>
 #include <any>
 #include <memory>
+#include <functional>
 
 
 #include <iostream>
@@ -97,6 +98,16 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_ColorBehavior(LampHSMFrameEvent& __e) {
+        if (__e._message == "getColor") {
+            _context_stack.back()._return = std::any(color);
+            return;;
+        } else if (__e._message == "setColor") {
+            auto color = std::any_cast<std::string>(__e._parameters.at("color"));
+            this->color = color;
+        }
+    }
+
     void _state_Off(LampHSMFrameEvent& __e) {
         if (__e._message == "isLampOn") {
             _context_stack.back()._return = std::any(lamp_on);
@@ -108,16 +119,6 @@ private:
             return;
         } else {
             _state_ColorBehavior(__e);
-        }
-    }
-
-    void _state_ColorBehavior(LampHSMFrameEvent& __e) {
-        if (__e._message == "getColor") {
-            _context_stack.back()._return = std::any(color);
-            return;;
-        } else if (__e._message == "setColor") {
-            auto color = std::any_cast<std::string>(__e._parameters.at("color"));
-            this->color = color;
         }
     }
 

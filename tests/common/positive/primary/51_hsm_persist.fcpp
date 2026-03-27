@@ -1,14 +1,150 @@
-// @@skip
-// HSM persist tests require JSON serialization library (e.g., nlohmann/json)
-// which is not available in the standard C++17 test environment.
-
 @@target cpp_17
+
+// Test 51: HSM Persistence (C++)
+//
+// Tests that HSM parent compartment chain is properly saved and restored:
+// - Child state vars preserved
+// - Parent state vars preserved
+// - Parent compartment chain intact after restore
+// - Forwarding to parent still works after restore
 
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system HSMPersist {
+    interface:
+        increment_child()
+        increment_parent()
+        get_child_count(): int
+        get_parent_count(): int
+        get_state(): std::string
+
+    machine:
+        $Child => $Parent {
+            $.child_count: int = 0
+
+            increment_child() {
+                $.child_count = $.child_count + 1
+            }
+
+            increment_parent() {
+                // Forward to parent
+                => $^
+            }
+
+            get_child_count(): int {
+                return $.child_count
+            }
+
+            get_parent_count(): int {
+                // Forward to parent
+                => $^
+            }
+
+            get_state(): std::string {
+                return std::string("Child")
+            }
+        }
+
+        $Parent {
+            $.parent_count: int = 100
+
+            increment_parent() {
+                $.parent_count = $.parent_count + 1
+            }
+
+            get_parent_count(): int {
+                return $.parent_count
+            }
+
+            get_state(): std::string {
+                return std::string("Parent")
+            }
+        }
+}
 
 int main() {
-    printf("SKIP: HSM persist requires JSON library\n");
+    printf("=== Test 51: HSM Persistence (C++) ===\n");
+
+    // Create system and modify state vars at both levels
+    HSMPersist s1;
+
+    // Verify initial state
+    if (s1.get_state() != "Child") {
+        printf("FAIL: Expected Child, got %s\n", s1.get_state().c_str());
+        assert(false);
+    }
+    if (s1.get_child_count() != 0) {
+        printf("FAIL: Expected 0, got %d\n", s1.get_child_count());
+        assert(false);
+    }
+    if (s1.get_parent_count() != 100) {
+        printf("FAIL: Expected 100, got %d\n", s1.get_parent_count());
+        assert(false);
+    }
+    printf("1. Initial state verified: Child with child_count=0, parent_count=100\n");
+
+    // Modify state vars at both levels
+    s1.increment_child();
+    s1.increment_child();
+    s1.increment_child();  // child_count = 3
+    s1.increment_parent();
+    s1.increment_parent();  // parent_count = 102
+
+    if (s1.get_child_count() != 3) {
+        printf("FAIL: Expected 3, got %d\n", s1.get_child_count());
+        assert(false);
+    }
+    if (s1.get_parent_count() != 102) {
+        printf("FAIL: Expected 102, got %d\n", s1.get_parent_count());
+        assert(false);
+    }
+    printf("2. After increments: child_count=%d, parent_count=%d\n", s1.get_child_count(), s1.get_parent_count());
+
+    // Save state
+    std::string json = s1.save_state();
+    printf("3. Saved state: %zu chars\n", json.length());
+
+    // Restore to new instance
+    HSMPersist s2 = HSMPersist::restore_state(json);
+
+    // Verify restored state
+    if (s2.get_state() != "Child") {
+        printf("FAIL: Expected Child after restore, got %s\n", s2.get_state().c_str());
+        assert(false);
+    }
+    printf("4. Restored state: %s\n", s2.get_state().c_str());
+
+    // Verify child state var preserved
+    if (s2.get_child_count() != 3) {
+        printf("FAIL: Expected child_count=3, got %d\n", s2.get_child_count());
+        assert(false);
+    }
+    printf("5. Child state var preserved: child_count=%d\n", s2.get_child_count());
+
+    // Verify parent state var preserved (requires parent compartment chain)
+    if (s2.get_parent_count() != 102) {
+        printf("FAIL: Expected parent_count=102, got %d\n", s2.get_parent_count());
+        assert(false);
+    }
+    printf("6. Parent state var preserved: parent_count=%d\n", s2.get_parent_count());
+
+    // Verify state machine still works after restore
+    s2.increment_child();
+    s2.increment_parent();
+    if (s2.get_child_count() != 4) {
+        printf("FAIL: Expected 4, got %d\n", s2.get_child_count());
+        assert(false);
+    }
+    if (s2.get_parent_count() != 103) {
+        printf("FAIL: Expected 103, got %d\n", s2.get_parent_count());
+        assert(false);
+    }
+    printf("7. After post-restore increments: child_count=%d, parent_count=%d\n", s2.get_child_count(), s2.get_parent_count());
+
+    printf("PASS: HSM persistence works correctly\n");
     return 0;
 }

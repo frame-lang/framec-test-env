@@ -3,6 +3,7 @@
 #include <vector>
 #include <any>
 #include <memory>
+#include <functional>
 
 
 #include <iostream>
@@ -95,16 +96,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_B(SFrameEvent& __e) {
-        if (__e._message == "e") {
-        }
-    }
-
-    void _state_P(SFrameEvent& __e) {
-        if (__e._message == "e") {
-        }
-    }
-
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             if (true) {
@@ -115,6 +106,16 @@ private:
                 __transition(std::move(__new_compartment));
                 return;
             }
+        }
+    }
+
+    void _state_B(SFrameEvent& __e) {
+        if (__e._message == "e") {
+        }
+    }
+
+    void _state_P(SFrameEvent& __e) {
+        if (__e._message == "e") {
         }
     }
 

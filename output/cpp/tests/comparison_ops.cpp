@@ -3,6 +3,7 @@
 #include <vector>
 #include <any>
 #include <memory>
+#include <functional>
 
 
 // Test: Comparison operators in Frame handlers

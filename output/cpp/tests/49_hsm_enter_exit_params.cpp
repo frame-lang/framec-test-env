@@ -3,6 +3,7 @@
 #include <vector>
 #include <any>
 #include <memory>
+#include <functional>
 
 
 #include <iostream>
@@ -99,6 +100,22 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_Start(HSMEnterExitParamsFrameEvent& __e) {
+        if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Start"));
+            return;;
+        } else if (__e._message == "go_to_a") {
+            auto __new_compartment = std::make_unique<HSMEnterExitParamsCompartment>("ChildA");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __new_compartment->enter_args["0"] = std::any(std::string("starting"));
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
     void _state_Parent(HSMEnterExitParamsFrameEvent& __e) {
         if (__e._message == "get_log") {
             _context_stack.back()._return = std::any(event_log);
@@ -150,22 +167,6 @@ private:
             auto __new_compartment = std::make_unique<HSMEnterExitParamsCompartment>("ChildB");
             __new_compartment->parent_compartment = __compartment->clone();
             __new_compartment->enter_args["0"] = std::any(std::string("arriving_B"));
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
-    void _state_Start(HSMEnterExitParamsFrameEvent& __e) {
-        if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Start"));
-            return;;
-        } else if (__e._message == "go_to_a") {
-            auto __new_compartment = std::make_unique<HSMEnterExitParamsCompartment>("ChildA");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __new_compartment->enter_args["0"] = std::any(std::string("starting"));
             __transition(std::move(__new_compartment));
             return;
         }

@@ -3,6 +3,7 @@
 #include <vector>
 #include <any>
 #include <memory>
+#include <functional>
 
 
 #include <iostream>
@@ -97,6 +98,18 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_Parent(HSMSiblingTransitionsFrameEvent& __e) {
+        if (__e._message == "forward_action") {
+            event_log.push_back("Parent:forward_action");
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Parent"));
+            return;;
+        }
+    }
+
     void _state_ChildA(HSMSiblingTransitionsFrameEvent& __e) {
         if (__e._message == "<$") {
             event_log.push_back("ChildA:exit");
@@ -140,18 +153,6 @@ private:
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
-        }
-    }
-
-    void _state_Parent(HSMSiblingTransitionsFrameEvent& __e) {
-        if (__e._message == "forward_action") {
-            event_log.push_back("Parent:forward_action");
-        } else if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Parent"));
-            return;;
         }
     }
 

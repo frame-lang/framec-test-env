@@ -3,6 +3,7 @@
 #include <vector>
 #include <any>
 #include <memory>
+#include <functional>
 
 
 #include <iostream>
@@ -122,21 +123,21 @@ public:
         _context_stack.pop_back();
     }
 
-    void e(std::any p, std::any q) {
+    void g(std::any x) {
         std::unordered_map<std::string, std::any> __params;
-        __params["p"] = p;
-        __params["q"] = q;
-        SFrameEvent __e("e", std::move(__params));
+        __params["x"] = x;
+        SFrameEvent __e("g", std::move(__params));
         SFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
 
-    void g(std::any x) {
+    void e(std::any p, std::any q) {
         std::unordered_map<std::string, std::any> __params;
-        __params["x"] = x;
-        SFrameEvent __e("g", std::move(__params));
+        __params["p"] = p;
+        __params["q"] = q;
+        SFrameEvent __e("e", std::move(__params));
         SFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);

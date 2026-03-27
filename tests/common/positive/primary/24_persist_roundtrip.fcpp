@@ -1,14 +1,165 @@
-// @@skip
-// Persist tests require JSON serialization library (e.g., nlohmann/json)
-// which is not available in the standard C++17 test environment.
-
 @@target cpp_17
 
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system PersistRoundtrip {
+    interface:
+        go_active()
+        go_idle()
+        get_state(): std::string
+        set_counter(n: int)
+        get_counter(): int
+        add_history(msg: std::string)
+        get_history(): std::string
+
+    machine:
+        $Idle {
+            go_active() {
+                this->history = this->history + "idle->active,";
+                -> $Active
+            }
+
+            go_idle() {
+                // already idle
+            }
+
+            get_state(): std::string {
+                return std::string("idle");
+            }
+
+            set_counter(n: int) {
+                this->counter = n;
+            }
+
+            get_counter(): int {
+                return this->counter;
+            }
+
+            add_history(msg: std::string) {
+                this->history = this->history + std::string("idle:") + msg + std::string(",");
+            }
+
+            get_history(): std::string {
+                return this->history;
+            }
+        }
+
+        $Active {
+            go_active() {
+                // already active
+            }
+
+            go_idle() {
+                this->history = this->history + "active->idle,";
+                -> $Idle
+            }
+
+            get_state(): std::string {
+                return std::string("active");
+            }
+
+            set_counter(n: int) {
+                this->counter = n * 2;
+            }
+
+            get_counter(): int {
+                return this->counter;
+            }
+
+            add_history(msg: std::string) {
+                this->history = this->history + std::string("active:") + msg + std::string(",");
+            }
+
+            get_history(): std::string {
+                return this->history;
+            }
+        }
+    domain:
+        int counter = 0
+        std::string history = ""
+        std::string mode = "normal"
+}
 
 int main() {
-    printf("SKIP: Persist roundtrip requires JSON library\n");
+    printf("=== Test 24: Persist Roundtrip (C++) ===\n");
+
+    // Test 1: Create system and build up state
+    PersistRoundtrip s1;
+    s1.set_counter(5);
+    s1.add_history("start");
+    s1.go_active();
+    s1.set_counter(3);  // Should be 6 in Active (doubled)
+    s1.add_history("work");
+
+    if (s1.get_state() != "active") {
+        printf("FAIL: Expected active, got %s\n", s1.get_state().c_str());
+        assert(false);
+    }
+    if (s1.get_counter() != 6) {
+        printf("FAIL: Expected 6, got %d\n", s1.get_counter());
+        assert(false);
+    }
+    printf("1. State before save: state=%s, counter=%d\n", s1.get_state().c_str(), s1.get_counter());
+    printf("   History: %s\n", s1.get_history().c_str());
+
+    // Test 2: Save state
+    std::string json = s1.save_state();
+    auto data = nlohmann::json::parse(json);
+    printf("2. Saved data keys present\n");
+    if (data["_compartment"]["state"] != "Active") {
+        printf("FAIL: Expected Active state in save data\n");
+        assert(false);
+    }
+    if (data["counter"] != 6) {
+        printf("FAIL: Expected counter=6 in save data\n");
+        assert(false);
+    }
+
+    // Test 3: Restore to new instance
+    PersistRoundtrip s2 = PersistRoundtrip::restore_state(json);
+
+    if (s2.get_state() != "active") {
+        printf("FAIL: Expected active, got %s\n", s2.get_state().c_str());
+        assert(false);
+    }
+    if (s2.get_counter() != 6) {
+        printf("FAIL: Expected 6, got %d\n", s2.get_counter());
+        assert(false);
+    }
+    printf("3. Restored state: state=%s, counter=%d\n", s2.get_state().c_str(), s2.get_counter());
+
+    // Test 4: State machine continues to work after restore
+    s2.set_counter(2);  // Should be 4 in Active (doubled)
+    if (s2.get_counter() != 4) {
+        printf("FAIL: Expected 4, got %d\n", s2.get_counter());
+        assert(false);
+    }
+    printf("4. Counter after set_counter(2): %d\n", s2.get_counter());
+
+    // Test 5: Verify history was preserved
+    if (s2.get_history() != s1.get_history()) {
+        printf("FAIL: History mismatch: '%s' vs '%s'\n", s2.get_history().c_str(), s1.get_history().c_str());
+        assert(false);
+    }
+    printf("5. History preserved: %s\n", s2.get_history().c_str());
+
+    // Test 6: Transitions work after restore
+    s2.go_idle();
+    if (s2.get_state() != "idle") {
+        printf("FAIL: Expected idle after go_idle\n");
+        assert(false);
+    }
+    s2.set_counter(10);  // Not doubled in Idle
+    if (s2.get_counter() != 10) {
+        printf("FAIL: Expected 10, got %d\n", s2.get_counter());
+        assert(false);
+    }
+    printf("6. After go_idle: state=%s, counter=%d\n", s2.get_state().c_str(), s2.get_counter());
+
+    printf("PASS: Persist roundtrip works correctly\n");
     return 0;
 }

@@ -3,6 +3,7 @@
 #include <vector>
 #include <any>
 #include <memory>
+#include <functional>
 
 
 // Test: Ternary/conditional expressions in Frame handlers

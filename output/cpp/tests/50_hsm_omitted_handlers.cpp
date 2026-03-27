@@ -3,6 +3,7 @@
 #include <vector>
 #include <any>
 #include <memory>
+#include <functional>
 
 
 #include <iostream>
@@ -95,6 +96,21 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_Child(HSMOmittedHandlersFrameEvent& __e) {
+        if (__e._message == "forwarded_explicitly") {
+            event_log.push_back("Child:before_forward");
+            _state_Parent(__e);
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Child"));
+            return;;
+        } else if (__e._message == "handled_by_child") {
+            event_log.push_back("Child:handled_by_child");
+        }
+    }
+
     void _state_Parent(HSMOmittedHandlersFrameEvent& __e) {
         if (__e._message == "forwarded_explicitly") {
             event_log.push_back("Parent:forwarded_explicitly");
@@ -108,21 +124,6 @@ private:
             event_log.push_back("Parent:handled_by_child");
         } else if (__e._message == "unhandled_no_forward") {
             event_log.push_back("Parent:unhandled_no_forward");
-        }
-    }
-
-    void _state_Child(HSMOmittedHandlersFrameEvent& __e) {
-        if (__e._message == "forwarded_explicitly") {
-            event_log.push_back("Child:before_forward");
-            _state_Parent(__e);
-        } else if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Child"));
-            return;;
-        } else if (__e._message == "handled_by_child") {
-            event_log.push_back("Child:handled_by_child");
         }
     }
 

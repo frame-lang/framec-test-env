@@ -3,6 +3,7 @@
 #include <vector>
 #include <any>
 #include <memory>
+#include <functional>
 
 
 #include <iostream>
@@ -105,10 +106,6 @@ private:
 
     }
 
-    void _state_B(SFrameEvent& __e) {
-
-    }
-
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             if (false) {
@@ -128,6 +125,10 @@ private:
                 return;
             }
         }
+    }
+
+    void _state_B(SFrameEvent& __e) {
+
     }
 
 public:

@@ -1,14 +1,106 @@
-// @@skip
-// Persist tests require JSON serialization library (e.g., nlohmann/json)
-// which is not available in the standard C++17 test environment.
-
 @@target cpp_17
 
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system PersistTest {
+    interface:
+        set_value(v: int)
+        get_value(): int
+        go_active()
+        go_idle()
+
+    machine:
+        $Idle {
+            set_value(v: int) {
+                value = v;
+            }
+
+            get_value(): int {
+                return value;
+            }
+
+            go_active() {
+                -> $Active
+            }
+
+            go_idle() {
+                // Already idle
+            }
+        }
+
+        $Active {
+            set_value(v: int) {
+                value = v * 2;
+            }
+
+            get_value(): int {
+                return value;
+            }
+
+            go_active() {
+                // Already active
+            }
+
+            go_idle() {
+                -> $Idle
+            }
+        }
+    domain:
+        int value = 0
+        std::string name = "default"
+}
 
 int main() {
-    printf("SKIP: Persist basic requires JSON library\n");
+    printf("=== Test 23: Persist Basic (C++) ===\n");
+
+    // Test 1: Create and modify system
+    PersistTest s1;
+    s1.set_value(10);
+    s1.go_active();
+    s1.set_value(5);  // Should be doubled to 10 in Active state
+
+    // Test 2: Save state
+    std::string json = s1.save_state();
+    auto data = nlohmann::json::parse(json);
+    if (data["_compartment"]["state"] != "Active") {
+        printf("FAIL: Expected 'Active', got '%s'\n", std::string(data["_compartment"]["state"]).c_str());
+        assert(false);
+    }
+    if (data["value"] != 10) {
+        printf("FAIL: Expected 10, got %d\n", int(data["value"]));
+        assert(false);
+    }
+    printf("1. Saved state: %s\n", json.c_str());
+
+    // Test 3: Restore state
+    PersistTest s2 = PersistTest::restore_state(json);
+    if (s2.get_value() != 10) {
+        printf("FAIL: Expected 10, got %d\n", s2.get_value());
+        assert(false);
+    }
+    printf("2. Restored value: %d\n", s2.get_value());
+
+    // Test 4: Verify state is preserved (Active state doubles)
+    s2.set_value(3);  // Should be doubled to 6 in Active state
+    if (s2.get_value() != 6) {
+        printf("FAIL: Expected 6, got %d\n", s2.get_value());
+        assert(false);
+    }
+    printf("3. After set_value(3) in Active: %d\n", s2.get_value());
+
+    // Test 5: Verify transitions work after restore
+    s2.go_idle();
+    s2.set_value(4);  // Should NOT be doubled in Idle state
+    if (s2.get_value() != 4) {
+        printf("FAIL: Expected 4, got %d\n", s2.get_value());
+        assert(false);
+    }
+    printf("4. After go_idle, set_value(4): %d\n", s2.get_value());
+
+    printf("PASS: Persist basic works correctly\n");
     return 0;
 }

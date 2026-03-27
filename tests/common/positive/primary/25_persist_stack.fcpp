@@ -1,14 +1,167 @@
-// @@skip
-// Persist tests require JSON serialization library (e.g., nlohmann/json)
-// which is not available in the standard C++17 test environment.
-
 @@target cpp_17
 
 #include <iostream>
 #include <string>
 #include <cassert>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system PersistStack {
+    interface:
+        push_and_go()
+        pop_back()
+        get_state(): std::string
+        get_depth(): int
+
+    machine:
+        $Start {
+            push_and_go() {
+                this->depth = this->depth + 1;
+                push$
+                -> $Middle
+            }
+
+            pop_back() {
+                // nothing to pop
+            }
+
+            get_state(): std::string {
+                return std::string("start");
+            }
+
+            get_depth(): int {
+                return this->depth;
+            }
+        }
+
+        $Middle {
+            push_and_go() {
+                this->depth = this->depth + 1;
+                push$
+                -> $End
+            }
+
+            pop_back() {
+                this->depth = this->depth - 1;
+                -> pop$
+            }
+
+            get_state(): std::string {
+                return std::string("middle");
+            }
+
+            get_depth(): int {
+                return this->depth;
+            }
+        }
+
+        $End {
+            push_and_go() {
+                // can't go further
+            }
+
+            pop_back() {
+                this->depth = this->depth - 1;
+                -> pop$
+            }
+
+            get_state(): std::string {
+                return std::string("end");
+            }
+
+            get_depth(): int {
+                return this->depth;
+            }
+        }
+    domain:
+        int depth = 0
+}
 
 int main() {
-    printf("SKIP: Persist stack requires JSON library\n");
+    printf("=== Test 25: Persist Stack (C++) ===\n");
+
+    // Test 1: Build up a stack
+    PersistStack s1;
+    if (s1.get_state() != "start") {
+        printf("FAIL: Expected start, got %s\n", s1.get_state().c_str());
+        assert(false);
+    }
+
+    s1.push_and_go();  // Start -> Middle (push Start)
+    if (s1.get_state() != "middle") {
+        printf("FAIL: Expected middle, got %s\n", s1.get_state().c_str());
+        assert(false);
+    }
+    if (s1.get_depth() != 1) {
+        printf("FAIL: Expected depth 1, got %d\n", s1.get_depth());
+        assert(false);
+    }
+
+    s1.push_and_go();  // Middle -> End (push Middle)
+    if (s1.get_state() != "end") {
+        printf("FAIL: Expected end, got %s\n", s1.get_state().c_str());
+        assert(false);
+    }
+    if (s1.get_depth() != 2) {
+        printf("FAIL: Expected depth 2, got %d\n", s1.get_depth());
+        assert(false);
+    }
+
+    printf("1. Built stack: state=%s, depth=%d\n", s1.get_state().c_str(), s1.get_depth());
+
+    // Test 2: Save state (should include stack)
+    std::string json = s1.save_state();
+    auto data = nlohmann::json::parse(json);
+    printf("2. Saved data: %s\n", json.c_str());
+    if (data["_compartment"]["state"] != "End") {
+        printf("FAIL: Expected End state in saved data\n");
+        assert(false);
+    }
+    if (!data.contains("_state_stack")) {
+        printf("FAIL: Expected _state_stack in saved data\n");
+        assert(false);
+    }
+    if (data["_state_stack"].size() != 2) {
+        printf("FAIL: Expected 2 items in stack, got %zu\n", data["_state_stack"].size());
+        assert(false);
+    }
+
+    // Test 3: Restore and verify stack works
+    PersistStack s2 = PersistStack::restore_state(json);
+    if (s2.get_state() != "end") {
+        printf("FAIL: Restored: expected end, got %s\n", s2.get_state().c_str());
+        assert(false);
+    }
+    if (s2.get_depth() != 2) {
+        printf("FAIL: Restored: expected depth 2, got %d\n", s2.get_depth());
+        assert(false);
+    }
+    printf("3. Restored: state=%s, depth=%d\n", s2.get_state().c_str(), s2.get_depth());
+
+    // Test 4: Pop should work after restore
+    s2.pop_back();  // End -> Middle (pop)
+    if (s2.get_state() != "middle") {
+        printf("FAIL: After pop: expected middle, got %s\n", s2.get_state().c_str());
+        assert(false);
+    }
+    if (s2.get_depth() != 1) {
+        printf("FAIL: After pop: expected depth 1, got %d\n", s2.get_depth());
+        assert(false);
+    }
+    printf("4. After pop: state=%s, depth=%d\n", s2.get_state().c_str(), s2.get_depth());
+
+    // Test 5: Pop again
+    s2.pop_back();  // Middle -> Start (pop)
+    if (s2.get_state() != "start") {
+        printf("FAIL: After 2nd pop: expected start, got %s\n", s2.get_state().c_str());
+        assert(false);
+    }
+    if (s2.get_depth() != 0) {
+        printf("FAIL: After 2nd pop: expected depth 0, got %d\n", s2.get_depth());
+        assert(false);
+    }
+    printf("5. After 2nd pop: state=%s, depth=%d\n", s2.get_state().c_str(), s2.get_depth());
+
+    printf("PASS: Persist stack works correctly\n");
     return 0;
 }
