@@ -1,0 +1,68 @@
+@@target javascript
+
+// Test 2: Transition after await
+// Validates: -> $State works correctly after async handler body
+
+async function mockConnect(url) {
+    await Promise.resolve();
+    return {url: url, status: "connected"};
+}
+
+@@system AsyncTransition {
+    interface:
+        async connect(url: str)
+        async disconnect()
+        get_state(): str = "Unknown"
+
+    machine:
+        $Disconnected {
+            get_state(): str { return "Disconnected" }
+
+            connect(url: str) {
+                const result = await mockConnect(url)
+                this.connection = result
+                -> $Connected
+            }
+        }
+
+        $Connected {
+            get_state(): str { return "Connected" }
+
+            disconnect() {
+                this.connection = null
+                -> $Disconnected
+            }
+        }
+
+    domain:
+        connection = null
+}
+
+async function main() {
+    let s = @@AsyncTransition();
+    await s.init();
+
+    // Initial state
+    let state = await s.get_state();
+    if (state !== "Disconnected") {
+        throw new Error(`Expected 'Disconnected', got '${state}'`);
+    }
+
+    // Connect — await then transition
+    await s.connect("ws://example.com");
+    state = await s.get_state();
+    if (state !== "Connected") {
+        throw new Error(`Expected 'Connected', got '${state}'`);
+    }
+
+    // Disconnect — transition back
+    await s.disconnect();
+    state = await s.get_state();
+    if (state !== "Disconnected") {
+        throw new Error(`Expected 'Disconnected', got '${state}'`);
+    }
+
+    console.log("PASS: async transition — state changes work after await");
+}
+
+main();

@@ -1,0 +1,121 @@
+@@target javascript
+
+@@persist
+@@system PersistStack {
+    interface:
+        push_and_go()
+        pop_back()
+        get_state(): string
+        get_depth(): number
+
+    machine:
+        $Start {
+            push_and_go() {
+                this.depth = this.depth + 1;
+                push$
+                -> $Middle
+            }
+
+            pop_back() {
+                // nothing to pop
+            }
+
+            get_state(): string {
+                return "start";
+            }
+
+            get_depth(): number {
+                return this.depth;
+            }
+        }
+
+        $Middle {
+            push_and_go() {
+                this.depth = this.depth + 1;
+                push$
+                -> $End
+            }
+
+            pop_back() {
+                this.depth = this.depth - 1;
+                -> pop$
+            }
+
+            get_state(): string {
+                return "middle";
+            }
+
+            get_depth(): number {
+                return this.depth;
+            }
+        }
+
+        $End {
+            push_and_go() {
+                // cannot go further
+            }
+
+            pop_back() {
+                this.depth = this.depth - 1;
+                -> pop$
+            }
+
+            get_state(): string {
+                return "end";
+            }
+
+            get_depth(): number {
+                return this.depth;
+            }
+        }
+    domain:
+        depth = 0
+}
+
+function main() {
+    console.log("=== Test 25: Persist Stack (JavaScript) ===");
+
+    // Test 1: Build up a stack
+    const s1 = @@PersistStack();
+    console.assert(s1.get_state() === "start", `Expected start, got ${s1.get_state()}`);
+
+    s1.push_and_go();  // Start -> Middle (push Start)
+    console.assert(s1.get_state() === "middle", `Expected middle, got ${s1.get_state()}`);
+    console.assert(s1.get_depth() === 1, `Expected depth 1, got ${s1.get_depth()}`);
+
+    s1.push_and_go();  // Middle -> End (push Middle)
+    console.assert(s1.get_state() === "end", `Expected end, got ${s1.get_state()}`);
+    console.assert(s1.get_depth() === 2, `Expected depth 2, got ${s1.get_depth()}`);
+
+    console.log(`1. Built stack: state=${s1.get_state()}, depth=${s1.get_depth()}`);
+
+    // Test 2: Save state (should include stack)
+    const json = s1.saveState();
+    const data = JSON.parse(json);
+    console.log(`2. Saved data: ${json}`);
+    console.assert(data._compartment.state === 'End', `Expected End state`);
+    console.assert(data._state_stack !== undefined, "Expected _state_stack in saved data");
+    console.assert(data._state_stack.length === 2, `Expected 2 items in stack, got ${data._state_stack.length}`);
+
+    // Test 3: Restore and verify stack works
+    const s2 = PersistStack.restoreState(json);
+    console.assert(s2.get_state() === "end", `Restored: expected end, got ${s2.get_state()}`);
+    console.assert(s2.get_depth() === 2, `Restored: expected depth 2, got ${s2.get_depth()}`);
+    console.log(`3. Restored: state=${s2.get_state()}, depth=${s2.get_depth()}`);
+
+    // Test 4: Pop should work after restore
+    s2.pop_back();  // End -> Middle (pop)
+    console.assert(s2.get_state() === "middle", `After pop: expected middle, got ${s2.get_state()}`);
+    console.assert(s2.get_depth() === 1, `After pop: expected depth 1, got ${s2.get_depth()}`);
+    console.log(`4. After pop: state=${s2.get_state()}, depth=${s2.get_depth()}`);
+
+    // Test 5: Pop again
+    s2.pop_back();  // Middle -> Start (pop)
+    console.assert(s2.get_state() === "start", `After 2nd pop: expected start, got ${s2.get_state()}`);
+    console.assert(s2.get_depth() === 0, `After 2nd pop: expected depth 0, got ${s2.get_depth()}`);
+    console.log(`5. After 2nd pop: state=${s2.get_state()}, depth=${s2.get_depth()}`);
+
+    console.log("PASS: Persist stack works correctly");
+}
+
+main();

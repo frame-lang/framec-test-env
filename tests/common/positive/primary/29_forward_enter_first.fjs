@@ -1,0 +1,84 @@
+@@target javascript
+
+@@system ForwardEnterFirst {
+    interface:
+        process()
+        get_counter(): number
+        get_log(): string[]
+
+    machine:
+        $Idle {
+            process() {
+                -> => $Working
+            }
+
+            get_counter(): number {
+                return -1
+            }
+
+            get_log(): string[] {
+                return this.log
+            }
+        }
+
+        $Working {
+            $.counter: number = 100
+
+            $>() {
+                this.log.push("Working:enter")
+            }
+
+            process() {
+                this.log.push("Working:process:counter=" + $.counter.toString())
+                $.counter = $.counter + 1
+            }
+
+            get_counter(): number {
+                return $.counter
+            }
+
+            get_log(): string[] {
+                return this.log
+            }
+        }
+    domain:
+        log = []
+}
+
+function main() {
+    console.log("=== Test 29: Forward Enter First ===");
+    const s = @@ForwardEnterFirst();
+
+    if (s.get_counter() !== -1) {
+        throw new Error("Expected -1 in Idle");
+    }
+
+    s.process();
+
+    const counter = s.get_counter();
+    const log = s.get_log();
+    console.log(`Counter after forward: ${counter}`);
+    console.log(`Log: ${JSON.stringify(log)}`);
+
+    if (!log.includes("Working:enter")) {
+        throw new Error(`Expected 'Working:enter' in log: ${log}`);
+    }
+
+    if (!log.includes("Working:process:counter=100")) {
+        throw new Error(`Expected 'Working:process:counter=100' in log: ${log}`);
+    }
+
+    if (counter !== 101) {
+        throw new Error(`Expected counter=101, got ${counter}`);
+    }
+
+    const enterIdx = log.indexOf("Working:enter");
+    const processIdx = log.indexOf("Working:process:counter=100");
+    if (enterIdx >= processIdx) {
+        throw new Error(`$> should run before process: ${log}`);
+    }
+
+    console.log("PASS: Forward sends $> first for non-$> events");
+}
+
+main();

@@ -1,0 +1,97 @@
+@@target javascript
+
+// Test 45: HSM Enter in Child Only
+//
+// Tests enter handler in child only:
+// - Child has $>(), parent does not
+// - Child enter handler fires on entry
+// - No error when parent lacks enter handler
+// - Forward to parent works without parent having enter
+
+@@system HSMEnterChildOnly {
+    interface:
+        go_to_child()
+        forward_action()
+        get_log(): string[]
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_child() {
+                -> $Child
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Start"
+            }
+        }
+
+        $Child => $Parent {
+            $>() {
+                this.log.push("Child:enter")
+            }
+
+            forward_action() {
+                this.log.push("Child:forward")
+                => $^
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Child"
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                this.log.push("Parent:forward_action")
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Parent"
+            }
+        }
+    domain:
+        log = []
+}
+
+function main() {
+    console.log("=== Test 45: HSM Enter in Child Only ===");
+    const s = @@HSMEnterChildOnly();
+
+    // Start state has no enter
+    if (s.get_state() !== "Start") throw new Error(`Expected Start, got ${s.get_state()}`);
+    console.log("TC2.1.0: Initial state is Start - PASS");
+
+    // TC2.1.1: Child enter handler fires on entry
+    s.go_to_child();
+    let log = s.get_log();
+    if (!log.includes("Child:enter")) throw new Error(`Expected Child:enter, got ${JSON.stringify(log)}`);
+    if (s.get_state() !== "Child") throw new Error(`Expected Child, got ${s.get_state()}`);
+    console.log("TC2.1.1: Child enter handler fires - PASS");
+
+    // TC2.1.2: No error when parent lacks enter (verified by compilation/execution)
+    console.log("TC2.1.2: No error when parent lacks enter - PASS");
+
+    // TC2.1.3: Forward to parent works without parent having enter
+    s.forward_action();
+    log = s.get_log();
+    if (!log.includes("Child:forward")) throw new Error(`Expected Child:forward, got ${JSON.stringify(log)}`);
+    if (!log.includes("Parent:forward_action")) throw new Error(`Expected Parent handler, got ${JSON.stringify(log)}`);
+    console.log("TC2.1.3: Forward works without parent enter - PASS");
+
+    console.log("PASS: HSM enter in child only works correctly");
+}
+
+main();

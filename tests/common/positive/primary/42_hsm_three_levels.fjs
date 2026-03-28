@@ -1,0 +1,135 @@
+@@target javascript
+
+// Test 42: HSM Three-Level Hierarchy
+//
+// Tests 3+ level deep hierarchies:
+// - $Grandchild => $Child => $Parent
+// - Forward through multiple levels
+// - Each level's state variables remain isolated
+
+@@system HSMThreeLevels {
+    interface:
+        handle_at_grandchild()
+        forward_to_child()
+        forward_to_parent()
+        forward_through_all()
+        get_log(): string[]
+
+    machine:
+        $Grandchild => $Child {
+            $.grandchild_var: int = 1
+
+            handle_at_grandchild() {
+                let val = $.grandchild_var
+                this.log.push(`Grandchild:handled(var=${val})`)
+            }
+
+            forward_to_child() {
+                this.log.push("Grandchild:forward_to_child")
+                => $^
+            }
+
+            forward_to_parent() {
+                this.log.push("Grandchild:forward_to_parent")
+                => $^
+            }
+
+            forward_through_all() {
+                this.log.push("Grandchild:forward_through_all")
+                => $^
+            }
+
+            get_log(): list {
+                return this.log
+            }
+        }
+
+        $Child => $Parent {
+            $.child_var: int = 10
+
+            forward_to_child() {
+                let val = $.child_var
+                this.log.push(`Child:handled(var=${val})`)
+            }
+
+            forward_to_parent() {
+                let val = $.child_var
+                this.log.push(`Child:forward_to_parent(var=${val})`)
+                => $^
+            }
+
+            forward_through_all() {
+                let val = $.child_var
+                this.log.push(`Child:forward_through_all(var=${val})`)
+                => $^
+            }
+
+            get_log(): list {
+                return this.log
+            }
+        }
+
+        $Parent {
+            $.parent_var: int = 100
+
+            forward_to_parent() {
+                let val = $.parent_var
+                this.log.push(`Parent:handled(var=${val})`)
+            }
+
+            forward_through_all() {
+                let val = $.parent_var
+                this.log.push(`Parent:forward_through_all(var=${val})`)
+            }
+
+            get_log(): list {
+                return this.log
+            }
+        }
+    domain:
+        log = []
+}
+
+function main() {
+    console.log("=== Test 42: HSM Three-Level Hierarchy ===");
+    const s = @@HSMThreeLevels();
+
+    // TC1.2.1: Three-level hierarchy compiles
+    console.log("TC1.2.1: Three-level hierarchy compiles - PASS");
+
+    // TC1.2.2: Handle at grandchild (no forward)
+    s.handle_at_grandchild();
+    let log = s.get_log();
+    if (!log.includes("Grandchild:handled(var=1)")) throw new Error(`Expected Grandchild handler, got ${JSON.stringify(log)}`);
+    console.log("TC1.2.2: Grandchild handles locally - PASS");
+
+    // TC1.2.3: Forward from grandchild to child
+    s.forward_to_child();
+    log = s.get_log();
+    if (!log.includes("Grandchild:forward_to_child")) throw new Error(`Expected Grandchild forward, got ${JSON.stringify(log)}`);
+    if (!log.includes("Child:handled(var=10)")) throw new Error(`Expected Child handler, got ${JSON.stringify(log)}`);
+    console.log("TC1.2.3: Forward grandchild->child - PASS");
+
+    // TC1.2.4: Forward from grandchild through child to parent
+    s.forward_to_parent();
+    log = s.get_log();
+    if (!log.includes("Grandchild:forward_to_parent")) throw new Error(`Expected Grandchild forward, got ${JSON.stringify(log)}`);
+    if (!log.includes("Child:forward_to_parent(var=10)")) throw new Error(`Expected Child forward, got ${JSON.stringify(log)}`);
+    if (!log.includes("Parent:handled(var=100)")) throw new Error(`Expected Parent handler, got ${JSON.stringify(log)}`);
+    console.log("TC1.2.4: Forward grandchild->child->parent - PASS");
+
+    // TC1.2.5: Forward through entire chain
+    s.forward_through_all();
+    log = s.get_log();
+    if (!log.includes("Grandchild:forward_through_all")) throw new Error(`Expected Grandchild, got ${JSON.stringify(log)}`);
+    if (!log.includes("Child:forward_through_all(var=10)")) throw new Error(`Expected Child, got ${JSON.stringify(log)}`);
+    if (!log.includes("Parent:forward_through_all(var=100)")) throw new Error(`Expected Parent, got ${JSON.stringify(log)}`);
+    console.log("TC1.2.5: Full chain forward - PASS");
+
+    // Verify state variable isolation
+    console.log("TC1.2.6: State vars isolated (grandchild=1, child=10, parent=100) - PASS");
+
+    console.log("PASS: HSM three-level hierarchy works correctly");
+}
+
+main();

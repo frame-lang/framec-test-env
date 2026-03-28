@@ -36,6 +36,7 @@ CPP_OUT="$TEST_ENV_ROOT/output/cpp/tests"
 JAVA_OUT="$TEST_ENV_ROOT/output/java/tests"
 CSHARP_OUT="$TEST_ENV_ROOT/output/csharp/tests"
 GO_OUT="$TEST_ENV_ROOT/output/go/tests"
+JS_OUT="$TEST_ENV_ROOT/output/javascript/tests"
 
 # .NET SDK — find dotnet
 DOTNET_CMD=""
@@ -68,6 +69,7 @@ case $lang in
     java) target="java"; out_dir="$JAVA_OUT"; out_ext="java" ;;
     csharp) target="csharp"; out_dir="$CSHARP_OUT"; out_ext="cs" ;;
     go) target="go"; out_dir="$GO_OUT"; out_ext="go" ;;
+    javascript) target="javascript"; out_dir="$JS_OUT"; out_ext="js" ;;
 esac
 
 out_file="$out_dir/${test_name}.${out_ext}"
@@ -199,6 +201,12 @@ case $lang in
             cp "$out_file" "$go_run_file"
         fi
         run_output=$(GOFLAGS="-count=1" go run "$go_run_file" 2>&1) || run_status=$?
+        ;;
+    javascript)
+        # Rename .js to .mjs for ESM execution without package.json
+        js_run_file="${out_file%.js}.mjs"
+        cp "$out_file" "$js_run_file"
+        run_output=$(node "$js_run_file" 2>&1) || run_status=$?
         ;;
 esac
 

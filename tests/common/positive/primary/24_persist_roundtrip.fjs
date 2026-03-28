@@ -1,0 +1,151 @@
+@@target javascript
+
+@@persist
+@@system PersistRoundtrip {
+    interface:
+        go_active()
+        go_idle()
+        get_state(): string
+        set_counter(n: number)
+        get_counter(): number
+        add_history(msg: string)
+        get_history(): string[]
+
+    machine:
+        $Idle {
+            go_active() {
+                this.history.push("idle->active");
+                -> $Active
+            }
+
+            go_idle() {
+                // already idle
+            }
+
+            get_state(): string {
+                return "idle";
+            }
+
+            set_counter(n: number) {
+                this.counter = n;
+            }
+
+            get_counter(): number {
+                return this.counter;
+            }
+
+            add_history(msg: string) {
+                this.history.push("idle:" + msg);
+            }
+
+            get_history(): string[] {
+                return this.history;
+            }
+        }
+
+        $Active {
+            go_active() {
+                // already active
+            }
+
+            go_idle() {
+                this.history.push("active->idle");
+                -> $Idle
+            }
+
+            get_state(): string {
+                return "active";
+            }
+
+            set_counter(n: number) {
+                this.counter = n * 2;
+            }
+
+            get_counter(): number {
+                return this.counter;
+            }
+
+            add_history(msg: string) {
+                this.history.push("active:" + msg);
+            }
+
+            get_history(): string[] {
+                return this.history;
+            }
+        }
+    domain:
+        counter = 0
+        history = []
+        mode = "normal"
+}
+
+function main() {
+    console.log("=== Test 24: Persist Roundtrip (JavaScript) ===");
+
+    // Test 1: Create system and build up state
+    const s1 = @@PersistRoundtrip();
+    s1.set_counter(5);
+    s1.add_history("start");
+    s1.go_active();
+    s1.set_counter(3);  // Should be 6 in Active (doubled)
+    s1.add_history("work");
+
+    if (s1.get_state() !== "active") {
+        throw new Error(`Expected active, got ${s1.get_state()}`);
+    }
+    if (s1.get_counter() !== 6) {
+        throw new Error(`Expected 6, got ${s1.get_counter()}`);
+    }
+    console.log(`1. State before save: state=${s1.get_state()}, counter=${s1.get_counter()}`);
+    console.log(`   History: ${JSON.stringify(s1.get_history())}`);
+
+    // Test 2: Save state
+    const json = s1.saveState();
+    const data = JSON.parse(json);
+    console.log(`2. Saved data keys: ${Object.keys(data)}`);
+    if (data._compartment.state !== 'Active') {
+        throw new Error("Expected Active state in save data");
+    }
+    if (data.counter !== 6) {
+        throw new Error("Expected counter=6 in save data");
+    }
+
+    // Test 3: Restore to new instance
+    const s2 = PersistRoundtrip.restoreState(json);
+
+    if (s2.get_state() !== "active") {
+        throw new Error(`Expected active, got ${s2.get_state()}`);
+    }
+    if (s2.get_counter() !== 6) {
+        throw new Error(`Expected 6, got ${s2.get_counter()}`);
+    }
+    console.log(`3. Restored state: state=${s2.get_state()}, counter=${s2.get_counter()}`);
+
+    // Test 4: State machine continues to work after restore
+    s2.set_counter(2);  // Should be 4 in Active (doubled)
+    if (s2.get_counter() !== 4) {
+        throw new Error(`Expected 4, got ${s2.get_counter()}`);
+    }
+    console.log(`4. Counter after set_counter(2): ${s2.get_counter()}`);
+
+    // Test 5: Verify history was preserved
+    if (JSON.stringify(s2.get_history()) !== JSON.stringify(s1.get_history())) {
+        throw new Error(`History mismatch: ${JSON.stringify(s2.get_history())} vs ${JSON.stringify(s1.get_history())}`);
+    }
+    console.log(`5. History preserved: ${JSON.stringify(s2.get_history())}`);
+
+    // Test 6: Transitions work after restore
+    s2.go_idle();
+    if (s2.get_state() !== "idle") {
+        throw new Error("Expected idle after go_idle");
+    }
+    s2.set_counter(10);  // Not doubled in Idle
+    if (s2.get_counter() !== 10) {
+        throw new Error(`Expected 10, got ${s2.get_counter()}`);
+    }
+    console.log(`6. After go_idle: state=${s2.get_state()}, counter=${s2.get_counter()}`);
+
+    console.log("PASS: Persist roundtrip works correctly");
+}
+
+main();

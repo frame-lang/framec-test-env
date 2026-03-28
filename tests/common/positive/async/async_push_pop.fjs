@@ -1,0 +1,81 @@
+@@target javascript
+
+// Test 5: Stack operations across async boundaries
+// Validates: push$/pop$ preserve compartment across async handlers
+
+async function mockCompute() {
+    await Promise.resolve();
+    return 42;
+}
+
+async function mockCleanup() {
+    await Promise.resolve();
+}
+
+@@system AsyncPushPop {
+    interface:
+        async save_and_go()
+        async restore()
+        get_state(): str = "Unknown"
+        get_counter(): int = 0
+
+    machine:
+        $Main {
+            $.counter: int = 0
+
+            get_state(): str { return "Main" }
+            get_counter(): int { return $.counter }
+
+            save_and_go() {
+                $.counter = await mockCompute()
+                push$
+                -> $Temp
+            }
+        }
+
+        $Temp {
+            get_state(): str { return "Temp" }
+            get_counter(): int { return 0 }
+
+            restore() {
+                await mockCleanup()
+                -> pop$
+            }
+        }
+}
+
+async function main() {
+    let s = @@AsyncPushPop();
+    await s.init();
+
+    let state = await s.get_state();
+    if (state !== "Main") {
+        throw new Error(`Expected 'Main', got '${state}'`);
+    }
+    let counter = await s.get_counter();
+    if (counter !== 0) {
+        throw new Error(`Expected 0, got ${counter}`);
+    }
+
+    // Save state and go to Temp
+    await s.save_and_go();
+    state = await s.get_state();
+    if (state !== "Temp") {
+        throw new Error(`Expected 'Temp', got '${state}'`);
+    }
+
+    // Restore — pop back to Main with preserved counter
+    await s.restore();
+    state = await s.get_state();
+    if (state !== "Main") {
+        throw new Error(`Expected 'Main', got '${state}'`);
+    }
+    counter = await s.get_counter();
+    if (counter !== 42) {
+        throw new Error(`Expected 42, got ${counter}`);
+    }
+
+    console.log("PASS: async push/pop — state vars preserved across async boundaries");
+}
+
+main();

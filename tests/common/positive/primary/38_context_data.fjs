@@ -1,0 +1,89 @@
+@@target javascript
+
+// Test: Context Data (@@:data)
+// Validates call-scoped data that persists across handler -> <$ -> $> chain
+
+@@system ContextDataTest {
+    interface:
+        process_with_data(value: number): string
+        check_data_isolation(): string
+        transition_preserves_data(x: number): string
+
+    machine:
+        $Start {
+            process_with_data(value: number): string {
+                // Set data in handler
+                @@:data["input"] = @@.value;
+                @@:data["trace"] = ["handler"];
+
+                @@:return = "processed:" + @@:data["input"];
+            }
+
+            check_data_isolation(): string {
+                // Set data, call another method, verify our data preserved
+                @@:data["outer"] = "outer_value";
+
+                // This creates its own context with its own data
+                const inner_result = this.process_with_data(99);
+
+                // Our data should still be here
+                @@:return = "outer_data=" + @@:data["outer"] + ",inner=" + inner_result;
+            }
+
+            transition_preserves_data(x: number): string {
+                // Set data, transition, verify data available in lifecycle handlers
+                @@:data["started_in"] = "Start";
+                @@:data["value"] = @@.x;
+                @@:data["trace"] = ["handler"];
+                -> $End
+            }
+
+            <$() {
+                // Exit handler can access data set by event handler
+                @@:data["trace"].push("exit");
+            }
+        }
+
+        $End {
+            $>() {
+                // Enter handler can access data set by previous handlers
+                @@:data["trace"].push("enter");
+                @@:data["ended_in"] = "End";
+
+                // Build final result from accumulated data
+                const trace = @@:data["trace"];
+                const trace_str = trace ? trace.join(",") : "no_trace";
+                @@:return = `from=${@@:data["started_in"]},to=${@@:data["ended_in"]},value=${@@:data["value"]},trace=${trace_str}`;
+            }
+        }
+}
+
+function main() {
+    console.log("=== Test 38: Context Data ===");
+
+    // Test 1: Basic data set/get
+    const s1 = @@ContextDataTest();
+    let result = s1.process_with_data(42);
+    if (result !== "processed:42") throw new Error(`Expected 'processed:42', got '${result}'`);
+    console.log(`1. process_with_data(42) = '${result}'`);
+
+    // Test 2: Data isolation between nested calls
+    const s2 = @@ContextDataTest();
+    result = s2.check_data_isolation();
+    const expected = "outer_data=outer_value,inner=processed:99";
+    if (result !== expected) throw new Error(`Expected '${expected}', got '${result}'`);
+    console.log(`2. check_data_isolation() = '${result}'`);
+
+    // Test 3: Data preserved across transition (handler -> <$ -> $>)
+    const s3 = @@ContextDataTest();
+    result = s3.transition_preserves_data(100);
+    // Data should flow: handler sets -> exit accesses -> enter accesses and returns
+    if (!result.includes("from=Start")) throw new Error(`Expected 'from=Start' in '${result}'`);
+    if (!result.includes("to=End")) throw new Error(`Expected 'to=End' in '${result}'`);
+    if (!result.includes("value=100")) throw new Error(`Expected 'value=100' in '${result}'`);
+    console.log(`3. transition_preserves_data(100) = '${result}'`);
+
+    console.log("PASS: Context data works correctly");
+}
+
+main();

@@ -1,0 +1,74 @@
+@@target javascript
+
+// Test 3: Async enter/exit lifecycle handlers
+// Validates: await works in $>() and <$() handlers
+
+async function mockSetup() {
+    await Promise.resolve();
+    return "setup_done";
+}
+
+async function mockTeardown() {
+    await Promise.resolve();
+    return "teardown_done";
+}
+
+@@system AsyncEnterExit {
+    interface:
+        async start()
+        async stop()
+        get_log(): str = ""
+
+    machine:
+        $Idle {
+            get_log(): str { return this.log }
+
+            start() {
+                -> $Active
+            }
+        }
+
+        $Active {
+            $>() {
+                const result = await mockSetup()
+                this.log = this.log + "enter:" + result + ","
+            }
+
+            <$() {
+                const result = await mockTeardown()
+                this.log = this.log + "exit:" + result + ","
+            }
+
+            get_log(): str { return this.log }
+
+            stop() {
+                -> $Idle
+            }
+        }
+
+    domain:
+        log = ""
+}
+
+async function main() {
+    let s = @@AsyncEnterExit();
+    await s.init();
+
+    // Start — triggers $Active.$>()
+    await s.start();
+    let log = await s.get_log();
+    if (!log.includes("enter:setup_done")) {
+        throw new Error(`Expected enter in log, got '${log}'`);
+    }
+
+    // Stop — triggers $Active.<$() then transition
+    await s.stop();
+    log = await s.get_log();
+    if (!log.includes("exit:teardown_done")) {
+        throw new Error(`Expected exit in log, got '${log}'`);
+    }
+
+    console.log("PASS: async enter/exit — lifecycle handlers with await work");
+}
+
+main();

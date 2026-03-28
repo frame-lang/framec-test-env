@@ -1,0 +1,48 @@
+@@target javascript
+
+// Test 1: Basic async dispatch chain
+// Validates: async interface method, await in handler, return value propagation
+
+async function mockLookup(key) {
+    await Promise.resolve();
+    return `value_for_${key}`;
+}
+
+@@system AsyncBasic {
+    interface:
+        async fetch(key: str): str
+        get_state(): str = "Unknown"
+
+    machine:
+        $Ready {
+            fetch(key: str): str {
+                const result = await mockLookup(key)
+                return result
+            }
+
+            get_state(): str {
+                return "Ready"
+            }
+        }
+}
+
+async function main() {
+    let s = @@AsyncBasic();
+    await s.init();
+
+    // Test async fetch
+    let result = await s.fetch("test_key");
+    if (result !== "value_for_test_key") {
+        throw new Error(`Expected 'value_for_test_key', got '${result}'`);
+    }
+
+    // Test sync method works through async kernel
+    let state = await s.get_state();
+    if (state !== "Ready") {
+        throw new Error(`Expected 'Ready', got '${state}'`);
+    }
+
+    console.log("PASS: async basic — dispatch chain and return values work");
+}
+
+main();

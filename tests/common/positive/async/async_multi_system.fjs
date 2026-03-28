@@ -1,0 +1,75 @@
+@@target javascript
+
+// Test 9: Two async systems interacting
+// Validates: multiple async systems in one file
+
+async function mockGenerate() {
+    await Promise.resolve();
+    return "raw_data";
+}
+
+async function mockProcess(data) {
+    await Promise.resolve();
+    return "processed:" + data;
+}
+
+@@system AsyncProducer {
+    interface:
+        async produce(): str
+
+    machine:
+        $Ready {
+            produce(): str {
+                const data = await mockGenerate()
+                return data
+            }
+        }
+}
+
+@@system AsyncConsumer {
+    interface:
+        async consume(data: str)
+        get_result(): str = ""
+
+    machine:
+        $Waiting {
+            get_result(): str { return this.last_result }
+
+            consume(data: str) {
+                const processed = await mockProcess(data)
+                this.last_result = processed
+                -> $Done
+            }
+        }
+
+        $Done {
+            get_result(): str { return this.last_result }
+        }
+
+    domain:
+        last_result = ""
+}
+
+async function main() {
+    let producer = @@AsyncProducer();
+    let consumer = @@AsyncConsumer();
+    await producer.init();
+    await consumer.init();
+
+    // Producer generates data
+    let data = await producer.produce();
+    if (data !== "raw_data") {
+        throw new Error(`produce: expected 'raw_data', got '${data}'`);
+    }
+
+    // Consumer processes it
+    await consumer.consume(data);
+    let result = await consumer.get_result();
+    if (result !== "processed:raw_data") {
+        throw new Error(`consume: expected 'processed:raw_data', got '${result}'`);
+    }
+
+    console.log("PASS: async multi-system — two async systems interact correctly");
+}
+
+main();

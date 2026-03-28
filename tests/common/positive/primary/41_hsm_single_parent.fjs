@@ -1,0 +1,93 @@
+@@target javascript
+
+// Test 41: HSM Single Parent Relationship
+//
+// Tests basic child-parent HSM relationship:
+// - Child declares parent with `=> $Parent` syntax
+// - Child can forward events to parent
+// - Child remains current state after forward
+// - Parent handler executes and returns control
+
+@@system HSMSingleParent {
+    interface:
+        child_only()
+        forward_to_parent()
+        get_log(): string[]
+        get_state(): str
+
+    machine:
+        $Child => $Parent {
+            child_only() {
+                this.log.push("Child:child_only")
+            }
+
+            forward_to_parent() {
+                this.log.push("Child:before_forward")
+                => $^
+                this.log.push("Child:after_forward")
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Child"
+            }
+        }
+
+        $Parent {
+            forward_to_parent() {
+                this.log.push("Parent:forward_to_parent")
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Parent"
+            }
+        }
+    domain:
+        log = []
+}
+
+function main() {
+    console.log("=== Test 41: HSM Single Parent ===");
+    const s = @@HSMSingleParent();
+
+    // TC1.1.1: Child declares parent with `=> $Parent` syntax (verified by compilation)
+    console.log("TC1.1.1: Child-Parent relationship compiles - PASS");
+
+    // TC1.1.2: Child can forward events to parent
+    s.forward_to_parent();
+    let log = s.get_log();
+    if (!log.includes("Child:before_forward")) throw new Error(`Expected Child:before_forward in log, got ${JSON.stringify(log)}`);
+    if (!log.includes("Parent:forward_to_parent")) throw new Error(`Expected Parent:forward_to_parent in log, got ${JSON.stringify(log)}`);
+    console.log(`TC1.1.2: Child forwards to parent - PASS (log: ${JSON.stringify(log)})`);
+
+    // TC1.1.3: Child remains the current state (no transition occurs on forward)
+    const state = s.get_state();
+    if (state !== "Child") throw new Error(`Expected state 'Child', got '${state}'`);
+    console.log("TC1.1.3: Child remains current state after forward - PASS");
+
+    // TC1.1.4: Parent handler executes and returns control
+    // Verified by "Child:after_forward" appearing after parent execution
+    if (!log.includes("Child:after_forward")) throw new Error(`Expected Child:after_forward in log (after parent), got ${JSON.stringify(log)}`);
+    const idx_parent = log.indexOf("Parent:forward_to_parent");
+    const idx_after = log.indexOf("Child:after_forward");
+    if (idx_after <= idx_parent) throw new Error("Expected Child:after_forward after Parent handler");
+    console.log("TC1.1.4: Parent executes and returns control - PASS");
+
+    // TC1.1.5: Child-only event not forwarded
+    s.child_only();
+    log = s.get_log();
+    const count = log.filter(x => x === "Child:child_only").length;
+    if (count !== 1) throw new Error(`Expected exactly 1 Child:child_only, got ${JSON.stringify(log)}`);
+    console.log("TC1.1.5: Child-only event handled locally - PASS");
+
+    console.log("PASS: HSM single parent relationship works correctly");
+}
+
+main();

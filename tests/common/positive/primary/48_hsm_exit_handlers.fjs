@@ -1,0 +1,149 @@
+@@target javascript
+
+// Test 48: HSM Exit Handlers
+//
+// Tests exit handlers in HSM context:
+// - Child exit fires when transitioning out of child
+// - Parent exit does NOT fire when transitioning out of child
+// - Exit handler can access child's state variables
+
+@@system HSMExitHandlers {
+    interface:
+        go_to_other()
+        go_to_parent()
+        go_to_child()
+        get_log(): string[]
+        get_state(): str
+        get_child_var(): int
+
+    machine:
+        $Child => $Parent {
+            $.child_var: int = 42
+
+            $>() {
+                this.log.push("Child:enter")
+            }
+
+            <$() {
+                let val = $.child_var
+                this.log.push(`Child:exit(var=${val})`)
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Child"
+            }
+
+            get_child_var(): int {
+                return $.child_var
+            }
+        }
+
+        $Parent {
+            $>() {
+                this.log.push("Parent:enter")
+            }
+
+            <$() {
+                this.log.push("Parent:exit")
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Parent"
+            }
+
+            get_child_var(): int {
+                return -1
+            }
+        }
+
+        $Other {
+            $>() {
+                this.log.push("Other:enter")
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): list {
+                return this.log
+            }
+
+            get_state(): str {
+                return "Other"
+            }
+
+            get_child_var(): int {
+                return -1
+            }
+        }
+    domain:
+        log = []
+}
+
+function main() {
+    console.log("=== Test 48: HSM Exit Handlers ===");
+    const s = @@HSMExitHandlers();
+
+    // Initial state is Child
+    let log = s.get_log();
+    if (!log.includes("Child:enter")) throw new Error(`Expected Child:enter on init, got ${JSON.stringify(log)}`);
+    if (s.get_state() !== "Child") throw new Error(`Expected Child, got ${s.get_state()}`);
+    console.log("TC2.4.0: Initial state is Child with enter - PASS");
+
+    // TC2.4.1: Child exit fires when transitioning out of child
+    s.go_to_other();
+    log = s.get_log();
+    if (!log.includes("Child:exit(var=42)")) throw new Error(`Expected Child:exit, got ${JSON.stringify(log)}`);
+    if (!log.includes("Other:enter")) throw new Error(`Expected Other:enter, got ${JSON.stringify(log)}`);
+    console.log("TC2.4.1: Child exit fires when transitioning out - PASS");
+
+    // TC2.4.2: Parent exit does NOT fire when transitioning out of child
+    if (log.includes("Parent:exit")) throw new Error(`Parent:exit should NOT fire for child exit, got ${JSON.stringify(log)}`);
+    console.log("TC2.4.2: Parent exit NOT fired for child exit - PASS");
+
+    // TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
+    console.log("TC2.4.3: Exit handler accesses state var (var=42) - PASS");
+
+    // TC2.4.4: Parent exit fires when transitioning out of Parent
+    s.go_to_parent();
+    log = s.get_log();
+    if (!log.includes("Parent:enter")) throw new Error(`Expected Parent:enter, got ${JSON.stringify(log)}`);
+
+    s.go_to_other();
+    log = s.get_log();
+    if (!log.includes("Parent:exit")) throw new Error(`Expected Parent:exit, got ${JSON.stringify(log)}`);
+    console.log("TC2.4.4: Parent exit fires when leaving parent - PASS");
+
+    console.log("PASS: HSM exit handlers work correctly");
+}
+
+main();
