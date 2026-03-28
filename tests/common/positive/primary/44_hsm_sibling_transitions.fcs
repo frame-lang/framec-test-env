@@ -1,0 +1,183 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system HSMSiblingTransitions {
+    interface:
+        go_to_b()
+        go_to_a()
+        forward_action()
+        get_log(): List<object>
+        get_state(): string
+
+    machine:
+        $ChildA => $Parent {
+            $>() {
+                this.log.Add("ChildA:enter");
+            }
+
+            <$() {
+                this.log.Add("ChildA:exit");
+            }
+
+            go_to_b() {
+                this.log.Add("ChildA:go_to_b");
+                -> $ChildB
+            }
+
+            forward_action() {
+                this.log.Add("ChildA:forward");
+                => $^
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "ChildA";
+            }
+        }
+
+        $ChildB => $Parent {
+            $>() {
+                this.log.Add("ChildB:enter");
+            }
+
+            <$() {
+                this.log.Add("ChildB:exit");
+            }
+
+            go_to_a() {
+                this.log.Add("ChildB:go_to_a");
+                -> $ChildA
+            }
+
+            forward_action() {
+                this.log.Add("ChildB:forward");
+                => $^
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "ChildB";
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                this.log.Add("Parent:forward_action");
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "Parent";
+            }
+        }
+    domain:
+        List<object> log = new List<object>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 44: HSM Sibling Transitions ===");
+        var s = @@HSMSiblingTransitions();
+
+        // Initial state is ChildA with enter handler fired
+        var log = (List<object>)s.get_log();
+        if (!log.Contains("ChildA:enter")) {
+            Console.WriteLine("FAIL: Expected ChildA:enter on init, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if ((string)s.get_state() != "ChildA") {
+            Console.WriteLine("FAIL: Expected ChildA, got " + s.get_state());
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.4.0: Initial state ChildA with enter - PASS");
+
+        // TC1.4.1: Transition from ChildA to ChildB
+        s.go_to_b();
+        if ((string)s.get_state() != "ChildB") {
+            Console.WriteLine("FAIL: Expected ChildB, got " + s.get_state());
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.4.1: Transition A->B works - PASS");
+
+        // TC1.4.2: Exit handler fired on source
+        log = (List<object>)s.get_log();
+        if (!log.Contains("ChildA:exit")) {
+            Console.WriteLine("FAIL: Expected ChildA:exit, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.4.2: Exit handler fires on source - PASS");
+
+        // TC1.4.3: Enter handler fired on target
+        if (!log.Contains("ChildB:enter")) {
+            Console.WriteLine("FAIL: Expected ChildB:enter, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.4.3: Enter handler fires on target - PASS");
+
+        // TC1.4.4: Parent relationship preserved - ChildB can forward
+        s.forward_action();
+        log = (List<object>)s.get_log();
+        if (!log.Contains("ChildB:forward")) {
+            Console.WriteLine("FAIL: Expected ChildB:forward, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (!log.Contains("Parent:forward_action")) {
+            Console.WriteLine("FAIL: Expected Parent handler, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.4.4: Parent relationship preserved - PASS");
+
+        // TC1.4.5: Transition back to ChildA
+        s.go_to_a();
+        if ((string)s.get_state() != "ChildA") {
+            Console.WriteLine("FAIL: Expected ChildA, got " + s.get_state());
+            Environment.Exit(1);
+        }
+        log = (List<object>)s.get_log();
+        int exitBCount = 0;
+        int enterACount = 0;
+        foreach (var item in log) {
+            if (item.Equals("ChildB:exit")) exitBCount++;
+            if (item.Equals("ChildA:enter")) enterACount++;
+        }
+        if (exitBCount != 1) {
+            Console.WriteLine("FAIL: Expected ChildB:exit once, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (enterACount != 2) {
+            Console.WriteLine("FAIL: Expected ChildA:enter twice, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.4.5: Transition B->A works with enter/exit - PASS");
+
+        // TC1.4.6: ChildA can still forward after returning
+        s.forward_action();
+        log = (List<object>)s.get_log();
+        if (!log.Contains("ChildA:forward")) {
+            Console.WriteLine("FAIL: Expected ChildA:forward, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        int parentCount = 0;
+        foreach (var item in log) {
+            if (item.Equals("Parent:forward_action")) parentCount++;
+        }
+        if (parentCount != 2) {
+            Console.WriteLine("FAIL: Expected 2 Parent handlers, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.4.6: ChildA forwards after returning - PASS");
+
+        Console.WriteLine("PASS: HSM sibling transitions work correctly");
+    }
+}

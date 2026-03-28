@@ -1,0 +1,166 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system HSMExitHandlers {
+    interface:
+        go_to_other()
+        go_to_parent()
+        go_to_child()
+        get_log(): List<object>
+        get_state(): string
+        get_child_var(): int
+
+    machine:
+        $Child => $Parent {
+            $.child_var: int = 42
+
+            $>() {
+                this.log.Add("Child:enter");
+            }
+
+            <$() {
+                int val = $.child_var;
+                this.log.Add("Child:exit(var=" + val + ")");
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "Child";
+            }
+
+            get_child_var(): int {
+                return $.child_var;
+            }
+        }
+
+        $Parent {
+            $>() {
+                this.log.Add("Parent:enter");
+            }
+
+            <$() {
+                this.log.Add("Parent:exit");
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "Parent";
+            }
+
+            get_child_var(): int {
+                return -1;
+            }
+        }
+
+        $Other {
+            $>() {
+                this.log.Add("Other:enter");
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "Other";
+            }
+
+            get_child_var(): int {
+                return -1;
+            }
+        }
+    domain:
+        List<object> log = new List<object>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 48: HSM Exit Handlers ===");
+        var s = @@HSMExitHandlers();
+
+        // Initial state is Child
+        var log = (List<object>)s.get_log();
+        if (!log.Contains("Child:enter")) {
+            Console.WriteLine("FAIL: Expected Child:enter on init, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if ((string)s.get_state() != "Child") {
+            Console.WriteLine("FAIL: Expected Child, got " + s.get_state());
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.4.0: Initial state is Child with enter - PASS");
+
+        // TC2.4.1: Child exit fires when transitioning out of child
+        s.go_to_other();
+        log = (List<object>)s.get_log();
+        if (!log.Contains("Child:exit(var=42)")) {
+            Console.WriteLine("FAIL: Expected Child:exit, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (!log.Contains("Other:enter")) {
+            Console.WriteLine("FAIL: Expected Other:enter, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.4.1: Child exit fires when transitioning out - PASS");
+
+        // TC2.4.2: Parent exit does NOT fire when transitioning out of child
+        if (log.Contains("Parent:exit")) {
+            Console.WriteLine("FAIL: Parent:exit should NOT fire for child exit, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.4.2: Parent exit NOT fired for child exit - PASS");
+
+        // TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
+        Console.WriteLine("TC2.4.3: Exit handler accesses state var (var=42) - PASS");
+
+        // TC2.4.4: Parent exit fires when transitioning out of Parent
+        s.go_to_parent();
+        log = (List<object>)s.get_log();
+        if (!log.Contains("Parent:enter")) {
+            Console.WriteLine("FAIL: Expected Parent:enter, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+
+        s.go_to_other();
+        log = (List<object>)s.get_log();
+        if (!log.Contains("Parent:exit")) {
+            Console.WriteLine("FAIL: Expected Parent:exit, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.4.4: Parent exit fires when leaving parent - PASS");
+
+        Console.WriteLine("PASS: HSM exit handlers work correctly");
+    }
+}

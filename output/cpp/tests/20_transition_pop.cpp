@@ -96,23 +96,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Working(TransitionPopTestFrameEvent& __e) {
-        if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Working"));
-            return;;
-        } else if (__e._message == "process") {
-            event_log.push_back("working:process:before_pop");
-            auto __popped = std::move(_state_stack.back()); _state_stack.pop_back();
-            __transition(std::move(__popped));
-            return;
-            // This should NOT execute because pop transitions away
-            event_log.push_back("working:process:after_pop");
-        }
-    }
-
     void _state_Idle(TransitionPopTestFrameEvent& __e) {
         if (__e._message == "get_log") {
             _context_stack.back()._return = std::any(event_log);
@@ -129,6 +112,23 @@ private:
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
+        }
+    }
+
+    void _state_Working(TransitionPopTestFrameEvent& __e) {
+        if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Working"));
+            return;;
+        } else if (__e._message == "process") {
+            event_log.push_back("working:process:before_pop");
+            auto __popped = std::move(_state_stack.back()); _state_stack.pop_back();
+            __transition(std::move(__popped));
+            return;
+            // This should NOT execute because pop transitions away
+            event_log.push_back("working:process:after_pop");
         }
     }
 

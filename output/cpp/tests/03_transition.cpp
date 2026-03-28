@@ -94,19 +94,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Second(WithTransitionFrameEvent& __e) {
-        if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Second"));
-            return;;
-        } else if (__e._message == "next") {
-            printf("Transitioning: Second -> First\n");
-            auto __new_compartment = std::make_unique<WithTransitionCompartment>("First");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
     void _state_First(WithTransitionFrameEvent& __e) {
         if (__e._message == "get_state") {
             _context_stack.back()._return = std::any(std::string("First"));
@@ -114,6 +101,19 @@ private:
         } else if (__e._message == "next") {
             printf("Transitioning: First -> Second\n");
             auto __new_compartment = std::make_unique<WithTransitionCompartment>("Second");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
+    void _state_Second(WithTransitionFrameEvent& __e) {
+        if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Second"));
+            return;;
+        } else if (__e._message == "next") {
+            printf("Transitioning: Second -> First\n");
+            auto __new_compartment = std::make_unique<WithTransitionCompartment>("First");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;

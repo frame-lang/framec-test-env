@@ -1,0 +1,104 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system StateVarPushPop {
+    interface:
+        increment(): int
+        get_count(): int
+        save_and_go()
+        restore()
+
+    machine:
+        $Counter {
+            $.count: int = 0
+
+            increment(): int {
+                $.count = $.count + 1;
+                return $.count;
+            }
+
+            get_count(): int {
+                return $.count;
+            }
+
+            save_and_go() {
+                `push$
+                -> $Other
+            }
+        }
+
+        $Other {
+            $.other_count: int = 100
+
+            restore() {
+                `-> pop$
+            }
+
+            increment(): int {
+                $.other_count = $.other_count + 1;
+                return $.other_count;
+            }
+
+            get_count(): int {
+                return $.other_count;
+            }
+        }
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 12: State Variable Push/Pop ===");
+        var s = new StateVarPushPop();
+
+        // Increment counter to 3
+        s.increment();
+        s.increment();
+        s.increment();
+        var count = (int)s.get_count();
+        if (count != 3) {
+            throw new Exception("Expected 3, got " + count);
+        }
+        Console.WriteLine("Counter before push: " + count);
+
+        // Push and go to Other state
+        s.save_and_go();
+        Console.WriteLine("Pushed and transitioned to Other");
+
+        // In Other state, count should be 100 (Other's state var)
+        count = (int)s.get_count();
+        if (count != 100) {
+            throw new Exception("Expected 100 in Other state, got " + count);
+        }
+        Console.WriteLine("Other state count: " + count);
+
+        // Increment in Other
+        s.increment();
+        count = (int)s.get_count();
+        if (count != 101) {
+            throw new Exception("Expected 101 after increment, got " + count);
+        }
+        Console.WriteLine("Other state after increment: " + count);
+
+        // Pop back - should restore Counter with count=3
+        s.restore();
+        Console.WriteLine("Popped back to Counter");
+
+        count = (int)s.get_count();
+        if (count != 3) {
+            throw new Exception("Expected 3 after pop (preserved), got " + count);
+        }
+        Console.WriteLine("Counter after pop: " + count);
+
+        // Increment to verify it works
+        s.increment();
+        count = (int)s.get_count();
+        if (count != 4) {
+            throw new Exception("Expected 4, got " + count);
+        }
+        Console.WriteLine("Counter after increment: " + count);
+
+        Console.WriteLine("PASS: State variables preserved across push/pop");
+    }
+}

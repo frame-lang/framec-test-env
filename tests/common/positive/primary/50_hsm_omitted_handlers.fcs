@@ -1,0 +1,178 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system HSMOmittedHandlers {
+    interface:
+        handled_by_child()
+        forwarded_explicitly()
+        unhandled_no_forward()
+        get_log(): List<object>
+        get_state(): string
+
+    machine:
+        $Child => $Parent {
+            handled_by_child() {
+                this.log.Add("Child:handled_by_child");
+            }
+
+            forwarded_explicitly() {
+                this.log.Add("Child:before_forward");
+                => $^
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "Child";
+            }
+        }
+
+        $Parent {
+            handled_by_child() {
+                this.log.Add("Parent:handled_by_child");
+            }
+
+            forwarded_explicitly() {
+                this.log.Add("Parent:forwarded_explicitly");
+            }
+
+            unhandled_no_forward() {
+                this.log.Add("Parent:unhandled_no_forward");
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "Parent";
+            }
+        }
+    domain:
+        List<object> log = new List<object>()
+}
+
+@@system HSMDefaultForward2 {
+    interface:
+        child_handled()
+        parent_handled()
+        both_respond()
+        get_log(): List<object>
+
+    machine:
+        $Child => $Parent {
+            child_handled() {
+                this.log.Add("Child:child_handled");
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            => $^
+        }
+
+        $Parent {
+            child_handled() {
+                this.log.Add("Parent:child_handled");
+            }
+
+            parent_handled() {
+                this.log.Add("Parent:parent_handled");
+            }
+
+            both_respond() {
+                this.log.Add("Parent:both_respond");
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+        }
+    domain:
+        List<object> log = new List<object>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 50: HSM Omitted Handlers ===");
+
+        // Part 1: Explicit forwarding vs no forwarding
+        var s1 = @@HSMOmittedHandlers();
+
+        // TC2.6.1: Event handled by child only
+        s1.handled_by_child();
+        var log = (List<object>)s1.get_log();
+        if (!log.Contains("Child:handled_by_child")) {
+            Console.WriteLine("FAIL: Expected Child handler, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (log.Contains("Parent:handled_by_child")) {
+            Console.WriteLine("FAIL: Parent should NOT be called, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.6.1: Handled by child, not forwarded - PASS");
+
+        // TC2.6.2: Event explicitly forwarded to parent
+        s1.forwarded_explicitly();
+        log = (List<object>)s1.get_log();
+        if (!log.Contains("Child:before_forward")) {
+            Console.WriteLine("FAIL: Expected Child forward, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (!log.Contains("Parent:forwarded_explicitly")) {
+            Console.WriteLine("FAIL: Expected Parent handler, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.6.2: Explicitly forwarded to parent - PASS");
+
+        // TC2.6.3: Unhandled event with no forward - silently ignored
+        s1.unhandled_no_forward();
+        log = (List<object>)s1.get_log();
+        if (log.Contains("Parent:unhandled_no_forward")) {
+            Console.WriteLine("FAIL: Unhandled should be ignored, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.6.3: Unhandled (no forward) is silently ignored - PASS");
+
+        // Part 2: State-level default forward
+        var s2 = @@HSMDefaultForward2();
+
+        // TC2.6.4: Event handled by child (no forward despite => $^)
+        s2.child_handled();
+        log = (List<object>)s2.get_log();
+        if (!log.Contains("Child:child_handled")) {
+            Console.WriteLine("FAIL: Expected Child handler, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (log.Contains("Parent:child_handled")) {
+            Console.WriteLine("FAIL: Handled by child, not forwarded, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.6.4: Child handles, not forwarded - PASS");
+
+        // TC2.6.5: Unhandled event forwarded via => $^
+        s2.parent_handled();
+        log = (List<object>)s2.get_log();
+        if (!log.Contains("Parent:parent_handled")) {
+            Console.WriteLine("FAIL: Expected Parent handler, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.6.5: Unhandled forwarded via state-level => $^ - PASS");
+
+        // TC2.6.6: Another unhandled event forwarded
+        s2.both_respond();
+        log = (List<object>)s2.get_log();
+        if (!log.Contains("Parent:both_respond")) {
+            Console.WriteLine("FAIL: Expected Parent handler, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.6.6: Default forward works for multiple events - PASS");
+
+        Console.WriteLine("PASS: HSM omitted handlers work correctly");
+    }
+}

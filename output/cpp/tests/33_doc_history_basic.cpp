@@ -98,6 +98,17 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_C(HistoryBasicFrameEvent& __e) {
+        if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("C"));
+            return;;
+        } else if (__e._message == "return_back") {
+            auto __popped = std::move(_state_stack.back()); _state_stack.pop_back();
+            __transition(std::move(__popped));
+            return;
+        }
+    }
+
     void _state_B(HistoryBasicFrameEvent& __e) {
         if (__e._message == "get_state") {
             _context_stack.back()._return = std::any(std::string("B"));
@@ -125,17 +136,6 @@ private:
             auto __new_compartment = std::make_unique<HistoryBasicCompartment>("C");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
-    void _state_C(HistoryBasicFrameEvent& __e) {
-        if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("C"));
-            return;;
-        } else if (__e._message == "return_back") {
-            auto __popped = std::move(_state_stack.back()); _state_stack.pop_back();
-            __transition(std::move(__popped));
             return;
         }
     }

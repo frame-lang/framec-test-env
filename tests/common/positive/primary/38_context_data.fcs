@@ -1,0 +1,104 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system ContextDataTest {
+    interface:
+        process_with_data(value: int): string
+        check_data_isolation(): string
+        transition_preserves_data(x: int): string
+
+    machine:
+        $Start {
+            process_with_data(value: int): string {
+                // Set data in handler
+                @@:data["input"] = @@.value;
+                @@:data["trace"] = new List<string>(new string[] {"handler"});
+
+                @@:return = "processed:" + @@:data["input"];
+            }
+
+            check_data_isolation(): string {
+                // Set data, call another method, verify our data preserved
+                @@:data["outer"] = "outer_value";
+
+                // This creates its own context with its own data
+                string inner_result = this.process_with_data(99);
+
+                // Our data should still be here
+                @@:return = "outer_data=" + @@:data["outer"] + ",inner=" + inner_result;
+            }
+
+            transition_preserves_data(x: int): string {
+                // Set data, transition, verify data available in lifecycle handlers
+                @@:data["started_in"] = "Start";
+                @@:data["value"] = @@.x;
+                @@:data["trace"] = new List<string>(new string[] {"handler"});
+                -> $End
+            }
+
+            <$() {
+                // Exit handler can access data set by event handler
+                ((List<string>)@@:data["trace"]).Add("exit");
+            }
+        }
+
+        $End {
+            $>() {
+                // Enter handler can access data set by previous handlers
+                ((List<string>)@@:data["trace"]).Add("enter");
+                @@:data["ended_in"] = "End";
+
+                // Build final result from accumulated data
+                var trace = (List<string>)@@:data["trace"];
+                string trace_str = trace != null ? string.Join(",", trace) : "no_trace";
+                @@:return = "from=" + @@:data["started_in"] + ",to=" + @@:data["ended_in"] + ",value=" + @@:data["value"] + ",trace=" + trace_str;
+            }
+        }
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 38: Context Data ===");
+
+        // Test 1: Basic data set/get
+        var s1 = @@ContextDataTest();
+        var result = (string)s1.process_with_data(42);
+        if (result != "processed:42") {
+            Console.WriteLine("FAIL: Expected 'processed:42', got '" + result + "'");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("1. process_with_data(42) = '" + result + "'");
+
+        // Test 2: Data isolation between nested calls
+        var s2 = @@ContextDataTest();
+        result = (string)s2.check_data_isolation();
+        var expected = "outer_data=outer_value,inner=processed:99";
+        if (result != expected) {
+            Console.WriteLine("FAIL: Expected '" + expected + "', got '" + result + "'");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("2. check_data_isolation() = '" + result + "'");
+
+        // Test 3: Data preserved across transition (handler -> <$ -> $>)
+        var s3 = @@ContextDataTest();
+        result = (string)s3.transition_preserves_data(100);
+        // Data should flow: handler sets -> exit accesses -> enter accesses and returns
+        if (!result.Contains("from=Start")) {
+            Console.WriteLine("FAIL: Expected 'from=Start' in '" + result + "'");
+            Environment.Exit(1);
+        }
+        if (!result.Contains("to=End")) {
+            Console.WriteLine("FAIL: Expected 'to=End' in '" + result + "'");
+            Environment.Exit(1);
+        }
+        if (!result.Contains("value=100")) {
+            Console.WriteLine("FAIL: Expected 'value=100' in '" + result + "'");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("3. transition_preserves_data(100) = '" + result + "'");
+
+        Console.WriteLine("PASS: Context data works correctly");
+    }
+}

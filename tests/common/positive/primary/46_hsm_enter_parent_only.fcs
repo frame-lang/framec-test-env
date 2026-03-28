@@ -1,0 +1,120 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system HSMEnterParentOnly {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): List<object>
+        get_state(): string
+
+    machine:
+        $Start {
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "Start";
+            }
+        }
+
+        $Child => $Parent {
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "Child";
+            }
+        }
+
+        $Parent {
+            $>() {
+                this.log.Add("Parent:enter");
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "Parent";
+            }
+        }
+    domain:
+        List<object> log = new List<object>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 46: HSM Enter in Parent Only ===");
+        var s = @@HSMEnterParentOnly();
+
+        // TC2.2.1: Child enters without error (no enter handler)
+        s.go_to_child();
+        if ((string)s.get_state() != "Child") {
+            Console.WriteLine("FAIL: Expected Child, got " + s.get_state());
+            Environment.Exit(1);
+        }
+        var log = (List<object>)s.get_log();
+        Console.WriteLine("TC2.2.1: Child enters without error (log: [" + string.Join(", ", log) + "]) - PASS");
+
+        // TC2.2.2: Parent's enter does NOT auto-fire when child is entered
+        if (log.Contains("Parent:enter")) {
+            Console.WriteLine("FAIL: Parent:enter should NOT fire for child entry, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.2.2: Parent enter NOT auto-fired for child - PASS");
+
+        // TC2.2.3: Parent enter only fires when transitioning directly TO parent
+        s.go_to_parent();
+        if ((string)s.get_state() != "Parent") {
+            Console.WriteLine("FAIL: Expected Parent, got " + s.get_state());
+            Environment.Exit(1);
+        }
+        log = (List<object>)s.get_log();
+        if (!log.Contains("Parent:enter")) {
+            Console.WriteLine("FAIL: Expected Parent:enter when transitioning to Parent, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.2.3: Parent enter fires when transitioning to Parent - PASS");
+
+        // TC2.2.4: Going back to child from parent
+        s.go_to_child();
+        if ((string)s.get_state() != "Child") {
+            Console.WriteLine("FAIL: Expected Child, got " + s.get_state());
+            Environment.Exit(1);
+        }
+        log = (List<object>)s.get_log();
+        int count = 0;
+        foreach (var item in log) {
+            if (item.Equals("Parent:enter")) count++;
+        }
+        if (count != 1) {
+            Console.WriteLine("FAIL: Expected exactly 1 Parent:enter, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.2.4: Return to child, parent enter count unchanged - PASS");
+
+        Console.WriteLine("PASS: HSM enter in parent only works correctly");
+    }
+}

@@ -103,16 +103,16 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Q4(MooreMachineFrameEvent& __e) {
+    void _state_Q0(MooreMachineFrameEvent& __e) {
         if (__e._message == "$>") {
-            this->set_output(1);
+            this->set_output(0);
         } else if (__e._message == "i_0") {
             auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q1");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
         } else if (__e._message == "i_1") {
-            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q3");
+            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q2");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
@@ -151,11 +151,11 @@ private:
         }
     }
 
-    void _state_Q0(MooreMachineFrameEvent& __e) {
+    void _state_Q3(MooreMachineFrameEvent& __e) {
         if (__e._message == "$>") {
-            this->set_output(0);
+            this->set_output(1);
         } else if (__e._message == "i_0") {
-            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q1");
+            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q4");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
@@ -167,16 +167,16 @@ private:
         }
     }
 
-    void _state_Q3(MooreMachineFrameEvent& __e) {
+    void _state_Q4(MooreMachineFrameEvent& __e) {
         if (__e._message == "$>") {
             this->set_output(1);
         } else if (__e._message == "i_0") {
-            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q4");
+            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q1");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
         } else if (__e._message == "i_1") {
-            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q2");
+            auto __new_compartment = std::make_unique<MooreMachineCompartment>("Q3");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;

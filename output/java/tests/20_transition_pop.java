@@ -154,21 +154,6 @@ class TransitionPopTest {
         return __result;
     }
 
-    private void _state_Working(TransitionPopTestFrameEvent __e) {
-        if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Working";
-            return;
-        } else if (__e._message.equals("process")) {
-            this.log.add("working:process:before_pop");
-            var __popped = _state_stack.remove(_state_stack.size() - 1);
-            __transition(__popped);
-            return;
-        }
-    }
-
     private void _state_Idle(TransitionPopTestFrameEvent __e) {
         if (__e._message.equals("get_log")) {
             _context_stack.get(_context_stack.size() - 1)._return = this.log;
@@ -184,6 +169,21 @@ class TransitionPopTest {
             var __compartment = new TransitionPopTestCompartment("Working");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
+            return;
+        }
+    }
+
+    private void _state_Working(TransitionPopTestFrameEvent __e) {
+        if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Working";
+            return;
+        } else if (__e._message.equals("process")) {
+            this.log.add("working:process:before_pop");
+            var __popped = _state_stack.remove(_state_stack.size() - 1);
+            __transition(__popped);
             return;
         }
     }

@@ -1,0 +1,159 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system HistoryHSM {
+    interface:
+        gotoA()
+        gotoB()
+        gotoC()
+        goBack()
+        get_state(): string
+        get_log(): List<object>
+
+    machine:
+        $Waiting {
+            $>() {
+                this.log_msg("In $Waiting");
+            }
+            gotoA() {
+                this.log_msg("gotoA");
+                -> $A
+            }
+            gotoB() {
+                this.log_msg("gotoB");
+                -> $B
+            }
+            get_state(): string {
+                return "Waiting";
+            }
+            get_log(): List<object> {
+                return this.log;
+            }
+        }
+
+        $A => $AB {
+            $>() {
+                this.log_msg("In $A");
+            }
+            gotoB() {
+                this.log_msg("gotoB");
+                -> $B
+            }
+            get_state(): string {
+                return "A";
+            }
+            get_log(): List<object> {
+                return this.log;
+            }
+            => $^
+        }
+
+        $B => $AB {
+            $>() {
+                this.log_msg("In $B");
+            }
+            gotoA() {
+                this.log_msg("gotoA");
+                -> $A
+            }
+            get_state(): string {
+                return "B";
+            }
+            get_log(): List<object> {
+                return this.log;
+            }
+            => $^
+        }
+
+        $AB {
+            gotoC() {
+                this.log_msg("gotoC in $AB");
+                push$
+                -> $C
+            }
+        }
+
+        $C {
+            $>() {
+                this.log_msg("In $C");
+            }
+            goBack() {
+                this.log_msg("goBack");
+                -> pop$
+            }
+            get_state(): string {
+                return "C";
+            }
+            get_log(): List<object> {
+                return this.log;
+            }
+        }
+
+    actions:
+        log_msg(msg: string) {
+            this.log.Add(msg);
+        }
+
+    domain:
+        List<object> log = new List<object>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 34: Doc History HSM ===");
+        var h = @@HistoryHSM();
+
+        // Start in Waiting
+        if ((string)h.get_state() != "Waiting") {
+            Console.WriteLine("FAIL: Expected 'Waiting', got '" + h.get_state() + "'");
+            Environment.Exit(1);
+        }
+
+        // Go to A
+        h.gotoA();
+        if ((string)h.get_state() != "A") {
+            Console.WriteLine("FAIL: Expected 'A', got '" + h.get_state() + "'");
+            Environment.Exit(1);
+        }
+
+        // Go to C (using inherited gotoC from $AB)
+        h.gotoC();
+        if ((string)h.get_state() != "C") {
+            Console.WriteLine("FAIL: Expected 'C', got '" + h.get_state() + "'");
+            Environment.Exit(1);
+        }
+
+        // Go back (should pop to A)
+        h.goBack();
+        if ((string)h.get_state() != "A") {
+            Console.WriteLine("FAIL: Expected 'A' after goBack, got '" + h.get_state() + "'");
+            Environment.Exit(1);
+        }
+
+        // Go to B
+        h.gotoB();
+        if ((string)h.get_state() != "B") {
+            Console.WriteLine("FAIL: Expected 'B', got '" + h.get_state() + "'");
+            Environment.Exit(1);
+        }
+
+        // Go to C (again using inherited gotoC)
+        h.gotoC();
+        if ((string)h.get_state() != "C") {
+            Console.WriteLine("FAIL: Expected 'C', got '" + h.get_state() + "'");
+            Environment.Exit(1);
+        }
+
+        // Go back (should pop to B)
+        h.goBack();
+        if ((string)h.get_state() != "B") {
+            Console.WriteLine("FAIL: Expected 'B' after goBack, got '" + h.get_state() + "'");
+            Environment.Exit(1);
+        }
+
+        Console.WriteLine("Log: [" + string.Join(", ", h.get_log()) + "]");
+        Console.WriteLine("PASS: HSM with history works correctly");
+    }
+}

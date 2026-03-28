@@ -1,0 +1,81 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system StateVarReentry {
+    interface:
+        increment(): int
+        get_count(): int
+        go_other()
+        come_back()
+
+    machine:
+        $Counter {
+            $.count: int = 0
+
+            increment(): int {
+                $.count = $.count + 1;
+                return $.count;
+            }
+
+            get_count(): int {
+                return $.count;
+            }
+
+            go_other() {
+                -> $Other
+            }
+        }
+
+        $Other {
+            come_back() {
+                -> $Counter
+            }
+
+            increment(): int {
+                return -1;
+            }
+
+            get_count(): int {
+                return -1;
+            }
+        }
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 11: State Variable Reentry ===");
+        var s = new StateVarReentry();
+
+        // Increment a few times
+        s.increment();
+        s.increment();
+        var count = (int)s.get_count();
+        if (count != 2) {
+            throw new Exception("Expected 2 after two increments, got " + count);
+        }
+        Console.WriteLine("Count before leaving: " + count);
+
+        // Leave the state
+        s.go_other();
+        Console.WriteLine("Transitioned to Other state");
+
+        // Come back - state var should be reinitialized to 0
+        s.come_back();
+        count = (int)s.get_count();
+        if (count != 0) {
+            throw new Exception("Expected 0 after re-entering Counter (state var reinit), got " + count);
+        }
+        Console.WriteLine("Count after re-entering Counter: " + count);
+
+        // Increment again to verify it works
+        var result = (int)s.increment();
+        if (result != 1) {
+            throw new Exception("Expected 1 after increment, got " + result);
+        }
+        Console.WriteLine("After increment: " + result);
+
+        Console.WriteLine("PASS: State variables reinitialize on state reentry");
+    }
+}

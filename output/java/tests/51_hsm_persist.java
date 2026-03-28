@@ -164,22 +164,6 @@ class HSMPersist {
         return __result;
     }
 
-    private void _state_Parent(HSMPersistFrameEvent __e) {
-        if (__e._message.equals("get_child_count")) {
-            _context_stack.get(_context_stack.size() - 1)._return = -1;
-            return;
-        } else if (__e._message.equals("get_parent_count")) {
-            _context_stack.get(_context_stack.size() - 1)._return = (int) __compartment.state_vars.get("parent_count");
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Parent";
-            return;
-        } else if (__e._message.equals("increment_child")) {
-        } else if (__e._message.equals("increment_parent")) {
-            __compartment.state_vars.put("parent_count", (int) __compartment.state_vars.get("parent_count") + 1);
-        }
-    }
-
     private void _state_Child(HSMPersistFrameEvent __e) {
         var __sv_comp = __compartment;
         while (__sv_comp != null && !__sv_comp.state.equals("Child")) { __sv_comp = __sv_comp.parent_compartment; }
@@ -195,6 +179,22 @@ class HSMPersist {
             return;
         } else if (__e._message.equals("increment_child")) {
             __sv_comp.state_vars.put("child_count", (int) __sv_comp.state_vars.get("child_count") + 1);
+        }
+    }
+
+    private void _state_Parent(HSMPersistFrameEvent __e) {
+        if (__e._message.equals("get_child_count")) {
+            _context_stack.get(_context_stack.size() - 1)._return = -1;
+            return;
+        } else if (__e._message.equals("get_parent_count")) {
+            _context_stack.get(_context_stack.size() - 1)._return = (int) __compartment.state_vars.get("parent_count");
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Parent";
+            return;
+        } else if (__e._message.equals("increment_child")) {
+        } else if (__e._message.equals("increment_parent")) {
+            __compartment.state_vars.put("parent_count", (int) __compartment.state_vars.get("parent_count") + 1);
         }
     }
 

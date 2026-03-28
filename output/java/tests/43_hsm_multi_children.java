@@ -185,29 +185,14 @@ class HSMMultiChildren {
         return __result;
     }
 
-    private void _state_ChildB(HSMMultiChildrenFrameEvent __e) {
-        if (__e._message.equals("do_action")) {
-            this.log.add("ChildB:do_action");
-        } else if (__e._message.equals("forward_action")) {
-            this.log.add("ChildB:forward_action");
-            _state_Parent(__e);
+    private void _state_Parent(HSMMultiChildrenFrameEvent __e) {
+        if (__e._message.equals("forward_action")) {
+            this.log.add("Parent:forward_action");
         } else if (__e._message.equals("get_log")) {
             _context_stack.get(_context_stack.size() - 1)._return = this.log;
             return;
         } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "ChildB";
-            return;
-        } else if (__e._message.equals("start_a")) {
-            var __compartment = new HSMMultiChildrenCompartment("ChildA");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        } else if (__e._message.equals("start_b")) {
-            // stay
-        } else if (__e._message.equals("start_c")) {
-            var __compartment = new HSMMultiChildrenCompartment("ChildC");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
+            _context_stack.get(_context_stack.size() - 1)._return = "Parent";
             return;
         }
     }
@@ -239,14 +224,29 @@ class HSMMultiChildren {
         }
     }
 
-    private void _state_Parent(HSMMultiChildrenFrameEvent __e) {
-        if (__e._message.equals("forward_action")) {
-            this.log.add("Parent:forward_action");
+    private void _state_ChildB(HSMMultiChildrenFrameEvent __e) {
+        if (__e._message.equals("do_action")) {
+            this.log.add("ChildB:do_action");
+        } else if (__e._message.equals("forward_action")) {
+            this.log.add("ChildB:forward_action");
+            _state_Parent(__e);
         } else if (__e._message.equals("get_log")) {
             _context_stack.get(_context_stack.size() - 1)._return = this.log;
             return;
         } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Parent";
+            _context_stack.get(_context_stack.size() - 1)._return = "ChildB";
+            return;
+        } else if (__e._message.equals("start_a")) {
+            var __compartment = new HSMMultiChildrenCompartment("ChildA");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        } else if (__e._message.equals("start_b")) {
+            // stay
+        } else if (__e._message.equals("start_c")) {
+            var __compartment = new HSMMultiChildrenCompartment("ChildC");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
             return;
         }
     }

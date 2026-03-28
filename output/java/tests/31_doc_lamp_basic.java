@@ -165,6 +165,24 @@ class Lamp {
         return __result;
     }
 
+    private void _state_Off(LampFrameEvent __e) {
+        if (__e._message.equals("getColor")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.color;
+            return;
+        } else if (__e._message.equals("isSwitchClosed")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.switch_closed;
+            return;
+        } else if (__e._message.equals("setColor")) {
+            var color = (String) __e._parameters.get("color");
+            this.color = color;
+        } else if (__e._message.equals("turnOn")) {
+            var __compartment = new LampCompartment("On");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
     private void _state_On(LampFrameEvent __e) {
         if (__e._message.equals("<$")) {
             this.openSwitch();
@@ -181,24 +199,6 @@ class Lamp {
             this.color = color;
         } else if (__e._message.equals("turnOff")) {
             var __compartment = new LampCompartment("Off");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
-    private void _state_Off(LampFrameEvent __e) {
-        if (__e._message.equals("getColor")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.color;
-            return;
-        } else if (__e._message.equals("isSwitchClosed")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.switch_closed;
-            return;
-        } else if (__e._message.equals("setColor")) {
-            var color = (String) __e._parameters.get("color");
-            this.color = color;
-        } else if (__e._message.equals("turnOn")) {
-            var __compartment = new LampCompartment("On");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;

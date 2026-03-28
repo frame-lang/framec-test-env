@@ -1,0 +1,225 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system HSMMultiChildren {
+    interface:
+        start_a()
+        start_b()
+        start_c()
+        do_action()
+        forward_action()
+        get_log(): List<object>
+        get_state(): string
+
+    machine:
+        $ChildA => $Parent {
+            start_a() {
+                // stay
+            }
+
+            start_b() {
+                -> $ChildB
+            }
+
+            start_c() {
+                -> $ChildC
+            }
+
+            do_action() {
+                this.log.Add("ChildA:do_action");
+            }
+
+            forward_action() {
+                this.log.Add("ChildA:forward_action");
+                => $^
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "ChildA";
+            }
+        }
+
+        $ChildB => $Parent {
+            start_a() {
+                -> $ChildA
+            }
+
+            start_b() {
+                // stay
+            }
+
+            start_c() {
+                -> $ChildC
+            }
+
+            do_action() {
+                this.log.Add("ChildB:do_action");
+            }
+
+            forward_action() {
+                this.log.Add("ChildB:forward_action");
+                => $^
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "ChildB";
+            }
+        }
+
+        $ChildC => $Parent {
+            start_a() {
+                -> $ChildA
+            }
+
+            start_b() {
+                -> $ChildB
+            }
+
+            start_c() {
+                // stay
+            }
+
+            do_action() {
+                this.log.Add("ChildC:do_action");
+            }
+
+            forward_action() {
+                this.log.Add("ChildC:forward_action");
+                => $^
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "ChildC";
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                this.log.Add("Parent:forward_action");
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "Parent";
+            }
+        }
+    domain:
+        List<object> log = new List<object>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 43: HSM Multiple Children ===");
+        var s = @@HSMMultiChildren();
+
+        // TC1.3.1: Multiple children declare same parent (verified by compilation)
+        Console.WriteLine("TC1.3.1: Multiple children with same parent compiles - PASS");
+
+        // Start in ChildA
+        if ((string)s.get_state() != "ChildA") {
+            Console.WriteLine("FAIL: Expected ChildA, got " + s.get_state());
+            Environment.Exit(1);
+        }
+
+        // TC1.3.2: ChildA can forward to shared parent
+        s.forward_action();
+        var log = (List<object>)s.get_log();
+        if (!log.Contains("ChildA:forward_action")) {
+            Console.WriteLine("FAIL: Expected ChildA forward, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (!log.Contains("Parent:forward_action")) {
+            Console.WriteLine("FAIL: Expected Parent handler, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.3.2: ChildA forwards to parent - PASS");
+
+        // TC1.3.3: Transition to sibling
+        s.start_b();
+        if ((string)s.get_state() != "ChildB") {
+            Console.WriteLine("FAIL: Expected ChildB after transition, got " + s.get_state());
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.3.3: Transition A->B works - PASS");
+
+        // TC1.3.4: ChildB can also forward to same parent
+        s.forward_action();
+        log = (List<object>)s.get_log();
+        if (!log.Contains("ChildB:forward_action")) {
+            Console.WriteLine("FAIL: Expected ChildB forward, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        int parentCount = 0;
+        foreach (var item in log) {
+            if (item.Equals("Parent:forward_action")) parentCount++;
+        }
+        if (parentCount != 2) {
+            Console.WriteLine("FAIL: Expected 2 Parent forwards, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.3.4: ChildB forwards to same parent - PASS");
+
+        // TC1.3.5: Transition to ChildC
+        s.start_c();
+        if ((string)s.get_state() != "ChildC") {
+            Console.WriteLine("FAIL: Expected ChildC, got " + s.get_state());
+            Environment.Exit(1);
+        }
+        s.forward_action();
+        log = (List<object>)s.get_log();
+        if (!log.Contains("ChildC:forward_action")) {
+            Console.WriteLine("FAIL: Expected ChildC forward, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        int parentCount2 = 0;
+        foreach (var item in log) {
+            if (item.Equals("Parent:forward_action")) parentCount2++;
+        }
+        if (parentCount2 != 3) {
+            Console.WriteLine("FAIL: Expected 3 Parent forwards, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.3.5: ChildC forwards to same parent - PASS");
+
+        // TC1.3.6: Each sibling maintains independent actions
+        s.start_a();
+        s.do_action();
+        s.start_b();
+        s.do_action();
+        s.start_c();
+        s.do_action();
+        log = (List<object>)s.get_log();
+        if (!log.Contains("ChildA:do_action")) {
+            Console.WriteLine("FAIL: Expected ChildA action");
+            Environment.Exit(1);
+        }
+        if (!log.Contains("ChildB:do_action")) {
+            Console.WriteLine("FAIL: Expected ChildB action");
+            Environment.Exit(1);
+        }
+        if (!log.Contains("ChildC:do_action")) {
+            Console.WriteLine("FAIL: Expected ChildC action");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.3.6: Each sibling has independent handlers - PASS");
+
+        Console.WriteLine("PASS: HSM multiple children work correctly");
+    }
+}

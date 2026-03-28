@@ -1,0 +1,101 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system TransitionPopTest {
+    interface:
+        start()
+        process()
+        get_state(): string
+        get_log(): List<object>
+
+    machine:
+        $Idle {
+            start() {
+                this.log.Add("idle:start:push");
+                `push$
+                -> $Working
+            }
+
+            process() {
+                this.log.Add("idle:process");
+            }
+
+            get_state(): string {
+                return "Idle";
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+        }
+
+        $Working {
+            process() {
+                this.log.Add("working:process:before_pop");
+                -> pop$
+                // This should NOT execute because pop transitions away
+                this.log.Add("working:process:after_pop");
+            }
+
+            get_state(): string {
+                return "Working";
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+        }
+    domain:
+        List<object> log = new List<object>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 20: Transition Pop (C#) ===");
+        var s = @@TransitionPopTest();
+
+        // Initial state should be Idle
+        if ((string)s.get_state() != "Idle") {
+            Console.WriteLine("FAIL: Expected 'Idle', got '" + s.get_state() + "'");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("Initial state: " + s.get_state());
+
+        // start() pushes Idle, transitions to Working
+        s.start();
+        if ((string)s.get_state() != "Working") {
+            Console.WriteLine("FAIL: Expected 'Working', got '" + s.get_state() + "'");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("After start(): " + s.get_state());
+
+        // process() in Working does pop transition back to Idle
+        s.process();
+        if ((string)s.get_state() != "Idle") {
+            Console.WriteLine("FAIL: Expected 'Idle' after pop, got '" + s.get_state() + "'");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("After process() with pop: " + s.get_state());
+
+        var log = (List<object>)s.get_log();
+        Console.WriteLine("Log: [" + string.Join(", ", log) + "]");
+
+        // Verify log contents
+        if (!log.Contains("idle:start:push")) {
+            Console.WriteLine("FAIL: Expected 'idle:start:push' in log");
+            Environment.Exit(1);
+        }
+        if (!log.Contains("working:process:before_pop")) {
+            Console.WriteLine("FAIL: Expected 'working:process:before_pop' in log");
+            Environment.Exit(1);
+        }
+        if (log.Contains("working:process:after_pop")) {
+            Console.WriteLine("FAIL: Should NOT have 'working:process:after_pop' in log");
+            Environment.Exit(1);
+        }
+
+        Console.WriteLine("PASS: Transition pop works correctly");
+    }
+}

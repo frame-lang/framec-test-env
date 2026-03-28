@@ -120,14 +120,6 @@ class S {
         __next_compartment = next;
     }
 
-    public void e1() {
-        SFrameEvent __e = new SFrameEvent("e1");
-        SFrameContext __ctx = new SFrameContext(__e, null);
-        _context_stack.add(__ctx);
-        __kernel(_context_stack.get(_context_stack.size() - 1)._event);
-        _context_stack.remove(_context_stack.size() - 1);
-    }
-
     public void e2() {
         SFrameEvent __e = new SFrameEvent("e2");
         SFrameContext __ctx = new SFrameContext(__e, null);
@@ -136,16 +128,24 @@ class S {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
+    public void e1() {
+        SFrameEvent __e = new SFrameEvent("e1");
+        SFrameContext __ctx = new SFrameContext(__e, null);
+        _context_stack.add(__ctx);
+        __kernel(_context_stack.get(_context_stack.size() - 1)._event);
+        _context_stack.remove(_context_stack.size() - 1);
+    }
+
+    private void _state_P(SFrameEvent __e) {
+
+    }
+
     private void _state_A(SFrameEvent __e) {
         if (__e._message.equals("e1")) {
             _state_P(__e);
         } else if (__e._message.equals("e2")) {
             _state_P(__e);
         }
-    }
-
-    private void _state_P(SFrameEvent __e) {
-
     }
 }
 

@@ -165,21 +165,6 @@ class HSMOmittedHandlers {
         return __result;
     }
 
-    private void _state_Child(HSMOmittedHandlersFrameEvent __e) {
-        if (__e._message.equals("forwarded_explicitly")) {
-            this.log.add("Child:before_forward");
-            _state_Parent(__e);
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Child";
-            return;
-        } else if (__e._message.equals("handled_by_child")) {
-            this.log.add("Child:handled_by_child");
-        }
-    }
-
     private void _state_Parent(HSMOmittedHandlersFrameEvent __e) {
         if (__e._message.equals("forwarded_explicitly")) {
             this.log.add("Parent:forwarded_explicitly");
@@ -193,6 +178,21 @@ class HSMOmittedHandlers {
             this.log.add("Parent:handled_by_child");
         } else if (__e._message.equals("unhandled_no_forward")) {
             this.log.add("Parent:unhandled_no_forward");
+        }
+    }
+
+    private void _state_Child(HSMOmittedHandlersFrameEvent __e) {
+        if (__e._message.equals("forwarded_explicitly")) {
+            this.log.add("Child:before_forward");
+            _state_Parent(__e);
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Child";
+            return;
+        } else if (__e._message.equals("handled_by_child")) {
+            this.log.add("Child:handled_by_child");
         }
     }
 }
@@ -349,6 +349,17 @@ class HSMDefaultForward2 {
         return __result;
     }
 
+    private void _state_Child(HSMDefaultForward2FrameEvent __e) {
+        if (__e._message.equals("child_handled")) {
+            this.log.add("Child:child_handled");
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else {
+            _state_Parent(__e);
+        }
+    }
+
     private void _state_Parent(HSMDefaultForward2FrameEvent __e) {
         if (__e._message.equals("both_respond")) {
             this.log.add("Parent:both_respond");
@@ -359,17 +370,6 @@ class HSMDefaultForward2 {
             return;
         } else if (__e._message.equals("parent_handled")) {
             this.log.add("Parent:parent_handled");
-        }
-    }
-
-    private void _state_Child(HSMDefaultForward2FrameEvent __e) {
-        if (__e._message.equals("child_handled")) {
-            this.log.add("Child:child_handled");
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else {
-            _state_Parent(__e);
         }
     }
 }

@@ -137,20 +137,6 @@ class StateParams {
         return __result;
     }
 
-    private void _state_Idle(StateParamsFrameEvent __e) {
-        if (__e._message.equals("get_value")) {
-            _context_stack.get(_context_stack.size() - 1)._return = 0;
-            return;
-        } else if (__e._message.equals("start")) {
-            var val = (int) __e._parameters.get("val");
-            var __compartment = new StateParamsCompartment("Counter");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __compartment.state_args.put("0", val);
-            __transition(__compartment);
-            return;
-        }
-    }
-
     private void _state_Counter(StateParamsFrameEvent __e) {
         var __sv_comp = __compartment;
         while (__sv_comp != null && !__sv_comp.state.equals("Counter")) { __sv_comp = __sv_comp.parent_compartment; }
@@ -164,6 +150,20 @@ class StateParams {
             System.out.println("Counter entered with initial=" + count_val);
         } else if (__e._message.equals("get_value")) {
             _context_stack.get(_context_stack.size() - 1)._return = (int) __sv_comp.state_vars.get("count");
+            return;
+        }
+    }
+
+    private void _state_Idle(StateParamsFrameEvent __e) {
+        if (__e._message.equals("get_value")) {
+            _context_stack.get(_context_stack.size() - 1)._return = 0;
+            return;
+        } else if (__e._message.equals("start")) {
+            var val = (int) __e._parameters.get("val");
+            var __compartment = new StateParamsCompartment("Counter");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __compartment.state_args.put("0", val);
+            __transition(__compartment);
             return;
         }
     }

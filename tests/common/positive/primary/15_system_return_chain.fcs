@@ -1,0 +1,89 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+// Tests that @@:return follows "last writer wins" across transition lifecycle
+
+@@system SystemReturnChainTest {
+    interface:
+        test_enter_sets(): string
+        test_exit_then_enter(): string
+        get_state(): string
+
+    machine:
+        $Start {
+            test_enter_sets(): string {
+                -> $EnterSetter
+            }
+
+            test_exit_then_enter(): string {
+                -> $BothSet
+            }
+
+            get_state(): string {
+                return "Start";
+            }
+
+            <$() {
+                // Exit handler sets initial value
+                @@:return = "from_exit";
+            }
+        }
+
+        $EnterSetter {
+            $>() {
+                // Enter handler sets return value
+                @@:return = "from_enter";
+            }
+
+            get_state(): string {
+                return "EnterSetter";
+            }
+        }
+
+        $BothSet {
+            $>() {
+                // Enter handler sets return - should overwrite exit's value
+                @@:return = "enter_wins";
+            }
+
+            get_state(): string {
+                return "BothSet";
+            }
+        }
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 15: System Return Chain (Last Writer Wins) ===");
+
+        // Test 1: Start exit + EnterSetter enter
+        // Start's exit sets "from_exit", EnterSetter's enter sets "from_enter"
+        // Enter should win (last writer)
+        var s1 = new SystemReturnChainTest();
+        var result1 = (string)s1.test_enter_sets();
+        if (result1 != "from_enter") {
+            throw new Exception("Expected 'from_enter', got '" + result1 + "'");
+        }
+        var state1 = (string)s1.get_state();
+        if (state1 != "EnterSetter") {
+            throw new Exception("Expected state 'EnterSetter'");
+        }
+        Console.WriteLine("1. Exit set then enter set - enter wins: '" + result1 + "'");
+
+        // Test 2: Both handlers set, enter wins
+        var s2 = new SystemReturnChainTest();
+        var result2 = (string)s2.test_exit_then_enter();
+        if (result2 != "enter_wins") {
+            throw new Exception("Expected 'enter_wins', got '" + result2 + "'");
+        }
+        var state2 = (string)s2.get_state();
+        if (state2 != "BothSet") {
+            throw new Exception("Expected state 'BothSet'");
+        }
+        Console.WriteLine("2. Both set - enter wins: '" + result2 + "'");
+
+        Console.WriteLine("PASS: System return chain (last writer wins) works correctly");
+    }
+}

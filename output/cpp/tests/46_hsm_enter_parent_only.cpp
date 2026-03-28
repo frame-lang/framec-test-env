@@ -98,6 +98,23 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_Parent(HSMEnterParentOnlyFrameEvent& __e) {
+        if (__e._message == "$>") {
+            event_log.push_back("Parent:enter");
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Parent"));
+            return;;
+        } else if (__e._message == "go_to_child") {
+            auto __new_compartment = std::make_unique<HSMEnterParentOnlyCompartment>("Child");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
     void _state_Start(HSMEnterParentOnlyFrameEvent& __e) {
         if (__e._message == "get_log") {
             _context_stack.back()._return = std::any(event_log);
@@ -127,23 +144,6 @@ private:
             return;;
         } else if (__e._message == "go_to_parent") {
             auto __new_compartment = std::make_unique<HSMEnterParentOnlyCompartment>("Parent");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
-    void _state_Parent(HSMEnterParentOnlyFrameEvent& __e) {
-        if (__e._message == "$>") {
-            event_log.push_back("Parent:enter");
-        } else if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Parent"));
-            return;;
-        } else if (__e._message == "go_to_child") {
-            auto __new_compartment = std::make_unique<HSMEnterParentOnlyCompartment>("Child");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;

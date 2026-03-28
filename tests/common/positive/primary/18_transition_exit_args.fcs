@@ -1,0 +1,71 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system TransitionExitArgs {
+    interface:
+        leave()
+        get_log(): List<object>
+
+    machine:
+        $Active {
+            <$(reason: string, code: int) {
+                this.log.Add("exit:" + reason + ":" + code);
+            }
+
+            leave() {
+                this.log.Add("leaving");
+                ("cleanup", 42) -> $Done
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+        }
+
+        $Done {
+            $>() {
+                this.log.Add("enter:done");
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+        }
+    domain:
+        List<object> log = new List<object>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 18: Transition Exit Args ===");
+        var s = @@TransitionExitArgs();
+
+        // Initial state is Active
+        var log = (List<object>)s.get_log();
+        if (log.Count != 0) {
+            Console.WriteLine("FAIL: Expected empty log, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+
+        // Leave - should call exit handler with args
+        s.leave();
+        log = (List<object>)s.get_log();
+        if (!log.Contains("leaving")) {
+            Console.WriteLine("FAIL: Expected 'leaving' in log, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (!log.Contains("exit:cleanup:42")) {
+            Console.WriteLine("FAIL: Expected 'exit:cleanup:42' in log, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (!log.Contains("enter:done")) {
+            Console.WriteLine("FAIL: Expected 'enter:done' in log, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("Log after transition: [" + string.Join(", ", log) + "]");
+
+        Console.WriteLine("PASS: Transition exit args work correctly");
+    }
+}

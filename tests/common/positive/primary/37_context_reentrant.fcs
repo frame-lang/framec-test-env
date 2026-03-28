@@ -1,0 +1,91 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system ContextReentrantTest {
+    interface:
+        outer(x: int): string
+        inner(y: int): string
+        deeply_nested(z: int): string
+        get_both(a: int, b: int): string
+
+    machine:
+        $Ready {
+            outer(x: int): string {
+                // Set our return before calling inner
+                @@:return = "outer_initial";
+
+                // Call inner - should NOT clobber our return
+                string inner_result = this.inner(@@.x * 10);
+
+                // Our return should still be accessible
+                // Update it with combined result
+                @@:return = "outer:" + @@.x + ",inner:" + inner_result;
+            }
+
+            inner(y: int): string {
+                // Inner has its own context
+                // @@.y should be inner's param, not outer's
+                @@:return = @@.y.ToString();
+            }
+
+            deeply_nested(z: int): string {
+                // 3 levels deep
+                string outer_result = this.outer(@@.z);
+                @@:return = "deep:" + @@.z + "," + outer_result;
+            }
+
+            get_both(a: int, b: int): string {
+                // Test that we can access multiple params
+                string result_a = this.inner(@@.a);
+                string result_b = this.inner(@@.b);
+                // After both inner calls, @@.a and @@.b should still be our params
+                @@:return = "a=" + @@.a + ",b=" + @@.b + ",results=" + result_a + "+" + result_b;
+            }
+        }
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 37: Context Reentrant ===");
+        var s = @@ContextReentrantTest();
+
+        // Test 1: Simple nesting - outer calls inner
+        var result = (string)s.outer(5);
+        var expected = "outer:5,inner:50";
+        if (result != expected) {
+            Console.WriteLine("FAIL: Expected '" + expected + "', got '" + result + "'");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("1. outer(5) = '" + result + "'");
+
+        // Test 2: Inner alone
+        result = (string)s.inner(42);
+        if (result != "42") {
+            Console.WriteLine("FAIL: Expected '42', got '" + result + "'");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("2. inner(42) = '" + result + "'");
+
+        // Test 3: Deep nesting (3 levels)
+        result = (string)s.deeply_nested(3);
+        expected = "deep:3,outer:3,inner:30";
+        if (result != expected) {
+            Console.WriteLine("FAIL: Expected '" + expected + "', got '" + result + "'");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("3. deeply_nested(3) = '" + result + "'");
+
+        // Test 4: Multiple inner calls, params preserved
+        result = (string)s.get_both(10, 20);
+        expected = "a=10,b=20,results=10+20";
+        if (result != expected) {
+            Console.WriteLine("FAIL: Expected '" + expected + "', got '" + result + "'");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("4. get_both(10, 20) = '" + result + "'");
+
+        Console.WriteLine("PASS: Context reentrant works correctly");
+    }
+}

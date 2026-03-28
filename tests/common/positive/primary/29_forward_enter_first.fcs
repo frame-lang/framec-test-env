@@ -1,0 +1,92 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system ForwardEnterFirst {
+    interface:
+        process()
+        get_counter(): int
+        get_log(): List<object>
+
+    machine:
+        $Idle {
+            process() {
+                -> => $Working
+            }
+
+            get_counter(): int {
+                return -1;
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+        }
+
+        $Working {
+            $.counter: int = 100
+
+            $>() {
+                this.log.Add("Working:enter");
+            }
+
+            process() {
+                this.log.Add("Working:process:counter=" + $.counter);
+                $.counter = $.counter + 1;
+            }
+
+            get_counter(): int {
+                return $.counter;
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+        }
+    domain:
+        List<object> log = new List<object>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 29: Forward Enter First ===");
+        var s = @@ForwardEnterFirst();
+
+        if ((int)s.get_counter() != -1) {
+            Console.WriteLine("FAIL: Expected -1 in Idle");
+            Environment.Exit(1);
+        }
+
+        s.process();
+
+        var counter = (int)s.get_counter();
+        var log = (List<object>)s.get_log();
+        Console.WriteLine("Counter after forward: " + counter);
+        Console.WriteLine("Log: [" + string.Join(", ", log) + "]");
+
+        if (!log.Contains("Working:enter")) {
+            Console.WriteLine("FAIL: Expected 'Working:enter' in log: " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+
+        if (!log.Contains("Working:process:counter=100")) {
+            Console.WriteLine("FAIL: Expected 'Working:process:counter=100' in log: " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+
+        if (counter != 101) {
+            Console.WriteLine("FAIL: Expected counter=101, got " + counter);
+            Environment.Exit(1);
+        }
+
+        int enterIdx = log.IndexOf("Working:enter");
+        int processIdx = log.IndexOf("Working:process:counter=100");
+        if (enterIdx >= processIdx) {
+            Console.WriteLine("FAIL: $> should run before process: " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+
+        Console.WriteLine("PASS: Forward sends $> first for non-$> events");
+    }
+}

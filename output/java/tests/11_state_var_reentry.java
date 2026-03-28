@@ -153,6 +153,21 @@ class StateVarReentry {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
+    private void _state_Other(StateVarReentryFrameEvent __e) {
+        if (__e._message.equals("come_back")) {
+            var __compartment = new StateVarReentryCompartment("Counter");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        } else if (__e._message.equals("get_count")) {
+            _context_stack.get(_context_stack.size() - 1)._return = -1;
+            return;
+        } else if (__e._message.equals("increment")) {
+            _context_stack.get(_context_stack.size() - 1)._return = -1;
+            return;
+        }
+    }
+
     private void _state_Counter(StateVarReentryFrameEvent __e) {
         var __sv_comp = __compartment;
         while (__sv_comp != null && !__sv_comp.state.equals("Counter")) { __sv_comp = __sv_comp.parent_compartment; }
@@ -171,21 +186,6 @@ class StateVarReentry {
         } else if (__e._message.equals("increment")) {
             __sv_comp.state_vars.put("count", (int) __sv_comp.state_vars.get("count") + 1);
             _context_stack.get(_context_stack.size() - 1)._return = (int) __sv_comp.state_vars.get("count");
-            return;
-        }
-    }
-
-    private void _state_Other(StateVarReentryFrameEvent __e) {
-        if (__e._message.equals("come_back")) {
-            var __compartment = new StateVarReentryCompartment("Counter");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        } else if (__e._message.equals("get_count")) {
-            _context_stack.get(_context_stack.size() - 1)._return = -1;
-            return;
-        } else if (__e._message.equals("increment")) {
-            _context_stack.get(_context_stack.size() - 1)._return = -1;
             return;
         }
     }

@@ -139,22 +139,6 @@ class MealyMachine {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
-    private void _state_Q0(MealyMachineFrameEvent __e) {
-        if (__e._message.equals("i_0")) {
-            this.emit_output(0);
-            var __compartment = new MealyMachineCompartment("Q1");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        } else if (__e._message.equals("i_1")) {
-            this.emit_output(0);
-            var __compartment = new MealyMachineCompartment("Q2");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
     private void _state_Q1(MealyMachineFrameEvent __e) {
         if (__e._message.equals("i_0")) {
             this.emit_output(0);
@@ -174,6 +158,22 @@ class MealyMachine {
     private void _state_Q2(MealyMachineFrameEvent __e) {
         if (__e._message.equals("i_0")) {
             this.emit_output(1);
+            var __compartment = new MealyMachineCompartment("Q1");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        } else if (__e._message.equals("i_1")) {
+            this.emit_output(0);
+            var __compartment = new MealyMachineCompartment("Q2");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
+    private void _state_Q0(MealyMachineFrameEvent __e) {
+        if (__e._message.equals("i_0")) {
+            this.emit_output(0);
             var __compartment = new MealyMachineCompartment("Q1");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);

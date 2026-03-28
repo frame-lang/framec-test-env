@@ -96,23 +96,23 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Parent(HSMForwardFrameEvent& __e) {
-        if (__e._message == "event_a") {
-            event_log.push_back("Parent:event_a");
-        } else if (__e._message == "event_b") {
-            event_log.push_back("Parent:event_b");
-        } else if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        }
-    }
-
     void _state_Child(HSMForwardFrameEvent& __e) {
         if (__e._message == "event_a") {
             event_log.push_back("Child:event_a");
         } else if (__e._message == "event_b") {
             event_log.push_back("Child:event_b_forward");
             _state_Parent(__e);
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        }
+    }
+
+    void _state_Parent(HSMForwardFrameEvent& __e) {
+        if (__e._message == "event_a") {
+            event_log.push_back("Parent:event_a");
+        } else if (__e._message == "event_b") {
+            event_log.push_back("Parent:event_b");
         } else if (__e._message == "get_log") {
             _context_stack.back()._return = std::any(event_log);
             return;;

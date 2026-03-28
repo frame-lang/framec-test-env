@@ -125,6 +125,10 @@ class MixedBodyStringsComments {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
+    private void _state_Done(MixedBodyStringsCommentsFrameEvent __e) {
+
+    }
+
     private void _state_Init(MixedBodyStringsCommentsFrameEvent __e) {
         if (__e._message.equals("start")) {
             // Native Java with Frame-statement-like tokens in strings and comments
@@ -136,10 +140,6 @@ class MixedBodyStringsComments {
             __transition(__compartment);
             return;
         }
-    }
-
-    private void _state_Done(MixedBodyStringsCommentsFrameEvent __e) {
-
     }
 }
 

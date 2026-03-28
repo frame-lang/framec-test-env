@@ -130,16 +130,16 @@ class S {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
-    private void _state_P(SFrameEvent __e) {
-
-    }
-
     private void _state_A(SFrameEvent __e) {
         if (__e._message.equals("ev")) {
             var n = (int) __e._parameters.get("n");
             _state_P(__e);
             String.valueOf(n);
         }
+    }
+
+    private void _state_P(SFrameEvent __e) {
+
     }
 }
 

@@ -96,19 +96,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Active(TransitionEnterArgsFrameEvent& __e) {
-        if (__e._message == "$>") {
-            auto source = std::any_cast<std::string>(__compartment->enter_args["0"]);
-            auto value = std::any_cast<int>(__compartment->enter_args["1"]);
-            event_log.push_back(std::string("active:enter:") + source + ":" + std::to_string(value));
-        } else if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "start") {
-            event_log.push_back("active:start");
-        }
-    }
-
     void _state_Idle(TransitionEnterArgsFrameEvent& __e) {
         if (__e._message == "get_log") {
             _context_stack.back()._return = std::any(event_log);
@@ -121,6 +108,19 @@ private:
             __new_compartment->enter_args["1"] = std::any(42);
             __transition(std::move(__new_compartment));
             return;
+        }
+    }
+
+    void _state_Active(TransitionEnterArgsFrameEvent& __e) {
+        if (__e._message == "$>") {
+            auto source = std::any_cast<std::string>(__compartment->enter_args["0"]);
+            auto value = std::any_cast<int>(__compartment->enter_args["1"]);
+            event_log.push_back(std::string("active:enter:") + source + ":" + std::to_string(value));
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "start") {
+            event_log.push_back("active:start");
         }
     }
 

@@ -94,28 +94,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Running(WithParamsFrameEvent& __e) {
-        if (__e._message == "add") {
-            auto value = std::any_cast<int>(__e._parameters.at("value"));
-            total += value;
-            printf("Added %d, total is now %d\n", value, total);
-        } else if (__e._message == "get_total") {
-            _context_stack.back()._return = std::any(total);
-            return;;
-        } else if (__e._message == "multiply") {
-            auto a = std::any_cast<int>(__e._parameters.at("a"));
-            auto b = std::any_cast<int>(__e._parameters.at("b"));
-            int result = a * b;
-            total += result;
-            printf("Multiplied %d * %d = %d, total is now %d\n", a, b, result, total);
-            _context_stack.back()._return = std::any(result);
-            return;;
-        } else if (__e._message == "start") {
-            auto initial = std::any_cast<int>(__e._parameters.at("initial"));
-            printf("Already running\n");
-        }
-    }
-
     void _state_Idle(WithParamsFrameEvent& __e) {
         if (__e._message == "add") {
             auto value = std::any_cast<int>(__e._parameters.at("value"));
@@ -136,6 +114,28 @@ private:
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
+        }
+    }
+
+    void _state_Running(WithParamsFrameEvent& __e) {
+        if (__e._message == "add") {
+            auto value = std::any_cast<int>(__e._parameters.at("value"));
+            total += value;
+            printf("Added %d, total is now %d\n", value, total);
+        } else if (__e._message == "get_total") {
+            _context_stack.back()._return = std::any(total);
+            return;;
+        } else if (__e._message == "multiply") {
+            auto a = std::any_cast<int>(__e._parameters.at("a"));
+            auto b = std::any_cast<int>(__e._parameters.at("b"));
+            int result = a * b;
+            total += result;
+            printf("Multiplied %d * %d = %d, total is now %d\n", a, b, result, total);
+            _context_stack.back()._return = std::any(result);
+            return;;
+        } else if (__e._message == "start") {
+            auto initial = std::any_cast<int>(__e._parameters.at("initial"));
+            printf("Already running\n");
         }
     }
 

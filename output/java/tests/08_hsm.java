@@ -147,23 +147,23 @@ class HSMForward {
         return __result;
     }
 
-    private void _state_Child(HSMForwardFrameEvent __e) {
+    private void _state_Parent(HSMForwardFrameEvent __e) {
         if (__e._message.equals("event_a")) {
-            this.log.add("Child:event_a");
+            this.log.add("Parent:event_a");
         } else if (__e._message.equals("event_b")) {
-            this.log.add("Child:event_b_forward");
-            _state_Parent(__e);
+            this.log.add("Parent:event_b");
         } else if (__e._message.equals("get_log")) {
             _context_stack.get(_context_stack.size() - 1)._return = this.log;
             return;
         }
     }
 
-    private void _state_Parent(HSMForwardFrameEvent __e) {
+    private void _state_Child(HSMForwardFrameEvent __e) {
         if (__e._message.equals("event_a")) {
-            this.log.add("Parent:event_a");
+            this.log.add("Child:event_a");
         } else if (__e._message.equals("event_b")) {
-            this.log.add("Parent:event_b");
+            this.log.add("Child:event_b_forward");
+            _state_Parent(__e);
         } else if (__e._message.equals("get_log")) {
             _context_stack.get(_context_stack.size() - 1)._return = this.log;
             return;

@@ -112,60 +112,12 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Closing(TcpServerFrameEvent& __e) {
+    void _state_Listen(TcpServerFrameEvent& __e) {
         if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Closing"));
+            _context_stack.back()._return = std::any(std::string("Listen"));
             return;;
-        } else if (__e._message == "receive_ack") {
-            auto __new_compartment = std::make_unique<TcpServerCompartment>("TimeWait");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
-    void _state_TimeWait(TcpServerFrameEvent& __e) {
-        if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("TimeWait"));
-            return;;
-        } else if (__e._message == "receive_ack") {
-            auto __new_compartment = std::make_unique<TcpServerCompartment>("Closed");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
-    void _state_CloseWait(TcpServerFrameEvent& __e) {
-        if (__e._message == "close") {
-            auto __new_compartment = std::make_unique<TcpServerCompartment>("LastAck");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("CloseWait"));
-            return;;
-        }
-    }
-
-    void _state_LastAck(TcpServerFrameEvent& __e) {
-        if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("LastAck"));
-            return;;
-        } else if (__e._message == "receive_ack") {
-            auto __new_compartment = std::make_unique<TcpServerCompartment>("Closed");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
-    void _state_FinWait2(TcpServerFrameEvent& __e) {
-        if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("FinWait2"));
-            return;;
-        } else if (__e._message == "receive_fin") {
-            auto __new_compartment = std::make_unique<TcpServerCompartment>("TimeWait");
+        } else if (__e._message == "receive_syn") {
+            auto __new_compartment = std::make_unique<TcpServerCompartment>("SynReceived");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
@@ -178,35 +130,6 @@ private:
             return;;
         } else if (__e._message == "receive_ack") {
             auto __new_compartment = std::make_unique<TcpServerCompartment>("Established");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
-    void _state_FinWait1(TcpServerFrameEvent& __e) {
-        if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("FinWait1"));
-            return;;
-        } else if (__e._message == "receive_ack") {
-            auto __new_compartment = std::make_unique<TcpServerCompartment>("FinWait2");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        } else if (__e._message == "receive_fin") {
-            auto __new_compartment = std::make_unique<TcpServerCompartment>("Closing");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
-    void _state_Listen(TcpServerFrameEvent& __e) {
-        if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Listen"));
-            return;;
-        } else if (__e._message == "receive_syn") {
-            auto __new_compartment = std::make_unique<TcpServerCompartment>("SynReceived");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
@@ -233,12 +156,89 @@ private:
         }
     }
 
+    void _state_LastAck(TcpServerFrameEvent& __e) {
+        if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("LastAck"));
+            return;;
+        } else if (__e._message == "receive_ack") {
+            auto __new_compartment = std::make_unique<TcpServerCompartment>("Closed");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
     void _state_Closed(TcpServerFrameEvent& __e) {
         if (__e._message == "get_state") {
             _context_stack.back()._return = std::any(std::string("Closed"));
             return;;
         } else if (__e._message == "listen") {
             auto __new_compartment = std::make_unique<TcpServerCompartment>("Listen");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
+    void _state_CloseWait(TcpServerFrameEvent& __e) {
+        if (__e._message == "close") {
+            auto __new_compartment = std::make_unique<TcpServerCompartment>("LastAck");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("CloseWait"));
+            return;;
+        }
+    }
+
+    void _state_FinWait2(TcpServerFrameEvent& __e) {
+        if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("FinWait2"));
+            return;;
+        } else if (__e._message == "receive_fin") {
+            auto __new_compartment = std::make_unique<TcpServerCompartment>("TimeWait");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
+    void _state_FinWait1(TcpServerFrameEvent& __e) {
+        if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("FinWait1"));
+            return;;
+        } else if (__e._message == "receive_ack") {
+            auto __new_compartment = std::make_unique<TcpServerCompartment>("FinWait2");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else if (__e._message == "receive_fin") {
+            auto __new_compartment = std::make_unique<TcpServerCompartment>("Closing");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
+    void _state_TimeWait(TcpServerFrameEvent& __e) {
+        if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("TimeWait"));
+            return;;
+        } else if (__e._message == "receive_ack") {
+            auto __new_compartment = std::make_unique<TcpServerCompartment>("Closed");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
+    void _state_Closing(TcpServerFrameEvent& __e) {
+        if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Closing"));
+            return;;
+        } else if (__e._message == "receive_ack") {
+            auto __new_compartment = std::make_unique<TcpServerCompartment>("TimeWait");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
@@ -417,59 +417,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_CloseWait(TcpClientFrameEvent& __e) {
-        if (__e._message == "close") {
-            auto __new_compartment = std::make_unique<TcpClientCompartment>("LastAck");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("CloseWait"));
-            return;;
-        }
-    }
-
-    void _state_FinWait2(TcpClientFrameEvent& __e) {
-        if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("FinWait2"));
-            return;;
-        } else if (__e._message == "receive_fin") {
-            auto __new_compartment = std::make_unique<TcpClientCompartment>("TimeWait");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
-    void _state_Closed(TcpClientFrameEvent& __e) {
-        if (__e._message == "connect") {
-            auto __new_compartment = std::make_unique<TcpClientCompartment>("SynSent");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Closed"));
-            return;;
-        }
-    }
-
-    void _state_FinWait1(TcpClientFrameEvent& __e) {
-        if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("FinWait1"));
-            return;;
-        } else if (__e._message == "receive_ack") {
-            auto __new_compartment = std::make_unique<TcpClientCompartment>("FinWait2");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        } else if (__e._message == "receive_fin") {
-            auto __new_compartment = std::make_unique<TcpClientCompartment>("Closing");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
     void _state_SynSent(TcpClientFrameEvent& __e) {
         if (__e._message == "get_state") {
             _context_stack.back()._return = std::any(std::string("SynSent"));
@@ -502,6 +449,59 @@ private:
         }
     }
 
+    void _state_Closed(TcpClientFrameEvent& __e) {
+        if (__e._message == "connect") {
+            auto __new_compartment = std::make_unique<TcpClientCompartment>("SynSent");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Closed"));
+            return;;
+        }
+    }
+
+    void _state_Closing(TcpClientFrameEvent& __e) {
+        if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Closing"));
+            return;;
+        } else if (__e._message == "receive_ack") {
+            auto __new_compartment = std::make_unique<TcpClientCompartment>("TimeWait");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
+    void _state_CloseWait(TcpClientFrameEvent& __e) {
+        if (__e._message == "close") {
+            auto __new_compartment = std::make_unique<TcpClientCompartment>("LastAck");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("CloseWait"));
+            return;;
+        }
+    }
+
+    void _state_FinWait1(TcpClientFrameEvent& __e) {
+        if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("FinWait1"));
+            return;;
+        } else if (__e._message == "receive_ack") {
+            auto __new_compartment = std::make_unique<TcpClientCompartment>("FinWait2");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else if (__e._message == "receive_fin") {
+            auto __new_compartment = std::make_unique<TcpClientCompartment>("Closing");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
     void _state_LastAck(TcpClientFrameEvent& __e) {
         if (__e._message == "get_state") {
             _context_stack.back()._return = std::any(std::string("LastAck"));
@@ -526,11 +526,11 @@ private:
         }
     }
 
-    void _state_Closing(TcpClientFrameEvent& __e) {
+    void _state_FinWait2(TcpClientFrameEvent& __e) {
         if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Closing"));
+            _context_stack.back()._return = std::any(std::string("FinWait2"));
             return;;
-        } else if (__e._message == "receive_ack") {
+        } else if (__e._message == "receive_fin") {
             auto __new_compartment = std::make_unique<TcpClientCompartment>("TimeWait");
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));

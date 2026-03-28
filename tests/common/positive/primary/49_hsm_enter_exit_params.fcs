@@ -1,0 +1,135 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system HSMEnterExitParams {
+    interface:
+        go_to_a()
+        go_to_sibling()
+        go_back()
+        get_log(): List<object>
+        get_state(): string
+
+    machine:
+        $Start {
+            go_to_a() {
+                -> ("starting") $ChildA
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "Start";
+            }
+        }
+
+        $ChildA => $Parent {
+            $>(msg: string) {
+                this.log.Add("ChildA:enter(" + msg + ")");
+            }
+
+            <$(reason: string) {
+                this.log.Add("ChildA:exit(" + reason + ")");
+            }
+
+            go_to_sibling() {
+                ("leaving_A") -> ("arriving_B") $ChildB
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "ChildA";
+            }
+        }
+
+        $ChildB => $Parent {
+            $>(msg: string) {
+                this.log.Add("ChildB:enter(" + msg + ")");
+            }
+
+            <$(reason: string) {
+                this.log.Add("ChildB:exit(" + reason + ")");
+            }
+
+            go_back() {
+                ("leaving_B") -> ("returning_A") $ChildA
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "ChildB";
+            }
+        }
+
+        $Parent {
+            get_log(): List<object> {
+                return this.log;
+            }
+
+            get_state(): string {
+                return "Parent";
+            }
+        }
+    domain:
+        List<object> log = new List<object>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 49: HSM Enter/Exit with Params ===");
+        var s = @@HSMEnterExitParams();
+
+        // First go to ChildA with enter params
+        s.go_to_a();
+        var log = (List<object>)s.get_log();
+        if (!log.Contains("ChildA:enter(starting)")) {
+            Console.WriteLine("FAIL: Expected ChildA:enter(starting), got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.5.0: Initial transition with enter params - PASS");
+
+        // TC2.5.1: Exit params passed correctly
+        s.go_to_sibling();
+        log = (List<object>)s.get_log();
+        if (!log.Contains("ChildA:exit(leaving_A)")) {
+            Console.WriteLine("FAIL: Expected exit with param, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.5.1: Exit params passed correctly - PASS");
+
+        // TC2.5.2: Enter params passed to target state
+        if (!log.Contains("ChildB:enter(arriving_B)")) {
+            Console.WriteLine("FAIL: Expected enter with param, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if ((string)s.get_state() != "ChildB") {
+            Console.WriteLine("FAIL: Expected ChildB, got " + s.get_state());
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.5.2: Enter params passed to target - PASS");
+
+        // TC2.5.3: Return transition with different params
+        s.go_back();
+        log = (List<object>)s.get_log();
+        if (!log.Contains("ChildB:exit(leaving_B)")) {
+            Console.WriteLine("FAIL: Expected ChildB exit, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (!log.Contains("ChildA:enter(returning_A)")) {
+            Console.WriteLine("FAIL: Expected ChildA enter, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2.5.3: Return transition with params - PASS");
+
+        Console.WriteLine("PASS: HSM enter/exit with params works correctly");
+    }
+}

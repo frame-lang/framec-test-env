@@ -1,0 +1,158 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system HSMThreeLevels {
+    interface:
+        handle_at_grandchild()
+        forward_to_child()
+        forward_to_parent()
+        forward_through_all()
+        get_log(): List<object>
+
+    machine:
+        $Grandchild => $Child {
+            $.grandchild_var: int = 1
+
+            handle_at_grandchild() {
+                int val = $.grandchild_var;
+                this.log.Add("Grandchild:handled(var=" + val + ")");
+            }
+
+            forward_to_child() {
+                this.log.Add("Grandchild:forward_to_child");
+                => $^
+            }
+
+            forward_to_parent() {
+                this.log.Add("Grandchild:forward_to_parent");
+                => $^
+            }
+
+            forward_through_all() {
+                this.log.Add("Grandchild:forward_through_all");
+                => $^
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+        }
+
+        $Child => $Parent {
+            $.child_var: int = 10
+
+            forward_to_child() {
+                int val = $.child_var;
+                this.log.Add("Child:handled(var=" + val + ")");
+            }
+
+            forward_to_parent() {
+                int val = $.child_var;
+                this.log.Add("Child:forward_to_parent(var=" + val + ")");
+                => $^
+            }
+
+            forward_through_all() {
+                int val = $.child_var;
+                this.log.Add("Child:forward_through_all(var=" + val + ")");
+                => $^
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+        }
+
+        $Parent {
+            $.parent_var: int = 100
+
+            forward_to_parent() {
+                int val = $.parent_var;
+                this.log.Add("Parent:handled(var=" + val + ")");
+            }
+
+            forward_through_all() {
+                int val = $.parent_var;
+                this.log.Add("Parent:forward_through_all(var=" + val + ")");
+            }
+
+            get_log(): List<object> {
+                return this.log;
+            }
+        }
+    domain:
+        List<object> log = new List<object>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 42: HSM Three-Level Hierarchy ===");
+        var s = @@HSMThreeLevels();
+
+        // TC1.2.1: Three-level hierarchy compiles
+        Console.WriteLine("TC1.2.1: Three-level hierarchy compiles - PASS");
+
+        // TC1.2.2: Handle at grandchild (no forward)
+        s.handle_at_grandchild();
+        var log = (List<object>)s.get_log();
+        if (!log.Contains("Grandchild:handled(var=1)")) {
+            Console.WriteLine("FAIL: Expected Grandchild handler, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.2.2: Grandchild handles locally - PASS");
+
+        // TC1.2.3: Forward from grandchild to child
+        s.forward_to_child();
+        log = (List<object>)s.get_log();
+        if (!log.Contains("Grandchild:forward_to_child")) {
+            Console.WriteLine("FAIL: Expected Grandchild forward, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (!log.Contains("Child:handled(var=10)")) {
+            Console.WriteLine("FAIL: Expected Child handler, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.2.3: Forward grandchild->child - PASS");
+
+        // TC1.2.4: Forward from grandchild through child to parent
+        s.forward_to_parent();
+        log = (List<object>)s.get_log();
+        if (!log.Contains("Grandchild:forward_to_parent")) {
+            Console.WriteLine("FAIL: Expected Grandchild forward, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (!log.Contains("Child:forward_to_parent(var=10)")) {
+            Console.WriteLine("FAIL: Expected Child forward, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (!log.Contains("Parent:handled(var=100)")) {
+            Console.WriteLine("FAIL: Expected Parent handler, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.2.4: Forward grandchild->child->parent - PASS");
+
+        // TC1.2.5: Forward through entire chain
+        s.forward_through_all();
+        log = (List<object>)s.get_log();
+        if (!log.Contains("Grandchild:forward_through_all")) {
+            Console.WriteLine("FAIL: Expected Grandchild, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (!log.Contains("Child:forward_through_all(var=10)")) {
+            Console.WriteLine("FAIL: Expected Child, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        if (!log.Contains("Parent:forward_through_all(var=100)")) {
+            Console.WriteLine("FAIL: Expected Parent, got " + string.Join(", ", log));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1.2.5: Full chain forward - PASS");
+
+        // Verify state variable isolation
+        Console.WriteLine("TC1.2.6: State vars isolated (grandchild=1, child=10, parent=100) - PASS");
+
+        Console.WriteLine("PASS: HSM three-level hierarchy works correctly");
+    }
+}

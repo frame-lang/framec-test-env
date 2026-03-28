@@ -1,0 +1,94 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system SystemReturnReentrantTest {
+    interface:
+        outer_call(): string
+        inner_call(): string
+        nested_call(): string
+        get_log(): string
+
+    machine:
+        $Start {
+            $.log: string = ""
+
+            outer_call(): string {
+                $.log = $.log + "outer_start,";
+                // Call inner method - this creates nested return context
+                string inner_result = this.inner_call();
+                $.log = $.log + "outer_after_inner,";
+                // Our return should be independent of inner's return
+                return "outer_result:" + inner_result;
+            }
+
+            inner_call(): string {
+                $.log = $.log + "inner,";
+                return "inner_result";
+            }
+
+            nested_call(): string {
+                $.log = $.log + "nested_start,";
+                // Two levels of nesting
+                string result1 = this.inner_call();
+                string result2 = this.outer_call();
+                $.log = $.log + "nested_end,";
+                return "nested:" + result1 + "+" + result2;
+            }
+
+            get_log(): string {
+                return $.log;
+            }
+        }
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 16: System Return Reentrant (Nested Calls) ===");
+
+        // Test 1: Simple inner call
+        var s1 = @@SystemReturnReentrantTest();
+        var result1 = (string)s1.inner_call();
+        if (result1 != "inner_result") {
+            Console.WriteLine("FAIL: Expected 'inner_result', got '" + result1 + "'");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("1. inner_call() = '" + result1 + "'");
+
+        // Test 2: Outer calls inner - return contexts should be separate
+        var s2 = @@SystemReturnReentrantTest();
+        var result2 = (string)s2.outer_call();
+        if (result2 != "outer_result:inner_result") {
+            Console.WriteLine("FAIL: Expected 'outer_result:inner_result', got '" + result2 + "'");
+            Environment.Exit(1);
+        }
+        var log2 = (string)s2.get_log();
+        if (!log2.Contains("outer_start")) {
+            Console.WriteLine("FAIL: Missing outer_start in log: " + log2);
+            Environment.Exit(1);
+        }
+        if (!log2.Contains("inner")) {
+            Console.WriteLine("FAIL: Missing inner in log: " + log2);
+            Environment.Exit(1);
+        }
+        if (!log2.Contains("outer_after_inner")) {
+            Console.WriteLine("FAIL: Missing outer_after_inner in log: " + log2);
+            Environment.Exit(1);
+        }
+        Console.WriteLine("2. outer_call() = '" + result2 + "'");
+        Console.WriteLine("   Log: '" + log2 + "'");
+
+        // Test 3: Deeply nested calls
+        var s3 = @@SystemReturnReentrantTest();
+        var result3 = (string)s3.nested_call();
+        var expected = "nested:inner_result+outer_result:inner_result";
+        if (result3 != expected) {
+            Console.WriteLine("FAIL: Expected '" + expected + "', got '" + result3 + "'");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("3. nested_call() = '" + result3 + "'");
+
+        Console.WriteLine("PASS: System return reentrant (nested calls) works correctly");
+    }
+}

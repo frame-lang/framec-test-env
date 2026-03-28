@@ -1,0 +1,71 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system HSMForward {
+    interface:
+        event_a()
+        event_b()
+        get_log(): List<string>
+
+    machine:
+        $Child => $Parent {
+            event_a() {
+                this.log.Add("Child:event_a");
+            }
+
+            event_b() {
+                this.log.Add("Child:event_b_forward");
+                => $^
+            }
+
+            get_log(): List<string> {
+                return this.log;
+            }
+        }
+
+        $Parent {
+            event_a() {
+                this.log.Add("Parent:event_a");
+            }
+
+            event_b() {
+                this.log.Add("Parent:event_b");
+            }
+
+            get_log(): List<string> {
+                return this.log;
+            }
+        }
+    domain:
+        List<string> log = new List<string>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 08: HSM Forward ===");
+        var s = new HSMForward();
+
+        // event_a should be handled by Child (no forward)
+        s.event_a();
+        var log = (List<string>)s.get_log();
+        if (!log.Contains("Child:event_a")) {
+            throw new Exception("Expected 'Child:event_a' in log, got " + string.Join(", ", log));
+        }
+        Console.WriteLine("After event_a: [" + string.Join(", ", log) + "]");
+
+        // event_b should forward to Parent
+        s.event_b();
+        log = (List<string>)s.get_log();
+        if (!log.Contains("Child:event_b_forward")) {
+            throw new Exception("Expected 'Child:event_b_forward' in log, got " + string.Join(", ", log));
+        }
+        if (!log.Contains("Parent:event_b")) {
+            throw new Exception("Expected 'Parent:event_b' in log (forwarded), got " + string.Join(", ", log));
+        }
+        Console.WriteLine("After event_b (forwarded): [" + string.Join(", ", log) + "]");
+
+        Console.WriteLine("PASS: HSM forward works correctly");
+    }
+}

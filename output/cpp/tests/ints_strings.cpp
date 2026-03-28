@@ -95,10 +95,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_P(SFrameEvent& __e) {
-
-    }
-
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             int n = 42;
@@ -106,6 +102,10 @@ private:
             _state_P(__e);
             std::transform(s.begin(), s.end(), s.begin(), ::toupper);
         }
+    }
+
+    void _state_P(SFrameEvent& __e) {
+
     }
 
 public:

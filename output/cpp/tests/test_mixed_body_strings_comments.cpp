@@ -94,10 +94,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Done(MixedBodyStringsCommentsFrameEvent& __e) {
-
-    }
-
     void _state_Init(MixedBodyStringsCommentsFrameEvent& __e) {
         if (__e._message == "start") {
             // Native C++ with Frame-statement-like tokens in strings and comments
@@ -109,6 +105,10 @@ private:
             __transition(std::move(__new_compartment));
             return;
         }
+    }
+
+    void _state_Done(MixedBodyStringsCommentsFrameEvent& __e) {
+
     }
 
 public:

@@ -125,10 +125,6 @@ class SysX {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
-    private void _state_B(SysXFrameEvent __e) {
-
-    }
-
     private void _state_A(SysXFrameEvent __e) {
         if (__e._message.equals("e")) {
             var __compartment = new SysXCompartment("B");
@@ -136,6 +132,10 @@ class SysX {
             __transition(__compartment);
             return;
         }
+    }
+
+    private void _state_B(SysXFrameEvent __e) {
+
     }
 }
 

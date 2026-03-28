@@ -94,6 +94,11 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_B(SFrameEvent& __e) {
+        if (__e._message == "e") {
+        }
+    }
+
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             auto p = __e._parameters.at("p");
@@ -108,11 +113,6 @@ private:
         }
     }
 
-    void _state_B(SFrameEvent& __e) {
-        if (__e._message == "e") {
-        }
-    }
-
 public:
     S() {
         __compartment = std::make_unique<SCompartment>("A");
@@ -123,21 +123,21 @@ public:
         _context_stack.pop_back();
     }
 
-    void e(std::any p, std::any q) {
+    void g(std::any x) {
         std::unordered_map<std::string, std::any> __params;
-        __params["p"] = p;
-        __params["q"] = q;
-        SFrameEvent __e("e", std::move(__params));
+        __params["x"] = x;
+        SFrameEvent __e("g", std::move(__params));
         SFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);
         _context_stack.pop_back();
     }
 
-    void g(std::any x) {
+    void e(std::any p, std::any q) {
         std::unordered_map<std::string, std::any> __params;
-        __params["x"] = x;
-        SFrameEvent __e("g", std::move(__params));
+        __params["p"] = p;
+        __params["q"] = q;
+        SFrameEvent __e("e", std::move(__params));
         SFrameContext __ctx(std::move(__e));
         _context_stack.push_back(std::move(__ctx));
         __kernel(_context_stack.back()._event);

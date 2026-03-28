@@ -58,6 +58,7 @@ RUST_OUT="$RUST_CRATE/tests"
 C_OUT="$TEST_ENV_ROOT/output/c/tests"
 CPP_OUT="$TEST_ENV_ROOT/output/cpp/tests"
 JAVA_OUT="$TEST_ENV_ROOT/output/java/tests"
+CSHARP_OUT="$TEST_ENV_ROOT/output/csharp/tests"
 
 # Colors
 RED='\033[0;31m'
@@ -90,6 +91,7 @@ while [[ $# -gt 0 ]]; do
         --c) FILTER_LANG="c" ;;
         --cpp|--c++) FILTER_LANG="cpp" ;;
         --java) FILTER_LANG="java" ;;
+        --csharp|--cs) FILTER_LANG="csharp" ;;
         --langs|-l)
             # Parse comma-separated language list (py,ts,rs,c -> python typescript rust c)
             FILTER_LANGS=""
@@ -138,7 +140,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Create output directories
-mkdir -p "$PYTHON_OUT" "$TS_OUT" "$RUST_OUT" "$C_OUT" "$CPP_OUT" "$JAVA_OUT"
+mkdir -p "$PYTHON_OUT" "$TS_OUT" "$RUST_OUT" "$C_OUT" "$CPP_OUT" "$JAVA_OUT" "$CSHARP_OUT"
 
 # Temp directory for parallel results
 RESULTS_DIR=$(mktemp -d)
@@ -153,6 +155,7 @@ lang_to_target() {
         c) echo "c" ;;
         cpp) echo "cpp_17" ;;
         java) echo "java" ;;
+        csharp) echo "csharp" ;;
     esac
 }
 
@@ -165,6 +168,7 @@ lang_to_outdir() {
         c) echo "$C_OUT" ;;
         cpp) echo "$CPP_OUT" ;;
         java) echo "$JAVA_OUT" ;;
+        csharp) echo "$CSHARP_OUT" ;;
     esac
 }
 
@@ -177,6 +181,7 @@ lang_to_outext() {
         c) echo "c" ;;
         cpp) echo "cpp" ;;
         java) echo "java" ;;
+        csharp) echo "cs" ;;
     esac
 }
 
@@ -189,6 +194,7 @@ lang_to_srcext() {
         c) echo "fc" ;;
         cpp) echo "fcpp" ;;
         java) echo "fjava" ;;
+        csharp) echo "fcs" ;;
     esac
 }
 
@@ -529,7 +535,7 @@ run_category() {
 
     # Check if directory has test files
     local has_tests=false
-    for ext in fpy fts frs fc fcpp fjava; do
+    for ext in fpy fts frs fc fcpp fjava fcs; do
         if ls "$category_dir"/*.$ext 1>/dev/null 2>&1; then
             has_tests=true
             break
@@ -546,7 +552,7 @@ run_category() {
     # Determine which languages to test based on scope
     local languages=""
     case $scope in
-        common) languages="python typescript rust c cpp java" ;;
+        common) languages="python typescript rust c cpp java csharp" ;;
         python) languages="python" ;;
         typescript) languages="typescript" ;;
         rust) languages="rust" ;;
@@ -555,7 +561,7 @@ run_category() {
 
     # Get unique test names from all language files
     local test_names=""
-    for ext in fpy fts frs fc fcpp fjava; do
+    for ext in fpy fts frs fc fcpp fjava fcs; do
         for f in "$category_dir"/*.$ext; do
             [ -f "$f" ] || continue
             local name=$(basename "$f" | sed 's/\.f[a-z]*$//')
@@ -591,6 +597,7 @@ run_category() {
                 c) ext="fc" ;;
                 cpp) ext="fcpp" ;;
                 java) ext="fjava" ;;
+                csharp) ext="fcs" ;;
             esac
 
             local test_file="$category_dir/${test_name}.${ext}"
@@ -628,7 +635,7 @@ if $PARALLEL; then
     elif [ -n "$FILTER_LANGS" ]; then
         languages="$FILTER_LANGS"
     else
-        languages="python typescript rust c cpp java"
+        languages="python typescript rust c cpp java csharp"
     fi
 
     # Phase 1: Transpile all tests first (all languages in parallel)
@@ -744,7 +751,7 @@ total_fail=0
 total_skip=0
 total_known=0
 
-for lang in python typescript rust c cpp java; do
+for lang in python typescript rust c cpp java csharp; do
     p=$(get_counter "$lang" "pass")
     f=$(get_counter "$lang" "fail")
     s=$(get_counter "$lang" "skip")

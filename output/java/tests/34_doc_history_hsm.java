@@ -227,6 +227,23 @@ class HistoryHSM {
         }
     }
 
+    private void _state_C(HistoryHSMFrameEvent __e) {
+        if (__e._message.equals("$>")) {
+            this.log_msg("In $C");
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "C";
+            return;
+        } else if (__e._message.equals("goBack")) {
+            this.log_msg("goBack");
+            var __popped = _state_stack.remove(_state_stack.size() - 1);
+            __transition(__popped);
+            return;
+        }
+    }
+
     private void _state_Waiting(HistoryHSMFrameEvent __e) {
         if (__e._message.equals("$>")) {
             this.log_msg("In $Waiting");
@@ -247,23 +264,6 @@ class HistoryHSM {
             var __compartment = new HistoryHSMCompartment("B");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
-            return;
-        }
-    }
-
-    private void _state_C(HistoryHSMFrameEvent __e) {
-        if (__e._message.equals("$>")) {
-            this.log_msg("In $C");
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "C";
-            return;
-        } else if (__e._message.equals("goBack")) {
-            this.log_msg("goBack");
-            var __popped = _state_stack.remove(_state_stack.size() - 1);
-            __transition(__popped);
             return;
         }
     }
