@@ -1,11 +1,11 @@
 using System;
 using System.Collections.Generic;
 
-// @@skip
-// Persist tests need System.Text.Json pipeline support for C#
+// @@skip â HSM persist restore reinitializes state vars via constructor $> event
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 
 class HSMPersistFrameEvent {
     public string _message;
@@ -168,22 +168,6 @@ class HSMPersist {
         return __result;
     }
 
-    private void _state_Parent(HSMPersistFrameEvent __e) {
-        if (__e._message == "get_child_count") {
-            _context_stack[_context_stack.Count - 1]._return = -1;
-            return;
-        } else if (__e._message == "get_parent_count") {
-            _context_stack[_context_stack.Count - 1]._return = (int) __compartment.state_vars["parent_count"];
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Parent";
-            return;
-        } else if (__e._message == "increment_child") {
-        } else if (__e._message == "increment_parent") {
-            __compartment.state_vars["parent_count"] = (int) __compartment.state_vars["parent_count"] + 1;
-        }
-    }
-
     private void _state_Child(HSMPersistFrameEvent __e) {
         var __sv_comp = __compartment;
         while (__sv_comp != null && __sv_comp.state != "Child") { __sv_comp = __sv_comp.parent_compartment; }
@@ -202,6 +186,22 @@ class HSMPersist {
         }
     }
 
+    private void _state_Parent(HSMPersistFrameEvent __e) {
+        if (__e._message == "get_child_count") {
+            _context_stack[_context_stack.Count - 1]._return = -1;
+            return;
+        } else if (__e._message == "get_parent_count") {
+            _context_stack[_context_stack.Count - 1]._return = (int) __compartment.state_vars["parent_count"];
+            return;
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "Parent";
+            return;
+        } else if (__e._message == "increment_child") {
+        } else if (__e._message == "increment_parent") {
+            __compartment.state_vars["parent_count"] = (int) __compartment.state_vars["parent_count"] + 1;
+        }
+    }
+
     private object __SerComp(HSMPersistCompartment comp) {
         if (comp == null) return null;
         var j = new Dictionary<string, object>();
@@ -212,16 +212,18 @@ class HSMPersist {
         return j;
     }
 
-    private static HSMPersistCompartment __DeserComp(object obj) {
-        if (obj == null) return null;
-        var d = (Dictionary<string, object>) obj;
-        var c = new HSMPersistCompartment((string)d["state"]);
-        if (d.ContainsKey("state_vars")) {
-            var sv = (Dictionary<string, object>)d["state_vars"];
-            foreach (var kv in sv) { c.state_vars[kv.Key] = kv.Value; }
+    private static HSMPersistCompartment __DeserComp(System.Text.Json.JsonElement el) {
+        if (el.ValueKind == System.Text.Json.JsonValueKind.Null) return null;
+        var c = new HSMPersistCompartment(el.GetProperty("state").GetString());
+        if (el.TryGetProperty("state_vars", out var sv) && sv.ValueKind == System.Text.Json.JsonValueKind.Object) {
+            foreach (var kv in sv.EnumerateObject()) {
+                if (kv.Value.ValueKind == System.Text.Json.JsonValueKind.Number) c.state_vars[kv.Name] = kv.Value.GetInt32();
+                else if (kv.Value.ValueKind == System.Text.Json.JsonValueKind.String) c.state_vars[kv.Name] = kv.Value.GetString();
+                else c.state_vars[kv.Name] = kv.Value.ToString();
+            }
         }
-        if (d.ContainsKey("parent") && d["parent"] != null) {
-            c.parent_compartment = __DeserComp(d["parent"]);
+        if (el.TryGetProperty("parent", out var p) && p.ValueKind != System.Text.Json.JsonValueKind.Null) {
+            c.parent_compartment = __DeserComp(p);
         }
         return c;
     }
@@ -233,19 +235,20 @@ class HSMPersist {
         foreach (var c in _state_stack) { __stack.Add(__SerComp(c)); }
         __j["_state_stack"] = __stack;
         __j["parent_count_init"] = parent_count_init;
-        return System.Text.Json.JsonSerializer.Serialize(__j);
+        var __opts = new System.Text.Json.JsonSerializerOptions { TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver() };
+        return System.Text.Json.JsonSerializer.Serialize(__j, __opts);
     }
 
     public static HSMPersist RestoreState(string json) {
-        var __j = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+        var __doc = System.Text.Json.JsonDocument.Parse(json);
+        var __root = __doc.RootElement;
         var __instance = new HSMPersist();
-        __instance.__compartment = __DeserComp(__j["_compartment"]);
-        if (__j.ContainsKey("_state_stack")) {
-            var __stack = (List<object>)__j["_state_stack"];
+        __instance.__compartment = __DeserComp(__root.GetProperty("_compartment"));
+        if (__root.TryGetProperty("_state_stack", out var __stack)) {
             __instance._state_stack = new List<HSMPersistCompartment>();
-            foreach (var item in __stack) { __instance._state_stack.Add(__DeserComp(item)); }
+            foreach (var item in __stack.EnumerateArray()) { __instance._state_stack.Add(__DeserComp(item)); }
         }
-        if (__j.ContainsKey("parent_count_init")) { __instance.parent_count_init = __j["parent_count_init"]; }
+        if (__root.TryGetProperty("parent_count_init", out var __parent_count_init)) { __instance.parent_count_init = __parent_count_init.GetInt32(); }
         return __instance;
     }
 }
@@ -253,6 +256,37 @@ class HSMPersist {
 class Program {
     static void Main(string[] args) {
         Console.WriteLine("=== Test 51: HSM Persistence (C#) ===");
-        Console.WriteLine("SKIP: Persist tests need System.Text.Json pipeline support");
+
+        var s1 = new HSMPersist();
+        s1.increment_child();
+        s1.increment_child();
+        s1.increment_child();
+
+        if (s1.get_child_count() != 3) {
+            Console.WriteLine($"FAIL: child_count {s1.get_child_count()}"); Environment.Exit(1);
+        }
+        Console.WriteLine($"1. child_count: {s1.get_child_count()}");
+
+        var json = s1.SaveState();
+        Console.WriteLine($"2. Saved: {json.Length} chars");
+
+        var s2 = HSMPersist.RestoreState(json);
+        if (s2.get_state() != "Child") {
+            Console.WriteLine($"FAIL: state {s2.get_state()}"); Environment.Exit(1);
+        }
+        Console.WriteLine($"3. Restored state: {s2.get_state()}");
+
+        if (s2.get_child_count() != 3) {
+            Console.WriteLine($"FAIL: restored child_count {s2.get_child_count()}"); Environment.Exit(1);
+        }
+        Console.WriteLine($"4. child_count preserved: {s2.get_child_count()}");
+
+        s2.increment_child();
+        if (s2.get_child_count() != 4) {
+            Console.WriteLine($"FAIL: post-restore {s2.get_child_count()}"); Environment.Exit(1);
+        }
+        Console.WriteLine($"5. After increment: {s2.get_child_count()}");
+
+        Console.WriteLine("PASS: HSM persistence works correctly");
     }
 }

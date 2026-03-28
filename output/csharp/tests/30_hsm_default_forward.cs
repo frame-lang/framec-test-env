@@ -149,17 +149,6 @@ class HSMDefaultForward {
         return __result;
     }
 
-    private void _state_Child(HSMDefaultForwardFrameEvent __e) {
-        if (__e._message == "get_log") {
-            _context_stack[_context_stack.Count - 1]._return = this.log;
-            return;
-        } else if (__e._message == "handled_event") {
-            this.log.Add("Child:handled_event");
-        } else {
-            _state_Parent(__e);
-        }
-    }
-
     private void _state_Parent(HSMDefaultForwardFrameEvent __e) {
         if (__e._message == "get_log") {
             _context_stack[_context_stack.Count - 1]._return = this.log;
@@ -168,6 +157,17 @@ class HSMDefaultForward {
             this.log.Add("Parent:handled_event");
         } else if (__e._message == "unhandled_event") {
             this.log.Add("Parent:unhandled_event");
+        }
+    }
+
+    private void _state_Child(HSMDefaultForwardFrameEvent __e) {
+        if (__e._message == "get_log") {
+            _context_stack[_context_stack.Count - 1]._return = this.log;
+            return;
+        } else if (__e._message == "handled_event") {
+            this.log.Add("Child:handled_event");
+        } else {
+            _state_Parent(__e);
         }
     }
 }

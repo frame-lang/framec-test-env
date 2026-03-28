@@ -158,23 +158,6 @@ class HSMEnterParentOnly {
         return __result;
     }
 
-    private void _state_Parent(HSMEnterParentOnlyFrameEvent __e) {
-        if (__e._message == "$>") {
-            this.log.Add("Parent:enter");
-        } else if (__e._message == "get_log") {
-            _context_stack[_context_stack.Count - 1]._return = this.log;
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Parent";
-            return;
-        } else if (__e._message == "go_to_child") {
-            { var __new_compartment = new HSMEnterParentOnlyCompartment("Child");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
     private void _state_Start(HSMEnterParentOnlyFrameEvent __e) {
         if (__e._message == "get_log") {
             _context_stack[_context_stack.Count - 1]._return = this.log;
@@ -189,6 +172,23 @@ class HSMEnterParentOnly {
             return;
         } else if (__e._message == "go_to_parent") {
             { var __new_compartment = new HSMEnterParentOnlyCompartment("Parent");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        }
+    }
+
+    private void _state_Parent(HSMEnterParentOnlyFrameEvent __e) {
+        if (__e._message == "$>") {
+            this.log.Add("Parent:enter");
+        } else if (__e._message == "get_log") {
+            _context_stack[_context_stack.Count - 1]._return = this.log;
+            return;
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "Parent";
+            return;
+        } else if (__e._message == "go_to_child") {
+            { var __new_compartment = new HSMEnterParentOnlyCompartment("Child");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;

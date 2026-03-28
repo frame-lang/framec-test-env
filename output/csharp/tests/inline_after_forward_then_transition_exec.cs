@@ -132,10 +132,6 @@ class S {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
-    private void _state_P(SFrameEvent __e) {
-
-    }
-
     private void _state_A(SFrameEvent __e) {
         if (__e._message == "e") {
             _state_P(__e); int a = 1; int b = 2; // multiple natives after forward on same line
@@ -147,6 +143,10 @@ class S {
     }
 
     private void _state_B(SFrameEvent __e) {
+
+    }
+
+    private void _state_P(SFrameEvent __e) {
 
     }
 }

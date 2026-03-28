@@ -176,6 +176,17 @@ class HistoryBasic {
         }
     }
 
+    private void _state_C(HistoryBasicFrameEvent __e) {
+        if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "C";
+            return;
+        } else if (__e._message == "return_back") {
+            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
+            __transition(__popped);
+            return;
+        }
+    }
+
     private void _state_A(HistoryBasicFrameEvent __e) {
         if (__e._message == "get_state") {
             _context_stack[_context_stack.Count - 1]._return = "A";
@@ -190,17 +201,6 @@ class HistoryBasic {
             { var __new_compartment = new HistoryBasicCompartment("C");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
-            return;
-        }
-    }
-
-    private void _state_C(HistoryBasicFrameEvent __e) {
-        if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "C";
-            return;
-        } else if (__e._message == "return_back") {
-            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
-            __transition(__popped);
             return;
         }
     }

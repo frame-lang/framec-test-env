@@ -136,10 +136,6 @@ class S {
 
     }
 
-    private void _state_P(SFrameEvent __e) {
-
-    }
-
     private void _state_A(SFrameEvent __e) {
         if (__e._message == "e") {
             _state_P(__e);
@@ -149,6 +145,10 @@ class S {
             __transition(__new_compartment); }
             return;
         }
+    }
+
+    private void _state_P(SFrameEvent __e) {
+
     }
 }
 

@@ -1,11 +1,10 @@
 using System;
 using System.Collections.Generic;
 
-// @@skip
-// Persist tests need System.Text.Json pipeline support for C#
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 
 class PersistTestFrameEvent {
     public string _message;
@@ -159,22 +158,6 @@ class PersistTest {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
-    private void _state_Active(PersistTestFrameEvent __e) {
-        if (__e._message == "get_value") {
-            _context_stack[_context_stack.Count - 1]._return = value;
-            return;
-        } else if (__e._message == "go_active") {
-        } else if (__e._message == "go_idle") {
-            { var __new_compartment = new PersistTestCompartment("Idle");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        } else if (__e._message == "set_value") {
-            var v = (int) __e._parameters["v"];
-            value = v * 2;
-        }
-    }
-
     private void _state_Idle(PersistTestFrameEvent __e) {
         if (__e._message == "get_value") {
             _context_stack[_context_stack.Count - 1]._return = value;
@@ -191,6 +174,22 @@ class PersistTest {
         }
     }
 
+    private void _state_Active(PersistTestFrameEvent __e) {
+        if (__e._message == "get_value") {
+            _context_stack[_context_stack.Count - 1]._return = value;
+            return;
+        } else if (__e._message == "go_active") {
+        } else if (__e._message == "go_idle") {
+            { var __new_compartment = new PersistTestCompartment("Idle");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        } else if (__e._message == "set_value") {
+            var v = (int) __e._parameters["v"];
+            value = v * 2;
+        }
+    }
+
     private object __SerComp(PersistTestCompartment comp) {
         if (comp == null) return null;
         var j = new Dictionary<string, object>();
@@ -201,16 +200,18 @@ class PersistTest {
         return j;
     }
 
-    private static PersistTestCompartment __DeserComp(object obj) {
-        if (obj == null) return null;
-        var d = (Dictionary<string, object>) obj;
-        var c = new PersistTestCompartment((string)d["state"]);
-        if (d.ContainsKey("state_vars")) {
-            var sv = (Dictionary<string, object>)d["state_vars"];
-            foreach (var kv in sv) { c.state_vars[kv.Key] = kv.Value; }
+    private static PersistTestCompartment __DeserComp(System.Text.Json.JsonElement el) {
+        if (el.ValueKind == System.Text.Json.JsonValueKind.Null) return null;
+        var c = new PersistTestCompartment(el.GetProperty("state").GetString());
+        if (el.TryGetProperty("state_vars", out var sv) && sv.ValueKind == System.Text.Json.JsonValueKind.Object) {
+            foreach (var kv in sv.EnumerateObject()) {
+                if (kv.Value.ValueKind == System.Text.Json.JsonValueKind.Number) c.state_vars[kv.Name] = kv.Value.GetInt32();
+                else if (kv.Value.ValueKind == System.Text.Json.JsonValueKind.String) c.state_vars[kv.Name] = kv.Value.GetString();
+                else c.state_vars[kv.Name] = kv.Value.ToString();
+            }
         }
-        if (d.ContainsKey("parent") && d["parent"] != null) {
-            c.parent_compartment = __DeserComp(d["parent"]);
+        if (el.TryGetProperty("parent", out var p) && p.ValueKind != System.Text.Json.JsonValueKind.Null) {
+            c.parent_compartment = __DeserComp(p);
         }
         return c;
     }
@@ -223,20 +224,21 @@ class PersistTest {
         __j["_state_stack"] = __stack;
         __j["value"] = value;
         __j["name"] = name;
-        return System.Text.Json.JsonSerializer.Serialize(__j);
+        var __opts = new System.Text.Json.JsonSerializerOptions { TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver() };
+        return System.Text.Json.JsonSerializer.Serialize(__j, __opts);
     }
 
     public static PersistTest RestoreState(string json) {
-        var __j = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+        var __doc = System.Text.Json.JsonDocument.Parse(json);
+        var __root = __doc.RootElement;
         var __instance = new PersistTest();
-        __instance.__compartment = __DeserComp(__j["_compartment"]);
-        if (__j.ContainsKey("_state_stack")) {
-            var __stack = (List<object>)__j["_state_stack"];
+        __instance.__compartment = __DeserComp(__root.GetProperty("_compartment"));
+        if (__root.TryGetProperty("_state_stack", out var __stack)) {
             __instance._state_stack = new List<PersistTestCompartment>();
-            foreach (var item in __stack) { __instance._state_stack.Add(__DeserComp(item)); }
+            foreach (var item in __stack.EnumerateArray()) { __instance._state_stack.Add(__DeserComp(item)); }
         }
-        if (__j.ContainsKey("value")) { __instance.value = __j["value"]; }
-        if (__j.ContainsKey("name")) { __instance.name = __j["name"]; }
+        if (__root.TryGetProperty("value", out var __value)) { __instance.value = __value.GetInt32(); }
+        if (__root.TryGetProperty("name", out var __name)) { __instance.name = __name.GetString(); }
         return __instance;
     }
 }
@@ -244,6 +246,42 @@ class PersistTest {
 class Program {
     static void Main(string[] args) {
         Console.WriteLine("=== Test 23: Persist Basic (C#) ===");
-        Console.WriteLine("SKIP: Persist tests need System.Text.Json pipeline support");
+
+        var s1 = new PersistTest();
+        s1.set_value(10);
+        s1.go_active();
+        s1.set_value(5);
+
+        var json = s1.SaveState();
+        var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (root.GetProperty("_compartment").GetProperty("state").GetString() != "Active") {
+            Console.WriteLine("FAIL: Expected Active"); Environment.Exit(1);
+        }
+        if (root.GetProperty("value").GetInt32() != 10) {
+            Console.WriteLine("FAIL: Expected value 10"); Environment.Exit(1);
+        }
+        Console.WriteLine($"1. Saved: {json}");
+
+        var s2 = PersistTest.RestoreState(json);
+        if (s2.get_value() != 10) {
+            Console.WriteLine($"FAIL: Restored value {s2.get_value()}"); Environment.Exit(1);
+        }
+        Console.WriteLine($"2. Restored value: {s2.get_value()}");
+
+        s2.set_value(3);
+        if (s2.get_value() != 6) {
+            Console.WriteLine($"FAIL: Expected 6, got {s2.get_value()}"); Environment.Exit(1);
+        }
+        Console.WriteLine($"3. After set_value(3) in Active: {s2.get_value()}");
+
+        s2.go_idle();
+        s2.set_value(4);
+        if (s2.get_value() != 4) {
+            Console.WriteLine($"FAIL: Expected 4, got {s2.get_value()}"); Environment.Exit(1);
+        }
+        Console.WriteLine($"4. After go_idle, set_value(4): {s2.get_value()}");
+
+        Console.WriteLine("PASS: Persist basic works correctly");
     }
 }

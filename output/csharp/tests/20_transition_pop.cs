@@ -156,21 +156,6 @@ class TransitionPopTest {
         return __result;
     }
 
-    private void _state_Working(TransitionPopTestFrameEvent __e) {
-        if (__e._message == "get_log") {
-            _context_stack[_context_stack.Count - 1]._return = this.log;
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Working";
-            return;
-        } else if (__e._message == "process") {
-            this.log.Add("working:process:before_pop");
-            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
-            __transition(__popped);
-            return;
-        }
-    }
-
     private void _state_Idle(TransitionPopTestFrameEvent __e) {
         if (__e._message == "get_log") {
             _context_stack[_context_stack.Count - 1]._return = this.log;
@@ -186,6 +171,21 @@ class TransitionPopTest {
             { var __new_compartment = new TransitionPopTestCompartment("Working");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
+            return;
+        }
+    }
+
+    private void _state_Working(TransitionPopTestFrameEvent __e) {
+        if (__e._message == "get_log") {
+            _context_stack[_context_stack.Count - 1]._return = this.log;
+            return;
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "Working";
+            return;
+        } else if (__e._message == "process") {
+            this.log.Add("working:process:before_pop");
+            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
+            __transition(__popped);
             return;
         }
     }

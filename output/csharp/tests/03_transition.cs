@@ -137,24 +137,24 @@ class WithTransition {
         return __result;
     }
 
-    private void _state_Second(WithTransitionFrameEvent __e) {
-        if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Second";
-            return;
-        } else if (__e._message == "next") {
-            { var __new_compartment = new WithTransitionCompartment("First");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
     private void _state_First(WithTransitionFrameEvent __e) {
         if (__e._message == "get_state") {
             _context_stack[_context_stack.Count - 1]._return = "First";
             return;
         } else if (__e._message == "next") {
             { var __new_compartment = new WithTransitionCompartment("Second");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        }
+    }
+
+    private void _state_Second(WithTransitionFrameEvent __e) {
+        if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "Second";
+            return;
+        } else if (__e._message == "next") {
+            { var __new_compartment = new WithTransitionCompartment("First");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;

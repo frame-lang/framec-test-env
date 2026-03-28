@@ -1,11 +1,10 @@
 using System;
 using System.Collections.Generic;
 
-// @@skip
-// Persist tests need System.Text.Json pipeline support for C#
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 
 class PersistRoundtripFrameEvent {
     public string _message;
@@ -190,32 +189,6 @@ class PersistRoundtrip {
         return __result;
     }
 
-    private void _state_Idle(PersistRoundtripFrameEvent __e) {
-        if (__e._message == "add_history") {
-            var entry = (string) __e._parameters["entry"];
-            history = history + entry + ",";
-        } else if (__e._message == "get_counter") {
-            _context_stack[_context_stack.Count - 1]._return = counter;
-            return;
-        } else if (__e._message == "get_history") {
-            _context_stack[_context_stack.Count - 1]._return = history;
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "idle";
-            return;
-        } else if (__e._message == "go_active") {
-            this.add_history("idle->active");
-            { var __new_compartment = new PersistRoundtripCompartment("Active");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        } else if (__e._message == "go_idle") {
-        } else if (__e._message == "set_counter") {
-            var v = (int) __e._parameters["v"];
-            counter = v;
-        }
-    }
-
     private void _state_Active(PersistRoundtripFrameEvent __e) {
         if (__e._message == "add_history") {
             var entry = (string) __e._parameters["entry"];
@@ -242,6 +215,32 @@ class PersistRoundtrip {
         }
     }
 
+    private void _state_Idle(PersistRoundtripFrameEvent __e) {
+        if (__e._message == "add_history") {
+            var entry = (string) __e._parameters["entry"];
+            history = history + entry + ",";
+        } else if (__e._message == "get_counter") {
+            _context_stack[_context_stack.Count - 1]._return = counter;
+            return;
+        } else if (__e._message == "get_history") {
+            _context_stack[_context_stack.Count - 1]._return = history;
+            return;
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "idle";
+            return;
+        } else if (__e._message == "go_active") {
+            this.add_history("idle->active");
+            { var __new_compartment = new PersistRoundtripCompartment("Active");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        } else if (__e._message == "go_idle") {
+        } else if (__e._message == "set_counter") {
+            var v = (int) __e._parameters["v"];
+            counter = v;
+        }
+    }
+
     private object __SerComp(PersistRoundtripCompartment comp) {
         if (comp == null) return null;
         var j = new Dictionary<string, object>();
@@ -252,16 +251,18 @@ class PersistRoundtrip {
         return j;
     }
 
-    private static PersistRoundtripCompartment __DeserComp(object obj) {
-        if (obj == null) return null;
-        var d = (Dictionary<string, object>) obj;
-        var c = new PersistRoundtripCompartment((string)d["state"]);
-        if (d.ContainsKey("state_vars")) {
-            var sv = (Dictionary<string, object>)d["state_vars"];
-            foreach (var kv in sv) { c.state_vars[kv.Key] = kv.Value; }
+    private static PersistRoundtripCompartment __DeserComp(System.Text.Json.JsonElement el) {
+        if (el.ValueKind == System.Text.Json.JsonValueKind.Null) return null;
+        var c = new PersistRoundtripCompartment(el.GetProperty("state").GetString());
+        if (el.TryGetProperty("state_vars", out var sv) && sv.ValueKind == System.Text.Json.JsonValueKind.Object) {
+            foreach (var kv in sv.EnumerateObject()) {
+                if (kv.Value.ValueKind == System.Text.Json.JsonValueKind.Number) c.state_vars[kv.Name] = kv.Value.GetInt32();
+                else if (kv.Value.ValueKind == System.Text.Json.JsonValueKind.String) c.state_vars[kv.Name] = kv.Value.GetString();
+                else c.state_vars[kv.Name] = kv.Value.ToString();
+            }
         }
-        if (d.ContainsKey("parent") && d["parent"] != null) {
-            c.parent_compartment = __DeserComp(d["parent"]);
+        if (el.TryGetProperty("parent", out var p) && p.ValueKind != System.Text.Json.JsonValueKind.Null) {
+            c.parent_compartment = __DeserComp(p);
         }
         return c;
     }
@@ -275,21 +276,22 @@ class PersistRoundtrip {
         __j["counter"] = counter;
         __j["history"] = history;
         __j["mode"] = mode;
-        return System.Text.Json.JsonSerializer.Serialize(__j);
+        var __opts = new System.Text.Json.JsonSerializerOptions { TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver() };
+        return System.Text.Json.JsonSerializer.Serialize(__j, __opts);
     }
 
     public static PersistRoundtrip RestoreState(string json) {
-        var __j = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+        var __doc = System.Text.Json.JsonDocument.Parse(json);
+        var __root = __doc.RootElement;
         var __instance = new PersistRoundtrip();
-        __instance.__compartment = __DeserComp(__j["_compartment"]);
-        if (__j.ContainsKey("_state_stack")) {
-            var __stack = (List<object>)__j["_state_stack"];
+        __instance.__compartment = __DeserComp(__root.GetProperty("_compartment"));
+        if (__root.TryGetProperty("_state_stack", out var __stack)) {
             __instance._state_stack = new List<PersistRoundtripCompartment>();
-            foreach (var item in __stack) { __instance._state_stack.Add(__DeserComp(item)); }
+            foreach (var item in __stack.EnumerateArray()) { __instance._state_stack.Add(__DeserComp(item)); }
         }
-        if (__j.ContainsKey("counter")) { __instance.counter = __j["counter"]; }
-        if (__j.ContainsKey("history")) { __instance.history = __j["history"]; }
-        if (__j.ContainsKey("mode")) { __instance.mode = __j["mode"]; }
+        if (__root.TryGetProperty("counter", out var __counter)) { __instance.counter = __counter.GetInt32(); }
+        if (__root.TryGetProperty("history", out var __history)) { __instance.history = __history.GetString(); }
+        if (__root.TryGetProperty("mode", out var __mode)) { __instance.mode = __mode.GetString(); }
         return __instance;
     }
 }
@@ -297,6 +299,38 @@ class PersistRoundtrip {
 class Program {
     static void Main(string[] args) {
         Console.WriteLine("=== Test 24: Persist Roundtrip (C#) ===");
-        Console.WriteLine("SKIP: Persist tests need System.Text.Json pipeline support");
+
+        var s1 = new PersistRoundtrip();
+        s1.add_history("idle:start");
+        s1.go_active();
+        s1.set_counter(3);
+        s1.add_history("active:work");
+
+        if (s1.get_state() != "active") { Console.WriteLine("FAIL: state"); Environment.Exit(1); }
+        if (s1.get_counter() != 6) { Console.WriteLine($"FAIL: counter {s1.get_counter()}"); Environment.Exit(1); }
+        Console.WriteLine($"1. State: {s1.get_state()}, counter: {s1.get_counter()}");
+        Console.WriteLine($"   History: {s1.get_history()}");
+
+        var json = s1.SaveState();
+        Console.WriteLine("2. Saved");
+
+        var s2 = PersistRoundtrip.RestoreState(json);
+        if (s2.get_state() != "active") { Console.WriteLine("FAIL: restored state"); Environment.Exit(1); }
+        if (s2.get_counter() != 6) { Console.WriteLine("FAIL: restored counter"); Environment.Exit(1); }
+        Console.WriteLine($"3. Restored: {s2.get_state()}, counter: {s2.get_counter()}");
+
+        s2.set_counter(2);
+        if (s2.get_counter() != 4) { Console.WriteLine("FAIL: post-restore counter"); Environment.Exit(1); }
+        Console.WriteLine($"4. Counter after set_counter(2): {s2.get_counter()}");
+
+        if (!s2.get_history().Contains("idle:start")) { Console.WriteLine("FAIL: history"); Environment.Exit(1); }
+        Console.WriteLine($"5. History preserved: {s2.get_history()}");
+
+        s2.go_idle();
+        s2.set_counter(10);
+        if (s2.get_counter() != 10) { Console.WriteLine("FAIL: idle counter"); Environment.Exit(1); }
+        Console.WriteLine($"6. After go_idle: {s2.get_state()}, counter: {s2.get_counter()}");
+
+        Console.WriteLine("PASS: Persist roundtrip works correctly");
     }
 }

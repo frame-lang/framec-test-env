@@ -226,33 +226,6 @@ class HSMMultiChildren {
         }
     }
 
-    private void _state_ChildA(HSMMultiChildrenFrameEvent __e) {
-        if (__e._message == "do_action") {
-            this.log.Add("ChildA:do_action");
-        } else if (__e._message == "forward_action") {
-            this.log.Add("ChildA:forward_action");
-            _state_Parent(__e);
-        } else if (__e._message == "get_log") {
-            _context_stack[_context_stack.Count - 1]._return = this.log;
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "ChildA";
-            return;
-        } else if (__e._message == "start_a") {
-            // stay
-        } else if (__e._message == "start_b") {
-            { var __new_compartment = new HSMMultiChildrenCompartment("ChildB");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        } else if (__e._message == "start_c") {
-            { var __new_compartment = new HSMMultiChildrenCompartment("ChildC");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
     private void _state_ChildC(HSMMultiChildrenFrameEvent __e) {
         if (__e._message == "do_action") {
             this.log.Add("ChildC:do_action");
@@ -277,6 +250,33 @@ class HSMMultiChildren {
             return;
         } else if (__e._message == "start_c") {
             // stay
+        }
+    }
+
+    private void _state_ChildA(HSMMultiChildrenFrameEvent __e) {
+        if (__e._message == "do_action") {
+            this.log.Add("ChildA:do_action");
+        } else if (__e._message == "forward_action") {
+            this.log.Add("ChildA:forward_action");
+            _state_Parent(__e);
+        } else if (__e._message == "get_log") {
+            _context_stack[_context_stack.Count - 1]._return = this.log;
+            return;
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "ChildA";
+            return;
+        } else if (__e._message == "start_a") {
+            // stay
+        } else if (__e._message == "start_b") {
+            { var __new_compartment = new HSMMultiChildrenCompartment("ChildB");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        } else if (__e._message == "start_c") {
+            { var __new_compartment = new HSMMultiChildrenCompartment("ChildC");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
         }
     }
 }

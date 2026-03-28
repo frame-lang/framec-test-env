@@ -1,9 +1,8 @@
-// @@skip
-// Persist tests need System.Text.Json pipeline support for C#
 @@target csharp
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 
 @@persist
 @@system PersistTest {
@@ -35,6 +34,42 @@ using System.Collections.Generic;
 class Program {
     static void Main(string[] args) {
         Console.WriteLine("=== Test 23: Persist Basic (C#) ===");
-        Console.WriteLine("SKIP: Persist tests need System.Text.Json pipeline support");
+
+        var s1 = new PersistTest();
+        s1.set_value(10);
+        s1.go_active();
+        s1.set_value(5);
+
+        var json = s1.SaveState();
+        var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (root.GetProperty("_compartment").GetProperty("state").GetString() != "Active") {
+            Console.WriteLine("FAIL: Expected Active"); Environment.Exit(1);
+        }
+        if (root.GetProperty("value").GetInt32() != 10) {
+            Console.WriteLine("FAIL: Expected value 10"); Environment.Exit(1);
+        }
+        Console.WriteLine($"1. Saved: {json}");
+
+        var s2 = PersistTest.RestoreState(json);
+        if (s2.get_value() != 10) {
+            Console.WriteLine($"FAIL: Restored value {s2.get_value()}"); Environment.Exit(1);
+        }
+        Console.WriteLine($"2. Restored value: {s2.get_value()}");
+
+        s2.set_value(3);
+        if (s2.get_value() != 6) {
+            Console.WriteLine($"FAIL: Expected 6, got {s2.get_value()}"); Environment.Exit(1);
+        }
+        Console.WriteLine($"3. After set_value(3) in Active: {s2.get_value()}");
+
+        s2.go_idle();
+        s2.set_value(4);
+        if (s2.get_value() != 4) {
+            Console.WriteLine($"FAIL: Expected 4, got {s2.get_value()}"); Environment.Exit(1);
+        }
+        Console.WriteLine($"4. After go_idle, set_value(4): {s2.get_value()}");
+
+        Console.WriteLine("PASS: Persist basic works correctly");
     }
 }

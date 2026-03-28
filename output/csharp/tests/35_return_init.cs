@@ -157,23 +157,6 @@ class ReturnInitTest {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
-    private void _state_Start(ReturnInitTestFrameEvent __e) {
-        if (__e._message == "$>") {
-            // Start state enter (no-op)
-        } else if (__e._message == "get_count") {
-            // Don't set return - should use default 0
-        } else if (__e._message == "get_flag") {
-            // Don't set return - should use default false
-        } else if (__e._message == "get_status") {
-            // Don't set return - should use default "unknown"
-        } else if (__e._message == "trigger") {
-            { var __new_compartment = new ReturnInitTestCompartment("Active");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
     private void _state_Active(ReturnInitTestFrameEvent __e) {
         if (__e._message == "$>") {
             // Active state enter (no-op)
@@ -185,6 +168,23 @@ class ReturnInitTest {
             _context_stack[_context_stack.Count - 1]._return = "active";
         } else if (__e._message == "trigger") {
             { var __new_compartment = new ReturnInitTestCompartment("Start");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        }
+    }
+
+    private void _state_Start(ReturnInitTestFrameEvent __e) {
+        if (__e._message == "$>") {
+            // Start state enter (no-op)
+        } else if (__e._message == "get_count") {
+            // Don't set return - should use default 0
+        } else if (__e._message == "get_flag") {
+            // Don't set return - should use default false
+        } else if (__e._message == "get_status") {
+            // Don't set return - should use default "unknown"
+        } else if (__e._message == "trigger") {
+            { var __new_compartment = new ReturnInitTestCompartment("Active");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;

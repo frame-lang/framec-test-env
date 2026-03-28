@@ -1,9 +1,8 @@
-// @@skip
-// Persist tests need System.Text.Json pipeline support for C#
 @@target csharp
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 
 @@persist
 @@system PersistRoundtrip {
@@ -51,6 +50,38 @@ using System.Collections.Generic;
 class Program {
     static void Main(string[] args) {
         Console.WriteLine("=== Test 24: Persist Roundtrip (C#) ===");
-        Console.WriteLine("SKIP: Persist tests need System.Text.Json pipeline support");
+
+        var s1 = new PersistRoundtrip();
+        s1.add_history("idle:start");
+        s1.go_active();
+        s1.set_counter(3);
+        s1.add_history("active:work");
+
+        if (s1.get_state() != "active") { Console.WriteLine("FAIL: state"); Environment.Exit(1); }
+        if (s1.get_counter() != 6) { Console.WriteLine($"FAIL: counter {s1.get_counter()}"); Environment.Exit(1); }
+        Console.WriteLine($"1. State: {s1.get_state()}, counter: {s1.get_counter()}");
+        Console.WriteLine($"   History: {s1.get_history()}");
+
+        var json = s1.SaveState();
+        Console.WriteLine("2. Saved");
+
+        var s2 = PersistRoundtrip.RestoreState(json);
+        if (s2.get_state() != "active") { Console.WriteLine("FAIL: restored state"); Environment.Exit(1); }
+        if (s2.get_counter() != 6) { Console.WriteLine("FAIL: restored counter"); Environment.Exit(1); }
+        Console.WriteLine($"3. Restored: {s2.get_state()}, counter: {s2.get_counter()}");
+
+        s2.set_counter(2);
+        if (s2.get_counter() != 4) { Console.WriteLine("FAIL: post-restore counter"); Environment.Exit(1); }
+        Console.WriteLine($"4. Counter after set_counter(2): {s2.get_counter()}");
+
+        if (!s2.get_history().Contains("idle:start")) { Console.WriteLine("FAIL: history"); Environment.Exit(1); }
+        Console.WriteLine($"5. History preserved: {s2.get_history()}");
+
+        s2.go_idle();
+        s2.set_counter(10);
+        if (s2.get_counter() != 10) { Console.WriteLine("FAIL: idle counter"); Environment.Exit(1); }
+        Console.WriteLine($"6. After go_idle: {s2.get_state()}, counter: {s2.get_counter()}");
+
+        Console.WriteLine("PASS: Persist roundtrip works correctly");
     }
 }

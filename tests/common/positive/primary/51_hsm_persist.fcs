@@ -1,9 +1,9 @@
-// @@skip
-// Persist tests need System.Text.Json pipeline support for C#
+// @@skip — HSM persist restore reinitializes state vars via constructor $> event
 @@target csharp
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 
 @@persist
 @@system HSMPersist {
@@ -38,6 +38,37 @@ using System.Collections.Generic;
 class Program {
     static void Main(string[] args) {
         Console.WriteLine("=== Test 51: HSM Persistence (C#) ===");
-        Console.WriteLine("SKIP: Persist tests need System.Text.Json pipeline support");
+
+        var s1 = new HSMPersist();
+        s1.increment_child();
+        s1.increment_child();
+        s1.increment_child();
+
+        if (s1.get_child_count() != 3) {
+            Console.WriteLine($"FAIL: child_count {s1.get_child_count()}"); Environment.Exit(1);
+        }
+        Console.WriteLine($"1. child_count: {s1.get_child_count()}");
+
+        var json = s1.SaveState();
+        Console.WriteLine($"2. Saved: {json.Length} chars");
+
+        var s2 = HSMPersist.RestoreState(json);
+        if (s2.get_state() != "Child") {
+            Console.WriteLine($"FAIL: state {s2.get_state()}"); Environment.Exit(1);
+        }
+        Console.WriteLine($"3. Restored state: {s2.get_state()}");
+
+        if (s2.get_child_count() != 3) {
+            Console.WriteLine($"FAIL: restored child_count {s2.get_child_count()}"); Environment.Exit(1);
+        }
+        Console.WriteLine($"4. child_count preserved: {s2.get_child_count()}");
+
+        s2.increment_child();
+        if (s2.get_child_count() != 4) {
+            Console.WriteLine($"FAIL: post-restore {s2.get_child_count()}"); Environment.Exit(1);
+        }
+        Console.WriteLine($"5. After increment: {s2.get_child_count()}");
+
+        Console.WriteLine("PASS: HSM persistence works correctly");
     }
 }

@@ -138,6 +138,19 @@ class TransitionEnterArgs {
         return __result;
     }
 
+    private void _state_Active(TransitionEnterArgsFrameEvent __e) {
+        if (__e._message == "$>") {
+            var source = (string) __compartment.enter_args["0"];
+            var value = (int) __compartment.enter_args["1"];
+            this.log.Add("active:enter:" + source + ":" + value);
+        } else if (__e._message == "get_log") {
+            _context_stack[_context_stack.Count - 1]._return = this.log;
+            return;
+        } else if (__e._message == "start") {
+            this.log.Add("active:start");
+        }
+    }
+
     private void _state_Idle(TransitionEnterArgsFrameEvent __e) {
         if (__e._message == "get_log") {
             _context_stack[_context_stack.Count - 1]._return = this.log;
@@ -150,19 +163,6 @@ class TransitionEnterArgs {
             __new_compartment.enter_args["1"] = 42;
             __transition(__new_compartment); }
             return;
-        }
-    }
-
-    private void _state_Active(TransitionEnterArgsFrameEvent __e) {
-        if (__e._message == "$>") {
-            var source = (string) __compartment.enter_args["0"];
-            var value = (int) __compartment.enter_args["1"];
-            this.log.Add("active:enter:" + source + ":" + value);
-        } else if (__e._message == "get_log") {
-            _context_stack[_context_stack.Count - 1]._return = this.log;
-            return;
-        } else if (__e._message == "start") {
-            this.log.Add("active:start");
         }
     }
 }

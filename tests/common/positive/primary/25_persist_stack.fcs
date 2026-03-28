@@ -1,9 +1,8 @@
-// @@skip
-// Persist tests need System.Text.Json pipeline support for C#
 @@target csharp
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 
 @@persist
 @@system PersistStack {
@@ -55,6 +54,44 @@ using System.Collections.Generic;
 class Program {
     static void Main(string[] args) {
         Console.WriteLine("=== Test 25: Persist Stack (C#) ===");
-        Console.WriteLine("SKIP: Persist tests need System.Text.Json pipeline support");
+
+        var s1 = new PersistStack();
+        s1.push_and_go();
+        s1.push_and_go();
+        if (s1.get_state() != "end" || s1.get_depth() != 2) {
+            Console.WriteLine("FAIL: build"); Environment.Exit(1);
+        }
+        Console.WriteLine($"1. Built stack: {s1.get_state()}, depth={s1.get_depth()}");
+
+        var json = s1.SaveState();
+        var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (root.GetProperty("_compartment").GetProperty("state").GetString() != "End") {
+            Console.WriteLine("FAIL: saved state"); Environment.Exit(1);
+        }
+        if (root.GetProperty("_state_stack").GetArrayLength() != 2) {
+            Console.WriteLine("FAIL: stack size"); Environment.Exit(1);
+        }
+        Console.WriteLine("2. Saved");
+
+        var s2 = PersistStack.RestoreState(json);
+        if (s2.get_state() != "end" || s2.get_depth() != 2) {
+            Console.WriteLine("FAIL: restored"); Environment.Exit(1);
+        }
+        Console.WriteLine($"3. Restored: {s2.get_state()}, depth={s2.get_depth()}");
+
+        s2.pop_back();
+        if (s2.get_state() != "middle" || s2.get_depth() != 1) {
+            Console.WriteLine("FAIL: pop1"); Environment.Exit(1);
+        }
+        Console.WriteLine($"4. After pop: {s2.get_state()}, depth={s2.get_depth()}");
+
+        s2.pop_back();
+        if (s2.get_state() != "start" || s2.get_depth() != 0) {
+            Console.WriteLine("FAIL: pop2"); Environment.Exit(1);
+        }
+        Console.WriteLine($"5. After 2nd pop: {s2.get_state()}, depth={s2.get_depth()}");
+
+        Console.WriteLine("PASS: Persist stack works correctly");
     }
 }

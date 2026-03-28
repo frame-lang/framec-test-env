@@ -171,6 +171,33 @@ class AiAgent {
         return __result;
     }
 
+    private void _state_Root(AiAgentFrameEvent __e) {
+        if (__e._message == "$>") {
+            this.action_log = "";
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "Root";
+            return;
+        } else if (__e._message == "tick") {
+            // Selector: check conditions in priority order
+            if (this.health < 20) {
+                { var __new_compartment = new AiAgentCompartment("Flee");
+                __new_compartment.parent_compartment = __compartment.Copy();
+                __transition(__new_compartment); }
+                return;
+            }
+            if (this.enemy_distance < 50) {
+                { var __new_compartment = new AiAgentCompartment("Approach");
+                __new_compartment.parent_compartment = __compartment.Copy();
+                __transition(__new_compartment); }
+                return;
+            }
+            { var __new_compartment = new AiAgentCompartment("Patrol");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        }
+    }
+
     private void _state_Approach(AiAgentFrameEvent __e) {
         if (__e._message == "$>") {
             this.action_log = this.action_log + "approach,";
@@ -205,57 +232,6 @@ class AiAgent {
                 __transition(__new_compartment); }
                 return;
             }
-        }
-    }
-
-    private void _state_Flee(AiAgentFrameEvent __e) {
-        if (__e._message == "$>") {
-            this.action_log = this.action_log + "flee,";
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Flee";
-            return;
-        } else if (__e._message == "tick") {
-            // Precondition: still low health?
-            if (this.health >= 20) {
-                { var __new_compartment = new AiAgentCompartment("Root");
-                __new_compartment.parent_compartment = __compartment.Copy();
-                __transition(__new_compartment); }
-                return;
-            }
-
-            // Action: flee (increase distance, recover health)
-            this.enemy_distance = this.enemy_distance + 10;
-            this.health = this.health + 5;
-            this.action_log = this.action_log + "flee,";
-        }
-    }
-
-    private void _state_Patrol(AiAgentFrameEvent __e) {
-        if (__e._message == "$>") {
-            this.action_log = this.action_log + "patrol,";
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Patrol";
-            return;
-        } else if (__e._message == "tick") {
-            // Higher-priority interrupt: combat
-            if (this.enemy_distance < 50) {
-                { var __new_compartment = new AiAgentCompartment("Approach");
-                __new_compartment.parent_compartment = __compartment.Copy();
-                __transition(__new_compartment); }
-                return;
-            }
-
-            // Higher-priority interrupt: survival
-            if (this.health < 20) {
-                { var __new_compartment = new AiAgentCompartment("Flee");
-                __new_compartment.parent_compartment = __compartment.Copy();
-                __transition(__new_compartment); }
-                return;
-            }
-
-            // Action: patrol
-            this.patrol_step = this.patrol_step + 1;
-            this.action_log = this.action_log + "patrol,";
         }
     }
 
@@ -297,30 +273,54 @@ class AiAgent {
         }
     }
 
-    private void _state_Root(AiAgentFrameEvent __e) {
+    private void _state_Patrol(AiAgentFrameEvent __e) {
         if (__e._message == "$>") {
-            this.action_log = "";
+            this.action_log = this.action_log + "patrol,";
         } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Root";
+            _context_stack[_context_stack.Count - 1]._return = "Patrol";
             return;
         } else if (__e._message == "tick") {
-            // Selector: check conditions in priority order
-            if (this.health < 20) {
-                { var __new_compartment = new AiAgentCompartment("Flee");
-                __new_compartment.parent_compartment = __compartment.Copy();
-                __transition(__new_compartment); }
-                return;
-            }
+            // Higher-priority interrupt: combat
             if (this.enemy_distance < 50) {
                 { var __new_compartment = new AiAgentCompartment("Approach");
                 __new_compartment.parent_compartment = __compartment.Copy();
                 __transition(__new_compartment); }
                 return;
             }
-            { var __new_compartment = new AiAgentCompartment("Patrol");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
+
+            // Higher-priority interrupt: survival
+            if (this.health < 20) {
+                { var __new_compartment = new AiAgentCompartment("Flee");
+                __new_compartment.parent_compartment = __compartment.Copy();
+                __transition(__new_compartment); }
+                return;
+            }
+
+            // Action: patrol
+            this.patrol_step = this.patrol_step + 1;
+            this.action_log = this.action_log + "patrol,";
+        }
+    }
+
+    private void _state_Flee(AiAgentFrameEvent __e) {
+        if (__e._message == "$>") {
+            this.action_log = this.action_log + "flee,";
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "Flee";
             return;
+        } else if (__e._message == "tick") {
+            // Precondition: still low health?
+            if (this.health >= 20) {
+                { var __new_compartment = new AiAgentCompartment("Root");
+                __new_compartment.parent_compartment = __compartment.Copy();
+                __transition(__new_compartment); }
+                return;
+            }
+
+            // Action: flee (increase distance, recover health)
+            this.enemy_distance = this.enemy_distance + 10;
+            this.health = this.health + 5;
+            this.action_log = this.action_log + "flee,";
         }
     }
 

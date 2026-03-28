@@ -1,11 +1,10 @@
 using System;
 using System.Collections.Generic;
 
-// @@skip
-// Persist tests need System.Text.Json pipeline support for C#
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json;
 
 class PersistStackFrameEvent {
     public string _message;
@@ -160,22 +159,6 @@ class PersistStack {
         return __result;
     }
 
-    private void _state_End(PersistStackFrameEvent __e) {
-        if (__e._message == "get_depth") {
-            _context_stack[_context_stack.Count - 1]._return = depth;
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "end";
-            return;
-        } else if (__e._message == "pop_back") {
-            depth = depth - 1;
-            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
-            __transition(__popped);
-            return;
-        } else if (__e._message == "push_and_go") {
-        }
-    }
-
     private void _state_Start(PersistStackFrameEvent __e) {
         if (__e._message == "get_depth") {
             _context_stack[_context_stack.Count - 1]._return = depth;
@@ -191,6 +174,22 @@ class PersistStack {
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
+        }
+    }
+
+    private void _state_End(PersistStackFrameEvent __e) {
+        if (__e._message == "get_depth") {
+            _context_stack[_context_stack.Count - 1]._return = depth;
+            return;
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "end";
+            return;
+        } else if (__e._message == "pop_back") {
+            depth = depth - 1;
+            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
+            __transition(__popped);
+            return;
+        } else if (__e._message == "push_and_go") {
         }
     }
 
@@ -226,16 +225,18 @@ class PersistStack {
         return j;
     }
 
-    private static PersistStackCompartment __DeserComp(object obj) {
-        if (obj == null) return null;
-        var d = (Dictionary<string, object>) obj;
-        var c = new PersistStackCompartment((string)d["state"]);
-        if (d.ContainsKey("state_vars")) {
-            var sv = (Dictionary<string, object>)d["state_vars"];
-            foreach (var kv in sv) { c.state_vars[kv.Key] = kv.Value; }
+    private static PersistStackCompartment __DeserComp(System.Text.Json.JsonElement el) {
+        if (el.ValueKind == System.Text.Json.JsonValueKind.Null) return null;
+        var c = new PersistStackCompartment(el.GetProperty("state").GetString());
+        if (el.TryGetProperty("state_vars", out var sv) && sv.ValueKind == System.Text.Json.JsonValueKind.Object) {
+            foreach (var kv in sv.EnumerateObject()) {
+                if (kv.Value.ValueKind == System.Text.Json.JsonValueKind.Number) c.state_vars[kv.Name] = kv.Value.GetInt32();
+                else if (kv.Value.ValueKind == System.Text.Json.JsonValueKind.String) c.state_vars[kv.Name] = kv.Value.GetString();
+                else c.state_vars[kv.Name] = kv.Value.ToString();
+            }
         }
-        if (d.ContainsKey("parent") && d["parent"] != null) {
-            c.parent_compartment = __DeserComp(d["parent"]);
+        if (el.TryGetProperty("parent", out var p) && p.ValueKind != System.Text.Json.JsonValueKind.Null) {
+            c.parent_compartment = __DeserComp(p);
         }
         return c;
     }
@@ -247,19 +248,20 @@ class PersistStack {
         foreach (var c in _state_stack) { __stack.Add(__SerComp(c)); }
         __j["_state_stack"] = __stack;
         __j["depth"] = depth;
-        return System.Text.Json.JsonSerializer.Serialize(__j);
+        var __opts = new System.Text.Json.JsonSerializerOptions { TypeInfoResolver = new System.Text.Json.Serialization.Metadata.DefaultJsonTypeInfoResolver() };
+        return System.Text.Json.JsonSerializer.Serialize(__j, __opts);
     }
 
     public static PersistStack RestoreState(string json) {
-        var __j = System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, object>>(json);
+        var __doc = System.Text.Json.JsonDocument.Parse(json);
+        var __root = __doc.RootElement;
         var __instance = new PersistStack();
-        __instance.__compartment = __DeserComp(__j["_compartment"]);
-        if (__j.ContainsKey("_state_stack")) {
-            var __stack = (List<object>)__j["_state_stack"];
+        __instance.__compartment = __DeserComp(__root.GetProperty("_compartment"));
+        if (__root.TryGetProperty("_state_stack", out var __stack)) {
             __instance._state_stack = new List<PersistStackCompartment>();
-            foreach (var item in __stack) { __instance._state_stack.Add(__DeserComp(item)); }
+            foreach (var item in __stack.EnumerateArray()) { __instance._state_stack.Add(__DeserComp(item)); }
         }
-        if (__j.ContainsKey("depth")) { __instance.depth = __j["depth"]; }
+        if (__root.TryGetProperty("depth", out var __depth)) { __instance.depth = __depth.GetInt32(); }
         return __instance;
     }
 }
@@ -267,6 +269,44 @@ class PersistStack {
 class Program {
     static void Main(string[] args) {
         Console.WriteLine("=== Test 25: Persist Stack (C#) ===");
-        Console.WriteLine("SKIP: Persist tests need System.Text.Json pipeline support");
+
+        var s1 = new PersistStack();
+        s1.push_and_go();
+        s1.push_and_go();
+        if (s1.get_state() != "end" || s1.get_depth() != 2) {
+            Console.WriteLine("FAIL: build"); Environment.Exit(1);
+        }
+        Console.WriteLine($"1. Built stack: {s1.get_state()}, depth={s1.get_depth()}");
+
+        var json = s1.SaveState();
+        var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        if (root.GetProperty("_compartment").GetProperty("state").GetString() != "End") {
+            Console.WriteLine("FAIL: saved state"); Environment.Exit(1);
+        }
+        if (root.GetProperty("_state_stack").GetArrayLength() != 2) {
+            Console.WriteLine("FAIL: stack size"); Environment.Exit(1);
+        }
+        Console.WriteLine("2. Saved");
+
+        var s2 = PersistStack.RestoreState(json);
+        if (s2.get_state() != "end" || s2.get_depth() != 2) {
+            Console.WriteLine("FAIL: restored"); Environment.Exit(1);
+        }
+        Console.WriteLine($"3. Restored: {s2.get_state()}, depth={s2.get_depth()}");
+
+        s2.pop_back();
+        if (s2.get_state() != "middle" || s2.get_depth() != 1) {
+            Console.WriteLine("FAIL: pop1"); Environment.Exit(1);
+        }
+        Console.WriteLine($"4. After pop: {s2.get_state()}, depth={s2.get_depth()}");
+
+        s2.pop_back();
+        if (s2.get_state() != "start" || s2.get_depth() != 0) {
+            Console.WriteLine("FAIL: pop2"); Environment.Exit(1);
+        }
+        Console.WriteLine($"5. After 2nd pop: {s2.get_state()}, depth={s2.get_depth()}");
+
+        Console.WriteLine("PASS: Persist stack works correctly");
     }
 }

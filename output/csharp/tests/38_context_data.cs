@@ -153,6 +153,19 @@ class ContextDataTest {
         return __result;
     }
 
+    private void _state_End(ContextDataTestFrameEvent __e) {
+        if (__e._message == "$>") {
+            // Enter handler can access data set by previous handlers
+            ((List<string>)_context_stack[_context_stack.Count - 1]._data["trace"]).Add("enter");
+            _context_stack[_context_stack.Count - 1]._data["ended_in"] = "End";
+
+            // Build final result from accumulated data
+            var trace = (List<string>)_context_stack[_context_stack.Count - 1]._data["trace"];
+            string trace_str = trace != null ? string.Join(",", trace) : "no_trace";
+            _context_stack[_context_stack.Count - 1]._return = "from=" + _context_stack[_context_stack.Count - 1]._data["started_in"] + ",to=" + _context_stack[_context_stack.Count - 1]._data["ended_in"] + ",value=" + _context_stack[_context_stack.Count - 1]._data["value"] + ",trace=" + trace_str;
+        }
+    }
+
     private void _state_Start(ContextDataTestFrameEvent __e) {
         if (__e._message == "<$") {
             // Exit handler can access data set by event handler
@@ -183,19 +196,6 @@ class ContextDataTest {
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
-        }
-    }
-
-    private void _state_End(ContextDataTestFrameEvent __e) {
-        if (__e._message == "$>") {
-            // Enter handler can access data set by previous handlers
-            ((List<string>)_context_stack[_context_stack.Count - 1]._data["trace"]).Add("enter");
-            _context_stack[_context_stack.Count - 1]._data["ended_in"] = "End";
-
-            // Build final result from accumulated data
-            var trace = (List<string>)_context_stack[_context_stack.Count - 1]._data["trace"];
-            string trace_str = trace != null ? string.Join(",", trace) : "no_trace";
-            _context_stack[_context_stack.Count - 1]._return = "from=" + _context_stack[_context_stack.Count - 1]._data["started_in"] + ",to=" + _context_stack[_context_stack.Count - 1]._data["ended_in"] + ",value=" + _context_stack[_context_stack.Count - 1]._data["value"] + ",trace=" + trace_str;
         }
     }
 }

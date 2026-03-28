@@ -153,26 +153,6 @@ class SystemReturnChainTest {
         return __result;
     }
 
-    private void _state_Start(SystemReturnChainTestFrameEvent __e) {
-        if (__e._message == "<$") {
-            // Exit handler sets initial value
-            _context_stack[_context_stack.Count - 1]._return = "from_exit";
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Start";
-            return;
-        } else if (__e._message == "test_enter_sets") {
-            { var __new_compartment = new SystemReturnChainTestCompartment("EnterSetter");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        } else if (__e._message == "test_exit_then_enter") {
-            { var __new_compartment = new SystemReturnChainTestCompartment("BothSet");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
     private void _state_EnterSetter(SystemReturnChainTestFrameEvent __e) {
         if (__e._message == "$>") {
             // Enter handler sets return value
@@ -189,6 +169,26 @@ class SystemReturnChainTest {
             _context_stack[_context_stack.Count - 1]._return = "enter_wins";
         } else if (__e._message == "get_state") {
             _context_stack[_context_stack.Count - 1]._return = "BothSet";
+            return;
+        }
+    }
+
+    private void _state_Start(SystemReturnChainTestFrameEvent __e) {
+        if (__e._message == "<$") {
+            // Exit handler sets initial value
+            _context_stack[_context_stack.Count - 1]._return = "from_exit";
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "Start";
+            return;
+        } else if (__e._message == "test_enter_sets") {
+            { var __new_compartment = new SystemReturnChainTestCompartment("EnterSetter");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        } else if (__e._message == "test_exit_then_enter") {
+            { var __new_compartment = new SystemReturnChainTestCompartment("BothSet");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
             return;
         }
     }

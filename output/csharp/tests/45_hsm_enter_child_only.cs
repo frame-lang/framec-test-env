@@ -158,6 +158,18 @@ class HSMEnterChildOnly {
         return __result;
     }
 
+    private void _state_Parent(HSMEnterChildOnlyFrameEvent __e) {
+        if (__e._message == "forward_action") {
+            this.log.Add("Parent:forward_action");
+        } else if (__e._message == "get_log") {
+            _context_stack[_context_stack.Count - 1]._return = this.log;
+            return;
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "Parent";
+            return;
+        }
+    }
+
     private void _state_Child(HSMEnterChildOnlyFrameEvent __e) {
         if (__e._message == "$>") {
             this.log.Add("Child:enter");
@@ -184,18 +196,6 @@ class HSMEnterChildOnly {
             { var __new_compartment = new HSMEnterChildOnlyCompartment("Child");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
-            return;
-        }
-    }
-
-    private void _state_Parent(HSMEnterChildOnlyFrameEvent __e) {
-        if (__e._message == "forward_action") {
-            this.log.Add("Parent:forward_action");
-        } else if (__e._message == "get_log") {
-            _context_stack[_context_stack.Count - 1]._return = this.log;
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Parent";
             return;
         }
     }
