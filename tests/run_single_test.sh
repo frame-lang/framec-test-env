@@ -82,6 +82,13 @@ if head -10 "$test_file" 2>/dev/null | grep -qE "@@xfail|@xfail"; then
     is_xfail=true
 fi
 
+# Clean stale compiled artifacts before transpilation
+# Java: .class files from previous tests (all tests use class Main)
+# C#: dotnet run caches in temp dirs
+case $lang in
+    java) find "$JAVA_OUT" -name "*.class" -delete 2>/dev/null ;;
+esac
+
 # Transpile
 compile_output=$("$FRAMEC" compile -l "$target" -o "$out_dir" "$test_file" 2>&1)
 compile_status=$?
