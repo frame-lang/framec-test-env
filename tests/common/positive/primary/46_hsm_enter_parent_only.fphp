@@ -1,0 +1,59 @@
+<?php
+@@target php
+
+@@system HSMEnterParentOnly {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): list { return $this->log; }
+            get_state(): str { return "Start"; }
+        }
+
+        $Child => $Parent {
+            go_to_parent() { -> $Parent }
+            get_log(): list { return $this->log; }
+            get_state(): str { return "Child"; }
+        }
+
+        $Parent {
+            $>() { $this->log[] = "Parent:enter"; }
+            go_to_child() { -> $Child }
+            get_log(): list { return $this->log; }
+            get_state(): str { return "Parent"; }
+        }
+    domain:
+        log = []
+}
+
+echo "=== Test 46: HSM Enter in Parent Only ===" . "\n";
+$s = new HSMEnterParentOnly();
+
+$s->go_to_child();
+if ($s->get_state() !== "Child") { echo "FAIL\n"; exit(1); }
+$log = $s->get_log();
+echo "TC2.2.1: Child enters without error - PASS" . "\n";
+
+if (in_array("Parent:enter", $log)) { echo "FAIL: Parent:enter should NOT fire for child entry\n"; exit(1); }
+echo "TC2.2.2: Parent enter NOT auto-fired for child - PASS" . "\n";
+
+$s->go_to_parent();
+if ($s->get_state() !== "Parent") { echo "FAIL\n"; exit(1); }
+$log = $s->get_log();
+if (!in_array("Parent:enter", $log)) { echo "FAIL\n"; exit(1); }
+echo "TC2.2.3: Parent enter fires when transitioning to Parent - PASS" . "\n";
+
+$s->go_to_child();
+if ($s->get_state() !== "Child") { echo "FAIL\n"; exit(1); }
+$log = $s->get_log();
+$parent_enter_count = count(array_filter($log, function($v) { return $v === "Parent:enter"; }));
+if ($parent_enter_count !== 1) { echo "FAIL\n"; exit(1); }
+echo "TC2.2.4: Return to child, parent enter count unchanged - PASS" . "\n";
+
+echo "PASS: HSM enter in parent only works correctly" . "\n";

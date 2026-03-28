@@ -1,0 +1,74 @@
+<?php
+@@target php
+
+@@system HSMEnterChildOnly {
+    interface:
+        go_to_child()
+        forward_action()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_child() {
+                -> $Child
+            }
+            get_log(): list {
+                return $this->log;
+            }
+            get_state(): str {
+                return "Start";
+            }
+        }
+
+        $Child => $Parent {
+            $>() {
+                $this->log[] = "Child:enter";
+            }
+            forward_action() {
+                $this->log[] = "Child:forward";
+                => $^
+            }
+            get_log(): list {
+                return $this->log;
+            }
+            get_state(): str {
+                return "Child";
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                $this->log[] = "Parent:forward_action";
+            }
+            get_log(): list {
+                return $this->log;
+            }
+            get_state(): str {
+                return "Parent";
+            }
+        }
+    domain:
+        log = []
+}
+
+echo "=== Test 45: HSM Enter in Child Only ===" . "\n";
+$s = new HSMEnterChildOnly();
+
+if ($s->get_state() !== "Start") { echo "FAIL\n"; exit(1); }
+echo "TC2.1.0: Initial state is Start - PASS" . "\n";
+
+$s->go_to_child();
+$log = $s->get_log();
+if (!in_array("Child:enter", $log)) { echo "FAIL\n"; exit(1); }
+if ($s->get_state() !== "Child") { echo "FAIL\n"; exit(1); }
+echo "TC2.1.1: Child enter handler fires - PASS" . "\n";
+echo "TC2.1.2: No error when parent lacks enter - PASS" . "\n";
+
+$s->forward_action();
+$log = $s->get_log();
+if (!in_array("Child:forward", $log)) { echo "FAIL\n"; exit(1); }
+if (!in_array("Parent:forward_action", $log)) { echo "FAIL\n"; exit(1); }
+echo "TC2.1.3: Forward works without parent enter - PASS" . "\n";
+
+echo "PASS: HSM enter in child only works correctly" . "\n";

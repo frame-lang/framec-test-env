@@ -1,0 +1,57 @@
+<?php
+@@target php
+
+@@system HSMForward {
+    interface:
+        event_a()
+        event_b()
+        get_log(): list
+
+    machine:
+        $Child => $Parent {
+            event_a() {
+                $this->log[] = "Child:event_a";
+            }
+
+            event_b() {
+                $this->log[] = "Child:event_b_forward";
+                => $^
+            }
+
+            get_log(): list {
+                return $this->log;
+            }
+        }
+
+        $Parent {
+            event_a() {
+                $this->log[] = "Parent:event_a";
+            }
+
+            event_b() {
+                $this->log[] = "Parent:event_b";
+            }
+
+            get_log(): list {
+                return $this->log;
+            }
+        }
+    domain:
+        log = []
+}
+
+echo "=== Test 08: HSM Forward ===" . "\n";
+$s = new HSMForward();
+
+$s->event_a();
+$log = $s->get_log();
+if (!in_array("Child:event_a", $log)) { echo "FAIL: Expected 'Child:event_a' in log\n"; exit(1); }
+echo "After event_a: " . implode(", ", $log) . "\n";
+
+$s->event_b();
+$log = $s->get_log();
+if (!in_array("Child:event_b_forward", $log)) { echo "FAIL: Expected 'Child:event_b_forward' in log\n"; exit(1); }
+if (!in_array("Parent:event_b", $log)) { echo "FAIL: Expected 'Parent:event_b' in log (forwarded)\n"; exit(1); }
+echo "After event_b (forwarded): " . implode(", ", $log) . "\n";
+
+echo "PASS: HSM forward works correctly" . "\n";

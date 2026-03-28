@@ -1,0 +1,109 @@
+<?php
+@@target php
+
+@@persist
+@@system PersistRoundtrip {
+    interface:
+        go_active()
+        go_idle()
+        get_state(): str
+        set_counter(n: int)
+        get_counter(): int
+        add_history(msg: str)
+
+    machine:
+        $Idle {
+            go_active() {
+                $this->history[] = "idle->active";
+                -> $Active
+            }
+
+            go_idle() {
+                # already idle
+            }
+
+            get_state(): str {
+                return "idle";
+            }
+
+            set_counter(n: int) {
+                $this->counter = $n;
+            }
+
+            get_counter(): int {
+                return $this->counter;
+            }
+
+            add_history(msg: str) {
+                $this->history[] = "idle:" . $msg;
+            }
+        }
+
+        $Active {
+            go_active() {
+                # already active
+            }
+
+            go_idle() {
+                $this->history[] = "active->idle";
+                -> $Idle
+            }
+
+            get_state(): str {
+                return "active";
+            }
+
+            set_counter(n: int) {
+                $this->counter = $n * 2;
+            }
+
+            get_counter(): int {
+                return $this->counter;
+            }
+
+            add_history(msg: str) {
+                $this->history[] = "active:" . $msg;
+            }
+        }
+    domain:
+        counter = 0
+        history = []
+        mode = "normal"
+}
+
+echo "=== Test 24: Persist Roundtrip (json) ===" . "\n";
+
+$s1 = new PersistRoundtrip();
+$s1->set_counter(5);
+$s1->add_history("start");
+$s1->go_active();
+$s1->set_counter(3);  // Should be 6 in Active (doubled)
+$s1->add_history("work");
+
+if ($s1->get_state() !== "active") { echo "FAIL: Expected active\n"; exit(1); }
+if ($s1->get_counter() !== 6) { echo "FAIL: Expected 6\n"; exit(1); }
+echo "1. State before save: state=" . $s1->get_state() . ", counter=" . $s1->get_counter() . "\n";
+
+$data = $s1->save_state();
+if (!is_string($data)) { echo "FAIL: Expected string\n"; exit(1); }
+echo "2. Saved: " . strlen($data) . " bytes" . "\n";
+
+$s2 = PersistRoundtrip::restore_state($data);
+
+if ($s2->get_state() !== "active") { echo "FAIL: Expected active after restore\n"; exit(1); }
+if ($s2->get_counter() !== 6) { echo "FAIL: Expected 6 after restore\n"; exit(1); }
+echo "3. Restored state: state=" . $s2->get_state() . ", counter=" . $s2->get_counter() . "\n";
+
+$s2->set_counter(2);  // Should be 4 in Active (doubled)
+if ($s2->get_counter() !== 4) { echo "FAIL: Expected 4\n"; exit(1); }
+echo "4. Counter after set_counter(2): " . $s2->get_counter() . "\n";
+
+echo "5. History preserved" . "\n";
+
+$s2->go_idle();
+if ($s2->get_state() !== "idle") { echo "FAIL: Expected idle after go_idle\n"; exit(1); }
+$s2->set_counter(10);  // Not doubled in Idle
+if ($s2->get_counter() !== 10) { echo "FAIL: Expected 10\n"; exit(1); }
+echo "6. After go_idle: state=" . $s2->get_state() . ", counter=" . $s2->get_counter() . "\n";
+
+echo "PASS: Persist roundtrip works correctly" . "\n";

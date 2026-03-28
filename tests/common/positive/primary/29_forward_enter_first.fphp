@@ -1,0 +1,69 @@
+<?php
+@@target php
+
+@@system ForwardEnterFirst {
+    interface:
+        process()
+        get_counter(): int
+        get_log(): list
+
+    machine:
+        $Idle {
+            process() {
+                -> => $Working
+            }
+
+            get_counter(): int {
+                return -1;
+            }
+
+            get_log(): list {
+                return $this->log;
+            }
+        }
+
+        $Working {
+            $.counter: int = 100
+
+            $>() {
+                $this->log[] = "Working:enter";
+            }
+
+            process() {
+                $this->log[] = "Working:process:counter=" . $.counter;
+                $.counter = $.counter + 1;
+            }
+
+            get_counter(): int {
+                return $.counter;
+            }
+
+            get_log(): list {
+                return $this->log;
+            }
+        }
+    domain:
+        log = []
+}
+
+echo "=== Test 29: Forward Enter First ===" . "\n";
+$s = new ForwardEnterFirst();
+
+if ($s->get_counter() !== -1) { echo "FAIL: Expected -1 in Idle\n"; exit(1); }
+
+$s->process();
+
+$counter = $s->get_counter();
+$log = $s->get_log();
+echo "Counter after forward: {$counter}" . "\n";
+echo "Log: " . implode(", ", $log) . "\n";
+
+if (!in_array("Working:enter", $log)) { echo "FAIL: Expected 'Working:enter' in log\n"; exit(1); }
+if (!in_array("Working:process:counter=100", $log)) { echo "FAIL: Expected 'Working:process:counter=100' in log\n"; exit(1); }
+if ($counter !== 101) { echo "FAIL: Expected counter=101, got {$counter}\n"; exit(1); }
+
+$enter_idx = array_search("Working:enter", $log);
+$process_idx = array_search("Working:process:counter=100", $log);
+if ($enter_idx >= $process_idx) { echo "FAIL: \$> should run before process\n"; exit(1); }
+
+echo "PASS: Forward sends \$> first for non-\$> events" . "\n";

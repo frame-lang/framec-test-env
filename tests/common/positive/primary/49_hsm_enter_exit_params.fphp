@@ -1,0 +1,66 @@
+<?php
+@@target php
+
+@@system HSMEnterExitParams {
+    interface:
+        go_to_a()
+        go_to_sibling()
+        go_back()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_a() { -> ("starting") $ChildA }
+            get_log(): list { return $this->log; }
+            get_state(): str { return "Start"; }
+        }
+
+        $ChildA => $Parent {
+            $>(msg: str) { $this->log[] = "ChildA:enter({$msg})"; }
+            <$(reason: str) { $this->log[] = "ChildA:exit({$reason})"; }
+            go_to_sibling() { ("leaving_A") -> ("arriving_B") $ChildB }
+            get_log(): list { return $this->log; }
+            get_state(): str { return "ChildA"; }
+        }
+
+        $ChildB => $Parent {
+            $>(msg: str) { $this->log[] = "ChildB:enter({$msg})"; }
+            <$(reason: str) { $this->log[] = "ChildB:exit({$reason})"; }
+            go_back() { ("leaving_B") -> ("returning_A") $ChildA }
+            get_log(): list { return $this->log; }
+            get_state(): str { return "ChildB"; }
+        }
+
+        $Parent {
+            get_log(): list { return $this->log; }
+            get_state(): str { return "Parent"; }
+        }
+    domain:
+        log = []
+}
+
+echo "=== Test 49: HSM Enter/Exit with Params ===" . "\n";
+$s = new HSMEnterExitParams();
+
+$s->go_to_a();
+$log = $s->get_log();
+if (!in_array("ChildA:enter(starting)", $log)) { echo "FAIL\n"; exit(1); }
+echo "TC2.5.0: Initial transition with enter params - PASS" . "\n";
+
+$s->go_to_sibling();
+$log = $s->get_log();
+if (!in_array("ChildA:exit(leaving_A)", $log)) { echo "FAIL\n"; exit(1); }
+echo "TC2.5.1: Exit params passed correctly - PASS" . "\n";
+
+if (!in_array("ChildB:enter(arriving_B)", $log)) { echo "FAIL\n"; exit(1); }
+if ($s->get_state() !== "ChildB") { echo "FAIL\n"; exit(1); }
+echo "TC2.5.2: Enter params passed to target - PASS" . "\n";
+
+$s->go_back();
+$log = $s->get_log();
+if (!in_array("ChildB:exit(leaving_B)", $log)) { echo "FAIL\n"; exit(1); }
+if (!in_array("ChildA:enter(returning_A)", $log)) { echo "FAIL\n"; exit(1); }
+echo "TC2.5.3: Return transition with params - PASS" . "\n";
+
+echo "PASS: HSM enter/exit with params works correctly" . "\n";

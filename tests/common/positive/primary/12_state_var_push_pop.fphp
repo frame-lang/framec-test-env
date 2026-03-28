@@ -1,0 +1,82 @@
+<?php
+@@target php
+
+@@system StateVarPushPop {
+    interface:
+        increment(): int
+        get_count(): int
+        save_and_go()
+        restore()
+
+    machine:
+        $Counter {
+            $.count: int = 0
+
+            increment(): int {
+                $.count = $.count + 1;
+                return $.count;
+            }
+
+            get_count(): int {
+                return $.count;
+            }
+
+            save_and_go() {
+                `push$
+                -> $Other
+            }
+        }
+
+        $Other {
+            $.other_count: int = 100
+
+            restore() {
+                `-> pop$
+            }
+
+            increment(): int {
+                $.other_count = $.other_count + 1;
+                return $.other_count;
+            }
+
+            get_count(): int {
+                return $.other_count;
+            }
+        }
+}
+
+echo "=== Test 12: State Variable Push/Pop ===" . "\n";
+$s = new StateVarPushPop();
+
+$s->increment();
+$s->increment();
+$s->increment();
+$count = $s->get_count();
+if ($count !== 3) { echo "FAIL: Expected 3, got {$count}\n"; exit(1); }
+echo "Counter before push: {$count}" . "\n";
+
+$s->save_and_go();
+echo "Pushed and transitioned to Other" . "\n";
+
+$count = $s->get_count();
+if ($count !== 100) { echo "FAIL: Expected 100 in Other state, got {$count}\n"; exit(1); }
+echo "Other state count: {$count}" . "\n";
+
+$s->increment();
+$count = $s->get_count();
+if ($count !== 101) { echo "FAIL: Expected 101 after increment, got {$count}\n"; exit(1); }
+echo "Other state after increment: {$count}" . "\n";
+
+$s->restore();
+echo "Popped back to Counter" . "\n";
+
+$count = $s->get_count();
+if ($count !== 3) { echo "FAIL: Expected 3 after pop (preserved), got {$count}\n"; exit(1); }
+echo "Counter after pop: {$count}" . "\n";
+
+$s->increment();
+$count = $s->get_count();
+if ($count !== 4) { echo "FAIL: Expected 4, got {$count}\n"; exit(1); }
+echo "Counter after increment: {$count}" . "\n";
+
+echo "PASS: State variables preserved across push/pop" . "\n";

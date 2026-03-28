@@ -37,6 +37,7 @@ JAVA_OUT="$TEST_ENV_ROOT/output/java/tests"
 CSHARP_OUT="$TEST_ENV_ROOT/output/csharp/tests"
 GO_OUT="$TEST_ENV_ROOT/output/go/tests"
 JS_OUT="$TEST_ENV_ROOT/output/javascript/tests"
+PHP_OUT="$TEST_ENV_ROOT/output/php/tests"
 
 # .NET SDK — find dotnet
 DOTNET_CMD=""
@@ -70,6 +71,7 @@ case $lang in
     csharp) target="csharp"; out_dir="$CSHARP_OUT"; out_ext="cs" ;;
     go) target="go"; out_dir="$GO_OUT"; out_ext="go" ;;
     javascript) target="javascript"; out_dir="$JS_OUT"; out_ext="js" ;;
+    php) target="php"; out_dir="$PHP_OUT"; out_ext="php" ;;
 esac
 
 out_file="$out_dir/${test_name}.${out_ext}"
@@ -207,6 +209,13 @@ case $lang in
         js_run_file="${out_file%.js}.mjs"
         cp "$out_file" "$js_run_file"
         run_output=$(node "$js_run_file" 2>&1) || run_status=$?
+        ;;
+    php)
+        php_cmd="php"
+        for __pdir in "/usr/local/opt/php/bin" "/opt/homebrew/opt/php/bin" "/usr/bin"; do
+            if [ -x "$__pdir/php" ]; then php_cmd="$__pdir/php"; break; fi
+        done
+        run_output=$($php_cmd "$out_file" 2>&1) || run_status=$?
         ;;
 esac
 

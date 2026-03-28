@@ -1,0 +1,114 @@
+<?php
+@@target php
+
+@@system HSMSiblingTransitions {
+    interface:
+        go_to_b()
+        go_to_a()
+        forward_action()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $ChildA => $Parent {
+            $>() {
+                $this->log[] = "ChildA:enter";
+            }
+            <$() {
+                $this->log[] = "ChildA:exit";
+            }
+            go_to_b() {
+                $this->log[] = "ChildA:go_to_b";
+                -> $ChildB
+            }
+            forward_action() {
+                $this->log[] = "ChildA:forward";
+                => $^
+            }
+            get_log(): list {
+                return $this->log;
+            }
+            get_state(): str {
+                return "ChildA";
+            }
+        }
+
+        $ChildB => $Parent {
+            $>() {
+                $this->log[] = "ChildB:enter";
+            }
+            <$() {
+                $this->log[] = "ChildB:exit";
+            }
+            go_to_a() {
+                $this->log[] = "ChildB:go_to_a";
+                -> $ChildA
+            }
+            forward_action() {
+                $this->log[] = "ChildB:forward";
+                => $^
+            }
+            get_log(): list {
+                return $this->log;
+            }
+            get_state(): str {
+                return "ChildB";
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                $this->log[] = "Parent:forward_action";
+            }
+            get_log(): list {
+                return $this->log;
+            }
+            get_state(): str {
+                return "Parent";
+            }
+        }
+    domain:
+        log = []
+}
+
+echo "=== Test 44: HSM Sibling Transitions ===" . "\n";
+$s = new HSMSiblingTransitions();
+
+$log = $s->get_log();
+if (!in_array("ChildA:enter", $log)) { echo "FAIL\n"; exit(1); }
+echo "TC1.4.0: Initial state ChildA with enter - PASS" . "\n";
+
+$s->go_to_b();
+if ($s->get_state() !== "ChildB") { echo "FAIL\n"; exit(1); }
+echo "TC1.4.1: Transition A->B works - PASS" . "\n";
+
+$log = $s->get_log();
+if (!in_array("ChildA:exit", $log)) { echo "FAIL\n"; exit(1); }
+echo "TC1.4.2: Exit handler fires on source - PASS" . "\n";
+
+if (!in_array("ChildB:enter", $log)) { echo "FAIL\n"; exit(1); }
+echo "TC1.4.3: Enter handler fires on target - PASS" . "\n";
+
+$s->forward_action();
+$log = $s->get_log();
+if (!in_array("ChildB:forward", $log)) { echo "FAIL\n"; exit(1); }
+if (!in_array("Parent:forward_action", $log)) { echo "FAIL\n"; exit(1); }
+echo "TC1.4.4: Parent relationship preserved - PASS" . "\n";
+
+$s->go_to_a();
+if ($s->get_state() !== "ChildA") { echo "FAIL\n"; exit(1); }
+$log = $s->get_log();
+$childB_exit_count = count(array_filter($log, function($v) { return $v === "ChildB:exit"; }));
+if ($childB_exit_count !== 1) { echo "FAIL\n"; exit(1); }
+$childA_enter_count = count(array_filter($log, function($v) { return $v === "ChildA:enter"; }));
+if ($childA_enter_count !== 2) { echo "FAIL\n"; exit(1); }
+echo "TC1.4.5: Transition B->A works with enter/exit - PASS" . "\n";
+
+$s->forward_action();
+$log = $s->get_log();
+if (!in_array("ChildA:forward", $log)) { echo "FAIL\n"; exit(1); }
+$parent_count = count(array_filter($log, function($v) { return $v === "Parent:forward_action"; }));
+if ($parent_count !== 2) { echo "FAIL\n"; exit(1); }
+echo "TC1.4.6: ChildA forwards after returning - PASS" . "\n";
+
+echo "PASS: HSM sibling transitions work correctly" . "\n";

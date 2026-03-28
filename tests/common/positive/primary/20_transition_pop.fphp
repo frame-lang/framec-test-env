@@ -1,0 +1,73 @@
+<?php
+@@target php
+
+@@system TransitionPopTest {
+    interface:
+        start()
+        process()
+        get_state(): str
+        get_log(): list
+
+    machine:
+        $Idle {
+            start() {
+                $this->log[] = "idle:start:push";
+                `push$
+                -> $Working
+            }
+
+            process() {
+                $this->log[] = "idle:process";
+            }
+
+            get_state(): str {
+                return "Idle";
+            }
+
+            get_log(): list {
+                return $this->log;
+            }
+        }
+
+        $Working {
+            process() {
+                $this->log[] = "working:process:before_pop";
+                -> pop$
+                # This should NOT execute because pop transitions away
+                $this->log[] = "working:process:after_pop";
+            }
+
+            get_state(): str {
+                return "Working";
+            }
+
+            get_log(): list {
+                return $this->log;
+            }
+        }
+    domain:
+        log = []
+}
+
+echo "=== Test 20: Transition Pop ===" . "\n";
+$s = new TransitionPopTest();
+
+if ($s->get_state() !== "Idle") { echo "FAIL: Expected 'Idle'\n"; exit(1); }
+echo "Initial state: " . $s->get_state() . "\n";
+
+$s->start();
+if ($s->get_state() !== "Working") { echo "FAIL: Expected 'Working'\n"; exit(1); }
+echo "After start(): " . $s->get_state() . "\n";
+
+$s->process();
+if ($s->get_state() !== "Idle") { echo "FAIL: Expected 'Idle' after pop\n"; exit(1); }
+echo "After process() with pop: " . $s->get_state() . "\n";
+
+$log = $s->get_log();
+echo "Log: " . implode(", ", $log) . "\n";
+
+if (!in_array("idle:start:push", $log)) { echo "FAIL: Expected 'idle:start:push' in log\n"; exit(1); }
+if (!in_array("working:process:before_pop", $log)) { echo "FAIL: Expected 'working:process:before_pop' in log\n"; exit(1); }
+if (in_array("working:process:after_pop", $log)) { echo "FAIL: Should NOT have 'working:process:after_pop' in log\n"; exit(1); }
+
+echo "PASS: Transition pop works correctly" . "\n";

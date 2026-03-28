@@ -1,0 +1,65 @@
+<?php
+@@target php
+
+@@system ContextDataTest {
+    interface:
+        process_with_data(value: int): str
+        check_data_isolation(): str
+        transition_preserves_data(x: int): str
+
+    machine:
+        $Start {
+            process_with_data(value: int): str {
+                @@:data["input"] = @@.value
+                @@:data["trace"] = ["handler"]
+
+                @@:return = "processed:" . strval(@@:data["input"])
+            }
+
+            check_data_isolation(): str {
+                @@:data["outer"] = "outer_value"
+                $inner_result = $this->process_with_data(99);
+                @@:return = "outer_data=" . @@:data["outer"] . ",inner=" . $inner_result
+            }
+
+            transition_preserves_data(x: int): str {
+                @@:data["started_in"] = "Start"
+                @@:data["value"] = strval(@@.x)
+                -> $End
+            }
+
+            <$() {
+                @@:data["exit_seen"] = "true"
+            }
+        }
+
+        $End {
+            $>() {
+                @@:data["ended_in"] = "End"
+                @@:return = "from=" . @@:data["started_in"] . ",to=" . @@:data["ended_in"] . ",value=" . @@:data["value"] . ",exit_seen=" . @@:data["exit_seen"]
+            }
+        }
+}
+
+echo "=== Test 38: Context Data ===" . "\n";
+
+$s1 = new ContextDataTest();
+$result = $s1->process_with_data(42);
+if ($result !== "processed:42") { echo "FAIL: Expected 'processed:42', got '{$result}'\n"; exit(1); }
+echo "1. process_with_data(42) = '{$result}'" . "\n";
+
+$s2 = new ContextDataTest();
+$result = $s2->check_data_isolation();
+$expected = "outer_data=outer_value,inner=processed:99";
+if ($result !== $expected) { echo "FAIL: Expected '{$expected}', got '{$result}'\n"; exit(1); }
+echo "2. check_data_isolation() = '{$result}'" . "\n";
+
+$s3 = new ContextDataTest();
+$result = $s3->transition_preserves_data(100);
+if (strpos($result, "from=Start") === false) { echo "FAIL: Expected 'from=Start' in '{$result}'\n"; exit(1); }
+if (strpos($result, "to=End") === false) { echo "FAIL: Expected 'to=End' in '{$result}'\n"; exit(1); }
+if (strpos($result, "value=100") === false) { echo "FAIL: Expected 'value=100' in '{$result}'\n"; exit(1); }
+if (strpos($result, "exit_seen=true") === false) { echo "FAIL: Expected 'exit_seen=true' in '{$result}'\n"; exit(1); }
+echo "3. transition_preserves_data(100) = '{$result}'" . "\n";
+
+echo "PASS: Context data works correctly" . "\n";

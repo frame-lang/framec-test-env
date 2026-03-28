@@ -1,0 +1,66 @@
+<?php
+@@target php
+
+# Tests that nested interface calls maintain separate return contexts
+
+@@system SystemReturnReentrantTest {
+    interface:
+        outer_call(): str
+        inner_call(): str
+        nested_call(): str
+        get_log(): str
+
+    machine:
+        $Start {
+            $.log: str = ""
+
+            outer_call(): str {
+                $.log = $.log . "outer_start,";
+                $inner_result = $this->inner_call();
+                $.log = $.log . "outer_after_inner,";
+                return "outer_result:" . $inner_result;
+            }
+
+            inner_call(): str {
+                $.log = $.log . "inner,";
+                return "inner_result";
+            }
+
+            nested_call(): str {
+                $.log = $.log . "nested_start,";
+                $result1 = $this->inner_call();
+                $result2 = $this->outer_call();
+                $.log = $.log . "nested_end,";
+                return "nested:" . $result1 . "+" . $result2;
+            }
+
+            get_log(): str {
+                return $.log;
+            }
+        }
+}
+
+echo "=== Test 16: System Return Reentrant (Nested Calls) ===" . "\n";
+
+$s1 = new SystemReturnReentrantTest();
+$result = $s1->inner_call();
+if ($result !== "inner_result") { echo "FAIL: Expected 'inner_result', got '{$result}'\n"; exit(1); }
+echo "1. inner_call() = '{$result}'" . "\n";
+
+$s2 = new SystemReturnReentrantTest();
+$result = $s2->outer_call();
+if ($result !== "outer_result:inner_result") { echo "FAIL: Expected 'outer_result:inner_result', got '{$result}'\n"; exit(1); }
+$log = $s2->get_log();
+if (strpos($log, "outer_start") === false) { echo "FAIL: Missing outer_start in log: {$log}\n"; exit(1); }
+if (strpos($log, "inner") === false) { echo "FAIL: Missing inner in log: {$log}\n"; exit(1); }
+if (strpos($log, "outer_after_inner") === false) { echo "FAIL: Missing outer_after_inner in log: {$log}\n"; exit(1); }
+echo "2. outer_call() = '{$result}'" . "\n";
+echo "   Log: '{$log}'" . "\n";
+
+$s3 = new SystemReturnReentrantTest();
+$result = $s3->nested_call();
+$expected = "nested:inner_result+outer_result:inner_result";
+if ($result !== $expected) { echo "FAIL: Expected '{$expected}', got '{$result}'\n"; exit(1); }
+echo "3. nested_call() = '{$result}'" . "\n";
+
+echo "PASS: System return reentrant (nested calls) works correctly" . "\n";

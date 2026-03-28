@@ -1,0 +1,64 @@
+<?php
+@@target php
+
+@@system HSMEnterBoth {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): list { return $this->log; }
+            get_state(): str { return "Start"; }
+        }
+
+        $Child => $Parent {
+            $>() { $this->log[] = "Child:enter"; }
+            go_to_parent() { -> $Parent }
+            get_log(): list { return $this->log; }
+            get_state(): str { return "Child"; }
+        }
+
+        $Parent {
+            $>() { $this->log[] = "Parent:enter"; }
+            go_to_child() { -> $Child }
+            get_log(): list { return $this->log; }
+            get_state(): str { return "Parent"; }
+        }
+    domain:
+        log = []
+}
+
+echo "=== Test 47: HSM Enter in Both ===" . "\n";
+$s = new HSMEnterBoth();
+
+$s->go_to_child();
+$log = $s->get_log();
+if (!in_array("Child:enter", $log)) { echo "FAIL\n"; exit(1); }
+if (in_array("Parent:enter", $log)) { echo "FAIL: Parent:enter should NOT fire when entering child\n"; exit(1); }
+echo "TC2.3.1: Only child's enter fires when entering child - PASS" . "\n";
+
+$s->go_to_parent();
+$log = $s->get_log();
+if (!in_array("Parent:enter", $log)) { echo "FAIL\n"; exit(1); }
+echo "TC2.3.2: Parent's enter fires when transitioning to parent - PASS" . "\n";
+
+$child_enter_count = count(array_filter($log, function($v) { return $v === "Child:enter"; }));
+$parent_enter_count = count(array_filter($log, function($v) { return $v === "Parent:enter"; }));
+if ($child_enter_count !== 1) { echo "FAIL\n"; exit(1); }
+if ($parent_enter_count !== 1) { echo "FAIL\n"; exit(1); }
+echo "TC2.3.3: No implicit cascading of enter handlers - PASS" . "\n";
+
+$s->go_to_child();
+$log = $s->get_log();
+$child_enter_count = count(array_filter($log, function($v) { return $v === "Child:enter"; }));
+$parent_enter_count = count(array_filter($log, function($v) { return $v === "Parent:enter"; }));
+if ($child_enter_count !== 2) { echo "FAIL\n"; exit(1); }
+if ($parent_enter_count !== 1) { echo "FAIL\n"; exit(1); }
+echo "TC2.3.4: Re-entering child fires child enter again - PASS" . "\n";
+
+echo "PASS: HSM enter in both works correctly" . "\n";

@@ -1,0 +1,125 @@
+<?php
+@@target php
+
+@@system HSMOmittedHandlers {
+    interface:
+        handled_by_child()
+        forwarded_explicitly()
+        unhandled_no_forward()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Child => $Parent {
+            handled_by_child() {
+                $this->log[] = "Child:handled_by_child";
+            }
+            forwarded_explicitly() {
+                $this->log[] = "Child:before_forward";
+                => $^
+            }
+            get_log(): list {
+                return $this->log;
+            }
+            get_state(): str {
+                return "Child";
+            }
+        }
+
+        $Parent {
+            handled_by_child() {
+                $this->log[] = "Parent:handled_by_child";
+            }
+            forwarded_explicitly() {
+                $this->log[] = "Parent:forwarded_explicitly";
+            }
+            unhandled_no_forward() {
+                $this->log[] = "Parent:unhandled_no_forward";
+            }
+            get_log(): list {
+                return $this->log;
+            }
+            get_state(): str {
+                return "Parent";
+            }
+        }
+    domain:
+        log = []
+}
+
+@@system HSMDefaultForward {
+    interface:
+        child_handled()
+        parent_handled()
+        both_respond()
+        get_log(): list
+
+    machine:
+        $Child => $Parent {
+            child_handled() {
+                $this->log[] = "Child:child_handled";
+            }
+            get_log(): list {
+                return $this->log;
+            }
+            => $^
+        }
+
+        $Parent {
+            child_handled() {
+                $this->log[] = "Parent:child_handled";
+            }
+            parent_handled() {
+                $this->log[] = "Parent:parent_handled";
+            }
+            both_respond() {
+                $this->log[] = "Parent:both_respond";
+            }
+            get_log(): list {
+                return $this->log;
+            }
+        }
+    domain:
+        log = []
+}
+
+echo "=== Test 50: HSM Omitted Handlers ===" . "\n";
+
+$s1 = new HSMOmittedHandlers();
+
+$s1->handled_by_child();
+$log = $s1->get_log();
+if (!in_array("Child:handled_by_child", $log)) { echo "FAIL\n"; exit(1); }
+if (in_array("Parent:handled_by_child", $log)) { echo "FAIL: Parent should NOT be called\n"; exit(1); }
+echo "TC2.6.1: Handled by child, not forwarded - PASS" . "\n";
+
+$s1->forwarded_explicitly();
+$log = $s1->get_log();
+if (!in_array("Child:before_forward", $log)) { echo "FAIL\n"; exit(1); }
+if (!in_array("Parent:forwarded_explicitly", $log)) { echo "FAIL\n"; exit(1); }
+echo "TC2.6.2: Explicitly forwarded to parent - PASS" . "\n";
+
+$s1->unhandled_no_forward();
+$log = $s1->get_log();
+if (in_array("Parent:unhandled_no_forward", $log)) { echo "FAIL: Unhandled should be ignored\n"; exit(1); }
+echo "TC2.6.3: Unhandled (no forward) is silently ignored - PASS" . "\n";
+
+$s2 = new HSMDefaultForward();
+
+$s2->child_handled();
+$log = $s2->get_log();
+if (!in_array("Child:child_handled", $log)) { echo "FAIL\n"; exit(1); }
+if (in_array("Parent:child_handled", $log)) { echo "FAIL\n"; exit(1); }
+echo "TC2.6.4: Child handles, not forwarded - PASS" . "\n";
+
+$s2->parent_handled();
+$log = $s2->get_log();
+if (!in_array("Parent:parent_handled", $log)) { echo "FAIL\n"; exit(1); }
+echo "TC2.6.5: Unhandled forwarded via state-level => \$^ - PASS" . "\n";
+
+$s2->both_respond();
+$log = $s2->get_log();
+if (!in_array("Parent:both_respond", $log)) { echo "FAIL\n"; exit(1); }
+echo "TC2.6.6: Default forward works for multiple events - PASS" . "\n";
+
+echo "PASS: HSM omitted handlers work correctly" . "\n";

@@ -1,0 +1,179 @@
+<?php
+@@target php
+
+@@system AiAgent {
+    interface:
+        tick()
+        get_state(): str = "Unknown"
+        get_action_log(): str = ""
+
+    machine:
+        $Root {
+            $>() {
+                $this->action_log = "";
+            }
+            tick() {
+                if ($this->health < 20) {
+                    -> $Flee
+                }
+                if ($this->enemy_distance < 50) {
+                    -> $Approach
+                }
+                -> $Patrol
+            }
+            get_state(): str {
+                return "Root";
+            }
+        }
+
+        $Flee {
+            $>() {
+                $this->action_log = $this->action_log . "flee,";
+            }
+            tick() {
+                if ($this->health >= 20) {
+                    -> $Root
+                }
+                $this->enemy_distance = $this->enemy_distance + 10;
+                $this->health = $this->health + 5;
+                $this->action_log = $this->action_log . "flee,";
+            }
+            get_state(): str {
+                return "Flee";
+            }
+        }
+
+        $Approach {
+            $>() {
+                $this->action_log = $this->action_log . "approach,";
+            }
+            tick() {
+                if ($this->health < 20) {
+                    -> $Flee
+                }
+                if ($this->enemy_distance >= 50) {
+                    -> $Root
+                }
+                if ($this->enemy_distance > 5) {
+                    $this->enemy_distance = $this->enemy_distance - 10;
+                    $this->action_log = $this->action_log . "approach,";
+                } else {
+                    -> $Attack
+                }
+            }
+            get_state(): str {
+                return "Approach";
+            }
+        }
+
+        $Attack {
+            $>() {
+                $this->action_log = $this->action_log . "attack,";
+            }
+            tick() {
+                if ($this->health < 20) {
+                    -> $Flee
+                }
+                if ($this->enemy_distance > 5) {
+                    -> $Approach
+                }
+                if ($this->enemy_health <= 0) {
+                    $this->enemy_distance = 100;
+                    -> $Root
+                }
+                $this->enemy_health = $this->enemy_health - 25;
+                $this->action_log = $this->action_log . "attack,";
+            }
+            get_state(): str {
+                return "Attack";
+            }
+        }
+
+        $Patrol {
+            $>() {
+                $this->action_log = $this->action_log . "patrol,";
+            }
+            tick() {
+                if ($this->enemy_distance < 50) {
+                    -> $Approach
+                }
+                if ($this->health < 20) {
+                    -> $Flee
+                }
+                $this->patrol_step = $this->patrol_step + 1;
+                $this->action_log = $this->action_log . "patrol,";
+            }
+            get_state(): str {
+                return "Patrol";
+            }
+        }
+
+    domain:
+        health = 100
+        enemy_distance = 100
+        enemy_health = 100
+        patrol_step = 0
+        action_log = ""
+}
+
+function assert_state($agent, $expected, $label) {
+    $actual = $agent->get_state();
+    if ($actual !== $expected) {
+        echo "FAIL: {$label} - expected '{$expected}', got '{$actual}'" . "\n";
+        throw new \Exception("State assertion failed: {$label}");
+    }
+}
+
+// test_priority_interrupt
+$agent = new AiAgent();
+$agent->tick();
+assert_state($agent, "Patrol", "initial patrol");
+$agent->enemy_distance = 30;
+$agent->tick();
+assert_state($agent, "Approach", "enemy triggers approach");
+$agent->health = 10;
+$agent->tick();
+assert_state($agent, "Flee", "low health interrupts combat");
+$agent->health = 50;
+$agent->enemy_distance = 20;
+$agent->tick();
+assert_state($agent, "Root", "flee exits to root");
+$agent->tick();
+assert_state($agent, "Approach", "health recovered, back to combat");
+echo "PASS: BT priority interrupt" . "\n";
+
+// test_sequence_completion
+$agent = new AiAgent();
+$agent->enemy_distance = 30;
+$agent->tick();
+assert_state($agent, "Approach", "start approach");
+$agent->tick();
+assert_state($agent, "Approach", "still approaching");
+$agent->enemy_distance = 5;
+$agent->tick();
+assert_state($agent, "Attack", "in range, attacking");
+$agent->tick();
+assert_state($agent, "Attack", "still attacking");
+$agent->enemy_health = 0;
+$agent->tick();
+assert_state($agent, "Root", "enemy dead, back to root");
+$agent->tick();
+assert_state($agent, "Patrol", "enemy dead, patrol");
+echo "PASS: BT sequence completion" . "\n";
+
+// test_re_evaluation
+$agent = new AiAgent();
+$agent->enemy_distance = 30;
+$agent->tick();
+assert_state($agent, "Approach", "approaching");
+$agent->enemy_distance = 60;
+$agent->tick();
+assert_state($agent, "Root", "enemy fled, root");
+$agent->tick();
+assert_state($agent, "Patrol", "enemy fled, patrol");
+$agent->enemy_distance = 10;
+$agent->tick();
+assert_state($agent, "Approach", "enemy back, approach again");
+echo "PASS: BT re-evaluation" . "\n";
+
+echo "PASS: All behavior tree tests passed" . "\n";

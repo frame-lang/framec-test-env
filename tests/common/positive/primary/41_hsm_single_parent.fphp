@@ -1,0 +1,73 @@
+<?php
+@@target php
+
+@@system HSMSingleParent {
+    interface:
+        child_only()
+        forward_to_parent()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Child => $Parent {
+            child_only() {
+                $this->log[] = "Child:child_only";
+            }
+
+            forward_to_parent() {
+                $this->log[] = "Child:before_forward";
+                => $^
+                $this->log[] = "Child:after_forward";
+            }
+
+            get_log(): list {
+                return $this->log;
+            }
+
+            get_state(): str {
+                return "Child";
+            }
+        }
+
+        $Parent {
+            forward_to_parent() {
+                $this->log[] = "Parent:forward_to_parent";
+            }
+
+            get_log(): list {
+                return $this->log;
+            }
+
+            get_state(): str {
+                return "Parent";
+            }
+        }
+    domain:
+        log = []
+}
+
+echo "=== Test 41: HSM Single Parent ===" . "\n";
+$s = new HSMSingleParent();
+
+echo "TC1.1.1: Child-Parent relationship compiles - PASS" . "\n";
+
+$s->forward_to_parent();
+$log = $s->get_log();
+if (!in_array("Child:before_forward", $log)) { echo "FAIL: Expected Child:before_forward in log\n"; exit(1); }
+if (!in_array("Parent:forward_to_parent", $log)) { echo "FAIL: Expected Parent:forward_to_parent in log\n"; exit(1); }
+echo "TC1.1.2: Child forwards to parent - PASS" . "\n";
+
+$state = $s->get_state();
+if ($state !== "Child") { echo "FAIL: Expected state 'Child', got '{$state}'\n"; exit(1); }
+echo "TC1.1.3: Child remains current state after forward - PASS" . "\n";
+
+if (!in_array("Child:after_forward", $log)) { echo "FAIL: Expected Child:after_forward in log\n"; exit(1); }
+echo "TC1.1.4: Parent executes and returns control - PASS" . "\n";
+
+$s->child_only();
+$log = $s->get_log();
+$child_only_count = count(array_filter($log, function($v) { return $v === "Child:child_only"; }));
+if ($child_only_count !== 1) { echo "FAIL: Expected exactly 1 Child:child_only\n"; exit(1); }
+echo "TC1.1.5: Child-only event handled locally - PASS" . "\n";
+
+echo "PASS: HSM single parent relationship works correctly" . "\n";

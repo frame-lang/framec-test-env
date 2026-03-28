@@ -1,0 +1,125 @@
+<?php
+@@target php
+
+@@system HistoryHSM {
+    interface:
+        gotoA()
+        gotoB()
+        gotoC()
+        goBack()
+        get_state(): str
+        get_log(): list
+
+    machine:
+        $Waiting {
+            $>() {
+                $this->log_msg("In \$Waiting");
+            }
+            gotoA() {
+                $this->log_msg("gotoA");
+                -> $A
+            }
+            gotoB() {
+                $this->log_msg("gotoB");
+                -> $B
+            }
+            get_state(): str {
+                return "Waiting";
+            }
+            get_log(): list {
+                return $this->log;
+            }
+        }
+
+        $A => $AB {
+            $>() {
+                $this->log_msg("In \$A");
+            }
+            gotoB() {
+                $this->log_msg("gotoB");
+                -> $B
+            }
+            get_state(): str {
+                return "A";
+            }
+            get_log(): list {
+                return $this->log;
+            }
+            => $^
+        }
+
+        $B => $AB {
+            $>() {
+                $this->log_msg("In \$B");
+            }
+            gotoA() {
+                $this->log_msg("gotoA");
+                -> $A
+            }
+            get_state(): str {
+                return "B";
+            }
+            get_log(): list {
+                return $this->log;
+            }
+            => $^
+        }
+
+        $AB {
+            gotoC() {
+                $this->log_msg("gotoC in \$AB");
+                push$
+                -> $C
+            }
+        }
+
+        $C {
+            $>() {
+                $this->log_msg("In \$C");
+            }
+            goBack() {
+                $this->log_msg("goBack");
+                -> pop$
+            }
+            get_state(): str {
+                return "C";
+            }
+            get_log(): list {
+                return $this->log;
+            }
+        }
+
+    actions:
+        log_msg(msg: str) {
+            $this->log[] = $msg;
+        }
+
+    domain:
+        log = []
+}
+
+echo "=== Test 34: Doc History HSM ===" . "\n";
+$h = new HistoryHSM();
+
+if ($h->get_state() !== "Waiting") { echo "FAIL: Expected 'Waiting'\n"; exit(1); }
+
+$h->gotoA();
+if ($h->get_state() !== "A") { echo "FAIL: Expected 'A'\n"; exit(1); }
+
+$h->gotoC();
+if ($h->get_state() !== "C") { echo "FAIL: Expected 'C'\n"; exit(1); }
+
+$h->goBack();
+if ($h->get_state() !== "A") { echo "FAIL: Expected 'A' after goBack\n"; exit(1); }
+
+$h->gotoB();
+if ($h->get_state() !== "B") { echo "FAIL: Expected 'B'\n"; exit(1); }
+
+$h->gotoC();
+if ($h->get_state() !== "C") { echo "FAIL: Expected 'C'\n"; exit(1); }
+
+$h->goBack();
+if ($h->get_state() !== "B") { echo "FAIL: Expected 'B' after goBack\n"; exit(1); }
+
+echo "Log: " . implode(", ", $h->get_log()) . "\n";
+echo "PASS: HSM with history works correctly" . "\n";

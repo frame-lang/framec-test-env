@@ -1,0 +1,69 @@
+<?php
+@@target php
+
+# Tests that @@:return follows "last writer wins" across transition lifecycle
+
+@@system SystemReturnChainTest {
+    interface:
+        test_enter_sets(): str
+        test_exit_then_enter(): str
+        get_state(): str
+
+    machine:
+        $Start {
+            test_enter_sets(): str {
+                -> $EnterSetter
+            }
+
+            test_exit_then_enter(): str {
+                -> $BothSet
+            }
+
+            get_state(): str {
+                return "Start";
+            }
+
+            <$() {
+                # Exit handler sets initial value
+                @@:return = "from_exit"
+            }
+        }
+
+        $EnterSetter {
+            $>() {
+                # Enter handler sets return value
+                @@:return = "from_enter"
+            }
+
+            get_state(): str {
+                return "EnterSetter";
+            }
+        }
+
+        $BothSet {
+            $>() {
+                # Enter handler sets return - should overwrite exit's value
+                @@:return = "enter_wins"
+            }
+
+            get_state(): str {
+                return "BothSet";
+            }
+        }
+}
+
+echo "=== Test 15: System Return Chain (Last Writer Wins) ===" . "\n";
+
+$s1 = new SystemReturnChainTest();
+$result = $s1->test_enter_sets();
+if ($result !== "from_enter") { echo "FAIL: Expected 'from_enter', got '{$result}'\n"; exit(1); }
+if ($s1->get_state() !== "EnterSetter") { echo "FAIL: Expected state 'EnterSetter'\n"; exit(1); }
+echo "1. Exit set then enter set - enter wins: '{$result}'" . "\n";
+
+$s2 = new SystemReturnChainTest();
+$result = $s2->test_exit_then_enter();
+if ($result !== "enter_wins") { echo "FAIL: Expected 'enter_wins', got '{$result}'\n"; exit(1); }
+if ($s2->get_state() !== "BothSet") { echo "FAIL: Expected state 'BothSet'\n"; exit(1); }
+echo "2. Both set - enter wins: '{$result}'" . "\n";
+
+echo "PASS: System return chain (last writer wins) works correctly" . "\n";

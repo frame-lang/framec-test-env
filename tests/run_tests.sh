@@ -61,6 +61,7 @@ JAVA_OUT="$TEST_ENV_ROOT/output/java/tests"
 CSHARP_OUT="$TEST_ENV_ROOT/output/csharp/tests"
 GO_OUT="$TEST_ENV_ROOT/output/go/tests"
 JS_OUT="$TEST_ENV_ROOT/output/javascript/tests"
+PHP_OUT="$TEST_ENV_ROOT/output/php/tests"
 
 # Colors
 RED='\033[0;31m'
@@ -96,6 +97,7 @@ while [[ $# -gt 0 ]]; do
         --csharp|--cs) FILTER_LANG="csharp" ;;
         --go) FILTER_LANG="go" ;;
         --javascript|--js) FILTER_LANG="javascript" ;;
+        --php) FILTER_LANG="php" ;;
         --langs|-l)
             # Parse comma-separated language list (py,ts,rs,c -> python typescript rust c)
             FILTER_LANGS=""
@@ -144,7 +146,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Create output directories
-mkdir -p "$PYTHON_OUT" "$TS_OUT" "$RUST_OUT" "$C_OUT" "$CPP_OUT" "$JAVA_OUT" "$CSHARP_OUT" "$GO_OUT" "$JS_OUT"
+mkdir -p "$PYTHON_OUT" "$TS_OUT" "$RUST_OUT" "$C_OUT" "$CPP_OUT" "$JAVA_OUT" "$CSHARP_OUT" "$GO_OUT" "$JS_OUT" "$PHP_OUT"
 
 # Temp directory for parallel results
 RESULTS_DIR=$(mktemp -d)
@@ -162,6 +164,7 @@ lang_to_target() {
         csharp) echo "csharp" ;;
         go) echo "go" ;;
         javascript) echo "javascript" ;;
+        php) echo "php" ;;
     esac
 }
 
@@ -177,6 +180,7 @@ lang_to_outdir() {
         csharp) echo "$CSHARP_OUT" ;;
         go) echo "$GO_OUT" ;;
         javascript) echo "$JS_OUT" ;;
+        php) echo "$PHP_OUT" ;;
     esac
 }
 
@@ -192,6 +196,7 @@ lang_to_outext() {
         csharp) echo "cs" ;;
         go) echo "go" ;;
         javascript) echo "js" ;;
+        php) echo "php" ;;
     esac
 }
 
@@ -207,6 +212,7 @@ lang_to_srcext() {
         csharp) echo "fcs" ;;
         go) echo "fgo" ;;
         javascript) echo "fjs" ;;
+        php) echo "fphp" ;;
     esac
 }
 
@@ -547,7 +553,7 @@ run_category() {
 
     # Check if directory has test files
     local has_tests=false
-    for ext in fpy fts frs fc fcpp fjava fcs fgo fjs; do
+    for ext in fpy fts frs fc fcpp fjava fcs fgo fjs fphp; do
         if ls "$category_dir"/*.$ext 1>/dev/null 2>&1; then
             has_tests=true
             break
@@ -564,7 +570,7 @@ run_category() {
     # Determine which languages to test based on scope
     local languages=""
     case $scope in
-        common) languages="python typescript rust c cpp java csharp go javascript" ;;
+        common) languages="python typescript rust c cpp java csharp go javascript php" ;;
         python) languages="python" ;;
         typescript) languages="typescript" ;;
         rust) languages="rust" ;;
@@ -573,7 +579,7 @@ run_category() {
 
     # Get unique test names from all language files
     local test_names=""
-    for ext in fpy fts frs fc fcpp fjava fcs fgo fjs; do
+    for ext in fpy fts frs fc fcpp fjava fcs fgo fjs fphp; do
         for f in "$category_dir"/*.$ext; do
             [ -f "$f" ] || continue
             local name=$(basename "$f" | sed 's/\.f[a-z]*$//')
@@ -612,6 +618,7 @@ run_category() {
                 csharp) ext="fcs" ;;
                 go) ext="fgo" ;;
                 javascript) ext="fjs" ;;
+                php) ext="fphp" ;;
             esac
 
             local test_file="$category_dir/${test_name}.${ext}"
@@ -649,7 +656,7 @@ if $PARALLEL; then
     elif [ -n "$FILTER_LANGS" ]; then
         languages="$FILTER_LANGS"
     else
-        languages="python typescript rust c cpp java csharp go javascript"
+        languages="python typescript rust c cpp java csharp go javascript php"
     fi
 
     # Phase 1: Transpile all tests first (all languages in parallel)
@@ -765,7 +772,7 @@ total_fail=0
 total_skip=0
 total_known=0
 
-for lang in python typescript rust c cpp java csharp go javascript; do
+for lang in python typescript rust c cpp java csharp go javascript php; do
     p=$(get_counter "$lang" "pass")
     f=$(get_counter "$lang" "fail")
     s=$(get_counter "$lang" "skip")
