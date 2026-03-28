@@ -150,6 +150,24 @@ func (s *TransitionPopTest) GetLog() []string {
     return __result
 }
 
+func (s *TransitionPopTest) _state_Working(__e *TransitionPopTestFrameEvent) {
+    if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "Working"
+        return
+    } else if __e._message == "Process" {
+        s.log = append(s.log, "working:process:before_pop")
+        __popped := s._state_stack[len(s._state_stack)-1]
+        s._state_stack = s._state_stack[:len(s._state_stack)-1]
+        s.__transition(__popped)
+        return
+        // This should NOT execute because pop transitions away
+        s.log = append(s.log, "working:process:after_pop")
+    }
+}
+
 func (s *TransitionPopTest) _state_Idle(__e *TransitionPopTestFrameEvent) {
     if __e._message == "GetLog" {
         s._context_stack[len(s._context_stack)-1]._return = s.log
@@ -166,24 +184,6 @@ func (s *TransitionPopTest) _state_Idle(__e *TransitionPopTestFrameEvent) {
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return
-    }
-}
-
-func (s *TransitionPopTest) _state_Working(__e *TransitionPopTestFrameEvent) {
-    if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Working"
-        return
-    } else if __e._message == "Process" {
-        s.log = append(s.log, "working:process:before_pop")
-        __popped := s._state_stack[len(s._state_stack)-1]
-        s._state_stack = s._state_stack[:len(s._state_stack)-1]
-        s.__transition(__popped)
-        return
-        // This should NOT execute because pop transitions away
-        s.log = append(s.log, "working:process:after_pop")
     }
 }
 

@@ -147,29 +147,6 @@ export class StateVarPushPop {
         this._context_stack.pop();
     }
 
-    _state_Other(__e) {
-        // HSM: Navigate to this state's compartment for state var access
-        let __sv_comp = this.__compartment;
-        while (__sv_comp !== null && __sv_comp.state !== "Other") {
-            __sv_comp = __sv_comp.parent_compartment;
-        }
-        if (__e._message === "$>") {
-            if (!("other_count" in __sv_comp.state_vars)) {
-                __sv_comp.state_vars["other_count"] = 100;
-            }
-        } else if (__e._message === "get_count") {
-            this._context_stack[this._context_stack.length - 1]._return = __sv_comp.state_vars["other_count"];
-            return;;
-        } else if (__e._message === "increment") {
-            __sv_comp.state_vars["other_count"] = __sv_comp.state_vars["other_count"] + 1;
-            this._context_stack[this._context_stack.length - 1]._return = __sv_comp.state_vars["other_count"];
-            return;;
-        } else if (__e._message === "restore") {
-            this.__transition(this._state_stack.pop());
-            return;
-        }
-    }
-
     _state_Counter(__e) {
         // HSM: Navigate to this state's compartment for state var access
         let __sv_comp = this.__compartment;
@@ -191,6 +168,29 @@ export class StateVarPushPop {
             this._state_stack.push(this.__compartment.copy());
             const __compartment = new StateVarPushPopCompartment("Other", this.__compartment.copy());
             this.__transition(__compartment);
+            return;
+        }
+    }
+
+    _state_Other(__e) {
+        // HSM: Navigate to this state's compartment for state var access
+        let __sv_comp = this.__compartment;
+        while (__sv_comp !== null && __sv_comp.state !== "Other") {
+            __sv_comp = __sv_comp.parent_compartment;
+        }
+        if (__e._message === "$>") {
+            if (!("other_count" in __sv_comp.state_vars)) {
+                __sv_comp.state_vars["other_count"] = 100;
+            }
+        } else if (__e._message === "get_count") {
+            this._context_stack[this._context_stack.length - 1]._return = __sv_comp.state_vars["other_count"];
+            return;;
+        } else if (__e._message === "increment") {
+            __sv_comp.state_vars["other_count"] = __sv_comp.state_vars["other_count"] + 1;
+            this._context_stack[this._context_stack.length - 1]._return = __sv_comp.state_vars["other_count"];
+            return;;
+        } else if (__e._message === "restore") {
+            this.__transition(this._state_stack.pop());
             return;
         }
     }

@@ -196,6 +196,72 @@ class AiAgent {
         }
     }
 
+    private void _state_Patrol(AiAgentFrameEvent __e) {
+        if (__e._message.equals("$>")) {
+            this.action_log = this.action_log + "patrol,";
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Patrol";
+            return;
+        } else if (__e._message.equals("tick")) {
+            // Higher-priority interrupt: combat
+            if (this.enemy_distance < 50) {
+                var __compartment = new AiAgentCompartment("Approach");
+                __compartment.parent_compartment = this.__compartment.copy();
+                __transition(__compartment);
+                return;
+            }
+
+            // Higher-priority interrupt: survival
+            if (this.health < 20) {
+                var __compartment = new AiAgentCompartment("Flee");
+                __compartment.parent_compartment = this.__compartment.copy();
+                __transition(__compartment);
+                return;
+            }
+
+            // Action: patrol
+            this.patrol_step = this.patrol_step + 1;
+            this.action_log = this.action_log + "patrol,";
+        }
+    }
+
+    private void _state_Approach(AiAgentFrameEvent __e) {
+        if (__e._message.equals("$>")) {
+            this.action_log = this.action_log + "approach,";
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Approach";
+            return;
+        } else if (__e._message.equals("tick")) {
+            // Survival interrupt: flee takes priority
+            if (this.health < 20) {
+                var __compartment = new AiAgentCompartment("Flee");
+                __compartment.parent_compartment = this.__compartment.copy();
+                __transition(__compartment);
+                return;
+            }
+
+            // Precondition: enemy still visible?
+            if (this.enemy_distance >= 50) {
+                var __compartment = new AiAgentCompartment("Root");
+                __compartment.parent_compartment = this.__compartment.copy();
+                __transition(__compartment);
+                return;
+            }
+
+            // Action: move closer
+            if (this.enemy_distance > 5) {
+                this.enemy_distance = this.enemy_distance - 10;
+                this.action_log = this.action_log + "approach,";
+            } else {
+                // In range -- sequence continues to Attack
+                var __compartment = new AiAgentCompartment("Attack");
+                __compartment.parent_compartment = this.__compartment.copy();
+                __transition(__compartment);
+                return;
+            }
+        }
+    }
+
     private void _state_Attack(AiAgentFrameEvent __e) {
         if (__e._message.equals("$>")) {
             this.action_log = this.action_log + "attack,";
@@ -234,35 +300,6 @@ class AiAgent {
         }
     }
 
-    private void _state_Patrol(AiAgentFrameEvent __e) {
-        if (__e._message.equals("$>")) {
-            this.action_log = this.action_log + "patrol,";
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Patrol";
-            return;
-        } else if (__e._message.equals("tick")) {
-            // Higher-priority interrupt: combat
-            if (this.enemy_distance < 50) {
-                var __compartment = new AiAgentCompartment("Approach");
-                __compartment.parent_compartment = this.__compartment.copy();
-                __transition(__compartment);
-                return;
-            }
-
-            // Higher-priority interrupt: survival
-            if (this.health < 20) {
-                var __compartment = new AiAgentCompartment("Flee");
-                __compartment.parent_compartment = this.__compartment.copy();
-                __transition(__compartment);
-                return;
-            }
-
-            // Action: patrol
-            this.patrol_step = this.patrol_step + 1;
-            this.action_log = this.action_log + "patrol,";
-        }
-    }
-
     private void _state_Flee(AiAgentFrameEvent __e) {
         if (__e._message.equals("$>")) {
             this.action_log = this.action_log + "flee,";
@@ -282,43 +319,6 @@ class AiAgent {
             this.enemy_distance = this.enemy_distance + 10;
             this.health = this.health + 5;
             this.action_log = this.action_log + "flee,";
-        }
-    }
-
-    private void _state_Approach(AiAgentFrameEvent __e) {
-        if (__e._message.equals("$>")) {
-            this.action_log = this.action_log + "approach,";
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Approach";
-            return;
-        } else if (__e._message.equals("tick")) {
-            // Survival interrupt: flee takes priority
-            if (this.health < 20) {
-                var __compartment = new AiAgentCompartment("Flee");
-                __compartment.parent_compartment = this.__compartment.copy();
-                __transition(__compartment);
-                return;
-            }
-
-            // Precondition: enemy still visible?
-            if (this.enemy_distance >= 50) {
-                var __compartment = new AiAgentCompartment("Root");
-                __compartment.parent_compartment = this.__compartment.copy();
-                __transition(__compartment);
-                return;
-            }
-
-            // Action: move closer
-            if (this.enemy_distance > 5) {
-                this.enemy_distance = this.enemy_distance - 10;
-                this.action_log = this.action_log + "approach,";
-            } else {
-                // In range -- sequence continues to Attack
-                var __compartment = new AiAgentCompartment("Attack");
-                __compartment.parent_compartment = this.__compartment.copy();
-                __transition(__compartment);
-                return;
-            }
         }
     }
 

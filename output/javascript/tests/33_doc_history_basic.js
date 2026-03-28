@@ -157,18 +157,6 @@ export class HistoryBasic {
         return this._context_stack.pop()._return;
     }
 
-    _state_B(__e) {
-        if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "B";
-            return;
-        } else if (__e._message === "gotoC_from_B") {
-            this._state_stack.push(this.__compartment.copy());
-            const __compartment = new HistoryBasicCompartment("C", this.__compartment.copy());
-            this.__transition(__compartment);
-            return;
-        }
-    }
-
     _state_A(__e) {
         if (__e._message === "get_state") {
             this._context_stack[this._context_stack.length - 1]._return = "A";
@@ -178,6 +166,18 @@ export class HistoryBasic {
             this.__transition(__compartment);
             return;
         } else if (__e._message === "gotoC_from_A") {
+            this._state_stack.push(this.__compartment.copy());
+            const __compartment = new HistoryBasicCompartment("C", this.__compartment.copy());
+            this.__transition(__compartment);
+            return;
+        }
+    }
+
+    _state_B(__e) {
+        if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "B";
+            return;
+        } else if (__e._message === "gotoC_from_B") {
             this._state_stack.push(this.__compartment.copy());
             const __compartment = new HistoryBasicCompartment("C", this.__compartment.copy());
             this.__transition(__compartment);

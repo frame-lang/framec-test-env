@@ -208,12 +208,24 @@ func (s *TcpServer) _state_SynReceived(__e *TcpServerFrameEvent) {
     }
 }
 
-func (s *TcpServer) _state_TimeWait(__e *TcpServerFrameEvent) {
+func (s *TcpServer) _state_FinWait2(__e *TcpServerFrameEvent) {
     if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "TimeWait"
+        s._context_stack[len(s._context_stack)-1]._return = "FinWait2"
         return
-    } else if __e._message == "ReceiveAck" {
-        __compartment := newTcpServerCompartment("Closed")
+    } else if __e._message == "ReceiveFin" {
+        __compartment := newTcpServerCompartment("TimeWait")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    }
+}
+
+func (s *TcpServer) _state_Listen(__e *TcpServerFrameEvent) {
+    if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "Listen"
+        return
+    } else if __e._message == "ReceiveSyn" {
+        __compartment := newTcpServerCompartment("SynReceived")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return
@@ -261,6 +273,27 @@ func (s *TcpServer) _state_FinWait1(__e *TcpServerFrameEvent) {
     }
 }
 
+func (s *TcpServer) _state_Established(__e *TcpServerFrameEvent) {
+    if __e._message == "Close" {
+        __compartment := newTcpServerCompartment("FinWait1")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "Established"
+        return
+    } else if __e._message == "ReceiveData" {
+        data := __e._parameters["data"].(string)
+        _ = data
+        s.last_data = data
+    } else if __e._message == "ReceiveFin" {
+        __compartment := newTcpServerCompartment("CloseWait")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    }
+}
+
 func (s *TcpServer) _state_Closed(__e *TcpServerFrameEvent) {
     if __e._message == "GetState" {
         s._context_stack[len(s._context_stack)-1]._return = "Closed"
@@ -285,45 +318,12 @@ func (s *TcpServer) _state_Closing(__e *TcpServerFrameEvent) {
     }
 }
 
-func (s *TcpServer) _state_FinWait2(__e *TcpServerFrameEvent) {
+func (s *TcpServer) _state_TimeWait(__e *TcpServerFrameEvent) {
     if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "FinWait2"
+        s._context_stack[len(s._context_stack)-1]._return = "TimeWait"
         return
-    } else if __e._message == "ReceiveFin" {
-        __compartment := newTcpServerCompartment("TimeWait")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    }
-}
-
-func (s *TcpServer) _state_Established(__e *TcpServerFrameEvent) {
-    if __e._message == "Close" {
-        __compartment := newTcpServerCompartment("FinWait1")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Established"
-        return
-    } else if __e._message == "ReceiveData" {
-        data := __e._parameters["data"].(string)
-        _ = data
-        s.last_data = data
-    } else if __e._message == "ReceiveFin" {
-        __compartment := newTcpServerCompartment("CloseWait")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    }
-}
-
-func (s *TcpServer) _state_Listen(__e *TcpServerFrameEvent) {
-    if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Listen"
-        return
-    } else if __e._message == "ReceiveSyn" {
-        __compartment := newTcpServerCompartment("SynReceived")
+    } else if __e._message == "ReceiveAck" {
+        __compartment := newTcpServerCompartment("Closed")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return
@@ -515,9 +515,50 @@ func (s *TcpClient) GetState() string {
     return __result
 }
 
-func (s *TcpClient) _state_TimeWait(__e *TcpClientFrameEvent) {
+func (s *TcpClient) _state_CloseWait(__e *TcpClientFrameEvent) {
+    if __e._message == "Close" {
+        __compartment := newTcpClientCompartment("LastAck")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "CloseWait"
+        return
+    }
+}
+
+func (s *TcpClient) _state_SynSent(__e *TcpClientFrameEvent) {
     if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "TimeWait"
+        s._context_stack[len(s._context_stack)-1]._return = "SynSent"
+        return
+    } else if __e._message == "ReceiveSynAck" {
+        __compartment := newTcpClientCompartment("Established")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    }
+}
+
+func (s *TcpClient) _state_FinWait1(__e *TcpClientFrameEvent) {
+    if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "FinWait1"
+        return
+    } else if __e._message == "ReceiveAck" {
+        __compartment := newTcpClientCompartment("FinWait2")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    } else if __e._message == "ReceiveFin" {
+        __compartment := newTcpClientCompartment("Closing")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    }
+}
+
+func (s *TcpClient) _state_LastAck(__e *TcpClientFrameEvent) {
+    if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "LastAck"
         return
     } else if __e._message == "ReceiveAck" {
         __compartment := newTcpClientCompartment("Closed")
@@ -527,14 +568,14 @@ func (s *TcpClient) _state_TimeWait(__e *TcpClientFrameEvent) {
     }
 }
 
-func (s *TcpClient) _state_Closed(__e *TcpClientFrameEvent) {
-    if __e._message == "Connect" {
-        __compartment := newTcpClientCompartment("SynSent")
+func (s *TcpClient) _state_TimeWait(__e *TcpClientFrameEvent) {
+    if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "TimeWait"
+        return
+    } else if __e._message == "ReceiveAck" {
+        __compartment := newTcpClientCompartment("Closed")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Closed"
         return
     }
 }
@@ -560,6 +601,18 @@ func (s *TcpClient) _state_Established(__e *TcpClientFrameEvent) {
     }
 }
 
+func (s *TcpClient) _state_Closed(__e *TcpClientFrameEvent) {
+    if __e._message == "Connect" {
+        __compartment := newTcpClientCompartment("SynSent")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "Closed"
+        return
+    }
+}
+
 func (s *TcpClient) _state_Closing(__e *TcpClientFrameEvent) {
     if __e._message == "GetState" {
         s._context_stack[len(s._context_stack)-1]._return = "Closing"
@@ -572,65 +625,12 @@ func (s *TcpClient) _state_Closing(__e *TcpClientFrameEvent) {
     }
 }
 
-func (s *TcpClient) _state_FinWait1(__e *TcpClientFrameEvent) {
-    if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "FinWait1"
-        return
-    } else if __e._message == "ReceiveAck" {
-        __compartment := newTcpClientCompartment("FinWait2")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    } else if __e._message == "ReceiveFin" {
-        __compartment := newTcpClientCompartment("Closing")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    }
-}
-
 func (s *TcpClient) _state_FinWait2(__e *TcpClientFrameEvent) {
     if __e._message == "GetState" {
         s._context_stack[len(s._context_stack)-1]._return = "FinWait2"
         return
     } else if __e._message == "ReceiveFin" {
         __compartment := newTcpClientCompartment("TimeWait")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    }
-}
-
-func (s *TcpClient) _state_SynSent(__e *TcpClientFrameEvent) {
-    if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "SynSent"
-        return
-    } else if __e._message == "ReceiveSynAck" {
-        __compartment := newTcpClientCompartment("Established")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    }
-}
-
-func (s *TcpClient) _state_CloseWait(__e *TcpClientFrameEvent) {
-    if __e._message == "Close" {
-        __compartment := newTcpClientCompartment("LastAck")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "CloseWait"
-        return
-    }
-}
-
-func (s *TcpClient) _state_LastAck(__e *TcpClientFrameEvent) {
-    if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "LastAck"
-        return
-    } else if __e._message == "ReceiveAck" {
-        __compartment := newTcpClientCompartment("Closed")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return

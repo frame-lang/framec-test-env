@@ -127,6 +127,11 @@ class S {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
+    private void _state_B(SFrameEvent __e) {
+        if (__e._message == "e") {
+        }
+    }
+
     private void _state_A(SFrameEvent __e) {
         if (__e._message == "e") {
             _state_stack.Add(__compartment.Copy());
@@ -134,11 +139,6 @@ class S {
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
-        }
-    }
-
-    private void _state_B(SFrameEvent __e) {
-        if (__e._message == "e") {
         }
     }
 }

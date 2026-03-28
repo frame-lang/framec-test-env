@@ -117,21 +117,21 @@ class S {
         __next_compartment = next;
     }
 
-    public void g(Object x) {
+    public void e(Object p, Object q) {
         HashMap<String, Object> __params = new HashMap<>();
-        __params.put("x", x);
-        SFrameEvent __e = new SFrameEvent("g", __params);
+        __params.put("p", p);
+        __params.put("q", q);
+        SFrameEvent __e = new SFrameEvent("e", __params);
         SFrameContext __ctx = new SFrameContext(__e, null);
         _context_stack.add(__ctx);
         __kernel(_context_stack.get(_context_stack.size() - 1)._event);
         _context_stack.remove(_context_stack.size() - 1);
     }
 
-    public void e(Object p, Object q) {
+    public void g(Object x) {
         HashMap<String, Object> __params = new HashMap<>();
-        __params.put("p", p);
-        __params.put("q", q);
-        SFrameEvent __e = new SFrameEvent("e", __params);
+        __params.put("x", x);
+        SFrameEvent __e = new SFrameEvent("g", __params);
         SFrameContext __ctx = new SFrameContext(__e, null);
         _context_stack.add(__ctx);
         __kernel(_context_stack.get(_context_stack.size() - 1)._event);

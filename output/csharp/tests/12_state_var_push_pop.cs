@@ -155,6 +155,27 @@ class StateVarPushPop {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
+    private void _state_Other(StateVarPushPopFrameEvent __e) {
+        var __sv_comp = __compartment;
+        while (__sv_comp != null && __sv_comp.state != "Other") { __sv_comp = __sv_comp.parent_compartment; }
+        if (__e._message == "$>") {
+            if (!__sv_comp.state_vars.ContainsKey("other_count")) {
+                __sv_comp.state_vars["other_count"] = 100;
+            }
+        } else if (__e._message == "get_count") {
+            _context_stack[_context_stack.Count - 1]._return = (int) __sv_comp.state_vars["other_count"];
+            return;
+        } else if (__e._message == "increment") {
+            __sv_comp.state_vars["other_count"] = (int) __sv_comp.state_vars["other_count"] + 1;
+            _context_stack[_context_stack.Count - 1]._return = (int) __sv_comp.state_vars["other_count"];
+            return;
+        } else if (__e._message == "restore") {
+            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
+            __transition(__popped);
+            return;
+        }
+    }
+
     private void _state_Counter(StateVarPushPopFrameEvent __e) {
         var __sv_comp = __compartment;
         while (__sv_comp != null && __sv_comp.state != "Counter") { __sv_comp = __sv_comp.parent_compartment; }
@@ -174,27 +195,6 @@ class StateVarPushPop {
             { var __new_compartment = new StateVarPushPopCompartment("Other");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
-            return;
-        }
-    }
-
-    private void _state_Other(StateVarPushPopFrameEvent __e) {
-        var __sv_comp = __compartment;
-        while (__sv_comp != null && __sv_comp.state != "Other") { __sv_comp = __sv_comp.parent_compartment; }
-        if (__e._message == "$>") {
-            if (!__sv_comp.state_vars.ContainsKey("other_count")) {
-                __sv_comp.state_vars["other_count"] = 100;
-            }
-        } else if (__e._message == "get_count") {
-            _context_stack[_context_stack.Count - 1]._return = (int) __sv_comp.state_vars["other_count"];
-            return;
-        } else if (__e._message == "increment") {
-            __sv_comp.state_vars["other_count"] = (int) __sv_comp.state_vars["other_count"] + 1;
-            _context_stack[_context_stack.Count - 1]._return = (int) __sv_comp.state_vars["other_count"];
-            return;
-        } else if (__e._message == "restore") {
-            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
-            __transition(__popped);
             return;
         }
     }

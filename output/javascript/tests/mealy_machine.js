@@ -149,20 +149,6 @@ export class MealyMachine {
         }
     }
 
-    _state_Q1(__e) {
-        if (__e._message === "i_0") {
-            this.emit_output(0);
-            const __compartment = new MealyMachineCompartment("Q1", this.__compartment.copy());
-            this.__transition(__compartment);
-            return;
-        } else if (__e._message === "i_1") {
-            this.emit_output(1);
-            const __compartment = new MealyMachineCompartment("Q2", this.__compartment.copy());
-            this.__transition(__compartment);
-            return;
-        }
-    }
-
     _state_Q2(__e) {
         if (__e._message === "i_0") {
             this.emit_output(1);
@@ -171,6 +157,20 @@ export class MealyMachine {
             return;
         } else if (__e._message === "i_1") {
             this.emit_output(0);
+            const __compartment = new MealyMachineCompartment("Q2", this.__compartment.copy());
+            this.__transition(__compartment);
+            return;
+        }
+    }
+
+    _state_Q1(__e) {
+        if (__e._message === "i_0") {
+            this.emit_output(0);
+            const __compartment = new MealyMachineCompartment("Q1", this.__compartment.copy());
+            this.__transition(__compartment);
+            return;
+        } else if (__e._message === "i_1") {
+            this.emit_output(1);
             const __compartment = new MealyMachineCompartment("Q2", this.__compartment.copy());
             this.__transition(__compartment);
             return;

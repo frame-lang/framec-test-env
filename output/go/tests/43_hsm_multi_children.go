@@ -182,29 +182,14 @@ func (s *HSMMultiChildren) GetState() string {
     return __result
 }
 
-func (s *HSMMultiChildren) _state_ChildB(__e *HSMMultiChildrenFrameEvent) {
-    if __e._message == "DoAction" {
-        s.log = append(s.log, "ChildB:do_action")
-    } else if __e._message == "ForwardAction" {
-        s.log = append(s.log, "ChildB:forward_action")
-        s._state_Parent(__e)
+func (s *HSMMultiChildren) _state_Parent(__e *HSMMultiChildrenFrameEvent) {
+    if __e._message == "ForwardAction" {
+        s.log = append(s.log, "Parent:forward_action")
     } else if __e._message == "GetLog" {
         s._context_stack[len(s._context_stack)-1]._return = s.log
         return
     } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "ChildB"
-        return
-    } else if __e._message == "StartA" {
-        __compartment := newHSMMultiChildrenCompartment("ChildA")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    } else if __e._message == "StartB" {
-        // stay
-    } else if __e._message == "StartC" {
-        __compartment := newHSMMultiChildrenCompartment("ChildC")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
+        s._context_stack[len(s._context_stack)-1]._return = "Parent"
         return
     }
 }
@@ -236,18 +221,6 @@ func (s *HSMMultiChildren) _state_ChildC(__e *HSMMultiChildrenFrameEvent) {
     }
 }
 
-func (s *HSMMultiChildren) _state_Parent(__e *HSMMultiChildrenFrameEvent) {
-    if __e._message == "ForwardAction" {
-        s.log = append(s.log, "Parent:forward_action")
-    } else if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Parent"
-        return
-    }
-}
-
 func (s *HSMMultiChildren) _state_ChildA(__e *HSMMultiChildrenFrameEvent) {
     if __e._message == "DoAction" {
         s.log = append(s.log, "ChildA:do_action")
@@ -267,6 +240,33 @@ func (s *HSMMultiChildren) _state_ChildA(__e *HSMMultiChildrenFrameEvent) {
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return
+    } else if __e._message == "StartC" {
+        __compartment := newHSMMultiChildrenCompartment("ChildC")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    }
+}
+
+func (s *HSMMultiChildren) _state_ChildB(__e *HSMMultiChildrenFrameEvent) {
+    if __e._message == "DoAction" {
+        s.log = append(s.log, "ChildB:do_action")
+    } else if __e._message == "ForwardAction" {
+        s.log = append(s.log, "ChildB:forward_action")
+        s._state_Parent(__e)
+    } else if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "ChildB"
+        return
+    } else if __e._message == "StartA" {
+        __compartment := newHSMMultiChildrenCompartment("ChildA")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    } else if __e._message == "StartB" {
+        // stay
     } else if __e._message == "StartC" {
         __compartment := newHSMMultiChildrenCompartment("ChildC")
         __compartment.parentCompartment = s.__compartment.copy()

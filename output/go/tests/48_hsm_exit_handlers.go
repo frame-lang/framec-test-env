@@ -175,28 +175,20 @@ func (s *HSMExitHandlers) GetChildVar() int {
     return __result
 }
 
-func (s *HSMExitHandlers) _state_Child(__e *HSMExitHandlersFrameEvent) {
-    __sv_comp := s.__compartment
-    for __sv_comp != nil && __sv_comp.state != "Child" { __sv_comp = __sv_comp.parentCompartment }
-    if __e._message == "<$" {
-        val := __sv_comp.stateVars["child_var"].(int)
-        s.log = append(s.log, fmt.Sprintf("Child:exit(var=%d)", val))
-    } else if __e._message == "$>" {
-        if _, ok := __sv_comp.stateVars["child_var"]; !ok {
-            __sv_comp.stateVars["child_var"] = 42
-        }
-        s.log = append(s.log, "Child:enter")
+func (s *HSMExitHandlers) _state_Other(__e *HSMExitHandlersFrameEvent) {
+    if __e._message == "$>" {
+        s.log = append(s.log, "Other:enter")
     } else if __e._message == "GetChildVar" {
-        s._context_stack[len(s._context_stack)-1]._return = __sv_comp.stateVars["child_var"].(int)
+        s._context_stack[len(s._context_stack)-1]._return = -1
         return
     } else if __e._message == "GetLog" {
         s._context_stack[len(s._context_stack)-1]._return = s.log
         return
     } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Child"
+        s._context_stack[len(s._context_stack)-1]._return = "Other"
         return
-    } else if __e._message == "GoToOther" {
-        __compartment := newHSMExitHandlersCompartment("Other")
+    } else if __e._message == "GoToChild" {
+        __compartment := newHSMExitHandlersCompartment("Child")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return
@@ -235,20 +227,28 @@ func (s *HSMExitHandlers) _state_Parent(__e *HSMExitHandlersFrameEvent) {
     }
 }
 
-func (s *HSMExitHandlers) _state_Other(__e *HSMExitHandlersFrameEvent) {
-    if __e._message == "$>" {
-        s.log = append(s.log, "Other:enter")
+func (s *HSMExitHandlers) _state_Child(__e *HSMExitHandlersFrameEvent) {
+    __sv_comp := s.__compartment
+    for __sv_comp != nil && __sv_comp.state != "Child" { __sv_comp = __sv_comp.parentCompartment }
+    if __e._message == "<$" {
+        val := __sv_comp.stateVars["child_var"].(int)
+        s.log = append(s.log, fmt.Sprintf("Child:exit(var=%d)", val))
+    } else if __e._message == "$>" {
+        if _, ok := __sv_comp.stateVars["child_var"]; !ok {
+            __sv_comp.stateVars["child_var"] = 42
+        }
+        s.log = append(s.log, "Child:enter")
     } else if __e._message == "GetChildVar" {
-        s._context_stack[len(s._context_stack)-1]._return = -1
+        s._context_stack[len(s._context_stack)-1]._return = __sv_comp.stateVars["child_var"].(int)
         return
     } else if __e._message == "GetLog" {
         s._context_stack[len(s._context_stack)-1]._return = s.log
         return
     } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Other"
+        s._context_stack[len(s._context_stack)-1]._return = "Child"
         return
-    } else if __e._message == "GoToChild" {
-        __compartment := newHSMExitHandlersCompartment("Child")
+    } else if __e._message == "GoToOther" {
+        __compartment := newHSMExitHandlersCompartment("Other")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return

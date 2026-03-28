@@ -97,17 +97,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_End(ContextDataTestFrameEvent& __e) {
-        if (__e._message == "$>") {
-            auto trace = std::any_cast<std::string>(_context_stack.back()._data["trace"]);
-            trace += ",enter";
-            _context_stack.back()._data["trace"] = std::any(trace);
-            _context_stack.back()._data["ended_in"] = std::any(std::string("End"));
-
-            _context_stack.back()._return = std::any(std::string("from=") + std::any_cast<std::string>(_context_stack.back()._data["started_in"]) + ",to=" + std::any_cast<std::string>(_context_stack.back()._data["ended_in"]) + ",value=" + std::to_string(std::any_cast<int>(_context_stack.back()._data["value"])) + ",trace=" + trace);
-        }
-    }
-
     void _state_Start(ContextDataTestFrameEvent& __e) {
         if (__e._message == "<$") {
             auto trace = std::any_cast<std::string>(_context_stack.back()._data["trace"]);
@@ -131,6 +120,17 @@ private:
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
+        }
+    }
+
+    void _state_End(ContextDataTestFrameEvent& __e) {
+        if (__e._message == "$>") {
+            auto trace = std::any_cast<std::string>(_context_stack.back()._data["trace"]);
+            trace += ",enter";
+            _context_stack.back()._data["trace"] = std::any(trace);
+            _context_stack.back()._data["ended_in"] = std::any(std::string("End"));
+
+            _context_stack.back()._return = std::any(std::string("from=") + std::any_cast<std::string>(_context_stack.back()._data["started_in"]) + ",to=" + std::any_cast<std::string>(_context_stack.back()._data["ended_in"]) + ",value=" + std::to_string(std::any_cast<int>(_context_stack.back()._data["value"])) + ",trace=" + trace);
         }
     }
 

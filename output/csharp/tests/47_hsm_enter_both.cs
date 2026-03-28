@@ -158,23 +158,6 @@ class HSMEnterBoth {
         return __result;
     }
 
-    private void _state_Child(HSMEnterBothFrameEvent __e) {
-        if (__e._message == "$>") {
-            this.log.Add("Child:enter");
-        } else if (__e._message == "get_log") {
-            _context_stack[_context_stack.Count - 1]._return = this.log;
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Child";
-            return;
-        } else if (__e._message == "go_to_parent") {
-            { var __new_compartment = new HSMEnterBothCompartment("Parent");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
     private void _state_Parent(HSMEnterBothFrameEvent __e) {
         if (__e._message == "$>") {
             this.log.Add("Parent:enter");
@@ -186,6 +169,23 @@ class HSMEnterBoth {
             return;
         } else if (__e._message == "go_to_child") {
             { var __new_compartment = new HSMEnterBothCompartment("Child");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        }
+    }
+
+    private void _state_Child(HSMEnterBothFrameEvent __e) {
+        if (__e._message == "$>") {
+            this.log.Add("Child:enter");
+        } else if (__e._message == "get_log") {
+            _context_stack[_context_stack.Count - 1]._return = this.log;
+            return;
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "Child";
+            return;
+        } else if (__e._message == "go_to_parent") {
+            { var __new_compartment = new HSMEnterBothCompartment("Parent");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;

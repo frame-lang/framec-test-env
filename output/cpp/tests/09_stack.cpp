@@ -94,6 +94,23 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_Sub(StackOpsFrameEvent& __e) {
+        if (__e._message == "do_work") {
+            _context_stack.back()._return = std::any(std::string("Working in Sub"));
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Sub"));
+            return;;
+        } else if (__e._message == "pop_back") {
+            printf("Popping back to previous state\n");
+            auto __popped = std::move(_state_stack.back()); _state_stack.pop_back();
+            __transition(std::move(__popped));
+            return;
+        } else if (__e._message == "push_and_go") {
+            printf("Already in Sub\n");
+        }
+    }
+
     void _state_Main(StackOpsFrameEvent& __e) {
         if (__e._message == "do_work") {
             _context_stack.back()._return = std::any(std::string("Working in Main"));
@@ -110,23 +127,6 @@ private:
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
-        }
-    }
-
-    void _state_Sub(StackOpsFrameEvent& __e) {
-        if (__e._message == "do_work") {
-            _context_stack.back()._return = std::any(std::string("Working in Sub"));
-            return;;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Sub"));
-            return;;
-        } else if (__e._message == "pop_back") {
-            printf("Popping back to previous state\n");
-            auto __popped = std::move(_state_stack.back()); _state_stack.pop_back();
-            __transition(std::move(__popped));
-            return;
-        } else if (__e._message == "push_and_go") {
-            printf("Already in Sub\n");
         }
     }
 

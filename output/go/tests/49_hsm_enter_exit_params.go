@@ -162,47 +162,6 @@ func (s *HSMEnterExitParams) GetState() string {
     return __result
 }
 
-func (s *HSMEnterExitParams) _state_Start(__e *HSMEnterExitParamsFrameEvent) {
-    if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Start"
-        return
-    } else if __e._message == "GoToA" {
-        __compartment := newHSMEnterExitParamsCompartment("ChildA")
-        __compartment.parentCompartment = s.__compartment.copy()
-        __compartment.enterArgs["0"] = "starting"
-        s.__transition(__compartment)
-        return
-    }
-}
-
-func (s *HSMEnterExitParams) _state_ChildA(__e *HSMEnterExitParamsFrameEvent) {
-    if __e._message == "<$" {
-        reason := s.__compartment.exitArgs["0"].(string)
-        _ = reason
-        s.log = append(s.log, "ChildA:exit(" + reason + ")")
-    } else if __e._message == "$>" {
-        msg := s.__compartment.enterArgs["0"].(string)
-        _ = msg
-        s.log = append(s.log, "ChildA:enter(" + msg + ")")
-    } else if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "ChildA"
-        return
-    } else if __e._message == "GoToSibling" {
-        s.__compartment.exitArgs["0"] = "leaving_A"
-        __compartment := newHSMEnterExitParamsCompartment("ChildB")
-        __compartment.parentCompartment = s.__compartment.copy()
-        __compartment.enterArgs["0"] = "arriving_B"
-        s.__transition(__compartment)
-        return
-    }
-}
-
 func (s *HSMEnterExitParams) _state_ChildB(__e *HSMEnterExitParamsFrameEvent) {
     if __e._message == "<$" {
         reason := s.__compartment.exitArgs["0"].(string)
@@ -228,12 +187,53 @@ func (s *HSMEnterExitParams) _state_ChildB(__e *HSMEnterExitParamsFrameEvent) {
     }
 }
 
+func (s *HSMEnterExitParams) _state_Start(__e *HSMEnterExitParamsFrameEvent) {
+    if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "Start"
+        return
+    } else if __e._message == "GoToA" {
+        __compartment := newHSMEnterExitParamsCompartment("ChildA")
+        __compartment.parentCompartment = s.__compartment.copy()
+        __compartment.enterArgs["0"] = "starting"
+        s.__transition(__compartment)
+        return
+    }
+}
+
 func (s *HSMEnterExitParams) _state_Parent(__e *HSMEnterExitParamsFrameEvent) {
     if __e._message == "GetLog" {
         s._context_stack[len(s._context_stack)-1]._return = s.log
         return
     } else if __e._message == "GetState" {
         s._context_stack[len(s._context_stack)-1]._return = "Parent"
+        return
+    }
+}
+
+func (s *HSMEnterExitParams) _state_ChildA(__e *HSMEnterExitParamsFrameEvent) {
+    if __e._message == "<$" {
+        reason := s.__compartment.exitArgs["0"].(string)
+        _ = reason
+        s.log = append(s.log, "ChildA:exit(" + reason + ")")
+    } else if __e._message == "$>" {
+        msg := s.__compartment.enterArgs["0"].(string)
+        _ = msg
+        s.log = append(s.log, "ChildA:enter(" + msg + ")")
+    } else if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "ChildA"
+        return
+    } else if __e._message == "GoToSibling" {
+        s.__compartment.exitArgs["0"] = "leaving_A"
+        __compartment := newHSMEnterExitParamsCompartment("ChildB")
+        __compartment.parentCompartment = s.__compartment.copy()
+        __compartment.enterArgs["0"] = "arriving_B"
+        s.__transition(__compartment)
         return
     }
 }

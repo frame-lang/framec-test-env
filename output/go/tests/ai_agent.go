@@ -167,73 +167,6 @@ func (s *AiAgent) GetActionLog() string {
     return __result
 }
 
-func (s *AiAgent) _state_Attack(__e *AiAgentFrameEvent) {
-    if __e._message == "$>" {
-        s.action_log = s.action_log + "attack,"
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Attack"
-        return
-    } else if __e._message == "Tick" {
-        // Survival interrupt
-        if s.health < 20 {
-            __compartment := newAiAgentCompartment("Flee")
-            __compartment.parentCompartment = s.__compartment.copy()
-            s.__transition(__compartment)
-            return
-        }
-
-        // Precondition: still in range?
-        if s.enemy_distance > 5 {
-            __compartment := newAiAgentCompartment("Approach")
-            __compartment.parentCompartment = s.__compartment.copy()
-            s.__transition(__compartment)
-            return
-        }
-
-        // Precondition: enemy still alive?
-        if s.enemy_health <= 0 {
-            s.enemy_distance = 100
-            __compartment := newAiAgentCompartment("Root")
-            __compartment.parentCompartment = s.__compartment.copy()
-            s.__transition(__compartment)
-            return
-        }
-
-        // Action: attack
-        s.enemy_health = s.enemy_health - 25
-        s.action_log = s.action_log + "attack,"
-    }
-}
-
-func (s *AiAgent) _state_Patrol(__e *AiAgentFrameEvent) {
-    if __e._message == "$>" {
-        s.action_log = s.action_log + "patrol,"
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Patrol"
-        return
-    } else if __e._message == "Tick" {
-        // Higher-priority interrupt: combat
-        if s.enemy_distance < 50 {
-            __compartment := newAiAgentCompartment("Approach")
-            __compartment.parentCompartment = s.__compartment.copy()
-            s.__transition(__compartment)
-            return
-        }
-
-        // Higher-priority interrupt: survival
-        if s.health < 20 {
-            __compartment := newAiAgentCompartment("Flee")
-            __compartment.parentCompartment = s.__compartment.copy()
-            s.__transition(__compartment)
-            return
-        }
-
-        // Action: patrol
-        s.patrol_step = s.patrol_step + 1
-        s.action_log = s.action_log + "patrol,"
-    }
-}
-
 func (s *AiAgent) _state_Approach(__e *AiAgentFrameEvent) {
     if __e._message == "$>" {
         s.action_log = s.action_log + "approach,"
@@ -271,6 +204,57 @@ func (s *AiAgent) _state_Approach(__e *AiAgentFrameEvent) {
     }
 }
 
+func (s *AiAgent) _state_Patrol(__e *AiAgentFrameEvent) {
+    if __e._message == "$>" {
+        s.action_log = s.action_log + "patrol,"
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "Patrol"
+        return
+    } else if __e._message == "Tick" {
+        // Higher-priority interrupt: combat
+        if s.enemy_distance < 50 {
+            __compartment := newAiAgentCompartment("Approach")
+            __compartment.parentCompartment = s.__compartment.copy()
+            s.__transition(__compartment)
+            return
+        }
+
+        // Higher-priority interrupt: survival
+        if s.health < 20 {
+            __compartment := newAiAgentCompartment("Flee")
+            __compartment.parentCompartment = s.__compartment.copy()
+            s.__transition(__compartment)
+            return
+        }
+
+        // Action: patrol
+        s.patrol_step = s.patrol_step + 1
+        s.action_log = s.action_log + "patrol,"
+    }
+}
+
+func (s *AiAgent) _state_Flee(__e *AiAgentFrameEvent) {
+    if __e._message == "$>" {
+        s.action_log = s.action_log + "flee,"
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "Flee"
+        return
+    } else if __e._message == "Tick" {
+        // Precondition: still low health?
+        if s.health >= 20 {
+            __compartment := newAiAgentCompartment("Root")
+            __compartment.parentCompartment = s.__compartment.copy()
+            s.__transition(__compartment)
+            return
+        }
+
+        // Action: flee (increase distance, recover health)
+        s.enemy_distance = s.enemy_distance + 10
+        s.health = s.health + 5
+        s.action_log = s.action_log + "flee,"
+    }
+}
+
 func (s *AiAgent) _state_Root(__e *AiAgentFrameEvent) {
     if __e._message == "$>" {
         s.action_log = ""
@@ -298,25 +282,41 @@ func (s *AiAgent) _state_Root(__e *AiAgentFrameEvent) {
     }
 }
 
-func (s *AiAgent) _state_Flee(__e *AiAgentFrameEvent) {
+func (s *AiAgent) _state_Attack(__e *AiAgentFrameEvent) {
     if __e._message == "$>" {
-        s.action_log = s.action_log + "flee,"
+        s.action_log = s.action_log + "attack,"
     } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Flee"
+        s._context_stack[len(s._context_stack)-1]._return = "Attack"
         return
     } else if __e._message == "Tick" {
-        // Precondition: still low health?
-        if s.health >= 20 {
+        // Survival interrupt
+        if s.health < 20 {
+            __compartment := newAiAgentCompartment("Flee")
+            __compartment.parentCompartment = s.__compartment.copy()
+            s.__transition(__compartment)
+            return
+        }
+
+        // Precondition: still in range?
+        if s.enemy_distance > 5 {
+            __compartment := newAiAgentCompartment("Approach")
+            __compartment.parentCompartment = s.__compartment.copy()
+            s.__transition(__compartment)
+            return
+        }
+
+        // Precondition: enemy still alive?
+        if s.enemy_health <= 0 {
+            s.enemy_distance = 100
             __compartment := newAiAgentCompartment("Root")
             __compartment.parentCompartment = s.__compartment.copy()
             s.__transition(__compartment)
             return
         }
 
-        // Action: flee (increase distance, recover health)
-        s.enemy_distance = s.enemy_distance + 10
-        s.health = s.health + 5
-        s.action_log = s.action_log + "flee,"
+        // Action: attack
+        s.enemy_health = s.enemy_health - 25
+        s.action_log = s.action_log + "attack,"
     }
 }
 

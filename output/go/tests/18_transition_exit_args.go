@@ -131,6 +131,15 @@ func (s *TransitionExitArgs) GetLog() []string {
     return __result
 }
 
+func (s *TransitionExitArgs) _state_Done(__e *TransitionExitArgsFrameEvent) {
+    if __e._message == "$>" {
+        s.log = append(s.log, "enter:done")
+    } else if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    }
+}
+
 func (s *TransitionExitArgs) _state_Active(__e *TransitionExitArgsFrameEvent) {
     if __e._message == "<$" {
         reason := s.__compartment.exitArgs["0"].(string)
@@ -148,15 +157,6 @@ func (s *TransitionExitArgs) _state_Active(__e *TransitionExitArgsFrameEvent) {
         __compartment := newTransitionExitArgsCompartment("Done")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
-        return
-    }
-}
-
-func (s *TransitionExitArgs) _state_Done(__e *TransitionExitArgsFrameEvent) {
-    if __e._message == "$>" {
-        s.log = append(s.log, "enter:done")
-    } else if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
         return
     }
 }

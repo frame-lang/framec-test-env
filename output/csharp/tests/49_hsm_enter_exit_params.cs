@@ -168,22 +168,6 @@ class HSMEnterExitParams {
         return __result;
     }
 
-    private void _state_Start(HSMEnterExitParamsFrameEvent __e) {
-        if (__e._message == "get_log") {
-            _context_stack[_context_stack.Count - 1]._return = this.log;
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Start";
-            return;
-        } else if (__e._message == "go_to_a") {
-            { var __new_compartment = new HSMEnterExitParamsCompartment("ChildA");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __new_compartment.enter_args["0"] = "starting";
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
     private void _state_ChildA(HSMEnterExitParamsFrameEvent __e) {
         if (__e._message == "<$") {
             var reason = (string) __compartment.exit_args["0"];
@@ -203,6 +187,16 @@ class HSMEnterExitParams {
             __new_compartment.parent_compartment = __compartment.Copy();
             __new_compartment.enter_args["0"] = "arriving_B";
             __transition(__new_compartment); }
+            return;
+        }
+    }
+
+    private void _state_Parent(HSMEnterExitParamsFrameEvent __e) {
+        if (__e._message == "get_log") {
+            _context_stack[_context_stack.Count - 1]._return = this.log;
+            return;
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "Parent";
             return;
         }
     }
@@ -230,12 +224,18 @@ class HSMEnterExitParams {
         }
     }
 
-    private void _state_Parent(HSMEnterExitParamsFrameEvent __e) {
+    private void _state_Start(HSMEnterExitParamsFrameEvent __e) {
         if (__e._message == "get_log") {
             _context_stack[_context_stack.Count - 1]._return = this.log;
             return;
         } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Parent";
+            _context_stack[_context_stack.Count - 1]._return = "Start";
+            return;
+        } else if (__e._message == "go_to_a") {
+            { var __new_compartment = new HSMEnterExitParamsCompartment("ChildA");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __new_compartment.enter_args["0"] = "starting";
+            __transition(__new_compartment); }
             return;
         }
     }

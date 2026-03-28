@@ -138,15 +138,6 @@ class EventForwardTest {
         return __result;
     }
 
-    private void _state_Working(EventForwardTestFrameEvent __e) {
-        if (__e._message == "get_log") {
-            _context_stack[_context_stack.Count - 1]._return = this.log;
-            return;
-        } else if (__e._message == "process") {
-            this.log.Add("working:process");
-        }
-    }
-
     private void _state_Idle(EventForwardTestFrameEvent __e) {
         if (__e._message == "get_log") {
             _context_stack[_context_stack.Count - 1]._return = this.log;
@@ -158,6 +149,15 @@ class EventForwardTest {
             __new_compartment.forward_event = __e;
             __transition(__new_compartment); }
             return;
+        }
+    }
+
+    private void _state_Working(EventForwardTestFrameEvent __e) {
+        if (__e._message == "get_log") {
+            _context_stack[_context_stack.Count - 1]._return = this.log;
+            return;
+        } else if (__e._message == "process") {
+            this.log.Add("working:process");
         }
     }
 }

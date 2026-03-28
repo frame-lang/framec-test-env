@@ -164,29 +164,6 @@ func (s *HSMSiblingTransitions) GetState() string {
     return __result
 }
 
-func (s *HSMSiblingTransitions) _state_ChildB(__e *HSMSiblingTransitionsFrameEvent) {
-    if __e._message == "<$" {
-        s.log = append(s.log, "ChildB:exit")
-    } else if __e._message == "$>" {
-        s.log = append(s.log, "ChildB:enter")
-    } else if __e._message == "ForwardAction" {
-        s.log = append(s.log, "ChildB:forward")
-        s._state_Parent(__e)
-    } else if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "ChildB"
-        return
-    } else if __e._message == "GoToA" {
-        s.log = append(s.log, "ChildB:go_to_a")
-        __compartment := newHSMSiblingTransitionsCompartment("ChildA")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    }
-}
-
 func (s *HSMSiblingTransitions) _state_Parent(__e *HSMSiblingTransitionsFrameEvent) {
     if __e._message == "ForwardAction" {
         s.log = append(s.log, "Parent:forward_action")
@@ -216,6 +193,29 @@ func (s *HSMSiblingTransitions) _state_ChildA(__e *HSMSiblingTransitionsFrameEve
     } else if __e._message == "GoToB" {
         s.log = append(s.log, "ChildA:go_to_b")
         __compartment := newHSMSiblingTransitionsCompartment("ChildB")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    }
+}
+
+func (s *HSMSiblingTransitions) _state_ChildB(__e *HSMSiblingTransitionsFrameEvent) {
+    if __e._message == "<$" {
+        s.log = append(s.log, "ChildB:exit")
+    } else if __e._message == "$>" {
+        s.log = append(s.log, "ChildB:enter")
+    } else if __e._message == "ForwardAction" {
+        s.log = append(s.log, "ChildB:forward")
+        s._state_Parent(__e)
+    } else if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "ChildB"
+        return
+    } else if __e._message == "GoToA" {
+        s.log = append(s.log, "ChildB:go_to_a")
+        __compartment := newHSMSiblingTransitionsCompartment("ChildA")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return

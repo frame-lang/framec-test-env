@@ -136,19 +136,6 @@ class TransitionEnterArgs {
         return __result;
     }
 
-    private void _state_Active(TransitionEnterArgsFrameEvent __e) {
-        if (__e._message.equals("$>")) {
-            var source = (String) __compartment.enter_args.get("0");
-            var value = (int) __compartment.enter_args.get("1");
-            this.log.add("active:enter:" + source + ":" + value);
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else if (__e._message.equals("start")) {
-            this.log.add("active:start");
-        }
-    }
-
     private void _state_Idle(TransitionEnterArgsFrameEvent __e) {
         if (__e._message.equals("get_log")) {
             _context_stack.get(_context_stack.size() - 1)._return = this.log;
@@ -161,6 +148,19 @@ class TransitionEnterArgs {
             __compartment.enter_args.put("1", 42);
             __transition(__compartment);
             return;
+        }
+    }
+
+    private void _state_Active(TransitionEnterArgsFrameEvent __e) {
+        if (__e._message.equals("$>")) {
+            var source = (String) __compartment.enter_args.get("0");
+            var value = (int) __compartment.enter_args.get("1");
+            this.log.add("active:enter:" + source + ":" + value);
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else if (__e._message.equals("start")) {
+            this.log.add("active:start");
         }
     }
 }

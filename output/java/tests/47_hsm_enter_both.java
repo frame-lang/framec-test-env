@@ -156,6 +156,26 @@ class HSMEnterBoth {
         return __result;
     }
 
+    private void _state_Start(HSMEnterBothFrameEvent __e) {
+        if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Start";
+            return;
+        } else if (__e._message.equals("go_to_child")) {
+            var __compartment = new HSMEnterBothCompartment("Child");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        } else if (__e._message.equals("go_to_parent")) {
+            var __compartment = new HSMEnterBothCompartment("Parent");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
     private void _state_Child(HSMEnterBothFrameEvent __e) {
         if (__e._message.equals("$>")) {
             this.log.add("Child:enter");
@@ -184,26 +204,6 @@ class HSMEnterBoth {
             return;
         } else if (__e._message.equals("go_to_child")) {
             var __compartment = new HSMEnterBothCompartment("Child");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
-    private void _state_Start(HSMEnterBothFrameEvent __e) {
-        if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Start";
-            return;
-        } else if (__e._message.equals("go_to_child")) {
-            var __compartment = new HSMEnterBothCompartment("Child");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        } else if (__e._message.equals("go_to_parent")) {
-            var __compartment = new HSMEnterBothCompartment("Parent");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;

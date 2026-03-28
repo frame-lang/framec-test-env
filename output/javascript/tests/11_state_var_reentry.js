@@ -147,20 +147,6 @@ export class StateVarReentry {
         this._context_stack.pop();
     }
 
-    _state_Other(__e) {
-        if (__e._message === "come_back") {
-            const __compartment = new StateVarReentryCompartment("Counter", this.__compartment.copy());
-            this.__transition(__compartment);
-            return;
-        } else if (__e._message === "get_count") {
-            this._context_stack[this._context_stack.length - 1]._return = -1;
-            return;;
-        } else if (__e._message === "increment") {
-            this._context_stack[this._context_stack.length - 1]._return = -1;
-            return;;
-        }
-    }
-
     _state_Counter(__e) {
         // HSM: Navigate to this state's compartment for state var access
         let __sv_comp = this.__compartment;
@@ -181,6 +167,20 @@ export class StateVarReentry {
         } else if (__e._message === "increment") {
             __sv_comp.state_vars["count"] = __sv_comp.state_vars["count"] + 1;
             this._context_stack[this._context_stack.length - 1]._return = __sv_comp.state_vars["count"];
+            return;;
+        }
+    }
+
+    _state_Other(__e) {
+        if (__e._message === "come_back") {
+            const __compartment = new StateVarReentryCompartment("Counter", this.__compartment.copy());
+            this.__transition(__compartment);
+            return;
+        } else if (__e._message === "get_count") {
+            this._context_stack[this._context_stack.length - 1]._return = -1;
+            return;;
+        } else if (__e._message === "increment") {
+            this._context_stack[this._context_stack.length - 1]._return = -1;
             return;;
         }
     }

@@ -98,6 +98,24 @@ private:
         __next_compartment = std::move(next);
     }
 
+    void _state_A(HistoryBasicFrameEvent& __e) {
+        if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("A"));
+            return;;
+        } else if (__e._message == "gotoB") {
+            auto __new_compartment = std::make_unique<HistoryBasicCompartment>("B");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else if (__e._message == "gotoC_from_A") {
+            _state_stack.push_back(__compartment->clone());
+            auto __new_compartment = std::make_unique<HistoryBasicCompartment>("C");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        }
+    }
+
     void _state_C(HistoryBasicFrameEvent& __e) {
         if (__e._message == "get_state") {
             _context_stack.back()._return = std::any(std::string("C"));
@@ -114,24 +132,6 @@ private:
             _context_stack.back()._return = std::any(std::string("B"));
             return;;
         } else if (__e._message == "gotoC_from_B") {
-            _state_stack.push_back(__compartment->clone());
-            auto __new_compartment = std::make_unique<HistoryBasicCompartment>("C");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        }
-    }
-
-    void _state_A(HistoryBasicFrameEvent& __e) {
-        if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("A"));
-            return;;
-        } else if (__e._message == "gotoB") {
-            auto __new_compartment = std::make_unique<HistoryBasicCompartment>("B");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        } else if (__e._message == "gotoC_from_A") {
             _state_stack.push_back(__compartment->clone());
             auto __new_compartment = std::make_unique<HistoryBasicCompartment>("C");
             __new_compartment->parent_compartment = __compartment->clone();

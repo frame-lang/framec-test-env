@@ -351,6 +351,17 @@ class HSMDefaultForward2 {
         return __result;
     }
 
+    private void _state_Child(HSMDefaultForward2FrameEvent __e) {
+        if (__e._message == "child_handled") {
+            this.log.Add("Child:child_handled");
+        } else if (__e._message == "get_log") {
+            _context_stack[_context_stack.Count - 1]._return = this.log;
+            return;
+        } else {
+            _state_Parent(__e);
+        }
+    }
+
     private void _state_Parent(HSMDefaultForward2FrameEvent __e) {
         if (__e._message == "both_respond") {
             this.log.Add("Parent:both_respond");
@@ -361,17 +372,6 @@ class HSMDefaultForward2 {
             return;
         } else if (__e._message == "parent_handled") {
             this.log.Add("Parent:parent_handled");
-        }
-    }
-
-    private void _state_Child(HSMDefaultForward2FrameEvent __e) {
-        if (__e._message == "child_handled") {
-            this.log.Add("Child:child_handled");
-        } else if (__e._message == "get_log") {
-            _context_stack[_context_stack.Count - 1]._return = this.log;
-            return;
-        } else {
-            _state_Parent(__e);
         }
     }
 }

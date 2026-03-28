@@ -149,6 +149,21 @@ func (s *StateVarReentry) ComeBack() {
     s._context_stack = s._context_stack[:len(s._context_stack)-1]
 }
 
+func (s *StateVarReentry) _state_Other(__e *StateVarReentryFrameEvent) {
+    if __e._message == "ComeBack" {
+        __compartment := newStateVarReentryCompartment("Counter")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    } else if __e._message == "GetCount" {
+        s._context_stack[len(s._context_stack)-1]._return = -1
+        return
+    } else if __e._message == "Increment" {
+        s._context_stack[len(s._context_stack)-1]._return = -1
+        return
+    }
+}
+
 func (s *StateVarReentry) _state_Counter(__e *StateVarReentryFrameEvent) {
     __sv_comp := s.__compartment
     for __sv_comp != nil && __sv_comp.state != "Counter" { __sv_comp = __sv_comp.parentCompartment }
@@ -167,21 +182,6 @@ func (s *StateVarReentry) _state_Counter(__e *StateVarReentryFrameEvent) {
     } else if __e._message == "Increment" {
         __sv_comp.stateVars["count"] = __sv_comp.stateVars["count"].(int) + 1
         s._context_stack[len(s._context_stack)-1]._return = __sv_comp.stateVars["count"].(int)
-        return
-    }
-}
-
-func (s *StateVarReentry) _state_Other(__e *StateVarReentryFrameEvent) {
-    if __e._message == "ComeBack" {
-        __compartment := newStateVarReentryCompartment("Counter")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    } else if __e._message == "GetCount" {
-        s._context_stack[len(s._context_stack)-1]._return = -1
-        return
-    } else if __e._message == "Increment" {
-        s._context_stack[len(s._context_stack)-1]._return = -1
         return
     }
 }

@@ -127,17 +127,17 @@ class S {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
+    private void _state_B(SFrameEvent __e) {
+        if (__e._message == "e") {
+        }
+    }
+
     private void _state_A(SFrameEvent __e) {
         if (__e._message == "e") {
             _state_stack.Add(__compartment.Copy());
             var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
             __transition(__popped);
             return;
-        }
-    }
-
-    private void _state_B(SFrameEvent __e) {
-        if (__e._message == "e") {
         }
     }
 }

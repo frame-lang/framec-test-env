@@ -187,17 +187,17 @@ class HSMMultiChildren {
         return __result;
     }
 
-    private void _state_ChildB(HSMMultiChildrenFrameEvent __e) {
+    private void _state_ChildC(HSMMultiChildrenFrameEvent __e) {
         if (__e._message == "do_action") {
-            this.log.Add("ChildB:do_action");
+            this.log.Add("ChildC:do_action");
         } else if (__e._message == "forward_action") {
-            this.log.Add("ChildB:forward_action");
+            this.log.Add("ChildC:forward_action");
             _state_Parent(__e);
         } else if (__e._message == "get_log") {
             _context_stack[_context_stack.Count - 1]._return = this.log;
             return;
         } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "ChildB";
+            _context_stack[_context_stack.Count - 1]._return = "ChildC";
             return;
         } else if (__e._message == "start_a") {
             { var __new_compartment = new HSMMultiChildrenCompartment("ChildA");
@@ -205,12 +205,12 @@ class HSMMultiChildren {
             __transition(__new_compartment); }
             return;
         } else if (__e._message == "start_b") {
-            // stay
-        } else if (__e._message == "start_c") {
-            { var __new_compartment = new HSMMultiChildrenCompartment("ChildC");
+            { var __new_compartment = new HSMMultiChildrenCompartment("ChildB");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
+        } else if (__e._message == "start_c") {
+            // stay
         }
     }
 
@@ -253,17 +253,17 @@ class HSMMultiChildren {
         }
     }
 
-    private void _state_ChildC(HSMMultiChildrenFrameEvent __e) {
+    private void _state_ChildB(HSMMultiChildrenFrameEvent __e) {
         if (__e._message == "do_action") {
-            this.log.Add("ChildC:do_action");
+            this.log.Add("ChildB:do_action");
         } else if (__e._message == "forward_action") {
-            this.log.Add("ChildC:forward_action");
+            this.log.Add("ChildB:forward_action");
             _state_Parent(__e);
         } else if (__e._message == "get_log") {
             _context_stack[_context_stack.Count - 1]._return = this.log;
             return;
         } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "ChildC";
+            _context_stack[_context_stack.Count - 1]._return = "ChildB";
             return;
         } else if (__e._message == "start_a") {
             { var __new_compartment = new HSMMultiChildrenCompartment("ChildA");
@@ -271,12 +271,12 @@ class HSMMultiChildren {
             __transition(__new_compartment); }
             return;
         } else if (__e._message == "start_b") {
-            { var __new_compartment = new HSMMultiChildrenCompartment("ChildB");
+            // stay
+        } else if (__e._message == "start_c") {
+            { var __new_compartment = new HSMMultiChildrenCompartment("ChildC");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
-        } else if (__e._message == "start_c") {
-            // stay
         }
     }
 }

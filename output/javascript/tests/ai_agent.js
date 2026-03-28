@@ -165,6 +165,89 @@ export class AiAgent {
         return this._context_stack.pop()._return;
     }
 
+    _state_Approach(__e) {
+        if (__e._message === "$>") {
+            this.action_log = this.action_log + "approach,";
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "Approach";
+            return;
+        } else if (__e._message === "tick") {
+            // Survival interrupt: flee takes priority
+            if (this.health < 20) {
+                const __compartment = new AiAgentCompartment("Flee", this.__compartment.copy());
+                this.__transition(__compartment);
+                return;
+            }
+
+            // Precondition: enemy still visible?
+            if (this.enemy_distance >= 50) {
+                const __compartment = new AiAgentCompartment("Root", this.__compartment.copy());
+                this.__transition(__compartment);
+                return;
+            }
+
+            // Action: move closer
+            if (this.enemy_distance > 5) {
+                this.enemy_distance = this.enemy_distance - 10;
+                this.action_log = this.action_log + "approach,";
+            } else {
+                // In range -- sequence continues to Attack
+                const __compartment = new AiAgentCompartment("Attack", this.__compartment.copy());
+                this.__transition(__compartment);
+                return;
+            }
+        }
+    }
+
+    _state_Flee(__e) {
+        if (__e._message === "$>") {
+            this.action_log = this.action_log + "flee,";
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "Flee";
+            return;
+        } else if (__e._message === "tick") {
+            // Precondition: still low health?
+            if (this.health >= 20) {
+                // Condition no longer met -- back to root for re-evaluation
+                const __compartment = new AiAgentCompartment("Root", this.__compartment.copy());
+                this.__transition(__compartment);
+                return;
+            }
+
+            // Action: flee (increase distance, recover health)
+            this.enemy_distance = this.enemy_distance + 10;
+            this.health = this.health + 5;
+            this.action_log = this.action_log + "flee,";
+        }
+    }
+
+    _state_Patrol(__e) {
+        if (__e._message === "$>") {
+            this.action_log = this.action_log + "patrol,";
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "Patrol";
+            return;
+        } else if (__e._message === "tick") {
+            // Higher-priority interrupt: combat
+            if (this.enemy_distance < 50) {
+                const __compartment = new AiAgentCompartment("Approach", this.__compartment.copy());
+                this.__transition(__compartment);
+                return;
+            }
+
+            // Higher-priority interrupt: survival
+            if (this.health < 20) {
+                const __compartment = new AiAgentCompartment("Flee", this.__compartment.copy());
+                this.__transition(__compartment);
+                return;
+            }
+
+            // Action: patrol
+            this.patrol_step = this.patrol_step + 1;
+            this.action_log = this.action_log + "patrol,";
+        }
+    }
+
     _state_Root(__e) {
         if (__e._message === "$>") {
             this.action_log = "";
@@ -223,89 +306,6 @@ export class AiAgent {
             // Action: attack
             this.enemy_health = this.enemy_health - 25;
             this.action_log = this.action_log + "attack,";
-        }
-    }
-
-    _state_Approach(__e) {
-        if (__e._message === "$>") {
-            this.action_log = this.action_log + "approach,";
-        } else if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "Approach";
-            return;
-        } else if (__e._message === "tick") {
-            // Survival interrupt: flee takes priority
-            if (this.health < 20) {
-                const __compartment = new AiAgentCompartment("Flee", this.__compartment.copy());
-                this.__transition(__compartment);
-                return;
-            }
-
-            // Precondition: enemy still visible?
-            if (this.enemy_distance >= 50) {
-                const __compartment = new AiAgentCompartment("Root", this.__compartment.copy());
-                this.__transition(__compartment);
-                return;
-            }
-
-            // Action: move closer
-            if (this.enemy_distance > 5) {
-                this.enemy_distance = this.enemy_distance - 10;
-                this.action_log = this.action_log + "approach,";
-            } else {
-                // In range -- sequence continues to Attack
-                const __compartment = new AiAgentCompartment("Attack", this.__compartment.copy());
-                this.__transition(__compartment);
-                return;
-            }
-        }
-    }
-
-    _state_Patrol(__e) {
-        if (__e._message === "$>") {
-            this.action_log = this.action_log + "patrol,";
-        } else if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "Patrol";
-            return;
-        } else if (__e._message === "tick") {
-            // Higher-priority interrupt: combat
-            if (this.enemy_distance < 50) {
-                const __compartment = new AiAgentCompartment("Approach", this.__compartment.copy());
-                this.__transition(__compartment);
-                return;
-            }
-
-            // Higher-priority interrupt: survival
-            if (this.health < 20) {
-                const __compartment = new AiAgentCompartment("Flee", this.__compartment.copy());
-                this.__transition(__compartment);
-                return;
-            }
-
-            // Action: patrol
-            this.patrol_step = this.patrol_step + 1;
-            this.action_log = this.action_log + "patrol,";
-        }
-    }
-
-    _state_Flee(__e) {
-        if (__e._message === "$>") {
-            this.action_log = this.action_log + "flee,";
-        } else if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "Flee";
-            return;
-        } else if (__e._message === "tick") {
-            // Precondition: still low health?
-            if (this.health >= 20) {
-                // Condition no longer met -- back to root for re-evaluation
-                const __compartment = new AiAgentCompartment("Root", this.__compartment.copy());
-                this.__transition(__compartment);
-                return;
-            }
-
-            // Action: flee (increase distance, recover health)
-            this.enemy_distance = this.enemy_distance + 10;
-            this.health = this.health + 5;
-            this.action_log = this.action_log + "flee,";
         }
     }
 

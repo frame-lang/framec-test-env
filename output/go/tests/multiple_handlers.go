@@ -114,14 +114,6 @@ func (s *S) __transition(next *SCompartment) {
     s.__next_compartment = next
 }
 
-func (s *S) E1() {
-    __e := SFrameEvent{_message: "E1"}
-    __ctx := SFrameContext{_event: __e, _data: make(map[string]any)}
-    s._context_stack = append(s._context_stack, __ctx)
-    s.__kernel(&s._context_stack[len(s._context_stack)-1]._event)
-    s._context_stack = s._context_stack[:len(s._context_stack)-1]
-}
-
 func (s *S) E2() {
     __e := SFrameEvent{_message: "E2"}
     __ctx := SFrameContext{_event: __e, _data: make(map[string]any)}
@@ -130,15 +122,23 @@ func (s *S) E2() {
     s._context_stack = s._context_stack[:len(s._context_stack)-1]
 }
 
+func (s *S) E1() {
+    __e := SFrameEvent{_message: "E1"}
+    __ctx := SFrameContext{_event: __e, _data: make(map[string]any)}
+    s._context_stack = append(s._context_stack, __ctx)
+    s.__kernel(&s._context_stack[len(s._context_stack)-1]._event)
+    s._context_stack = s._context_stack[:len(s._context_stack)-1]
+}
+
+func (s *S) _state_P(__e *SFrameEvent) {
+}
+
 func (s *S) _state_A(__e *SFrameEvent) {
     if __e._message == "E1" {
         s._state_P(__e);
     } else if __e._message == "E2" {
         s._state_P(__e);
     }
-}
-
-func (s *S) _state_P(__e *SFrameEvent) {
 }
 
 func main() {

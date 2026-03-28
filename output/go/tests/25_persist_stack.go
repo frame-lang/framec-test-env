@@ -155,6 +155,25 @@ func (s *PersistStack) GetDepth() int {
     return __result
 }
 
+func (s *PersistStack) _state_Start(__e *PersistStackFrameEvent) {
+    if __e._message == "GetDepth" {
+        s._context_stack[len(s._context_stack)-1]._return = s.depth
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "start"
+        return
+    } else if __e._message == "PopBack" {
+        // nothing to pop
+    } else if __e._message == "PushAndGo" {
+        s.depth = s.depth + 1
+        s._state_stack = append(s._state_stack, s.__compartment.copy())
+        __compartment := newPersistStackCompartment("Middle")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    }
+}
+
 func (s *PersistStack) _state_End(__e *PersistStackFrameEvent) {
     if __e._message == "GetDepth" {
         s._context_stack[len(s._context_stack)-1]._return = s.depth
@@ -190,25 +209,6 @@ func (s *PersistStack) _state_Middle(__e *PersistStackFrameEvent) {
         s.depth = s.depth + 1
         s._state_stack = append(s._state_stack, s.__compartment.copy())
         __compartment := newPersistStackCompartment("End")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    }
-}
-
-func (s *PersistStack) _state_Start(__e *PersistStackFrameEvent) {
-    if __e._message == "GetDepth" {
-        s._context_stack[len(s._context_stack)-1]._return = s.depth
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "start"
-        return
-    } else if __e._message == "PopBack" {
-        // nothing to pop
-    } else if __e._message == "PushAndGo" {
-        s.depth = s.depth + 1
-        s._state_stack = append(s._state_stack, s.__compartment.copy())
-        __compartment := newPersistStackCompartment("Middle")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return

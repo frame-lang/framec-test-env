@@ -148,22 +148,6 @@ class ForwardEnterFirst {
         return __result;
     }
 
-    private void _state_Idle(ForwardEnterFirstFrameEvent __e) {
-        if (__e._message == "get_counter") {
-            _context_stack[_context_stack.Count - 1]._return = -1;
-            return;
-        } else if (__e._message == "get_log") {
-            _context_stack[_context_stack.Count - 1]._return = this.log;
-            return;
-        } else if (__e._message == "process") {
-            { var __new_compartment = new ForwardEnterFirstCompartment("Working");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __new_compartment.forward_event = __e;
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
     private void _state_Working(ForwardEnterFirstFrameEvent __e) {
         var __sv_comp = __compartment;
         while (__sv_comp != null && __sv_comp.state != "Working") { __sv_comp = __sv_comp.parent_compartment; }
@@ -181,6 +165,22 @@ class ForwardEnterFirst {
         } else if (__e._message == "process") {
             this.log.Add("Working:process:counter=" + (int) __sv_comp.state_vars["counter"]);
             __sv_comp.state_vars["counter"] = (int) __sv_comp.state_vars["counter"] + 1;
+        }
+    }
+
+    private void _state_Idle(ForwardEnterFirstFrameEvent __e) {
+        if (__e._message == "get_counter") {
+            _context_stack[_context_stack.Count - 1]._return = -1;
+            return;
+        } else if (__e._message == "get_log") {
+            _context_stack[_context_stack.Count - 1]._return = this.log;
+            return;
+        } else if (__e._message == "process") {
+            { var __new_compartment = new ForwardEnterFirstCompartment("Working");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __new_compartment.forward_event = __e;
+            __transition(__new_compartment); }
+            return;
         }
     }
 }

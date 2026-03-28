@@ -131,18 +131,6 @@ export class WithTransition {
         return this._context_stack.pop()._return;
     }
 
-    _state_First(__e) {
-        if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "First";
-            return;;
-        } else if (__e._message === "next") {
-            console.log("Transitioning: First -> Second");
-            const __compartment = new WithTransitionCompartment("Second", this.__compartment.copy());
-            this.__transition(__compartment);
-            return;
-        }
-    }
-
     _state_Second(__e) {
         if (__e._message === "get_state") {
             this._context_stack[this._context_stack.length - 1]._return = "Second";
@@ -150,6 +138,18 @@ export class WithTransition {
         } else if (__e._message === "next") {
             console.log("Transitioning: Second -> First");
             const __compartment = new WithTransitionCompartment("First", this.__compartment.copy());
+            this.__transition(__compartment);
+            return;
+        }
+    }
+
+    _state_First(__e) {
+        if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "First";
+            return;;
+        } else if (__e._message === "next") {
+            console.log("Transitioning: First -> Second");
+            const __compartment = new WithTransitionCompartment("Second", this.__compartment.copy());
             this.__transition(__compartment);
             return;
         }

@@ -132,23 +132,6 @@ export class EnterExit {
         return this._context_stack.pop()._return;
     }
 
-    _state_Off(__e) {
-        if (__e._message === "<$") {
-            this.log.push("exit:Off");
-            console.log("Exiting Off state");
-        } else if (__e._message === "$>") {
-            this.log.push("enter:Off");
-            console.log("Entered Off state");
-        } else if (__e._message === "get_log") {
-            this._context_stack[this._context_stack.length - 1]._return = this.log;
-            return;;
-        } else if (__e._message === "toggle") {
-            const __compartment = new EnterExitCompartment("On", this.__compartment.copy());
-            this.__transition(__compartment);
-            return;
-        }
-    }
-
     _state_On(__e) {
         if (__e._message === "<$") {
             this.log.push("exit:On");
@@ -161,6 +144,23 @@ export class EnterExit {
             return;;
         } else if (__e._message === "toggle") {
             const __compartment = new EnterExitCompartment("Off", this.__compartment.copy());
+            this.__transition(__compartment);
+            return;
+        }
+    }
+
+    _state_Off(__e) {
+        if (__e._message === "<$") {
+            this.log.push("exit:Off");
+            console.log("Exiting Off state");
+        } else if (__e._message === "$>") {
+            this.log.push("enter:Off");
+            console.log("Entered Off state");
+        } else if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;;
+        } else if (__e._message === "toggle") {
+            const __compartment = new EnterExitCompartment("On", this.__compartment.copy());
             this.__transition(__compartment);
             return;
         }

@@ -110,21 +110,6 @@ private:
         }
     }
 
-    void _state_Child(HSMEnterChildOnlyFrameEvent& __e) {
-        if (__e._message == "$>") {
-            event_log.push_back("Child:enter");
-        } else if (__e._message == "forward_action") {
-            event_log.push_back("Child:forward");
-            _state_Parent(__e);
-        } else if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Child"));
-            return;;
-        }
-    }
-
     void _state_Start(HSMEnterChildOnlyFrameEvent& __e) {
         if (__e._message == "get_log") {
             _context_stack.back()._return = std::any(event_log);
@@ -137,6 +122,21 @@ private:
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
+        }
+    }
+
+    void _state_Child(HSMEnterChildOnlyFrameEvent& __e) {
+        if (__e._message == "$>") {
+            event_log.push_back("Child:enter");
+        } else if (__e._message == "forward_action") {
+            event_log.push_back("Child:forward");
+            _state_Parent(__e);
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Child"));
+            return;;
         }
     }
 

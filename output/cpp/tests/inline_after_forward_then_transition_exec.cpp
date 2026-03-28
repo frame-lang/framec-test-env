@@ -100,10 +100,6 @@ private:
 
     }
 
-    void _state_B(SFrameEvent& __e) {
-
-    }
-
     void _state_A(SFrameEvent& __e) {
         if (__e._message == "e") {
             _state_P(__e);; auto a = 1; auto b = 2; // multiple natives after forward on same line
@@ -112,6 +108,10 @@ private:
             __transition(std::move(__new_compartment));
             return;;
         }
+    }
+
+    void _state_B(SFrameEvent& __e) {
+
     }
 
 public:

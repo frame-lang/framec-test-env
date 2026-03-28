@@ -110,18 +110,6 @@ func (s *S) __transition(next *SCompartment) {
     s.__next_compartment = next
 }
 
-func (s *S) E(p any, q any) {
-    __params := map[string]any{
-        "p": p,
-        "q": q,
-    }
-    __e := SFrameEvent{_message: "E", _parameters: __params}
-    __ctx := SFrameContext{_event: __e, _data: make(map[string]any)}
-    s._context_stack = append(s._context_stack, __ctx)
-    s.__kernel(&s._context_stack[len(s._context_stack)-1]._event)
-    s._context_stack = s._context_stack[:len(s._context_stack)-1]
-}
-
 func (s *S) G(x any) {
     __params := map[string]any{
         "x": x,
@@ -133,9 +121,16 @@ func (s *S) G(x any) {
     s._context_stack = s._context_stack[:len(s._context_stack)-1]
 }
 
-func (s *S) _state_B(__e *SFrameEvent) {
-    if __e._message == "E" {
+func (s *S) E(p any, q any) {
+    __params := map[string]any{
+        "p": p,
+        "q": q,
     }
+    __e := SFrameEvent{_message: "E", _parameters: __params}
+    __ctx := SFrameContext{_event: __e, _data: make(map[string]any)}
+    s._context_stack = append(s._context_stack, __ctx)
+    s.__kernel(&s._context_stack[len(s._context_stack)-1]._event)
+    s._context_stack = s._context_stack[:len(s._context_stack)-1]
 }
 
 func (s *S) _state_A(__e *SFrameEvent) {
@@ -152,6 +147,11 @@ func (s *S) _state_A(__e *SFrameEvent) {
         x := __e._parameters["x"]
         _ = x
         ;
+    }
+}
+
+func (s *S) _state_B(__e *SFrameEvent) {
+    if __e._message == "E" {
     }
 }
 

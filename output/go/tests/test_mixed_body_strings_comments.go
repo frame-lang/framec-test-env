@@ -118,6 +118,9 @@ func (s *MixedBodyStringsComments) Start() {
     s._context_stack = s._context_stack[:len(s._context_stack)-1]
 }
 
+func (s *MixedBodyStringsComments) _state_Done(__e *MixedBodyStringsCommentsFrameEvent) {
+}
+
 func (s *MixedBodyStringsComments) _state_Init(__e *MixedBodyStringsCommentsFrameEvent) {
     if __e._message == "Start" {
         // Native Go with Frame-statement-like tokens in strings and comments
@@ -129,9 +132,6 @@ func (s *MixedBodyStringsComments) _state_Init(__e *MixedBodyStringsCommentsFram
         s.__transition(__compartment)
         return
     }
-}
-
-func (s *MixedBodyStringsComments) _state_Done(__e *MixedBodyStringsCommentsFrameEvent) {
 }
 
 func main() {

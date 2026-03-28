@@ -162,21 +162,6 @@ func (s *HSMOmittedHandlers) GetState() string {
     return __result
 }
 
-func (s *HSMOmittedHandlers) _state_Child(__e *HSMOmittedHandlersFrameEvent) {
-    if __e._message == "ForwardedExplicitly" {
-        s.log = append(s.log, "Child:before_forward")
-        s._state_Parent(__e)
-    } else if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Child"
-        return
-    } else if __e._message == "HandledByChild" {
-        s.log = append(s.log, "Child:handled_by_child")
-    }
-}
-
 func (s *HSMOmittedHandlers) _state_Parent(__e *HSMOmittedHandlersFrameEvent) {
     if __e._message == "ForwardedExplicitly" {
         s.log = append(s.log, "Parent:forwarded_explicitly")
@@ -190,6 +175,21 @@ func (s *HSMOmittedHandlers) _state_Parent(__e *HSMOmittedHandlersFrameEvent) {
         s.log = append(s.log, "Parent:handled_by_child")
     } else if __e._message == "UnhandledNoForward" {
         s.log = append(s.log, "Parent:unhandled_no_forward")
+    }
+}
+
+func (s *HSMOmittedHandlers) _state_Child(__e *HSMOmittedHandlersFrameEvent) {
+    if __e._message == "ForwardedExplicitly" {
+        s.log = append(s.log, "Child:before_forward")
+        s._state_Parent(__e)
+    } else if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "Child"
+        return
+    } else if __e._message == "HandledByChild" {
+        s.log = append(s.log, "Child:handled_by_child")
     }
 }
 

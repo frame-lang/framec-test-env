@@ -142,17 +142,6 @@ export class HSMDefaultForward {
         return this._context_stack.pop()._return;
     }
 
-    _state_Parent(__e) {
-        if (__e._message === "get_log") {
-            this._context_stack[this._context_stack.length - 1]._return = this.log;
-            return;
-        } else if (__e._message === "handled_event") {
-            this.log.push("Parent:handled_event")
-        } else if (__e._message === "unhandled_event") {
-            this.log.push("Parent:unhandled_event")
-        }
-    }
-
     _state_Child(__e) {
         if (__e._message === "get_log") {
             this._context_stack[this._context_stack.length - 1]._return = this.log;
@@ -161,6 +150,17 @@ export class HSMDefaultForward {
             this.log.push("Child:handled_event")
         } else {
             this._state_Parent(__e);
+        }
+    }
+
+    _state_Parent(__e) {
+        if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;
+        } else if (__e._message === "handled_event") {
+            this.log.push("Parent:handled_event")
+        } else if (__e._message === "unhandled_event") {
+            this.log.push("Parent:unhandled_event")
         }
     }
 }

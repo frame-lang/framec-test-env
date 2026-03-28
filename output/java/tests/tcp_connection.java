@@ -198,73 +198,36 @@ class TcpServer {
         return __result;
     }
 
+    private void _state_FinWait2(TcpServerFrameEvent __e) {
+        if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "FinWait2";
+            return;
+        } else if (__e._message.equals("receive_fin")) {
+            var __compartment = new TcpServerCompartment("TimeWait");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
+    private void _state_Closing(TcpServerFrameEvent __e) {
+        if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Closing";
+            return;
+        } else if (__e._message.equals("receive_ack")) {
+            var __compartment = new TcpServerCompartment("TimeWait");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
     private void _state_TimeWait(TcpServerFrameEvent __e) {
         if (__e._message.equals("get_state")) {
             _context_stack.get(_context_stack.size() - 1)._return = "TimeWait";
             return;
         } else if (__e._message.equals("receive_ack")) {
             var __compartment = new TcpServerCompartment("Closed");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
-    private void _state_SynReceived(TcpServerFrameEvent __e) {
-        if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "SynReceived";
-            return;
-        } else if (__e._message.equals("receive_ack")) {
-            var __compartment = new TcpServerCompartment("Established");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
-    private void _state_FinWait1(TcpServerFrameEvent __e) {
-        if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "FinWait1";
-            return;
-        } else if (__e._message.equals("receive_ack")) {
-            var __compartment = new TcpServerCompartment("FinWait2");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        } else if (__e._message.equals("receive_fin")) {
-            var __compartment = new TcpServerCompartment("Closing");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
-    private void _state_CloseWait(TcpServerFrameEvent __e) {
-        if (__e._message.equals("close")) {
-            var __compartment = new TcpServerCompartment("LastAck");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "CloseWait";
-            return;
-        }
-    }
-
-    private void _state_Established(TcpServerFrameEvent __e) {
-        if (__e._message.equals("close")) {
-            var __compartment = new TcpServerCompartment("FinWait1");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Established";
-            return;
-        } else if (__e._message.equals("receive_data")) {
-            var data = (String) __e._parameters.get("data");
-            this.last_data = data;
-        } else if (__e._message.equals("receive_fin")) {
-            var __compartment = new TcpServerCompartment("CloseWait");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;
@@ -283,14 +246,14 @@ class TcpServer {
         }
     }
 
-    private void _state_FinWait2(TcpServerFrameEvent __e) {
-        if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "FinWait2";
-            return;
-        } else if (__e._message.equals("receive_fin")) {
-            var __compartment = new TcpServerCompartment("TimeWait");
+    private void _state_CloseWait(TcpServerFrameEvent __e) {
+        if (__e._message.equals("close")) {
+            var __compartment = new TcpServerCompartment("LastAck");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "CloseWait";
             return;
         }
     }
@@ -319,12 +282,49 @@ class TcpServer {
         }
     }
 
-    private void _state_Closing(TcpServerFrameEvent __e) {
+    private void _state_Established(TcpServerFrameEvent __e) {
+        if (__e._message.equals("close")) {
+            var __compartment = new TcpServerCompartment("FinWait1");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Established";
+            return;
+        } else if (__e._message.equals("receive_data")) {
+            var data = (String) __e._parameters.get("data");
+            this.last_data = data;
+        } else if (__e._message.equals("receive_fin")) {
+            var __compartment = new TcpServerCompartment("CloseWait");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
+    private void _state_FinWait1(TcpServerFrameEvent __e) {
         if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Closing";
+            _context_stack.get(_context_stack.size() - 1)._return = "FinWait1";
             return;
         } else if (__e._message.equals("receive_ack")) {
-            var __compartment = new TcpServerCompartment("TimeWait");
+            var __compartment = new TcpServerCompartment("FinWait2");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        } else if (__e._message.equals("receive_fin")) {
+            var __compartment = new TcpServerCompartment("Closing");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
+    private void _state_SynReceived(TcpServerFrameEvent __e) {
+        if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "SynReceived";
+            return;
+        } else if (__e._message.equals("receive_ack")) {
+            var __compartment = new TcpServerCompartment("Established");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;
@@ -522,12 +522,17 @@ class TcpClient {
         return __result;
     }
 
-    private void _state_SynSent(TcpClientFrameEvent __e) {
+    private void _state_FinWait1(TcpClientFrameEvent __e) {
         if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "SynSent";
+            _context_stack.get(_context_stack.size() - 1)._return = "FinWait1";
             return;
-        } else if (__e._message.equals("receive_syn_ack")) {
-            var __compartment = new TcpClientCompartment("Established");
+        } else if (__e._message.equals("receive_ack")) {
+            var __compartment = new TcpClientCompartment("FinWait2");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        } else if (__e._message.equals("receive_fin")) {
+            var __compartment = new TcpClientCompartment("Closing");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;
@@ -554,17 +559,36 @@ class TcpClient {
         }
     }
 
-    private void _state_FinWait1(TcpClientFrameEvent __e) {
+    private void _state_Closing(TcpClientFrameEvent __e) {
         if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "FinWait1";
+            _context_stack.get(_context_stack.size() - 1)._return = "Closing";
             return;
         } else if (__e._message.equals("receive_ack")) {
-            var __compartment = new TcpClientCompartment("FinWait2");
+            var __compartment = new TcpClientCompartment("TimeWait");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;
-        } else if (__e._message.equals("receive_fin")) {
-            var __compartment = new TcpClientCompartment("Closing");
+        }
+    }
+
+    private void _state_TimeWait(TcpClientFrameEvent __e) {
+        if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "TimeWait";
+            return;
+        } else if (__e._message.equals("receive_ack")) {
+            var __compartment = new TcpClientCompartment("Closed");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
+    private void _state_SynSent(TcpClientFrameEvent __e) {
+        if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "SynSent";
+            return;
+        } else if (__e._message.equals("receive_syn_ack")) {
+            var __compartment = new TcpClientCompartment("Established");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;
@@ -583,18 +607,6 @@ class TcpClient {
         }
     }
 
-    private void _state_LastAck(TcpClientFrameEvent __e) {
-        if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "LastAck";
-            return;
-        } else if (__e._message.equals("receive_ack")) {
-            var __compartment = new TcpClientCompartment("Closed");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
     private void _state_Closed(TcpClientFrameEvent __e) {
         if (__e._message.equals("connect")) {
             var __compartment = new TcpClientCompartment("SynSent");
@@ -603,18 +615,6 @@ class TcpClient {
             return;
         } else if (__e._message.equals("get_state")) {
             _context_stack.get(_context_stack.size() - 1)._return = "Closed";
-            return;
-        }
-    }
-
-    private void _state_TimeWait(TcpClientFrameEvent __e) {
-        if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "TimeWait";
-            return;
-        } else if (__e._message.equals("receive_ack")) {
-            var __compartment = new TcpClientCompartment("Closed");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
             return;
         }
     }
@@ -631,12 +631,12 @@ class TcpClient {
         }
     }
 
-    private void _state_Closing(TcpClientFrameEvent __e) {
+    private void _state_LastAck(TcpClientFrameEvent __e) {
         if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Closing";
+            _context_stack.get(_context_stack.size() - 1)._return = "LastAck";
             return;
         } else if (__e._message.equals("receive_ack")) {
-            var __compartment = new TcpClientCompartment("TimeWait");
+            var __compartment = new TcpClientCompartment("Closed");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;

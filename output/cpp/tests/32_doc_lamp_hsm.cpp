@@ -98,21 +98,13 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_On(LampHSMFrameEvent& __e) {
-        if (__e._message == "<$") {
-            this->turnOffLamp();
-        } else if (__e._message == "$>") {
-            this->turnOnLamp();
-        } else if (__e._message == "isLampOn") {
-            _context_stack.back()._return = std::any(lamp_on);
+    void _state_ColorBehavior(LampHSMFrameEvent& __e) {
+        if (__e._message == "getColor") {
+            _context_stack.back()._return = std::any(color);
             return;;
-        } else if (__e._message == "turnOff") {
-            auto __new_compartment = std::make_unique<LampHSMCompartment>("Off");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        } else {
-            _state_ColorBehavior(__e);
+        } else if (__e._message == "setColor") {
+            auto color = std::any_cast<std::string>(__e._parameters.at("color"));
+            this->color = color;
         }
     }
 
@@ -130,13 +122,21 @@ private:
         }
     }
 
-    void _state_ColorBehavior(LampHSMFrameEvent& __e) {
-        if (__e._message == "getColor") {
-            _context_stack.back()._return = std::any(color);
+    void _state_On(LampHSMFrameEvent& __e) {
+        if (__e._message == "<$") {
+            this->turnOffLamp();
+        } else if (__e._message == "$>") {
+            this->turnOnLamp();
+        } else if (__e._message == "isLampOn") {
+            _context_stack.back()._return = std::any(lamp_on);
             return;;
-        } else if (__e._message == "setColor") {
-            auto color = std::any_cast<std::string>(__e._parameters.at("color"));
-            this->color = color;
+        } else if (__e._message == "turnOff") {
+            auto __new_compartment = std::make_unique<LampHSMCompartment>("Off");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else {
+            _state_ColorBehavior(__e);
         }
     }
 

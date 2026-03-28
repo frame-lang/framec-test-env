@@ -107,6 +107,15 @@ private:
         }
     }
 
+    void _state_EnterSetter(SystemReturnChainTestFrameEvent& __e) {
+        if (__e._message == "$>") {
+            _context_stack.back()._return = std::any(std::string("from_enter"));
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("EnterSetter"));
+            return;;
+        }
+    }
+
     void _state_Start(SystemReturnChainTestFrameEvent& __e) {
         if (__e._message == "<$") {
             _context_stack.back()._return = std::any(std::string("from_exit"));
@@ -123,15 +132,6 @@ private:
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
-        }
-    }
-
-    void _state_EnterSetter(SystemReturnChainTestFrameEvent& __e) {
-        if (__e._message == "$>") {
-            _context_stack.back()._return = std::any(std::string("from_enter"));
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("EnterSetter"));
-            return;;
         }
     }
 

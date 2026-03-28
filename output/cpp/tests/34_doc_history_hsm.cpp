@@ -128,6 +128,26 @@ private:
         }
     }
 
+    void _state_A(HistoryHSMFrameEvent& __e) {
+        if (__e._message == "$>") {
+            this->log_msg("In $A");
+        } else if (__e._message == "get_log") {
+            _context_stack.back()._return = std::any(event_log);
+            return;;
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("A"));
+            return;;
+        } else if (__e._message == "gotoB") {
+            this->log_msg("gotoB");
+            auto __new_compartment = std::make_unique<HistoryHSMCompartment>("B");
+            __new_compartment->parent_compartment = __compartment->clone();
+            __transition(std::move(__new_compartment));
+            return;
+        } else {
+            _state_AB(__e);
+        }
+    }
+
     void _state_C(HistoryHSMFrameEvent& __e) {
         if (__e._message == "$>") {
             this->log_msg("In $C");
@@ -173,26 +193,6 @@ private:
             __new_compartment->parent_compartment = __compartment->clone();
             __transition(std::move(__new_compartment));
             return;
-        }
-    }
-
-    void _state_A(HistoryHSMFrameEvent& __e) {
-        if (__e._message == "$>") {
-            this->log_msg("In $A");
-        } else if (__e._message == "get_log") {
-            _context_stack.back()._return = std::any(event_log);
-            return;;
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("A"));
-            return;;
-        } else if (__e._message == "gotoB") {
-            this->log_msg("gotoB");
-            auto __new_compartment = std::make_unique<HistoryHSMCompartment>("B");
-            __new_compartment->parent_compartment = __compartment->clone();
-            __transition(std::move(__new_compartment));
-            return;
-        } else {
-            _state_AB(__e);
         }
     }
 

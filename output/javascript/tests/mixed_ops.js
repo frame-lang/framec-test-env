@@ -123,17 +123,17 @@ export class S {
         this._context_stack.pop();
     }
 
+    _state_B(__e) {
+        if (__e._message === "e") {
+        }
+    }
+
     _state_A(__e) {
         if (__e._message === "e") {
             this._state_stack.push(this.__compartment.copy());;
             const __compartment = new SCompartment("B", this.__compartment.copy());
             this.__transition(__compartment);
             return;;
-        }
-    }
-
-    _state_B(__e) {
-        if (__e._message === "e") {
         }
     }
 }

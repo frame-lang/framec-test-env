@@ -165,21 +165,6 @@ export class HSMOmittedHandlers {
         return this._context_stack.pop()._return;
     }
 
-    _state_Child(__e) {
-        if (__e._message === "forwarded_explicitly") {
-            this.log.push("Child:before_forward")
-            this._state_Parent(__e);
-        } else if (__e._message === "get_log") {
-            this._context_stack[this._context_stack.length - 1]._return = this.log;
-            return;
-        } else if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "Child";
-            return;
-        } else if (__e._message === "handled_by_child") {
-            this.log.push("Child:handled_by_child")
-        }
-    }
-
     _state_Parent(__e) {
         if (__e._message === "forwarded_explicitly") {
             this.log.push("Parent:forwarded_explicitly")
@@ -193,6 +178,21 @@ export class HSMOmittedHandlers {
             this.log.push("Parent:handled_by_child")
         } else if (__e._message === "unhandled_no_forward") {
             this.log.push("Parent:unhandled_no_forward")
+        }
+    }
+
+    _state_Child(__e) {
+        if (__e._message === "forwarded_explicitly") {
+            this.log.push("Child:before_forward")
+            this._state_Parent(__e);
+        } else if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "Child";
+            return;
+        } else if (__e._message === "handled_by_child") {
+            this.log.push("Child:handled_by_child")
         }
     }
 }
@@ -348,6 +348,17 @@ export class HSMDefaultForward {
         return this._context_stack.pop()._return;
     }
 
+    _state_Child(__e) {
+        if (__e._message === "child_handled") {
+            this.log.push("Child:child_handled")
+        } else if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;
+        } else {
+            this._state_Parent(__e);
+        }
+    }
+
     _state_Parent(__e) {
         if (__e._message === "both_respond") {
             this.log.push("Parent:both_respond")
@@ -358,17 +369,6 @@ export class HSMDefaultForward {
             return;
         } else if (__e._message === "parent_handled") {
             this.log.push("Parent:parent_handled")
-        }
-    }
-
-    _state_Child(__e) {
-        if (__e._message === "child_handled") {
-            this.log.push("Child:child_handled")
-        } else if (__e._message === "get_log") {
-            this._context_stack[this._context_stack.length - 1]._return = this.log;
-            return;
-        } else {
-            this._state_Parent(__e);
         }
     }
 }

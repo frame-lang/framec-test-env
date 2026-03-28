@@ -178,26 +178,19 @@ class HistoryHSM {
         return __result;
     }
 
-    private void _state_Waiting(HistoryHSMFrameEvent __e) {
+    private void _state_C(HistoryHSMFrameEvent __e) {
         if (__e._message == "$>") {
-            this.log_msg("In $Waiting");
+            this.log_msg("In $C");
         } else if (__e._message == "get_log") {
             _context_stack[_context_stack.Count - 1]._return = this.log;
             return;
         } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Waiting";
+            _context_stack[_context_stack.Count - 1]._return = "C";
             return;
-        } else if (__e._message == "gotoA") {
-            this.log_msg("gotoA");
-            { var __new_compartment = new HistoryHSMCompartment("A");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        } else if (__e._message == "gotoB") {
-            this.log_msg("gotoB");
-            { var __new_compartment = new HistoryHSMCompartment("B");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
+        } else if (__e._message == "goBack") {
+            this.log_msg("goBack");
+            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
+            __transition(__popped);
             return;
         }
     }
@@ -222,17 +215,6 @@ class HistoryHSM {
         }
     }
 
-    private void _state_AB(HistoryHSMFrameEvent __e) {
-        if (__e._message == "gotoC") {
-            this.log_msg("gotoC in $AB");
-            _state_stack.Add(__compartment.Copy());
-            { var __new_compartment = new HistoryHSMCompartment("C");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
     private void _state_B(HistoryHSMFrameEvent __e) {
         if (__e._message == "$>") {
             this.log_msg("In $B");
@@ -253,19 +235,37 @@ class HistoryHSM {
         }
     }
 
-    private void _state_C(HistoryHSMFrameEvent __e) {
+    private void _state_Waiting(HistoryHSMFrameEvent __e) {
         if (__e._message == "$>") {
-            this.log_msg("In $C");
+            this.log_msg("In $Waiting");
         } else if (__e._message == "get_log") {
             _context_stack[_context_stack.Count - 1]._return = this.log;
             return;
         } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "C";
+            _context_stack[_context_stack.Count - 1]._return = "Waiting";
             return;
-        } else if (__e._message == "goBack") {
-            this.log_msg("goBack");
-            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
-            __transition(__popped);
+        } else if (__e._message == "gotoA") {
+            this.log_msg("gotoA");
+            { var __new_compartment = new HistoryHSMCompartment("A");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        } else if (__e._message == "gotoB") {
+            this.log_msg("gotoB");
+            { var __new_compartment = new HistoryHSMCompartment("B");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        }
+    }
+
+    private void _state_AB(HistoryHSMFrameEvent __e) {
+        if (__e._message == "gotoC") {
+            this.log_msg("gotoC in $AB");
+            _state_stack.Add(__compartment.Copy());
+            { var __new_compartment = new HistoryHSMCompartment("C");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
             return;
         }
     }

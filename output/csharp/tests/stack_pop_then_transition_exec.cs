@@ -127,6 +127,14 @@ class S {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
+    private void _state_B(SFrameEvent __e) {
+        if (__e._message == "e") {
+            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
+            __transition(__popped);
+            return;// Pop from stack and transition back to A
+        }
+    }
+
     private void _state_A(SFrameEvent __e) {
         if (__e._message == "e") {
             _state_stack.Add(__compartment.Copy());// Push current state to stack
@@ -134,14 +142,6 @@ class S {
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
-        }
-    }
-
-    private void _state_B(SFrameEvent __e) {
-        if (__e._message == "e") {
-            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
-            __transition(__popped);
-            return;// Pop from stack and transition back to A
         }
     }
 }

@@ -118,9 +118,6 @@ func (s *SimpleDocker) Run() {
     s._context_stack = s._context_stack[:len(s._context_stack)-1]
 }
 
-func (s *SimpleDocker) _state_End(__e *SimpleDockerFrameEvent) {
-}
-
 func (s *SimpleDocker) _state_Start(__e *SimpleDockerFrameEvent) {
     if __e._message == "Run" {
         fmt.Println("SUCCESS: Hello from Docker")
@@ -129,6 +126,9 @@ func (s *SimpleDocker) _state_Start(__e *SimpleDockerFrameEvent) {
         s.__transition(__compartment)
         return
     }
+}
+
+func (s *SimpleDocker) _state_End(__e *SimpleDockerFrameEvent) {
 }
 
 func main() {

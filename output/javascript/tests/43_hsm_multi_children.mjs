@@ -182,18 +182,6 @@ export class HSMMultiChildren {
         return this._context_stack.pop()._return;
     }
 
-    _state_Parent(__e) {
-        if (__e._message === "forward_action") {
-            this.log.push("Parent:forward_action")
-        } else if (__e._message === "get_log") {
-            this._context_stack[this._context_stack.length - 1]._return = this.log;
-            return;
-        } else if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "Parent";
-            return;
-        }
-    }
-
     _state_ChildA(__e) {
         if (__e._message === "do_action") {
             this.log.push("ChildA:do_action")
@@ -219,27 +207,14 @@ export class HSMMultiChildren {
         }
     }
 
-    _state_ChildB(__e) {
-        if (__e._message === "do_action") {
-            this.log.push("ChildB:do_action")
-        } else if (__e._message === "forward_action") {
-            this.log.push("ChildB:forward_action")
-            this._state_Parent(__e);
+    _state_Parent(__e) {
+        if (__e._message === "forward_action") {
+            this.log.push("Parent:forward_action")
         } else if (__e._message === "get_log") {
             this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;
         } else if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "ChildB";
-            return;
-        } else if (__e._message === "start_a") {
-            const __compartment = new HSMMultiChildrenCompartment("ChildA", this.__compartment.copy());
-            this.__transition(__compartment);
-            return;
-        } else if (__e._message === "start_b") {
-            // stay
-        } else if (__e._message === "start_c") {
-            const __compartment = new HSMMultiChildrenCompartment("ChildC", this.__compartment.copy());
-            this.__transition(__compartment);
+            this._context_stack[this._context_stack.length - 1]._return = "Parent";
             return;
         }
     }
@@ -266,6 +241,31 @@ export class HSMMultiChildren {
             return;
         } else if (__e._message === "start_c") {
             // stay
+        }
+    }
+
+    _state_ChildB(__e) {
+        if (__e._message === "do_action") {
+            this.log.push("ChildB:do_action")
+        } else if (__e._message === "forward_action") {
+            this.log.push("ChildB:forward_action")
+            this._state_Parent(__e);
+        } else if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "ChildB";
+            return;
+        } else if (__e._message === "start_a") {
+            const __compartment = new HSMMultiChildrenCompartment("ChildA", this.__compartment.copy());
+            this.__transition(__compartment);
+            return;
+        } else if (__e._message === "start_b") {
+            // stay
+        } else if (__e._message === "start_c") {
+            const __compartment = new HSMMultiChildrenCompartment("ChildC", this.__compartment.copy());
+            this.__transition(__compartment);
+            return;
         }
     }
 }

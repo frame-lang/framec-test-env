@@ -142,23 +142,23 @@ export class HSMForward {
         return this._context_stack.pop()._return;
     }
 
-    _state_Child(__e) {
+    _state_Parent(__e) {
         if (__e._message === "event_a") {
-            this.log.push("Child:event_a");
+            this.log.push("Parent:event_a");
         } else if (__e._message === "event_b") {
-            this.log.push("Child:event_b_forward");
-            this._state_Parent(__e);
+            this.log.push("Parent:event_b");
         } else if (__e._message === "get_log") {
             this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;;
         }
     }
 
-    _state_Parent(__e) {
+    _state_Child(__e) {
         if (__e._message === "event_a") {
-            this.log.push("Parent:event_a");
+            this.log.push("Child:event_a");
         } else if (__e._message === "event_b") {
-            this.log.push("Parent:event_b");
+            this.log.push("Child:event_b_forward");
+            this._state_Parent(__e);
         } else if (__e._message === "get_log") {
             this._context_stack[this._context_stack.length - 1]._return = this.log;
             return;;

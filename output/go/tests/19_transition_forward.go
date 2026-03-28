@@ -131,15 +131,6 @@ func (s *EventForwardTest) GetLog() []string {
     return __result
 }
 
-func (s *EventForwardTest) _state_Working(__e *EventForwardTestFrameEvent) {
-    if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
-        return
-    } else if __e._message == "Process" {
-        s.log = append(s.log, "working:process")
-    }
-}
-
 func (s *EventForwardTest) _state_Idle(__e *EventForwardTestFrameEvent) {
     if __e._message == "GetLog" {
         s._context_stack[len(s._context_stack)-1]._return = s.log
@@ -153,6 +144,15 @@ func (s *EventForwardTest) _state_Idle(__e *EventForwardTestFrameEvent) {
         return
         // This should NOT execute because -> => returns after dispatch
         s.log = append(s.log, "idle:process:after")
+    }
+}
+
+func (s *EventForwardTest) _state_Working(__e *EventForwardTestFrameEvent) {
+    if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    } else if __e._message == "Process" {
+        s.log = append(s.log, "working:process")
     }
 }
 

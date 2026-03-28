@@ -132,6 +132,22 @@ func (s *MealyMachine) I1() {
     s._context_stack = s._context_stack[:len(s._context_stack)-1]
 }
 
+func (s *MealyMachine) _state_Q1(__e *MealyMachineFrameEvent) {
+    if __e._message == "I0" {
+        s.emitOutput(0)
+        __compartment := newMealyMachineCompartment("Q1")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    } else if __e._message == "I1" {
+        s.emitOutput(1)
+        __compartment := newMealyMachineCompartment("Q2")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    }
+}
+
 func (s *MealyMachine) _state_Q0(__e *MealyMachineFrameEvent) {
     if __e._message == "I0" {
         s.emitOutput(0)
@@ -157,22 +173,6 @@ func (s *MealyMachine) _state_Q2(__e *MealyMachineFrameEvent) {
         return
     } else if __e._message == "I1" {
         s.emitOutput(0)
-        __compartment := newMealyMachineCompartment("Q2")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    }
-}
-
-func (s *MealyMachine) _state_Q1(__e *MealyMachineFrameEvent) {
-    if __e._message == "I0" {
-        s.emitOutput(0)
-        __compartment := newMealyMachineCompartment("Q1")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    } else if __e._message == "I1" {
-        s.emitOutput(1)
         __compartment := newMealyMachineCompartment("Q2")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)

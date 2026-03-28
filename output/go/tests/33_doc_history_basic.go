@@ -156,20 +156,14 @@ func (s *HistoryBasic) GetState() string {
     return __result
 }
 
-func (s *HistoryBasic) _state_A(__e *HistoryBasicFrameEvent) {
+func (s *HistoryBasic) _state_C(__e *HistoryBasicFrameEvent) {
     if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "A"
+        s._context_stack[len(s._context_stack)-1]._return = "C"
         return
-    } else if __e._message == "GotoB" {
-        __compartment := newHistoryBasicCompartment("B")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    } else if __e._message == "GotoCFromA" {
-        s._state_stack = append(s._state_stack, s.__compartment.copy())
-        __compartment := newHistoryBasicCompartment("C")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
+    } else if __e._message == "ReturnBack" {
+        __popped := s._state_stack[len(s._state_stack)-1]
+        s._state_stack = s._state_stack[:len(s._state_stack)-1]
+        s.__transition(__popped)
         return
     }
 }
@@ -187,14 +181,20 @@ func (s *HistoryBasic) _state_B(__e *HistoryBasicFrameEvent) {
     }
 }
 
-func (s *HistoryBasic) _state_C(__e *HistoryBasicFrameEvent) {
+func (s *HistoryBasic) _state_A(__e *HistoryBasicFrameEvent) {
     if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "C"
+        s._context_stack[len(s._context_stack)-1]._return = "A"
         return
-    } else if __e._message == "ReturnBack" {
-        __popped := s._state_stack[len(s._state_stack)-1]
-        s._state_stack = s._state_stack[:len(s._state_stack)-1]
-        s.__transition(__popped)
+    } else if __e._message == "GotoB" {
+        __compartment := newHistoryBasicCompartment("B")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    } else if __e._message == "GotoCFromA" {
+        s._state_stack = append(s._state_stack, s.__compartment.copy())
+        __compartment := newHistoryBasicCompartment("C")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
         return
     }
 }

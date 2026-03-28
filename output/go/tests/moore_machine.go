@@ -136,22 +136,6 @@ func (s *MooreMachine) I1() {
     s._context_stack = s._context_stack[:len(s._context_stack)-1]
 }
 
-func (s *MooreMachine) _state_Q2(__e *MooreMachineFrameEvent) {
-    if __e._message == "$>" {
-        s.setOutput(0)
-    } else if __e._message == "I0" {
-        __compartment := newMooreMachineCompartment("Q4")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    } else if __e._message == "I1" {
-        __compartment := newMooreMachineCompartment("Q2")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    }
-}
-
 func (s *MooreMachine) _state_Q4(__e *MooreMachineFrameEvent) {
     if __e._message == "$>" {
         s.setOutput(1)
@@ -162,6 +146,22 @@ func (s *MooreMachine) _state_Q4(__e *MooreMachineFrameEvent) {
         return
     } else if __e._message == "I1" {
         __compartment := newMooreMachineCompartment("Q3")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    }
+}
+
+func (s *MooreMachine) _state_Q2(__e *MooreMachineFrameEvent) {
+    if __e._message == "$>" {
+        s.setOutput(0)
+    } else if __e._message == "I0" {
+        __compartment := newMooreMachineCompartment("Q4")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    } else if __e._message == "I1" {
+        __compartment := newMooreMachineCompartment("Q2")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return

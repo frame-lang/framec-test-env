@@ -172,6 +172,37 @@ func (s *HistoryHSM) GetLog() []string {
     return __result
 }
 
+func (s *HistoryHSM) _state_B(__e *HistoryHSMFrameEvent) {
+    if __e._message == "$>" {
+        s.__log_msg("In $B")
+    } else if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "B"
+        return
+    } else if __e._message == "GotoA" {
+        s.__log_msg("gotoA")
+        __compartment := newHistoryHSMCompartment("A")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    } else {
+        s._state_AB(__e)
+    }
+}
+
+func (s *HistoryHSM) _state_AB(__e *HistoryHSMFrameEvent) {
+    if __e._message == "GotoC" {
+        s.__log_msg("gotoC in $AB")
+        s._state_stack = append(s._state_stack, s.__compartment.copy())
+        __compartment := newHistoryHSMCompartment("C")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    }
+}
+
 func (s *HistoryHSM) _state_C(__e *HistoryHSMFrameEvent) {
     if __e._message == "$>" {
         s.__log_msg("In $C")
@@ -208,37 +239,6 @@ func (s *HistoryHSM) _state_Waiting(__e *HistoryHSMFrameEvent) {
     } else if __e._message == "GotoB" {
         s.__log_msg("gotoB")
         __compartment := newHistoryHSMCompartment("B")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    }
-}
-
-func (s *HistoryHSM) _state_B(__e *HistoryHSMFrameEvent) {
-    if __e._message == "$>" {
-        s.__log_msg("In $B")
-    } else if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "B"
-        return
-    } else if __e._message == "GotoA" {
-        s.__log_msg("gotoA")
-        __compartment := newHistoryHSMCompartment("A")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    } else {
-        s._state_AB(__e)
-    }
-}
-
-func (s *HistoryHSM) _state_AB(__e *HistoryHSMFrameEvent) {
-    if __e._message == "GotoC" {
-        s.__log_msg("gotoC in $AB")
-        s._state_stack = append(s._state_stack, s.__compartment.copy())
-        __compartment := newHistoryHSMCompartment("C")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return

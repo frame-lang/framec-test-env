@@ -139,6 +139,17 @@ export class AsyncHsm {
         return this._context_stack.pop()._return;
     }
 
+    async _state_Child(__e) {
+        if (__e._message === "process") {
+            const data = __e._parameters?.["data"];
+            const result = await mockTransform(data)
+            this._context_stack[this._context_stack.length - 1]._return = "child:" + result;
+            return;
+        } else {
+            await this._state_Parent(__e);
+        }
+    }
+
     async _state_Parent(__e) {
         if (__e._message === "other") {
             const data = __e._parameters?.["data"];
@@ -150,17 +161,6 @@ export class AsyncHsm {
             const result = await mockTransform(data)
             this._context_stack[this._context_stack.length - 1]._return = "parent:" + result;
             return;
-        }
-    }
-
-    async _state_Child(__e) {
-        if (__e._message === "process") {
-            const data = __e._parameters?.["data"];
-            const result = await mockTransform(data)
-            this._context_stack[this._context_stack.length - 1]._return = "child:" + result;
-            return;
-        } else {
-            await this._state_Parent(__e);
         }
     }
 

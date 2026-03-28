@@ -165,27 +165,6 @@ func (s *PersistRoundtrip) GetCounter() int {
     return __result
 }
 
-func (s *PersistRoundtrip) _state_Idle(__e *PersistRoundtripFrameEvent) {
-    if __e._message == "GetCounter" {
-        s._context_stack[len(s._context_stack)-1]._return = s.counter
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "idle"
-        return
-    } else if __e._message == "GoActive" {
-        __compartment := newPersistRoundtripCompartment("Active")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    } else if __e._message == "GoIdle" {
-        // already idle
-    } else if __e._message == "SetCounter" {
-        n := __e._parameters["n"].(int)
-        _ = n
-        s.counter = n
-    }
-}
-
 func (s *PersistRoundtrip) _state_Active(__e *PersistRoundtripFrameEvent) {
     if __e._message == "GetCounter" {
         s._context_stack[len(s._context_stack)-1]._return = s.counter
@@ -204,6 +183,27 @@ func (s *PersistRoundtrip) _state_Active(__e *PersistRoundtripFrameEvent) {
         n := __e._parameters["n"].(int)
         _ = n
         s.counter = n * 2
+    }
+}
+
+func (s *PersistRoundtrip) _state_Idle(__e *PersistRoundtripFrameEvent) {
+    if __e._message == "GetCounter" {
+        s._context_stack[len(s._context_stack)-1]._return = s.counter
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "idle"
+        return
+    } else if __e._message == "GoActive" {
+        __compartment := newPersistRoundtripCompartment("Active")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    } else if __e._message == "GoIdle" {
+        // already idle
+    } else if __e._message == "SetCounter" {
+        n := __e._parameters["n"].(int)
+        _ = n
+        s.counter = n
     }
 }
 

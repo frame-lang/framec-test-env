@@ -152,18 +152,6 @@ func (s *HSMEnterChildOnly) GetState() string {
     return __result
 }
 
-func (s *HSMEnterChildOnly) _state_Parent(__e *HSMEnterChildOnlyFrameEvent) {
-    if __e._message == "ForwardAction" {
-        s.log = append(s.log, "Parent:forward_action")
-    } else if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Parent"
-        return
-    }
-}
-
 func (s *HSMEnterChildOnly) _state_Start(__e *HSMEnterChildOnlyFrameEvent) {
     if __e._message == "GetLog" {
         s._context_stack[len(s._context_stack)-1]._return = s.log
@@ -175,6 +163,18 @@ func (s *HSMEnterChildOnly) _state_Start(__e *HSMEnterChildOnlyFrameEvent) {
         __compartment := newHSMEnterChildOnlyCompartment("Child")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
+        return
+    }
+}
+
+func (s *HSMEnterChildOnly) _state_Parent(__e *HSMEnterChildOnlyFrameEvent) {
+    if __e._message == "ForwardAction" {
+        s.log = append(s.log, "Parent:forward_action")
+    } else if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "Parent"
         return
     }
 }

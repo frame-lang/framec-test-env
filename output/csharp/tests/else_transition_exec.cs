@@ -131,6 +131,10 @@ class S {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
+    private void _state_B(SFrameEvent __e) {
+
+    }
+
     private void _state_A(SFrameEvent __e) {
         if (__e._message == "e") {
             if (false) {
@@ -142,10 +146,6 @@ class S {
                 return;
             }
         }
-    }
-
-    private void _state_B(SFrameEvent __e) {
-
     }
 }
 

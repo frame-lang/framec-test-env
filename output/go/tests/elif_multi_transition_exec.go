@@ -143,13 +143,13 @@ func (s *S) _state_A(__e *SFrameEvent) {
     }
 }
 
-func (s *S) _state_B(__e *SFrameEvent) {
-}
-
 func (s *S) _state_D(__e *SFrameEvent) {
 }
 
 func (s *S) _state_C(__e *SFrameEvent) {
+}
+
+func (s *S) _state_B(__e *SFrameEvent) {
 }
 
 func main() {

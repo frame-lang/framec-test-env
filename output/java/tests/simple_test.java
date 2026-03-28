@@ -125,10 +125,6 @@ class SimpleDocker {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
-    private void _state_End(SimpleDockerFrameEvent __e) {
-
-    }
-
     private void _state_Start(SimpleDockerFrameEvent __e) {
         if (__e._message.equals("run")) {
             System.out.println("SUCCESS: Hello from Docker");
@@ -137,6 +133,10 @@ class SimpleDocker {
             __transition(__compartment);
             return;
         }
+    }
+
+    private void _state_End(SimpleDockerFrameEvent __e) {
+
     }
 }
 

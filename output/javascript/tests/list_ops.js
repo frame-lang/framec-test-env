@@ -125,6 +125,10 @@ export class S {
         this._context_stack.pop();
     }
 
+    _state_P(__e) {
+
+    }
+
     _state_A(__e) {
         if (__e._message === "e") {
             let a = [1, 2];
@@ -132,10 +136,6 @@ export class S {
             this._state_P(__e);
             a.length;
         }
-    }
-
-    _state_P(__e) {
-
     }
 }
 

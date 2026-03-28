@@ -165,28 +165,6 @@ export class HSMSiblingTransitions {
         return this._context_stack.pop()._return;
     }
 
-    _state_ChildB(__e) {
-        if (__e._message === "<$") {
-            this.log.push("ChildB:exit")
-        } else if (__e._message === "$>") {
-            this.log.push("ChildB:enter")
-        } else if (__e._message === "forward_action") {
-            this.log.push("ChildB:forward")
-            this._state_Parent(__e);
-        } else if (__e._message === "get_log") {
-            this._context_stack[this._context_stack.length - 1]._return = this.log;
-            return;
-        } else if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "ChildB";
-            return;
-        } else if (__e._message === "go_to_a") {
-            this.log.push("ChildB:go_to_a")
-            const __compartment = new HSMSiblingTransitionsCompartment("ChildA", this.__compartment.copy());
-            this.__transition(__compartment);
-            return;
-        }
-    }
-
     _state_Parent(__e) {
         if (__e._message === "forward_action") {
             this.log.push("Parent:forward_action")
@@ -216,6 +194,28 @@ export class HSMSiblingTransitions {
         } else if (__e._message === "go_to_b") {
             this.log.push("ChildA:go_to_b")
             const __compartment = new HSMSiblingTransitionsCompartment("ChildB", this.__compartment.copy());
+            this.__transition(__compartment);
+            return;
+        }
+    }
+
+    _state_ChildB(__e) {
+        if (__e._message === "<$") {
+            this.log.push("ChildB:exit")
+        } else if (__e._message === "$>") {
+            this.log.push("ChildB:enter")
+        } else if (__e._message === "forward_action") {
+            this.log.push("ChildB:forward")
+            this._state_Parent(__e);
+        } else if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "ChildB";
+            return;
+        } else if (__e._message === "go_to_a") {
+            this.log.push("ChildB:go_to_a")
+            const __compartment = new HSMSiblingTransitionsCompartment("ChildA", this.__compartment.copy());
             this.__transition(__compartment);
             return;
         }

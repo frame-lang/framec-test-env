@@ -127,6 +127,9 @@ func (s *S) E() {
 func (s *S) _state_P(__e *SFrameEvent) {
 }
 
+func (s *S) _state_B(__e *SFrameEvent) {
+}
+
 func (s *S) _state_A(__e *SFrameEvent) {
     if __e._message == "E" {
         y := 0
@@ -138,9 +141,6 @@ func (s *S) _state_A(__e *SFrameEvent) {
         s.__transition(__compartment)
         return
     }
-}
-
-func (s *S) _state_B(__e *SFrameEvent) {
 }
 
 func main() {

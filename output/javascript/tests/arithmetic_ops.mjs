@@ -125,16 +125,16 @@ export class S {
         this._context_stack.pop();
     }
 
+    _state_P(__e) {
+
+    }
+
     _state_A(__e) {
         if (__e._message === "e") {
             let x = 1 + 2 - 3 * 4 / 5;
             x += 2;
             this._state_P(__e);
         }
-    }
-
-    _state_P(__e) {
-
     }
 }
 

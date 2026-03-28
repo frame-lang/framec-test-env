@@ -125,6 +125,14 @@ class S {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
+    private void _state_B(SFrameEvent __e) {
+        if (__e._message.equals("e")) {
+            var __popped = _state_stack.remove(_state_stack.size() - 1);
+            __transition(__popped);
+            return;// Pop from stack and transition back to A
+        }
+    }
+
     private void _state_A(SFrameEvent __e) {
         if (__e._message.equals("e")) {
             _state_stack.add(__compartment.copy());// Push current state to stack
@@ -132,14 +140,6 @@ class S {
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;
-        }
-    }
-
-    private void _state_B(SFrameEvent __e) {
-        if (__e._message.equals("e")) {
-            var __popped = _state_stack.remove(_state_stack.size() - 1);
-            __transition(__popped);
-            return;// Pop from stack and transition back to A
         }
     }
 }

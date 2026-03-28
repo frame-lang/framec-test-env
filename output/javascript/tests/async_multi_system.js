@@ -283,6 +283,13 @@ export class AsyncConsumer {
         return this._context_stack.pop()._return;
     }
 
+    async _state_Done(__e) {
+        if (__e._message === "get_result") {
+            this._context_stack[this._context_stack.length - 1]._return = this.last_result;
+            return;
+        }
+    }
+
     async _state_Waiting(__e) {
         if (__e._message === "consume") {
             const data = __e._parameters?.["data"];
@@ -292,13 +299,6 @@ export class AsyncConsumer {
             this.__transition(__compartment);
             return;
         } else if (__e._message === "get_result") {
-            this._context_stack[this._context_stack.length - 1]._return = this.last_result;
-            return;
-        }
-    }
-
-    async _state_Done(__e) {
-        if (__e._message === "get_result") {
             this._context_stack[this._context_stack.length - 1]._return = this.last_result;
             return;
         }

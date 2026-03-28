@@ -152,23 +152,6 @@ func (s *HSMEnterParentOnly) GetState() string {
     return __result
 }
 
-func (s *HSMEnterParentOnly) _state_Parent(__e *HSMEnterParentOnlyFrameEvent) {
-    if __e._message == "$>" {
-        s.log = append(s.log, "Parent:enter")
-    } else if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Parent"
-        return
-    } else if __e._message == "GoToChild" {
-        __compartment := newHSMEnterParentOnlyCompartment("Child")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    }
-}
-
 func (s *HSMEnterParentOnly) _state_Start(__e *HSMEnterParentOnlyFrameEvent) {
     if __e._message == "GetLog" {
         s._context_stack[len(s._context_stack)-1]._return = s.log
@@ -198,6 +181,23 @@ func (s *HSMEnterParentOnly) _state_Child(__e *HSMEnterParentOnlyFrameEvent) {
         return
     } else if __e._message == "GoToParent" {
         __compartment := newHSMEnterParentOnlyCompartment("Parent")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    }
+}
+
+func (s *HSMEnterParentOnly) _state_Parent(__e *HSMEnterParentOnlyFrameEvent) {
+    if __e._message == "$>" {
+        s.log = append(s.log, "Parent:enter")
+    } else if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "Parent"
+        return
+    } else if __e._message == "GoToChild" {
+        __compartment := newHSMEnterParentOnlyCompartment("Child")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return

@@ -154,6 +154,18 @@ func (s *HSMSingleParent) GetState() string {
     return __result
 }
 
+func (s *HSMSingleParent) _state_Parent(__e *HSMSingleParentFrameEvent) {
+    if __e._message == "ForwardToParent" {
+        s.log = append(s.log, "Parent:forward_to_parent")
+    } else if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "Parent"
+        return
+    }
+}
+
 func (s *HSMSingleParent) _state_Child(__e *HSMSingleParentFrameEvent) {
     if __e._message == "ChildOnly" {
         s.log = append(s.log, "Child:child_only")
@@ -166,18 +178,6 @@ func (s *HSMSingleParent) _state_Child(__e *HSMSingleParentFrameEvent) {
         return
     } else if __e._message == "GetState" {
         s._context_stack[len(s._context_stack)-1]._return = "Child"
-        return
-    }
-}
-
-func (s *HSMSingleParent) _state_Parent(__e *HSMSingleParentFrameEvent) {
-    if __e._message == "ForwardToParent" {
-        s.log = append(s.log, "Parent:forward_to_parent")
-    } else if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Parent"
         return
     }
 }

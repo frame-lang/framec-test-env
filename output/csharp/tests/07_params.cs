@@ -163,28 +163,6 @@ class WithParams {
         return __result;
     }
 
-    private void _state_Running(WithParamsFrameEvent __e) {
-        if (__e._message == "add") {
-            var value = (int) __e._parameters["value"];
-            this.total += value;
-            Console.WriteLine("Added " + value + ", total is now " + this.total);
-        } else if (__e._message == "get_total") {
-            _context_stack[_context_stack.Count - 1]._return = this.total;
-            return;
-        } else if (__e._message == "multiply") {
-            var a = (int) __e._parameters["a"];
-            var b = (int) __e._parameters["b"];
-            int result = a * b;
-            this.total += result;
-            Console.WriteLine("Multiplied " + a + " * " + b + " = " + result + ", total is now " + this.total);
-            _context_stack[_context_stack.Count - 1]._return = result;
-            return;
-        } else if (__e._message == "start") {
-            var initial = (int) __e._parameters["initial"];
-            Console.WriteLine("Already running");
-        }
-    }
-
     private void _state_Idle(WithParamsFrameEvent __e) {
         if (__e._message == "add") {
             var value = (int) __e._parameters["value"];
@@ -205,6 +183,28 @@ class WithParams {
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
+        }
+    }
+
+    private void _state_Running(WithParamsFrameEvent __e) {
+        if (__e._message == "add") {
+            var value = (int) __e._parameters["value"];
+            this.total += value;
+            Console.WriteLine("Added " + value + ", total is now " + this.total);
+        } else if (__e._message == "get_total") {
+            _context_stack[_context_stack.Count - 1]._return = this.total;
+            return;
+        } else if (__e._message == "multiply") {
+            var a = (int) __e._parameters["a"];
+            var b = (int) __e._parameters["b"];
+            int result = a * b;
+            this.total += result;
+            Console.WriteLine("Multiplied " + a + " * " + b + " = " + result + ", total is now " + this.total);
+            _context_stack[_context_stack.Count - 1]._return = result;
+            return;
+        } else if (__e._message == "start") {
+            var initial = (int) __e._parameters["initial"];
+            Console.WriteLine("Already running");
         }
     }
 }

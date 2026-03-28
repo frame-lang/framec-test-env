@@ -189,6 +189,25 @@ func (s *HSMThreeLevels) _state_Child(__e *HSMThreeLevelsFrameEvent) {
     }
 }
 
+func (s *HSMThreeLevels) _state_Parent(__e *HSMThreeLevelsFrameEvent) {
+    __sv_comp := s.__compartment
+    for __sv_comp != nil && __sv_comp.state != "Parent" { __sv_comp = __sv_comp.parentCompartment }
+    if __e._message == "$>" {
+        if _, ok := __sv_comp.stateVars["parent_var"]; !ok {
+            __sv_comp.stateVars["parent_var"] = 100
+        }
+    } else if __e._message == "ForwardThroughAll" {
+        val := __sv_comp.stateVars["parent_var"].(int)
+        s.log = append(s.log, fmt.Sprintf("Parent:forward_through_all(var=%d)", val))
+    } else if __e._message == "ForwardToParent" {
+        val := __sv_comp.stateVars["parent_var"].(int)
+        s.log = append(s.log, fmt.Sprintf("Parent:handled(var=%d)", val))
+    } else if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    }
+}
+
 func (s *HSMThreeLevels) _state_Grandchild(__e *HSMThreeLevelsFrameEvent) {
     __sv_comp := s.__compartment
     for __sv_comp != nil && __sv_comp.state != "Grandchild" { __sv_comp = __sv_comp.parentCompartment }
@@ -211,25 +230,6 @@ func (s *HSMThreeLevels) _state_Grandchild(__e *HSMThreeLevelsFrameEvent) {
     } else if __e._message == "HandleAtGrandchild" {
         val := __sv_comp.stateVars["grandchild_var"].(int)
         s.log = append(s.log, fmt.Sprintf("Grandchild:handled(var=%d)", val))
-    }
-}
-
-func (s *HSMThreeLevels) _state_Parent(__e *HSMThreeLevelsFrameEvent) {
-    __sv_comp := s.__compartment
-    for __sv_comp != nil && __sv_comp.state != "Parent" { __sv_comp = __sv_comp.parentCompartment }
-    if __e._message == "$>" {
-        if _, ok := __sv_comp.stateVars["parent_var"]; !ok {
-            __sv_comp.stateVars["parent_var"] = 100
-        }
-    } else if __e._message == "ForwardThroughAll" {
-        val := __sv_comp.stateVars["parent_var"].(int)
-        s.log = append(s.log, fmt.Sprintf("Parent:forward_through_all(var=%d)", val))
-    } else if __e._message == "ForwardToParent" {
-        val := __sv_comp.stateVars["parent_var"].(int)
-        s.log = append(s.log, fmt.Sprintf("Parent:handled(var=%d)", val))
-    } else if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
-        return
     }
 }
 

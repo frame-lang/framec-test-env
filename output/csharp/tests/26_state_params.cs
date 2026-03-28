@@ -139,20 +139,6 @@ class StateParams {
         return __result;
     }
 
-    private void _state_Idle(StateParamsFrameEvent __e) {
-        if (__e._message == "get_value") {
-            _context_stack[_context_stack.Count - 1]._return = 0;
-            return;
-        } else if (__e._message == "start") {
-            var val = (int) __e._parameters["val"];
-            { var __new_compartment = new StateParamsCompartment("Counter");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __new_compartment.state_args["0"] = val;
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
     private void _state_Counter(StateParamsFrameEvent __e) {
         var __sv_comp = __compartment;
         while (__sv_comp != null && __sv_comp.state != "Counter") { __sv_comp = __sv_comp.parent_compartment; }
@@ -166,6 +152,20 @@ class StateParams {
             Console.WriteLine("Counter entered with initial=" + count_val);
         } else if (__e._message == "get_value") {
             _context_stack[_context_stack.Count - 1]._return = (int) __sv_comp.state_vars["count"];
+            return;
+        }
+    }
+
+    private void _state_Idle(StateParamsFrameEvent __e) {
+        if (__e._message == "get_value") {
+            _context_stack[_context_stack.Count - 1]._return = 0;
+            return;
+        } else if (__e._message == "start") {
+            var val = (int) __e._parameters["val"];
+            { var __new_compartment = new StateParamsCompartment("Counter");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __new_compartment.state_args["0"] = val;
+            __transition(__new_compartment); }
             return;
         }
     }

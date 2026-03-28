@@ -152,26 +152,6 @@ func (s *HSMEnterBoth) GetState() string {
     return __result
 }
 
-func (s *HSMEnterBoth) _state_Start(__e *HSMEnterBothFrameEvent) {
-    if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
-        return
-    } else if __e._message == "GetState" {
-        s._context_stack[len(s._context_stack)-1]._return = "Start"
-        return
-    } else if __e._message == "GoToChild" {
-        __compartment := newHSMEnterBothCompartment("Child")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    } else if __e._message == "GoToParent" {
-        __compartment := newHSMEnterBothCompartment("Parent")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    }
-}
-
 func (s *HSMEnterBoth) _state_Child(__e *HSMEnterBothFrameEvent) {
     if __e._message == "$>" {
         s.log = append(s.log, "Child:enter")
@@ -200,6 +180,26 @@ func (s *HSMEnterBoth) _state_Parent(__e *HSMEnterBothFrameEvent) {
         return
     } else if __e._message == "GoToChild" {
         __compartment := newHSMEnterBothCompartment("Child")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    }
+}
+
+func (s *HSMEnterBoth) _state_Start(__e *HSMEnterBothFrameEvent) {
+    if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    } else if __e._message == "GetState" {
+        s._context_stack[len(s._context_stack)-1]._return = "Start"
+        return
+    } else if __e._message == "GoToChild" {
+        __compartment := newHSMEnterBothCompartment("Child")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    } else if __e._message == "GoToParent" {
+        __compartment := newHSMEnterBothCompartment("Parent")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return

@@ -136,15 +136,6 @@ class TransitionExitArgs {
         return __result;
     }
 
-    private void _state_Done(TransitionExitArgsFrameEvent __e) {
-        if (__e._message.equals("$>")) {
-            this.log.add("enter:done");
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        }
-    }
-
     private void _state_Active(TransitionExitArgsFrameEvent __e) {
         if (__e._message.equals("<$")) {
             var reason = (String) __compartment.exit_args.get("0");
@@ -160,6 +151,15 @@ class TransitionExitArgs {
             var __compartment = new TransitionExitArgsCompartment("Done");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
+            return;
+        }
+    }
+
+    private void _state_Done(TransitionExitArgsFrameEvent __e) {
+        if (__e._message.equals("$>")) {
+            this.log.add("enter:done");
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
             return;
         }
     }

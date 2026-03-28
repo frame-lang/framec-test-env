@@ -119,35 +119,6 @@ private:
         __next_compartment = std::move(next);
     }
 
-    void _state_Patrol(AiAgentFrameEvent& __e) {
-        if (__e._message == "$>") {
-            action_log = action_log + "patrol,";
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Patrol"));
-            return;
-        } else if (__e._message == "tick") {
-            // Higher-priority interrupt: combat
-            if (enemy_distance < 50) {
-                auto __new_compartment = std::make_unique<AiAgentCompartment>("Approach");
-                __new_compartment->parent_compartment = __compartment->clone();
-                __transition(std::move(__new_compartment));
-                return;
-            }
-
-            // Higher-priority interrupt: survival
-            if (health < 20) {
-                auto __new_compartment = std::make_unique<AiAgentCompartment>("Flee");
-                __new_compartment->parent_compartment = __compartment->clone();
-                __transition(std::move(__new_compartment));
-                return;
-            }
-
-            // Action: patrol
-            patrol_step = patrol_step + 1;
-            action_log = action_log + "patrol,";
-        }
-    }
-
     void _state_Flee(AiAgentFrameEvent& __e) {
         if (__e._message == "$>") {
             action_log = action_log + "flee,";
@@ -168,43 +139,6 @@ private:
             enemy_distance = enemy_distance + 10;
             health = health + 5;
             action_log = action_log + "flee,";
-        }
-    }
-
-    void _state_Approach(AiAgentFrameEvent& __e) {
-        if (__e._message == "$>") {
-            action_log = action_log + "approach,";
-        } else if (__e._message == "get_state") {
-            _context_stack.back()._return = std::any(std::string("Approach"));
-            return;
-        } else if (__e._message == "tick") {
-            // Survival interrupt: flee takes priority
-            if (health < 20) {
-                auto __new_compartment = std::make_unique<AiAgentCompartment>("Flee");
-                __new_compartment->parent_compartment = __compartment->clone();
-                __transition(std::move(__new_compartment));
-                return;
-            }
-
-            // Precondition: enemy still visible?
-            if (enemy_distance >= 50) {
-                auto __new_compartment = std::make_unique<AiAgentCompartment>("Root");
-                __new_compartment->parent_compartment = __compartment->clone();
-                __transition(std::move(__new_compartment));
-                return;
-            }
-
-            // Action: move closer
-            if (enemy_distance > 5) {
-                enemy_distance = enemy_distance - 10;
-                action_log = action_log + "approach,";
-            } else {
-                // In range -- sequence continues to Attack
-                auto __new_compartment = std::make_unique<AiAgentCompartment>("Attack");
-                __new_compartment->parent_compartment = __compartment->clone();
-                __transition(std::move(__new_compartment));
-                return;
-            }
         }
     }
 
@@ -245,6 +179,72 @@ private:
             // Action: attack
             enemy_health = enemy_health - 25;
             action_log = action_log + "attack,";
+        }
+    }
+
+    void _state_Approach(AiAgentFrameEvent& __e) {
+        if (__e._message == "$>") {
+            action_log = action_log + "approach,";
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Approach"));
+            return;
+        } else if (__e._message == "tick") {
+            // Survival interrupt: flee takes priority
+            if (health < 20) {
+                auto __new_compartment = std::make_unique<AiAgentCompartment>("Flee");
+                __new_compartment->parent_compartment = __compartment->clone();
+                __transition(std::move(__new_compartment));
+                return;
+            }
+
+            // Precondition: enemy still visible?
+            if (enemy_distance >= 50) {
+                auto __new_compartment = std::make_unique<AiAgentCompartment>("Root");
+                __new_compartment->parent_compartment = __compartment->clone();
+                __transition(std::move(__new_compartment));
+                return;
+            }
+
+            // Action: move closer
+            if (enemy_distance > 5) {
+                enemy_distance = enemy_distance - 10;
+                action_log = action_log + "approach,";
+            } else {
+                // In range -- sequence continues to Attack
+                auto __new_compartment = std::make_unique<AiAgentCompartment>("Attack");
+                __new_compartment->parent_compartment = __compartment->clone();
+                __transition(std::move(__new_compartment));
+                return;
+            }
+        }
+    }
+
+    void _state_Patrol(AiAgentFrameEvent& __e) {
+        if (__e._message == "$>") {
+            action_log = action_log + "patrol,";
+        } else if (__e._message == "get_state") {
+            _context_stack.back()._return = std::any(std::string("Patrol"));
+            return;
+        } else if (__e._message == "tick") {
+            // Higher-priority interrupt: combat
+            if (enemy_distance < 50) {
+                auto __new_compartment = std::make_unique<AiAgentCompartment>("Approach");
+                __new_compartment->parent_compartment = __compartment->clone();
+                __transition(std::move(__new_compartment));
+                return;
+            }
+
+            // Higher-priority interrupt: survival
+            if (health < 20) {
+                auto __new_compartment = std::make_unique<AiAgentCompartment>("Flee");
+                __new_compartment->parent_compartment = __compartment->clone();
+                __transition(std::move(__new_compartment));
+                return;
+            }
+
+            // Action: patrol
+            patrol_step = patrol_step + 1;
+            action_log = action_log + "patrol,";
         }
     }
 

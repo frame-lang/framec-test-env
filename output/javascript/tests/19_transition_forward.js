@@ -132,15 +132,6 @@ export class EventForwardTest {
         return this._context_stack.pop()._return;
     }
 
-    _state_Working(__e) {
-        if (__e._message === "get_log") {
-            this._context_stack[this._context_stack.length - 1]._return = this.log;
-            return;;
-        } else if (__e._message === "process") {
-            this.log.push("working:process");
-        }
-    }
-
     _state_Idle(__e) {
         if (__e._message === "get_log") {
             this._context_stack[this._context_stack.length - 1]._return = this.log;
@@ -153,6 +144,15 @@ export class EventForwardTest {
             return;
             // This should NOT execute because -> => returns after dispatch
             this.log.push("idle:process:after");
+        }
+    }
+
+    _state_Working(__e) {
+        if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;;
+        } else if (__e._message === "process") {
+            this.log.push("working:process");
         }
     }
 }

@@ -122,9 +122,6 @@ func (s *S) E() {
     s._context_stack = s._context_stack[:len(s._context_stack)-1]
 }
 
-func (s *S) _state_P(__e *SFrameEvent) {
-}
-
 func (s *S) _state_A(__e *SFrameEvent) {
     if __e._message == "E" {
         // Go supports nested anonymous functions
@@ -134,6 +131,9 @@ func (s *S) _state_A(__e *SFrameEvent) {
         s._state_P(__e)
         _ = outer()
     }
+}
+
+func (s *S) _state_P(__e *SFrameEvent) {
 }
 
 func main() {

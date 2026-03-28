@@ -173,21 +173,6 @@ export class HSMEnterExitParams {
         }
     }
 
-    _state_Start(__e) {
-        if (__e._message === "get_log") {
-            this._context_stack[this._context_stack.length - 1]._return = this.log;
-            return;
-        } else if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "Start";
-            return;
-        } else if (__e._message === "go_to_a") {
-            const __compartment = new HSMEnterExitParamsCompartment("ChildA", this.__compartment.copy());
-            __compartment.enter_args = Object.fromEntries(["starting"].map((v, i) => [String(i), v]));
-            this.__transition(__compartment);
-            return;
-        }
-    }
-
     _state_ChildA(__e) {
         if (__e._message === "<$") {
             const reason = __e._parameters?.["0"];
@@ -205,6 +190,21 @@ export class HSMEnterExitParams {
             this.__compartment.exit_args = Object.fromEntries(["leaving_A"].map((v, i) => [String(i), v]));
             const __compartment = new HSMEnterExitParamsCompartment("ChildB", this.__compartment.copy());
             __compartment.enter_args = Object.fromEntries(["arriving_B"].map((v, i) => [String(i), v]));
+            this.__transition(__compartment);
+            return;
+        }
+    }
+
+    _state_Start(__e) {
+        if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "Start";
+            return;
+        } else if (__e._message === "go_to_a") {
+            const __compartment = new HSMEnterExitParamsCompartment("ChildA", this.__compartment.copy());
+            __compartment.enter_args = Object.fromEntries(["starting"].map((v, i) => [String(i), v]));
             this.__transition(__compartment);
             return;
         }

@@ -132,19 +132,6 @@ export class TransitionEnterArgs {
         return this._context_stack.pop()._return;
     }
 
-    _state_Idle(__e) {
-        if (__e._message === "get_log") {
-            this._context_stack[this._context_stack.length - 1]._return = this.log;
-            return;;
-        } else if (__e._message === "start") {
-            this.log.push("idle:start");
-            const __compartment = new TransitionEnterArgsCompartment("Active", this.__compartment.copy());
-            __compartment.enter_args = Object.fromEntries(["from_idle", 42].map((v, i) => [String(i), v]));
-            this.__transition(__compartment);
-            return;
-        }
-    }
-
     _state_Active(__e) {
         if (__e._message === "$>") {
             const source = __e._parameters?.["0"];
@@ -155,6 +142,19 @@ export class TransitionEnterArgs {
             return;;
         } else if (__e._message === "start") {
             this.log.push("active:start");
+        }
+    }
+
+    _state_Idle(__e) {
+        if (__e._message === "get_log") {
+            this._context_stack[this._context_stack.length - 1]._return = this.log;
+            return;;
+        } else if (__e._message === "start") {
+            this.log.push("idle:start");
+            const __compartment = new TransitionEnterArgsCompartment("Active", this.__compartment.copy());
+            __compartment.enter_args = Object.fromEntries(["from_idle", 42].map((v, i) => [String(i), v]));
+            this.__transition(__compartment);
+            return;
         }
     }
 }

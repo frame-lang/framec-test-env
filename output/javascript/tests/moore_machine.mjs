@@ -135,11 +135,11 @@ export class MooreMachine {
         this._context_stack.pop();
     }
 
-    _state_Q2(__e) {
+    _state_Q0(__e) {
         if (__e._message === "$>") {
             this.set_output(0);
         } else if (__e._message === "i_0") {
-            const __compartment = new MooreMachineCompartment("Q4", this.__compartment.copy());
+            const __compartment = new MooreMachineCompartment("Q1", this.__compartment.copy());
             this.__transition(__compartment);
             return;
         } else if (__e._message === "i_1") {
@@ -163,23 +163,9 @@ export class MooreMachine {
         }
     }
 
-    _state_Q0(__e) {
+    _state_Q2(__e) {
         if (__e._message === "$>") {
             this.set_output(0);
-        } else if (__e._message === "i_0") {
-            const __compartment = new MooreMachineCompartment("Q1", this.__compartment.copy());
-            this.__transition(__compartment);
-            return;
-        } else if (__e._message === "i_1") {
-            const __compartment = new MooreMachineCompartment("Q2", this.__compartment.copy());
-            this.__transition(__compartment);
-            return;
-        }
-    }
-
-    _state_Q3(__e) {
-        if (__e._message === "$>") {
-            this.set_output(1);
         } else if (__e._message === "i_0") {
             const __compartment = new MooreMachineCompartment("Q4", this.__compartment.copy());
             this.__transition(__compartment);
@@ -200,6 +186,20 @@ export class MooreMachine {
             return;
         } else if (__e._message === "i_1") {
             const __compartment = new MooreMachineCompartment("Q3", this.__compartment.copy());
+            this.__transition(__compartment);
+            return;
+        }
+    }
+
+    _state_Q3(__e) {
+        if (__e._message === "$>") {
+            this.set_output(1);
+        } else if (__e._message === "i_0") {
+            const __compartment = new MooreMachineCompartment("Q4", this.__compartment.copy());
+            this.__transition(__compartment);
+            return;
+        } else if (__e._message === "i_1") {
+            const __compartment = new MooreMachineCompartment("Q2", this.__compartment.copy());
             this.__transition(__compartment);
             return;
         }

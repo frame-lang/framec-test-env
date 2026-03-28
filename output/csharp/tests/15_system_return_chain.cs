@@ -153,26 +153,6 @@ class SystemReturnChainTest {
         return __result;
     }
 
-    private void _state_EnterSetter(SystemReturnChainTestFrameEvent __e) {
-        if (__e._message == "$>") {
-            // Enter handler sets return value
-            _context_stack[_context_stack.Count - 1]._return = "from_enter";
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "EnterSetter";
-            return;
-        }
-    }
-
-    private void _state_BothSet(SystemReturnChainTestFrameEvent __e) {
-        if (__e._message == "$>") {
-            // Enter handler sets return - should overwrite exit's value
-            _context_stack[_context_stack.Count - 1]._return = "enter_wins";
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "BothSet";
-            return;
-        }
-    }
-
     private void _state_Start(SystemReturnChainTestFrameEvent __e) {
         if (__e._message == "<$") {
             // Exit handler sets initial value
@@ -189,6 +169,26 @@ class SystemReturnChainTest {
             { var __new_compartment = new SystemReturnChainTestCompartment("BothSet");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
+            return;
+        }
+    }
+
+    private void _state_EnterSetter(SystemReturnChainTestFrameEvent __e) {
+        if (__e._message == "$>") {
+            // Enter handler sets return value
+            _context_stack[_context_stack.Count - 1]._return = "from_enter";
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "EnterSetter";
+            return;
+        }
+    }
+
+    private void _state_BothSet(SystemReturnChainTestFrameEvent __e) {
+        if (__e._message == "$>") {
+            // Enter handler sets return - should overwrite exit's value
+            _context_stack[_context_stack.Count - 1]._return = "enter_wins";
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "BothSet";
             return;
         }
     }

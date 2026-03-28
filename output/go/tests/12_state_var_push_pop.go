@@ -149,6 +149,28 @@ func (s *StateVarPushPop) Restore() {
     s._context_stack = s._context_stack[:len(s._context_stack)-1]
 }
 
+func (s *StateVarPushPop) _state_Other(__e *StateVarPushPopFrameEvent) {
+    __sv_comp := s.__compartment
+    for __sv_comp != nil && __sv_comp.state != "Other" { __sv_comp = __sv_comp.parentCompartment }
+    if __e._message == "$>" {
+        if _, ok := __sv_comp.stateVars["other_count"]; !ok {
+            __sv_comp.stateVars["other_count"] = 100
+        }
+    } else if __e._message == "GetCount" {
+        s._context_stack[len(s._context_stack)-1]._return = __sv_comp.stateVars["other_count"].(int)
+        return
+    } else if __e._message == "Increment" {
+        __sv_comp.stateVars["other_count"] = __sv_comp.stateVars["other_count"].(int) + 1
+        s._context_stack[len(s._context_stack)-1]._return = __sv_comp.stateVars["other_count"].(int)
+        return
+    } else if __e._message == "Restore" {
+        __popped := s._state_stack[len(s._state_stack)-1]
+        s._state_stack = s._state_stack[:len(s._state_stack)-1]
+        s.__transition(__popped)
+        return
+    }
+}
+
 func (s *StateVarPushPop) _state_Counter(__e *StateVarPushPopFrameEvent) {
     __sv_comp := s.__compartment
     for __sv_comp != nil && __sv_comp.state != "Counter" { __sv_comp = __sv_comp.parentCompartment }
@@ -168,28 +190,6 @@ func (s *StateVarPushPop) _state_Counter(__e *StateVarPushPopFrameEvent) {
         __compartment := newStateVarPushPopCompartment("Other")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
-        return
-    }
-}
-
-func (s *StateVarPushPop) _state_Other(__e *StateVarPushPopFrameEvent) {
-    __sv_comp := s.__compartment
-    for __sv_comp != nil && __sv_comp.state != "Other" { __sv_comp = __sv_comp.parentCompartment }
-    if __e._message == "$>" {
-        if _, ok := __sv_comp.stateVars["other_count"]; !ok {
-            __sv_comp.stateVars["other_count"] = 100
-        }
-    } else if __e._message == "GetCount" {
-        s._context_stack[len(s._context_stack)-1]._return = __sv_comp.stateVars["other_count"].(int)
-        return
-    } else if __e._message == "Increment" {
-        __sv_comp.stateVars["other_count"] = __sv_comp.stateVars["other_count"].(int) + 1
-        s._context_stack[len(s._context_stack)-1]._return = __sv_comp.stateVars["other_count"].(int)
-        return
-    } else if __e._message == "Restore" {
-        __popped := s._state_stack[len(s._state_stack)-1]
-        s._state_stack = s._state_stack[:len(s._state_stack)-1]
-        s.__transition(__popped)
         return
     }
 }

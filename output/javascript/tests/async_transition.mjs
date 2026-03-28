@@ -147,6 +147,18 @@ export class AsyncTransition {
         return this._context_stack.pop()._return;
     }
 
+    async _state_Connected(__e) {
+        if (__e._message === "disconnect") {
+            this.connection = null
+            const __compartment = new AsyncTransitionCompartment("Disconnected", this.__compartment.copy());
+            this.__transition(__compartment);
+            return;
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "Connected";
+            return;
+        }
+    }
+
     async _state_Disconnected(__e) {
         if (__e._message === "connect") {
             const url = __e._parameters?.["url"];
@@ -157,18 +169,6 @@ export class AsyncTransition {
             return;
         } else if (__e._message === "get_state") {
             this._context_stack[this._context_stack.length - 1]._return = "Disconnected";
-            return;
-        }
-    }
-
-    async _state_Connected(__e) {
-        if (__e._message === "disconnect") {
-            this.connection = null
-            const __compartment = new AsyncTransitionCompartment("Disconnected", this.__compartment.copy());
-            this.__transition(__compartment);
-            return;
-        } else if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "Connected";
             return;
         }
     }

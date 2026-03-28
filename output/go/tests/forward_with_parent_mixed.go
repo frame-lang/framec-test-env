@@ -120,6 +120,9 @@ func (s *S) E() {
     s._context_stack = s._context_stack[:len(s._context_stack)-1]
 }
 
+func (s *S) _state_B(__e *SFrameEvent) {
+}
+
 func (s *S) _state_P(__e *SFrameEvent) {
 }
 
@@ -127,9 +130,6 @@ func (s *S) _state_A(__e *SFrameEvent) {
     if __e._message == "E" {
         s._state_P(__e)
     }
-}
-
-func (s *S) _state_B(__e *SFrameEvent) {
 }
 
 func main() {

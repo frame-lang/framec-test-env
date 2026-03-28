@@ -118,12 +118,6 @@ func (s *S) E() {
     s._context_stack = s._context_stack[:len(s._context_stack)-1]
 }
 
-func (s *S) _state_B(__e *SFrameEvent) {
-    if __e._message == "E" {
-        ;
-    }
-}
-
 func (s *S) _state_A(__e *SFrameEvent) {
     if __e._message == "E" {
         x := 1
@@ -132,6 +126,12 @@ func (s *S) _state_A(__e *SFrameEvent) {
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return
+    }
+}
+
+func (s *S) _state_B(__e *SFrameEvent) {
+    if __e._message == "E" {
+        ;
     }
 }
 

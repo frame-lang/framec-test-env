@@ -134,10 +134,6 @@ class S {
 
     }
 
-    private void _state_B(SFrameEvent __e) {
-
-    }
-
     private void _state_A(SFrameEvent __e) {
         if (__e._message.equals("e")) {
             int v = 2;
@@ -155,6 +151,10 @@ class S {
                 return;
             }
         }
+    }
+
+    private void _state_B(SFrameEvent __e) {
+
     }
 }
 

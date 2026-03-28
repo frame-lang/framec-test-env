@@ -1,5 +1,7 @@
 
-export class SFrameEvent {
+// Test: Frame tokens inside JavaScript strings should NOT be recognized as Frame syntax.
+
+export class FrameTokensInStringsFrameEvent {
     _message;
     _parameters;
 
@@ -10,7 +12,7 @@ export class SFrameEvent {
 }
 
 
-export class SFrameContext {
+export class FrameTokensInStringsFrameContext {
     event;
     _return;
     _data;
@@ -23,7 +25,7 @@ export class SFrameContext {
 }
 
 
-export class SCompartment {
+export class FrameTokensInStringsCompartment {
     state;
     state_args;
     state_vars;
@@ -43,7 +45,7 @@ export class SCompartment {
     }
 
     copy() {
-        const c = new SCompartment(this.state, this.parent_compartment);
+        const c = new FrameTokensInStringsCompartment(this.state, this.parent_compartment);
         c.state_args = {...this.state_args};
         c.state_vars = {...this.state_vars};
         c.enter_args = {...this.enter_args};
@@ -54,7 +56,7 @@ export class SCompartment {
 }
 
 
-export class S {
+export class FrameTokensInStrings {
     _state_stack;
     __compartment;
     __next_compartment;
@@ -63,9 +65,9 @@ export class S {
     constructor() {
         this._state_stack = [];
         this._context_stack = [];
-        this.__compartment = new SCompartment("A");
+        this.__compartment = new FrameTokensInStringsCompartment("Start");
         this.__next_compartment = null;
-        const __frame_event = new SFrameEvent("$>", null);
+        const __frame_event = new FrameTokensInStringsFrameEvent("$>", null);
         this.__kernel(__frame_event);
     }
 
@@ -77,13 +79,13 @@ export class S {
             const next_compartment = this.__next_compartment;
             this.__next_compartment = null;
             // Exit current state
-            const exit_event = new SFrameEvent("<$", this.__compartment.exit_args);
+            const exit_event = new FrameTokensInStringsFrameEvent("<$", this.__compartment.exit_args);
             this.__router(exit_event);
             // Switch to new compartment
             this.__compartment = next_compartment;
             // Enter new state (or forward event)
             if (next_compartment.forward_event === null) {
-                const enter_event = new SFrameEvent("$>", this.__compartment.enter_args);
+                const enter_event = new FrameTokensInStringsFrameEvent("$>", this.__compartment.enter_args);
                 this.__router(enter_event);
             } else {
                 // Forward event to new state
@@ -94,7 +96,7 @@ export class S {
                     this.__router(forward_event);
                 } else {
                     // Forwarding other event - send $> first, then forward
-                    const enter_event = new SFrameEvent("$>", this.__compartment.enter_args);
+                    const enter_event = new FrameTokensInStringsFrameEvent("$>", this.__compartment.enter_args);
                     this.__router(enter_event);
                     this.__router(forward_event);
                 }
@@ -115,39 +117,38 @@ export class S {
         this.__next_compartment = next_compartment;
     }
 
-    e() {
-        const __e = new SFrameEvent("e", null);
-        const __ctx = new SFrameContext(__e, null);
+    run_test() {
+        const __e = new FrameTokensInStringsFrameEvent("run_test", null);
+        const __ctx = new FrameTokensInStringsFrameContext(__e, null);
         this._context_stack.push(__ctx);
         this.__kernel(__e);
         this._context_stack.pop();
     }
 
-    _state_A(__e) {
-        if (__e._message === "e") {
-            const __compartment = new SCompartment("B", this.__compartment.copy());
-            this.__transition(__compartment);
-            return;
+    _state_Start(__e) {
+        if (__e._message === "run_test") {
+            // Regular strings
+            const a = "-> $FakeState";
+            const b = "=> $^";
+            const c = "push$ and pop$";
+            const d = "$.fake_var = 42";
+            const e = "@@target javascript";
+            const f = "@@system NotReal { }";
+            const g = "@@:return = 99";
+
+            // Template literals
+            const h = `-> $Transition in template`;
+            const i = `@@system ${a} template`;
+            const j = `
+                => $^
+                push$
+                @@system MultiLine { }
+            `;
+
+            console.log("PASS: Frame tokens in strings correctly ignored");
         }
     }
-
-    _state_B(__e) {
-
-    }
 }
 
-function native() {}
-function x() {}
-
-function main() {
-    console.log("TAP version 14");
-    console.log("1..1");
-    try {
-        const s = new S();
-        if (typeof s.e === 'function') { s.e(); }
-        console.log("ok 1 - transition_basic_exec");
-    } catch (ex) {
-        console.log(`not ok 1 - transition_basic_exec # ${ex}`);
-    }
-}
-main();
+const s = new FrameTokensInStrings();
+s.run_test();

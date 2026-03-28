@@ -147,22 +147,6 @@ export class StackOps {
         return this._context_stack.pop()._return;
     }
 
-    _state_Sub(__e) {
-        if (__e._message === "do_work") {
-            this._context_stack[this._context_stack.length - 1]._return = "Working in Sub";
-            return;;
-        } else if (__e._message === "get_state") {
-            this._context_stack[this._context_stack.length - 1]._return = "Sub";
-            return;;
-        } else if (__e._message === "pop_back") {
-            console.log("Popping back to previous state");
-            this.__transition(this._state_stack.pop());
-            return;
-        } else if (__e._message === "push_and_go") {
-            console.log("Already in Sub");
-        }
-    }
-
     _state_Main(__e) {
         if (__e._message === "do_work") {
             this._context_stack[this._context_stack.length - 1]._return = "Working in Main";
@@ -178,6 +162,22 @@ export class StackOps {
             const __compartment = new StackOpsCompartment("Sub", this.__compartment.copy());
             this.__transition(__compartment);
             return;
+        }
+    }
+
+    _state_Sub(__e) {
+        if (__e._message === "do_work") {
+            this._context_stack[this._context_stack.length - 1]._return = "Working in Sub";
+            return;;
+        } else if (__e._message === "get_state") {
+            this._context_stack[this._context_stack.length - 1]._return = "Sub";
+            return;;
+        } else if (__e._message === "pop_back") {
+            console.log("Popping back to previous state");
+            this.__transition(this._state_stack.pop());
+            return;
+        } else if (__e._message === "push_and_go") {
+            console.log("Already in Sub");
         }
     }
 }

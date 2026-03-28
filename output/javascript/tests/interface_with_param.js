@@ -125,16 +125,16 @@ export class S {
         this._context_stack.pop();
     }
 
-    _state_P(__e) {
-
-    }
-
     _state_A(__e) {
         if (__e._message === "ev") {
             const n = __e._parameters?.["n"];
             this._state_P(__e);
             String(n)
         }
+    }
+
+    _state_P(__e) {
+
     }
 }
 

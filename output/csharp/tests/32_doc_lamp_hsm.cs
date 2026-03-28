@@ -190,6 +190,16 @@ class LampHSM {
         }
     }
 
+    private void _state_ColorBehavior(LampHSMFrameEvent __e) {
+        if (__e._message == "getColor") {
+            _context_stack[_context_stack.Count - 1]._return = this.color;
+            return;
+        } else if (__e._message == "setColor") {
+            var color = (string) __e._parameters["color"];
+            this.color = color;
+        }
+    }
+
     private void _state_Off(LampHSMFrameEvent __e) {
         if (__e._message == "isLampOn") {
             _context_stack[_context_stack.Count - 1]._return = this.lamp_on;
@@ -201,16 +211,6 @@ class LampHSM {
             return;
         } else {
             _state_ColorBehavior(__e);
-        }
-    }
-
-    private void _state_ColorBehavior(LampHSMFrameEvent __e) {
-        if (__e._message == "getColor") {
-            _context_stack[_context_stack.Count - 1]._return = this.color;
-            return;
-        } else if (__e._message == "setColor") {
-            var color = (string) __e._parameters["color"];
-            this.color = color;
         }
     }
 

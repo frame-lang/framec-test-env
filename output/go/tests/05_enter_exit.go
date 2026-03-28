@@ -131,24 +131,6 @@ func (s *EnterExit) GetLog() []string {
     return __result
 }
 
-func (s *EnterExit) _state_Off(__e *EnterExitFrameEvent) {
-    if __e._message == "<$" {
-        s.log = append(s.log, "exit:Off")
-        fmt.Println("Exiting Off state")
-    } else if __e._message == "$>" {
-        s.log = append(s.log, "enter:Off")
-        fmt.Println("Entered Off state")
-    } else if __e._message == "GetLog" {
-        s._context_stack[len(s._context_stack)-1]._return = s.log
-        return
-    } else if __e._message == "Toggle" {
-        __compartment := newEnterExitCompartment("On")
-        __compartment.parentCompartment = s.__compartment.copy()
-        s.__transition(__compartment)
-        return
-    }
-}
-
 func (s *EnterExit) _state_On(__e *EnterExitFrameEvent) {
     if __e._message == "<$" {
         s.log = append(s.log, "exit:On")
@@ -161,6 +143,24 @@ func (s *EnterExit) _state_On(__e *EnterExitFrameEvent) {
         return
     } else if __e._message == "Toggle" {
         __compartment := newEnterExitCompartment("Off")
+        __compartment.parentCompartment = s.__compartment.copy()
+        s.__transition(__compartment)
+        return
+    }
+}
+
+func (s *EnterExit) _state_Off(__e *EnterExitFrameEvent) {
+    if __e._message == "<$" {
+        s.log = append(s.log, "exit:Off")
+        fmt.Println("Exiting Off state")
+    } else if __e._message == "$>" {
+        s.log = append(s.log, "enter:Off")
+        fmt.Println("Entered Off state")
+    } else if __e._message == "GetLog" {
+        s._context_stack[len(s._context_stack)-1]._return = s.log
+        return
+    } else if __e._message == "Toggle" {
+        __compartment := newEnterExitCompartment("On")
         __compartment.parentCompartment = s.__compartment.copy()
         s.__transition(__compartment)
         return

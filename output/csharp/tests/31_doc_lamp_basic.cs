@@ -167,24 +167,6 @@ class Lamp {
         return __result;
     }
 
-    private void _state_Off(LampFrameEvent __e) {
-        if (__e._message == "getColor") {
-            _context_stack[_context_stack.Count - 1]._return = this.color;
-            return;
-        } else if (__e._message == "isSwitchClosed") {
-            _context_stack[_context_stack.Count - 1]._return = this.switch_closed;
-            return;
-        } else if (__e._message == "setColor") {
-            var color = (string) __e._parameters["color"];
-            this.color = color;
-        } else if (__e._message == "turnOn") {
-            { var __new_compartment = new LampCompartment("On");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
     private void _state_On(LampFrameEvent __e) {
         if (__e._message == "<$") {
             this.openSwitch();
@@ -201,6 +183,24 @@ class Lamp {
             this.color = color;
         } else if (__e._message == "turnOff") {
             { var __new_compartment = new LampCompartment("Off");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        }
+    }
+
+    private void _state_Off(LampFrameEvent __e) {
+        if (__e._message == "getColor") {
+            _context_stack[_context_stack.Count - 1]._return = this.color;
+            return;
+        } else if (__e._message == "isSwitchClosed") {
+            _context_stack[_context_stack.Count - 1]._return = this.switch_closed;
+            return;
+        } else if (__e._message == "setColor") {
+            var color = (string) __e._parameters["color"];
+            this.color = color;
+        } else if (__e._message == "turnOn") {
+            { var __new_compartment = new LampCompartment("On");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
