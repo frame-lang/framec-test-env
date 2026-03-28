@@ -1,0 +1,175 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system HSMExitHandlers {
+    interface:
+        GoToOther()
+        GoToParent()
+        GoToChild()
+        GetLog(): []string
+        GetState(): string
+        GetChildVar(): int
+
+    machine:
+        $Child => $Parent {
+            $.child_var: int = 42
+
+            $>() {
+                s.log = append(s.log, "Child:enter")
+            }
+
+            <$() {
+                val := $.child_var
+                s.log = append(s.log, fmt.Sprintf("Child:exit(var=%d)", val))
+            }
+
+            GoToOther() {
+                -> $Other
+            }
+
+            GoToParent() {
+                -> $Parent
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Child"
+            }
+
+            GetChildVar(): int {
+                return $.child_var
+            }
+        }
+
+        $Parent {
+            $>() {
+                s.log = append(s.log, "Parent:enter")
+            }
+
+            <$() {
+                s.log = append(s.log, "Parent:exit")
+            }
+
+            GoToChild() {
+                -> $Child
+            }
+
+            GoToOther() {
+                -> $Other
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Parent"
+            }
+
+            GetChildVar(): int {
+                return -1
+            }
+        }
+
+        $Other {
+            $>() {
+                s.log = append(s.log, "Other:enter")
+            }
+
+            GoToChild() {
+                -> $Child
+            }
+
+            GoToParent() {
+                -> $Parent
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Other"
+            }
+
+            GetChildVar(): int {
+                return -1
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func main() {
+	fmt.Println("=== Test 48: HSM Exit Handlers ===")
+	sm := @@HSMExitHandlers()
+
+	// Initial state is Child
+	log := sm.GetLog()
+	if !contains(log, "Child:enter") {
+		fmt.Printf("FAIL: Expected Child:enter on init, got %v\n", log)
+		os.Exit(1)
+	}
+	if sm.GetState() != "Child" {
+		fmt.Printf("FAIL: Expected Child, got %s\n", sm.GetState())
+		os.Exit(1)
+	}
+	fmt.Println("TC2.4.0: Initial state is Child with enter - PASS")
+
+	// TC2.4.1: Child exit fires when transitioning out of child
+	sm.GoToOther()
+	log = sm.GetLog()
+	if !contains(log, "Child:exit(var=42)") {
+		fmt.Printf("FAIL: Expected Child:exit, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "Other:enter") {
+		fmt.Printf("FAIL: Expected Other:enter, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.4.1: Child exit fires when transitioning out - PASS")
+
+	// TC2.4.2: Parent exit does NOT fire when transitioning out of child
+	if contains(log, "Parent:exit") {
+		fmt.Printf("FAIL: Parent:exit should NOT fire for child exit, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.4.2: Parent exit NOT fired for child exit - PASS")
+
+	// TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
+	fmt.Println("TC2.4.3: Exit handler accesses state var (var=42) - PASS")
+
+	// TC2.4.4: Parent exit fires when transitioning out of Parent
+	sm.GoToParent()
+	log = sm.GetLog()
+	if !contains(log, "Parent:enter") {
+		fmt.Printf("FAIL: Expected Parent:enter, got %v\n", log)
+		os.Exit(1)
+	}
+
+	sm.GoToOther()
+	log = sm.GetLog()
+	if !contains(log, "Parent:exit") {
+		fmt.Printf("FAIL: Expected Parent:exit, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.4.4: Parent exit fires when leaving parent - PASS")
+
+	fmt.Println("PASS: HSM exit handlers work correctly")
+}

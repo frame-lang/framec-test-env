@@ -1,0 +1,70 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system EventForwardTest {
+    interface:
+        Process()
+        GetLog(): []string
+
+    machine:
+        $Idle {
+            Process() {
+                s.log = append(s.log, "idle:process:before")
+                -> => $Working
+                // This should NOT execute because -> => returns after dispatch
+                s.log = append(s.log, "idle:process:after")
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+
+        $Working {
+            Process() {
+                s.log = append(s.log, "working:process")
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func main() {
+	fmt.Println("=== Test 19: Transition Forward (Go) ===")
+	sm := @@EventForwardTest()
+	sm.Process()
+	log := sm.GetLog()
+	fmt.Printf("Log: %v\n", log)
+
+	if !contains(log, "idle:process:before") {
+		fmt.Printf("FAIL: Expected 'idle:process:before' in log: %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "working:process") {
+		fmt.Printf("FAIL: Expected 'working:process' in log: %v\n", log)
+		os.Exit(1)
+	}
+	if contains(log, "idle:process:after") {
+		fmt.Printf("FAIL: Should NOT have 'idle:process:after' in log: %v\n", log)
+		os.Exit(1)
+	}
+
+	fmt.Println("PASS: Transition forward works correctly")
+}

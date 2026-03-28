@@ -1,0 +1,83 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system HSMForward {
+    interface:
+        EventA()
+        EventB()
+        GetLog(): []string
+
+    machine:
+        $Child => $Parent {
+            EventA() {
+                s.log = append(s.log, "Child:event_a")
+            }
+
+            EventB() {
+                s.log = append(s.log, "Child:event_b_forward")
+                => $^
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+
+        $Parent {
+            EventA() {
+                s.log = append(s.log, "Parent:event_a")
+            }
+
+            EventB() {
+                s.log = append(s.log, "Parent:event_b")
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func main() {
+	fmt.Println("=== Test 08: HSM Forward ===")
+	sm := NewHSMForward()
+
+	// event_a should be handled by Child (no forward)
+	sm.EventA()
+	log := sm.GetLog()
+	if !contains(log, "Child:event_a") {
+		fmt.Printf("FAIL: Expected 'Child:event_a' in log, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Printf("After EventA: %v\n", log)
+
+	// event_b should forward to Parent
+	sm.EventB()
+	log = sm.GetLog()
+	if !contains(log, "Child:event_b_forward") {
+		fmt.Printf("FAIL: Expected 'Child:event_b_forward' in log, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "Parent:event_b") {
+		fmt.Printf("FAIL: Expected 'Parent:event_b' in log (forwarded), got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Printf("After EventB (forwarded): %v\n", log)
+
+	fmt.Println("PASS: HSM forward works correctly")
+}

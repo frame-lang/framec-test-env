@@ -1,0 +1,111 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+import "strings"
+
+@@system ContextDataTest {
+    interface:
+        ProcessWithData(value: int): string
+        CheckDataIsolation(): string
+        TransitionPreservesData(x: int): string
+
+    machine:
+        $Start {
+            ProcessWithData(value: int): string {
+                // Set data in handler
+                @@:data["input"] = value
+                // Read data back using context stack directly
+                input := s._context_stack[len(s._context_stack)-1]._data["input"]
+                @@:return = fmt.Sprintf("processed:%v", input)
+            }
+
+            CheckDataIsolation(): string {
+                // Set data, call another method, verify our data preserved
+                @@:data["outer"] = "outer_value"
+
+                // This creates its own context with its own data
+                inner_result := s.ProcessWithData(99)
+
+                // Our data should still be here
+                outer_val := s._context_stack[len(s._context_stack)-1]._data["outer"]
+                @@:return = fmt.Sprintf("outer_data=%v,inner=%s", outer_val, inner_result)
+            }
+
+            TransitionPreservesData(x: int): string {
+                // Set data, transition, verify data available in lifecycle handlers
+                @@:data["started_in"] = "Start"
+                @@:data["value"] = x
+                @@:data["trace"] = []string{"handler"}
+                -> $End
+            }
+
+            <$() {
+                // Exit handler can access data set by event handler
+                trace := s._context_stack[len(s._context_stack)-1]._data["trace"].([]string)
+                trace = append(trace, "exit")
+                @@:data["trace"] = trace
+            }
+        }
+
+        $End {
+            $>() {
+                // Enter handler can access data set by previous handlers
+                trace := s._context_stack[len(s._context_stack)-1]._data["trace"].([]string)
+                trace = append(trace, "enter")
+                @@:data["trace"] = trace
+                @@:data["ended_in"] = "End"
+
+                // Build final result from accumulated data
+                trace_str := strings.Join(trace, ",")
+                started := s._context_stack[len(s._context_stack)-1]._data["started_in"]
+                ended := s._context_stack[len(s._context_stack)-1]._data["ended_in"]
+                val := s._context_stack[len(s._context_stack)-1]._data["value"]
+                @@:return = fmt.Sprintf("from=%v,to=%v,value=%v,trace=%s", started, ended, val, trace_str)
+            }
+        }
+}
+
+func main() {
+	fmt.Println("=== Test 38: Context Data ===")
+
+	// Test 1: Basic data set/get
+	s1 := @@ContextDataTest()
+	result := s1.ProcessWithData(42)
+	if result != "processed:42" {
+		fmt.Printf("FAIL: Expected 'processed:42', got '%s'\n", result)
+		os.Exit(1)
+	}
+	fmt.Printf("1. ProcessWithData(42) = '%s'\n", result)
+
+	// Test 2: Data isolation between nested calls
+	s2 := @@ContextDataTest()
+	result = s2.CheckDataIsolation()
+	expected := "outer_data=outer_value,inner=processed:99"
+	if result != expected {
+		fmt.Printf("FAIL: Expected '%s', got '%s'\n", expected, result)
+		os.Exit(1)
+	}
+	fmt.Printf("2. CheckDataIsolation() = '%s'\n", result)
+
+	// Test 3: Data preserved across transition (handler -> <$ -> $>)
+	s3 := @@ContextDataTest()
+	result = s3.TransitionPreservesData(100)
+	if !strings.Contains(result, "from=Start") {
+		fmt.Printf("FAIL: Expected 'from=Start' in '%s'\n", result)
+		os.Exit(1)
+	}
+	if !strings.Contains(result, "to=End") {
+		fmt.Printf("FAIL: Expected 'to=End' in '%s'\n", result)
+		os.Exit(1)
+	}
+	if !strings.Contains(result, "value=100") {
+		fmt.Printf("FAIL: Expected 'value=100' in '%s'\n", result)
+		os.Exit(1)
+	}
+	fmt.Printf("3. TransitionPreservesData(100) = '%s'\n", result)
+
+	fmt.Println("PASS: Context data works correctly")
+}

@@ -1,0 +1,76 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system TransitionEnterArgs {
+    interface:
+        Start()
+        GetLog(): []string
+
+    machine:
+        $Idle {
+            Start() {
+                s.log = append(s.log, "idle:start")
+                -> ("from_idle", 42) $Active
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+
+        $Active {
+            $>(source: string, value: int) {
+                s.log = append(s.log, fmt.Sprintf("active:enter:%s:%d", source, value))
+            }
+
+            Start() {
+                s.log = append(s.log, "active:start")
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func main() {
+	fmt.Println("=== Test 17: Transition Enter Args ===")
+	sm := @@TransitionEnterArgs()
+
+	// Initial state is Idle
+	log := sm.GetLog()
+	if len(log) != 0 {
+		fmt.Printf("FAIL: Expected empty log, got %v\n", log)
+		os.Exit(1)
+	}
+
+	// Transition to Active with args
+	sm.Start()
+	log = sm.GetLog()
+	if !contains(log, "idle:start") {
+		fmt.Printf("FAIL: Expected 'idle:start' in log, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "active:enter:from_idle:42") {
+		fmt.Printf("FAIL: Expected 'active:enter:from_idle:42' in log, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Printf("Log after transition: %v\n", log)
+
+	fmt.Println("PASS: Transition enter args work correctly")
+}

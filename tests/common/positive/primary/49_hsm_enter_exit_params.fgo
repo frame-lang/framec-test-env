@@ -1,0 +1,144 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system HSMEnterExitParams {
+    interface:
+        GoToA()
+        GoToSibling()
+        GoBack()
+        GetLog(): []string
+        GetState(): string
+
+    machine:
+        $Start {
+            GoToA() {
+                -> ("starting") $ChildA
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Start"
+            }
+        }
+
+        $ChildA => $Parent {
+            $>(msg: string) {
+                s.log = append(s.log, "ChildA:enter(" + msg + ")")
+            }
+
+            <$(reason: string) {
+                s.log = append(s.log, "ChildA:exit(" + reason + ")")
+            }
+
+            GoToSibling() {
+                ("leaving_A") -> ("arriving_B") $ChildB
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "ChildA"
+            }
+        }
+
+        $ChildB => $Parent {
+            $>(msg: string) {
+                s.log = append(s.log, "ChildB:enter(" + msg + ")")
+            }
+
+            <$(reason: string) {
+                s.log = append(s.log, "ChildB:exit(" + reason + ")")
+            }
+
+            GoBack() {
+                ("leaving_B") -> ("returning_A") $ChildA
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "ChildB"
+            }
+        }
+
+        $Parent {
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Parent"
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func main() {
+	fmt.Println("=== Test 49: HSM Enter/Exit with Params ===")
+	sm := @@HSMEnterExitParams()
+
+	// First go to ChildA with enter params
+	sm.GoToA()
+	log := sm.GetLog()
+	if !contains(log, "ChildA:enter(starting)") {
+		fmt.Printf("FAIL: Expected ChildA:enter(starting), got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.5.0: Initial transition with enter params - PASS")
+
+	// TC2.5.1: Exit params passed correctly
+	sm.GoToSibling()
+	log = sm.GetLog()
+	if !contains(log, "ChildA:exit(leaving_A)") {
+		fmt.Printf("FAIL: Expected exit with param, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.5.1: Exit params passed correctly - PASS")
+
+	// TC2.5.2: Enter params passed to target state
+	if !contains(log, "ChildB:enter(arriving_B)") {
+		fmt.Printf("FAIL: Expected enter with param, got %v\n", log)
+		os.Exit(1)
+	}
+	if sm.GetState() != "ChildB" {
+		fmt.Printf("FAIL: Expected ChildB, got %s\n", sm.GetState())
+		os.Exit(1)
+	}
+	fmt.Println("TC2.5.2: Enter params passed to target - PASS")
+
+	// TC2.5.3: Return transition with different params
+	sm.GoBack()
+	log = sm.GetLog()
+	if !contains(log, "ChildB:exit(leaving_B)") {
+		fmt.Printf("FAIL: Expected ChildB exit, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "ChildA:enter(returning_A)") {
+		fmt.Printf("FAIL: Expected ChildA enter, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.5.3: Return transition with params - PASS")
+
+	fmt.Println("PASS: HSM enter/exit with params works correctly")
+}

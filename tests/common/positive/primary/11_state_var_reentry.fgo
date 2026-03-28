@@ -1,0 +1,84 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system StateVarReentry {
+    interface:
+        Increment(): int
+        GetCount(): int
+        GoOther()
+        ComeBack()
+
+    machine:
+        $Counter {
+            $.count: int = 0
+
+            Increment(): int {
+                $.count = $.count + 1
+                return $.count
+            }
+
+            GetCount(): int {
+                return $.count
+            }
+
+            GoOther() {
+                -> $Other
+            }
+        }
+
+        $Other {
+            ComeBack() {
+                -> $Counter
+            }
+
+            Increment(): int {
+                return -1
+            }
+
+            GetCount(): int {
+                return -1
+            }
+        }
+}
+
+func main() {
+	fmt.Println("=== Test 11: State Variable Reentry ===")
+	sm := NewStateVarReentry()
+
+	// Increment a few times
+	sm.Increment()
+	sm.Increment()
+	count := sm.GetCount()
+	if count != 2 {
+		fmt.Printf("FAIL: Expected 2 after two increments, got %d\n", count)
+		os.Exit(1)
+	}
+	fmt.Printf("Count before leaving: %d\n", count)
+
+	// Leave the state
+	sm.GoOther()
+	fmt.Println("Transitioned to Other state")
+
+	// Come back - state var should be reinitialized to 0
+	sm.ComeBack()
+	count = sm.GetCount()
+	if count != 0 {
+		fmt.Printf("FAIL: Expected 0 after re-entering Counter (state var reinit), got %d\n", count)
+		os.Exit(1)
+	}
+	fmt.Printf("Count after re-entering Counter: %d\n", count)
+
+	// Increment again to verify it works
+	result := sm.Increment()
+	if result != 1 {
+		fmt.Printf("FAIL: Expected 1 after increment, got %d\n", result)
+		os.Exit(1)
+	}
+	fmt.Printf("After increment: %d\n", result)
+
+	fmt.Println("PASS: State variables reinitialize on state reentry")
+}

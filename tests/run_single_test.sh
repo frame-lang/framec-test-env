@@ -35,6 +35,7 @@ C_OUT="$TEST_ENV_ROOT/output/c/tests"
 CPP_OUT="$TEST_ENV_ROOT/output/cpp/tests"
 JAVA_OUT="$TEST_ENV_ROOT/output/java/tests"
 CSHARP_OUT="$TEST_ENV_ROOT/output/csharp/tests"
+GO_OUT="$TEST_ENV_ROOT/output/go/tests"
 
 # .NET SDK — find dotnet
 DOTNET_CMD=""
@@ -66,6 +67,7 @@ case $lang in
     cpp) target="cpp_17"; out_dir="$CPP_OUT"; out_ext="cpp" ;;
     java) target="java"; out_dir="$JAVA_OUT"; out_ext="java" ;;
     csharp) target="csharp"; out_dir="$CSHARP_OUT"; out_ext="cs" ;;
+    go) target="go"; out_dir="$GO_OUT"; out_ext="go" ;;
 esac
 
 out_file="$out_dir/${test_name}.${out_ext}"
@@ -83,10 +85,9 @@ if head -10 "$test_file" 2>/dev/null | grep -qE "@@xfail|@xfail"; then
 fi
 
 # Clean stale compiled artifacts before transpilation
-# Java: .class files from previous tests (all tests use class Main)
-# C#: dotnet run caches in temp dirs
 case $lang in
     java) find "$JAVA_OUT" -name "*.class" -delete 2>/dev/null ;;
+    go) rm -f "$out_dir/${test_name}.go" 2>/dev/null ;;
 esac
 
 # Transpile
@@ -189,6 +190,15 @@ case $lang in
             run_status=1
             run_output="dotnet not found"
         fi
+        ;;
+    go)
+        # Go treats *_test.go as test files — copy to temp name if needed
+        go_run_file="$out_file"
+        if echo "$out_file" | grep -q '_test\.go$'; then
+            go_run_file="${out_file%.go}_run.go"
+            cp "$out_file" "$go_run_file"
+        fi
+        run_output=$(GOFLAGS="-count=1" go run "$go_run_file" 2>&1) || run_status=$?
         ;;
 esac
 

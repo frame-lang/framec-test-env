@@ -1,0 +1,93 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+)
+
+@@system ContextReentrantTest {
+    interface:
+        Outer(x: int): string
+        Inner(y: int): string
+        DeeplyNested(z: int): string
+        GetBoth(a: int, b: int): string
+
+    machine:
+        $Ready {
+            Outer(x: int): string {
+                // Set our return before calling inner
+                @@:return = "outer_initial"
+
+                // Call inner - should NOT clobber our return
+                inner_result := s.Inner(x * 10)
+
+                // Our return should still be accessible
+                // Update it with combined result
+                @@:return = "outer:" + strconv.Itoa(x) + ",inner:" + inner_result
+            }
+
+            Inner(y: int): string {
+                // Inner has its own context
+                @@:return = strconv.Itoa(y)
+            }
+
+            DeeplyNested(z: int): string {
+                // 3 levels deep
+                outer_result := s.Outer(z)
+                @@:return = "deep:" + strconv.Itoa(z) + "," + outer_result
+            }
+
+            GetBoth(a: int, b: int): string {
+                // Test that we can access multiple params
+                result_a := s.Inner(a)
+                result_b := s.Inner(b)
+                // After both inner calls, a and b should still be our params
+                @@:return = "a=" + strconv.Itoa(a) + ",b=" + strconv.Itoa(b) + ",results=" + result_a + "+" + result_b
+            }
+        }
+}
+
+func main() {
+	fmt.Println("=== Test 37: Context Reentrant ===")
+	sm := @@ContextReentrantTest()
+
+	// Test 1: Simple nesting - outer calls inner
+	result := sm.Outer(5)
+	expected := "outer:5,inner:50"
+	if result != expected {
+		fmt.Printf("FAIL: Expected '%s', got '%s'\n", expected, result)
+		os.Exit(1)
+	}
+	fmt.Printf("1. Outer(5) = '%s'\n", result)
+
+	// Test 2: Inner alone
+	result = sm.Inner(42)
+	if result != "42" {
+		fmt.Printf("FAIL: Expected '42', got '%s'\n", result)
+		os.Exit(1)
+	}
+	fmt.Printf("2. Inner(42) = '%s'\n", result)
+
+	// Test 3: Deep nesting (3 levels)
+	result = sm.DeeplyNested(3)
+	expected = "deep:3,outer:3,inner:30"
+	if result != expected {
+		fmt.Printf("FAIL: Expected '%s', got '%s'\n", expected, result)
+		os.Exit(1)
+	}
+	fmt.Printf("3. DeeplyNested(3) = '%s'\n", result)
+
+	// Test 4: Multiple inner calls, params preserved
+	result = sm.GetBoth(10, 20)
+	expected = "a=10,b=20,results=10+20"
+	if result != expected {
+		fmt.Printf("FAIL: Expected '%s', got '%s'\n", expected, result)
+		os.Exit(1)
+	}
+	fmt.Printf("4. GetBoth(10, 20) = '%s'\n", result)
+
+	fmt.Println("PASS: Context reentrant works correctly")
+}

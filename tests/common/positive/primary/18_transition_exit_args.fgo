@@ -1,0 +1,80 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system TransitionExitArgs {
+    interface:
+        Leave()
+        GetLog(): []string
+
+    machine:
+        $Active {
+            <$(reason: string, code: int) {
+                s.log = append(s.log, fmt.Sprintf("exit:%s:%d", reason, code))
+            }
+
+            Leave() {
+                s.log = append(s.log, "leaving")
+                ("cleanup", 42) -> $Done
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+
+        $Done {
+            $>() {
+                s.log = append(s.log, "enter:done")
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func main() {
+	fmt.Println("=== Test 18: Transition Exit Args ===")
+	sm := @@TransitionExitArgs()
+
+	// Initial state is Active
+	log := sm.GetLog()
+	if len(log) != 0 {
+		fmt.Printf("FAIL: Expected empty log, got %v\n", log)
+		os.Exit(1)
+	}
+
+	// Leave - should call exit handler with args
+	sm.Leave()
+	log = sm.GetLog()
+	if !contains(log, "leaving") {
+		fmt.Printf("FAIL: Expected 'leaving' in log, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "exit:cleanup:42") {
+		fmt.Printf("FAIL: Expected 'exit:cleanup:42' in log, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "enter:done") {
+		fmt.Printf("FAIL: Expected 'enter:done' in log, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Printf("Log after transition: %v\n", log)
+
+	fmt.Println("PASS: Transition exit args work correctly")
+}

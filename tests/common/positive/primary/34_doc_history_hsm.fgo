@@ -1,0 +1,159 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system HistoryHSM {
+    interface:
+        GotoA()
+        GotoB()
+        GotoC()
+        GoBack()
+        GetState(): string
+        GetLog(): []string
+
+    machine:
+        $Waiting {
+            $>() {
+                s.__log_msg("In $Waiting")
+            }
+            GotoA() {
+                s.__log_msg("gotoA")
+                -> $A
+            }
+            GotoB() {
+                s.__log_msg("gotoB")
+                -> $B
+            }
+            GetState(): string {
+                return "Waiting"
+            }
+            GetLog(): []string {
+                return s.log
+            }
+        }
+
+        $A => $AB {
+            $>() {
+                s.__log_msg("In $A")
+            }
+            GotoB() {
+                s.__log_msg("gotoB")
+                -> $B
+            }
+            GetState(): string {
+                return "A"
+            }
+            GetLog(): []string {
+                return s.log
+            }
+            => $^
+        }
+
+        $B => $AB {
+            $>() {
+                s.__log_msg("In $B")
+            }
+            GotoA() {
+                s.__log_msg("gotoA")
+                -> $A
+            }
+            GetState(): string {
+                return "B"
+            }
+            GetLog(): []string {
+                return s.log
+            }
+            => $^
+        }
+
+        $AB {
+            GotoC() {
+                s.__log_msg("gotoC in $AB")
+                push$
+                -> $C
+            }
+        }
+
+        $C {
+            $>() {
+                s.__log_msg("In $C")
+            }
+            GoBack() {
+                s.__log_msg("goBack")
+                -> pop$
+            }
+            GetState(): string {
+                return "C"
+            }
+            GetLog(): []string {
+                return s.log
+            }
+        }
+
+    actions:
+        __log_msg(msg: string) {
+            s.log = append(s.log, msg)
+        }
+
+    domain:
+        log []string
+}
+
+func main() {
+	fmt.Println("=== Test 34: Doc History HSM ===")
+	h := @@HistoryHSM()
+
+	// Start in Waiting
+	if h.GetState() != "Waiting" {
+		fmt.Printf("FAIL: Expected 'Waiting', got '%s'\n", h.GetState())
+		os.Exit(1)
+	}
+
+	// Go to A
+	h.GotoA()
+	if h.GetState() != "A" {
+		fmt.Printf("FAIL: Expected 'A', got '%s'\n", h.GetState())
+		os.Exit(1)
+	}
+
+	// Go to C (using inherited GotoC from $AB)
+	h.GotoC()
+	if h.GetState() != "C" {
+		fmt.Printf("FAIL: Expected 'C', got '%s'\n", h.GetState())
+		os.Exit(1)
+	}
+
+	// Go back (should pop to A)
+	h.GoBack()
+	if h.GetState() != "A" {
+		fmt.Printf("FAIL: Expected 'A' after GoBack, got '%s'\n", h.GetState())
+		os.Exit(1)
+	}
+
+	// Go to B
+	h.GotoB()
+	if h.GetState() != "B" {
+		fmt.Printf("FAIL: Expected 'B', got '%s'\n", h.GetState())
+		os.Exit(1)
+	}
+
+	// Go to C (again using inherited GotoC)
+	h.GotoC()
+	if h.GetState() != "C" {
+		fmt.Printf("FAIL: Expected 'C', got '%s'\n", h.GetState())
+		os.Exit(1)
+	}
+
+	// Go back (should pop to B)
+	h.GoBack()
+	if h.GetState() != "B" {
+		fmt.Printf("FAIL: Expected 'B' after GoBack, got '%s'\n", h.GetState())
+		os.Exit(1)
+	}
+
+	fmt.Printf("Log: %v\n", h.GetLog())
+	fmt.Println("PASS: HSM with history works correctly")
+}

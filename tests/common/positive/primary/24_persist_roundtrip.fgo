@@ -1,0 +1,164 @@
+@@target go
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+@@persist
+@@system PersistRoundtrip {
+    interface:
+        GoActive()
+        GoIdle()
+        GetState(): string
+        SetCounter(n: int)
+        GetCounter(): int
+
+    machine:
+        $Idle {
+            GoActive() {
+                -> $Active
+            }
+
+            GoIdle() {
+                // already idle
+            }
+
+            GetState(): string {
+                return "idle"
+            }
+
+            SetCounter(n: int) {
+                s.counter = n
+            }
+
+            GetCounter(): int {
+                return s.counter
+            }
+        }
+
+        $Active {
+            GoActive() {
+                // already active
+            }
+
+            GoIdle() {
+                -> $Idle
+            }
+
+            GetState(): string {
+                return "active"
+            }
+
+            SetCounter(n: int) {
+                s.counter = n * 2
+            }
+
+            GetCounter(): int {
+                return s.counter
+            }
+        }
+    domain:
+        counter int
+        mode string
+}
+
+// --- Persist helpers ---
+
+type persistRoundtripSnapshot struct {
+	State   string `json:"state"`
+	Counter int    `json:"counter"`
+	Mode    string `json:"mode"`
+}
+
+func savePersistRoundtrip(s *PersistRoundtrip) string {
+	snap := persistRoundtripSnapshot{
+		State:   s.__compartment.state,
+		Counter: s.counter,
+		Mode:    s.mode,
+	}
+	b, err := json.Marshal(snap)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+func restorePersistRoundtrip(jsonStr string) *PersistRoundtrip {
+	var snap persistRoundtripSnapshot
+	if err := json.Unmarshal([]byte(jsonStr), &snap); err != nil {
+		panic(err)
+	}
+	s := &PersistRoundtrip{}
+	s._state_stack = make([]*PersistRoundtripCompartment, 0)
+	s._context_stack = make([]PersistRoundtripFrameContext, 0)
+	s.__compartment = newPersistRoundtripCompartment(snap.State)
+	s.__next_compartment = nil
+	s.counter = snap.Counter
+	s.mode = snap.Mode
+	return s
+}
+
+func main() {
+	fmt.Println("=== Test 24: Persist Roundtrip (Go) ===")
+
+	// Test 1: Create system and build up state
+	s1 := NewPersistRoundtrip()
+	s1.SetCounter(5)
+	s1.GoActive()
+	s1.SetCounter(3) // Should be 6 in Active (doubled)
+
+	if s1.GetState() != "active" {
+		fmt.Printf("FAIL: Expected active, got %s\n", s1.GetState())
+		os.Exit(1)
+	}
+	if s1.GetCounter() != 6 {
+		fmt.Printf("FAIL: Expected 6, got %d\n", s1.GetCounter())
+		os.Exit(1)
+	}
+	fmt.Printf("1. State before save: state=%s, counter=%d\n", s1.GetState(), s1.GetCounter())
+
+	// Test 2: Save state
+	data := savePersistRoundtrip(s1)
+	fmt.Printf("2. Saved: %s\n", data)
+
+	// Test 3: Restore to new instance
+	s2 := restorePersistRoundtrip(data)
+
+	// Verify restored state matches
+	if s2.GetState() != "active" {
+		fmt.Printf("FAIL: Expected active, got %s\n", s2.GetState())
+		os.Exit(1)
+	}
+	if s2.GetCounter() != 6 {
+		fmt.Printf("FAIL: Expected 6, got %d\n", s2.GetCounter())
+		os.Exit(1)
+	}
+	fmt.Printf("3. Restored state: state=%s, counter=%d\n", s2.GetState(), s2.GetCounter())
+
+	// Test 4: State machine continues to work after restore
+	s2.SetCounter(2) // Should be 4 in Active (doubled)
+	if s2.GetCounter() != 4 {
+		fmt.Printf("FAIL: Expected 4, got %d\n", s2.GetCounter())
+		os.Exit(1)
+	}
+	fmt.Printf("4. Counter after SetCounter(2): %d\n", s2.GetCounter())
+
+	// Test 5: Transitions work after restore
+	s2.GoIdle()
+	if s2.GetState() != "idle" {
+		fmt.Printf("FAIL: Expected idle after GoIdle\n")
+		os.Exit(1)
+	}
+	s2.SetCounter(10) // Not doubled in Idle
+	if s2.GetCounter() != 10 {
+		fmt.Printf("FAIL: Expected 10, got %d\n", s2.GetCounter())
+		os.Exit(1)
+	}
+	fmt.Printf("5. After GoIdle: state=%s, counter=%d\n", s2.GetState(), s2.GetCounter())
+
+	fmt.Println("PASS: Persist roundtrip works correctly")
+}

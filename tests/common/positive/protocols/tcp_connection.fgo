@@ -1,0 +1,252 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+// TCP Connection State Machine (simplified RFC 793)
+// Two Frame systems -- TcpClient and TcpServer -- communicating through
+// direct method calls simulating packet exchange.
+
+@@system TcpServer {
+    interface:
+        Listen()
+        ReceiveSyn()
+        ReceiveAck()
+        ReceiveFin()
+        ReceiveData(data: string)
+        Close()
+        GetState(): string = "Unknown"
+
+    machine:
+        $Closed {
+            GetState(): string { return "Closed" }
+            Listen() { -> $Listen }
+        }
+
+        $Listen {
+            GetState(): string { return "Listen" }
+            ReceiveSyn() { -> $SynReceived }
+        }
+
+        $SynReceived {
+            GetState(): string { return "SynReceived" }
+            ReceiveAck() { -> $Established }
+        }
+
+        $Established {
+            GetState(): string { return "Established" }
+            ReceiveData(data: string) { s.last_data = data }
+            ReceiveFin() { -> $CloseWait }
+            Close() { -> $FinWait1 }
+        }
+
+        $CloseWait {
+            GetState(): string { return "CloseWait" }
+            Close() { -> $LastAck }
+        }
+
+        $LastAck {
+            GetState(): string { return "LastAck" }
+            ReceiveAck() { -> $Closed }
+        }
+
+        $FinWait1 {
+            GetState(): string { return "FinWait1" }
+            ReceiveAck() { -> $FinWait2 }
+            ReceiveFin() { -> $Closing }
+        }
+
+        $FinWait2 {
+            GetState(): string { return "FinWait2" }
+            ReceiveFin() { -> $TimeWait }
+        }
+
+        $Closing {
+            GetState(): string { return "Closing" }
+            ReceiveAck() { -> $TimeWait }
+        }
+
+        $TimeWait {
+            GetState(): string { return "TimeWait" }
+            ReceiveAck() { -> $Closed }
+        }
+
+    domain:
+        last_data string
+}
+
+
+@@system TcpClient {
+    interface:
+        Connect()
+        ReceiveSynAck()
+        ReceiveAck()
+        ReceiveFin()
+        SendData(data: string)
+        Close()
+        GetState(): string = "Unknown"
+
+    machine:
+        $Closed {
+            GetState(): string { return "Closed" }
+            Connect() { -> $SynSent }
+        }
+
+        $SynSent {
+            GetState(): string { return "SynSent" }
+            ReceiveSynAck() { -> $Established }
+        }
+
+        $Established {
+            GetState(): string { return "Established" }
+            SendData(data: string) { s.sent_count += 1 }
+            Close() { -> $FinWait1 }
+            ReceiveFin() { -> $CloseWait }
+        }
+
+        $FinWait1 {
+            GetState(): string { return "FinWait1" }
+            ReceiveAck() { -> $FinWait2 }
+            ReceiveFin() { -> $Closing }
+        }
+
+        $FinWait2 {
+            GetState(): string { return "FinWait2" }
+            ReceiveFin() { -> $TimeWait }
+        }
+
+        $Closing {
+            GetState(): string { return "Closing" }
+            ReceiveAck() { -> $TimeWait }
+        }
+
+        $TimeWait {
+            GetState(): string { return "TimeWait" }
+            ReceiveAck() { -> $Closed }
+        }
+
+        $CloseWait {
+            GetState(): string { return "CloseWait" }
+            Close() { -> $LastAck }
+        }
+
+        $LastAck {
+            GetState(): string { return "LastAck" }
+            ReceiveAck() { -> $Closed }
+        }
+
+    domain:
+        sent_count int
+}
+
+// ============================================================
+// Test Harness
+// ============================================================
+
+func assertServerState(server *TcpServer, expected string, label string) {
+	actual := server.GetState()
+	if actual != expected {
+		fmt.Printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func assertClientState(client *TcpClient, expected string, label string) {
+	actual := client.GetState()
+	if actual != expected {
+		fmt.Printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func testHappyPath() {
+	server := NewTcpServer()
+	client := NewTcpClient()
+
+	assertServerState(server, "Closed", "server initial")
+	assertClientState(client, "Closed", "client initial")
+
+	server.Listen()
+	assertServerState(server, "Listen", "server listen")
+
+	client.Connect()
+	assertClientState(client, "SynSent", "client syn sent")
+
+	server.ReceiveSyn()
+	assertServerState(server, "SynReceived", "server syn received")
+
+	client.ReceiveSynAck()
+	assertClientState(client, "Established", "client established")
+
+	server.ReceiveAck()
+	assertServerState(server, "Established", "server established")
+
+	client.SendData("hello")
+	server.ReceiveData("hello")
+
+	client.Close()
+	assertClientState(client, "FinWait1", "client fin wait 1")
+
+	server.ReceiveFin()
+	assertServerState(server, "CloseWait", "server close wait")
+
+	client.ReceiveAck()
+	assertClientState(client, "FinWait2", "client fin wait 2")
+
+	server.Close()
+	assertServerState(server, "LastAck", "server last ack")
+
+	client.ReceiveFin()
+	assertClientState(client, "TimeWait", "client time wait")
+
+	server.ReceiveAck()
+	assertServerState(server, "Closed", "server closed")
+
+	client.ReceiveAck()
+	assertClientState(client, "Closed", "client closed")
+
+	fmt.Println("PASS: TCP happy path")
+}
+
+func testSimultaneousClose() {
+	server := NewTcpServer()
+	client := NewTcpClient()
+
+	server.Listen()
+	client.Connect()
+	server.ReceiveSyn()
+	client.ReceiveSynAck()
+	server.ReceiveAck()
+
+	client.Close()
+	server.Close()
+	assertClientState(client, "FinWait1", "client fin wait 1")
+	assertServerState(server, "FinWait1", "server fin wait 1")
+
+	client.ReceiveFin()
+	server.ReceiveFin()
+	assertClientState(client, "Closing", "client closing")
+	assertServerState(server, "Closing", "server closing")
+
+	client.ReceiveAck()
+	server.ReceiveAck()
+	assertClientState(client, "TimeWait", "client time wait")
+	assertServerState(server, "TimeWait", "server time wait")
+
+	client.ReceiveAck()
+	server.ReceiveAck()
+	assertClientState(client, "Closed", "client closed")
+	assertServerState(server, "Closed", "server closed")
+
+	fmt.Println("PASS: TCP simultaneous close")
+}
+
+func main() {
+	testHappyPath()
+	testSimultaneousClose()
+	fmt.Println("PASS: All TCP connection tests passed")
+}

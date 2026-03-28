@@ -1,0 +1,167 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system HSMThreeLevels {
+    interface:
+        HandleAtGrandchild()
+        ForwardToChild()
+        ForwardToParent()
+        ForwardThroughAll()
+        GetLog(): []string
+
+    machine:
+        $Grandchild => $Child {
+            $.grandchild_var: int = 1
+
+            HandleAtGrandchild() {
+                val := $.grandchild_var
+                s.log = append(s.log, fmt.Sprintf("Grandchild:handled(var=%d)", val))
+            }
+
+            ForwardToChild() {
+                s.log = append(s.log, "Grandchild:forward_to_child")
+                => $^
+            }
+
+            ForwardToParent() {
+                s.log = append(s.log, "Grandchild:forward_to_parent")
+                => $^
+            }
+
+            ForwardThroughAll() {
+                s.log = append(s.log, "Grandchild:forward_through_all")
+                => $^
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+
+        $Child => $Parent {
+            $.child_var: int = 10
+
+            ForwardToChild() {
+                val := $.child_var
+                s.log = append(s.log, fmt.Sprintf("Child:handled(var=%d)", val))
+            }
+
+            ForwardToParent() {
+                val := $.child_var
+                s.log = append(s.log, fmt.Sprintf("Child:forward_to_parent(var=%d)", val))
+                => $^
+            }
+
+            ForwardThroughAll() {
+                val := $.child_var
+                s.log = append(s.log, fmt.Sprintf("Child:forward_through_all(var=%d)", val))
+                => $^
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+
+        $Parent {
+            $.parent_var: int = 100
+
+            ForwardToParent() {
+                val := $.parent_var
+                s.log = append(s.log, fmt.Sprintf("Parent:handled(var=%d)", val))
+            }
+
+            ForwardThroughAll() {
+                val := $.parent_var
+                s.log = append(s.log, fmt.Sprintf("Parent:forward_through_all(var=%d)", val))
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func main() {
+	fmt.Println("=== Test 42: HSM Three-Level Hierarchy ===")
+	sm := @@HSMThreeLevels()
+
+	// TC1.2.1: Three-level hierarchy compiles
+	fmt.Println("TC1.2.1: Three-level hierarchy compiles - PASS")
+
+	// TC1.2.2: Handle at grandchild (no forward)
+	sm.HandleAtGrandchild()
+	log := sm.GetLog()
+	if !contains(log, "Grandchild:handled(var=1)") {
+		fmt.Printf("FAIL: Expected Grandchild handler, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC1.2.2: Grandchild handles locally - PASS")
+
+	// TC1.2.3: Forward from grandchild to child
+	sm.ForwardToChild()
+	log = sm.GetLog()
+	if !contains(log, "Grandchild:forward_to_child") {
+		fmt.Printf("FAIL: Expected Grandchild forward, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "Child:handled(var=10)") {
+		fmt.Printf("FAIL: Expected Child handler, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC1.2.3: Forward grandchild->child - PASS")
+
+	// TC1.2.4: Forward from grandchild through child to parent
+	sm.ForwardToParent()
+	log = sm.GetLog()
+	if !contains(log, "Grandchild:forward_to_parent") {
+		fmt.Printf("FAIL: Expected Grandchild forward, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "Child:forward_to_parent(var=10)") {
+		fmt.Printf("FAIL: Expected Child forward, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "Parent:handled(var=100)") {
+		fmt.Printf("FAIL: Expected Parent handler, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC1.2.4: Forward grandchild->child->parent - PASS")
+
+	// TC1.2.5: Forward through entire chain
+	sm.ForwardThroughAll()
+	log = sm.GetLog()
+	if !contains(log, "Grandchild:forward_through_all") {
+		fmt.Printf("FAIL: Expected Grandchild, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "Child:forward_through_all(var=10)") {
+		fmt.Printf("FAIL: Expected Child, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "Parent:forward_through_all(var=100)") {
+		fmt.Printf("FAIL: Expected Parent, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC1.2.5: Full chain forward - PASS")
+
+	// Verify state variable isolation
+	fmt.Println("TC1.2.6: State vars isolated (grandchild=1, child=10, parent=100) - PASS")
+
+	fmt.Println("PASS: HSM three-level hierarchy works correctly")
+}

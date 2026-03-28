@@ -1,0 +1,217 @@
+@@target go
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+@@persist
+@@system PersistStack {
+    interface:
+        PushAndGo()
+        PopBack()
+        GetState(): string
+        GetDepth(): int
+
+    machine:
+        $Start {
+            PushAndGo() {
+                s.depth = s.depth + 1
+                push$
+                -> $Middle
+            }
+
+            PopBack() {
+                // nothing to pop
+            }
+
+            GetState(): string {
+                return "start"
+            }
+
+            GetDepth(): int {
+                return s.depth
+            }
+        }
+
+        $Middle {
+            PushAndGo() {
+                s.depth = s.depth + 1
+                push$
+                -> $End
+            }
+
+            PopBack() {
+                s.depth = s.depth - 1
+                -> pop$
+            }
+
+            GetState(): string {
+                return "middle"
+            }
+
+            GetDepth(): int {
+                return s.depth
+            }
+        }
+
+        $End {
+            PushAndGo() {
+                // cannot go further
+            }
+
+            PopBack() {
+                s.depth = s.depth - 1
+                -> pop$
+            }
+
+            GetState(): string {
+                return "end"
+            }
+
+            GetDepth(): int {
+                return s.depth
+            }
+        }
+    domain:
+        depth int
+}
+
+// --- Persist helpers with stack support ---
+
+type persistStackCompSnap struct {
+	State     string            `json:"state"`
+	StateVars map[string]any    `json:"state_vars,omitempty"`
+}
+
+type persistStackSnapshot struct {
+	Compartment persistStackCompSnap   `json:"compartment"`
+	Stack       []persistStackCompSnap `json:"stack"`
+	Depth       int                    `json:"depth"`
+}
+
+func saveCompSnap(c *PersistStackCompartment) persistStackCompSnap {
+	vars := make(map[string]any)
+	for k, v := range c.stateVars {
+		vars[k] = v
+	}
+	return persistStackCompSnap{State: c.state, StateVars: vars}
+}
+
+func savePersistStack(s *PersistStack) string {
+	snap := persistStackSnapshot{
+		Compartment: saveCompSnap(s.__compartment),
+		Depth:       s.depth,
+	}
+	for _, c := range s._state_stack {
+		snap.Stack = append(snap.Stack, saveCompSnap(c))
+	}
+	b, err := json.Marshal(snap)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+func restoreCompSnap(cs persistStackCompSnap) *PersistStackCompartment {
+	c := newPersistStackCompartment(cs.State)
+	for k, v := range cs.StateVars {
+		c.stateVars[k] = v
+	}
+	return c
+}
+
+func restorePersistStack(jsonStr string) *PersistStack {
+	var snap persistStackSnapshot
+	if err := json.Unmarshal([]byte(jsonStr), &snap); err != nil {
+		panic(err)
+	}
+	s := &PersistStack{}
+	s._state_stack = make([]*PersistStackCompartment, 0)
+	s._context_stack = make([]PersistStackFrameContext, 0)
+	s.__compartment = restoreCompSnap(snap.Compartment)
+	s.__next_compartment = nil
+	s.depth = snap.Depth
+	for _, cs := range snap.Stack {
+		s._state_stack = append(s._state_stack, restoreCompSnap(cs))
+	}
+	return s
+}
+
+func main() {
+	fmt.Println("=== Test 25: Persist Stack (Go) ===")
+
+	// Test 1: Build up a stack
+	s1 := NewPersistStack()
+	if s1.GetState() != "start" {
+		fmt.Printf("FAIL: Expected start, got %s\n", s1.GetState())
+		os.Exit(1)
+	}
+
+	s1.PushAndGo() // Start -> Middle (push Start)
+	if s1.GetState() != "middle" {
+		fmt.Printf("FAIL: Expected middle, got %s\n", s1.GetState())
+		os.Exit(1)
+	}
+	if s1.GetDepth() != 1 {
+		fmt.Printf("FAIL: Expected depth 1, got %d\n", s1.GetDepth())
+		os.Exit(1)
+	}
+
+	s1.PushAndGo() // Middle -> End (push Middle)
+	if s1.GetState() != "end" {
+		fmt.Printf("FAIL: Expected end, got %s\n", s1.GetState())
+		os.Exit(1)
+	}
+	if s1.GetDepth() != 2 {
+		fmt.Printf("FAIL: Expected depth 2, got %d\n", s1.GetDepth())
+		os.Exit(1)
+	}
+
+	fmt.Printf("1. Built stack: state=%s, depth=%d\n", s1.GetState(), s1.GetDepth())
+
+	// Test 2: Save state (should include stack)
+	data := savePersistStack(s1)
+	fmt.Printf("2. Saved: %s\n", data)
+
+	// Test 3: Restore and verify stack works
+	s2 := restorePersistStack(data)
+	if s2.GetState() != "end" {
+		fmt.Printf("FAIL: Restored: expected end, got %s\n", s2.GetState())
+		os.Exit(1)
+	}
+	if s2.GetDepth() != 2 {
+		fmt.Printf("FAIL: Restored: expected depth 2, got %d\n", s2.GetDepth())
+		os.Exit(1)
+	}
+	fmt.Printf("3. Restored: state=%s, depth=%d\n", s2.GetState(), s2.GetDepth())
+
+	// Test 4: Pop should work after restore
+	s2.PopBack() // End -> Middle (pop)
+	if s2.GetState() != "middle" {
+		fmt.Printf("FAIL: After pop: expected middle, got %s\n", s2.GetState())
+		os.Exit(1)
+	}
+	if s2.GetDepth() != 1 {
+		fmt.Printf("FAIL: After pop: expected depth 1, got %d\n", s2.GetDepth())
+		os.Exit(1)
+	}
+	fmt.Printf("4. After pop: state=%s, depth=%d\n", s2.GetState(), s2.GetDepth())
+
+	// Test 5: Pop again
+	s2.PopBack() // Middle -> Start (pop)
+	if s2.GetState() != "start" {
+		fmt.Printf("FAIL: After 2nd pop: expected start, got %s\n", s2.GetState())
+		os.Exit(1)
+	}
+	if s2.GetDepth() != 0 {
+		fmt.Printf("FAIL: After 2nd pop: expected depth 0, got %d\n", s2.GetDepth())
+		os.Exit(1)
+	}
+	fmt.Printf("5. After 2nd pop: state=%s, depth=%d\n", s2.GetState(), s2.GetDepth())
+
+	fmt.Println("PASS: Persist stack works correctly")
+}

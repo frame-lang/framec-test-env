@@ -1,0 +1,116 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system EnterExit {
+    interface:
+        Toggle()
+        GetLog(): []string
+
+    machine:
+        $Off {
+            $>() {
+                s.log = append(s.log, "enter:Off")
+                fmt.Println("Entered Off state")
+            }
+
+            <$() {
+                s.log = append(s.log, "exit:Off")
+                fmt.Println("Exiting Off state")
+            }
+
+            Toggle() {
+                -> $On
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+
+        $On {
+            $>() {
+                s.log = append(s.log, "enter:On")
+                fmt.Println("Entered On state")
+            }
+
+            <$() {
+                s.log = append(s.log, "exit:On")
+                fmt.Println("Exiting On state")
+            }
+
+            Toggle() {
+                -> $Off
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func countOccurrences(slice []string, item string) int {
+	count := 0
+	for _, v := range slice {
+		if v == item {
+			count++
+		}
+	}
+	return count
+}
+
+func main() {
+	fmt.Println("=== Test 05: Enter/Exit Handlers ===")
+	sm := NewEnterExit()
+
+	// Initial enter should have been called
+	log := sm.GetLog()
+	if !contains(log, "enter:Off") {
+		fmt.Printf("FAIL: Expected 'enter:Off' in log, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Printf("After construction: %v\n", log)
+
+	// Toggle to On - should exit Off, enter On
+	sm.Toggle()
+	log = sm.GetLog()
+	if !contains(log, "exit:Off") {
+		fmt.Printf("FAIL: Expected 'exit:Off' in log, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "enter:On") {
+		fmt.Printf("FAIL: Expected 'enter:On' in log, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Printf("After toggle to On: %v\n", log)
+
+	// Toggle back to Off - should exit On, enter Off
+	sm.Toggle()
+	log = sm.GetLog()
+	enterOffCount := countOccurrences(log, "enter:Off")
+	if enterOffCount != 2 {
+		fmt.Printf("FAIL: Expected 2 'enter:Off' entries, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "exit:On") {
+		fmt.Printf("FAIL: Expected 'exit:On' in log, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Printf("After toggle to Off: %v\n", log)
+
+	fmt.Println("PASS: Enter/Exit handlers work correctly")
+}

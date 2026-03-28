@@ -1,0 +1,111 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system LampHSM {
+    interface:
+        TurnOn()
+        TurnOff()
+        GetColor(): string
+        SetColor(color: string)
+        IsLampOn(): bool
+
+    machine:
+        $Off => $ColorBehavior {
+            TurnOn() {
+                -> $On
+            }
+            IsLampOn(): bool {
+                return s.lamp_on
+            }
+            => $^
+        }
+
+        $On => $ColorBehavior {
+            $>() {
+                s.__turnOnLamp()
+            }
+            <$() {
+                s.__turnOffLamp()
+            }
+            TurnOff() {
+                -> $Off
+            }
+            IsLampOn(): bool {
+                return s.lamp_on
+            }
+            => $^
+        }
+
+        $ColorBehavior {
+            GetColor(): string {
+                return s.color
+            }
+            SetColor(color: string) {
+                s.color = color
+            }
+        }
+
+    actions:
+        __turnOnLamp() {
+            s.lamp_on = true
+        }
+        __turnOffLamp() {
+            s.lamp_on = false
+        }
+
+    domain:
+        color string
+        lamp_on bool
+}
+
+func main() {
+	fmt.Println("=== Test 32: Doc Lamp HSM ===")
+	lamp := @@LampHSM()
+
+	// Set initial color since Go zero-inits to ""
+	lamp.SetColor("white")
+
+	// Color behavior available in both states
+	if lamp.GetColor() != "white" {
+		fmt.Printf("FAIL: Expected 'white', got '%s'\n", lamp.GetColor())
+		os.Exit(1)
+	}
+	lamp.SetColor("red")
+	if lamp.GetColor() != "red" {
+		fmt.Printf("FAIL: Expected 'red', got '%s'\n", lamp.GetColor())
+		os.Exit(1)
+	}
+
+	// Turn on
+	lamp.TurnOn()
+	if lamp.IsLampOn() != true {
+		fmt.Println("FAIL: Lamp should be on")
+		os.Exit(1)
+	}
+
+	// Color still works when on
+	lamp.SetColor("green")
+	if lamp.GetColor() != "green" {
+		fmt.Printf("FAIL: Expected 'green', got '%s'\n", lamp.GetColor())
+		os.Exit(1)
+	}
+
+	// Turn off
+	lamp.TurnOff()
+	if lamp.IsLampOn() != false {
+		fmt.Println("FAIL: Lamp should be off")
+		os.Exit(1)
+	}
+
+	// Color still works when off
+	if lamp.GetColor() != "green" {
+		fmt.Printf("FAIL: Expected 'green', got '%s'\n", lamp.GetColor())
+		os.Exit(1)
+	}
+
+	fmt.Println("PASS: HSM lamp works correctly")
+}

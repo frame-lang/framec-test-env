@@ -1,0 +1,155 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system HSMEnterBoth {
+    interface:
+        GoToChild()
+        GoToParent()
+        GetLog(): []string
+        GetState(): string
+
+    machine:
+        $Start {
+            GoToChild() {
+                -> $Child
+            }
+
+            GoToParent() {
+                -> $Parent
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Start"
+            }
+        }
+
+        $Child => $Parent {
+            $>() {
+                s.log = append(s.log, "Child:enter")
+            }
+
+            GoToParent() {
+                -> $Parent
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Child"
+            }
+        }
+
+        $Parent {
+            $>() {
+                s.log = append(s.log, "Parent:enter")
+            }
+
+            GoToChild() {
+                -> $Child
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Parent"
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func countOccurrences(slice []string, item string) int {
+	count := 0
+	for _, v := range slice {
+		if v == item {
+			count++
+		}
+	}
+	return count
+}
+
+func main() {
+	fmt.Println("=== Test 47: HSM Enter in Both ===")
+	sm := @@HSMEnterBoth()
+
+	// TC2.3.1: Only child's enter fires when entering child
+	sm.GoToChild()
+	log := sm.GetLog()
+	if !contains(log, "Child:enter") {
+		fmt.Printf("FAIL: Expected Child:enter, got %v\n", log)
+		os.Exit(1)
+	}
+	if contains(log, "Parent:enter") {
+		fmt.Printf("FAIL: Parent:enter should NOT fire when entering child, got %v\n", log)
+		os.Exit(1)
+	}
+	if sm.GetState() != "Child" {
+		fmt.Printf("FAIL: Expected Child, got %s\n", sm.GetState())
+		os.Exit(1)
+	}
+	fmt.Println("TC2.3.1: Only child's enter fires when entering child - PASS")
+
+	// TC2.3.2: Parent's enter fires only when transitioning to parent
+	sm.GoToParent()
+	log = sm.GetLog()
+	if !contains(log, "Parent:enter") {
+		fmt.Printf("FAIL: Expected Parent:enter, got %v\n", log)
+		os.Exit(1)
+	}
+	if sm.GetState() != "Parent" {
+		fmt.Printf("FAIL: Expected Parent, got %s\n", sm.GetState())
+		os.Exit(1)
+	}
+	fmt.Println("TC2.3.2: Parent's enter fires when transitioning to parent - PASS")
+
+	// TC2.3.3: No implicit cascading - counts should be exactly 1 each
+	childCount := countOccurrences(log, "Child:enter")
+	parentCount := countOccurrences(log, "Parent:enter")
+	if childCount != 1 {
+		fmt.Printf("FAIL: Expected exactly 1 Child:enter, got %v\n", log)
+		os.Exit(1)
+	}
+	if parentCount != 1 {
+		fmt.Printf("FAIL: Expected exactly 1 Parent:enter, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.3.3: No implicit cascading of enter handlers - PASS")
+
+	// TC2.3.4: Going back to child fires child enter again
+	sm.GoToChild()
+	log = sm.GetLog()
+	childCount2 := countOccurrences(log, "Child:enter")
+	parentCount2 := countOccurrences(log, "Parent:enter")
+	if childCount2 != 2 {
+		fmt.Printf("FAIL: Expected 2 Child:enter, got %v\n", log)
+		os.Exit(1)
+	}
+	if parentCount2 != 1 {
+		fmt.Printf("FAIL: Expected still 1 Parent:enter, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.3.4: Re-entering child fires child enter again - PASS")
+
+	fmt.Println("PASS: HSM enter in both works correctly")
+}

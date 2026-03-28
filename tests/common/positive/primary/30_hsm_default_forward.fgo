@@ -1,0 +1,74 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system HSMDefaultForward {
+    interface:
+        HandledEvent()
+        UnhandledEvent()
+        GetLog(): []string
+
+    machine:
+        $Child => $Parent {
+            HandledEvent() {
+                s.log = append(s.log, "Child:handled_event")
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            => $^
+        }
+
+        $Parent {
+            HandledEvent() {
+                s.log = append(s.log, "Parent:handled_event")
+            }
+
+            UnhandledEvent() {
+                s.log = append(s.log, "Parent:unhandled_event")
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func main() {
+	fmt.Println("=== Test 30: HSM State-Level Default Forward ===")
+	sm := @@HSMDefaultForward()
+
+	sm.HandledEvent()
+	log := sm.GetLog()
+	if !contains(log, "Child:handled_event") {
+		fmt.Printf("FAIL: Expected 'Child:handled_event' in log, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Printf("After HandledEvent: %v\n", log)
+
+	sm.UnhandledEvent()
+	log = sm.GetLog()
+	if !contains(log, "Parent:unhandled_event") {
+		fmt.Printf("FAIL: Expected 'Parent:unhandled_event' in log (forwarded), got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Printf("After UnhandledEvent (forwarded): %v\n", log)
+
+	fmt.Println("PASS: HSM state-level default forward works correctly")
+}

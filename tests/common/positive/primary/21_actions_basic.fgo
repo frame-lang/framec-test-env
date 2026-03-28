@@ -1,0 +1,92 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+@@system ActionsTest {
+    interface:
+        Process(value: int): int
+        GetLog(): string
+
+    machine:
+        $Ready {
+            Process(value: int): int {
+                s.__log_event("start")
+                s.__validate_positive(value)
+                s.__log_event("valid")
+                result := value * 2
+                s.__log_event("done")
+                return result
+            }
+
+            GetLog(): string {
+                return s.log
+            }
+        }
+    actions:
+        __log_event(msg: string) {
+            s.log = s.log + msg + ";"
+        }
+
+        __validate_positive(n: int) {
+            if n < 0 {
+                panic(fmt.Sprintf("Value must be positive: %d", n))
+            }
+        }
+    domain:
+        log string
+}
+
+func main() {
+	fmt.Println("=== Test 21: Actions Basic (Go) ===")
+	sm := @@ActionsTest()
+
+	// Test 1: Actions are called correctly
+	result := sm.Process(5)
+	if result != 10 {
+		fmt.Printf("FAIL: Expected 10, got %d\n", result)
+		os.Exit(1)
+	}
+	fmt.Printf("1. Process(5) = %d\n", result)
+
+	// Test 2: Log shows action calls
+	log := sm.GetLog()
+	if !strings.Contains(log, "start") {
+		fmt.Printf("FAIL: Missing 'start' in log: %s\n", log)
+		os.Exit(1)
+	}
+	if !strings.Contains(log, "valid") {
+		fmt.Printf("FAIL: Missing 'valid' in log: %s\n", log)
+		os.Exit(1)
+	}
+	if !strings.Contains(log, "done") {
+		fmt.Printf("FAIL: Missing 'done' in log: %s\n", log)
+		os.Exit(1)
+	}
+	fmt.Printf("2. Log: %s\n", log)
+
+	// Test 3: Action with validation
+	func() {
+		defer func() {
+			r := recover()
+			if r == nil {
+				fmt.Println("FAIL: Should have panicked")
+				os.Exit(1)
+			}
+			msg := fmt.Sprintf("%v", r)
+			if strings.Contains(msg, "positive") {
+				fmt.Printf("3. Validation caught: %s\n", msg)
+			} else {
+				panic(r)
+			}
+		}()
+		sm.Process(-1)
+	}()
+
+	fmt.Println("PASS: Actions basic works correctly")
+}

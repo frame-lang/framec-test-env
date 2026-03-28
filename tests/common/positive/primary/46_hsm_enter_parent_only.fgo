@@ -1,0 +1,136 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system HSMEnterParentOnly {
+    interface:
+        GoToChild()
+        GoToParent()
+        GetLog(): []string
+        GetState(): string
+
+    machine:
+        $Start {
+            GoToChild() {
+                -> $Child
+            }
+
+            GoToParent() {
+                -> $Parent
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Start"
+            }
+        }
+
+        $Child => $Parent {
+            GoToParent() {
+                -> $Parent
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Child"
+            }
+        }
+
+        $Parent {
+            $>() {
+                s.log = append(s.log, "Parent:enter")
+            }
+
+            GoToChild() {
+                -> $Child
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Parent"
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func countOccurrences(slice []string, item string) int {
+	count := 0
+	for _, v := range slice {
+		if v == item {
+			count++
+		}
+	}
+	return count
+}
+
+func main() {
+	fmt.Println("=== Test 46: HSM Enter in Parent Only ===")
+	sm := @@HSMEnterParentOnly()
+
+	// TC2.2.1: Child enters without error (no enter handler)
+	sm.GoToChild()
+	if sm.GetState() != "Child" {
+		fmt.Printf("FAIL: Expected Child, got %s\n", sm.GetState())
+		os.Exit(1)
+	}
+	log := sm.GetLog()
+	fmt.Printf("TC2.2.1: Child enters without error (log: %v) - PASS\n", log)
+
+	// TC2.2.2: Parent's enter does NOT auto-fire when child is entered
+	if contains(log, "Parent:enter") {
+		fmt.Printf("FAIL: Parent:enter should NOT fire for child entry, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.2.2: Parent enter NOT auto-fired for child - PASS")
+
+	// TC2.2.3: Parent enter only fires when transitioning directly TO parent
+	sm.GoToParent()
+	if sm.GetState() != "Parent" {
+		fmt.Printf("FAIL: Expected Parent, got %s\n", sm.GetState())
+		os.Exit(1)
+	}
+	log = sm.GetLog()
+	if !contains(log, "Parent:enter") {
+		fmt.Printf("FAIL: Expected Parent:enter when transitioning to Parent, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.2.3: Parent enter fires when transitioning to Parent - PASS")
+
+	// TC2.2.4: Going back to child from parent
+	sm.GoToChild()
+	if sm.GetState() != "Child" {
+		fmt.Printf("FAIL: Expected Child, got %s\n", sm.GetState())
+		os.Exit(1)
+	}
+	log = sm.GetLog()
+	count := countOccurrences(log, "Parent:enter")
+	if count != 1 {
+		fmt.Printf("FAIL: Expected exactly 1 Parent:enter, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.2.4: Return to child, parent enter count unchanged - PASS")
+
+	fmt.Println("PASS: HSM enter in parent only works correctly")
+}

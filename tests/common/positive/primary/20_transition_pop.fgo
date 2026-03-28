@@ -1,0 +1,110 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system TransitionPopTest {
+    interface:
+        Start()
+        Process()
+        GetState(): string
+        GetLog(): []string
+
+    machine:
+        $Idle {
+            Start() {
+                s.log = append(s.log, "idle:start:push")
+                push$
+                -> $Working
+            }
+
+            Process() {
+                s.log = append(s.log, "idle:process")
+            }
+
+            GetState(): string {
+                return "Idle"
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+
+        $Working {
+            Process() {
+                s.log = append(s.log, "working:process:before_pop")
+                -> pop$
+                // This should NOT execute because pop transitions away
+                s.log = append(s.log, "working:process:after_pop")
+            }
+
+            GetState(): string {
+                return "Working"
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func main() {
+	fmt.Println("=== Test 20: Transition Pop (Go) ===")
+	sm := @@TransitionPopTest()
+
+	// Initial state should be Idle
+	if sm.GetState() != "Idle" {
+		fmt.Printf("FAIL: Expected 'Idle', got '%s'\n", sm.GetState())
+		os.Exit(1)
+	}
+	fmt.Printf("Initial state: %s\n", sm.GetState())
+
+	// start() pushes Idle, transitions to Working
+	sm.Start()
+	if sm.GetState() != "Working" {
+		fmt.Printf("FAIL: Expected 'Working', got '%s'\n", sm.GetState())
+		os.Exit(1)
+	}
+	fmt.Printf("After Start(): %s\n", sm.GetState())
+
+	// process() in Working does pop transition back to Idle
+	sm.Process()
+	if sm.GetState() != "Idle" {
+		fmt.Printf("FAIL: Expected 'Idle' after pop, got '%s'\n", sm.GetState())
+		os.Exit(1)
+	}
+	fmt.Printf("After Process() with pop: %s\n", sm.GetState())
+
+	log := sm.GetLog()
+	fmt.Printf("Log: %v\n", log)
+
+	// Verify log contents
+	if !contains(log, "idle:start:push") {
+		fmt.Println("FAIL: Expected 'idle:start:push' in log")
+		os.Exit(1)
+	}
+	if !contains(log, "working:process:before_pop") {
+		fmt.Println("FAIL: Expected 'working:process:before_pop' in log")
+		os.Exit(1)
+	}
+	if contains(log, "working:process:after_pop") {
+		fmt.Println("FAIL: Should NOT have 'working:process:after_pop' in log")
+		os.Exit(1)
+	}
+
+	fmt.Println("PASS: Transition pop works correctly")
+}

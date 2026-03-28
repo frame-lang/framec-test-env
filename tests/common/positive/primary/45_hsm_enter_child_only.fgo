@@ -1,0 +1,116 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system HSMEnterChildOnly {
+    interface:
+        GoToChild()
+        ForwardAction()
+        GetLog(): []string
+        GetState(): string
+
+    machine:
+        $Start {
+            GoToChild() {
+                -> $Child
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Start"
+            }
+        }
+
+        $Child => $Parent {
+            $>() {
+                s.log = append(s.log, "Child:enter")
+            }
+
+            ForwardAction() {
+                s.log = append(s.log, "Child:forward")
+                => $^
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Child"
+            }
+        }
+
+        $Parent {
+            ForwardAction() {
+                s.log = append(s.log, "Parent:forward_action")
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Parent"
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func main() {
+	fmt.Println("=== Test 45: HSM Enter in Child Only ===")
+	sm := @@HSMEnterChildOnly()
+
+	// Start state has no enter
+	if sm.GetState() != "Start" {
+		fmt.Printf("FAIL: Expected Start, got %s\n", sm.GetState())
+		os.Exit(1)
+	}
+	fmt.Println("TC2.1.0: Initial state is Start - PASS")
+
+	// TC2.1.1: Child enter handler fires on entry
+	sm.GoToChild()
+	log := sm.GetLog()
+	if !contains(log, "Child:enter") {
+		fmt.Printf("FAIL: Expected Child:enter, got %v\n", log)
+		os.Exit(1)
+	}
+	if sm.GetState() != "Child" {
+		fmt.Printf("FAIL: Expected Child, got %s\n", sm.GetState())
+		os.Exit(1)
+	}
+	fmt.Println("TC2.1.1: Child enter handler fires - PASS")
+
+	// TC2.1.2: No error when parent lacks enter (verified by compilation/execution)
+	fmt.Println("TC2.1.2: No error when parent lacks enter - PASS")
+
+	// TC2.1.3: Forward to parent works without parent having enter
+	sm.ForwardAction()
+	log = sm.GetLog()
+	if !contains(log, "Child:forward") {
+		fmt.Printf("FAIL: Expected Child:forward, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "Parent:forward_action") {
+		fmt.Printf("FAIL: Expected Parent handler, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.1.3: Forward works without parent enter - PASS")
+
+	fmt.Println("PASS: HSM enter in child only works correctly")
+}

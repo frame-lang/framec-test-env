@@ -1,0 +1,187 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system HSMOmittedHandlers {
+    interface:
+        HandledByChild()
+        ForwardedExplicitly()
+        UnhandledNoForward()
+        GetLog(): []string
+        GetState(): string
+
+    machine:
+        $Child => $Parent {
+            HandledByChild() {
+                s.log = append(s.log, "Child:handled_by_child")
+            }
+
+            ForwardedExplicitly() {
+                s.log = append(s.log, "Child:before_forward")
+                => $^
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Child"
+            }
+        }
+
+        $Parent {
+            HandledByChild() {
+                s.log = append(s.log, "Parent:handled_by_child")
+            }
+
+            ForwardedExplicitly() {
+                s.log = append(s.log, "Parent:forwarded_explicitly")
+            }
+
+            UnhandledNoForward() {
+                s.log = append(s.log, "Parent:unhandled_no_forward")
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Parent"
+            }
+        }
+    domain:
+        log []string
+}
+
+@@system HSMDefaultForward2 {
+    interface:
+        ChildHandled()
+        ParentHandled()
+        BothRespond()
+        GetLog(): []string
+
+    machine:
+        $Child => $Parent {
+            ChildHandled() {
+                s.log = append(s.log, "Child:child_handled")
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            => $^
+        }
+
+        $Parent {
+            ChildHandled() {
+                s.log = append(s.log, "Parent:child_handled")
+            }
+
+            ParentHandled() {
+                s.log = append(s.log, "Parent:parent_handled")
+            }
+
+            BothRespond() {
+                s.log = append(s.log, "Parent:both_respond")
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func main() {
+	fmt.Println("=== Test 50: HSM Omitted Handlers ===")
+
+	// Part 1: Explicit forwarding vs no forwarding
+	s1 := @@HSMOmittedHandlers()
+
+	// TC2.6.1: Event handled by child only
+	s1.HandledByChild()
+	log := s1.GetLog()
+	if !contains(log, "Child:handled_by_child") {
+		fmt.Printf("FAIL: Expected Child handler, got %v\n", log)
+		os.Exit(1)
+	}
+	if contains(log, "Parent:handled_by_child") {
+		fmt.Printf("FAIL: Parent should NOT be called, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.6.1: Handled by child, not forwarded - PASS")
+
+	// TC2.6.2: Event explicitly forwarded to parent
+	s1.ForwardedExplicitly()
+	log = s1.GetLog()
+	if !contains(log, "Child:before_forward") {
+		fmt.Printf("FAIL: Expected Child forward, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "Parent:forwarded_explicitly") {
+		fmt.Printf("FAIL: Expected Parent handler, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.6.2: Explicitly forwarded to parent - PASS")
+
+	// TC2.6.3: Unhandled event with no forward - silently ignored
+	s1.UnhandledNoForward()
+	log = s1.GetLog()
+	if contains(log, "Parent:unhandled_no_forward") {
+		fmt.Printf("FAIL: Unhandled should be ignored, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.6.3: Unhandled (no forward) is silently ignored - PASS")
+
+	// Part 2: State-level default forward
+	s2 := @@HSMDefaultForward2()
+
+	// TC2.6.4: Event handled by child (no forward despite => $^)
+	s2.ChildHandled()
+	log = s2.GetLog()
+	if !contains(log, "Child:child_handled") {
+		fmt.Printf("FAIL: Expected Child handler, got %v\n", log)
+		os.Exit(1)
+	}
+	if contains(log, "Parent:child_handled") {
+		fmt.Printf("FAIL: Handled by child, not forwarded, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.6.4: Child handles, not forwarded - PASS")
+
+	// TC2.6.5: Unhandled event forwarded via => $^
+	s2.ParentHandled()
+	log = s2.GetLog()
+	if !contains(log, "Parent:parent_handled") {
+		fmt.Printf("FAIL: Expected Parent handler, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.6.5: Unhandled forwarded via state-level => $^ - PASS")
+
+	// TC2.6.6: Another unhandled event forwarded
+	s2.BothRespond()
+	log = s2.GetLog()
+	if !contains(log, "Parent:both_respond") {
+		fmt.Printf("FAIL: Expected Parent handler, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC2.6.6: Default forward works for multiple events - PASS")
+
+	fmt.Println("PASS: HSM omitted handlers work correctly")
+}

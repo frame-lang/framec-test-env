@@ -1,0 +1,108 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system Lamp {
+    interface:
+        TurnOn()
+        TurnOff()
+        GetColor(): string
+        SetColor(color: string)
+        IsSwitchClosed(): bool
+
+    machine:
+        $Off {
+            TurnOn() {
+                -> $On
+            }
+            GetColor(): string {
+                return s.color
+            }
+            SetColor(color: string) {
+                s.color = color
+            }
+            IsSwitchClosed(): bool {
+                return s.switch_closed
+            }
+        }
+
+        $On {
+            $>() {
+                s.__closeSwitch()
+            }
+            <$() {
+                s.__openSwitch()
+            }
+            TurnOff() {
+                -> $Off
+            }
+            GetColor(): string {
+                return s.color
+            }
+            SetColor(color: string) {
+                s.color = color
+            }
+            IsSwitchClosed(): bool {
+                return s.switch_closed
+            }
+        }
+
+    actions:
+        __closeSwitch() {
+            s.switch_closed = true
+        }
+        __openSwitch() {
+            s.switch_closed = false
+        }
+
+    domain:
+        color string
+        switch_closed bool
+}
+
+func main() {
+	fmt.Println("=== Test 31: Doc Lamp Basic ===")
+	lamp := @@Lamp()
+
+	// Initially off - need to set color since Go zero-inits to ""
+	// The Java version inits color to "white" via domain, but Go cannot do that
+	// So we set it manually
+	lamp.SetColor("white")
+
+	if lamp.IsSwitchClosed() != false {
+		fmt.Println("FAIL: Switch should be open initially")
+		os.Exit(1)
+	}
+
+	// Turn on - should close switch
+	lamp.TurnOn()
+	if lamp.IsSwitchClosed() != true {
+		fmt.Println("FAIL: Switch should be closed after TurnOn")
+		os.Exit(1)
+	}
+
+	// Check color
+	if lamp.GetColor() != "white" {
+		fmt.Printf("FAIL: Expected 'white', got '%s'\n", lamp.GetColor())
+		os.Exit(1)
+	}
+
+	// Set color
+	lamp.SetColor("blue")
+	if lamp.GetColor() != "blue" {
+		fmt.Printf("FAIL: Expected 'blue', got '%s'\n", lamp.GetColor())
+		os.Exit(1)
+	}
+
+	// Turn off - should open switch
+	lamp.TurnOff()
+	if lamp.IsSwitchClosed() != false {
+		fmt.Println("FAIL: Switch should be open after TurnOff")
+		os.Exit(1)
+	}
+
+	fmt.Println("PASS: Basic lamp works correctly")
+}

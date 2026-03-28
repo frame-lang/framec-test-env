@@ -1,0 +1,84 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"strconv"
+)
+
+@@system SystemReturnReentrantTest {
+    interface:
+        OuterCall(): string
+        InnerCall(): string
+        NestedCall(): string
+        GetLog(): string
+
+    machine:
+        $Start {
+            $.log: string = ""
+
+            OuterCall(): string {
+                $.log = $.log + "outer_start,"
+                // Call inner method - this creates nested return context
+                inner_result := s.InnerCall()
+                $.log = $.log + "outer_after_inner,"
+                // Our return should be independent of inner return
+                return "outer_result:" + inner_result
+            }
+
+            InnerCall(): string {
+                $.log = $.log + "inner,"
+                return "inner_result"
+            }
+
+            NestedCall(): string {
+                $.log = $.log + "nested_start,"
+                // Two levels of nesting
+                result1 := s.InnerCall()
+                result2 := s.OuterCall()
+                $.log = $.log + "nested_end,"
+                return "nested:" + result1 + "+" + result2
+            }
+
+            GetLog(): string {
+                return $.log
+            }
+        }
+}
+
+func main() {
+	_ = strconv.Itoa // ensure import used
+	fmt.Println("=== Test 16: System Return Reentrant (Nested Calls) ===")
+
+	// Test 1: Simple inner call
+	s1 := @@SystemReturnReentrantTest()
+	result1 := s1.InnerCall()
+	if result1 != "inner_result" {
+		fmt.Printf("FAIL: Expected 'inner_result', got '%s'\n", result1)
+		os.Exit(1)
+	}
+	fmt.Printf("1. InnerCall() = '%s'\n", result1)
+
+	// Test 2: Outer calls inner - return contexts should be separate
+	s2 := @@SystemReturnReentrantTest()
+	result2 := s2.OuterCall()
+	if result2 != "outer_result:inner_result" {
+		fmt.Printf("FAIL: Expected 'outer_result:inner_result', got '%s'\n", result2)
+		os.Exit(1)
+	}
+	fmt.Printf("2. OuterCall() = '%s'\n", result2)
+
+	// Test 3: Deeply nested calls
+	s3 := @@SystemReturnReentrantTest()
+	result3 := s3.NestedCall()
+	expected := "nested:inner_result+outer_result:inner_result"
+	if result3 != expected {
+		fmt.Printf("FAIL: Expected '%s', got '%s'\n", expected, result3)
+		os.Exit(1)
+	}
+	fmt.Printf("3. NestedCall() = '%s'\n", result3)
+
+	fmt.Println("PASS: System return reentrant (nested calls) works correctly")
+}

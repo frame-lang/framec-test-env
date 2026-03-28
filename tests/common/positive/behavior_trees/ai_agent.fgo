@@ -1,0 +1,274 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+// Behavior Tree implemented as HSM with tick-driven re-evaluation.
+//
+// Tree structure (Selector = priority-ordered, Sequence = ordered steps):
+//
+//   $Root (Selector)
+//   +-- $Survival (Selector -- highest priority)
+//   |   +-- $Flee (Action -- flee when health < 20)
+//   +-- $Combat (Sequence)
+//   |   +-- $Approach (Action -- move toward enemy)
+//   |   +-- $Attack (Action -- attack when in range)
+//   +-- $Idle (Selector -- lowest priority)
+//       +-- $Patrol (Action -- walk patrol route)
+
+@@system AiAgent {
+    operations:
+        SetHealth(v: int) { s.health = v }
+        SetEnemyDistance(v: int) { s.enemy_distance = v }
+        SetEnemyHealth(v: int) { s.enemy_health = v }
+
+    interface:
+        Tick()
+        GetState(): string = "Unknown"
+        GetActionLog(): string = ""
+
+    machine:
+        $Root {
+            $>() {
+                s.action_log = ""
+            }
+
+            Tick() {
+                // Selector: check conditions in priority order
+                if s.health < 20 {
+                    -> $Flee
+                }
+                if s.enemy_distance < 50 {
+                    -> $Approach
+                }
+                -> $Patrol
+            }
+
+            GetState(): string { return "Root" }
+        }
+
+        $Flee {
+            $>() {
+                s.action_log = s.action_log + "flee,"
+            }
+
+            Tick() {
+                // Precondition: still low health?
+                if s.health >= 20 {
+                    -> $Root
+                }
+
+                // Action: flee (increase distance, recover health)
+                s.enemy_distance = s.enemy_distance + 10
+                s.health = s.health + 5
+                s.action_log = s.action_log + "flee,"
+            }
+
+            GetState(): string { return "Flee" }
+        }
+
+        $Approach {
+            $>() {
+                s.action_log = s.action_log + "approach,"
+            }
+
+            Tick() {
+                // Survival interrupt: flee takes priority
+                if s.health < 20 {
+                    -> $Flee
+                }
+
+                // Precondition: enemy still visible?
+                if s.enemy_distance >= 50 {
+                    -> $Root
+                }
+
+                // Action: move closer
+                if s.enemy_distance > 5 {
+                    s.enemy_distance = s.enemy_distance - 10
+                    s.action_log = s.action_log + "approach,"
+                } else {
+                    // In range -- sequence continues to Attack
+                    -> $Attack
+                }
+            }
+
+            GetState(): string { return "Approach" }
+        }
+
+        $Attack {
+            $>() {
+                s.action_log = s.action_log + "attack,"
+            }
+
+            Tick() {
+                // Survival interrupt
+                if s.health < 20 {
+                    -> $Flee
+                }
+
+                // Precondition: still in range?
+                if s.enemy_distance > 5 {
+                    -> $Approach
+                }
+
+                // Precondition: enemy still alive?
+                if s.enemy_health <= 0 {
+                    s.enemy_distance = 100
+                    -> $Root
+                }
+
+                // Action: attack
+                s.enemy_health = s.enemy_health - 25
+                s.action_log = s.action_log + "attack,"
+            }
+
+            GetState(): string { return "Attack" }
+        }
+
+        $Patrol {
+            $>() {
+                s.action_log = s.action_log + "patrol,"
+            }
+
+            Tick() {
+                // Higher-priority interrupt: combat
+                if s.enemy_distance < 50 {
+                    -> $Approach
+                }
+
+                // Higher-priority interrupt: survival
+                if s.health < 20 {
+                    -> $Flee
+                }
+
+                // Action: patrol
+                s.patrol_step = s.patrol_step + 1
+                s.action_log = s.action_log + "patrol,"
+            }
+
+            GetState(): string { return "Patrol" }
+        }
+
+    domain:
+        health int
+        enemy_distance int
+        enemy_health int
+        patrol_step int
+        action_log string
+}
+
+
+// ============================================================
+// Test Harness
+// ============================================================
+
+func assertState(agent *AiAgent, expected string, label string) {
+	actual := agent.GetState()
+	if actual != expected {
+		fmt.Printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func testPriorityInterrupt() {
+	agent := NewAiAgent()
+	agent.SetHealth(100)
+	agent.SetEnemyDistance(100)
+	agent.SetEnemyHealth(100)
+
+	// No enemy, full health -> should patrol
+	agent.Tick()
+	assertState(agent, "Patrol", "initial patrol")
+
+	// Enemy appears at distance 30 -> should approach
+	agent.SetEnemyDistance(30)
+	agent.Tick()
+	assertState(agent, "Approach", "enemy triggers approach")
+
+	// Health drops critically -> should flee (interrupts combat)
+	agent.SetHealth(10)
+	agent.Tick()
+	assertState(agent, "Flee", "low health interrupts combat")
+
+	// Health recovers -> flee transitions to root, then next tick re-evaluates
+	agent.SetHealth(50)
+	agent.SetEnemyDistance(20)
+	agent.Tick() // Flee sees health OK -> transitions to Root
+	assertState(agent, "Root", "flee exits to root")
+	agent.Tick() // Root re-evaluates -> enemy near -> approach
+	assertState(agent, "Approach", "health recovered, back to combat")
+
+	fmt.Println("PASS: BT priority interrupt")
+}
+
+func testSequenceCompletion() {
+	agent := NewAiAgent()
+	agent.SetHealth(100)
+	agent.SetEnemyDistance(100)
+	agent.SetEnemyHealth(100)
+
+	// Enemy at distance 30
+	agent.SetEnemyDistance(30)
+	agent.Tick()
+	assertState(agent, "Approach", "start approach")
+
+	// Tick: approach reduces distance
+	agent.Tick()
+	assertState(agent, "Approach", "still approaching")
+
+	// Tick: now close enough (distance <= 5) -> transitions to Attack
+	agent.SetEnemyDistance(5)
+	agent.Tick()
+	assertState(agent, "Attack", "in range, attacking")
+
+	// Tick: attack deals damage
+	agent.Tick()
+	assertState(agent, "Attack", "still attacking")
+
+	// Enemy dies -> Attack transitions to Root
+	agent.SetEnemyHealth(0)
+	agent.Tick()
+	assertState(agent, "Root", "enemy dead, back to root")
+	agent.Tick() // Root re-evaluates -> no enemy -> patrol
+	assertState(agent, "Patrol", "enemy dead, patrol")
+
+	fmt.Println("PASS: BT sequence completion")
+}
+
+func testReEvaluation() {
+	agent := NewAiAgent()
+	agent.SetHealth(100)
+	agent.SetEnemyDistance(100)
+	agent.SetEnemyHealth(100)
+
+	// Enemy at distance 30 -> approach
+	agent.SetEnemyDistance(30)
+	agent.Tick()
+	assertState(agent, "Approach", "approaching")
+
+	// Enemy runs away (distance > 50) -> back to root, then patrol
+	agent.SetEnemyDistance(60)
+	agent.Tick() // Approach sees no enemy -> Root
+	assertState(agent, "Root", "enemy fled, root")
+	agent.Tick() // Root -> patrol
+	assertState(agent, "Patrol", "enemy fled, patrol")
+
+	// Enemy comes back
+	agent.SetEnemyDistance(10)
+	agent.Tick()
+	assertState(agent, "Approach", "enemy back, approach again")
+
+	fmt.Println("PASS: BT re-evaluation")
+}
+
+func main() {
+	testPriorityInterrupt()
+	testSequenceCompletion()
+	testReEvaluation()
+	fmt.Println("PASS: All behavior tree tests passed")
+}

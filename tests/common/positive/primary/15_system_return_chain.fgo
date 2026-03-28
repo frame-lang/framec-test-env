@@ -1,0 +1,90 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// Tests that @@:return follows "last writer wins" across transition lifecycle
+
+@@system SystemReturnChainTest {
+    interface:
+        TestEnterSets(): string
+        TestExitThenEnter(): string
+        GetState(): string
+
+    machine:
+        $Start {
+            TestEnterSets(): string {
+                -> $EnterSetter
+            }
+
+            TestExitThenEnter(): string {
+                -> $BothSet
+            }
+
+            GetState(): string {
+                return "Start"
+            }
+
+            <$() {
+                // Exit handler sets initial value
+                @@:return = "from_exit"
+            }
+        }
+
+        $EnterSetter {
+            $>() {
+                // Enter handler sets return value
+                @@:return = "from_enter"
+            }
+
+            GetState(): string {
+                return "EnterSetter"
+            }
+        }
+
+        $BothSet {
+            $>() {
+                @@:return = "enter_wins"
+            }
+
+            GetState(): string {
+                return "BothSet"
+            }
+        }
+}
+
+func main() {
+	fmt.Println("=== Test 15: System Return Chain (Last Writer Wins) ===")
+
+	// Test 1: Start exit + EnterSetter enter
+	s1 := NewSystemReturnChainTest()
+	result1 := s1.TestEnterSets()
+	if result1 != "from_enter" {
+		fmt.Printf("FAIL: Expected 'from_enter', got '%s'\n", result1)
+		os.Exit(1)
+	}
+	state1 := s1.GetState()
+	if state1 != "EnterSetter" {
+		fmt.Printf("FAIL: Expected state 'EnterSetter'\n")
+		os.Exit(1)
+	}
+	fmt.Printf("1. Exit set then enter set - enter wins: '%s'\n", result1)
+
+	// Test 2: Both handlers set, enter wins
+	s2 := NewSystemReturnChainTest()
+	result2 := s2.TestExitThenEnter()
+	if result2 != "enter_wins" {
+		fmt.Printf("FAIL: Expected 'enter_wins', got '%s'\n", result2)
+		os.Exit(1)
+	}
+	state2 := s2.GetState()
+	if state2 != "BothSet" {
+		fmt.Printf("FAIL: Expected state 'BothSet'\n")
+		os.Exit(1)
+	}
+	fmt.Printf("2. Both set - enter wins: '%s'\n", result2)
+
+	fmt.Println("PASS: System return chain (last writer wins) works correctly")
+}

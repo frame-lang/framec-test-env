@@ -1,0 +1,195 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system HSMSiblingTransitions {
+    interface:
+        GoToB()
+        GoToA()
+        ForwardAction()
+        GetLog(): []string
+        GetState(): string
+
+    machine:
+        $ChildA => $Parent {
+            $>() {
+                s.log = append(s.log, "ChildA:enter")
+            }
+
+            <$() {
+                s.log = append(s.log, "ChildA:exit")
+            }
+
+            GoToB() {
+                s.log = append(s.log, "ChildA:go_to_b")
+                -> $ChildB
+            }
+
+            ForwardAction() {
+                s.log = append(s.log, "ChildA:forward")
+                => $^
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "ChildA"
+            }
+        }
+
+        $ChildB => $Parent {
+            $>() {
+                s.log = append(s.log, "ChildB:enter")
+            }
+
+            <$() {
+                s.log = append(s.log, "ChildB:exit")
+            }
+
+            GoToA() {
+                s.log = append(s.log, "ChildB:go_to_a")
+                -> $ChildA
+            }
+
+            ForwardAction() {
+                s.log = append(s.log, "ChildB:forward")
+                => $^
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "ChildB"
+            }
+        }
+
+        $Parent {
+            ForwardAction() {
+                s.log = append(s.log, "Parent:forward_action")
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+
+            GetState(): string {
+                return "Parent"
+            }
+        }
+    domain:
+        log []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func countOccurrences(slice []string, item string) int {
+	count := 0
+	for _, v := range slice {
+		if v == item {
+			count++
+		}
+	}
+	return count
+}
+
+func main() {
+	fmt.Println("=== Test 44: HSM Sibling Transitions ===")
+	sm := @@HSMSiblingTransitions()
+
+	// Initial state is ChildA with enter handler fired
+	log := sm.GetLog()
+	if !contains(log, "ChildA:enter") {
+		fmt.Printf("FAIL: Expected ChildA:enter on init, got %v\n", log)
+		os.Exit(1)
+	}
+	if sm.GetState() != "ChildA" {
+		fmt.Printf("FAIL: Expected ChildA, got %s\n", sm.GetState())
+		os.Exit(1)
+	}
+	fmt.Println("TC1.4.0: Initial state ChildA with enter - PASS")
+
+	// TC1.4.1: Transition from ChildA to ChildB
+	sm.GoToB()
+	if sm.GetState() != "ChildB" {
+		fmt.Printf("FAIL: Expected ChildB, got %s\n", sm.GetState())
+		os.Exit(1)
+	}
+	fmt.Println("TC1.4.1: Transition A->B works - PASS")
+
+	// TC1.4.2: Exit handler fired on source
+	log = sm.GetLog()
+	if !contains(log, "ChildA:exit") {
+		fmt.Printf("FAIL: Expected ChildA:exit, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC1.4.2: Exit handler fires on source - PASS")
+
+	// TC1.4.3: Enter handler fired on target
+	if !contains(log, "ChildB:enter") {
+		fmt.Printf("FAIL: Expected ChildB:enter, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC1.4.3: Enter handler fires on target - PASS")
+
+	// TC1.4.4: Parent relationship preserved - ChildB can forward
+	sm.ForwardAction()
+	log = sm.GetLog()
+	if !contains(log, "ChildB:forward") {
+		fmt.Printf("FAIL: Expected ChildB:forward, got %v\n", log)
+		os.Exit(1)
+	}
+	if !contains(log, "Parent:forward_action") {
+		fmt.Printf("FAIL: Expected Parent handler, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC1.4.4: Parent relationship preserved - PASS")
+
+	// TC1.4.5: Transition back to ChildA
+	sm.GoToA()
+	if sm.GetState() != "ChildA" {
+		fmt.Printf("FAIL: Expected ChildA, got %s\n", sm.GetState())
+		os.Exit(1)
+	}
+	log = sm.GetLog()
+	exitBCount := countOccurrences(log, "ChildB:exit")
+	enterACount := countOccurrences(log, "ChildA:enter")
+	if exitBCount != 1 {
+		fmt.Printf("FAIL: Expected ChildB:exit once, got %v\n", log)
+		os.Exit(1)
+	}
+	if enterACount != 2 {
+		fmt.Printf("FAIL: Expected ChildA:enter twice, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC1.4.5: Transition B->A works with enter/exit - PASS")
+
+	// TC1.4.6: ChildA can still forward after returning
+	sm.ForwardAction()
+	log = sm.GetLog()
+	if !contains(log, "ChildA:forward") {
+		fmt.Printf("FAIL: Expected ChildA:forward, got %v\n", log)
+		os.Exit(1)
+	}
+	parentCount := countOccurrences(log, "Parent:forward_action")
+	if parentCount != 2 {
+		fmt.Printf("FAIL: Expected 2 Parent handlers, got %v\n", log)
+		os.Exit(1)
+	}
+	fmt.Println("TC1.4.6: ChildA forwards after returning - PASS")
+
+	fmt.Println("PASS: HSM sibling transitions work correctly")
+}

@@ -1,0 +1,105 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system ForwardEnterFirst {
+    interface:
+        Process()
+        GetCounter(): int
+        GetLog(): []string
+
+    machine:
+        $Idle {
+            Process() {
+                -> => $Working
+            }
+
+            GetCounter(): int {
+                return -1
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+
+        $Working {
+            $.counter: int = 100
+
+            $>() {
+                s.log = append(s.log, "Working:enter")
+            }
+
+            Process() {
+                s.log = append(s.log, fmt.Sprintf("Working:process:counter=%d", $.counter))
+                $.counter = $.counter + 1
+            }
+
+            GetCounter(): int {
+                return $.counter
+            }
+
+            GetLog(): []string {
+                return s.log
+            }
+        }
+    domain:
+        log []string
+}
+
+func indexOf(slice []string, item string) int {
+	for i, v := range slice {
+		if v == item {
+			return i
+		}
+	}
+	return -1
+}
+
+func contains(slice []string, item string) bool {
+	return indexOf(slice, item) >= 0
+}
+
+func main() {
+	fmt.Println("=== Test 29: Forward Enter First ===")
+	sm := @@ForwardEnterFirst()
+
+	if sm.GetCounter() != -1 {
+		fmt.Println("FAIL: Expected -1 in Idle")
+		os.Exit(1)
+	}
+
+	sm.Process()
+
+	counter := sm.GetCounter()
+	log := sm.GetLog()
+	fmt.Printf("Counter after forward: %d\n", counter)
+	fmt.Printf("Log: %v\n", log)
+
+	if !contains(log, "Working:enter") {
+		fmt.Printf("FAIL: Expected 'Working:enter' in log: %v\n", log)
+		os.Exit(1)
+	}
+
+	if !contains(log, "Working:process:counter=100") {
+		fmt.Printf("FAIL: Expected 'Working:process:counter=100' in log: %v\n", log)
+		os.Exit(1)
+	}
+
+	if counter != 101 {
+		fmt.Printf("FAIL: Expected counter=101, got %d\n", counter)
+		os.Exit(1)
+	}
+
+	enterIdx := indexOf(log, "Working:enter")
+	processIdx := indexOf(log, "Working:process:counter=100")
+	if enterIdx >= processIdx {
+		fmt.Printf("FAIL: $> should run before process: %v\n", log)
+		os.Exit(1)
+	}
+
+	fmt.Println("PASS: Forward sends $> first for non-$> events")
+}

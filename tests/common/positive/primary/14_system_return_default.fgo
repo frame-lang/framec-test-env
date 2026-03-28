@@ -1,0 +1,78 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// NOTE: Default return value syntax (method(): type = default) not yet implemented.
+// This test validates behavior when handler does not set @@:return.
+
+@@system SystemReturnDefaultTest {
+    interface:
+        HandlerSetsValue(): string
+        HandlerNoReturn(): string
+        GetCount(): int
+
+    machine:
+        $Start {
+            $.count: int = 0
+
+            HandlerSetsValue(): string {
+                return "set_by_handler"
+            }
+
+            HandlerNoReturn(): string {
+                // Does not set return - should return nil/zero
+                $.count = $.count + 1
+            }
+
+            GetCount(): int {
+                return $.count
+            }
+        }
+}
+
+func main() {
+	fmt.Println("=== Test 14: System Return Default Behavior ===")
+	sm := NewSystemReturnDefaultTest()
+
+	// Test 1: Handler explicitly sets return value
+	result1 := sm.HandlerSetsValue()
+	if result1 != "set_by_handler" {
+		fmt.Printf("FAIL: Expected 'set_by_handler', got '%s'\n", result1)
+		os.Exit(1)
+	}
+	fmt.Printf("1. HandlerSetsValue() = '%s'\n", result1)
+
+	// Test 2: Handler does NOT set return - should return empty string (Go zero value)
+	result2 := sm.HandlerNoReturn()
+	if result2 != "" {
+		fmt.Printf("FAIL: Expected empty string, got '%s'\n", result2)
+		os.Exit(1)
+	}
+	fmt.Printf("2. HandlerNoReturn() = '%s'\n", result2)
+
+	// Test 3: Verify handler was called (side effect check)
+	count := sm.GetCount()
+	if count != 1 {
+		fmt.Printf("FAIL: Expected count=1, got %d\n", count)
+		os.Exit(1)
+	}
+	fmt.Printf("3. Handler was called, count = %d\n", count)
+
+	// Test 4: Call again to verify idempotence
+	result4 := sm.HandlerNoReturn()
+	if result4 != "" {
+		fmt.Printf("FAIL: Expected empty string again, got '%s'\n", result4)
+		os.Exit(1)
+	}
+	count = sm.GetCount()
+	if count != 2 {
+		fmt.Printf("FAIL: Expected count=2, got %d\n", count)
+		os.Exit(1)
+	}
+	fmt.Printf("4. Second call: result='%s', count=%d\n", result4, count)
+
+	fmt.Println("PASS: System return default behavior works correctly")
+}

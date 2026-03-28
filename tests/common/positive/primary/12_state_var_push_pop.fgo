@@ -1,0 +1,109 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+@@system StateVarPushPop {
+    interface:
+        Increment(): int
+        GetCount(): int
+        SaveAndGo()
+        Restore()
+
+    machine:
+        $Counter {
+            $.count: int = 0
+
+            Increment(): int {
+                $.count = $.count + 1
+                return $.count
+            }
+
+            GetCount(): int {
+                return $.count
+            }
+
+            SaveAndGo() {
+                push$
+                -> $Other
+            }
+        }
+
+        $Other {
+            $.other_count: int = 100
+
+            Restore() {
+                -> pop$
+            }
+
+            Increment(): int {
+                $.other_count = $.other_count + 1
+                return $.other_count
+            }
+
+            GetCount(): int {
+                return $.other_count
+            }
+        }
+}
+
+func main() {
+	fmt.Println("=== Test 12: State Variable Push/Pop ===")
+	sm := NewStateVarPushPop()
+
+	// Increment counter to 3
+	sm.Increment()
+	sm.Increment()
+	sm.Increment()
+	count := sm.GetCount()
+	if count != 3 {
+		fmt.Printf("FAIL: Expected 3, got %d\n", count)
+		os.Exit(1)
+	}
+	fmt.Printf("Counter before push: %d\n", count)
+
+	// Push and go to Other state
+	sm.SaveAndGo()
+	fmt.Println("Pushed and transitioned to Other")
+
+	// In Other state, count should be 100 (Other's state var)
+	count = sm.GetCount()
+	if count != 100 {
+		fmt.Printf("FAIL: Expected 100 in Other state, got %d\n", count)
+		os.Exit(1)
+	}
+	fmt.Printf("Other state count: %d\n", count)
+
+	// Increment in Other
+	sm.Increment()
+	count = sm.GetCount()
+	if count != 101 {
+		fmt.Printf("FAIL: Expected 101 after increment, got %d\n", count)
+		os.Exit(1)
+	}
+	fmt.Printf("Other state after increment: %d\n", count)
+
+	// Pop back - should restore Counter with count=3
+	sm.Restore()
+	fmt.Println("Popped back to Counter")
+
+	count = sm.GetCount()
+	if count != 3 {
+		fmt.Printf("FAIL: Expected 3 after pop (preserved), got %d\n", count)
+		os.Exit(1)
+	}
+	fmt.Printf("Counter after pop: %d\n", count)
+
+	// Increment to verify it works
+	sm.Increment()
+	count = sm.GetCount()
+	if count != 4 {
+		fmt.Printf("FAIL: Expected 4, got %d\n", count)
+		os.Exit(1)
+	}
+	fmt.Printf("Counter after increment: %d\n", count)
+
+	fmt.Println("PASS: State variables preserved across push/pop")
+}
