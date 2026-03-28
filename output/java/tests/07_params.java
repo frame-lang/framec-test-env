@@ -161,6 +161,28 @@ class WithParams {
         return __result;
     }
 
+    private void _state_Running(WithParamsFrameEvent __e) {
+        if (__e._message.equals("add")) {
+            var value = (int) __e._parameters.get("value");
+            this.total += value;
+            System.out.println("Added " + value + ", total is now " + this.total);
+        } else if (__e._message.equals("get_total")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.total;
+            return;
+        } else if (__e._message.equals("multiply")) {
+            var a = (int) __e._parameters.get("a");
+            var b = (int) __e._parameters.get("b");
+            int result = a * b;
+            this.total += result;
+            System.out.println("Multiplied " + a + " * " + b + " = " + result + ", total is now " + this.total);
+            _context_stack.get(_context_stack.size() - 1)._return = result;
+            return;
+        } else if (__e._message.equals("start")) {
+            var initial = (int) __e._parameters.get("initial");
+            System.out.println("Already running");
+        }
+    }
+
     private void _state_Idle(WithParamsFrameEvent __e) {
         if (__e._message.equals("add")) {
             var value = (int) __e._parameters.get("value");
@@ -181,28 +203,6 @@ class WithParams {
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;
-        }
-    }
-
-    private void _state_Running(WithParamsFrameEvent __e) {
-        if (__e._message.equals("add")) {
-            var value = (int) __e._parameters.get("value");
-            this.total += value;
-            System.out.println("Added " + value + ", total is now " + this.total);
-        } else if (__e._message.equals("get_total")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.total;
-            return;
-        } else if (__e._message.equals("multiply")) {
-            var a = (int) __e._parameters.get("a");
-            var b = (int) __e._parameters.get("b");
-            int result = a * b;
-            this.total += result;
-            System.out.println("Multiplied " + a + " * " + b + " = " + result + ", total is now " + this.total);
-            _context_stack.get(_context_stack.size() - 1)._return = result;
-            return;
-        } else if (__e._message.equals("start")) {
-            var initial = (int) __e._parameters.get("initial");
-            System.out.println("Already running");
         }
     }
 }

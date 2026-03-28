@@ -200,18 +200,6 @@ class TcpServer {
         return __result;
     }
 
-    private void _state_SynReceived(TcpServerFrameEvent __e) {
-        if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "SynReceived";
-            return;
-        } else if (__e._message == "receive_ack") {
-            { var __new_compartment = new TcpServerCompartment("Established");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
     private void _state_CloseWait(TcpServerFrameEvent __e) {
         if (__e._message == "close") {
             { var __new_compartment = new TcpServerCompartment("LastAck");
@@ -224,20 +212,12 @@ class TcpServer {
         }
     }
 
-    private void _state_Established(TcpServerFrameEvent __e) {
-        if (__e._message == "close") {
-            { var __new_compartment = new TcpServerCompartment("FinWait1");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
+    private void _state_TimeWait(TcpServerFrameEvent __e) {
+        if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "TimeWait";
             return;
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Established";
-            return;
-        } else if (__e._message == "receive_data") {
-            var data = (string) __e._parameters["data"];
-            this.last_data = data;
-        } else if (__e._message == "receive_fin") {
-            { var __new_compartment = new TcpServerCompartment("CloseWait");
+        } else if (__e._message == "receive_ack") {
+            { var __new_compartment = new TcpServerCompartment("Closed");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
@@ -256,12 +236,48 @@ class TcpServer {
         }
     }
 
+    private void _state_FinWait2(TcpServerFrameEvent __e) {
+        if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "FinWait2";
+            return;
+        } else if (__e._message == "receive_fin") {
+            { var __new_compartment = new TcpServerCompartment("TimeWait");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        }
+    }
+
     private void _state_Closing(TcpServerFrameEvent __e) {
         if (__e._message == "get_state") {
             _context_stack[_context_stack.Count - 1]._return = "Closing";
             return;
         } else if (__e._message == "receive_ack") {
             { var __new_compartment = new TcpServerCompartment("TimeWait");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        }
+    }
+
+    private void _state_SynReceived(TcpServerFrameEvent __e) {
+        if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "SynReceived";
+            return;
+        } else if (__e._message == "receive_ack") {
+            { var __new_compartment = new TcpServerCompartment("Established");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        }
+    }
+
+    private void _state_Listen(TcpServerFrameEvent __e) {
+        if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "Listen";
+            return;
+        } else if (__e._message == "receive_syn") {
+            { var __new_compartment = new TcpServerCompartment("SynReceived");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
@@ -285,30 +301,6 @@ class TcpServer {
         }
     }
 
-    private void _state_TimeWait(TcpServerFrameEvent __e) {
-        if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "TimeWait";
-            return;
-        } else if (__e._message == "receive_ack") {
-            { var __new_compartment = new TcpServerCompartment("Closed");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
-    private void _state_Listen(TcpServerFrameEvent __e) {
-        if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Listen";
-            return;
-        } else if (__e._message == "receive_syn") {
-            { var __new_compartment = new TcpServerCompartment("SynReceived");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
     private void _state_Closed(TcpServerFrameEvent __e) {
         if (__e._message == "get_state") {
             _context_stack[_context_stack.Count - 1]._return = "Closed";
@@ -321,12 +313,20 @@ class TcpServer {
         }
     }
 
-    private void _state_FinWait2(TcpServerFrameEvent __e) {
-        if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "FinWait2";
+    private void _state_Established(TcpServerFrameEvent __e) {
+        if (__e._message == "close") {
+            { var __new_compartment = new TcpServerCompartment("FinWait1");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
             return;
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "Established";
+            return;
+        } else if (__e._message == "receive_data") {
+            var data = (string) __e._parameters["data"];
+            this.last_data = data;
         } else if (__e._message == "receive_fin") {
-            { var __new_compartment = new TcpServerCompartment("TimeWait");
+            { var __new_compartment = new TcpServerCompartment("CloseWait");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
@@ -544,6 +544,18 @@ class TcpClient {
         }
     }
 
+    private void _state_SynSent(TcpClientFrameEvent __e) {
+        if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "SynSent";
+            return;
+        } else if (__e._message == "receive_syn_ack") {
+            { var __new_compartment = new TcpClientCompartment("Established");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        }
+    }
+
     private void _state_FinWait1(TcpClientFrameEvent __e) {
         if (__e._message == "get_state") {
             _context_stack[_context_stack.Count - 1]._return = "FinWait1";
@@ -555,30 +567,6 @@ class TcpClient {
             return;
         } else if (__e._message == "receive_fin") {
             { var __new_compartment = new TcpClientCompartment("Closing");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
-    private void _state_LastAck(TcpClientFrameEvent __e) {
-        if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "LastAck";
-            return;
-        } else if (__e._message == "receive_ack") {
-            { var __new_compartment = new TcpClientCompartment("Closed");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
-    private void _state_FinWait2(TcpClientFrameEvent __e) {
-        if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "FinWait2";
-            return;
-        } else if (__e._message == "receive_fin") {
-            { var __new_compartment = new TcpClientCompartment("TimeWait");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
@@ -609,12 +597,24 @@ class TcpClient {
         }
     }
 
-    private void _state_SynSent(TcpClientFrameEvent __e) {
-        if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "SynSent";
+    private void _state_Closed(TcpClientFrameEvent __e) {
+        if (__e._message == "connect") {
+            { var __new_compartment = new TcpClientCompartment("SynSent");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
             return;
-        } else if (__e._message == "receive_syn_ack") {
-            { var __new_compartment = new TcpClientCompartment("Established");
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "Closed";
+            return;
+        }
+    }
+
+    private void _state_FinWait2(TcpClientFrameEvent __e) {
+        if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "FinWait2";
+            return;
+        } else if (__e._message == "receive_fin") {
+            { var __new_compartment = new TcpClientCompartment("TimeWait");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
@@ -633,14 +633,14 @@ class TcpClient {
         }
     }
 
-    private void _state_Closed(TcpClientFrameEvent __e) {
-        if (__e._message == "connect") {
-            { var __new_compartment = new TcpClientCompartment("SynSent");
+    private void _state_LastAck(TcpClientFrameEvent __e) {
+        if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "LastAck";
+            return;
+        } else if (__e._message == "receive_ack") {
+            { var __new_compartment = new TcpClientCompartment("Closed");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Closed";
             return;
         }
     }

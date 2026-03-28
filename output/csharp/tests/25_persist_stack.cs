@@ -159,18 +159,22 @@ class PersistStack {
         return __result;
     }
 
-    private void _state_Start(PersistStackFrameEvent __e) {
+    private void _state_Middle(PersistStackFrameEvent __e) {
         if (__e._message == "get_depth") {
             _context_stack[_context_stack.Count - 1]._return = depth;
             return;
         } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "start";
+            _context_stack[_context_stack.Count - 1]._return = "middle";
             return;
         } else if (__e._message == "pop_back") {
+            depth = depth - 1;
+            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
+            __transition(__popped);
+            return;
         } else if (__e._message == "push_and_go") {
             depth = depth + 1;
             _state_stack.Add(__compartment.Copy());
-            { var __new_compartment = new PersistStackCompartment("Middle");
+            { var __new_compartment = new PersistStackCompartment("End");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
@@ -193,22 +197,18 @@ class PersistStack {
         }
     }
 
-    private void _state_Middle(PersistStackFrameEvent __e) {
+    private void _state_Start(PersistStackFrameEvent __e) {
         if (__e._message == "get_depth") {
             _context_stack[_context_stack.Count - 1]._return = depth;
             return;
         } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "middle";
+            _context_stack[_context_stack.Count - 1]._return = "start";
             return;
         } else if (__e._message == "pop_back") {
-            depth = depth - 1;
-            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
-            __transition(__popped);
-            return;
         } else if (__e._message == "push_and_go") {
             depth = depth + 1;
             _state_stack.Add(__compartment.Copy());
-            { var __new_compartment = new PersistStackCompartment("End");
+            { var __new_compartment = new PersistStackCompartment("Middle");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;

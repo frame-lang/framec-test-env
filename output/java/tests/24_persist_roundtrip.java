@@ -186,32 +186,6 @@ class PersistRoundtrip {
         return __result;
     }
 
-    private void _state_Idle(PersistRoundtripFrameEvent __e) {
-        if (__e._message.equals("add_history")) {
-            var entry = (String) __e._parameters.get("entry");
-            history = history + entry + ",";
-        } else if (__e._message.equals("get_counter")) {
-            _context_stack.get(_context_stack.size() - 1)._return = counter;
-            return;
-        } else if (__e._message.equals("get_history")) {
-            _context_stack.get(_context_stack.size() - 1)._return = history;
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "idle";
-            return;
-        } else if (__e._message.equals("go_active")) {
-            this.add_history("idle->active");
-            var __compartment = new PersistRoundtripCompartment("Active");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        } else if (__e._message.equals("go_idle")) {
-        } else if (__e._message.equals("set_counter")) {
-            var v = (int) __e._parameters.get("v");
-            counter = v;
-        }
-    }
-
     private void _state_Active(PersistRoundtripFrameEvent __e) {
         if (__e._message.equals("add_history")) {
             var entry = (String) __e._parameters.get("entry");
@@ -235,6 +209,32 @@ class PersistRoundtrip {
         } else if (__e._message.equals("set_counter")) {
             var v = (int) __e._parameters.get("v");
             counter = v * 2;
+        }
+    }
+
+    private void _state_Idle(PersistRoundtripFrameEvent __e) {
+        if (__e._message.equals("add_history")) {
+            var entry = (String) __e._parameters.get("entry");
+            history = history + entry + ",";
+        } else if (__e._message.equals("get_counter")) {
+            _context_stack.get(_context_stack.size() - 1)._return = counter;
+            return;
+        } else if (__e._message.equals("get_history")) {
+            _context_stack.get(_context_stack.size() - 1)._return = history;
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "idle";
+            return;
+        } else if (__e._message.equals("go_active")) {
+            this.add_history("idle->active");
+            var __compartment = new PersistRoundtripCompartment("Active");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        } else if (__e._message.equals("go_idle")) {
+        } else if (__e._message.equals("set_counter")) {
+            var v = (int) __e._parameters.get("v");
+            counter = v;
         }
     }
 

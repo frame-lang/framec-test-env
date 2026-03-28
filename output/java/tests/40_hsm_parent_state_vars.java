@@ -141,6 +141,19 @@ class HSMParentStateVars {
         return __result;
     }
 
+    private void _state_Parent(HSMParentStateVarsFrameEvent __e) {
+        var __sv_comp = __compartment;
+        while (__sv_comp != null && !__sv_comp.state.equals("Parent")) { __sv_comp = __sv_comp.parent_compartment; }
+        if (__e._message.equals("$>")) {
+            if (!__sv_comp.state_vars.containsKey("parent_count")) {
+                __sv_comp.state_vars.put("parent_count", 100);
+            }
+        } else if (__e._message.equals("get_parent_count")) {
+            _context_stack.get(_context_stack.size() - 1)._return = (int) __sv_comp.state_vars.get("parent_count");
+            return;
+        }
+    }
+
     private void _state_Child(HSMParentStateVarsFrameEvent __e) {
         var __sv_comp = __compartment;
         while (__sv_comp != null && !__sv_comp.state.equals("Child")) { __sv_comp = __sv_comp.parent_compartment; }
@@ -153,19 +166,6 @@ class HSMParentStateVars {
             return;
         } else if (__e._message.equals("get_parent_count")) {
             _state_Parent(__e);
-        }
-    }
-
-    private void _state_Parent(HSMParentStateVarsFrameEvent __e) {
-        var __sv_comp = __compartment;
-        while (__sv_comp != null && !__sv_comp.state.equals("Parent")) { __sv_comp = __sv_comp.parent_compartment; }
-        if (__e._message.equals("$>")) {
-            if (!__sv_comp.state_vars.containsKey("parent_count")) {
-                __sv_comp.state_vars.put("parent_count", 100);
-            }
-        } else if (__e._message.equals("get_parent_count")) {
-            _context_stack.get(_context_stack.size() - 1)._return = (int) __sv_comp.state_vars.get("parent_count");
-            return;
         }
     }
 }

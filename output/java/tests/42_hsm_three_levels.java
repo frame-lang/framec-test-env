@@ -193,6 +193,25 @@ class HSMThreeLevels {
         }
     }
 
+    private void _state_Parent(HSMThreeLevelsFrameEvent __e) {
+        var __sv_comp = __compartment;
+        while (__sv_comp != null && !__sv_comp.state.equals("Parent")) { __sv_comp = __sv_comp.parent_compartment; }
+        if (__e._message.equals("$>")) {
+            if (!__sv_comp.state_vars.containsKey("parent_var")) {
+                __sv_comp.state_vars.put("parent_var", 100);
+            }
+        } else if (__e._message.equals("forward_through_all")) {
+            int val = (int) __sv_comp.state_vars.get("parent_var");
+            this.log.add("Parent:forward_through_all(var=" + val + ")");
+        } else if (__e._message.equals("forward_to_parent")) {
+            int val = (int) __sv_comp.state_vars.get("parent_var");
+            this.log.add("Parent:handled(var=" + val + ")");
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        }
+    }
+
     private void _state_Grandchild(HSMThreeLevelsFrameEvent __e) {
         var __sv_comp = __compartment;
         while (__sv_comp != null && !__sv_comp.state.equals("Grandchild")) { __sv_comp = __sv_comp.parent_compartment; }
@@ -215,25 +234,6 @@ class HSMThreeLevels {
         } else if (__e._message.equals("handle_at_grandchild")) {
             int val = (int) __sv_comp.state_vars.get("grandchild_var");
             this.log.add("Grandchild:handled(var=" + val + ")");
-        }
-    }
-
-    private void _state_Parent(HSMThreeLevelsFrameEvent __e) {
-        var __sv_comp = __compartment;
-        while (__sv_comp != null && !__sv_comp.state.equals("Parent")) { __sv_comp = __sv_comp.parent_compartment; }
-        if (__e._message.equals("$>")) {
-            if (!__sv_comp.state_vars.containsKey("parent_var")) {
-                __sv_comp.state_vars.put("parent_var", 100);
-            }
-        } else if (__e._message.equals("forward_through_all")) {
-            int val = (int) __sv_comp.state_vars.get("parent_var");
-            this.log.add("Parent:forward_through_all(var=" + val + ")");
-        } else if (__e._message.equals("forward_to_parent")) {
-            int val = (int) __sv_comp.state_vars.get("parent_var");
-            this.log.add("Parent:handled(var=" + val + ")");
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
         }
     }
 }

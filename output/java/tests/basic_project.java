@@ -125,18 +125,18 @@ class P {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
-    private void _state_B(PFrameEvent __e) {
-        if (__e._message.equals("e")) {
-            ;
-        }
-    }
-
     private void _state_A(PFrameEvent __e) {
         if (__e._message.equals("e")) {
             var __compartment = new PCompartment("B");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;
+        }
+    }
+
+    private void _state_B(PFrameEvent __e) {
+        if (__e._message.equals("e")) {
+            ;
         }
     }
 }

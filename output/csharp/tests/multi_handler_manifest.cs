@@ -119,6 +119,17 @@ class S {
         __next_compartment = next;
     }
 
+    public void e(object p, object q) {
+        Dictionary<string, object> __params = new Dictionary<string, object>();
+        __params["p"] = p;
+        __params["q"] = q;
+        SFrameEvent __e = new SFrameEvent("e", __params);
+        SFrameContext __ctx = new SFrameContext(__e, null);
+        _context_stack.Add(__ctx);
+        __kernel(_context_stack[_context_stack.Count - 1]._event);
+        _context_stack.RemoveAt(_context_stack.Count - 1);
+    }
+
     public void g(object x) {
         Dictionary<string, object> __params = new Dictionary<string, object>();
         __params["x"] = x;
@@ -129,15 +140,9 @@ class S {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
-    public void e(object p, object q) {
-        Dictionary<string, object> __params = new Dictionary<string, object>();
-        __params["p"] = p;
-        __params["q"] = q;
-        SFrameEvent __e = new SFrameEvent("e", __params);
-        SFrameContext __ctx = new SFrameContext(__e, null);
-        _context_stack.Add(__ctx);
-        __kernel(_context_stack[_context_stack.Count - 1]._event);
-        _context_stack.RemoveAt(_context_stack.Count - 1);
+    private void _state_B(SFrameEvent __e) {
+        if (__e._message == "e") {
+        }
     }
 
     private void _state_A(SFrameEvent __e) {
@@ -151,11 +156,6 @@ class S {
         } else if (__e._message == "g") {
             var x = (object) __e._parameters["x"];
             ;
-        }
-    }
-
-    private void _state_B(SFrameEvent __e) {
-        if (__e._message == "e") {
         }
     }
 }

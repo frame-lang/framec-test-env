@@ -3,10 +3,6 @@ import java.util.*;
 
 import java.util.*;
 
-class Stubs {
-    static void x() {}
-}
-
 class SFrameEvent {
     String _message;
     HashMap<String, Object> _parameters;
@@ -135,7 +131,6 @@ class S {
     private void _state_A(SFrameEvent __e) {
         if (__e._message.equals("e")) {
             _state_P(__e);
-            Stubs.x();
         }
     }
 

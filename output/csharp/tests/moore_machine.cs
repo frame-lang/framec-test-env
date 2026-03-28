@@ -145,6 +145,38 @@ class MooreMachine {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
+    private void _state_Q0(MooreMachineFrameEvent __e) {
+        if (__e._message == "$>") {
+            this.set_output(0);
+        } else if (__e._message == "i_0") {
+            { var __new_compartment = new MooreMachineCompartment("Q1");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        } else if (__e._message == "i_1") {
+            { var __new_compartment = new MooreMachineCompartment("Q2");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        }
+    }
+
+    private void _state_Q1(MooreMachineFrameEvent __e) {
+        if (__e._message == "$>") {
+            this.set_output(0);
+        } else if (__e._message == "i_0") {
+            { var __new_compartment = new MooreMachineCompartment("Q1");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        } else if (__e._message == "i_1") {
+            { var __new_compartment = new MooreMachineCompartment("Q3");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        }
+    }
+
     private void _state_Q2(MooreMachineFrameEvent __e) {
         if (__e._message == "$>") {
             this.set_output(0);
@@ -177,22 +209,6 @@ class MooreMachine {
         }
     }
 
-    private void _state_Q1(MooreMachineFrameEvent __e) {
-        if (__e._message == "$>") {
-            this.set_output(0);
-        } else if (__e._message == "i_0") {
-            { var __new_compartment = new MooreMachineCompartment("Q1");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        } else if (__e._message == "i_1") {
-            { var __new_compartment = new MooreMachineCompartment("Q3");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
     private void _state_Q4(MooreMachineFrameEvent __e) {
         if (__e._message == "$>") {
             this.set_output(1);
@@ -203,22 +219,6 @@ class MooreMachine {
             return;
         } else if (__e._message == "i_1") {
             { var __new_compartment = new MooreMachineCompartment("Q3");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        }
-    }
-
-    private void _state_Q0(MooreMachineFrameEvent __e) {
-        if (__e._message == "$>") {
-            this.set_output(0);
-        } else if (__e._message == "i_0") {
-            { var __new_compartment = new MooreMachineCompartment("Q1");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        } else if (__e._message == "i_1") {
-            { var __new_compartment = new MooreMachineCompartment("Q2");
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;

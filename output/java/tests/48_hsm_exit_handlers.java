@@ -177,6 +177,39 @@ class HSMExitHandlers {
         return __result;
     }
 
+    private void _state_Child(HSMExitHandlersFrameEvent __e) {
+        var __sv_comp = __compartment;
+        while (__sv_comp != null && !__sv_comp.state.equals("Child")) { __sv_comp = __sv_comp.parent_compartment; }
+        if (__e._message.equals("<$")) {
+            int val = (int) __sv_comp.state_vars.get("child_var");
+            this.log.add("Child:exit(var=" + val + ")");
+        } else if (__e._message.equals("$>")) {
+            if (!__sv_comp.state_vars.containsKey("child_var")) {
+                __sv_comp.state_vars.put("child_var", 42);
+            }
+            this.log.add("Child:enter");
+        } else if (__e._message.equals("get_child_var")) {
+            _context_stack.get(_context_stack.size() - 1)._return = (int) __sv_comp.state_vars.get("child_var");
+            return;
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Child";
+            return;
+        } else if (__e._message.equals("go_to_other")) {
+            var __compartment = new HSMExitHandlersCompartment("Other");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        } else if (__e._message.equals("go_to_parent")) {
+            var __compartment = new HSMExitHandlersCompartment("Parent");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        }
+    }
+
     private void _state_Other(HSMExitHandlersFrameEvent __e) {
         if (__e._message.equals("$>")) {
             this.log.add("Other:enter");
@@ -223,39 +256,6 @@ class HSMExitHandlers {
             return;
         } else if (__e._message.equals("go_to_other")) {
             var __compartment = new HSMExitHandlersCompartment("Other");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
-    private void _state_Child(HSMExitHandlersFrameEvent __e) {
-        var __sv_comp = __compartment;
-        while (__sv_comp != null && !__sv_comp.state.equals("Child")) { __sv_comp = __sv_comp.parent_compartment; }
-        if (__e._message.equals("<$")) {
-            int val = (int) __sv_comp.state_vars.get("child_var");
-            this.log.add("Child:exit(var=" + val + ")");
-        } else if (__e._message.equals("$>")) {
-            if (!__sv_comp.state_vars.containsKey("child_var")) {
-                __sv_comp.state_vars.put("child_var", 42);
-            }
-            this.log.add("Child:enter");
-        } else if (__e._message.equals("get_child_var")) {
-            _context_stack.get(_context_stack.size() - 1)._return = (int) __sv_comp.state_vars.get("child_var");
-            return;
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Child";
-            return;
-        } else if (__e._message.equals("go_to_other")) {
-            var __compartment = new HSMExitHandlersCompartment("Other");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        } else if (__e._message.equals("go_to_parent")) {
-            var __compartment = new HSMExitHandlersCompartment("Parent");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;

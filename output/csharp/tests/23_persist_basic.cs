@@ -158,22 +158,6 @@ class PersistTest {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
-    private void _state_Idle(PersistTestFrameEvent __e) {
-        if (__e._message == "get_value") {
-            _context_stack[_context_stack.Count - 1]._return = value;
-            return;
-        } else if (__e._message == "go_active") {
-            { var __new_compartment = new PersistTestCompartment("Active");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        } else if (__e._message == "go_idle") {
-        } else if (__e._message == "set_value") {
-            var v = (int) __e._parameters["v"];
-            value = v;
-        }
-    }
-
     private void _state_Active(PersistTestFrameEvent __e) {
         if (__e._message == "get_value") {
             _context_stack[_context_stack.Count - 1]._return = value;
@@ -187,6 +171,22 @@ class PersistTest {
         } else if (__e._message == "set_value") {
             var v = (int) __e._parameters["v"];
             value = v * 2;
+        }
+    }
+
+    private void _state_Idle(PersistTestFrameEvent __e) {
+        if (__e._message == "get_value") {
+            _context_stack[_context_stack.Count - 1]._return = value;
+            return;
+        } else if (__e._message == "go_active") {
+            { var __new_compartment = new PersistTestCompartment("Active");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        } else if (__e._message == "go_idle") {
+        } else if (__e._message == "set_value") {
+            var v = (int) __e._parameters["v"];
+            value = v;
         }
     }
 

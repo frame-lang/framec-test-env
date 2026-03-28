@@ -131,7 +131,7 @@ class S {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
-    private void _state_C(SFrameEvent __e) {
+    private void _state_B(SFrameEvent __e) {
 
     }
 
@@ -156,7 +156,7 @@ class S {
         }
     }
 
-    private void _state_B(SFrameEvent __e) {
+    private void _state_C(SFrameEvent __e) {
 
     }
 

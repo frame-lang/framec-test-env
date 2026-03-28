@@ -185,45 +185,6 @@ class HSMMultiChildren {
         return __result;
     }
 
-    private void _state_Parent(HSMMultiChildrenFrameEvent __e) {
-        if (__e._message.equals("forward_action")) {
-            this.log.add("Parent:forward_action");
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Parent";
-            return;
-        }
-    }
-
-    private void _state_ChildA(HSMMultiChildrenFrameEvent __e) {
-        if (__e._message.equals("do_action")) {
-            this.log.add("ChildA:do_action");
-        } else if (__e._message.equals("forward_action")) {
-            this.log.add("ChildA:forward_action");
-            _state_Parent(__e);
-        } else if (__e._message.equals("get_log")) {
-            _context_stack.get(_context_stack.size() - 1)._return = this.log;
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "ChildA";
-            return;
-        } else if (__e._message.equals("start_a")) {
-            // stay
-        } else if (__e._message.equals("start_b")) {
-            var __compartment = new HSMMultiChildrenCompartment("ChildB");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        } else if (__e._message.equals("start_c")) {
-            var __compartment = new HSMMultiChildrenCompartment("ChildC");
-            __compartment.parent_compartment = this.__compartment.copy();
-            __transition(__compartment);
-            return;
-        }
-    }
-
     private void _state_ChildB(HSMMultiChildrenFrameEvent __e) {
         if (__e._message.equals("do_action")) {
             this.log.add("ChildB:do_action");
@@ -247,6 +208,18 @@ class HSMMultiChildren {
             var __compartment = new HSMMultiChildrenCompartment("ChildC");
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
+            return;
+        }
+    }
+
+    private void _state_Parent(HSMMultiChildrenFrameEvent __e) {
+        if (__e._message.equals("forward_action")) {
+            this.log.add("Parent:forward_action");
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Parent";
             return;
         }
     }
@@ -275,6 +248,33 @@ class HSMMultiChildren {
             return;
         } else if (__e._message.equals("start_c")) {
             // stay
+        }
+    }
+
+    private void _state_ChildA(HSMMultiChildrenFrameEvent __e) {
+        if (__e._message.equals("do_action")) {
+            this.log.add("ChildA:do_action");
+        } else if (__e._message.equals("forward_action")) {
+            this.log.add("ChildA:forward_action");
+            _state_Parent(__e);
+        } else if (__e._message.equals("get_log")) {
+            _context_stack.get(_context_stack.size() - 1)._return = this.log;
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "ChildA";
+            return;
+        } else if (__e._message.equals("start_a")) {
+            // stay
+        } else if (__e._message.equals("start_b")) {
+            var __compartment = new HSMMultiChildrenCompartment("ChildB");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
+        } else if (__e._message.equals("start_c")) {
+            var __compartment = new HSMMultiChildrenCompartment("ChildC");
+            __compartment.parent_compartment = this.__compartment.copy();
+            __transition(__compartment);
+            return;
         }
     }
 }

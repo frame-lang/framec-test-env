@@ -150,15 +150,15 @@ class S {
         }
     }
 
-    private void _state_B(SFrameEvent __e) {
-
-    }
-
     private void _state_C(SFrameEvent __e) {
 
     }
 
     private void _state_D(SFrameEvent __e) {
+
+    }
+
+    private void _state_B(SFrameEvent __e) {
 
     }
 }

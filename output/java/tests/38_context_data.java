@@ -151,19 +151,6 @@ class ContextDataTest {
         return __result;
     }
 
-    private void _state_End(ContextDataTestFrameEvent __e) {
-        if (__e._message.equals("$>")) {
-            // Enter handler can access data set by previous handlers
-            ((ArrayList)_context_stack.get(_context_stack.size() - 1)._data.get("trace")).add("enter");
-            _context_stack.get(_context_stack.size() - 1)._data.put("ended_in", "End");
-
-            // Build final result from accumulated data
-            ArrayList trace = (ArrayList)_context_stack.get(_context_stack.size() - 1)._data.get("trace");
-            String trace_str = trace != null ? String.join(",", trace) : "no_trace";
-            _context_stack.get(_context_stack.size() - 1)._return = "from=" + _context_stack.get(_context_stack.size() - 1)._data.get("started_in") + ",to=" + _context_stack.get(_context_stack.size() - 1)._data.get("ended_in") + ",value=" + _context_stack.get(_context_stack.size() - 1)._data.get("value") + ",trace=" + trace_str;
-        }
-    }
-
     private void _state_Start(ContextDataTestFrameEvent __e) {
         if (__e._message.equals("<$")) {
             // Exit handler can access data set by event handler
@@ -194,6 +181,19 @@ class ContextDataTest {
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;
+        }
+    }
+
+    private void _state_End(ContextDataTestFrameEvent __e) {
+        if (__e._message.equals("$>")) {
+            // Enter handler can access data set by previous handlers
+            ((ArrayList)_context_stack.get(_context_stack.size() - 1)._data.get("trace")).add("enter");
+            _context_stack.get(_context_stack.size() - 1)._data.put("ended_in", "End");
+
+            // Build final result from accumulated data
+            ArrayList trace = (ArrayList)_context_stack.get(_context_stack.size() - 1)._data.get("trace");
+            String trace_str = trace != null ? String.join(",", trace) : "no_trace";
+            _context_stack.get(_context_stack.size() - 1)._return = "from=" + _context_stack.get(_context_stack.size() - 1)._data.get("started_in") + ",to=" + _context_stack.get(_context_stack.size() - 1)._data.get("ended_in") + ",value=" + _context_stack.get(_context_stack.size() - 1)._data.get("value") + ",trace=" + trace_str;
         }
     }
 }

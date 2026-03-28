@@ -155,6 +155,23 @@ class StackOps {
         return __result;
     }
 
+    private void _state_Sub(StackOpsFrameEvent __e) {
+        if (__e._message == "do_work") {
+            _context_stack[_context_stack.Count - 1]._return = "Working in Sub";
+            return;
+        } else if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "Sub";
+            return;
+        } else if (__e._message == "pop_back") {
+            Console.WriteLine("Popping back to previous state");
+            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
+            __transition(__popped);
+            return;
+        } else if (__e._message == "push_and_go") {
+            Console.WriteLine("Already in Sub");
+        }
+    }
+
     private void _state_Main(StackOpsFrameEvent __e) {
         if (__e._message == "do_work") {
             _context_stack[_context_stack.Count - 1]._return = "Working in Main";
@@ -171,23 +188,6 @@ class StackOps {
             __new_compartment.parent_compartment = __compartment.Copy();
             __transition(__new_compartment); }
             return;
-        }
-    }
-
-    private void _state_Sub(StackOpsFrameEvent __e) {
-        if (__e._message == "do_work") {
-            _context_stack[_context_stack.Count - 1]._return = "Working in Sub";
-            return;
-        } else if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "Sub";
-            return;
-        } else if (__e._message == "pop_back") {
-            Console.WriteLine("Popping back to previous state");
-            var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
-            __transition(__popped);
-            return;
-        } else if (__e._message == "push_and_go") {
-            Console.WriteLine("Already in Sub");
         }
     }
 }

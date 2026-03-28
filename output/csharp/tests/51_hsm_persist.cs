@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 
-// @@skip â HSM persist restore reinitializes state vars via constructor $> event
 
 using System;
 using System.Collections.Generic;
@@ -75,8 +74,11 @@ class HSMPersist {
     public HSMPersist() {
         _state_stack = new List<HSMPersistCompartment>();
         _context_stack = new List<HSMPersistFrameContext>();
-        __compartment = new HSMPersistCompartment("Parent");
-        __next_compartment = null;
+        // HSM: Create parent compartment chain
+        var __parent_comp_0 = new HSMPersistCompartment("Parent");
+        this.__compartment = new HSMPersistCompartment("Child");
+        this.__compartment.parent_compartment = __parent_comp_0;
+        this.__next_compartment = null;
         HSMPersistFrameEvent __frame_event = new HSMPersistFrameEvent("$>");
         HSMPersistFrameContext __ctx = new HSMPersistFrameContext(__frame_event, null);
         _context_stack.Add(__ctx);
@@ -111,10 +113,10 @@ class HSMPersist {
 
     private void __router(HSMPersistFrameEvent __e) {
         string state_name = __compartment.state;
-        if (state_name == "Parent") {
-            _state_Parent(__e);
-        } else if (state_name == "Child") {
+        if (state_name == "Child") {
             _state_Child(__e);
+        } else if (state_name == "Parent") {
+            _state_Parent(__e);
         }
     }
 

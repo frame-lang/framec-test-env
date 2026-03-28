@@ -171,30 +171,6 @@ class HSMThreeLevels {
         return __result;
     }
 
-    private void _state_Child(HSMThreeLevelsFrameEvent __e) {
-        var __sv_comp = __compartment;
-        while (__sv_comp != null && __sv_comp.state != "Child") { __sv_comp = __sv_comp.parent_compartment; }
-        if (__e._message == "$>") {
-            if (!__sv_comp.state_vars.ContainsKey("child_var")) {
-                __sv_comp.state_vars["child_var"] = 10;
-            }
-        } else if (__e._message == "forward_through_all") {
-            int val = (int) __sv_comp.state_vars["child_var"];
-            this.log.Add("Child:forward_through_all(var=" + val + ")");
-            _state_Parent(__e);
-        } else if (__e._message == "forward_to_child") {
-            int val = (int) __sv_comp.state_vars["child_var"];
-            this.log.Add("Child:handled(var=" + val + ")");
-        } else if (__e._message == "forward_to_parent") {
-            int val = (int) __sv_comp.state_vars["child_var"];
-            this.log.Add("Child:forward_to_parent(var=" + val + ")");
-            _state_Parent(__e);
-        } else if (__e._message == "get_log") {
-            _context_stack[_context_stack.Count - 1]._return = this.log;
-            return;
-        }
-    }
-
     private void _state_Parent(HSMThreeLevelsFrameEvent __e) {
         var __sv_comp = __compartment;
         while (__sv_comp != null && __sv_comp.state != "Parent") { __sv_comp = __sv_comp.parent_compartment; }
@@ -236,6 +212,30 @@ class HSMThreeLevels {
         } else if (__e._message == "handle_at_grandchild") {
             int val = (int) __sv_comp.state_vars["grandchild_var"];
             this.log.Add("Grandchild:handled(var=" + val + ")");
+        }
+    }
+
+    private void _state_Child(HSMThreeLevelsFrameEvent __e) {
+        var __sv_comp = __compartment;
+        while (__sv_comp != null && __sv_comp.state != "Child") { __sv_comp = __sv_comp.parent_compartment; }
+        if (__e._message == "$>") {
+            if (!__sv_comp.state_vars.ContainsKey("child_var")) {
+                __sv_comp.state_vars["child_var"] = 10;
+            }
+        } else if (__e._message == "forward_through_all") {
+            int val = (int) __sv_comp.state_vars["child_var"];
+            this.log.Add("Child:forward_through_all(var=" + val + ")");
+            _state_Parent(__e);
+        } else if (__e._message == "forward_to_child") {
+            int val = (int) __sv_comp.state_vars["child_var"];
+            this.log.Add("Child:handled(var=" + val + ")");
+        } else if (__e._message == "forward_to_parent") {
+            int val = (int) __sv_comp.state_vars["child_var"];
+            this.log.Add("Child:forward_to_parent(var=" + val + ")");
+            _state_Parent(__e);
+        } else if (__e._message == "get_log") {
+            _context_stack[_context_stack.Count - 1]._return = this.log;
+            return;
         }
     }
 }

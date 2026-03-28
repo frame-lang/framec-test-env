@@ -134,6 +134,10 @@ class S {
 
     }
 
+    private void _state_P(SFrameEvent __e) {
+
+    }
+
     private void _state_A(SFrameEvent __e) {
         if (__e._message.equals("e")) {
             _state_stack.add(__compartment.copy());
@@ -143,10 +147,6 @@ class S {
             __transition(__compartment);
             return;
         }
-    }
-
-    private void _state_P(SFrameEvent __e) {
-
     }
 }
 

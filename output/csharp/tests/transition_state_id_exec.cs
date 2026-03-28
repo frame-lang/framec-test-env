@@ -127,10 +127,6 @@ class SysX {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
-    private void _state_B(SysXFrameEvent __e) {
-
-    }
-
     private void _state_A(SysXFrameEvent __e) {
         if (__e._message == "e") {
             { var __new_compartment = new SysXCompartment("B");
@@ -138,6 +134,10 @@ class SysX {
             __transition(__new_compartment); }
             return;
         }
+    }
+
+    private void _state_B(SysXFrameEvent __e) {
+
     }
 }
 

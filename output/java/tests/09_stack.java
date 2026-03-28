@@ -153,6 +153,23 @@ class StackOps {
         return __result;
     }
 
+    private void _state_Sub(StackOpsFrameEvent __e) {
+        if (__e._message.equals("do_work")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Working in Sub";
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "Sub";
+            return;
+        } else if (__e._message.equals("pop_back")) {
+            System.out.println("Popping back to previous state");
+            var __popped = _state_stack.remove(_state_stack.size() - 1);
+            __transition(__popped);
+            return;
+        } else if (__e._message.equals("push_and_go")) {
+            System.out.println("Already in Sub");
+        }
+    }
+
     private void _state_Main(StackOpsFrameEvent __e) {
         if (__e._message.equals("do_work")) {
             _context_stack.get(_context_stack.size() - 1)._return = "Working in Main";
@@ -169,23 +186,6 @@ class StackOps {
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;
-        }
-    }
-
-    private void _state_Sub(StackOpsFrameEvent __e) {
-        if (__e._message.equals("do_work")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Working in Sub";
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "Sub";
-            return;
-        } else if (__e._message.equals("pop_back")) {
-            System.out.println("Popping back to previous state");
-            var __popped = _state_stack.remove(_state_stack.size() - 1);
-            __transition(__popped);
-            return;
-        } else if (__e._message.equals("push_and_go")) {
-            System.out.println("Already in Sub");
         }
     }
 }

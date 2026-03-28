@@ -174,22 +174,6 @@ class PersistStack {
         }
     }
 
-    private void _state_End(PersistStackFrameEvent __e) {
-        if (__e._message.equals("get_depth")) {
-            _context_stack.get(_context_stack.size() - 1)._return = depth;
-            return;
-        } else if (__e._message.equals("get_state")) {
-            _context_stack.get(_context_stack.size() - 1)._return = "end";
-            return;
-        } else if (__e._message.equals("pop_back")) {
-            depth = depth - 1;
-            var __popped = _state_stack.remove(_state_stack.size() - 1);
-            __transition(__popped);
-            return;
-        } else if (__e._message.equals("push_and_go")) {
-        }
-    }
-
     private void _state_Middle(PersistStackFrameEvent __e) {
         if (__e._message.equals("get_depth")) {
             _context_stack.get(_context_stack.size() - 1)._return = depth;
@@ -209,6 +193,22 @@ class PersistStack {
             __compartment.parent_compartment = this.__compartment.copy();
             __transition(__compartment);
             return;
+        }
+    }
+
+    private void _state_End(PersistStackFrameEvent __e) {
+        if (__e._message.equals("get_depth")) {
+            _context_stack.get(_context_stack.size() - 1)._return = depth;
+            return;
+        } else if (__e._message.equals("get_state")) {
+            _context_stack.get(_context_stack.size() - 1)._return = "end";
+            return;
+        } else if (__e._message.equals("pop_back")) {
+            depth = depth - 1;
+            var __popped = _state_stack.remove(_state_stack.size() - 1);
+            __transition(__popped);
+            return;
+        } else if (__e._message.equals("push_and_go")) {
         }
     }
 

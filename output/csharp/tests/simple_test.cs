@@ -127,6 +127,10 @@ class SimpleDocker {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
+    private void _state_End(SimpleDockerFrameEvent __e) {
+
+    }
+
     private void _state_Start(SimpleDockerFrameEvent __e) {
         if (__e._message == "run") {
             Console.WriteLine("SUCCESS: Hello from Docker");
@@ -135,10 +139,6 @@ class SimpleDocker {
             __transition(__new_compartment); }
             return;
         }
-    }
-
-    private void _state_End(SimpleDockerFrameEvent __e) {
-
     }
 }
 

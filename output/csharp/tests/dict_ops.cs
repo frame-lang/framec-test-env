@@ -130,6 +130,10 @@ class S {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
+    private void _state_P(SFrameEvent __e) {
+
+    }
+
     private void _state_A(SFrameEvent __e) {
         if (__e._message == "e") {
             Dictionary<string, int> d = new Dictionary<string, int>();
@@ -138,10 +142,6 @@ class S {
             _state_P(__e);
             var v = d["k"];
         }
-    }
-
-    private void _state_P(SFrameEvent __e) {
-
     }
 }
 

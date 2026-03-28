@@ -136,6 +136,10 @@ class S {
         _context_stack.RemoveAt(_context_stack.Count - 1);
     }
 
+    private void _state_P(SFrameEvent __e) {
+
+    }
+
     private void _state_A(SFrameEvent __e) {
         if (__e._message == "e") {
             while (Stubs.cond) {
@@ -144,10 +148,6 @@ class S {
             }
             Stubs.done();
         }
-    }
-
-    private void _state_P(SFrameEvent __e) {
-
     }
 }
 

@@ -163,6 +163,24 @@ class HistoryBasic {
         return __result;
     }
 
+    private void _state_A(HistoryBasicFrameEvent __e) {
+        if (__e._message == "get_state") {
+            _context_stack[_context_stack.Count - 1]._return = "A";
+            return;
+        } else if (__e._message == "gotoB") {
+            { var __new_compartment = new HistoryBasicCompartment("B");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        } else if (__e._message == "gotoC_from_A") {
+            _state_stack.Add(__compartment.Copy());
+            { var __new_compartment = new HistoryBasicCompartment("C");
+            __new_compartment.parent_compartment = __compartment.Copy();
+            __transition(__new_compartment); }
+            return;
+        }
+    }
+
     private void _state_B(HistoryBasicFrameEvent __e) {
         if (__e._message == "get_state") {
             _context_stack[_context_stack.Count - 1]._return = "B";
@@ -183,24 +201,6 @@ class HistoryBasic {
         } else if (__e._message == "return_back") {
             var __popped = _state_stack[_state_stack.Count - 1]; _state_stack.RemoveAt(_state_stack.Count - 1);
             __transition(__popped);
-            return;
-        }
-    }
-
-    private void _state_A(HistoryBasicFrameEvent __e) {
-        if (__e._message == "get_state") {
-            _context_stack[_context_stack.Count - 1]._return = "A";
-            return;
-        } else if (__e._message == "gotoB") {
-            { var __new_compartment = new HistoryBasicCompartment("B");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
-            return;
-        } else if (__e._message == "gotoC_from_A") {
-            _state_stack.Add(__compartment.Copy());
-            { var __new_compartment = new HistoryBasicCompartment("C");
-            __new_compartment.parent_compartment = __compartment.Copy();
-            __transition(__new_compartment); }
             return;
         }
     }

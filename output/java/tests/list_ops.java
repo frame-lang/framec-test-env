@@ -128,10 +128,6 @@ class S {
         _context_stack.remove(_context_stack.size() - 1);
     }
 
-    private void _state_P(SFrameEvent __e) {
-
-    }
-
     private void _state_A(SFrameEvent __e) {
         if (__e._message.equals("e")) {
             ArrayList<Integer> a = new ArrayList<>(Arrays.asList(1, 2));
@@ -139,6 +135,10 @@ class S {
             _state_P(__e);
             a.size();
         }
+    }
+
+    private void _state_P(SFrameEvent __e) {
+
     }
 }
 
