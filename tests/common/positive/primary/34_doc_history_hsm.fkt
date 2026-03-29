@@ -1,0 +1,156 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+@@system HistoryHSM {
+    interface:
+        gotoA()
+        gotoB()
+        gotoC()
+        goBack()
+        get_state(): String
+        get_log(): ArrayList
+
+    machine:
+        $Waiting {
+            $>() {
+                this.log_msg("In \$Waiting")
+            }
+            gotoA() {
+                this.log_msg("gotoA")
+                -> $A
+            }
+            gotoB() {
+                this.log_msg("gotoB")
+                -> $B
+            }
+            get_state(): String {
+                return "Waiting"
+            }
+            get_log(): ArrayList {
+                return this.log
+            }
+        }
+
+        $A => $AB {
+            $>() {
+                this.log_msg("In \$A")
+            }
+            gotoB() {
+                this.log_msg("gotoB")
+                -> $B
+            }
+            get_state(): String {
+                return "A"
+            }
+            get_log(): ArrayList {
+                return this.log
+            }
+            => $^
+        }
+
+        $B => $AB {
+            $>() {
+                this.log_msg("In \$B")
+            }
+            gotoA() {
+                this.log_msg("gotoA")
+                -> $A
+            }
+            get_state(): String {
+                return "B"
+            }
+            get_log(): ArrayList {
+                return this.log
+            }
+            => $^
+        }
+
+        $AB {
+            gotoC() {
+                this.log_msg("gotoC in \$AB")
+                push$
+                -> $C
+            }
+        }
+
+        $C {
+            $>() {
+                this.log_msg("In \$C")
+            }
+            goBack() {
+                this.log_msg("goBack")
+                -> pop$
+            }
+            get_state(): String {
+                return "C"
+            }
+            get_log(): ArrayList {
+                return this.log
+            }
+        }
+
+    actions:
+        log_msg(msg: String) {
+            this.log.add(msg)
+        }
+
+    domain:
+        log = ArrayList()
+}
+
+fun main() {
+    println("=== Test 34: Doc History HSM ===")
+    val h = @@HistoryHSM()
+
+    // Start in Waiting
+    if ((h.get_state() as String) != "Waiting") {
+        println("FAIL: Expected 'Waiting', got '${h.get_state()}'")
+        exitProcess(1)
+    }
+
+    // Go to A
+    h.gotoA()
+    if ((h.get_state() as String) != "A") {
+        println("FAIL: Expected 'A', got '${h.get_state()}'")
+        exitProcess(1)
+    }
+
+    // Go to C (using inherited gotoC from $AB)
+    h.gotoC()
+    if ((h.get_state() as String) != "C") {
+        println("FAIL: Expected 'C', got '${h.get_state()}'")
+        exitProcess(1)
+    }
+
+    // Go back (should pop to A)
+    h.goBack()
+    if ((h.get_state() as String) != "A") {
+        println("FAIL: Expected 'A' after goBack, got '${h.get_state()}'")
+        exitProcess(1)
+    }
+
+    // Go to B
+    h.gotoB()
+    if ((h.get_state() as String) != "B") {
+        println("FAIL: Expected 'B', got '${h.get_state()}'")
+        exitProcess(1)
+    }
+
+    // Go to C (again using inherited gotoC)
+    h.gotoC()
+    if ((h.get_state() as String) != "C") {
+        println("FAIL: Expected 'C', got '${h.get_state()}'")
+        exitProcess(1)
+    }
+
+    // Go back (should pop to B)
+    h.goBack()
+    if ((h.get_state() as String) != "B") {
+        println("FAIL: Expected 'B' after goBack, got '${h.get_state()}'")
+        exitProcess(1)
+    }
+
+    println("Log: ${h.get_log()}")
+    println("PASS: HSM with history works correctly")
+}

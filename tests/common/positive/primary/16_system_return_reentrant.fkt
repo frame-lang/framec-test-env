@@ -1,0 +1,91 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+@@system SystemReturnReentrantTest {
+    interface:
+        outer_call(): String
+        inner_call(): String
+        nested_call(): String
+        get_log(): String
+
+    machine:
+        $Start {
+            $.log: String = ""
+
+            outer_call(): String {
+                $.log = $.log + "outer_start,"
+                // Call inner method - this creates nested return context
+                val inner_result = this.inner_call() as String
+                $.log = $.log + "outer_after_inner,"
+                // Our return should be independent of inner's return
+                return "outer_result:" + inner_result
+            }
+
+            inner_call(): String {
+                $.log = $.log + "inner,"
+                return "inner_result"
+            }
+
+            nested_call(): String {
+                $.log = $.log + "nested_start,"
+                // Two levels of nesting
+                val result1 = this.inner_call() as String
+                val result2 = this.outer_call() as String
+                $.log = $.log + "nested_end,"
+                return "nested:" + result1 + "+" + result2
+            }
+
+            get_log(): String {
+                return $.log
+            }
+        }
+}
+
+fun main() {
+    println("=== Test 16: System Return Reentrant (Nested Calls) ===")
+
+    // Test 1: Simple inner call
+    val s1 = @@SystemReturnReentrantTest()
+    val result1 = s1.inner_call() as String
+    if (result1 != "inner_result") {
+        println("FAIL: Expected 'inner_result', got '$result1'")
+        exitProcess(1)
+    }
+    println("1. inner_call() = '$result1'")
+
+    // Test 2: Outer calls inner - return contexts should be separate
+    val s2 = @@SystemReturnReentrantTest()
+    val result2 = s2.outer_call() as String
+    if (result2 != "outer_result:inner_result") {
+        println("FAIL: Expected 'outer_result:inner_result', got '$result2'")
+        exitProcess(1)
+    }
+    val log2 = s2.get_log() as String
+    if (!log2.contains("outer_start")) {
+        println("FAIL: Missing outer_start in log: $log2")
+        exitProcess(1)
+    }
+    if (!log2.contains("inner")) {
+        println("FAIL: Missing inner in log: $log2")
+        exitProcess(1)
+    }
+    if (!log2.contains("outer_after_inner")) {
+        println("FAIL: Missing outer_after_inner in log: $log2")
+        exitProcess(1)
+    }
+    println("2. outer_call() = '$result2'")
+    println("   Log: '$log2'")
+
+    // Test 3: Deeply nested calls
+    val s3 = @@SystemReturnReentrantTest()
+    val result3 = s3.nested_call() as String
+    val expected = "nested:inner_result+outer_result:inner_result"
+    if (result3 != expected) {
+        println("FAIL: Expected '$expected', got '$result3'")
+        exitProcess(1)
+    }
+    println("3. nested_call() = '$result3'")
+
+    println("PASS: System return reentrant (nested calls) works correctly")
+}

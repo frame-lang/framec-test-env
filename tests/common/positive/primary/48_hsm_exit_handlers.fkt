@@ -1,0 +1,163 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+@@system HSMExitHandlers {
+    interface:
+        go_to_other()
+        go_to_parent()
+        go_to_child()
+        get_log(): ArrayList
+        get_state(): String
+        get_child_var(): Int
+
+    machine:
+        $Child => $Parent {
+            $.child_var: Int = 42
+
+            $>() {
+                this.log.add("Child:enter")
+            }
+
+            <$() {
+                val v = $.child_var
+                this.log.add("Child:exit(var=" + v + ")")
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): ArrayList {
+                return this.log
+            }
+
+            get_state(): String {
+                return "Child"
+            }
+
+            get_child_var(): Int {
+                return $.child_var
+            }
+        }
+
+        $Parent {
+            $>() {
+                this.log.add("Parent:enter")
+            }
+
+            <$() {
+                this.log.add("Parent:exit")
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            get_log(): ArrayList {
+                return this.log
+            }
+
+            get_state(): String {
+                return "Parent"
+            }
+
+            get_child_var(): Int {
+                return -1
+            }
+        }
+
+        $Other {
+            $>() {
+                this.log.add("Other:enter")
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): ArrayList {
+                return this.log
+            }
+
+            get_state(): String {
+                return "Other"
+            }
+
+            get_child_var(): Int {
+                return -1
+            }
+        }
+    domain:
+        log = ArrayList()
+}
+
+fun main() {
+    println("=== Test 48: HSM Exit Handlers ===")
+    val s = @@HSMExitHandlers()
+
+    // Initial state is Child
+    var log = s.get_log() as java.util.ArrayList<*>
+    if (!log.contains("Child:enter")) {
+        println("FAIL: Expected Child:enter on init, got $log")
+        exitProcess(1)
+    }
+    if ((s.get_state() as String) != "Child") {
+        println("FAIL: Expected Child, got ${s.get_state()}")
+        exitProcess(1)
+    }
+    println("TC2.4.0: Initial state is Child with enter - PASS")
+
+    // TC2.4.1: Child exit fires when transitioning out of child
+    s.go_to_other()
+    log = s.get_log() as java.util.ArrayList<*>
+    if (!log.contains("Child:exit(var=42)")) {
+        println("FAIL: Expected Child:exit, got $log")
+        exitProcess(1)
+    }
+    if (!log.contains("Other:enter")) {
+        println("FAIL: Expected Other:enter, got $log")
+        exitProcess(1)
+    }
+    println("TC2.4.1: Child exit fires when transitioning out - PASS")
+
+    // TC2.4.2: Parent exit does NOT fire when transitioning out of child
+    if (log.contains("Parent:exit")) {
+        println("FAIL: Parent:exit should NOT fire for child exit, got $log")
+        exitProcess(1)
+    }
+    println("TC2.4.2: Parent exit NOT fired for child exit - PASS")
+
+    // TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
+    println("TC2.4.3: Exit handler accesses state var (var=42) - PASS")
+
+    // TC2.4.4: Parent exit fires when transitioning out of Parent
+    s.go_to_parent()
+    log = s.get_log() as java.util.ArrayList<*>
+    if (!log.contains("Parent:enter")) {
+        println("FAIL: Expected Parent:enter, got $log")
+        exitProcess(1)
+    }
+
+    s.go_to_other()
+    log = s.get_log() as java.util.ArrayList<*>
+    if (!log.contains("Parent:exit")) {
+        println("FAIL: Expected Parent:exit, got $log")
+        exitProcess(1)
+    }
+    println("TC2.4.4: Parent exit fires when leaving parent - PASS")
+
+    println("PASS: HSM exit handlers work correctly")
+}

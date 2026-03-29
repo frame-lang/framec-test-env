@@ -1,0 +1,70 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+@@system HSMForward {
+    interface:
+        event_a()
+        event_b()
+        get_log(): MutableList<String>
+
+    machine:
+        $Child => $Parent {
+            event_a() {
+                this.log.add("Child:event_a")
+            }
+
+            event_b() {
+                this.log.add("Child:event_b_forward")
+                => $^
+            }
+
+            get_log(): MutableList<String> {
+                return this.log
+            }
+        }
+
+        $Parent {
+            event_a() {
+                this.log.add("Parent:event_a")
+            }
+
+            event_b() {
+                this.log.add("Parent:event_b")
+            }
+
+            get_log(): MutableList<String> {
+                return this.log
+            }
+        }
+    domain:
+        log = mutableListOf<String>()
+}
+
+fun main() {
+    println("=== Test 08: HSM Forward ===")
+    val s = HSMForward()
+
+    // event_a should be handled by Child (no forward)
+    s.event_a()
+    @Suppress("UNCHECKED_CAST")
+    var log = s.get_log() as MutableList<String>
+    if (!log.contains("Child:event_a")) {
+        throw RuntimeException("Expected 'Child:event_a' in log, got $log")
+    }
+    println("After event_a: $log")
+
+    // event_b should forward to Parent
+    s.event_b()
+    @Suppress("UNCHECKED_CAST")
+    log = s.get_log() as MutableList<String>
+    if (!log.contains("Child:event_b_forward")) {
+        throw RuntimeException("Expected 'Child:event_b_forward' in log, got $log")
+    }
+    if (!log.contains("Parent:event_b")) {
+        throw RuntimeException("Expected 'Parent:event_b' in log (forwarded), got $log")
+    }
+    println("After event_b (forwarded): $log")
+
+    println("PASS: HSM forward works correctly")
+}

@@ -1,0 +1,78 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+@@system StateVarReentry {
+    interface:
+        increment(): Int
+        get_count(): Int
+        go_other()
+        come_back()
+
+    machine:
+        $Counter {
+            $.count: Int = 0
+
+            increment(): Int {
+                $.count = $.count + 1
+                return $.count
+            }
+
+            get_count(): Int {
+                return $.count
+            }
+
+            go_other() {
+                -> $Other
+            }
+        }
+
+        $Other {
+            come_back() {
+                -> $Counter
+            }
+
+            increment(): Int {
+                return -1
+            }
+
+            get_count(): Int {
+                return -1
+            }
+        }
+}
+
+fun main() {
+    println("=== Test 11: State Variable Reentry ===")
+    val s = StateVarReentry()
+
+    // Increment a few times
+    s.increment()
+    s.increment()
+    var count = s.get_count() as Int
+    if (count != 2) {
+        throw RuntimeException("Expected 2 after two increments, got $count")
+    }
+    println("Count before leaving: $count")
+
+    // Leave the state
+    s.go_other()
+    println("Transitioned to Other state")
+
+    // Come back - state var should be reinitialized to 0
+    s.come_back()
+    count = s.get_count() as Int
+    if (count != 0) {
+        throw RuntimeException("Expected 0 after re-entering Counter (state var reinit), got $count")
+    }
+    println("Count after re-entering Counter: $count")
+
+    // Increment again to verify it works
+    val result = s.increment() as Int
+    if (result != 1) {
+        throw RuntimeException("Expected 1 after increment, got $result")
+    }
+    println("After increment: $result")
+
+    println("PASS: State variables reinitialize on state reentry")
+}

@@ -1,0 +1,104 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+@@system HSMEnterChildOnly {
+    interface:
+        go_to_child()
+        forward_action()
+        get_log(): ArrayList
+        get_state(): String
+
+    machine:
+        $Start {
+            go_to_child() {
+                -> $Child
+            }
+
+            get_log(): ArrayList {
+                return this.log
+            }
+
+            get_state(): String {
+                return "Start"
+            }
+        }
+
+        $Child => $Parent {
+            $>() {
+                this.log.add("Child:enter")
+            }
+
+            forward_action() {
+                this.log.add("Child:forward")
+                => $^
+            }
+
+            get_log(): ArrayList {
+                return this.log
+            }
+
+            get_state(): String {
+                return "Child"
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                this.log.add("Parent:forward_action")
+            }
+
+            get_log(): ArrayList {
+                return this.log
+            }
+
+            get_state(): String {
+                return "Parent"
+            }
+        }
+    domain:
+        log = ArrayList()
+}
+
+fun main() {
+    println("=== Test 45: HSM Enter in Child Only ===")
+    val s = @@HSMEnterChildOnly()
+
+    // Start state has no enter
+    if ((s.get_state() as String) != "Start") {
+        println("FAIL: Expected Start, got ${s.get_state()}")
+        exitProcess(1)
+    }
+    println("TC2.1.0: Initial state is Start - PASS")
+
+    // TC2.1.1: Child enter handler fires on entry
+    s.go_to_child()
+    var log = s.get_log() as java.util.ArrayList<*>
+    if (!log.contains("Child:enter")) {
+        println("FAIL: Expected Child:enter, got $log")
+        exitProcess(1)
+    }
+    if ((s.get_state() as String) != "Child") {
+        println("FAIL: Expected Child, got ${s.get_state()}")
+        exitProcess(1)
+    }
+    println("TC2.1.1: Child enter handler fires - PASS")
+
+    // TC2.1.2: No error when parent lacks enter (verified by compilation/execution)
+    println("TC2.1.2: No error when parent lacks enter - PASS")
+
+    // TC2.1.3: Forward to parent works without parent having enter
+    s.forward_action()
+    log = s.get_log() as java.util.ArrayList<*>
+    if (!log.contains("Child:forward")) {
+        println("FAIL: Expected Child:forward, got $log")
+        exitProcess(1)
+    }
+    if (!log.contains("Parent:forward_action")) {
+        println("FAIL: Expected Parent handler, got $log")
+        exitProcess(1)
+    }
+    println("TC2.1.3: Forward works without parent enter - PASS")
+
+    println("PASS: HSM enter in child only works correctly")
+}

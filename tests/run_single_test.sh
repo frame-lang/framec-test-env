@@ -38,6 +38,7 @@ CSHARP_OUT="$TEST_ENV_ROOT/output/csharp/tests"
 GO_OUT="$TEST_ENV_ROOT/output/go/tests"
 JS_OUT="$TEST_ENV_ROOT/output/javascript/tests"
 PHP_OUT="$TEST_ENV_ROOT/output/php/tests"
+KOTLIN_OUT="$TEST_ENV_ROOT/output/kotlin/tests"
 
 # .NET SDK — find dotnet
 DOTNET_CMD=""
@@ -72,6 +73,7 @@ case $lang in
     go) target="go"; out_dir="$GO_OUT"; out_ext="go" ;;
     javascript) target="javascript"; out_dir="$JS_OUT"; out_ext="js" ;;
     php) target="php"; out_dir="$PHP_OUT"; out_ext="php" ;;
+    kotlin) target="kotlin"; out_dir="$KOTLIN_OUT"; out_ext="kt" ;;
 esac
 
 out_file="$out_dir/${test_name}.${out_ext}"
@@ -216,6 +218,21 @@ case $lang in
             if [ -x "$__pdir/php" ]; then php_cmd="$__pdir/php"; break; fi
         done
         run_output=$($php_cmd "$out_file" 2>&1) || run_status=$?
+        ;;
+    kotlin)
+        # Kotlin script mode: kotlinc -script file.kts
+        # But .kt files need compilation: kotlinc file.kt -include-runtime -d file.jar && java -jar file.jar
+        kt_jar="${out_file%.kt}.jar"
+        kotlinc_cmd="kotlinc"
+        for __kdir in "/usr/local/bin" "/opt/homebrew/bin"; do
+            if [ -x "$__kdir/kotlinc" ]; then kotlinc_cmd="$__kdir/kotlinc"; break; fi
+        done
+        if $kotlinc_cmd "$out_file" -include-runtime -d "$kt_jar" 2>&1 | grep -qv "^w:"; then
+            run_output=$(/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home/bin/java -jar "$kt_jar" 2>&1) || run_status=$?
+        else
+            run_status=1
+            run_output="Kotlin compilation failed"
+        fi
         ;;
 esac
 

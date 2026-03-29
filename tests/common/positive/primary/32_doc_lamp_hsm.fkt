@@ -1,0 +1,105 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+@@system LampHSM {
+    interface:
+        turnOn()
+        turnOff()
+        getColor(): String
+        setColor(color: String)
+        isLampOn(): Boolean
+
+    machine:
+        $Off => $ColorBehavior {
+            turnOn() {
+                -> $On
+            }
+            isLampOn(): Boolean {
+                return this.lamp_on
+            }
+            => $^
+        }
+
+        $On => $ColorBehavior {
+            $>() {
+                this.turnOnLamp()
+            }
+            <$() {
+                this.turnOffLamp()
+            }
+            turnOff() {
+                -> $Off
+            }
+            isLampOn(): Boolean {
+                return this.lamp_on
+            }
+            => $^
+        }
+
+        $ColorBehavior {
+            getColor(): String {
+                return this.color
+            }
+            setColor(color: String) {
+                this.color = color
+            }
+        }
+
+    actions:
+        turnOnLamp() {
+            this.lamp_on = true
+        }
+        turnOffLamp() {
+            this.lamp_on = false
+        }
+
+    domain:
+        color = "white"
+        lamp_on = false
+}
+
+fun main() {
+    println("=== Test 32: Doc Lamp HSM ===")
+    val lamp = @@LampHSM()
+
+    // Color behavior available in both states
+    if ((lamp.getColor() as String) != "white") {
+        println("FAIL: Expected 'white', got '${lamp.getColor()}'")
+        exitProcess(1)
+    }
+    lamp.setColor("red")
+    if ((lamp.getColor() as String) != "red") {
+        println("FAIL: Expected 'red', got '${lamp.getColor()}'")
+        exitProcess(1)
+    }
+
+    // Turn on
+    lamp.turnOn()
+    if (lamp.isLampOn() != true) {
+        println("FAIL: Lamp should be on")
+        exitProcess(1)
+    }
+
+    // Color still works when on
+    lamp.setColor("green")
+    if ((lamp.getColor() as String) != "green") {
+        println("FAIL: Expected 'green', got '${lamp.getColor()}'")
+        exitProcess(1)
+    }
+
+    // Turn off
+    lamp.turnOff()
+    if (lamp.isLampOn() != false) {
+        println("FAIL: Lamp should be off")
+        exitProcess(1)
+    }
+
+    // Color still works when off
+    if ((lamp.getColor() as String) != "green") {
+        println("FAIL: Expected 'green', got '${lamp.getColor()}'")
+        exitProcess(1)
+    }
+
+    println("PASS: HSM lamp works correctly")
+}

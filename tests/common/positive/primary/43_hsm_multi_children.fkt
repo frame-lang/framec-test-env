@@ -1,0 +1,222 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+@@system HSMMultiChildren {
+    interface:
+        start_a()
+        start_b()
+        start_c()
+        do_action()
+        forward_action()
+        get_log(): ArrayList
+        get_state(): String
+
+    machine:
+        $ChildA => $Parent {
+            start_a() {
+                // stay
+            }
+
+            start_b() {
+                -> $ChildB
+            }
+
+            start_c() {
+                -> $ChildC
+            }
+
+            do_action() {
+                this.log.add("ChildA:do_action")
+            }
+
+            forward_action() {
+                this.log.add("ChildA:forward_action")
+                => $^
+            }
+
+            get_log(): ArrayList {
+                return this.log
+            }
+
+            get_state(): String {
+                return "ChildA"
+            }
+        }
+
+        $ChildB => $Parent {
+            start_a() {
+                -> $ChildA
+            }
+
+            start_b() {
+                // stay
+            }
+
+            start_c() {
+                -> $ChildC
+            }
+
+            do_action() {
+                this.log.add("ChildB:do_action")
+            }
+
+            forward_action() {
+                this.log.add("ChildB:forward_action")
+                => $^
+            }
+
+            get_log(): ArrayList {
+                return this.log
+            }
+
+            get_state(): String {
+                return "ChildB"
+            }
+        }
+
+        $ChildC => $Parent {
+            start_a() {
+                -> $ChildA
+            }
+
+            start_b() {
+                -> $ChildB
+            }
+
+            start_c() {
+                // stay
+            }
+
+            do_action() {
+                this.log.add("ChildC:do_action")
+            }
+
+            forward_action() {
+                this.log.add("ChildC:forward_action")
+                => $^
+            }
+
+            get_log(): ArrayList {
+                return this.log
+            }
+
+            get_state(): String {
+                return "ChildC"
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                this.log.add("Parent:forward_action")
+            }
+
+            get_log(): ArrayList {
+                return this.log
+            }
+
+            get_state(): String {
+                return "Parent"
+            }
+        }
+    domain:
+        log = ArrayList()
+}
+
+fun main() {
+    println("=== Test 43: HSM Multiple Children ===")
+    val s = @@HSMMultiChildren()
+
+    // TC1.3.1: Multiple children declare same parent (verified by compilation)
+    println("TC1.3.1: Multiple children with same parent compiles - PASS")
+
+    // Start in ChildA
+    if ((s.get_state() as String) != "ChildA") {
+        println("FAIL: Expected ChildA, got ${s.get_state()}")
+        exitProcess(1)
+    }
+
+    // TC1.3.2: ChildA can forward to shared parent
+    s.forward_action()
+    var log = s.get_log() as java.util.ArrayList<*>
+    if (!log.contains("ChildA:forward_action")) {
+        println("FAIL: Expected ChildA forward, got $log")
+        exitProcess(1)
+    }
+    if (!log.contains("Parent:forward_action")) {
+        println("FAIL: Expected Parent handler, got $log")
+        exitProcess(1)
+    }
+    println("TC1.3.2: ChildA forwards to parent - PASS")
+
+    // TC1.3.3: Transition to sibling
+    s.start_b()
+    if ((s.get_state() as String) != "ChildB") {
+        println("FAIL: Expected ChildB after transition, got ${s.get_state()}")
+        exitProcess(1)
+    }
+    println("TC1.3.3: Transition A->B works - PASS")
+
+    // TC1.3.4: ChildB can also forward to same parent
+    s.forward_action()
+    log = s.get_log() as java.util.ArrayList<*>
+    if (!log.contains("ChildB:forward_action")) {
+        println("FAIL: Expected ChildB forward, got $log")
+        exitProcess(1)
+    }
+    var parentCount = 0
+    for (item in log) {
+        if (item == "Parent:forward_action") parentCount++
+    }
+    if (parentCount != 2) {
+        println("FAIL: Expected 2 Parent forwards, got $log")
+        exitProcess(1)
+    }
+    println("TC1.3.4: ChildB forwards to same parent - PASS")
+
+    // TC1.3.5: Transition to ChildC
+    s.start_c()
+    if ((s.get_state() as String) != "ChildC") {
+        println("FAIL: Expected ChildC, got ${s.get_state()}")
+        exitProcess(1)
+    }
+    s.forward_action()
+    log = s.get_log() as java.util.ArrayList<*>
+    if (!log.contains("ChildC:forward_action")) {
+        println("FAIL: Expected ChildC forward, got $log")
+        exitProcess(1)
+    }
+    var parentCount2 = 0
+    for (item in log) {
+        if (item == "Parent:forward_action") parentCount2++
+    }
+    if (parentCount2 != 3) {
+        println("FAIL: Expected 3 Parent forwards, got $log")
+        exitProcess(1)
+    }
+    println("TC1.3.5: ChildC forwards to same parent - PASS")
+
+    // TC1.3.6: Each sibling maintains independent actions
+    s.start_a()
+    s.do_action()
+    s.start_b()
+    s.do_action()
+    s.start_c()
+    s.do_action()
+    log = s.get_log() as java.util.ArrayList<*>
+    if (!log.contains("ChildA:do_action")) {
+        println("FAIL: Expected ChildA action")
+        exitProcess(1)
+    }
+    if (!log.contains("ChildB:do_action")) {
+        println("FAIL: Expected ChildB action")
+        exitProcess(1)
+    }
+    if (!log.contains("ChildC:do_action")) {
+        println("FAIL: Expected ChildC action")
+        exitProcess(1)
+    }
+    println("TC1.3.6: Each sibling has independent handlers - PASS")
+
+    println("PASS: HSM multiple children work correctly")
+}

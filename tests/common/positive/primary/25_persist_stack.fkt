@@ -1,0 +1,92 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+@@persist
+@@system PersistStack {
+    interface:
+        push_and_go()
+        pop_back()
+        get_state(): String
+        get_depth(): Int
+
+    machine:
+        $Start {
+            push_and_go() {
+                depth = depth + 1
+                push$
+                -> $Middle
+            }
+            pop_back() { }
+            get_state(): String { return "start" }
+            get_depth(): Int { return depth }
+        }
+
+        $Middle {
+            push_and_go() {
+                depth = depth + 1
+                push$
+                -> $End
+            }
+            pop_back() {
+                depth = depth - 1
+                -> pop$
+            }
+            get_state(): String { return "middle" }
+            get_depth(): Int { return depth }
+        }
+
+        $End {
+            push_and_go() { }
+            pop_back() {
+                depth = depth - 1
+                -> pop$
+            }
+            get_state(): String { return "end" }
+            get_depth(): Int { return depth }
+        }
+    domain:
+        depth = 0
+}
+
+fun main() {
+    println("=== Test 25: Persist Stack (Kotlin) ===")
+
+    val s1 = PersistStack()
+    s1.push_and_go()
+    s1.push_and_go()
+    if ((s1.get_state() as String) != "end" || (s1.get_depth() as Int) != 2) {
+        println("FAIL: build"); exitProcess(1)
+    }
+    println("1. Built stack: ${s1.get_state()}, depth=${s1.get_depth()}")
+
+    val json = s1.save_state() as String
+    val data = org.json.JSONObject(json)
+    if (data.getJSONObject("_compartment").getString("state") != "End") {
+        println("FAIL: saved state"); exitProcess(1)
+    }
+    if (data.getJSONArray("_state_stack").length() != 2) {
+        println("FAIL: stack size"); exitProcess(1)
+    }
+    println("2. Saved")
+
+    val s2 = PersistStack.restore_state(json)
+    if ((s2.get_state() as String) != "end" || (s2.get_depth() as Int) != 2) {
+        println("FAIL: restored"); exitProcess(1)
+    }
+    println("3. Restored: ${s2.get_state()}, depth=${s2.get_depth()}")
+
+    s2.pop_back()
+    if ((s2.get_state() as String) != "middle" || (s2.get_depth() as Int) != 1) {
+        println("FAIL: pop1"); exitProcess(1)
+    }
+    println("4. After pop: ${s2.get_state()}, depth=${s2.get_depth()}")
+
+    s2.pop_back()
+    if ((s2.get_state() as String) != "start" || (s2.get_depth() as Int) != 0) {
+        println("FAIL: pop2"); exitProcess(1)
+    }
+    println("5. After 2nd pop: ${s2.get_state()}, depth=${s2.get_depth()}")
+
+    println("PASS: Persist stack works correctly")
+}

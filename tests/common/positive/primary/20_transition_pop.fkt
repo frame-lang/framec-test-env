@@ -1,0 +1,98 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+@@system TransitionPopTest {
+    interface:
+        start()
+        process()
+        get_state(): String
+        get_log(): ArrayList
+
+    machine:
+        $Idle {
+            start() {
+                this.log.add("idle:start:push")
+                `push$
+                -> $Working
+            }
+
+            process() {
+                this.log.add("idle:process")
+            }
+
+            get_state(): String {
+                return "Idle"
+            }
+
+            get_log(): ArrayList {
+                return this.log
+            }
+        }
+
+        $Working {
+            process() {
+                this.log.add("working:process:before_pop")
+                -> pop$
+                // This should NOT execute because pop transitions away
+                this.log.add("working:process:after_pop")
+            }
+
+            get_state(): String {
+                return "Working"
+            }
+
+            get_log(): ArrayList {
+                return this.log
+            }
+        }
+    domain:
+        log = ArrayList()
+}
+
+fun main() {
+    println("=== Test 20: Transition Pop (Kotlin) ===")
+    val s = @@TransitionPopTest()
+
+    // Initial state should be Idle
+    if ((s.get_state() as String) != "Idle") {
+        println("FAIL: Expected 'Idle', got '${s.get_state()}'")
+        exitProcess(1)
+    }
+    println("Initial state: ${s.get_state()}")
+
+    // start() pushes Idle, transitions to Working
+    s.start()
+    if ((s.get_state() as String) != "Working") {
+        println("FAIL: Expected 'Working', got '${s.get_state()}'")
+        exitProcess(1)
+    }
+    println("After start(): ${s.get_state()}")
+
+    // process() in Working does pop transition back to Idle
+    s.process()
+    if ((s.get_state() as String) != "Idle") {
+        println("FAIL: Expected 'Idle' after pop, got '${s.get_state()}'")
+        exitProcess(1)
+    }
+    println("After process() with pop: ${s.get_state()}")
+
+    val log = s.get_log() as java.util.ArrayList<*>
+    println("Log: $log")
+
+    // Verify log contents
+    if (!log.contains("idle:start:push")) {
+        println("FAIL: Expected 'idle:start:push' in log")
+        exitProcess(1)
+    }
+    if (!log.contains("working:process:before_pop")) {
+        println("FAIL: Expected 'working:process:before_pop' in log")
+        exitProcess(1)
+    }
+    if (log.contains("working:process:after_pop")) {
+        println("FAIL: Should NOT have 'working:process:after_pop' in log")
+        exitProcess(1)
+    }
+
+    println("PASS: Transition pop works correctly")
+}

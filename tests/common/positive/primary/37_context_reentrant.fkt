@@ -1,0 +1,88 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+@@system ContextReentrantTest {
+    interface:
+        outer(x: Int): String
+        inner(y: Int): String
+        deeply_nested(z: Int): String
+        get_both(a: Int, b: Int): String
+
+    machine:
+        $Ready {
+            outer(x: Int): String {
+                // Set our return before calling inner
+                @@:return = "outer_initial"
+
+                // Call inner - should NOT clobber our return
+                val inner_result = this.inner(@@.x * 10) as String
+
+                // Our return should still be accessible
+                // Update it with combined result
+                @@:return = "outer:" + @@.x + ",inner:" + inner_result
+            }
+
+            inner(y: Int): String {
+                // Inner has its own context
+                // @@.y should be inner's param, not outer's
+                @@:return = @@.y.toString()
+            }
+
+            deeply_nested(z: Int): String {
+                // 3 levels deep
+                val outer_result = this.outer(@@.z) as String
+                @@:return = "deep:" + @@.z + "," + outer_result
+            }
+
+            get_both(a: Int, b: Int): String {
+                // Test that we can access multiple params
+                val result_a = this.inner(@@.a) as String
+                val result_b = this.inner(@@.b) as String
+                // After both inner calls, @@.a and @@.b should still be our params
+                @@:return = "a=" + @@.a + ",b=" + @@.b + ",results=" + result_a + "+" + result_b
+            }
+        }
+}
+
+fun main() {
+    println("=== Test 37: Context Reentrant ===")
+    val s = @@ContextReentrantTest()
+
+    // Test 1: Simple nesting - outer calls inner
+    var result = s.outer(5) as String
+    var expected = "outer:5,inner:50"
+    if (result != expected) {
+        println("FAIL: Expected '$expected', got '$result'")
+        exitProcess(1)
+    }
+    println("1. outer(5) = '$result'")
+
+    // Test 2: Inner alone
+    result = s.inner(42) as String
+    if (result != "42") {
+        println("FAIL: Expected '42', got '$result'")
+        exitProcess(1)
+    }
+    println("2. inner(42) = '$result'")
+
+    // Test 3: Deep nesting (3 levels)
+    result = s.deeply_nested(3) as String
+    expected = "deep:3,outer:3,inner:30"
+    if (result != expected) {
+        println("FAIL: Expected '$expected', got '$result'")
+        exitProcess(1)
+    }
+    println("3. deeply_nested(3) = '$result'")
+
+    // Test 4: Multiple inner calls, params preserved
+    result = s.get_both(10, 20) as String
+    expected = "a=10,b=20,results=10+20"
+    if (result != expected) {
+        println("FAIL: Expected '$expected', got '$result'")
+        exitProcess(1)
+    }
+    println("4. get_both(10, 20) = '$result'")
+
+    println("PASS: Context reentrant works correctly")
+}

@@ -1,0 +1,101 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+@@system StateVarPushPop {
+    interface:
+        increment(): Int
+        get_count(): Int
+        save_and_go()
+        restore()
+
+    machine:
+        $Counter {
+            $.count: Int = 0
+
+            increment(): Int {
+                $.count = $.count + 1
+                return $.count
+            }
+
+            get_count(): Int {
+                return $.count
+            }
+
+            save_and_go() {
+                `push$
+                -> $Other
+            }
+        }
+
+        $Other {
+            $.other_count: Int = 100
+
+            restore() {
+                `-> pop$
+            }
+
+            increment(): Int {
+                $.other_count = $.other_count + 1
+                return $.other_count
+            }
+
+            get_count(): Int {
+                return $.other_count
+            }
+        }
+}
+
+fun main() {
+    println("=== Test 12: State Variable Push/Pop ===")
+    val s = StateVarPushPop()
+
+    // Increment counter to 3
+    s.increment()
+    s.increment()
+    s.increment()
+    var count = s.get_count() as Int
+    if (count != 3) {
+        throw RuntimeException("Expected 3, got $count")
+    }
+    println("Counter before push: $count")
+
+    // Push and go to Other state
+    s.save_and_go()
+    println("Pushed and transitioned to Other")
+
+    // In Other state, count should be 100 (Other's state var)
+    count = s.get_count() as Int
+    if (count != 100) {
+        throw RuntimeException("Expected 100 in Other state, got $count")
+    }
+    println("Other state count: $count")
+
+    // Increment in Other
+    s.increment()
+    count = s.get_count() as Int
+    if (count != 101) {
+        throw RuntimeException("Expected 101 after increment, got $count")
+    }
+    println("Other state after increment: $count")
+
+    // Pop back - should restore Counter with count=3
+    s.restore()
+    println("Popped back to Counter")
+
+    count = s.get_count() as Int
+    if (count != 3) {
+        throw RuntimeException("Expected 3 after pop (preserved), got $count")
+    }
+    println("Counter after pop: $count")
+
+    // Increment to verify it works
+    s.increment()
+    count = s.get_count() as Int
+    if (count != 4) {
+        throw RuntimeException("Expected 4, got $count")
+    }
+    println("Counter after increment: $count")
+
+    println("PASS: State variables preserved across push/pop")
+}
