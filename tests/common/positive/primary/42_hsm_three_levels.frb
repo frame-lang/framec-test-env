@@ -1,0 +1,118 @@
+@@target ruby
+
+@@system HSMThreeLevels {
+    interface:
+        handle_at_grandchild()
+        forward_to_child()
+        forward_to_parent()
+        forward_through_all()
+        get_log(): list
+
+    machine:
+        $Grandchild => $Child {
+            $.grandchild_var: int = 1
+
+            handle_at_grandchild() {
+                val = $.grandchild_var
+                self.log.push("Grandchild:handled(var=#{val})")
+            }
+
+            forward_to_child() {
+                self.log.push("Grandchild:forward_to_child")
+                => $^
+            }
+
+            forward_to_parent() {
+                self.log.push("Grandchild:forward_to_parent")
+                => $^
+            }
+
+            forward_through_all() {
+                self.log.push("Grandchild:forward_through_all")
+                => $^
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+
+        $Child => $Parent {
+            $.child_var: int = 10
+
+            forward_to_child() {
+                val = $.child_var
+                self.log.push("Child:handled(var=#{val})")
+            }
+
+            forward_to_parent() {
+                val = $.child_var
+                self.log.push("Child:forward_to_parent(var=#{val})")
+                => $^
+            }
+
+            forward_through_all() {
+                val = $.child_var
+                self.log.push("Child:forward_through_all(var=#{val})")
+                => $^
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+
+        $Parent {
+            $.parent_var: int = 100
+
+            forward_to_parent() {
+                val = $.parent_var
+                self.log.push("Parent:handled(var=#{val})")
+            }
+
+            forward_through_all() {
+                val = $.parent_var
+                self.log.push("Parent:forward_through_all(var=#{val})")
+            }
+
+            get_log(): list {
+                return self.log
+            }
+        }
+    domain:
+        log: list = []
+}
+
+puts("=== Test 42: HSM Three-Level Hierarchy ===")
+s = HSMThreeLevels.new
+
+puts("TC1.2.1: Three-level hierarchy compiles - PASS")
+
+s.handle_at_grandchild()
+log = s.get_log()
+raise "Expected Grandchild handler, got #{log}" unless log.include?("Grandchild:handled(var=1)")
+puts("TC1.2.2: Grandchild handles locally - PASS")
+
+s.forward_to_child()
+log = s.get_log()
+raise "Expected Grandchild forward, got #{log}" unless log.include?("Grandchild:forward_to_child")
+raise "Expected Child handler, got #{log}" unless log.include?("Child:handled(var=10)")
+puts("TC1.2.3: Forward grandchild->child - PASS")
+
+s.forward_to_parent()
+log = s.get_log()
+raise "Expected Grandchild forward, got #{log}" unless log.include?("Grandchild:forward_to_parent")
+raise "Expected Child forward, got #{log}" unless log.include?("Child:forward_to_parent(var=10)")
+raise "Expected Parent handler, got #{log}" unless log.include?("Parent:handled(var=100)")
+puts("TC1.2.4: Forward grandchild->child->parent - PASS")
+
+s.forward_through_all()
+log = s.get_log()
+raise "Expected Grandchild, got #{log}" unless log.include?("Grandchild:forward_through_all")
+raise "Expected Child, got #{log}" unless log.include?("Child:forward_through_all(var=10)")
+raise "Expected Parent, got #{log}" unless log.include?("Parent:forward_through_all(var=100)")
+puts("TC1.2.5: Full chain forward - PASS")
+
+puts("TC1.2.6: State vars isolated (grandchild=1, child=10, parent=100) - PASS")
+
+puts("PASS: HSM three-level hierarchy works correctly")

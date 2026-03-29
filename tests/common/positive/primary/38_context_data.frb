@@ -1,0 +1,82 @@
+@@target ruby
+
+# Test: Context Data (@@:data)
+# Validates call-scoped data that persists across handler -> <$ -> $> chain
+
+@@system ContextDataTest {
+    interface:
+        process_with_data(value: int): str
+        check_data_isolation(): str
+        transition_preserves_data(x: int): str
+
+    machine:
+        $Start {
+            process_with_data(value: int): str {
+                # Set data in handler
+                @@:data["input"] = @@.value
+                @@:data["trace"] = ["handler"]
+
+                @@:return = "processed:" + @@:data["input"].to_s
+            }
+
+            check_data_isolation(): str {
+                # Set data, call another method, verify our data preserved
+                @@:data["outer"] = "outer_value"
+
+                # This creates its own context with its own data
+                inner_result = self.process_with_data(99)
+
+                # Our data should still be here
+                @@:return = "outer_data=" + @@:data["outer"] + ",inner=" + inner_result
+            }
+
+            transition_preserves_data(x: int): str {
+                # Set data, transition, verify data available in lifecycle handlers
+                @@:data["started_in"] = "Start"
+                @@:data["value"] = @@.x.to_s
+                -> $End
+            }
+
+            <$() {
+                # Exit handler can access data set by event handler
+                @@:data["exit_seen"] = "true"
+            }
+        }
+
+        $End {
+            $>() {
+                # Enter handler can access data set by previous handlers
+                @@:data["ended_in"] = "End"
+
+                # Build final result from accumulated data
+                @@:return = "from=#{@@:data['started_in']},to=#{@@:data['ended_in']},value=#{@@:data['value']},exit_seen=#{@@:data['exit_seen']}"
+            }
+        }
+}
+
+puts("=== Test 38: Context Data ===")
+
+# Test 1: Basic data set/get
+s1 = ContextDataTest.new
+result = s1.process_with_data(42)
+raise "Expected 'processed:42', got '#{result}'" unless result == "processed:42"
+puts("1. process_with_data(42) = '#{result}'")
+
+# Test 2: Data isolation between nested calls
+s2 = ContextDataTest.new
+result = s2.check_data_isolation()
+expected = "outer_data=outer_value,inner=processed:99"
+raise "Expected '#{expected}', got '#{result}'" unless result == expected
+puts("2. check_data_isolation() = '#{result}'")
+
+# Test 3: Data preserved across transition (handler -> <$ -> $>)
+s3 = ContextDataTest.new
+result = s3.transition_preserves_data(100)
+# Data should flow: handler sets -> exit accesses -> enter accesses and returns
+raise "Expected 'from=Start' in '#{result}'" unless result.include?("from=Start")
+raise "Expected 'to=End' in '#{result}'" unless result.include?("to=End")
+raise "Expected 'value=100' in '#{result}'" unless result.include?("value=100")
+raise "Expected 'exit_seen=true' in '#{result}'" unless result.include?("exit_seen=true")
+puts("3. transition_preserves_data(100) = '#{result}'")
+
+puts("PASS: Context data works correctly")

@@ -1,0 +1,122 @@
+@@target swift
+
+import Foundation
+
+@@persist
+@@system PersistStack {
+    interface:
+        push_and_go()
+        pop_back()
+        get_state(): string
+        get_depth(): number
+
+    machine:
+        $Start {
+            push_and_go() {
+                self.depth = self.depth + 1
+                push$
+                -> $Middle
+            }
+
+            pop_back() {
+                // nothing to pop
+            }
+
+            get_state(): string {
+                return "start"
+            }
+
+            get_depth(): number {
+                return self.depth
+            }
+        }
+
+        $Middle {
+            push_and_go() {
+                self.depth = self.depth + 1
+                push$
+                -> $End
+            }
+
+            pop_back() {
+                self.depth = self.depth - 1
+                -> pop$
+            }
+
+            get_state(): string {
+                return "middle"
+            }
+
+            get_depth(): number {
+                return self.depth
+            }
+        }
+
+        $End {
+            push_and_go() {
+                // can't go further
+            }
+
+            pop_back() {
+                self.depth = self.depth - 1
+                -> pop$
+            }
+
+            get_state(): string {
+                return "end"
+            }
+
+            get_depth(): number {
+                return self.depth
+            }
+        }
+    domain:
+        depth: number = 0
+}
+
+// main
+    print("=== Test 25: Persist Stack (Swift) ===")
+
+    // Test 1: Build up a stack
+    let s1 = @@PersistStack()
+    assert(s1.get_state() == "start", "Expected start, got \(s1.get_state())")
+
+    s1.push_and_go()  // Start -> Middle (push Start)
+    assert(s1.get_state() == "middle", "Expected middle, got \(s1.get_state())")
+    assert(s1.get_depth() == 1, "Expected depth 1, got \(s1.get_depth())")
+
+    s1.push_and_go()  // Middle -> End (push Middle)
+    assert(s1.get_state() == "end", "Expected end, got \(s1.get_state())")
+    assert(s1.get_depth() == 2, "Expected depth 2, got \(s1.get_depth())")
+
+    print("1. Built stack: state=\(s1.get_state()), depth=\(s1.get_depth())")
+
+    // Test 2: Save state (should include stack)
+    let json = s1.saveState()
+    let data = try! JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [String: Any]
+    print("2. Saved data: \(json)")
+    let compartment = data["_compartment"] as! [String: Any]
+    assert((compartment["state"] as! String) == "End", "Expected End state")
+    assert(data["_state_stack"] != nil, "Expected _state_stack in saved data")
+    let stateStack = data["_state_stack"] as! [Any]
+    assert(stateStack.count == 2, "Expected 2 items in stack, got \(stateStack.count)")
+
+    // Test 3: Restore and verify stack works
+    let s2 = PersistStack.restoreState(json)
+    assert(s2.get_state() == "end", "Restored: expected end, got \(s2.get_state())")
+    assert(s2.get_depth() == 2, "Restored: expected depth 2, got \(s2.get_depth())")
+    print("3. Restored: state=\(s2.get_state()), depth=\(s2.get_depth())")
+
+    // Test 4: Pop should work after restore
+    s2.pop_back()  // End -> Middle (pop)
+    assert(s2.get_state() == "middle", "After pop: expected middle, got \(s2.get_state())")
+    assert(s2.get_depth() == 1, "After pop: expected depth 1, got \(s2.get_depth())")
+    print("4. After pop: state=\(s2.get_state()), depth=\(s2.get_depth())")
+
+    // Test 5: Pop again
+    s2.pop_back()  // Middle -> Start (pop)
+    assert(s2.get_state() == "start", "After 2nd pop: expected start, got \(s2.get_state())")
+    assert(s2.get_depth() == 0, "After 2nd pop: expected depth 0, got \(s2.get_depth())")
+    print("5. After 2nd pop: state=\(s2.get_state()), depth=\(s2.get_depth())")
+
+    print("PASS: Persist stack works correctly")

@@ -1,0 +1,68 @@
+@@target swift
+
+// Test 49: HSM Enter/Exit with Parameters
+
+@@system HSMEnterExitParams {
+    interface:
+        go_to_a()
+        go_to_sibling()
+        go_back()
+        get_log(): string[]
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_a() { -> ("starting") $ChildA }
+            get_log(): list { return self.log }
+            get_state(): str { return "Start" }
+        }
+
+        $ChildA => $Parent {
+            $>(msg: str) { self.log.append("ChildA:enter(\(msg))") }
+            <$(reason: str) { self.log.append("ChildA:exit(\(reason))") }
+            go_to_sibling() { ("leaving_A") -> ("arriving_B") $ChildB }
+            get_log(): list { return self.log }
+            get_state(): str { return "ChildA" }
+        }
+
+        $ChildB => $Parent {
+            $>(msg: str) { self.log.append("ChildB:enter(\(msg))") }
+            <$(reason: str) { self.log.append("ChildB:exit(\(reason))") }
+            go_back() { ("leaving_B") -> ("returning_A") $ChildA }
+            get_log(): list { return self.log }
+            get_state(): str { return "ChildB" }
+        }
+
+        $Parent {
+            get_log(): list { return self.log }
+            get_state(): str { return "Parent" }
+        }
+    domain:
+        log: string[] = []
+}
+
+// main
+    print("=== Test 49: HSM Enter/Exit with Params ===")
+    let s = @@HSMEnterExitParams()
+
+    s.go_to_a()
+    var log = s.get_log()
+    if !log.contains("ChildA:enter(starting)") { fatalError("Expected ChildA:enter(starting)") }
+    print("TC2.5.0: Initial transition with enter params - PASS")
+
+    s.go_to_sibling()
+    log = s.get_log()
+    if !log.contains("ChildA:exit(leaving_A)") { fatalError("Expected exit with param") }
+    print("TC2.5.1: Exit params passed correctly - PASS")
+
+    if !log.contains("ChildB:enter(arriving_B)") { fatalError("Expected enter with param") }
+    if s.get_state() != "ChildB" { fatalError("Expected ChildB") }
+    print("TC2.5.2: Enter params passed to target - PASS")
+
+    s.go_back()
+    log = s.get_log()
+    if !log.contains("ChildB:exit(leaving_B)") { fatalError("Expected ChildB exit") }
+    if !log.contains("ChildA:enter(returning_A)") { fatalError("Expected ChildA enter") }
+    print("TC2.5.3: Return transition with params - PASS")
+
+    print("PASS: HSM enter/exit with params works correctly")

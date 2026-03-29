@@ -1,0 +1,98 @@
+@@target swift
+
+// Test 50: HSM Omitted Handlers - Forwarding Behavior
+
+@@system HSMOmittedHandlers {
+    interface:
+        handled_by_child()
+        forwarded_explicitly()
+        unhandled_no_forward()
+        get_log(): string[]
+        get_state(): str
+
+    machine:
+        $Child => $Parent {
+            handled_by_child() { self.log.append("Child:handled_by_child") }
+            forwarded_explicitly() { self.log.append("Child:before_forward"); => $^ }
+            get_log(): list { return self.log }
+            get_state(): str { return "Child" }
+        }
+
+        $Parent {
+            handled_by_child() { self.log.append("Parent:handled_by_child") }
+            forwarded_explicitly() { self.log.append("Parent:forwarded_explicitly") }
+            unhandled_no_forward() { self.log.append("Parent:unhandled_no_forward") }
+            get_log(): list { return self.log }
+            get_state(): str { return "Parent" }
+        }
+    domain:
+        log: string[] = []
+}
+
+@@system HSMDefaultForward {
+    interface:
+        child_handled()
+        parent_handled()
+        both_respond()
+        get_log(): string[]
+
+    machine:
+        $Child => $Parent {
+            child_handled() { self.log.append("Child:child_handled") }
+            get_log(): list { return self.log }
+            => $^
+        }
+
+        $Parent {
+            child_handled() { self.log.append("Parent:child_handled") }
+            parent_handled() { self.log.append("Parent:parent_handled") }
+            both_respond() { self.log.append("Parent:both_respond") }
+            get_log(): list { return self.log }
+        }
+    domain:
+        log: string[] = []
+}
+
+// main
+    print("=== Test 50: HSM Omitted Handlers ===")
+
+    // Part 1: Explicit forwarding vs no forwarding
+    let s1 = @@HSMOmittedHandlers()
+
+    s1.handled_by_child()
+    var log = s1.get_log()
+    if !log.contains("Child:handled_by_child") { fatalError("Expected Child handler") }
+    if log.contains("Parent:handled_by_child") { fatalError("Parent should NOT be called") }
+    print("TC2.6.1: Handled by child, not forwarded - PASS")
+
+    s1.forwarded_explicitly()
+    log = s1.get_log()
+    if !log.contains("Child:before_forward") { fatalError("Expected Child forward") }
+    if !log.contains("Parent:forwarded_explicitly") { fatalError("Expected Parent handler") }
+    print("TC2.6.2: Explicitly forwarded to parent - PASS")
+
+    s1.unhandled_no_forward()
+    log = s1.get_log()
+    if log.contains("Parent:unhandled_no_forward") { fatalError("Unhandled should be ignored") }
+    print("TC2.6.3: Unhandled (no forward) is silently ignored - PASS")
+
+    // Part 2: State-level default forward
+    let s2 = @@HSMDefaultForward()
+
+    s2.child_handled()
+    log = s2.get_log()
+    if !log.contains("Child:child_handled") { fatalError("Expected Child handler") }
+    if log.contains("Parent:child_handled") { fatalError("Handled by child, not forwarded") }
+    print("TC2.6.4: Child handles, not forwarded - PASS")
+
+    s2.parent_handled()
+    log = s2.get_log()
+    if !log.contains("Parent:parent_handled") { fatalError("Expected Parent handler") }
+    print("TC2.6.5: Unhandled forwarded via state-level => $^ - PASS")
+
+    s2.both_respond()
+    log = s2.get_log()
+    if !log.contains("Parent:both_respond") { fatalError("Expected Parent handler") }
+    print("TC2.6.6: Default forward works for multiple events - PASS")
+
+    print("PASS: HSM omitted handlers work correctly")

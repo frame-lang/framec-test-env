@@ -1,0 +1,165 @@
+@@target swift
+
+// Behavior Tree implemented as HSM with tick-driven re-evaluation.
+
+@@system AiAgent {
+    operations:
+        set_health(v: number) { self.health = v }
+        set_enemy_distance(v: number) { self.enemy_distance = v }
+        set_enemy_health(v: number) { self.enemy_health = v }
+
+    interface:
+        tick()
+        get_state(): string = "Unknown"
+        get_action_log(): string = ""
+
+    machine:
+        $Root {
+            $>() { self.action_log = "" }
+            tick() {
+                if (self.health < 20) { -> $Flee }
+                if (self.enemy_distance < 50) { -> $Approach }
+                -> $Patrol
+            }
+            get_state(): string { return "Root" }
+        }
+
+        $Flee {
+            $>() { self.action_log = self.action_log + "flee," }
+            tick() {
+                if (self.health >= 20) { -> $Root }
+                self.enemy_distance = self.enemy_distance + 10
+                self.health = self.health + 5
+                self.action_log = self.action_log + "flee,"
+            }
+            get_state(): string { return "Flee" }
+        }
+
+        $Approach {
+            $>() { self.action_log = self.action_log + "approach," }
+            tick() {
+                if (self.health < 20) { -> $Flee }
+                if (self.enemy_distance >= 50) { -> $Root }
+                if (self.enemy_distance > 5) {
+                    self.enemy_distance = self.enemy_distance - 10
+                    self.action_log = self.action_log + "approach,"
+                } else {
+                    -> $Attack
+                }
+            }
+            get_state(): string { return "Approach" }
+        }
+
+        $Attack {
+            $>() { self.action_log = self.action_log + "attack," }
+            tick() {
+                if (self.health < 20) { -> $Flee }
+                if (self.enemy_distance > 5) { -> $Approach }
+                if (self.enemy_health <= 0) {
+                    self.enemy_distance = 100
+                    -> $Root
+                }
+                self.enemy_health = self.enemy_health - 25
+                self.action_log = self.action_log + "attack,"
+            }
+            get_state(): string { return "Attack" }
+        }
+
+        $Patrol {
+            $>() { self.action_log = self.action_log + "patrol," }
+            tick() {
+                if (self.enemy_distance < 50) { -> $Approach }
+                if (self.health < 20) { -> $Flee }
+                self.patrol_step = self.patrol_step + 1
+                self.action_log = self.action_log + "patrol,"
+            }
+            get_state(): string { return "Patrol" }
+        }
+
+    domain:
+        health: number = 100
+        enemy_distance: number = 100
+        enemy_health: number = 100
+        patrol_step: number = 0
+        action_log: string = ""
+}
+
+func assert_state(_ agent: AiAgent, _ expected: String, _ label: String) {
+    let actual = agent.get_state()
+    if actual != expected {
+        print("FAIL: \(label) -- expected '\(expected)', got '\(actual)'")
+        fatalError("State assertion failed: \(label)")
+    }
+}
+
+func test_priority_interrupt() {
+    let agent = @@AiAgent()
+    agent.tick()
+    assert_state(agent, "Patrol", "initial patrol")
+
+    agent.set_enemy_distance(30)
+    agent.tick()
+    assert_state(agent, "Approach", "enemy triggers approach")
+
+    agent.set_health(10)
+    agent.tick()
+    assert_state(agent, "Flee", "low health interrupts combat")
+
+    agent.set_health(50)
+    agent.set_enemy_distance(20)
+    agent.tick()
+    assert_state(agent, "Root", "flee exits to root")
+    agent.tick()
+    assert_state(agent, "Approach", "health recovered, back to combat")
+
+    print("PASS: BT priority interrupt")
+}
+
+func test_sequence_completion() {
+    let agent = @@AiAgent()
+    agent.set_enemy_distance(30)
+    agent.tick()
+    assert_state(agent, "Approach", "start approach")
+
+    agent.tick()
+    assert_state(agent, "Approach", "still approaching")
+
+    agent.set_enemy_distance(5)
+    agent.tick()
+    assert_state(agent, "Attack", "in range, attacking")
+
+    agent.tick()
+    assert_state(agent, "Attack", "still attacking")
+
+    agent.set_enemy_health(0)
+    agent.tick()
+    assert_state(agent, "Root", "enemy dead, back to root")
+    agent.tick()
+    assert_state(agent, "Patrol", "enemy dead, patrol")
+
+    print("PASS: BT sequence completion")
+}
+
+func test_re_evaluation() {
+    let agent = @@AiAgent()
+    agent.set_enemy_distance(30)
+    agent.tick()
+    assert_state(agent, "Approach", "approaching")
+
+    agent.set_enemy_distance(60)
+    agent.tick()
+    assert_state(agent, "Root", "enemy fled, root")
+    agent.tick()
+    assert_state(agent, "Patrol", "enemy fled, patrol")
+
+    agent.set_enemy_distance(10)
+    agent.tick()
+    assert_state(agent, "Approach", "enemy back, approach again")
+
+    print("PASS: BT re-evaluation")
+}
+
+test_priority_interrupt()
+test_sequence_completion()
+test_re_evaluation()
+print("PASS: All behavior tree tests passed")

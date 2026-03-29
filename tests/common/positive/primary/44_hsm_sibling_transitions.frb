@@ -1,0 +1,77 @@
+@@target ruby
+
+@@system HSMSiblingTransitions {
+    interface:
+        go_to_b()
+        go_to_a()
+        forward_action()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $ChildA => $Parent {
+            $>() { self.log.push("ChildA:enter") }
+            <$() { self.log.push("ChildA:exit") }
+            go_to_b() { self.log.push("ChildA:go_to_b"); -> $ChildB }
+            forward_action() { self.log.push("ChildA:forward"); => $^ }
+            get_log(): list { return self.log }
+            get_state(): str { return "ChildA" }
+        }
+
+        $ChildB => $Parent {
+            $>() { self.log.push("ChildB:enter") }
+            <$() { self.log.push("ChildB:exit") }
+            go_to_a() { self.log.push("ChildB:go_to_a"); -> $ChildA }
+            forward_action() { self.log.push("ChildB:forward"); => $^ }
+            get_log(): list { return self.log }
+            get_state(): str { return "ChildB" }
+        }
+
+        $Parent {
+            forward_action() { self.log.push("Parent:forward_action") }
+            get_log(): list { return self.log }
+            get_state(): str { return "Parent" }
+        }
+    domain:
+        log: list = []
+}
+
+puts("=== Test 44: HSM Sibling Transitions ===")
+s = HSMSiblingTransitions.new
+
+log = s.get_log()
+raise "Expected ChildA:enter on init, got #{log}" unless log.include?("ChildA:enter")
+raise "Expected ChildA, got #{s.get_state()}" unless s.get_state() == "ChildA"
+puts("TC1.4.0: Initial state ChildA with enter - PASS")
+
+s.go_to_b()
+raise "Expected ChildB, got #{s.get_state()}" unless s.get_state() == "ChildB"
+puts("TC1.4.1: Transition A->B works - PASS")
+
+log = s.get_log()
+raise "Expected ChildA:exit, got #{log}" unless log.include?("ChildA:exit")
+puts("TC1.4.2: Exit handler fires on source - PASS")
+
+raise "Expected ChildB:enter, got #{log}" unless log.include?("ChildB:enter")
+puts("TC1.4.3: Enter handler fires on target - PASS")
+
+s.forward_action()
+log = s.get_log()
+raise "Expected ChildB:forward, got #{log}" unless log.include?("ChildB:forward")
+raise "Expected Parent handler, got #{log}" unless log.include?("Parent:forward_action")
+puts("TC1.4.4: Parent relationship preserved - PASS")
+
+s.go_to_a()
+raise "Expected ChildA, got #{s.get_state()}" unless s.get_state() == "ChildA"
+log = s.get_log()
+raise "Expected ChildB:exit once, got #{log}" unless log.count("ChildB:exit") == 1
+raise "Expected ChildA:enter twice, got #{log}" unless log.count("ChildA:enter") == 2
+puts("TC1.4.5: Transition B->A works with enter/exit - PASS")
+
+s.forward_action()
+log = s.get_log()
+raise "Expected ChildA:forward, got #{log}" unless log.include?("ChildA:forward")
+raise "Expected 2 Parent handlers, got #{log}" unless log.count("Parent:forward_action") == 2
+puts("TC1.4.6: ChildA forwards after returning - PASS")
+
+puts("PASS: HSM sibling transitions work correctly")

@@ -1,0 +1,83 @@
+@@target swift
+
+// Test 41: HSM Single Parent Relationship
+
+@@system HSMSingleParent {
+    interface:
+        child_only()
+        forward_to_parent()
+        get_log(): string[]
+        get_state(): str
+
+    machine:
+        $Child => $Parent {
+            child_only() {
+                self.log.append("Child:child_only")
+            }
+
+            forward_to_parent() {
+                self.log.append("Child:before_forward")
+                => $^
+                self.log.append("Child:after_forward")
+            }
+
+            get_log(): list {
+                return self.log
+            }
+
+            get_state(): str {
+                return "Child"
+            }
+        }
+
+        $Parent {
+            forward_to_parent() {
+                self.log.append("Parent:forward_to_parent")
+            }
+
+            get_log(): list {
+                return self.log
+            }
+
+            get_state(): str {
+                return "Parent"
+            }
+        }
+    domain:
+        log: string[] = []
+}
+
+// main
+    print("=== Test 41: HSM Single Parent ===")
+    let s = @@HSMSingleParent()
+
+    // TC1.1.1: Child declares parent with `=> $Parent` syntax (verified by compilation)
+    print("TC1.1.1: Child-Parent relationship compiles - PASS")
+
+    // TC1.1.2: Child can forward events to parent
+    s.forward_to_parent()
+    var log = s.get_log()
+    if !log.contains("Child:before_forward") { fatalError("Expected Child:before_forward in log, got \(String(describing: log))") }
+    if !log.contains("Parent:forward_to_parent") { fatalError("Expected Parent:forward_to_parent in log, got \(String(describing: log))") }
+    print("TC1.1.2: Child forwards to parent - PASS (log: \(String(describing: log)))")
+
+    // TC1.1.3: Child remains the current state (no transition occurs on forward)
+    let state = s.get_state()
+    if state != "Child" { fatalError("Expected state 'Child', got '\(state)'") }
+    print("TC1.1.3: Child remains current state after forward - PASS")
+
+    // TC1.1.4: Parent handler executes and returns control
+    if !log.contains("Child:after_forward") { fatalError("Expected Child:after_forward in log (after parent), got \(String(describing: log))") }
+    let idx_parent = log.firstIndex(of: "Parent:forward_to_parent")!
+    let idx_after = log.firstIndex(of: "Child:after_forward")!
+    if idx_after <= idx_parent { fatalError("Expected Child:after_forward after Parent handler") }
+    print("TC1.1.4: Parent executes and returns control - PASS")
+
+    // TC1.1.5: Child-only event not forwarded
+    s.child_only()
+    log = s.get_log()
+    let count = log.filter { $0 == "Child:child_only" }.count
+    if count != 1 { fatalError("Expected exactly 1 Child:child_only, got \(String(describing: log))") }
+    print("TC1.1.5: Child-only event handled locally - PASS")
+
+    print("PASS: HSM single parent relationship works correctly")

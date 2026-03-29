@@ -1,0 +1,97 @@
+@@target swift
+
+import Foundation
+
+@@persist
+@@system PersistTest {
+    interface:
+        set_value(v: number)
+        get_value(): number
+        go_active()
+        go_idle()
+
+    machine:
+        $Idle {
+            set_value(v: number) {
+                self.value = v
+            }
+
+            get_value(): number {
+                return self.value
+            }
+
+            go_active() {
+                -> $Active
+            }
+
+            go_idle() {
+                // Already idle
+            }
+        }
+
+        $Active {
+            set_value(v: number) {
+                self.value = v * 2
+            }
+
+            get_value(): number {
+                return self.value
+            }
+
+            go_active() {
+                // Already active
+            }
+
+            go_idle() {
+                -> $Idle
+            }
+        }
+    domain:
+        value: number = 0
+        name: string = "default"
+}
+
+// main
+    print("=== Test 23: Persist Basic (Swift) ===")
+
+    // Test 1: Create and modify system
+    let s1 = @@PersistTest()
+    s1.set_value(10)
+    s1.go_active()
+    s1.set_value(5)  // Should be doubled to 10 in Active state
+
+    // Test 2: Save state
+    let json = s1.saveState()
+    let data = try! JSONSerialization.jsonObject(with: json.data(using: .utf8)!) as! [String: Any]
+    let compartment = data["_compartment"] as! [String: Any]
+    if (compartment["state"] as! String) != "Active" {
+        fatalError("Expected 'Active', got \(compartment["state"]!)")
+    }
+    if (data["value"] as! Int) != 10 {
+        fatalError("Expected 10, got \(data["value"]!)")
+    }
+    print("1. Saved state: \(json)")
+
+    // Test 3: Restore state
+    let s2 = PersistTest.restoreState(json)
+    if s2.get_value() != 10 {
+        fatalError("Expected 10, got \(s2.get_value())")
+    }
+    print("2. Restored value: \(s2.get_value())")
+
+    // Test 4: Verify state is preserved (Active state doubles)
+    s2.set_value(3)  // Should be doubled to 6 in Active state
+    if s2.get_value() != 6 {
+        fatalError("Expected 6, got \(s2.get_value())")
+    }
+    print("3. After set_value(3) in Active: \(s2.get_value())")
+
+    // Test 5: Verify transitions work after restore
+    s2.go_idle()
+    s2.set_value(4)  // Should NOT be doubled in Idle state
+    if s2.get_value() != 4 {
+        fatalError("Expected 4, got \(s2.get_value())")
+    }
+    print("4. After go_idle, set_value(4): \(s2.get_value())")
+
+    print("PASS: Persist basic works correctly")

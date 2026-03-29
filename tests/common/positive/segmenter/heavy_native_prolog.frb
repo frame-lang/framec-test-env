@@ -1,0 +1,63 @@
+@@target ruby
+
+# Test: Heavy native prolog and epilog with edge-case syntax.
+
+require 'json'
+
+# Helper class with braces in strings
+class NativeHelper
+    TEMPLATE = '{"@@target": "not_real", "-> $State": "just a string"}'
+
+    def self.process(data)
+        result = JSON.generate({"key" => "value with { braces }"})
+        # Comment with -> $Transition and => $^ and push$
+        return result
+    end
+end
+
+# Global with @@ in string
+GLOBAL_CONFIG = {
+    "description" => "Config with @@system-like syntax",
+    "pattern" => "-> $Start",
+}
+
+@@system HeavyNativeProlog {
+    interface:
+        run_test()
+
+    machine:
+        $Start {
+            run_test() {
+                h = NativeHelper
+                result = h.process(GLOBAL_CONFIG)
+                if result != nil
+                    puts("PASS: Heavy native prolog handled correctly")
+                else
+                    raise "FAIL"
+                end
+            }
+        }
+}
+
+# Heavy epilog
+class PostSystem
+    def initialize
+        @data = {"@@system" => "in dict", "-> $State" => "in dict"}
+    end
+
+    def run
+        # This mentions Frame constructs but is native code
+        # -> $NotATransition
+        # => $^
+        return true
+    end
+end
+
+def epilog_function
+    p = PostSystem.new
+    return p.run()
+end
+
+s = HeavyNativeProlog.new
+s.run_test()
+raise "epilog_function failed" unless epilog_function() == true

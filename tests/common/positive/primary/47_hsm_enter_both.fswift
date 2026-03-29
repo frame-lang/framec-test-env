@@ -1,0 +1,68 @@
+@@target swift
+
+// Test 47: HSM Enter in Both Child and Parent
+
+@@system HSMEnterBoth {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): string[]
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): list { return self.log }
+            get_state(): str { return "Start" }
+        }
+
+        $Child => $Parent {
+            $>() { self.log.append("Child:enter") }
+            go_to_parent() { -> $Parent }
+            get_log(): list { return self.log }
+            get_state(): str { return "Child" }
+        }
+
+        $Parent {
+            $>() { self.log.append("Parent:enter") }
+            go_to_child() { -> $Child }
+            get_log(): list { return self.log }
+            get_state(): str { return "Parent" }
+        }
+    domain:
+        log: string[] = []
+}
+
+// main
+    print("=== Test 47: HSM Enter in Both ===")
+    let s = @@HSMEnterBoth()
+
+    s.go_to_child()
+    var log = s.get_log()
+    if !log.contains("Child:enter") { fatalError("Expected Child:enter") }
+    if log.contains("Parent:enter") { fatalError("Parent:enter should NOT fire when entering child") }
+    if s.get_state() != "Child" { fatalError("Expected Child") }
+    print("TC2.3.1: Only child's enter fires when entering child - PASS")
+
+    s.go_to_parent()
+    log = s.get_log()
+    if !log.contains("Parent:enter") { fatalError("Expected Parent:enter") }
+    if s.get_state() != "Parent" { fatalError("Expected Parent") }
+    print("TC2.3.2: Parent's enter fires when transitioning to parent - PASS")
+
+    let childCount = log.filter { $0 == "Child:enter" }.count
+    let parentCount = log.filter { $0 == "Parent:enter" }.count
+    if childCount != 1 { fatalError("Expected exactly 1 Child:enter") }
+    if parentCount != 1 { fatalError("Expected exactly 1 Parent:enter") }
+    print("TC2.3.3: No implicit cascading of enter handlers - PASS")
+
+    s.go_to_child()
+    log = s.get_log()
+    let childCount2 = log.filter { $0 == "Child:enter" }.count
+    let parentCount2 = log.filter { $0 == "Parent:enter" }.count
+    if childCount2 != 2 { fatalError("Expected 2 Child:enter") }
+    if parentCount2 != 1 { fatalError("Expected still 1 Parent:enter") }
+    print("TC2.3.4: Re-entering child fires child enter again - PASS")
+
+    print("PASS: HSM enter in both works correctly")

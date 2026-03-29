@@ -1,0 +1,95 @@
+@@target ruby
+
+@@system HSMOmittedHandlers {
+    interface:
+        handled_by_child()
+        forwarded_explicitly()
+        unhandled_no_forward()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Child => $Parent {
+            handled_by_child() { self.log.push("Child:handled_by_child") }
+            forwarded_explicitly() { self.log.push("Child:before_forward"); => $^ }
+            get_log(): list { return self.log }
+            get_state(): str { return "Child" }
+        }
+
+        $Parent {
+            handled_by_child() { self.log.push("Parent:handled_by_child") }
+            forwarded_explicitly() { self.log.push("Parent:forwarded_explicitly") }
+            unhandled_no_forward() { self.log.push("Parent:unhandled_no_forward") }
+            get_log(): list { return self.log }
+            get_state(): str { return "Parent" }
+        }
+    domain:
+        log: list = []
+}
+
+@@system HSMDefaultForward {
+    interface:
+        child_handled()
+        parent_handled()
+        both_respond()
+        get_log(): list
+
+    machine:
+        $Child => $Parent {
+            child_handled() { self.log.push("Child:child_handled") }
+            get_log(): list { return self.log }
+            => $^
+        }
+
+        $Parent {
+            child_handled() { self.log.push("Parent:child_handled") }
+            parent_handled() { self.log.push("Parent:parent_handled") }
+            both_respond() { self.log.push("Parent:both_respond") }
+            get_log(): list { return self.log }
+        }
+    domain:
+        log: list = []
+}
+
+puts("=== Test 50: HSM Omitted Handlers ===")
+
+# Part 1: Explicit forwarding vs no forwarding
+s1 = HSMOmittedHandlers.new
+
+s1.handled_by_child()
+log = s1.get_log()
+raise "Expected Child handler, got #{log}" unless log.include?("Child:handled_by_child")
+raise "Parent should NOT be called, got #{log}" if log.include?("Parent:handled_by_child")
+puts("TC2.6.1: Handled by child, not forwarded - PASS")
+
+s1.forwarded_explicitly()
+log = s1.get_log()
+raise "Expected Child forward, got #{log}" unless log.include?("Child:before_forward")
+raise "Expected Parent handler, got #{log}" unless log.include?("Parent:forwarded_explicitly")
+puts("TC2.6.2: Explicitly forwarded to parent - PASS")
+
+s1.unhandled_no_forward()
+log = s1.get_log()
+raise "Unhandled should be ignored, got #{log}" if log.include?("Parent:unhandled_no_forward")
+puts("TC2.6.3: Unhandled (no forward) is silently ignored - PASS")
+
+# Part 2: State-level default forward
+s2 = HSMDefaultForward.new
+
+s2.child_handled()
+log = s2.get_log()
+raise "Expected Child handler, got #{log}" unless log.include?("Child:child_handled")
+raise "Handled by child, not forwarded, got #{log}" if log.include?("Parent:child_handled")
+puts("TC2.6.4: Child handles, not forwarded - PASS")
+
+s2.parent_handled()
+log = s2.get_log()
+raise "Expected Parent handler, got #{log}" unless log.include?("Parent:parent_handled")
+puts("TC2.6.5: Unhandled forwarded via state-level => $^ - PASS")
+
+s2.both_respond()
+log = s2.get_log()
+raise "Expected Parent handler, got #{log}" unless log.include?("Parent:both_respond")
+puts("TC2.6.6: Default forward works for multiple events - PASS")
+
+puts("PASS: HSM omitted handlers work correctly")

@@ -1,0 +1,149 @@
+@@target swift
+
+// Documentation Example: HSM with History (History203)
+// Refactored common gotoC behavior into parent state $AB
+
+@@system HistoryHSM {
+    interface:
+        gotoA()
+        gotoB()
+        gotoC()
+        goBack()
+        get_state(): string
+        get_log(): string[]
+
+    machine:
+        $Waiting {
+            $>() {
+                self.log_msg("In $Waiting")
+            }
+            gotoA() {
+                self.log_msg("gotoA")
+                -> $A
+            }
+            gotoB() {
+                self.log_msg("gotoB")
+                -> $B
+            }
+            get_state(): string {
+                return "Waiting"
+            }
+            get_log(): string[] {
+                return self.log
+            }
+        }
+
+        $A => $AB {
+            $>() {
+                self.log_msg("In $A")
+            }
+            gotoB() {
+                self.log_msg("gotoB")
+                -> $B
+            }
+            get_state(): string {
+                return "A"
+            }
+            get_log(): string[] {
+                return self.log
+            }
+            => $^
+        }
+
+        $B => $AB {
+            $>() {
+                self.log_msg("In $B")
+            }
+            gotoA() {
+                self.log_msg("gotoA")
+                -> $A
+            }
+            get_state(): string {
+                return "B"
+            }
+            get_log(): string[] {
+                return self.log
+            }
+            => $^
+        }
+
+        $AB {
+            gotoC() {
+                self.log_msg("gotoC in $AB")
+                push$
+                -> $C
+            }
+        }
+
+        $C {
+            $>() {
+                self.log_msg("In $C")
+            }
+            goBack() {
+                self.log_msg("goBack")
+                -> pop$
+            }
+            get_state(): string {
+                return "C"
+            }
+            get_log(): string[] {
+                return self.log
+            }
+        }
+
+    actions:
+        log_msg(msg: string) {
+            self.log.append(msg)
+        }
+
+    domain:
+        log: string[] = []
+}
+
+// main
+    print("=== Test 34: Doc History HSM ===")
+    let h = @@HistoryHSM()
+
+    // Start in Waiting
+    if h.get_state() != "Waiting" {
+        fatalError("Expected 'Waiting', got '\(h.get_state())'")
+    }
+
+    // Go to A
+    h.gotoA()
+    if h.get_state() != "A" {
+        fatalError("Expected 'A', got '\(h.get_state())'")
+    }
+
+    // Go to C (using inherited gotoC from $AB)
+    h.gotoC()
+    if h.get_state() != "C" {
+        fatalError("Expected 'C', got '\(h.get_state())'")
+    }
+
+    // Go back (should pop to A)
+    h.goBack()
+    if h.get_state() != "A" {
+        fatalError("Expected 'A' after goBack, got '\(h.get_state())'")
+    }
+
+    // Go to B
+    h.gotoB()
+    if h.get_state() != "B" {
+        fatalError("Expected 'B', got '\(h.get_state())'")
+    }
+
+    // Go to C (again using inherited gotoC)
+    h.gotoC()
+    if h.get_state() != "C" {
+        fatalError("Expected 'C', got '\(h.get_state())'")
+    }
+
+    // Go back (should pop to B)
+    h.goBack()
+    if h.get_state() != "B" {
+        fatalError("Expected 'B' after goBack, got '\(h.get_state())'")
+    }
+
+    print("Log: \(h.get_log())")
+    print("PASS: HSM with history works correctly")

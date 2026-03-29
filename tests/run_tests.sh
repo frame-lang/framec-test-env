@@ -63,6 +63,8 @@ GO_OUT="$TEST_ENV_ROOT/output/go/tests"
 JS_OUT="$TEST_ENV_ROOT/output/javascript/tests"
 PHP_OUT="$TEST_ENV_ROOT/output/php/tests"
 KOTLIN_OUT="$TEST_ENV_ROOT/output/kotlin/tests"
+SWIFT_OUT="$TEST_ENV_ROOT/output/swift/tests"
+RUBY_OUT="$TEST_ENV_ROOT/output/ruby/tests"
 
 # Colors
 RED='\033[0;31m'
@@ -100,6 +102,8 @@ while [[ $# -gt 0 ]]; do
         --javascript|--js) FILTER_LANG="javascript" ;;
         --php) FILTER_LANG="php" ;;
         --kotlin|--kt) FILTER_LANG="kotlin" ;;
+        --swift) FILTER_LANG="swift" ;;
+        --ruby|--rb) FILTER_LANG="ruby" ;;
         --langs|-l)
             # Parse comma-separated language list (py,ts,rs,c -> python typescript rust c)
             FILTER_LANGS=""
@@ -148,7 +152,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Create output directories
-mkdir -p "$PYTHON_OUT" "$TS_OUT" "$RUST_OUT" "$C_OUT" "$CPP_OUT" "$JAVA_OUT" "$CSHARP_OUT" "$GO_OUT" "$JS_OUT" "$PHP_OUT" "$KOTLIN_OUT"
+mkdir -p "$PYTHON_OUT" "$TS_OUT" "$RUST_OUT" "$C_OUT" "$CPP_OUT" "$JAVA_OUT" "$CSHARP_OUT" "$GO_OUT" "$JS_OUT" "$PHP_OUT" "$KOTLIN_OUT" "$SWIFT_OUT" "$RUBY_OUT"
 
 # Temp directory for parallel results
 RESULTS_DIR=$(mktemp -d)
@@ -168,6 +172,8 @@ lang_to_target() {
         javascript) echo "javascript" ;;
         php) echo "php" ;;
         kotlin) echo "kotlin" ;;
+        swift) echo "swift" ;;
+        ruby) echo "ruby" ;;
     esac
 }
 
@@ -185,6 +191,8 @@ lang_to_outdir() {
         javascript) echo "$JS_OUT" ;;
         php) echo "$PHP_OUT" ;;
         kotlin) echo "$KOTLIN_OUT" ;;
+        swift) echo "$SWIFT_OUT" ;;
+        ruby) echo "$RUBY_OUT" ;;
     esac
 }
 
@@ -202,6 +210,8 @@ lang_to_outext() {
         javascript) echo "js" ;;
         php) echo "php" ;;
         kotlin) echo "kt" ;;
+        swift) echo "swift" ;;
+        ruby) echo "rb" ;;
     esac
 }
 
@@ -219,6 +229,8 @@ lang_to_srcext() {
         javascript) echo "fjs" ;;
         php) echo "fphp" ;;
         kotlin) echo "fkt" ;;
+        swift) echo "fswift" ;;
+        ruby) echo "frb" ;;
     esac
 }
 
@@ -559,7 +571,7 @@ run_category() {
 
     # Check if directory has test files
     local has_tests=false
-    for ext in fpy fts frs fc fcpp fjava fcs fgo fjs fphp fkt; do
+    for ext in fpy fts frs fc fcpp fjava fcs fgo fjs fphp fkt fswift frb; do
         if ls "$category_dir"/*.$ext 1>/dev/null 2>&1; then
             has_tests=true
             break
@@ -576,7 +588,7 @@ run_category() {
     # Determine which languages to test based on scope
     local languages=""
     case $scope in
-        common) languages="python typescript rust c cpp java csharp go javascript php kotlin" ;;
+        common) languages="python typescript rust c cpp java csharp go javascript php kotlin swift ruby" ;;
         python) languages="python" ;;
         typescript) languages="typescript" ;;
         rust) languages="rust" ;;
@@ -585,7 +597,7 @@ run_category() {
 
     # Get unique test names from all language files
     local test_names=""
-    for ext in fpy fts frs fc fcpp fjava fcs fgo fjs fphp fkt; do
+    for ext in fpy fts frs fc fcpp fjava fcs fgo fjs fphp fkt fswift frb; do
         for f in "$category_dir"/*.$ext; do
             [ -f "$f" ] || continue
             local name=$(basename "$f" | sed 's/\.f[a-z]*$//')
@@ -626,6 +638,8 @@ run_category() {
                 javascript) ext="fjs" ;;
                 php) ext="fphp" ;;
                 kotlin) ext="fkt" ;;
+                swift) ext="fswift" ;;
+                ruby) ext="frb" ;;
             esac
 
             local test_file="$category_dir/${test_name}.${ext}"
@@ -663,7 +677,7 @@ if $PARALLEL; then
     elif [ -n "$FILTER_LANGS" ]; then
         languages="$FILTER_LANGS"
     else
-        languages="python typescript rust c cpp java csharp go javascript php kotlin"
+        languages="python typescript rust c cpp java csharp go javascript php kotlin swift ruby"
     fi
 
     # Phase 1: Transpile all tests first (all languages in parallel)
@@ -779,7 +793,7 @@ total_fail=0
 total_skip=0
 total_known=0
 
-for lang in python typescript rust c cpp java csharp go javascript php kotlin; do
+for lang in python typescript rust c cpp java csharp go javascript php kotlin swift ruby; do
     p=$(get_counter "$lang" "pass")
     f=$(get_counter "$lang" "fail")
     s=$(get_counter "$lang" "skip")

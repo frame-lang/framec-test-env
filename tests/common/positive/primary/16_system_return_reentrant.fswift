@@ -1,0 +1,84 @@
+@@target swift
+
+// Tests that nested interface calls maintain separate return contexts
+
+@@system SystemReturnReentrantTest {
+    interface:
+        outer_call(): string
+        inner_call(): string
+        nested_call(): string
+        get_log(): string
+
+    machine:
+        $Start {
+            $.log: string = ""
+
+            outer_call(): string {
+                $.log = $.log + "outer_start,"
+                // Call inner method - this creates nested return context
+                let inner_result = self.inner_call()
+                $.log = $.log + "outer_after_inner,"
+                // Our return should be independent of inner's return
+                return "outer_result:" + inner_result
+            }
+
+            inner_call(): string {
+                $.log = $.log + "inner,"
+                return "inner_result"
+            }
+
+            nested_call(): string {
+                $.log = $.log + "nested_start,"
+                // Two levels of nesting
+                let result1 = self.inner_call()
+                let result2 = self.outer_call()
+                $.log = $.log + "nested_end,"
+                return "nested:" + result1 + "+" + result2
+            }
+
+            get_log(): string {
+                return $.log
+            }
+        }
+}
+
+// main
+    print("=== Test 16: System Return Reentrant (Nested Calls) ===")
+
+    // Test 1: Simple inner call
+    let s1 = @@SystemReturnReentrantTest()
+    let result1 = s1.inner_call()
+    if result1 != "inner_result" {
+        fatalError("Expected 'inner_result', got '\(result1)'")
+    }
+    print("1. inner_call() = '\(result1)'")
+
+    // Test 2: Outer calls inner - return contexts should be separate
+    let s2 = @@SystemReturnReentrantTest()
+    let result2 = s2.outer_call()
+    if result2 != "outer_result:inner_result" {
+        fatalError("Expected 'outer_result:inner_result', got '\(result2)'")
+    }
+    let log2 = s2.get_log()
+    if !log2.contains("outer_start") {
+        fatalError("Missing outer_start in log: \(log2)")
+    }
+    if !log2.contains("inner") {
+        fatalError("Missing inner in log: \(log2)")
+    }
+    if !log2.contains("outer_after_inner") {
+        fatalError("Missing outer_after_inner in log: \(log2)")
+    }
+    print("2. outer_call() = '\(result2)'")
+    print("   Log: '\(log2)'")
+
+    // Test 3: Deeply nested calls
+    let s3 = @@SystemReturnReentrantTest()
+    let result3 = s3.nested_call()
+    let expected = "nested:inner_result+outer_result:inner_result"
+    if result3 != expected {
+        fatalError("Expected '\(expected)', got '\(result3)'")
+    }
+    print("3. nested_call() = '\(result3)'")
+
+    print("PASS: System return reentrant (nested calls) works correctly")

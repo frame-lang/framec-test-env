@@ -1,0 +1,83 @@
+@@target swift
+
+// Test 44: HSM Sibling Transitions
+
+@@system HSMSiblingTransitions {
+    interface:
+        go_to_b()
+        go_to_a()
+        forward_action()
+        get_log(): string[]
+        get_state(): str
+
+    machine:
+        $ChildA => $Parent {
+            $>() { self.log.append("ChildA:enter") }
+            <$() { self.log.append("ChildA:exit") }
+            go_to_b() { self.log.append("ChildA:go_to_b"); -> $ChildB }
+            forward_action() { self.log.append("ChildA:forward"); => $^ }
+            get_log(): list { return self.log }
+            get_state(): str { return "ChildA" }
+        }
+
+        $ChildB => $Parent {
+            $>() { self.log.append("ChildB:enter") }
+            <$() { self.log.append("ChildB:exit") }
+            go_to_a() { self.log.append("ChildB:go_to_a"); -> $ChildA }
+            forward_action() { self.log.append("ChildB:forward"); => $^ }
+            get_log(): list { return self.log }
+            get_state(): str { return "ChildB" }
+        }
+
+        $Parent {
+            forward_action() { self.log.append("Parent:forward_action") }
+            get_log(): list { return self.log }
+            get_state(): str { return "Parent" }
+        }
+    domain:
+        log: string[] = []
+}
+
+// main
+    print("=== Test 44: HSM Sibling Transitions ===")
+    let s = @@HSMSiblingTransitions()
+
+    var log = s.get_log()
+    if !log.contains("ChildA:enter") { fatalError("Expected ChildA:enter on init") }
+    if s.get_state() != "ChildA" { fatalError("Expected ChildA") }
+    print("TC1.4.0: Initial state ChildA with enter - PASS")
+
+    s.go_to_b()
+    if s.get_state() != "ChildB" { fatalError("Expected ChildB") }
+    print("TC1.4.1: Transition A->B works - PASS")
+
+    log = s.get_log()
+    if !log.contains("ChildA:exit") { fatalError("Expected ChildA:exit") }
+    print("TC1.4.2: Exit handler fires on source - PASS")
+
+    if !log.contains("ChildB:enter") { fatalError("Expected ChildB:enter") }
+    print("TC1.4.3: Enter handler fires on target - PASS")
+
+    s.forward_action()
+    log = s.get_log()
+    if !log.contains("ChildB:forward") { fatalError("Expected ChildB:forward") }
+    if !log.contains("Parent:forward_action") { fatalError("Expected Parent handler") }
+    print("TC1.4.4: Parent relationship preserved - PASS")
+
+    s.go_to_a()
+    if s.get_state() != "ChildA" { fatalError("Expected ChildA") }
+    log = s.get_log()
+    let exitBCount = log.filter { $0 == "ChildB:exit" }.count
+    let enterACount = log.filter { $0 == "ChildA:enter" }.count
+    if exitBCount != 1 { fatalError("Expected ChildB:exit once") }
+    if enterACount != 2 { fatalError("Expected ChildA:enter twice") }
+    print("TC1.4.5: Transition B->A works with enter/exit - PASS")
+
+    s.forward_action()
+    log = s.get_log()
+    if !log.contains("ChildA:forward") { fatalError("Expected ChildA:forward") }
+    let parentCount = log.filter { $0 == "Parent:forward_action" }.count
+    if parentCount != 2 { fatalError("Expected 2 Parent handlers") }
+    print("TC1.4.6: ChildA forwards after returning - PASS")
+
+    print("PASS: HSM sibling transitions work correctly")

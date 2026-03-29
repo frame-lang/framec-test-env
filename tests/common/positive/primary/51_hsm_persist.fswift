@@ -1,0 +1,73 @@
+@@target swift
+
+import Foundation
+
+// Test 51: HSM Persistence
+
+@@persist
+@@system HSMPersist {
+    interface:
+        increment_child()
+        increment_parent()
+        get_child_count(): number
+        get_parent_count(): number
+        get_state(): string
+
+    machine:
+        $Child => $Parent {
+            $.child_count: number = 0
+
+            increment_child() { $.child_count = $.child_count + 1 }
+            increment_parent() { => $^ }
+            get_child_count(): number { return $.child_count }
+            get_parent_count(): number { => $^ }
+            get_state(): string { return "Child" }
+        }
+
+        $Parent {
+            $.parent_count: number = 100
+
+            increment_parent() { $.parent_count = $.parent_count + 1 }
+            get_parent_count(): number { return $.parent_count }
+            get_state(): string { return "Parent" }
+        }
+}
+
+// main
+    print("=== Test 51: HSM Persistence ===")
+
+    let s1 = @@HSMPersist()
+
+    assert(s1.get_state() == "Child", "Expected Child, got \(s1.get_state())")
+    assert(s1.get_child_count() == 0, "Expected 0, got \(s1.get_child_count())")
+    assert(s1.get_parent_count() == 100, "Expected 100, got \(s1.get_parent_count())")
+    print("1. Initial state verified: Child with child_count=0, parent_count=100")
+
+    s1.increment_child(); s1.increment_child(); s1.increment_child()
+    s1.increment_parent(); s1.increment_parent()
+
+    assert(s1.get_child_count() == 3, "Expected 3")
+    assert(s1.get_parent_count() == 102, "Expected 102")
+    print("2. After increments: child_count=\(s1.get_child_count()), parent_count=\(s1.get_parent_count())")
+
+    let data = s1.saveState()
+    assert(data is String, "Expected string")
+    print("3. Saved state: \(data.count) chars")
+
+    let s2 = HSMPersist.restoreState(data)
+
+    assert(s2.get_state() == "Child", "Expected Child after restore")
+    print("4. Restored state: \(s2.get_state())")
+
+    assert(s2.get_child_count() == 3, "Expected child_count=3")
+    print("5. Child state var preserved: child_count=\(s2.get_child_count())")
+
+    assert(s2.get_parent_count() == 102, "Expected parent_count=102")
+    print("6. Parent state var preserved: parent_count=\(s2.get_parent_count())")
+
+    s2.increment_child(); s2.increment_parent()
+    assert(s2.get_child_count() == 4, "Expected 4")
+    assert(s2.get_parent_count() == 103, "Expected 103")
+    print("7. After post-restore increments: child_count=\(s2.get_child_count()), parent_count=\(s2.get_parent_count())")
+
+    print("PASS: HSM persistence works correctly")

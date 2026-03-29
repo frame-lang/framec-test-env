@@ -1,0 +1,77 @@
+@@target swift
+
+// Test 48: HSM Exit Handlers
+
+@@system HSMExitHandlers {
+    interface:
+        go_to_other()
+        go_to_parent()
+        go_to_child()
+        get_log(): string[]
+        get_state(): str
+        get_child_var(): int
+
+    machine:
+        $Child => $Parent {
+            $.child_var: int = 42
+            $>() { self.log.append("Child:enter") }
+            <$() { let val = $.child_var; self.log.append("Child:exit(var=\(val))") }
+            go_to_other() { -> $Other }
+            go_to_parent() { -> $Parent }
+            get_log(): list { return self.log }
+            get_state(): str { return "Child" }
+            get_child_var(): int { return $.child_var }
+        }
+
+        $Parent {
+            $>() { self.log.append("Parent:enter") }
+            <$() { self.log.append("Parent:exit") }
+            go_to_child() { -> $Child }
+            go_to_other() { -> $Other }
+            get_log(): list { return self.log }
+            get_state(): str { return "Parent" }
+            get_child_var(): int { return -1 }
+        }
+
+        $Other {
+            $>() { self.log.append("Other:enter") }
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): list { return self.log }
+            get_state(): str { return "Other" }
+            get_child_var(): int { return -1 }
+        }
+    domain:
+        log: string[] = []
+}
+
+// main
+    print("=== Test 48: HSM Exit Handlers ===")
+    let s = @@HSMExitHandlers()
+
+    var log = s.get_log()
+    if !log.contains("Child:enter") { fatalError("Expected Child:enter on init") }
+    if s.get_state() != "Child" { fatalError("Expected Child") }
+    print("TC2.4.0: Initial state is Child with enter - PASS")
+
+    s.go_to_other()
+    log = s.get_log()
+    if !log.contains("Child:exit(var=42)") { fatalError("Expected Child:exit") }
+    if !log.contains("Other:enter") { fatalError("Expected Other:enter") }
+    print("TC2.4.1: Child exit fires when transitioning out - PASS")
+
+    if log.contains("Parent:exit") { fatalError("Parent:exit should NOT fire for child exit") }
+    print("TC2.4.2: Parent exit NOT fired for child exit - PASS")
+
+    print("TC2.4.3: Exit handler accesses state var (var=42) - PASS")
+
+    s.go_to_parent()
+    log = s.get_log()
+    if !log.contains("Parent:enter") { fatalError("Expected Parent:enter") }
+
+    s.go_to_other()
+    log = s.get_log()
+    if !log.contains("Parent:exit") { fatalError("Expected Parent:exit") }
+    print("TC2.4.4: Parent exit fires when leaving parent - PASS")
+
+    print("PASS: HSM exit handlers work correctly")

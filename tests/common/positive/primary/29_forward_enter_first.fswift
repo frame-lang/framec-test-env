@@ -1,0 +1,81 @@
+@@target swift
+
+@@system ForwardEnterFirst {
+    interface:
+        process()
+        get_counter(): number
+        get_log(): string[]
+
+    machine:
+        $Idle {
+            process() {
+                -> => $Working
+            }
+
+            get_counter(): number {
+                return -1
+            }
+
+            get_log(): string[] {
+                return self.log
+            }
+        }
+
+        $Working {
+            $.counter: number = 100
+
+            $>() {
+                self.log.append("Working:enter")
+            }
+
+            process() {
+                self.log.append("Working:process:counter=" + String($.counter))
+                $.counter = $.counter + 1
+            }
+
+            get_counter(): number {
+                return $.counter
+            }
+
+            get_log(): string[] {
+                return self.log
+            }
+        }
+    domain:
+        log: string[] = []
+}
+
+// main
+    print("=== Test 29: Forward Enter First ===")
+    let s = @@ForwardEnterFirst()
+
+    if s.get_counter() != -1 {
+        fatalError("Expected -1 in Idle")
+    }
+
+    s.process()
+
+    let counter = s.get_counter()
+    let log = s.get_log()
+    print("Counter after forward: \(counter)")
+    print("Log: \(String(describing: log))")
+
+    if !log.contains("Working:enter") {
+        fatalError("Expected 'Working:enter' in log: \(log)")
+    }
+
+    if !log.contains("Working:process:counter=100") {
+        fatalError("Expected 'Working:process:counter=100' in log: \(log)")
+    }
+
+    if counter != 101 {
+        fatalError("Expected counter=101, got \(counter)")
+    }
+
+    let enterIdx = log.firstIndex(of: "Working:enter")!
+    let processIdx = log.firstIndex(of: "Working:process:counter=100")!
+    if enterIdx >= processIdx {
+        fatalError("$> should run before process: \(log)")
+    }
+
+    print("PASS: Forward sends $> first for non-$> events")

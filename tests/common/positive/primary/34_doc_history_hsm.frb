@@ -1,0 +1,136 @@
+@@target ruby
+
+# Documentation Example: HSM with History (History203)
+# Refactored common gotoC behavior into parent state $AB
+
+@@system HistoryHSM {
+    interface:
+        gotoA()
+        gotoB()
+        gotoC()
+        goBack()
+        get_state(): str
+        get_log(): list
+
+    machine:
+        $Waiting {
+            $>() {
+                self.log_msg("In $Waiting")
+            }
+            gotoA() {
+                self.log_msg("gotoA")
+                -> $A
+            }
+            gotoB() {
+                self.log_msg("gotoB")
+                -> $B
+            }
+            get_state(): str {
+                return "Waiting"
+            }
+            get_log(): list {
+                return self.log
+            }
+        }
+
+        $A => $AB {
+            $>() {
+                self.log_msg("In $A")
+            }
+            gotoB() {
+                self.log_msg("gotoB")
+                -> $B
+            }
+            get_state(): str {
+                return "A"
+            }
+            get_log(): list {
+                return self.log
+            }
+            => $^
+        }
+
+        $B => $AB {
+            $>() {
+                self.log_msg("In $B")
+            }
+            gotoA() {
+                self.log_msg("gotoA")
+                -> $A
+            }
+            get_state(): str {
+                return "B"
+            }
+            get_log(): list {
+                return self.log
+            }
+            => $^
+        }
+
+        $AB {
+            gotoC() {
+                self.log_msg("gotoC in $AB")
+                push$
+                -> $C
+            }
+        }
+
+        $C {
+            $>() {
+                self.log_msg("In $C")
+            }
+            goBack() {
+                self.log_msg("goBack")
+                -> pop$
+            }
+            get_state(): str {
+                return "C"
+            }
+            get_log(): list {
+                return self.log
+            }
+        }
+
+    actions:
+        log_msg(msg: str) {
+            self.log.push(msg)
+        }
+
+    domain:
+        log: list = []
+}
+
+puts("=== Test 34: Doc History HSM ===")
+h = HistoryHSM.new
+
+# Start in Waiting
+raise "Expected 'Waiting', got '#{h.get_state()}'" unless h.get_state() == "Waiting"
+raise "Expected enter log, got #{h.get_log()}" unless h.get_log().include?("In $Waiting")
+
+# Go to A
+h.gotoA()
+raise "Expected 'A', got '#{h.get_state()}'" unless h.get_state() == "A"
+
+# Go to C (using inherited gotoC from $AB)
+h.gotoC()
+raise "Expected 'C', got '#{h.get_state()}'" unless h.get_state() == "C"
+raise "Expected gotoC log, got #{h.get_log()}" unless h.get_log().include?("gotoC in $AB")
+
+# Go back (should pop to A)
+h.goBack()
+raise "Expected 'A' after goBack, got '#{h.get_state()}'" unless h.get_state() == "A"
+
+# Go to B
+h.gotoB()
+raise "Expected 'B', got '#{h.get_state()}'" unless h.get_state() == "B"
+
+# Go to C (again using inherited gotoC)
+h.gotoC()
+raise "Expected 'C', got '#{h.get_state()}'" unless h.get_state() == "C"
+
+# Go back (should pop to B)
+h.goBack()
+raise "Expected 'B' after goBack, got '#{h.get_state()}'" unless h.get_state() == "B"
+
+puts("Log: #{h.get_log()}")
+puts("PASS: HSM with history works correctly")

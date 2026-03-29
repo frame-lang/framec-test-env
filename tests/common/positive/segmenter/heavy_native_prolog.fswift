@@ -1,0 +1,67 @@
+@@target swift
+
+import Foundation
+
+// Test: Heavy native prolog and epilog with edge-case Swift syntax.
+
+protocol NativeInterface {
+    func process(_ data: [String: Any]) -> String?
+}
+
+class NativeHelper: NativeInterface {
+    // Mentions @@system and -> $State in comments
+    // These should NOT be parsed as Frame
+
+    static let TEMPLATE = """
+    {
+        "@@target": "not_real",
+        "-> $State": "just a string",
+        "push$": true
+    }
+    """
+
+    func process(_ data: [String: Any]) -> String? {
+        // Comment with -> $Transition and => $^ and push$
+        return "{\"key\": \"value with { braces }\"}"
+    }
+}
+
+// Global with @@ in string
+let GLOBAL_CONFIG: [String: String] = [
+    "description": "Config with @@system-like syntax",
+    "pattern": "-> $Start",
+]
+
+@@system HeavyNativeProlog {
+    interface:
+        run_test()
+
+    machine:
+        $Start {
+            run_test() {
+                let h = NativeHelper()
+                let result = h.process(GLOBAL_CONFIG as [String: Any])
+                if result != nil {
+                    print("PASS: Heavy native prolog handled correctly")
+                } else {
+                    fatalError("FAIL")
+                }
+            }
+        }
+}
+
+// Heavy epilog
+class PostSystem {
+    var data: [String: String] = ["@@system": "in dict", "-> $State": "in dict"]
+
+    func run() -> Bool {
+        // -> $NotATransition
+        // => $^
+        return true
+    }
+}
+
+let s = @@HeavyNativeProlog()
+s.run_test()
+let p = PostSystem()
+if !p.run() { fatalError("epilog failed") }

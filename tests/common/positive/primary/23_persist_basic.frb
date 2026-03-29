@@ -1,0 +1,84 @@
+@@target ruby
+
+require 'json'
+
+@@persist
+@@system PersistTest {
+    interface:
+        set_value(v: int)
+        get_value(): int
+        go_active()
+        go_idle()
+
+    machine:
+        $Idle {
+            set_value(v: int) {
+                self.value = v
+            }
+
+            get_value(): int {
+                return self.value
+            }
+
+            go_active() {
+                -> $Active
+            }
+
+            go_idle() {
+                # pass  # Already idle
+            }
+        }
+
+        $Active {
+            set_value(v: int) {
+                self.value = v * 2
+            }
+
+            get_value(): int {
+                return self.value
+            }
+
+            go_active() {
+                # pass  # Already active
+            }
+
+            go_idle() {
+                -> $Idle
+            }
+        }
+    domain:
+        value: int = 0
+        name: str = "default"
+}
+
+puts("=== Test 23: Persist Basic ===")
+
+# Test 1: Create and modify system
+s1 = PersistTest.new
+s1.set_value(10)
+s1.go_active()
+s1.set_value(5)  # Should be doubled to 10 in Active state
+raise "Expected 10 after doubling, got #{s1.get_value()}" unless s1.get_value() == 10
+
+# Test 2: Save state
+data = s1.save_state()
+raise "Expected String, got #{data.class}" unless data.is_a?(String)
+puts("1. Saved state: #{data.length} bytes")
+
+# Test 3: Restore state
+s2 = PersistTest.restore_state(data)
+raise "Expected 10, got #{s2.get_value()}" unless s2.get_value() == 10
+puts("2. Restored value: #{s2.get_value()}")
+
+# Test 4: Verify state is preserved (Active state doubles)
+s2.set_value(3)  # Should be doubled to 6 in Active state
+raise "Expected 6, got #{s2.get_value()}" unless s2.get_value() == 6
+puts("3. After set_value(3) in Active: #{s2.get_value()}")
+
+# Test 5: Verify transitions work after restore
+s2.go_idle()
+s2.set_value(4)  # Should NOT be doubled in Idle state
+raise "Expected 4, got #{s2.get_value()}" unless s2.get_value() == 4
+puts("4. After go_idle, set_value(4): #{s2.get_value()}")
+
+puts("PASS: Persist basic works correctly")

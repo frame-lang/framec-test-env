@@ -1,0 +1,74 @@
+@@target ruby
+
+@@system HSMSingleParent {
+    interface:
+        child_only()
+        forward_to_parent()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Child => $Parent {
+            child_only() {
+                self.log.push("Child:child_only")
+            }
+
+            forward_to_parent() {
+                self.log.push("Child:before_forward")
+                => $^
+                self.log.push("Child:after_forward")
+            }
+
+            get_log(): list {
+                return self.log
+            }
+
+            get_state(): str {
+                return "Child"
+            }
+        }
+
+        $Parent {
+            forward_to_parent() {
+                self.log.push("Parent:forward_to_parent")
+            }
+
+            get_log(): list {
+                return self.log
+            }
+
+            get_state(): str {
+                return "Parent"
+            }
+        }
+    domain:
+        log: list = []
+}
+
+puts("=== Test 41: HSM Single Parent ===")
+s = HSMSingleParent.new
+
+puts("TC1.1.1: Child-Parent relationship compiles - PASS")
+
+s.forward_to_parent()
+log = s.get_log()
+raise "Expected Child:before_forward in log, got #{log}" unless log.include?("Child:before_forward")
+raise "Expected Parent:forward_to_parent in log, got #{log}" unless log.include?("Parent:forward_to_parent")
+puts("TC1.1.2: Child forwards to parent - PASS (log: #{log})")
+
+state = s.get_state()
+raise "Expected state 'Child', got '#{state}'" unless state == "Child"
+puts("TC1.1.3: Child remains current state after forward - PASS")
+
+raise "Expected Child:after_forward in log (after parent), got #{log}" unless log.include?("Child:after_forward")
+idx_parent = log.index("Parent:forward_to_parent")
+idx_after = log.index("Child:after_forward")
+raise "Expected Child:after_forward after Parent handler" unless idx_after > idx_parent
+puts("TC1.1.4: Parent executes and returns control - PASS")
+
+s.child_only()
+log = s.get_log()
+raise "Expected exactly 1 Child:child_only, got #{log}" unless log.count("Child:child_only") == 1
+puts("TC1.1.5: Child-only event handled locally - PASS")
+
+puts("PASS: HSM single parent relationship works correctly")

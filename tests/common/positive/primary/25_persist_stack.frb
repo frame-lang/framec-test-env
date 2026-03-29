@@ -1,0 +1,116 @@
+@@target ruby
+
+require 'json'
+
+@@persist
+@@system PersistStack {
+    interface:
+        push_and_go()
+        pop_back()
+        get_state(): str
+        get_depth(): int
+
+    machine:
+        $Start {
+            push_and_go() {
+                self.depth = self.depth + 1
+                push$
+                -> $Middle
+            }
+
+            pop_back() {
+                # pass  # nothing to pop
+            }
+
+            get_state(): str {
+                return "start"
+            }
+
+            get_depth(): int {
+                return self.depth
+            }
+        }
+
+        $Middle {
+            push_and_go() {
+                self.depth = self.depth + 1
+                push$
+                -> $End
+            }
+
+            pop_back() {
+                self.depth = self.depth - 1
+                -> pop$
+            }
+
+            get_state(): str {
+                return "middle"
+            }
+
+            get_depth(): int {
+                return self.depth
+            }
+        }
+
+        $End {
+            push_and_go() {
+                # pass  # can't go further
+            }
+
+            pop_back() {
+                self.depth = self.depth - 1
+                -> pop$
+            }
+
+            get_state(): str {
+                return "end"
+            }
+
+            get_depth(): int {
+                return self.depth
+            }
+        }
+    domain:
+        depth: int = 0
+}
+
+puts("=== Test 25: Persist Stack ===")
+
+# Test 1: Build up a stack
+s1 = PersistStack.new
+raise "Expected start, got #{s1.get_state()}" unless s1.get_state() == "start"
+
+s1.push_and_go()  # Start -> Middle (push Start)
+raise "Expected middle, got #{s1.get_state()}" unless s1.get_state() == "middle"
+raise "Expected depth 1, got #{s1.get_depth()}" unless s1.get_depth() == 1
+
+s1.push_and_go()  # Middle -> End (push Middle)
+raise "Expected end, got #{s1.get_state()}" unless s1.get_state() == "end"
+raise "Expected depth 2, got #{s1.get_depth()}" unless s1.get_depth() == 2
+
+puts("1. Built stack: state=#{s1.get_state()}, depth=#{s1.get_depth()}")
+
+# Test 2: Save state (should include stack)
+data = s1.save_state()
+raise "Expected String, got #{data.class}" unless data.is_a?(String)
+puts("2. Saved: #{data.length} bytes")
+
+# Test 3: Restore and verify stack works
+s2 = PersistStack.restore_state(data)
+raise "Restored: expected end, got #{s2.get_state()}" unless s2.get_state() == "end"
+raise "Restored: expected depth 2, got #{s2.get_depth()}" unless s2.get_depth() == 2
+puts("3. Restored: state=#{s2.get_state()}, depth=#{s2.get_depth()}")
+
+# Test 4: Pop should work after restore
+s2.pop_back()  # End -> Middle (pop)
+raise "After pop: expected middle, got #{s2.get_state()}" unless s2.get_state() == "middle"
+raise "After pop: expected depth 1, got #{s2.get_depth()}" unless s2.get_depth() == 1
+puts("4. After pop: state=#{s2.get_state()}, depth=#{s2.get_depth()}")
+
+# Test 5: Pop again
+s2.pop_back()  # Middle -> Start (pop)
+raise "After 2nd pop: expected start, got #{s2.get_state()}" unless s2.get_state() == "start"
+raise "After 2nd pop: expected depth 0, got #{s2.get_depth()}" unless s2.get_depth() == 0
+puts("5. After 2nd pop: state=#{s2.get_state()}, depth=#{s2.get_depth()}")
+
+puts("PASS: Persist stack works correctly")

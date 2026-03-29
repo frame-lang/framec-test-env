@@ -1,0 +1,51 @@
+@@target ruby
+
+@@system HSMEnterChildOnly {
+    interface:
+        go_to_child()
+        forward_action()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            get_log(): list { return self.log }
+            get_state(): str { return "Start" }
+        }
+
+        $Child => $Parent {
+            $>() { self.log.push("Child:enter") }
+            forward_action() { self.log.push("Child:forward"); => $^ }
+            get_log(): list { return self.log }
+            get_state(): str { return "Child" }
+        }
+
+        $Parent {
+            forward_action() { self.log.push("Parent:forward_action") }
+            get_log(): list { return self.log }
+            get_state(): str { return "Parent" }
+        }
+    domain:
+        log: list = []
+}
+
+puts("=== Test 45: HSM Enter in Child Only ===")
+s = HSMEnterChildOnly.new
+raise "Expected Start, got #{s.get_state()}" unless s.get_state() == "Start"
+puts("TC2.1.0: Initial state is Start - PASS")
+
+s.go_to_child()
+log = s.get_log()
+raise "Expected Child:enter, got #{log}" unless log.include?("Child:enter")
+raise "Expected Child, got #{s.get_state()}" unless s.get_state() == "Child"
+puts("TC2.1.1: Child enter handler fires - PASS")
+puts("TC2.1.2: No error when parent lacks enter - PASS")
+
+s.forward_action()
+log = s.get_log()
+raise "Expected Child:forward, got #{log}" unless log.include?("Child:forward")
+raise "Expected Parent handler, got #{log}" unless log.include?("Parent:forward_action")
+puts("TC2.1.3: Forward works without parent enter - PASS")
+
+puts("PASS: HSM enter in child only works correctly")

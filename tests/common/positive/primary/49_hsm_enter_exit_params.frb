@@ -1,0 +1,65 @@
+@@target ruby
+
+@@system HSMEnterExitParams {
+    interface:
+        go_to_a()
+        go_to_sibling()
+        go_back()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_a() { -> ("starting") $ChildA }
+            get_log(): list { return self.log }
+            get_state(): str { return "Start" }
+        }
+
+        $ChildA => $Parent {
+            $>(msg: str) { self.log.push("ChildA:enter(#{msg})") }
+            <$(reason: str) { self.log.push("ChildA:exit(#{reason})") }
+            go_to_sibling() { ("leaving_A") -> ("arriving_B") $ChildB }
+            get_log(): list { return self.log }
+            get_state(): str { return "ChildA" }
+        }
+
+        $ChildB => $Parent {
+            $>(msg: str) { self.log.push("ChildB:enter(#{msg})") }
+            <$(reason: str) { self.log.push("ChildB:exit(#{reason})") }
+            go_back() { ("leaving_B") -> ("returning_A") $ChildA }
+            get_log(): list { return self.log }
+            get_state(): str { return "ChildB" }
+        }
+
+        $Parent {
+            get_log(): list { return self.log }
+            get_state(): str { return "Parent" }
+        }
+    domain:
+        log: list = []
+}
+
+puts("=== Test 49: HSM Enter/Exit with Params ===")
+s = HSMEnterExitParams.new
+
+s.go_to_a()
+log = s.get_log()
+raise "Expected ChildA:enter(starting), got #{log}" unless log.include?("ChildA:enter(starting)")
+puts("TC2.5.0: Initial transition with enter params - PASS")
+
+s.go_to_sibling()
+log = s.get_log()
+raise "Expected exit with param, got #{log}" unless log.include?("ChildA:exit(leaving_A)")
+puts("TC2.5.1: Exit params passed correctly - PASS")
+
+raise "Expected enter with param, got #{log}" unless log.include?("ChildB:enter(arriving_B)")
+raise "Expected ChildB, got #{s.get_state()}" unless s.get_state() == "ChildB"
+puts("TC2.5.2: Enter params passed to target - PASS")
+
+s.go_back()
+log = s.get_log()
+raise "Expected ChildB exit, got #{log}" unless log.include?("ChildB:exit(leaving_B)")
+raise "Expected ChildA enter, got #{log}" unless log.include?("ChildA:enter(returning_A)")
+puts("TC2.5.3: Return transition with params - PASS")
+
+puts("PASS: HSM enter/exit with params works correctly")

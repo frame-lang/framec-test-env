@@ -1,0 +1,98 @@
+@@target swift
+
+// Test 43: HSM Multiple Children of Same Parent
+
+@@system HSMMultiChildren {
+    interface:
+        start_a()
+        start_b()
+        start_c()
+        do_action()
+        forward_action()
+        get_log(): string[]
+        get_state(): str
+
+    machine:
+        $ChildA => $Parent {
+            start_a() { }
+            start_b() { -> $ChildB }
+            start_c() { -> $ChildC }
+            do_action() { self.log.append("ChildA:do_action") }
+            forward_action() { self.log.append("ChildA:forward_action"); => $^ }
+            get_log(): list { return self.log }
+            get_state(): str { return "ChildA" }
+        }
+
+        $ChildB => $Parent {
+            start_a() { -> $ChildA }
+            start_b() { }
+            start_c() { -> $ChildC }
+            do_action() { self.log.append("ChildB:do_action") }
+            forward_action() { self.log.append("ChildB:forward_action"); => $^ }
+            get_log(): list { return self.log }
+            get_state(): str { return "ChildB" }
+        }
+
+        $ChildC => $Parent {
+            start_a() { -> $ChildA }
+            start_b() { -> $ChildB }
+            start_c() { }
+            do_action() { self.log.append("ChildC:do_action") }
+            forward_action() { self.log.append("ChildC:forward_action"); => $^ }
+            get_log(): list { return self.log }
+            get_state(): str { return "ChildC" }
+        }
+
+        $Parent {
+            forward_action() { self.log.append("Parent:forward_action") }
+            get_log(): list { return self.log }
+            get_state(): str { return "Parent" }
+        }
+    domain:
+        log: string[] = []
+}
+
+// main
+    print("=== Test 43: HSM Multiple Children ===")
+    let s = @@HSMMultiChildren()
+
+    print("TC1.3.1: Multiple children with same parent compiles - PASS")
+
+    if s.get_state() != "ChildA" { fatalError("Expected ChildA, got \(s.get_state())") }
+
+    s.forward_action()
+    var log = s.get_log()
+    if !log.contains("ChildA:forward_action") { fatalError("Expected ChildA forward") }
+    if !log.contains("Parent:forward_action") { fatalError("Expected Parent handler") }
+    print("TC1.3.2: ChildA forwards to parent - PASS")
+
+    s.start_b()
+    if s.get_state() != "ChildB" { fatalError("Expected ChildB after transition") }
+    print("TC1.3.3: Transition A->B works - PASS")
+
+    s.forward_action()
+    log = s.get_log()
+    if !log.contains("ChildB:forward_action") { fatalError("Expected ChildB forward") }
+    let parentCount = log.filter { $0 == "Parent:forward_action" }.count
+    if parentCount != 2 { fatalError("Expected 2 Parent forwards") }
+    print("TC1.3.4: ChildB forwards to same parent - PASS")
+
+    s.start_c()
+    if s.get_state() != "ChildC" { fatalError("Expected ChildC") }
+    s.forward_action()
+    log = s.get_log()
+    if !log.contains("ChildC:forward_action") { fatalError("Expected ChildC forward") }
+    let parentCount2 = log.filter { $0 == "Parent:forward_action" }.count
+    if parentCount2 != 3 { fatalError("Expected 3 Parent forwards") }
+    print("TC1.3.5: ChildC forwards to same parent - PASS")
+
+    s.start_a(); s.do_action()
+    s.start_b(); s.do_action()
+    s.start_c(); s.do_action()
+    log = s.get_log()
+    if !log.contains("ChildA:do_action") { fatalError("Expected ChildA action") }
+    if !log.contains("ChildB:do_action") { fatalError("Expected ChildB action") }
+    if !log.contains("ChildC:do_action") { fatalError("Expected ChildC action") }
+    print("TC1.3.6: Each sibling has independent handlers - PASS")
+
+    print("PASS: HSM multiple children work correctly")

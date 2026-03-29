@@ -1,0 +1,65 @@
+@@target swift
+
+@@system HSMForward {
+    interface:
+        event_a()
+        event_b()
+        get_log(): string[]
+
+    machine:
+        $Child => $Parent {
+            event_a() {
+                self.log.append("Child:event_a")
+            }
+
+            event_b() {
+                self.log.append("Child:event_b_forward")
+                => $^
+            }
+
+            get_log(): string[] {
+                return self.log
+            }
+        }
+
+        $Parent {
+            event_a() {
+                self.log.append("Parent:event_a")
+            }
+
+            event_b() {
+                self.log.append("Parent:event_b")
+            }
+
+            get_log(): string[] {
+                return self.log
+            }
+        }
+    domain:
+        log: string[] = []
+}
+
+// main
+    print("=== Test 08: HSM Forward ===")
+    let s = @@HSMForward()
+
+    // event_a should be handled by Child (no forward)
+    s.event_a()
+    var log = s.get_log()
+    if !log.contains("Child:event_a") {
+        fatalError("Expected 'Child:event_a' in log, got \(String(describing: log))")
+    }
+    print("After event_a: \(String(describing: log))")
+
+    // event_b should forward to Parent
+    s.event_b()
+    log = s.get_log()
+    if !log.contains("Child:event_b_forward") {
+        fatalError("Expected 'Child:event_b_forward' in log, got \(String(describing: log))")
+    }
+    if !log.contains("Parent:event_b") {
+        fatalError("Expected 'Parent:event_b' in log (forwarded), got \(String(describing: log))")
+    }
+    print("After event_b (forwarded): \(String(describing: log))")
+
+    print("PASS: HSM forward works correctly")

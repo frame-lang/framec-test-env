@@ -1,0 +1,61 @@
+@@target swift
+
+// Test 46: HSM Enter in Parent Only
+
+@@system HSMEnterParentOnly {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): string[]
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): list { return self.log }
+            get_state(): str { return "Start" }
+        }
+
+        $Child => $Parent {
+            go_to_parent() { -> $Parent }
+            get_log(): list { return self.log }
+            get_state(): str { return "Child" }
+        }
+
+        $Parent {
+            $>() { self.log.append("Parent:enter") }
+            go_to_child() { -> $Child }
+            get_log(): list { return self.log }
+            get_state(): str { return "Parent" }
+        }
+    domain:
+        log: string[] = []
+}
+
+// main
+    print("=== Test 46: HSM Enter in Parent Only ===")
+    let s = @@HSMEnterParentOnly()
+
+    s.go_to_child()
+    if s.get_state() != "Child" { fatalError("Expected Child") }
+    var log = s.get_log()
+    print("TC2.2.1: Child enters without error (log: \(String(describing: log))) - PASS")
+
+    if log.contains("Parent:enter") { fatalError("Parent:enter should NOT fire for child entry") }
+    print("TC2.2.2: Parent enter NOT auto-fired for child - PASS")
+
+    s.go_to_parent()
+    if s.get_state() != "Parent" { fatalError("Expected Parent") }
+    log = s.get_log()
+    if !log.contains("Parent:enter") { fatalError("Expected Parent:enter when transitioning to Parent") }
+    print("TC2.2.3: Parent enter fires when transitioning to Parent - PASS")
+
+    s.go_to_child()
+    if s.get_state() != "Child" { fatalError("Expected Child") }
+    log = s.get_log()
+    let count = log.filter { $0 == "Parent:enter" }.count
+    if count != 1 { fatalError("Expected exactly 1 Parent:enter") }
+    print("TC2.2.4: Return to child, parent enter count unchanged - PASS")
+
+    print("PASS: HSM enter in parent only works correctly")

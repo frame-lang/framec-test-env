@@ -39,6 +39,8 @@ GO_OUT="$TEST_ENV_ROOT/output/go/tests"
 JS_OUT="$TEST_ENV_ROOT/output/javascript/tests"
 PHP_OUT="$TEST_ENV_ROOT/output/php/tests"
 KOTLIN_OUT="$TEST_ENV_ROOT/output/kotlin/tests"
+SWIFT_OUT="$TEST_ENV_ROOT/output/swift/tests"
+RUBY_OUT="$TEST_ENV_ROOT/output/ruby/tests"
 
 # .NET SDK — find dotnet
 DOTNET_CMD=""
@@ -74,6 +76,8 @@ case $lang in
     javascript) target="javascript"; out_dir="$JS_OUT"; out_ext="js" ;;
     php) target="php"; out_dir="$PHP_OUT"; out_ext="php" ;;
     kotlin) target="kotlin"; out_dir="$KOTLIN_OUT"; out_ext="kt" ;;
+    swift) target="swift"; out_dir="$SWIFT_OUT"; out_ext="swift" ;;
+    ruby) target="ruby"; out_dir="$RUBY_OUT"; out_ext="rb" ;;
 esac
 
 out_file="$out_dir/${test_name}.${out_ext}"
@@ -251,6 +255,16 @@ case $lang in
             run_status=1
             run_output="Kotlin compilation failed: $kt_compile_output"
         fi
+        ;;
+    swift)
+        run_output=$(swift "$out_file" 2>&1) || run_status=$?
+        ;;
+    ruby)
+        ruby_cmd="ruby"
+        for __rdir in "/usr/local/opt/ruby/bin" "/opt/homebrew/opt/ruby/bin" "/usr/bin"; do
+            if [ -x "$__rdir/ruby" ]; then ruby_cmd="$__rdir/ruby"; break; fi
+        done
+        run_output=$($ruby_cmd "$out_file" 2>&1) || run_status=$?
         ;;
 esac
 

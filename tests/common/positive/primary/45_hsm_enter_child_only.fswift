@@ -1,0 +1,56 @@
+@@target swift
+
+// Test 45: HSM Enter in Child Only
+
+@@system HSMEnterChildOnly {
+    interface:
+        go_to_child()
+        forward_action()
+        get_log(): string[]
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            get_log(): list { return self.log }
+            get_state(): str { return "Start" }
+        }
+
+        $Child => $Parent {
+            $>() { self.log.append("Child:enter") }
+            forward_action() { self.log.append("Child:forward"); => $^ }
+            get_log(): list { return self.log }
+            get_state(): str { return "Child" }
+        }
+
+        $Parent {
+            forward_action() { self.log.append("Parent:forward_action") }
+            get_log(): list { return self.log }
+            get_state(): str { return "Parent" }
+        }
+    domain:
+        log: string[] = []
+}
+
+// main
+    print("=== Test 45: HSM Enter in Child Only ===")
+    let s = @@HSMEnterChildOnly()
+
+    if s.get_state() != "Start" { fatalError("Expected Start") }
+    print("TC2.1.0: Initial state is Start - PASS")
+
+    s.go_to_child()
+    var log = s.get_log()
+    if !log.contains("Child:enter") { fatalError("Expected Child:enter") }
+    if s.get_state() != "Child" { fatalError("Expected Child") }
+    print("TC2.1.1: Child enter handler fires - PASS")
+
+    print("TC2.1.2: No error when parent lacks enter - PASS")
+
+    s.forward_action()
+    log = s.get_log()
+    if !log.contains("Child:forward") { fatalError("Expected Child:forward") }
+    if !log.contains("Parent:forward_action") { fatalError("Expected Parent handler") }
+    print("TC2.1.3: Forward works without parent enter - PASS")
+
+    print("PASS: HSM enter in child only works correctly")
