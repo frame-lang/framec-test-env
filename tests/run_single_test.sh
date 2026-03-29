@@ -227,11 +227,13 @@ case $lang in
         for __kdir in "/usr/local/bin" "/opt/homebrew/bin"; do
             if [ -x "$__kdir/kotlinc" ]; then kotlinc_cmd="$__kdir/kotlinc"; break; fi
         done
-        if $kotlinc_cmd "$out_file" -include-runtime -d "$kt_jar" 2>&1 | grep -qv "^w:"; then
+        kt_compile_output=$($kotlinc_cmd "$out_file" -include-runtime -d "$kt_jar" 2>&1)
+        kt_compile_status=$?
+        if [ $kt_compile_status -eq 0 ]; then
             run_output=$(/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home/bin/java -jar "$kt_jar" 2>&1) || run_status=$?
         else
             run_status=1
-            run_output="Kotlin compilation failed"
+            run_output="Kotlin compilation failed: $kt_compile_output"
         fi
         ;;
 esac
