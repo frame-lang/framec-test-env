@@ -220,17 +220,33 @@ case $lang in
         run_output=$($php_cmd "$out_file" 2>&1) || run_status=$?
         ;;
     kotlin)
-        # Kotlin script mode: kotlinc -script file.kts
-        # But .kt files need compilation: kotlinc file.kt -include-runtime -d file.jar && java -jar file.jar
+        # Kotlin: kotlinc file.kt -include-runtime -d file.jar && java -jar file.jar
         kt_jar="${out_file%.kt}.jar"
         kotlinc_cmd="kotlinc"
         for __kdir in "/usr/local/bin" "/opt/homebrew/bin"; do
             if [ -x "$__kdir/kotlinc" ]; then kotlinc_cmd="$__kdir/kotlinc"; break; fi
         done
-        kt_compile_output=$($kotlinc_cmd "$out_file" -include-runtime -d "$kt_jar" 2>&1)
+        # Include json.jar for @@persist tests that use org.json
+        kt_json_jar="$TEST_ENV_ROOT/output/java/lib/json.jar"
+        kt_cp_flags=""
+        if [ -f "$kt_json_jar" ]; then
+            kt_cp_flags="-cp $kt_json_jar"
+        fi
+        kt_compile_output=$($kotlinc_cmd $kt_cp_flags "$out_file" -include-runtime -d "$kt_jar" 2>&1)
         kt_compile_status=$?
         if [ $kt_compile_status -eq 0 ]; then
-            run_output=$(/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home/bin/java -jar "$kt_jar" 2>&1) || run_status=$?
+            # Use -cp instead of -jar to include json.jar at runtime
+            if [ -f "$kt_json_jar" ]; then
+                # Extract Main-Class from jar manifest, then use -cp to include json.jar
+                kt_main=$(unzip -p "$kt_jar" META-INF/MANIFEST.MF 2>/dev/null | grep "Main-Class:" | sed 's/Main-Class: *//' | tr -d '\r')
+                if [ -n "$kt_main" ]; then
+                    run_output=$(/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home/bin/java -cp "$kt_jar:$kt_json_jar" "$kt_main" 2>&1) || run_status=$?
+                else
+                    run_output=$(/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home/bin/java -jar "$kt_jar" 2>&1) || run_status=$?
+                fi
+            else
+                run_output=$(/usr/local/opt/openjdk@17/libexec/openjdk.jdk/Contents/Home/bin/java -jar "$kt_jar" 2>&1) || run_status=$?
+            fi
         else
             run_status=1
             run_output="Kotlin compilation failed: $kt_compile_output"
