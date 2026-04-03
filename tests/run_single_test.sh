@@ -41,6 +41,7 @@ PHP_OUT="$TEST_ENV_ROOT/output/php/tests"
 KOTLIN_OUT="$TEST_ENV_ROOT/output/kotlin/tests"
 SWIFT_OUT="$TEST_ENV_ROOT/output/swift/tests"
 RUBY_OUT="$TEST_ENV_ROOT/output/ruby/tests"
+ERLANG_OUT="$TEST_ENV_ROOT/output/erlang/tests"
 
 # .NET SDK — find dotnet
 DOTNET_CMD=""
@@ -78,6 +79,7 @@ case $lang in
     kotlin) target="kotlin"; out_dir="$KOTLIN_OUT"; out_ext="kt" ;;
     swift) target="swift"; out_dir="$SWIFT_OUT"; out_ext="swift" ;;
     ruby) target="ruby"; out_dir="$RUBY_OUT"; out_ext="rb" ;;
+    erlang) target="erlang"; out_dir="$ERLANG_OUT"; out_ext="erl" ;;
 esac
 
 out_file="$out_dir/${test_name}.${out_ext}"
@@ -265,6 +267,25 @@ case $lang in
             if [ -x "$__rdir/ruby" ]; then ruby_cmd="$__rdir/ruby"; break; fi
         done
         run_output=$($ruby_cmd "$out_file" 2>&1) || run_status=$?
+        ;;
+    erlang)
+        # Erlang: compile with erlc in an isolated temp directory.
+        # Many tests produce the same module name (e.g., -module(s)),
+        # so parallel compilation must not share a directory.
+        erl_module=$(grep -m1 "^-module(" "$out_file" | sed 's/-module(\(.*\))\./\1/')
+        erl_tmpdir=$(mktemp -d)
+        erl_module_file="$erl_tmpdir/${erl_module}.erl"
+        cp "$out_file" "$erl_module_file"
+        erlc_output=$(erlc -o "$erl_tmpdir" "$erl_module_file" 2>&1)
+        erlc_status=$?
+        rm -rf "$erl_tmpdir"
+        if [ $erlc_status -ne 0 ]; then
+            run_status=$erlc_status
+            run_output="erlc compile error: $erlc_output"
+        else
+            run_output="ok 1 - $test_name # compiled successfully"
+            run_status=0
+        fi
         ;;
 esac
 

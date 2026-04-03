@@ -1,0 +1,140 @@
+@@target erlang
+@@system AiAgent {
+    interface:
+        tick()
+        get_state(): str = "Unknown"
+        get_action_log(): str = ""
+
+    machine:
+        $Root {
+            $>() {
+                self.action_log = ""
+            }
+
+            tick() {
+                % Selector: check conditions in priority order
+                if self.health < 20 {
+                    -> $Flee
+                }
+                if self.enemy_distance < 50 {
+                    -> $Approach
+                }
+                -> $Patrol
+            }
+
+            get_state(): str { return "Root" }
+        }
+
+        $Flee {
+            $>() {
+                self.action_log = self.action_log + "flee,"
+            }
+
+            tick() {
+                % Precondition: still low health?
+                if self.health >= 20 {
+                    % Condition no longer met — back to root for re-evaluation
+                    -> $Root
+
+                }
+                % Action: flee (increase distance, recover health)
+                self.enemy_distance = self.enemy_distance + 10
+                self.health = self.health + 5
+                self.action_log = self.action_log + "flee,"
+            }
+
+            get_state(): str { return "Flee" }
+        }
+
+        $Approach {
+            $>() {
+                self.action_log = self.action_log + "approach,"
+            }
+
+            tick() {
+                % Survival interrupt: flee takes priority
+                if self.health < 20 {
+                    -> $Flee
+
+                }
+                % Precondition: enemy still visible?
+                if self.enemy_distance >= 50 {
+                    -> $Root
+
+                }
+                % Action: move closer
+                if self.enemy_distance > 5 {
+                    self.enemy_distance = self.enemy_distance - 10
+                    self.action_log = self.action_log + "approach,"
+                } else {
+                    % In range — sequence continues to Attack
+                    -> $Attack
+                }
+            }
+
+            get_state(): str { return "Approach" }
+        }
+
+        $Attack {
+            $>() {
+                self.action_log = self.action_log + "attack,"
+            }
+
+            tick() {
+                % Survival interrupt
+                if self.health < 20 {
+                    -> $Flee
+
+                }
+                % Precondition: still in range?
+                if self.enemy_distance > 5 {
+                    % Enemy moved away — go back to approach
+                    -> $Approach
+
+                }
+                % Precondition: enemy still alive?
+                if self.enemy_health =< 0 {
+                    % Victory — back to idle
+                    self.enemy_distance = 100
+                    -> $Root
+
+                }
+                % Action: attack
+                self.enemy_health = self.enemy_health - 25
+                self.action_log = self.action_log + "attack,"
+            }
+
+            get_state(): str { return "Attack" }
+        }
+
+        $Patrol {
+            $>() {
+                self.action_log = self.action_log + "patrol,"
+            }
+
+            tick() {
+                % Higher-priority interrupt: combat
+                if self.enemy_distance < 50 {
+                    -> $Approach
+
+                }
+                % Higher-priority interrupt: survival
+                if self.health < 20 {
+                    -> $Flee
+
+                }
+                % Action: patrol
+                self.patrol_step = self.patrol_step + 1
+                self.action_log = self.action_log + "patrol,"
+            }
+
+            get_state(): str { return "Patrol" }
+        }
+
+    domain:
+        health = 100
+        enemy_distance = 100
+        enemy_health = 100
+        patrol_step = 0
+        action_log = ""
+}
