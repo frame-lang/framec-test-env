@@ -1,0 +1,219 @@
+@@target lua
+@@system TcpServer {
+    interface:
+        listen()
+        receive_syn()
+        receive_ack()
+        receive_fin()
+        receive_data(data: str)
+        close()
+        get_state(): str = "Unknown"
+        get_last_data(): str = ""
+
+    machine:
+        $Closed {
+            get_state(): str { return "Closed" }
+
+            listen() {
+                -> $Listen
+            }
+        }
+
+        $Listen {
+            get_state(): str { return "Listen" }
+
+            receive_syn() {
+                -- Send SYN-ACK (implicit — client will call receive_syn_ack)
+                -> $SynReceived
+            }
+        }
+
+        $SynReceived {
+            get_state(): str { return "SynReceived" }
+
+            receive_ack() {
+                -> $Established
+            }
+        }
+
+        $Established {
+            get_state(): str { return "Established" }
+            get_last_data(): str { return self.last_data }
+
+            receive_data(data: str) {
+                self.last_data = data
+            }
+
+            receive_fin() {
+                -- Client initiated close
+                -> $CloseWait
+            }
+
+            close() {
+                -- Server initiates close
+                -> $FinWait1
+            }
+        }
+
+        $CloseWait {
+            get_state(): str { return "CloseWait" }
+
+            close() {
+                -- Server sends FIN
+                -> $LastAck
+            }
+        }
+
+        $LastAck {
+            get_state(): str { return "LastAck" }
+
+            receive_ack() {
+                -> $Closed
+            }
+        }
+
+        $FinWait1 {
+            get_state(): str { return "FinWait1" }
+
+            receive_ack() {
+                -> $FinWait2
+            }
+
+            receive_fin() {
+                -- Simultaneous close
+                -> $Closing
+            }
+        }
+
+        $FinWait2 {
+            get_state(): str { return "FinWait2" }
+
+            receive_fin() {
+                -> $TimeWait
+            }
+        }
+
+        $Closing {
+            get_state(): str { return "Closing" }
+
+            receive_ack() {
+                -> $TimeWait
+            }
+        }
+
+        $TimeWait {
+            get_state(): str { return "TimeWait" }
+
+            -- In real TCP, wait 2*MSL then close. We simulate with explicit call.
+            receive_ack() {
+                -> $Closed
+            }
+        }
+
+    domain:
+        last_data = ""
+}
+@@system TcpClient {
+    interface:
+        connect()
+        receive_syn_ack()
+        receive_ack()
+        receive_fin()
+        send_data(data: str)
+        close()
+        get_state(): str = "Unknown"
+
+    machine:
+        $Closed {
+            get_state(): str { return "Closed" }
+
+            connect() {
+                -- Send SYN (implicit — server will receive via receive_syn)
+                -> $SynSent
+            }
+        }
+
+        $SynSent {
+            get_state(): str { return "SynSent" }
+
+            receive_syn_ack() {
+                -- Send ACK (implicit — server will receive via receive_ack)
+                -> $Established
+            }
+        }
+
+        $Established {
+            get_state(): str { return "Established" }
+
+            send_data(data: str) {
+                -- Data sent — server will receive via receive_data
+                self.sent_count = self.sent_count + 1
+            }
+
+            close() {
+                -- Send FIN
+                -> $FinWait1
+            }
+
+            receive_fin() {
+                -- Server initiated close
+                -> $CloseWait
+            }
+        }
+
+        $FinWait1 {
+            get_state(): str { return "FinWait1" }
+
+            receive_ack() {
+                -> $FinWait2
+            }
+
+            receive_fin() {
+                -- Simultaneous close
+                -> $Closing
+            }
+        }
+
+        $FinWait2 {
+            get_state(): str { return "FinWait2" }
+
+            receive_fin() {
+                -> $TimeWait
+            }
+        }
+
+        $Closing {
+            get_state(): str { return "Closing" }
+
+            receive_ack() {
+                -> $TimeWait
+            }
+        }
+
+        $TimeWait {
+            get_state(): str { return "TimeWait" }
+
+            receive_ack() {
+                -> $Closed
+            }
+        }
+
+        $CloseWait {
+            get_state(): str { return "CloseWait" }
+
+            close() {
+                -> $LastAck
+            }
+        }
+
+        $LastAck {
+            get_state(): str { return "LastAck" }
+
+            receive_ack() {
+                -> $Closed
+            }
+        }
+
+    domain:
+        sent_count = 0
+}

@@ -42,6 +42,7 @@ KOTLIN_OUT="$TEST_ENV_ROOT/output/kotlin/tests"
 SWIFT_OUT="$TEST_ENV_ROOT/output/swift/tests"
 RUBY_OUT="$TEST_ENV_ROOT/output/ruby/tests"
 ERLANG_OUT="$TEST_ENV_ROOT/output/erlang/tests"
+LUA_OUT="$TEST_ENV_ROOT/output/lua/tests"
 
 # .NET SDK — find dotnet
 DOTNET_CMD=""
@@ -80,6 +81,7 @@ case $lang in
     swift) target="swift"; out_dir="$SWIFT_OUT"; out_ext="swift" ;;
     ruby) target="ruby"; out_dir="$RUBY_OUT"; out_ext="rb" ;;
     erlang) target="erlang"; out_dir="$ERLANG_OUT"; out_ext="erl" ;;
+    lua) target="lua"; out_dir="$LUA_OUT"; out_ext="lua" ;;
 esac
 
 out_file="$out_dir/${test_name}.${out_ext}"
@@ -284,6 +286,27 @@ case $lang in
             run_output="erlc compile error: $erlc_output"
         else
             run_output="ok 1 - $test_name # compiled successfully"
+            run_status=0
+        fi
+        ;;
+    lua)
+        # Lua: run with lua interpreter
+        lua_cmd=""
+        for __ldir in "/usr/local/bin" "/opt/homebrew/bin" "/usr/bin"; do
+            if [ -x "$__ldir/lua" ]; then lua_cmd="$__ldir/lua"; break; fi
+        done
+        if [ -z "$lua_cmd" ]; then
+            # Try lua5.4 or luajit
+            for __ldir in "/usr/local/bin" "/opt/homebrew/bin" "/usr/bin"; do
+                if [ -x "$__ldir/lua5.4" ]; then lua_cmd="$__ldir/lua5.4"; break; fi
+                if [ -x "$__ldir/luajit" ]; then lua_cmd="$__ldir/luajit"; break; fi
+            done
+        fi
+        if [ -n "$lua_cmd" ]; then
+            run_output=$($lua_cmd "$out_file" 2>&1) || run_status=$?
+        else
+            # No lua — transpile-only
+            run_output="ok 1 - $test_name # compiled (no lua interpreter)"
             run_status=0
         fi
         ;;
