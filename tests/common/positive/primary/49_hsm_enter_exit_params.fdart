@@ -1,0 +1,128 @@
+@@target dart
+
+// Test 49: HSM Enter/Exit with Parameters
+//
+// Tests enter and exit handlers with parameters in HSM context:
+// - Exit params passed correctly
+// - Enter params passed to target state
+// - Transition syntax: (exit_args) -> (enter_args) $Target
+
+@@system HSMEnterExitParams {
+    interface:
+        go_to_a()
+        go_to_sibling()
+        go_back()
+        get_log(): String[]
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_a() {
+                -> ("starting") $ChildA
+            }
+
+            get_log(): list {
+                @@:(this.log)
+                return;
+            }
+
+            get_state(): str {
+                @@:("Start")
+                return;
+            }
+        }
+
+        $ChildA => $Parent {
+            $>(msg: str) {
+                this.log.add("ChildA:enter(${msg})")
+            }
+
+            <$(reason: str) {
+                this.log.add("ChildA:exit(${reason})")
+            }
+
+            go_to_sibling() {
+                ("leaving_A") -> ("arriving_B") $ChildB
+            }
+
+            get_log(): list {
+                @@:(this.log)
+                return;
+            }
+
+            get_state(): str {
+                @@:("ChildA")
+                return;
+            }
+        }
+
+        $ChildB => $Parent {
+            $>(msg: str) {
+                this.log.add("ChildB:enter(${msg})")
+            }
+
+            <$(reason: str) {
+                this.log.add("ChildB:exit(${reason})")
+            }
+
+            go_back() {
+                ("leaving_B") -> ("returning_A") $ChildA
+            }
+
+            get_log(): list {
+                @@:(this.log)
+                return;
+            }
+
+            get_state(): str {
+                @@:("ChildB")
+                return;
+            }
+        }
+
+        $Parent {
+            get_log(): list {
+                @@:(this.log)
+                return;
+            }
+
+            get_state(): str {
+                @@:("Parent")
+                return;
+            }
+        }
+    domain:
+        log: String[] = []
+}
+
+void main() {
+    print("== Test 49: HSM Enter/Exit with Params ==");
+    final s = @@HSMEnterExitParams();
+
+    // First go to ChildA with enter params
+    s.go_to_a();
+    var log = s.get_log();
+    if (!log.includes("ChildA:enter(starting)")) throw Exception("Expected ChildA:enter(starting), got ${jsonEncode(log)}");
+    print("TC2.5.0: Initial transition with enter params - PASS");
+
+    // TC2.5.1: Exit params passed correctly
+    s.go_to_sibling();
+    log = s.get_log();
+    if (!log.includes("ChildA:exit(leaving_A)")) throw Exception("Expected exit with param, got ${jsonEncode(log)}");
+    print("TC2.5.1: Exit params passed correctly - PASS");
+
+    // TC2.5.2: Enter params passed to target state
+    if (!log.includes("ChildB:enter(arriving_B)")) throw Exception("Expected enter with param, got ${jsonEncode(log)}");
+    if (s.get_state() != "ChildB") throw Exception("Expected ChildB, got ${s.get_state()}");
+    print("TC2.5.2: Enter params passed to target - PASS");
+
+    // TC2.5.3: Return transition with different params
+    s.go_back();
+    log = s.get_log();
+    if (!log.includes("ChildB:exit(leaving_B)")) throw Exception("Expected ChildB exit, got ${jsonEncode(log)}");
+    if (!log.includes("ChildA:enter(returning_A)")) throw Exception("Expected ChildA enter, got ${jsonEncode(log)}");
+    print("TC2.5.3: Return transition with params - PASS");
+
+    print("PASS: HSM enter/exit with params works correctly");
+}
+

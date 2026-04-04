@@ -1,0 +1,129 @@
+@@target gdscript
+
+# Test 49: HSM Enter/Exit with Parameters
+#
+# Tests enter and exit handlers with parameters in HSM context:
+# - Exit params passed correctly
+# - Enter params passed to target state
+# - Transition syntax: (exit_args) -> (enter_args) $Target
+
+@@system HSMEnterExitParams {
+    interface:
+        go_to_a()
+        go_to_sibling()
+        go_back()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_a() {
+                -> ("starting") $ChildA
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Start")
+                return
+            }
+        }
+
+        $ChildA => $Parent {
+            $>(msg: str) {
+                self.log.append(f"ChildA:enter({msg})")
+            }
+
+            <$(reason: str) {
+                self.log.append(f"ChildA:exit({reason})")
+            }
+
+            go_to_sibling() {
+                ("leaving_A") -> ("arriving_B") $ChildB
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("ChildA")
+                return
+            }
+        }
+
+        $ChildB => $Parent {
+            $>(msg: str) {
+                self.log.append(f"ChildB:enter({msg})")
+            }
+
+            <$(reason: str) {
+                self.log.append(f"ChildB:exit({reason})")
+            }
+
+            go_back() {
+                ("leaving_B") -> ("returning_A") $ChildA
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("ChildB")
+                return
+            }
+        }
+
+        $Parent {
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Parent")
+                return
+            }
+        }
+    domain:
+        log: list = []
+}
+
+def main():
+    print("=== Test 49: HSM Enter/Exit with Params ===")
+    s = @@HSMEnterExitParams()
+
+    # First go to ChildA with enter params
+    s.go_to_a()
+    log = s.get_log()
+    assert "ChildA:enter(starting)" in log, f"Expected ChildA:enter(starting), got {log}"
+    print("TC2.5.0: Initial transition with enter params - PASS")
+
+    # TC2.5.1: Exit params passed correctly
+    s.go_to_sibling()
+    log = s.get_log()
+    assert "ChildA:exit(leaving_A)" in log, f"Expected exit with param, got {log}"
+    print("TC2.5.1: Exit params passed correctly - PASS")
+
+    # TC2.5.2: Enter params passed to target state
+    assert "ChildB:enter(arriving_B)" in log, f"Expected enter with param, got {log}"
+    assert s.get_state() == "ChildB", f"Expected ChildB, got {s.get_state()}"
+    print("TC2.5.2: Enter params passed to target - PASS")
+
+    # TC2.5.3: Return transition with different params
+    s.go_back()
+    log = s.get_log()
+    assert "ChildB:exit(leaving_B)" in log, f"Expected ChildB exit, got {log}"
+    assert "ChildA:enter(returning_A)" in log, f"Expected ChildA enter, got {log}"
+    print("TC2.5.3: Return transition with params - PASS")
+
+    print("PASS: HSM enter/exit with params works correctly")
+
+func _ready():
+    main()

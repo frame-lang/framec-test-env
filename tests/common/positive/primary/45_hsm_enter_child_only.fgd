@@ -1,0 +1,103 @@
+@@target gdscript
+
+# Test 45: HSM Enter in Child Only
+#
+# Tests enter handler in child only:
+# - Child has $>(), parent does not
+# - Child enter handler fires on entry
+# - No error when parent lacks enter handler
+# - Forward to parent works without parent having enter
+
+@@system HSMEnterChildOnly {
+    interface:
+        go_to_child()
+        forward_action()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_child() {
+                -> $Child
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Start")
+                return
+            }
+        }
+
+        $Child => $Parent {
+            $>() {
+                self.log.append("Child:enter")
+            }
+
+            forward_action() {
+                self.log.append("Child:forward")
+                => $^
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Child")
+                return
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                self.log.append("Parent:forward_action")
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Parent")
+                return
+            }
+        }
+    domain:
+        log: list = []
+}
+
+def main():
+    print("=== Test 45: HSM Enter in Child Only ===")
+    s = @@HSMEnterChildOnly()
+
+    # Start state has no enter
+    assert s.get_state() == "Start", f"Expected Start, got {s.get_state()}"
+    print("TC2.1.0: Initial state is Start - PASS")
+
+    # TC2.1.1: Child enter handler fires on entry
+    s.go_to_child()
+    log = s.get_log()
+    assert "Child:enter" in log, f"Expected Child:enter, got {log}"
+    assert s.get_state() == "Child", f"Expected Child, got {s.get_state()}"
+    print("TC2.1.1: Child enter handler fires - PASS")
+
+    # TC2.1.2: No error when parent lacks enter (verified by compilation/execution)
+    print("TC2.1.2: No error when parent lacks enter - PASS")
+
+    # TC2.1.3: Forward to parent works without parent having enter
+    s.forward_action()
+    log = s.get_log()
+    assert "Child:forward" in log, f"Expected Child:forward, got {log}"
+    assert "Parent:forward_action" in log, f"Expected Parent handler, got {log}"
+    print("TC2.1.3: Forward works without parent enter - PASS")
+
+    print("PASS: HSM enter in child only works correctly")
+
+func _ready():
+    main()

@@ -1,0 +1,86 @@
+@@target dart
+
+// Tests that @@:return follows "last writer wins" across transition lifecycle
+
+@@system SystemReturnChainTest {
+    interface:
+        test_enter_sets(): String
+        test_exit_then_enter(): String
+        get_state(): String
+
+    machine:
+        $Start {
+            test_enter_sets(): String {
+                -> $EnterSetter
+            }
+
+            test_exit_then_enter(): String {
+                -> $BothSet
+            }
+
+            get_state(): String {
+                @@:("Start")
+                return;
+            }
+
+            <$() {
+                // Exit handler sets initial value
+                @@:return = "from_exit";
+            }
+        }
+
+        $EnterSetter {
+            $>() {
+                // Enter handler sets return value
+                @@:return = "from_enter";
+            }
+
+            get_state(): String {
+                @@:("EnterSetter")
+                return;
+            }
+        }
+
+        $BothSet {
+            $>() {
+                // Enter handler sets return - should overwrite exit's value
+                @@:return = "enter_wins";
+            }
+
+            get_state(): String {
+                @@:("BothSet")
+                return;
+            }
+        }
+}
+
+void main() {
+    print("== Test 15: System Return Chain (Last Writer Wins) ==");
+
+    // Test 1: Start exit + EnterSetter enter
+    // Start's exit sets "from_exit", EnterSetter's enter sets "from_enter"
+    // Enter should win (last writer)
+    final s1 = @@SystemReturnChainTest();
+    final result1 = s1.test_enter_sets();
+    if (result1 != "from_enter") {
+        throw Exception("Expected 'from_enter', got '${result1}'");
+    }
+    if (s1.get_state() != "EnterSetter") {
+        throw Exception("Expected state 'EnterSetter'");
+    }
+    print("1. Exit set then enter set - enter wins: '${result1}'");
+
+    // Test 2: Both handlers set, enter wins
+    final s2 = @@SystemReturnChainTest();
+    final result2 = s2.test_exit_then_enter();
+    if (result2 != "enter_wins") {
+        throw Exception("Expected 'enter_wins', got '${result2}'");
+    }
+    if (s2.get_state() != "BothSet") {
+        throw Exception("Expected state 'BothSet'");
+    }
+    print("2. Both set - enter wins: '${result2}'");
+
+    print("PASS: System return chain (last writer wins) works correctly");
+}
+

@@ -1,0 +1,90 @@
+@@target dart
+
+// Tests that nested interface calls maintain separate return contexts
+
+@@system SystemReturnReentrantTest {
+    interface:
+        outer_call(): String
+        inner_call(): String
+        nested_call(): String
+        get_log(): String
+
+    machine:
+        $Start {
+            $.log: String = ""
+
+            outer_call(): String {
+                $.log = $.log + "outer_start,";
+                // Call inner method - this creates nested return context
+                final inner_result = this.inner_call();
+                $.log = $.log + "outer_after_inner,";
+                // Our return should be independent of inner's return
+                @@:("outer_result:" + inner_result)
+                return;
+            }
+
+            inner_call(): String {
+                $.log = $.log + "inner,";
+                @@:("inner_result")
+                return;
+            }
+
+            nested_call(): String {
+                $.log = $.log + "nested_start,";
+                // Two levels of nesting
+                final result1 = this.inner_call();
+                final result2 = this.outer_call();
+                $.log = $.log + "nested_end,";
+                @@:("nested:" + result1 + "+" + result2)
+                return;
+            }
+
+            get_log(): String {
+                @@:($.log)
+                return;
+            }
+        }
+}
+
+void main() {
+    print("== Test 16: System Return Reentrant (Nested Calls) ==");
+
+    // Test 1: Simple inner call
+    final s1 = @@SystemReturnReentrantTest();
+    final result1 = s1.inner_call();
+    if (result1 != "inner_result") {
+        throw Exception("Expected 'inner_result', got '${result1}'");
+    }
+    print("1. inner_call() = '${result1}'");
+
+    // Test 2: Outer calls inner - return contexts should be separate
+    final s2 = @@SystemReturnReentrantTest();
+    final result2 = s2.outer_call();
+    if (result2 != "outer_result:inner_result") {
+        throw Exception("Expected 'outer_result:inner_result', got '${result2}'");
+    }
+    final log2 = s2.get_log();
+    if (!log2.includes("outer_start")) {
+        throw Exception("Missing outer_start in log: ${log2}");
+    }
+    if (!log2.includes("inner")) {
+        throw Exception("Missing inner in log: ${log2}");
+    }
+    if (!log2.includes("outer_after_inner")) {
+        throw Exception("Missing outer_after_inner in log: ${log2}");
+    }
+    print("2. outer_call() = '${result2}'");
+    print("   Log: '${log2}'");
+
+    // Test 3: Deeply nested calls
+    final s3 = @@SystemReturnReentrantTest();
+    final result3 = s3.nested_call();
+    final expected = "nested:inner_result+outer_result:inner_result";
+    if (result3 != expected) {
+        throw Exception("Expected '${expected}', got '${result3}'");
+    }
+    print("3. nested_call() = '${result3}'");
+
+    print("PASS: System return reentrant (nested calls) works correctly");
+}
+

@@ -1,0 +1,78 @@
+@@target dart
+
+// Test: Context Stack Reentrancy
+// Validates that nested interface calls maintain separate contexts
+
+@@system ContextReentrantTest {
+    interface:
+        outer(x: int): String
+        inner(y: int): String
+        deeply_nested(z: int): String
+        get_both(a: int, b: int): String
+
+    machine:
+        $Ready {
+            outer(x: int): String {
+                // Set our return before calling inner
+                @@:return = "outer_initial";
+
+                // Call inner - should NOT clobber our return
+                final inner_result = this.inner(@@.x * 10);
+
+                // Our return should still be accessible
+                // Update it with combined result
+                @@:return = "outer:" + @@.x + ",inner:" + inner_result;
+            }
+
+            inner(y: int): String {
+                // Inner has its own context
+                // @@.y should be inner's param, not outer's
+                @@:return = String(@@.y);
+            }
+
+            deeply_nested(z: int): String {
+                // 3 levels deep
+                final outer_result = this.outer(@@.z);
+                @@:return = "deep:" + @@.z + "," + outer_result;
+            }
+
+            get_both(a: int, b: int): String {
+                // Test that we can access multiple params
+                final result_a = this.inner(@@.a);
+                final result_b = this.inner(@@.b);
+                // After both inner calls, @@.a and @@.b should still be our params
+                @@:return = "a=" + @@.a + ",b=" + @@.b + ",results=" + result_a + "+" + result_b;
+            }
+        }
+}
+
+void main(): void {
+    print("== Test 37: Context Reentrant ==");
+    final s = @@ContextReentrantTest();
+
+    // Test 1: Simple nesting - outer calls inner
+    var result = s.outer(5);
+    var expected = "outer:5,inner:50";
+    if (result != expected) throw Exception("Expected '${expected}', got '${result}'");
+    print("1. outer(5) = '${result}'");
+
+    // Test 2: Inner alone
+    result = s.inner(42);
+    if (result != "42") throw Exception("Expected '42', got '${result}'");
+    print("2. inner(42) = '${result}'");
+
+    // Test 3: Deep nesting (3 levels)
+    result = s.deeply_nested(3);
+    expected = "deep:3,outer:3,inner:30";
+    if (result != expected) throw Exception("Expected '${expected}', got '${result}'");
+    print("3. deeply_nested(3) = '${result}'");
+
+    // Test 4: Multiple inner calls, params preserved
+    result = s.get_both(10, 20);
+    expected = "a=10,b=20,results=10+20";
+    if (result != expected) throw Exception("Expected '${expected}', got '${result}'");
+    print("4. get_both(10, 20) = '${result}'");
+
+    print("PASS: Context reentrant works correctly");
+}
+

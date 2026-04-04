@@ -1,0 +1,156 @@
+@@target dart
+
+@@persist
+@@system PersistRoundtrip {
+    interface:
+        go_active()
+        go_idle()
+        get_state(): String
+        set_counter(n: int)
+        get_counter(): int
+        add_history(msg: String)
+        get_history(): String[]
+
+    machine:
+        $Idle {
+            go_active() {
+                this.history.add("idle->active");
+                -> $Active
+            }
+
+            go_idle() {
+                // already idle
+            }
+
+            get_state(): String {
+                @@:("idle")
+                return;
+            }
+
+            set_counter(n: int) {
+                this.counter = n;
+            }
+
+            get_counter(): int {
+                @@:(this.counter)
+                return;
+            }
+
+            add_history(msg: String) {
+                this.history.add("idle:" + msg);
+            }
+
+            get_history(): String[] {
+                @@:(this.history)
+                return;
+            }
+        }
+
+        $Active {
+            go_active() {
+                // already active
+            }
+
+            go_idle() {
+                this.history.add("active->idle");
+                -> $Idle
+            }
+
+            get_state(): String {
+                @@:("active")
+                return;
+            }
+
+            set_counter(n: int) {
+                this.counter = n * 2;
+            }
+
+            get_counter(): int {
+                @@:(this.counter)
+                return;
+            }
+
+            add_history(msg: String) {
+                this.history.add("active:" + msg);
+            }
+
+            get_history(): String[] {
+                @@:(this.history)
+                return;
+            }
+        }
+    domain:
+        counter: int = 0
+        history: String[] = []
+        mode: String = "normal"
+}
+
+void main(): void {
+    print("== Test 24: Persist Roundtrip (TypeScript) ==");
+
+    // Test 1: Create system and build up state
+    final s1 = @@PersistRoundtrip();
+    s1.set_counter(5);
+    s1.add_history("start");
+    s1.go_active();
+    s1.set_counter(3);  // Should be 6 in Active (doubled)
+    s1.add_history("work");
+
+    if (s1.get_state() != "active") {
+        throw Exception("Expected active, got ${s1.get_state()}");
+    }
+    if (s1.get_counter() != 6) {
+        throw Exception("Expected 6, got ${s1.get_counter()}");
+    }
+    print("1. State before save: state=${s1.get_state()}, counter=${s1.get_counter()}");
+    print("   History: ${jsonEncode(s1.get_history())}");
+
+    // Test 2: Save state
+    final json = s1.saveState();
+    final data = jsonDecode(json);
+    print("2. Saved data keys: ${Object.keys(data)}");
+    if (data._compartment.state != 'Active') {
+        throw Exception("Expected Active state in save data");
+    }
+    if (data.counter != 6) {
+        throw Exception("Expected counter=6 in save data");
+    }
+
+    // Test 3: Restore to instance
+    final s2 = PersistRoundtrip.restoreState(json);
+
+    if (s2.get_state() != "active") {
+        throw Exception("Expected active, got ${s2.get_state()}");
+    }
+    if (s2.get_counter() != 6) {
+        throw Exception("Expected 6, got ${s2.get_counter()}");
+    }
+    print("3. Restored state: state=${s2.get_state()}, counter=${s2.get_counter()}");
+
+    // Test 4: State machine continues to work after restore
+    s2.set_counter(2);  // Should be 4 in Active (doubled)
+    if (s2.get_counter() != 4) {
+        throw Exception("Expected 4, got ${s2.get_counter()}");
+    }
+    print("4. Counter after set_counter(2): ${s2.get_counter()}");
+
+    // Test 5: Verify history was preserved
+    if (jsonEncode(s2.get_history()) != jsonEncode(s1.get_history())) {
+        throw Exception("History mismatch: ${jsonEncode(s2.get_history())} vs ${jsonEncode(s1.get_history())}");
+    }
+    print("5. History preserved: ${jsonEncode(s2.get_history())}");
+
+    // Test 6: Transitions work after restore
+    s2.go_idle();
+    if (s2.get_state() != "idle") {
+        throw Exception("Expected idle after go_idle");
+    }
+    s2.set_counter(10);  // Not doubled in Idle
+    if (s2.get_counter() != 10) {
+        throw Exception("Expected 10, got ${s2.get_counter()}");
+    }
+    print("6. After go_idle: state=${s2.get_state()}, counter=${s2.get_counter()}");
+
+    print("PASS: Persist roundtrip works correctly");
+}
+

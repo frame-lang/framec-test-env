@@ -67,6 +67,8 @@ SWIFT_OUT="$TEST_ENV_ROOT/output/swift/tests"
 RUBY_OUT="$TEST_ENV_ROOT/output/ruby/tests"
 ERLANG_OUT="$TEST_ENV_ROOT/output/erlang/tests"
 LUA_OUT="$TEST_ENV_ROOT/output/lua/tests"
+DART_OUT="$TEST_ENV_ROOT/output/dart/tests"
+GDSCRIPT_OUT="$TEST_ENV_ROOT/output/gdscript/tests"
 
 # Colors
 RED='\033[0;31m'
@@ -82,6 +84,8 @@ rust_pass=0 rust_fail=0 rust_skip=0 rust_known=0
 c_pass=0 c_fail=0 c_skip=0 c_known=0
 erlang_pass=0 erlang_fail=0 erlang_skip=0 erlang_known=0
 lua_pass=0 lua_fail=0 lua_skip=0 lua_known=0
+dart_pass=0 dart_fail=0 dart_skip=0 dart_known=0
+gdscript_pass=0 gdscript_fail=0 gdscript_skip=0 gdscript_known=0
 
 # Command line options
 FILTER_LANG=""
@@ -110,6 +114,8 @@ while [[ $# -gt 0 ]]; do
         --ruby|--rb) FILTER_LANG="ruby" ;;
         --erlang|--erl) FILTER_LANG="erlang" ;;
         --lua) FILTER_LANG="lua" ;;
+        --dart) FILTER_LANG="dart" ;;
+        --gdscript|--gd) FILTER_LANG="gdscript" ;;
         --langs|-l)
             # Parse comma-separated language list (py,ts,rs,c -> python typescript rust c)
             FILTER_LANGS=""
@@ -158,7 +164,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Create output directories
-mkdir -p "$PYTHON_OUT" "$TS_OUT" "$RUST_OUT" "$C_OUT" "$CPP_OUT" "$JAVA_OUT" "$CSHARP_OUT" "$GO_OUT" "$JS_OUT" "$PHP_OUT" "$KOTLIN_OUT" "$SWIFT_OUT" "$RUBY_OUT" "$ERLANG_OUT" "$LUA_OUT"
+mkdir -p "$PYTHON_OUT" "$TS_OUT" "$RUST_OUT" "$C_OUT" "$CPP_OUT" "$JAVA_OUT" "$CSHARP_OUT" "$GO_OUT" "$JS_OUT" "$PHP_OUT" "$KOTLIN_OUT" "$SWIFT_OUT" "$RUBY_OUT" "$ERLANG_OUT" "$LUA_OUT" "$DART_OUT" "$GDSCRIPT_OUT"
 
 # Temp directory for parallel results
 RESULTS_DIR=$(mktemp -d)
@@ -182,6 +188,8 @@ lang_to_target() {
         ruby) echo "ruby" ;;
         erlang) echo "erlang" ;;
         lua) echo "lua" ;;
+        dart) echo "dart" ;;
+        gdscript) echo "gdscript" ;;
     esac
 }
 
@@ -203,6 +211,8 @@ lang_to_outdir() {
         ruby) echo "$RUBY_OUT" ;;
         erlang) echo "$ERLANG_OUT" ;;
         lua) echo "$LUA_OUT" ;;
+        dart) echo "$DART_OUT" ;;
+        gdscript) echo "$GDSCRIPT_OUT" ;;
     esac
 }
 
@@ -224,6 +234,8 @@ lang_to_outext() {
         ruby) echo "rb" ;;
         erlang) echo "erl" ;;
         lua) echo "lua" ;;
+        dart) echo "dart" ;;
+        gdscript) echo "gd" ;;
     esac
 }
 
@@ -245,6 +257,8 @@ lang_to_srcext() {
         ruby) echo "frb" ;;
         erlang) echo "ferl" ;;
         lua) echo "flua" ;;
+        dart) echo "fdart" ;;
+        gdscript) echo "fgd" ;;
     esac
 }
 
@@ -617,7 +631,7 @@ run_category() {
 
     # Check if directory has test files
     local has_tests=false
-    for ext in fpy fts frs fc fcpp fjava fcs fgo fjs fphp fkt fswift frb ferl flua; do
+    for ext in fpy fts frs fc fcpp fjava fcs fgo fjs fphp fkt fswift frb ferl flua fdart fgd; do
         if ls "$category_dir"/*.$ext 1>/dev/null 2>&1; then
             has_tests=true
             break
@@ -634,7 +648,7 @@ run_category() {
     # Determine which languages to test based on scope
     local languages=""
     case $scope in
-        common) languages="python typescript rust c cpp java csharp go javascript php kotlin swift ruby erlang lua" ;;
+        common) languages="python typescript rust c cpp java csharp go javascript php kotlin swift ruby erlang lua dart gdscript" ;;
         python) languages="python" ;;
         typescript) languages="typescript" ;;
         rust) languages="rust" ;;
@@ -643,7 +657,7 @@ run_category() {
 
     # Get unique test names from all language files
     local test_names=""
-    for ext in fpy fts frs fc fcpp fjava fcs fgo fjs fphp fkt fswift frb ferl flua; do
+    for ext in fpy fts frs fc fcpp fjava fcs fgo fjs fphp fkt fswift frb ferl flua fdart fgd; do
         for f in "$category_dir"/*.$ext; do
             [ -f "$f" ] || continue
             local name=$(basename "$f" | sed 's/\.f[a-z]*$//')
@@ -688,6 +702,8 @@ run_category() {
                 ruby) ext="frb" ;;
                 erlang) ext="ferl" ;;
                 lua) ext="flua" ;;
+                dart) ext="fdart" ;;
+                gdscript) ext="fgd" ;;
             esac
 
             local test_file="$category_dir/${test_name}.${ext}"
@@ -725,7 +741,7 @@ if $PARALLEL; then
     elif [ -n "$FILTER_LANGS" ]; then
         languages="$FILTER_LANGS"
     else
-        languages="python typescript rust c cpp java csharp go javascript php kotlin swift ruby erlang lua"
+        languages="python typescript rust c cpp java csharp go javascript php kotlin swift ruby erlang lua dart gdscript"
     fi
 
     # Phase 1: Transpile all tests first (all languages in parallel)
@@ -841,7 +857,7 @@ total_fail=0
 total_skip=0
 total_known=0
 
-for lang in python typescript rust c cpp java csharp go javascript php kotlin swift ruby erlang lua; do
+for lang in python typescript rust c cpp java csharp go javascript php kotlin swift ruby erlang lua dart gdscript; do
     p=$(get_counter "$lang" "pass")
     f=$(get_counter "$lang" "fail")
     s=$(get_counter "$lang" "skip")

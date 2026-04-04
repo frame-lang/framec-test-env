@@ -1,0 +1,162 @@
+@@target gdscript
+
+# Test 50: HSM Omitted Handlers - Forwarding Behavior
+#
+# Tests behavior when handlers are omitted at various levels:
+# - Event not handled in child, not forwarded = silent ignore
+# - Event not handled in child, forwarded with `=> $^` = parent handles
+# - State-level `=> $^` forwards all unhandled events
+
+@@system HSMOmittedHandlers {
+    interface:
+        handled_by_child()
+        forwarded_explicitly()
+        unhandled_no_forward()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Child => $Parent {
+            handled_by_child() {
+                self.log.append("Child:handled_by_child")
+            }
+
+            forwarded_explicitly() {
+                self.log.append("Child:before_forward")
+                => $^
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Child")
+                return
+            }
+        }
+
+        $Parent {
+            handled_by_child() {
+                self.log.append("Parent:handled_by_child")
+            }
+
+            forwarded_explicitly() {
+                self.log.append("Parent:forwarded_explicitly")
+            }
+
+            unhandled_no_forward() {
+                self.log.append("Parent:unhandled_no_forward")
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Parent")
+                return
+            }
+        }
+    domain:
+        log: list = []
+}
+
+@@system HSMDefaultForward {
+    interface:
+        child_handled()
+        parent_handled()
+        both_respond()
+        get_log(): list
+
+    machine:
+        $Child => $Parent {
+            child_handled() {
+                self.log.append("Child:child_handled")
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            => $^
+        }
+
+        $Parent {
+            child_handled() {
+                self.log.append("Parent:child_handled")
+            }
+
+            parent_handled() {
+                self.log.append("Parent:parent_handled")
+            }
+
+            both_respond() {
+                self.log.append("Parent:both_respond")
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+        }
+    domain:
+        log: list = []
+}
+
+def main():
+    print("=== Test 50: HSM Omitted Handlers ===")
+
+    # Part 1: Explicit forwarding vs no forwarding
+    s1 = @@HSMOmittedHandlers()
+
+    # TC2.6.1: Event handled by child only
+    s1.handled_by_child()
+    log = s1.get_log()
+    assert "Child:handled_by_child" in log, f"Expected Child handler, got {log}"
+    assert "Parent:handled_by_child" not in log, f"Parent should NOT be called, got {log}"
+    print("TC2.6.1: Handled by child, not forwarded - PASS")
+
+    # TC2.6.2: Event explicitly forwarded to parent
+    s1.forwarded_explicitly()
+    log = s1.get_log()
+    assert "Child:before_forward" in log, f"Expected Child forward, got {log}"
+    assert "Parent:forwarded_explicitly" in log, f"Expected Parent handler, got {log}"
+    print("TC2.6.2: Explicitly forwarded to parent - PASS")
+
+    # TC2.6.3: Unhandled event with no forward - silently ignored
+    # This should NOT crash and should NOT call parent
+    s1.unhandled_no_forward()
+    log = s1.get_log()
+    assert "Parent:unhandled_no_forward" not in log, f"Unhandled should be ignored, got {log}"
+    print("TC2.6.3: Unhandled (no forward) is silently ignored - PASS")
+
+    # Part 2: State-level default forward
+    s2 = @@HSMDefaultForward()
+
+    # TC2.6.4: Event handled by child (no forward despite => $^)
+    s2.child_handled()
+    log = s2.get_log()
+    assert "Child:child_handled" in log, f"Expected Child handler, got {log}"
+    assert "Parent:child_handled" not in log, f"Handled by child, not forwarded, got {log}"
+    print("TC2.6.4: Child handles, not forwarded - PASS")
+
+    # TC2.6.5: Unhandled event forwarded via => $^
+    s2.parent_handled()
+    log = s2.get_log()
+    assert "Parent:parent_handled" in log, f"Expected Parent handler, got {log}"
+    print("TC2.6.5: Unhandled forwarded via state-level => $^ - PASS")
+
+    # TC2.6.6: Another unhandled event forwarded
+    s2.both_respond()
+    log = s2.get_log()
+    assert "Parent:both_respond" in log, f"Expected Parent handler, got {log}"
+    print("TC2.6.6: Default forward works for multiple events - PASS")
+
+    print("PASS: HSM omitted handlers work correctly")
+
+func _ready():
+    main()

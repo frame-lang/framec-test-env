@@ -1,0 +1,87 @@
+@@target dart
+
+@@system ForwardEnterFirst {
+    interface:
+        process()
+        get_counter(): int
+        get_log(): String[]
+
+    machine:
+        $Idle {
+            process() {
+                -> => $Working
+            }
+
+            get_counter(): int {
+                @@:(-1)
+                return;
+            }
+
+            get_log(): String[] {
+                @@:(this.log)
+                return;
+            }
+        }
+
+        $Working {
+            $.counter: int = 100
+
+            $>() {
+                this.log.add("Working:enter")
+            }
+
+            process() {
+                this.log.add("Working:process:counter=" + $.counter.toString())
+                $.counter = $.counter + 1
+            }
+
+            get_counter(): int {
+                @@:($.counter)
+                return;
+            }
+
+            get_log(): String[] {
+                @@:(this.log)
+                return;
+            }
+        }
+    domain:
+        log: String[] = []
+}
+
+void main(): void {
+    print("== Test 29: Forward Enter First ==");
+    final s = @@ForwardEnterFirst();
+
+    if (s.get_counter() != -1) {
+        throw Exception("Expected -1 in Idle");
+    }
+
+    s.process();
+
+    final counter = s.get_counter();
+    final log = s.get_log();
+    print("Counter after forward: ${counter}");
+    print("Log: ${jsonEncode(log)}");
+
+    if (!log.includes("Working:enter")) {
+        throw Exception("Expected 'Working:enter' in log: ${log}");
+    }
+
+    if (!log.includes("Working:process:counter=100")) {
+        throw Exception("Expected 'Working:process:counter=100' in log: ${log}");
+    }
+
+    if (counter != 101) {
+        throw Exception("Expected counter=101, got ${counter}");
+    }
+
+    final enterIdx = log.indexOf("Working:enter");
+    final processIdx = log.indexOf("Working:process:counter=100");
+    if (enterIdx >= processIdx) {
+        throw Exception("$> should run before process: ${log}");
+    }
+
+    print("PASS: Forward sends $> first for non-$> events");
+}
+

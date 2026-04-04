@@ -1,0 +1,81 @@
+@@target dart
+
+@@system StateVarReentry {
+    interface:
+        increment(): int
+        get_count(): int
+        go_other()
+        come_back()
+
+    machine:
+        $Counter {
+            $.count: int = 0
+
+            increment(): int {
+                $.count = $.count + 1;
+                @@:($.count)
+                return;
+            }
+
+            get_count(): int {
+                @@:($.count)
+                return;
+            }
+
+            go_other() {
+                -> $Other
+            }
+        }
+
+        $Other {
+            come_back() {
+                -> $Counter
+            }
+
+            increment(): int {
+                @@:(-1)
+                return;
+            }
+
+            get_count(): int {
+                @@:(-1)
+                return;
+            }
+        }
+}
+
+void main() {
+    print("== Test 11: State Variable Reentry ==");
+    final s = @@StateVarReentry();
+
+    // Increment a few times
+    s.increment();
+    s.increment();
+    var count = s.get_count();
+    if (count != 2) {
+        throw Exception("Expected 2 after two increments, got ${count}");
+    }
+    print("Count before leaving: ${count}");
+
+    // Leave the state
+    s.go_other();
+    print("Transitioned to Other state");
+
+    // Come back - state var should be reinitialized to 0
+    s.come_back();
+    count = s.get_count();
+    if (count != 0) {
+        throw Exception("Expected 0 after re-entering Counter (state var reinit), got ${count}");
+    }
+    print("Count after re-entering Counter: ${count}");
+
+    // Increment again to verify it works
+    final result = s.increment();
+    if (result != 1) {
+        throw Exception("Expected 1 after increment, got ${result}");
+    }
+    print("After increment: ${result}");
+
+    print("PASS: State variables reinitialize on state reentry");
+}
+

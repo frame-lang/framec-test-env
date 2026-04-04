@@ -1,0 +1,161 @@
+@@target dart
+
+// Test 50: HSM Omitted Handlers - Forwarding Behavior
+//
+// Tests behavior when handlers are omitted at various levels:
+// - Event not handled in child, not forwarded = silent ignore
+// - Event not handled in child, forwarded with "=> $^" = parent handles
+// - State-level "=> $^" forwards all unhandled events
+
+@@system HSMOmittedHandlers {
+    interface:
+        handled_by_child()
+        forwarded_explicitly()
+        unhandled_no_forward()
+        get_log(): String[]
+        get_state(): str
+
+    machine:
+        $Child => $Parent {
+            handled_by_child() {
+                this.log.add("Child:handled_by_child")
+            }
+
+            forwarded_explicitly() {
+                this.log.add("Child:before_forward")
+                => $^
+            }
+
+            get_log(): list {
+                @@:(this.log)
+                return;
+            }
+
+            get_state(): str {
+                @@:("Child")
+                return;
+            }
+        }
+
+        $Parent {
+            handled_by_child() {
+                this.log.add("Parent:handled_by_child")
+            }
+
+            forwarded_explicitly() {
+                this.log.add("Parent:forwarded_explicitly")
+            }
+
+            unhandled_no_forward() {
+                this.log.add("Parent:unhandled_no_forward")
+            }
+
+            get_log(): list {
+                @@:(this.log)
+                return;
+            }
+
+            get_state(): str {
+                @@:("Parent")
+                return;
+            }
+        }
+    domain:
+        log: String[] = []
+}
+
+@@system HSMDefaultForward {
+    interface:
+        child_handled()
+        parent_handled()
+        both_respond()
+        get_log(): String[]
+
+    machine:
+        $Child => $Parent {
+            child_handled() {
+                this.log.add("Child:child_handled")
+            }
+
+            get_log(): list {
+                @@:(this.log)
+                return;
+            }
+
+            => $^
+        }
+
+        $Parent {
+            child_handled() {
+                this.log.add("Parent:child_handled")
+            }
+
+            parent_handled() {
+                this.log.add("Parent:parent_handled")
+            }
+
+            both_respond() {
+                this.log.add("Parent:both_respond")
+            }
+
+            get_log(): list {
+                @@:(this.log)
+                return;
+            }
+        }
+    domain:
+        log: String[] = []
+}
+
+void main() {
+    print("== Test 50: HSM Omitted Handlers ==");
+
+    // Part 1: Explicit forwarding vs no forwarding
+    final s1 = @@HSMOmittedHandlers();
+
+    // TC2.6.1: Event handled by child only
+    s1.handled_by_child();
+    var log = s1.get_log();
+    if (!log.includes("Child:handled_by_child")) throw Exception("Expected Child handler, got ${jsonEncode(log)}");
+    if (log.includes("Parent:handled_by_child")) throw Exception("Parent should NOT be called, got ${jsonEncode(log)}");
+    print("TC2.6.1: Handled by child, not forwarded - PASS");
+
+    // TC2.6.2: Event explicitly forwarded to parent
+    s1.forwarded_explicitly();
+    log = s1.get_log();
+    if (!log.includes("Child:before_forward")) throw Exception("Expected Child forward, got ${jsonEncode(log)}");
+    if (!log.includes("Parent:forwarded_explicitly")) throw Exception("Expected Parent handler, got ${jsonEncode(log)}");
+    print("TC2.6.2: Explicitly forwarded to parent - PASS");
+
+    // TC2.6.3: Unhandled event with no forward - silently ignored
+    // This should NOT crash and should NOT call parent
+    s1.unhandled_no_forward();
+    log = s1.get_log();
+    if (log.includes("Parent:unhandled_no_forward")) throw Exception("Unhandled should be ignored, got ${jsonEncode(log)}");
+    print("TC2.6.3: Unhandled (no forward) is silently ignored - PASS");
+
+    // Part 2: State-level default forward
+    final s2 = @@HSMDefaultForward();
+
+    // TC2.6.4: Event handled by child (no forward despite => $^)
+    s2.child_handled();
+    log = s2.get_log();
+    if (!log.includes("Child:child_handled")) throw Exception("Expected Child handler, got ${jsonEncode(log)}");
+    if (log.includes("Parent:child_handled")) throw Exception("Handled by child, not forwarded, got ${jsonEncode(log)}");
+    print("TC2.6.4: Child handles, not forwarded - PASS");
+
+    // TC2.6.5: Unhandled event forwarded via => $^
+    s2.parent_handled();
+    log = s2.get_log();
+    if (!log.includes("Parent:parent_handled")) throw Exception("Expected Parent handler, got ${jsonEncode(log)}");
+    print("TC2.6.5: Unhandled forwarded via state-level => $^ - PASS");
+
+    // TC2.6.6: Another unhandled event forwarded
+    s2.both_respond();
+    log = s2.get_log();
+    if (!log.includes("Parent:both_respond")) throw Exception("Expected Parent handler, got ${jsonEncode(log)}");
+    print("TC2.6.6: Default forward works for multiple events - PASS");
+
+    print("PASS: HSM omitted handlers work correctly");
+}
+

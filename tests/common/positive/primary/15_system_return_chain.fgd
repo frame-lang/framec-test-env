@@ -1,0 +1,79 @@
+@@target gdscript
+
+# Tests that @@:return follows "last writer wins" across transition lifecycle
+
+@@system SystemReturnChainTest {
+    interface:
+        test_enter_sets(): str
+        test_exit_then_enter(): str
+        get_state(): str
+
+    machine:
+        $Start {
+            test_enter_sets(): str {
+                -> $EnterSetter
+            }
+
+            test_exit_then_enter(): str {
+                -> $BothSet
+            }
+
+            get_state(): str {
+                @@:("Start")
+                return
+            }
+
+            <$() {
+                # Exit handler sets initial value
+                @@:return = "from_exit"
+            }
+        }
+
+        $EnterSetter {
+            $>() {
+                # Enter handler sets return value
+                @@:return = "from_enter"
+            }
+
+            get_state(): str {
+                @@:("EnterSetter")
+                return
+            }
+        }
+
+        $BothSet {
+            $>() {
+                # Enter handler sets return - should overwrite exit's value
+                @@:return = "enter_wins"
+            }
+
+            get_state(): str {
+                @@:("BothSet")
+                return
+            }
+        }
+}
+
+def main():
+    print("=== Test 15: System Return Chain (Last Writer Wins) ===")
+
+    # Test 1: Start exit + EnterSetter enter
+    # Start's exit sets "from_exit", EnterSetter's enter sets "from_enter"
+    # Enter should win (last writer)
+    s1 = @@SystemReturnChainTest()
+    result = s1.test_enter_sets()
+    assert result == "from_enter", f"Expected 'from_enter', got '{result}'"
+    assert s1.get_state() == "EnterSetter", f"Expected state 'EnterSetter'"
+    print("1. Exit set then enter set - enter wins: '{result}'")
+
+    # Test 2: Both handlers set, enter wins
+    s2 = @@SystemReturnChainTest()
+    result = s2.test_exit_then_enter()
+    assert result == "enter_wins", f"Expected 'enter_wins', got '{result}'"
+    assert s2.get_state() == "BothSet", f"Expected state 'BothSet'"
+    print("2. Both set - enter wins: '{result}'")
+
+    print("PASS: System return chain (last writer wins) works correctly")
+
+func _ready():
+    main()

@@ -1,0 +1,158 @@
+@@target gdscript
+
+# Test 48: HSM Exit Handlers
+#
+# Tests exit handlers in HSM context:
+# - Child exit fires when transitioning out of child
+# - Parent exit does NOT fire when transitioning out of child
+# - Exit handler can access child's state variables
+
+@@system HSMExitHandlers {
+    interface:
+        go_to_other()
+        go_to_parent()
+        go_to_child()
+        get_log(): list
+        get_state(): str
+        get_child_var(): int
+
+    machine:
+        $Child => $Parent {
+            $.child_var: int = 42
+
+            $>() {
+                self.log.append("Child:enter")
+            }
+
+            <$() {
+                val = $.child_var
+                self.log.append(f"Child:exit(var={val})")
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Child")
+                return
+            }
+
+            get_child_var(): int {
+                @@:($.child_var)
+                return
+            }
+        }
+
+        $Parent {
+            $>() {
+                self.log.append("Parent:enter")
+            }
+
+            <$() {
+                self.log.append("Parent:exit")
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Parent")
+                return
+            }
+
+            get_child_var(): int {
+                @@:(-1)
+                return
+            }
+        }
+
+        $Other {
+            $>() {
+                self.log.append("Other:enter")
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Other")
+                return
+            }
+
+            get_child_var(): int {
+                @@:(-1)
+                return
+            }
+        }
+    domain:
+        log: list = []
+}
+
+def main():
+    print("=== Test 48: HSM Exit Handlers ===")
+    s = @@HSMExitHandlers()
+
+    # Initial state is Child
+    log = s.get_log()
+    assert "Child:enter" in log, f"Expected Child:enter on init, got {log}"
+    assert s.get_state() == "Child", f"Expected Child, got {s.get_state()}"
+    print("TC2.4.0: Initial state is Child with enter - PASS")
+
+    # TC2.4.1: Child exit fires when transitioning out of child
+    s.go_to_other()
+    log = s.get_log()
+    assert "Child:exit(var=42)" in log, f"Expected Child:exit, got {log}"
+    assert "Other:enter" in log, f"Expected Other:enter, got {log}"
+    print("TC2.4.1: Child exit fires when transitioning out - PASS")
+
+    # TC2.4.2: Parent exit does NOT fire when transitioning out of child
+    assert "Parent:exit" not in log, f"Parent:exit should NOT fire for child exit, got {log}"
+    print("TC2.4.2: Parent exit NOT fired for child exit - PASS")
+
+    # TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
+    print("TC2.4.3: Exit handler accesses state var (var=42) - PASS")
+
+    # TC2.4.4: Parent exit fires when transitioning out of Parent
+    s.go_to_parent()
+    log = s.get_log()
+    assert "Parent:enter" in log, f"Expected Parent:enter, got {log}"
+
+    s.go_to_other()
+    log = s.get_log()
+    assert "Parent:exit" in log, f"Expected Parent:exit, got {log}"
+    print("TC2.4.4: Parent exit fires when leaving parent - PASS")
+
+    print("PASS: HSM exit handlers work correctly")
+
+func _ready():
+    main()

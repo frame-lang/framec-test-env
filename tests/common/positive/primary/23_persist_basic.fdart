@@ -1,0 +1,98 @@
+@@target dart
+
+@@persist
+@@system PersistTest {
+    interface:
+        set_value(v: int)
+        get_value(): int
+        go_active()
+        go_idle()
+
+    machine:
+        $Idle {
+            set_value(v: int) {
+                this.value = v;
+            }
+
+            get_value(): int {
+                @@:(this.value)
+                return;
+            }
+
+            go_active() {
+                -> $Active
+            }
+
+            go_idle() {
+                // Already idle
+            }
+        }
+
+        $Active {
+            set_value(v: int) {
+                this.value = v * 2;
+            }
+
+            get_value(): int {
+                @@:(this.value)
+                return;
+            }
+
+            go_active() {
+                // Already active
+            }
+
+            go_idle() {
+                -> $Idle
+            }
+        }
+    domain:
+        value: int = 0
+        name: String = "default"
+}
+
+void main(): void {
+    print("== Test 23: Persist Basic (TypeScript) ==");
+
+    // Test 1: Create and modify system
+    final s1 = @@PersistTest();
+    s1.set_value(10);
+    s1.go_active();
+    s1.set_value(5);  // Should be doubled to 10 in Active state
+
+    // Test 2: Save state
+    final json = s1.saveState();
+    final data = jsonDecode(json);
+    if (data._compartment.state != 'Active') {
+        throw Exception("Expected 'Active', got ${data._compartment.state}");
+    }
+    if (data.value != 10) {
+        throw Exception("Expected 10, got ${data.value}");
+    }
+    print("1. Saved state: ${json}");
+
+    // Test 3: Restore state
+    final s2 = PersistTest.restoreState(json);
+    if (s2.get_value() != 10) {
+        throw Exception("Expected 10, got ${s2.get_value()}");
+    }
+    print("2. Restored value: ${s2.get_value()}");
+
+    // Test 4: Verify state is preserved (Active state doubles)
+    s2.set_value(3);  // Should be doubled to 6 in Active state
+    if (s2.get_value() != 6) {
+        throw Exception("Expected 6, got ${s2.get_value()}");
+    }
+    print("3. After set_value(3) in Active: ${s2.get_value()}");
+
+    // Test 5: Verify transitions work after restore
+    s2.go_idle();
+    s2.set_value(4);  // Should NOT be doubled in Idle state
+    if (s2.get_value() != 4) {
+        throw Exception("Expected 4, got ${s2.get_value()}");
+    }
+    print("4. After go_idle, set_value(4): ${s2.get_value()}");
+
+    print("PASS: Persist basic works correctly");
+}
+

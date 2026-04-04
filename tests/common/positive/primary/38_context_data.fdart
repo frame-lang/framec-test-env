@@ -1,0 +1,88 @@
+@@target dart
+
+// Test: Context Data (@@:data)
+// Validates call-scoped data that persists across handler -> <$ -> $> chain
+
+@@system ContextDataTest {
+    interface:
+        process_with_data(value: int): String
+        check_data_isolation(): String
+        transition_preserves_data(x: int): String
+
+    machine:
+        $Start {
+            process_with_data(value: int): String {
+                // Set data in handler
+                @@:data["input"] = @@.value;
+                @@:data["trace"] = ["handler"];
+
+                @@:return = "processed:" + @@:data["input"];
+            }
+
+            check_data_isolation(): String {
+                // Set data, call another method, verify our data preserved
+                @@:data["outer"] = "outer_value";
+
+                // This creates its own context with its own data
+                final inner_result = this.process_with_data(99);
+
+                // Our data should still be here
+                @@:return = "outer_data=" + @@:data["outer"] + ",inner=" + inner_result;
+            }
+
+            transition_preserves_data(x: int): String {
+                // Set data, transition, verify data available in lifecycle handlers
+                @@:data["started_in"] = "Start";
+                @@:data["value"] = @@.x;
+                @@:data["trace"] = ["handler"];
+                -> $End
+            }
+
+            <$() {
+                // Exit handler can access data set by event handler
+                (@@:data["trace"] as string[]).add("exit");
+            }
+        }
+
+        $End {
+            $>() {
+                // Enter handler can access data set by previous handlers
+                (@@:data["trace"] as string[]).add("enter");
+                @@:data["ended_in"] = "End";
+
+                // Build final result from accumulated data
+                final trace = @@:data["trace"] as string[];
+                final trace_str = trace ? trace.join(",") : "no_trace";
+                @@:return = "from=${@@:data["started_in"]},to=${@@:data["ended_in"]},value=${@@:data["value"]},trace=${trace_str}";
+            }
+        }
+}
+
+void main(): void {
+    print("== Test 38: Context Data ==");
+
+    // Test 1: Basic data set/get
+    final s1 = @@ContextDataTest();
+    var result = s1.process_with_data(42);
+    if (result != "processed:42") throw Exception("Expected 'processed:42', got '${result}'");
+    print("1. process_with_data(42) = '${result}'");
+
+    // Test 2: Data isolation between nested calls
+    final s2 = @@ContextDataTest();
+    result = s2.check_data_isolation();
+    final expected = "outer_data=outer_value,inner=processed:99";
+    if (result != expected) throw Exception("Expected '${expected}', got '${result}'");
+    print("2. check_data_isolation() = '${result}'");
+
+    // Test 3: Data preserved across transition (handler -> <$ -> $>)
+    final s3 = @@ContextDataTest();
+    result = s3.transition_preserves_data(100);
+    // Data should flow: handler sets -> exit accesses -> enter accesses and returns
+    if (!result.includes("from=Start")) throw Exception("Expected 'from=Start' in '${result}'");
+    if (!result.includes("to=End")) throw Exception("Expected 'to=End' in '${result}'");
+    if (!result.includes("value=100")) throw Exception("Expected 'value=100' in '${result}'");
+    print("3. transition_preserves_data(100) = '${result}'");
+
+    print("PASS: Context data works correctly");
+}
+

@@ -1,0 +1,147 @@
+@@target gdscript
+
+# Test 44: HSM Sibling Transitions
+#
+# Tests transitions between states sharing the same parent:
+# - Exit handler fires on source sibling
+# - Enter handler fires on target sibling
+# - Parent relationship preserved after transition
+
+@@system HSMSiblingTransitions {
+    interface:
+        go_to_b()
+        go_to_a()
+        forward_action()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $ChildA => $Parent {
+            $>() {
+                self.log.append("ChildA:enter")
+            }
+
+            <$() {
+                self.log.append("ChildA:exit")
+            }
+
+            go_to_b() {
+                self.log.append("ChildA:go_to_b")
+                -> $ChildB
+            }
+
+            forward_action() {
+                self.log.append("ChildA:forward")
+                => $^
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("ChildA")
+                return
+            }
+        }
+
+        $ChildB => $Parent {
+            $>() {
+                self.log.append("ChildB:enter")
+            }
+
+            <$() {
+                self.log.append("ChildB:exit")
+            }
+
+            go_to_a() {
+                self.log.append("ChildB:go_to_a")
+                -> $ChildA
+            }
+
+            forward_action() {
+                self.log.append("ChildB:forward")
+                => $^
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("ChildB")
+                return
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                self.log.append("Parent:forward_action")
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Parent")
+                return
+            }
+        }
+    domain:
+        log: list = []
+}
+
+def main():
+    print("=== Test 44: HSM Sibling Transitions ===")
+    s = @@HSMSiblingTransitions()
+
+    # Initial state is ChildA with enter handler fired
+    log = s.get_log()
+    assert "ChildA:enter" in log, f"Expected ChildA:enter on init, got {log}"
+    assert s.get_state() == "ChildA", f"Expected ChildA, got {s.get_state()}"
+    print("TC1.4.0: Initial state ChildA with enter - PASS")
+
+    # TC1.4.1: Transition from ChildA to ChildB
+    s.go_to_b()
+    assert s.get_state() == "ChildB", f"Expected ChildB, got {s.get_state()}"
+    print("TC1.4.1: Transition A->B works - PASS")
+
+    # TC1.4.2: Exit handler fired on source
+    log = s.get_log()
+    assert "ChildA:exit" in log, f"Expected ChildA:exit, got {log}"
+    print("TC1.4.2: Exit handler fires on source - PASS")
+
+    # TC1.4.3: Enter handler fired on target
+    assert "ChildB:enter" in log, f"Expected ChildB:enter, got {log}"
+    print("TC1.4.3: Enter handler fires on target - PASS")
+
+    # TC1.4.4: Parent relationship preserved - ChildB can forward
+    s.forward_action()
+    log = s.get_log()
+    assert "ChildB:forward" in log, f"Expected ChildB:forward, got {log}"
+    assert "Parent:forward_action" in log, f"Expected Parent handler, got {log}"
+    print("TC1.4.4: Parent relationship preserved - PASS")
+
+    # TC1.4.5: Transition back to ChildA
+    s.go_to_a()
+    assert s.get_state() == "ChildA", f"Expected ChildA, got {s.get_state()}"
+    log = s.get_log()
+    assert log.count("ChildB:exit") == 1, f"Expected ChildB:exit once, got {log}"
+    assert log.count("ChildA:enter") == 2, f"Expected ChildA:enter twice, got {log}"
+    print("TC1.4.5: Transition B->A works with enter/exit - PASS")
+
+    # TC1.4.6: ChildA can still forward after returning
+    s.forward_action()
+    log = s.get_log()
+    assert "ChildA:forward" in log, f"Expected ChildA:forward, got {log}"
+    assert log.count("Parent:forward_action") == 2, f"Expected 2 Parent handlers, got {log}"
+    print("TC1.4.6: ChildA forwards after returning - PASS")
+
+    print("PASS: HSM sibling transitions work correctly")
+
+func _ready():
+    main()

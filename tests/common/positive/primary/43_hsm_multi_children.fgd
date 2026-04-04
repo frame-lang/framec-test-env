@@ -1,0 +1,194 @@
+@@target gdscript
+
+# Test 43: HSM Multiple Children of Same Parent
+#
+# Tests multiple states sharing the same parent:
+# - $ChildA => $Parent
+# - $ChildB => $Parent
+# - $ChildC => $Parent
+# Each child can forward to the shared parent
+
+@@system HSMMultiChildren {
+    interface:
+        start_a()
+        start_b()
+        start_c()
+        do_action()
+        forward_action()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $ChildA => $Parent {
+            start_a() {
+                pass
+            }
+
+            start_b() {
+                -> $ChildB
+            }
+
+            start_c() {
+                -> $ChildC
+            }
+
+            do_action() {
+                self.log.append("ChildA:do_action")
+            }
+
+            forward_action() {
+                self.log.append("ChildA:forward_action")
+                => $^
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("ChildA")
+                return
+            }
+        }
+
+        $ChildB => $Parent {
+            start_a() {
+                -> $ChildA
+            }
+
+            start_b() {
+                pass
+            }
+
+            start_c() {
+                -> $ChildC
+            }
+
+            do_action() {
+                self.log.append("ChildB:do_action")
+            }
+
+            forward_action() {
+                self.log.append("ChildB:forward_action")
+                => $^
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("ChildB")
+                return
+            }
+        }
+
+        $ChildC => $Parent {
+            start_a() {
+                -> $ChildA
+            }
+
+            start_b() {
+                -> $ChildB
+            }
+
+            start_c() {
+                pass
+            }
+
+            do_action() {
+                self.log.append("ChildC:do_action")
+            }
+
+            forward_action() {
+                self.log.append("ChildC:forward_action")
+                => $^
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("ChildC")
+                return
+            }
+        }
+
+        $Parent {
+            forward_action() {
+                self.log.append("Parent:forward_action")
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Parent")
+                return
+            }
+        }
+    domain:
+        log: list = []
+}
+
+def main():
+    print("=== Test 43: HSM Multiple Children ===")
+    s = @@HSMMultiChildren()
+
+    # TC1.3.1: Multiple children declare same parent (verified by compilation)
+    print("TC1.3.1: Multiple children with same parent compiles - PASS")
+
+    # Start in ChildA
+    assert s.get_state() == "ChildA", f"Expected ChildA, got {s.get_state()}"
+
+    # TC1.3.2: ChildA can forward to shared parent
+    s.forward_action()
+    log = s.get_log()
+    assert "ChildA:forward_action" in log, f"Expected ChildA forward, got {log}"
+    assert "Parent:forward_action" in log, f"Expected Parent handler, got {log}"
+    print("TC1.3.2: ChildA forwards to parent - PASS")
+
+    # TC1.3.3: Transition to sibling
+    s.start_b()
+    assert s.get_state() == "ChildB", f"Expected ChildB after transition, got {s.get_state()}"
+    print("TC1.3.3: Transition A->B works - PASS")
+
+    # TC1.3.4: ChildB can also forward to same parent
+    s.forward_action()
+    log = s.get_log()
+    assert "ChildB:forward_action" in log, f"Expected ChildB forward, got {log}"
+    assert log.count("Parent:forward_action") == 2, f"Expected 2 Parent forwards, got {log}"
+    print("TC1.3.4: ChildB forwards to same parent - PASS")
+
+    # TC1.3.5: Transition to ChildC
+    s.start_c()
+    assert s.get_state() == "ChildC", f"Expected ChildC, got {s.get_state()}"
+    s.forward_action()
+    log = s.get_log()
+    assert "ChildC:forward_action" in log, f"Expected ChildC forward, got {log}"
+    assert log.count("Parent:forward_action") == 3, f"Expected 3 Parent forwards, got {log}"
+    print("TC1.3.5: ChildC forwards to same parent - PASS")
+
+    # TC1.3.6: Each sibling maintains independent actions
+    s.start_a()
+    s.do_action()
+    s.start_b()
+    s.do_action()
+    s.start_c()
+    s.do_action()
+    log = s.get_log()
+    assert "ChildA:do_action" in log, f"Expected ChildA action"
+    assert "ChildB:do_action" in log, f"Expected ChildB action"
+    assert "ChildC:do_action" in log, f"Expected ChildC action"
+    print("TC1.3.6: Each sibling has independent handlers - PASS")
+
+    print("PASS: HSM multiple children work correctly")
+
+func _ready():
+    main()

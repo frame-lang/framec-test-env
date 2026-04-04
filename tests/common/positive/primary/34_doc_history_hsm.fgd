@@ -1,0 +1,148 @@
+@@target gdscript
+
+# Documentation Example: HSM with History (History203)
+# Refactored common gotoC behavior into parent state $AB
+
+@@system HistoryHSM {
+    interface:
+        gotoA()
+        gotoB()
+        gotoC()
+        goBack()
+        get_state(): str
+        get_log(): list
+
+    machine:
+        $Waiting {
+            $>() {
+                self.log_msg("In $Waiting")
+            }
+            gotoA() {
+                self.log_msg("gotoA")
+                -> $A
+            }
+            gotoB() {
+                self.log_msg("gotoB")
+                -> $B
+            }
+            get_state(): str {
+                @@:("Waiting")
+                return
+            }
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+        }
+
+        $A => $AB {
+            $>() {
+                self.log_msg("In $A")
+            }
+            gotoB() {
+                self.log_msg("gotoB")
+                -> $B
+            }
+            get_state(): str {
+                @@:("A")
+                return
+            }
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+            => $^
+        }
+
+        $B => $AB {
+            $>() {
+                self.log_msg("In $B")
+            }
+            gotoA() {
+                self.log_msg("gotoA")
+                -> $A
+            }
+            get_state(): str {
+                @@:("B")
+                return
+            }
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+            => $^
+        }
+
+        $AB {
+            gotoC() {
+                self.log_msg("gotoC in $AB")
+                push$
+                -> $C
+            }
+        }
+
+        $C {
+            $>() {
+                self.log_msg("In $C")
+            }
+            goBack() {
+                self.log_msg("goBack")
+                -> pop$
+            }
+            get_state(): str {
+                @@:("C")
+                return
+            }
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+        }
+
+    actions:
+        log_msg(msg: str) {
+            self.log.append(msg)
+        }
+
+    domain:
+        log: list = []
+}
+
+def main():
+    print("=== Test 34: Doc History HSM ===")
+    h = @@HistoryHSM()
+
+    # Start in Waiting
+    assert h.get_state() == "Waiting", f"Expected 'Waiting', got '{h.get_state()}'"
+    assert "In $Waiting" in h.get_log(), f"Expected enter log, got {h.get_log()}"
+
+    # Go to A
+    h.gotoA()
+    assert h.get_state() == "A", f"Expected 'A', got '{h.get_state()}'"
+
+    # Go to C (using inherited gotoC from $AB)
+    h.gotoC()
+    assert h.get_state() == "C", f"Expected 'C', got '{h.get_state()}'"
+    assert "gotoC in $AB" in h.get_log(), f"Expected gotoC log, got {h.get_log()}"
+
+    # Go back (should pop to A)
+    h.goBack()
+    assert h.get_state() == "A", f"Expected 'A' after goBack, got '{h.get_state()}'"
+
+    # Go to B
+    h.gotoB()
+    assert h.get_state() == "B", f"Expected 'B', got '{h.get_state()}'"
+
+    # Go to C (again using inherited gotoC)
+    h.gotoC()
+    assert h.get_state() == "C", f"Expected 'C', got '{h.get_state()}'"
+
+    # Go back (should pop to B)
+    h.goBack()
+    assert h.get_state() == "B", f"Expected 'B' after goBack, got '{h.get_state()}'"
+
+    print("Log: {h.get_log()}")
+    print("PASS: HSM with history works correctly")
+
+func _ready():
+    main()

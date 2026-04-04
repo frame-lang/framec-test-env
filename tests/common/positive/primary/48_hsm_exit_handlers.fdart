@@ -1,0 +1,157 @@
+@@target dart
+
+// Test 48: HSM Exit Handlers
+//
+// Tests exit handlers in HSM context:
+// - Child exit fires when transitioning out of child
+// - Parent exit does NOT fire when transitioning out of child
+// - Exit handler can access child's state variables
+
+@@system HSMExitHandlers {
+    interface:
+        go_to_other()
+        go_to_parent()
+        go_to_child()
+        get_log(): String[]
+        get_state(): str
+        get_child_var(): int
+
+    machine:
+        $Child => $Parent {
+            $.child_var: int = 42
+
+            $>() {
+                this.log.add("Child:enter")
+            }
+
+            <$() {
+                var val = $.child_var
+                this.log.add("Child:exit(var=${val})")
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): list {
+                @@:(this.log)
+                return;
+            }
+
+            get_state(): str {
+                @@:("Child")
+                return;
+            }
+
+            get_child_var(): int {
+                @@:($.child_var)
+                return;
+            }
+        }
+
+        $Parent {
+            $>() {
+                this.log.add("Parent:enter")
+            }
+
+            <$() {
+                this.log.add("Parent:exit")
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_other() {
+                -> $Other
+            }
+
+            get_log(): list {
+                @@:(this.log)
+                return;
+            }
+
+            get_state(): str {
+                @@:("Parent")
+                return;
+            }
+
+            get_child_var(): int {
+                @@:(-1)
+                return;
+            }
+        }
+
+        $Other {
+            $>() {
+                this.log.add("Other:enter")
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): list {
+                @@:(this.log)
+                return;
+            }
+
+            get_state(): str {
+                @@:("Other")
+                return;
+            }
+
+            get_child_var(): int {
+                @@:(-1)
+                return;
+            }
+        }
+    domain:
+        log: String[] = []
+}
+
+void main() {
+    print("== Test 48: HSM Exit Handlers ==");
+    final s = @@HSMExitHandlers();
+
+    // Initial state is Child
+    var log = s.get_log();
+    if (!log.includes("Child:enter")) throw Exception("Expected Child:enter on init, got ${jsonEncode(log)}");
+    if (s.get_state() != "Child") throw Exception("Expected Child, got ${s.get_state()}");
+    print("TC2.4.0: Initial state is Child with enter - PASS");
+
+    // TC2.4.1: Child exit fires when transitioning out of child
+    s.go_to_other();
+    log = s.get_log();
+    if (!log.includes("Child:exit(var=42)")) throw Exception("Expected Child:exit, got ${jsonEncode(log)}");
+    if (!log.includes("Other:enter")) throw Exception("Expected Other:enter, got ${jsonEncode(log)}");
+    print("TC2.4.1: Child exit fires when transitioning out - PASS");
+
+    // TC2.4.2: Parent exit does NOT fire when transitioning out of child
+    if (log.includes("Parent:exit")) throw Exception("Parent:exit should NOT fire for child exit, got ${jsonEncode(log)}");
+    print("TC2.4.2: Parent exit NOT fired for child exit - PASS");
+
+    // TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
+    print("TC2.4.3: Exit handler accesses state var (var=42) - PASS");
+
+    // TC2.4.4: Parent exit fires when transitioning out of Parent
+    s.go_to_parent();
+    log = s.get_log();
+    if (!log.includes("Parent:enter")) throw Exception("Expected Parent:enter, got ${jsonEncode(log)}");
+
+    s.go_to_other();
+    log = s.get_log();
+    if (!log.includes("Parent:exit")) throw Exception("Expected Parent:exit, got ${jsonEncode(log)}");
+    print("TC2.4.4: Parent exit fires when leaving parent - PASS");
+
+    print("PASS: HSM exit handlers work correctly");
+}
+
