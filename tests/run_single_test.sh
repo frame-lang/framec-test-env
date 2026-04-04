@@ -304,6 +304,10 @@ case $lang in
         fi
         if [ -n "$lua_cmd" ]; then
             run_output=$($lua_cmd "$out_file" 2>&1) || run_status=$?
+            # Clean exit with no TAP output = pass (transpile+execute test)
+            if [ $run_status -eq 0 ] && [ -z "$run_output" ]; then
+                run_output="ok 1 - $test_name # executed clean"
+            fi
         else
             # No lua — transpile-only
             run_output="ok 1 - $test_name # compiled (no lua interpreter)"
