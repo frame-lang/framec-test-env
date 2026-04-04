@@ -1,33 +1,47 @@
 @@target lua
+
+-- Test: Heavy native prolog and epilog with edge-case Lua syntax.
 -- Verifies the segmenter correctly identifies @@system boundaries
 -- when surrounded by complex native code.
 
--- import os
--- import sys
--- import json
--- from typing import Any, Dict, List, Optional, Tuple
+-- Function that mentions "system" in comments (not @@)
+local function log_calls(func)
+    return function(...)
+        print("Calling function")
+        return func(...)
+    end
+end
 
--- Decorator that mentions "system" and uses @ (not @@)
-def log_calls(func):
-    """Decorator — note the @ symbol is NOT @@"""
-    def wrapper(*args, **kwargs):
-        print(f"Calling {func.__name__}")
-        return func(*args, **kwargs)
-    return wrapper
+-- Table with braces and Frame-like strings
+local NativeHelper = {}
+NativeHelper.__index = NativeHelper
 
--- Class with braces in docstrings and complex syntax
-class NativeHelper:
-    """Helper class with { braces } in docstring.
-    Also mentions @@system and -> $State in docs.
-    These should NOT be parsed as Frame.
-    """
+function NativeHelper.new()
+    local self = setmetatable({}, NativeHelper)
+    self.data = {}
+    return self
+end
 
-    TEMPLATE = """
+NativeHelper.TEMPLATE = [[
     {
         "@@target": "not_real",
         "-> $State": "just a string",
         "push$": true
     }
+]]
+
+function NativeHelper:process(data)
+    -- Comment with -> $Transition and => $^ and push$
+    local result = "processed"
+    return result
+end
+
+-- Global with @@ in string
+local GLOBAL_CONFIG = {
+    description = "Config with @@system-like syntax",
+    pattern = "-> $Start",
+}
+
 @@system HeavyNativeProlog {
     interface:
         run_test()
@@ -35,16 +49,36 @@ class NativeHelper:
     machine:
         $Start {
             run_test() {
-                h = NativeHelper()
-                result = h.process(GLOBAL_CONFIG)
-                if result ~= nil {
-                    -- print
-                } else {
-                    error("runtime error")
-                }
+                local h = NativeHelper.new()
+                local result = h:process(GLOBAL_CONFIG)
+                if result ~= nil then
+                    print("PASS: Heavy native prolog handled correctly")
+                else
+                    error("FAIL")
+                end
             }
         }
 }
-    """Class defined after @@system block"""
-    def __init__(self):
-        self.data = {"@@system": "in dict", "-> $State": "in dict"}
+
+-- Heavy epilog
+local PostSystem = {}
+PostSystem.__index = PostSystem
+
+function PostSystem.new()
+    local self = setmetatable({}, PostSystem)
+    self.data = {["@@system"] = "in dict", ["-> $State"] = "in dict"}
+    return self
+end
+
+function PostSystem:run()
+    -- -> $NotATransition
+    -- => $^
+    return true
+end
+
+local s = @@HeavyNativeProlog()
+s:run_test()
+local p = PostSystem.new()
+if not p:run() then
+    error("epilog failed")
+end
