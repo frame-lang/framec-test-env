@@ -1,22 +1,21 @@
 @@target dart
-
 // Test: Context Data (@@:data)
 // Validates call-scoped data that persists across handler -> <$ -> $> chain
 
 @@system ContextDataTest {
     interface:
-        process_with_data(value: int): String
+        process_with_data(value: num): String
         check_data_isolation(): String
-        transition_preserves_data(x: int): String
+        transition_preserves_data(x: num): String
 
     machine:
         $Start {
-            process_with_data(value: int): String {
+            process_with_data(value: num): String {
                 // Set data in handler
                 @@:data["input"] = @@:params["value"];
                 @@:data["trace"] = ["handler"];
 
-                @@:return = "processed:" + @@:data["input"];
+                @@:return = "processed:${@@:data["input"]}";
             }
 
             check_data_isolation(): String {
@@ -27,10 +26,10 @@
                 final inner_result = this.process_with_data(99);
 
                 // Our data should still be here
-                @@:return = "outer_data=" + @@:data["outer"] + ",inner=" + inner_result;
+                @@:return = "outer_data=${@@:data["outer"]},inner=${inner_result}";
             }
 
-            transition_preserves_data(x: int): String {
+            transition_preserves_data(x: num): String {
                 // Set data, transition, verify data available in lifecycle handlers
                 @@:data["started_in"] = "Start";
                 @@:data["value"] = @@:params["x"];
@@ -40,25 +39,25 @@
 
             <$() {
                 // Exit handler can access data set by event handler
-                (@@:data["trace"] as string[]).add("exit");
+                (@@:data["trace"] as List<String>).add("exit");
             }
         }
 
         $End {
             $>() {
                 // Enter handler can access data set by previous handlers
-                (@@:data["trace"] as string[]).add("enter");
+                (@@:data["trace"] as List<String>).add("enter");
                 @@:data["ended_in"] = "End";
 
                 // Build final result from accumulated data
-                final trace = @@:data["trace"] as string[];
-                final trace_str = trace ? trace.join(",") : "no_trace";
+                final trace = @@:data["trace"] as List<String>;
+                final trace_str = trace != null ? trace.join(",") : "no_trace";
                 @@:return = "from=${@@:data["started_in"]},to=${@@:data["ended_in"]},value=${@@:data["value"]},trace=${trace_str}";
             }
         }
 }
 
-void main(): void {
+void main() {
     print("== Test 38: Context Data ==");
 
     // Test 1: Basic data set/get
@@ -78,9 +77,9 @@ void main(): void {
     final s3 = @@ContextDataTest();
     result = s3.transition_preserves_data(100);
     // Data should flow: handler sets -> exit accesses -> enter accesses and returns
-    if (!result.includes("from=Start")) throw Exception("Expected 'from=Start' in '${result}'");
-    if (!result.includes("to=End")) throw Exception("Expected 'to=End' in '${result}'");
-    if (!result.includes("value=100")) throw Exception("Expected 'value=100' in '${result}'");
+    if (!result.contains("from=Start")) throw Exception("Expected 'from=Start' in '${result}'");
+    if (!result.contains("to=End")) throw Exception("Expected 'to=End' in '${result}'");
+    if (!result.contains("value=100")) throw Exception("Expected 'value=100' in '${result}'");
     print("3. transition_preserves_data(100) = '${result}'");
 
     print("PASS: Context data works correctly");
