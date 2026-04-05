@@ -350,7 +350,10 @@ case $lang in
         fi
         if [ -n "$godot_cmd" ]; then
             # Try running with timeout; godot --headless --script may not work for standalone scripts
-            run_output=$(timeout 10 $godot_cmd --headless --script "$out_file" 2>&1) || run_status=$?
+            # Use gtimeout on macOS (coreutils), timeout on Linux
+            __timeout_cmd="timeout"
+            if command -v gtimeout &>/dev/null; then __timeout_cmd="gtimeout"; fi
+            run_output=$($__timeout_cmd 10 $godot_cmd --headless --script "$out_file" 2>&1) || run_status=$?
             if [ $run_status -eq 124 ]; then
                 # Timeout — treat as transpile-only pass
                 run_output="ok 1 - $test_name # transpiled (godot timed out)"
