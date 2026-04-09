@@ -1,0 +1,42 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <any>
+
+// Test: all three param groups (state, enter, domain) in one system header.
+
+@@system Service($(slot: int), $>(timeout: int), name: str) {
+    interface:
+        get_slot(): int
+        get_timeout(): int
+        get_name(): str
+
+    machine:
+        $Start(slot: int) {
+            $>(timeout: int) {
+                this->__compartment->state_vars["t"] = std::any(timeout);
+            }
+            $.t: int = 0
+            get_slot(): int { @@:(slot) return; }
+            get_timeout(): int {
+                int v = std::any_cast<int>(this->__compartment->state_vars["t"]);
+                @@:(v)
+                return;
+            }
+            get_name(): str { @@:(this->name) return; }
+        }
+
+    domain:
+        name: std::string = name
+}
+
+int main() {
+    Service s = @@Service($(0), $>(1000), "primary");
+    if (s.get_slot() != 0) { printf("FAIL slot\n"); return 1; }
+    if (s.get_timeout() != 1000) { printf("FAIL timeout\n"); return 2; }
+    if (s.get_name() != "primary") { printf("FAIL name\n"); return 3; }
+    printf("ok 1 - sysparam_enter_mixed\n");
+    return 0;
+}

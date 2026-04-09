@@ -1,0 +1,36 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <any>
+
+// Test: single enter param via $>(name: type).
+// The C++ enter-handler dispatch reads from compartment->enter_args directly,
+// so populating that dict in the constructor is sufficient.
+
+@@system Worker($>(batch_size: int)) {
+    interface:
+        get_size(): int
+
+    machine:
+        $Start {
+            $>(batch_size: int) {
+                this->__compartment->state_vars["size"] = std::any(batch_size);
+            }
+            $.size: int = 0
+            get_size(): int {
+                int s = std::any_cast<int>(this->__compartment->state_vars["size"]);
+                @@:(s)
+                return;
+            }
+        }
+}
+
+int main() {
+    Worker w = @@Worker($>(50));
+    int s = w.get_size();
+    if (s != 50) { printf("FAIL got %d\n", s); return 1; }
+    printf("ok 1 - sysparam_enter_single\n");
+    return 0;
+}
