@@ -1,0 +1,59 @@
+@@target java
+
+import java.util.*;
+
+// Test: mixed state + enter + domain params in a single system.
+// `slot` becomes a state arg on $Start, `timeout` flows via enter_args,
+// and `name` becomes a domain field.
+
+@@system Service($(slot: int), $>(timeout: int), name: str) {
+    interface:
+        get_slot(): int
+        get_timeout(): int
+        get_name(): str
+
+    machine:
+        $Start(slot: int) {
+            $>(timeout: int) {
+                __compartment.state_vars.put("t", timeout);
+            }
+            get_slot(): int {
+                @@:(slot)
+                return;
+            }
+            get_timeout(): int {
+                int v = (Integer) __compartment.state_vars.get("t");
+                @@:(v)
+                return;
+            }
+            get_name(): str {
+                @@:(this.name)
+                return;
+            }
+        }
+
+    domain:
+        name: String = name
+}
+
+class Main {
+    public static void main(String[] args) {
+        var s = @@Service($(0), $>(1000), "primary");
+        int slot = s.get_slot();
+        if (slot != 0) {
+            System.out.println("FAIL: Expected slot 0, got " + slot);
+            System.exit(1);
+        }
+        int t = s.get_timeout();
+        if (t != 1000) {
+            System.out.println("FAIL: Expected timeout 1000, got " + t);
+            System.exit(1);
+        }
+        String n = s.get_name();
+        if (!n.equals("primary")) {
+            System.out.println("FAIL: Expected 'primary', got '" + n + "'");
+            System.exit(1);
+        }
+        System.out.println("ok 1 - sysparam_enter_mixed");
+    }
+}
