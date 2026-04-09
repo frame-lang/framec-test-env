@@ -1,0 +1,45 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+
+// Test: all three param groups (state, enter, domain) in one system header.
+
+@@system Service($(slot: int), $>(timeout: int), name: str) {
+    interface:
+        get_slot(): int
+        get_timeout(): int
+        get_name(): str
+
+    machine:
+        $Start(slot: int) {
+            $>(timeout: int) {
+                Service_FrameDict_set(self->__compartment->state_vars, "t",
+                    (void*)(intptr_t)timeout);
+            }
+            $.t: int = 0
+            get_slot(): int { @@:(slot) return; }
+            get_timeout(): int {
+                int v = (int)(intptr_t)Service_FrameDict_get(
+                    self->__compartment->state_vars, "t");
+                @@:(v)
+                return;
+            }
+            get_name(): str { @@:(self->name) return; }
+        }
+
+    domain:
+        name: char* = name
+}
+
+int main(void) {
+    Service* s = @@Service($(0), $>(1000), "primary");
+    if (Service_get_slot(s) != 0) { printf("FAIL slot\n"); return 1; }
+    if (Service_get_timeout(s) != 1000) { printf("FAIL timeout\n"); return 2; }
+    if (strcmp(Service_get_name(s), "primary") != 0) { printf("FAIL name\n"); return 3; }
+    printf("ok 1 - sysparam_enter_mixed\n");
+    Service_destroy(s);
+    return 0;
+}

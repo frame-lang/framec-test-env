@@ -1,0 +1,38 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+
+// Test: single enter param via $>(name: type).
+// Param flows from constructor → compartment.enter_args, then into the
+// start state's enter handler via the kernel-init $> event.
+
+@@system Worker($>(batch_size: int)) {
+    interface:
+        get_size(): int
+
+    machine:
+        $Start {
+            $>(batch_size: int) {
+                Worker_FrameDict_set(self->__compartment->state_vars, "size",
+                    (void*)(intptr_t)batch_size);
+            }
+            $.size: int = 0
+            get_size(): int {
+                int s = (int)(intptr_t)Worker_FrameDict_get(
+                    self->__compartment->state_vars, "size");
+                @@:(s)
+                return;
+            }
+        }
+}
+
+int main(void) {
+    Worker* w = @@Worker($>(50));
+    int s = Worker_get_size(w);
+    if (s != 50) { printf("FAIL got %d\n", s); return 1; }
+    printf("ok 1 - sysparam_enter_single\n");
+    Worker_destroy(w);
+    return 0;
+}
