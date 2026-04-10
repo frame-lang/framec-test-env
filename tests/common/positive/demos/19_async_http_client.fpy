@@ -1,0 +1,69 @@
+@@target python_3
+
+import asyncio
+
+@@system AsyncWorker {
+    interface:
+        async start()
+        async process(data: str): str
+        async stop()
+        get_status(): str
+
+    machine:
+        $Idle {
+            $>() {
+                self.log.append("idle:ready")
+            }
+            start() {
+                -> $Working
+            }
+            get_status(): str { @@:("idle") }
+        }
+        $Working {
+            $>() {
+                self.log.append("working:entered")
+            }
+            <$() {
+                self.log.append("working:exited")
+            }
+            process(data: str): str {
+                await asyncio.sleep(0.01)
+                result = f"processed:{data}"
+                self.log.append(result)
+                @@:(result)
+            }
+            stop() {
+                -> $Idle
+            }
+            get_status(): str { @@:("working") }
+        }
+
+    domain:
+        log = []
+}
+
+async def main():
+    w = @@AsyncWorker()
+    await w.init()
+
+    # Note: when ANY interface method is async, ALL interface methods become async
+    status = await w.get_status()
+    assert status == "idle", f"Expected idle, got {status}"
+    assert "idle:ready" in w.log, f"Expected idle:ready in log, got {w.log}"
+
+    await w.start()
+    status = await w.get_status()
+    assert status == "working"
+
+    result = await w.process("hello")
+    assert result == "processed:hello", f"Expected 'processed:hello', got '{result}'"
+
+    await w.stop()
+    status = await w.get_status()
+    assert status == "idle"
+    assert "working:exited" in w.log
+
+    print("PASS: async_http_client")
+
+if __name__ == '__main__':
+    asyncio.run(main())

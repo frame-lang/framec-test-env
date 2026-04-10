@@ -1,0 +1,54 @@
+@@target python_3
+
+@@system OrderProcessor {
+    interface:
+        submit(item: str)
+        cancel(reason: str)
+        status(): str
+
+    machine:
+        $Idle {
+            submit(item: str) {
+                self.item = item
+                -> $Validating
+            }
+            status(): str { @@:("idle") }
+        }
+        $Validating {
+            $>() {
+                if self.validate(self.item):
+                    -> $Processing
+                else:
+                    -> $Rejected
+            }
+            status(): str { @@:("validating") }
+        }
+        $Processing {
+            cancel(reason: str) {
+                print(f"Cancelled: {reason}")
+                -> $Idle
+            }
+            status(): str { @@:("processing") }
+        }
+        $Rejected {
+            status(): str { @@:("rejected") }
+        }
+
+    actions:
+        validate(item) {
+            return item is not None and len(item) > 0
+        }
+
+    domain:
+        item: str = ""
+}
+
+if __name__ == '__main__':
+    op = @@OrderProcessor()
+    op.submit("widget")
+    r1 = op.status()
+    assert r1 == "processing", f"Expected 'processing', got '{r1}'"
+    op.cancel("changed mind")
+    r2 = op.status()
+    assert r2 == "idle", f"Expected 'idle', got '{r2}'"
+    print("PASS: order_processor")

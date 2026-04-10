@@ -1,0 +1,51 @@
+@@target python_3
+
+@@system Retrier {
+    interface:
+        start()
+        status(): str
+
+    machine:
+        $Idle {
+            start() {
+                self.attempts = 0
+                -> $Trying
+            }
+        }
+        $Trying {
+            $>() {
+                self.attempts = self.attempts + 1
+                if self.try_operation():
+                    -> $Succeeded
+                else:
+                    if self.attempts >= self.max_retries:
+                        -> $Failed
+                    else:
+                        -> $Trying
+            }
+            status(): str { @@:("trying") }
+        }
+        $Succeeded {
+            status(): str { @@:("succeeded") }
+        }
+        $Failed {
+            status(): str { @@:("failed after max retries") }
+        }
+
+    actions:
+        try_operation() {
+            return False
+        }
+
+    domain:
+        attempts: int = 0
+        max_retries: int = 3
+}
+
+if __name__ == '__main__':
+    r = @@Retrier()
+    r.start()
+    result = r.status()
+    assert result == "failed after max retries", f"Expected 'failed after max retries', got '{result}'"
+    assert r.attempts == 3, f"Expected 3 attempts, got {r.attempts}"
+    print("PASS: retry_with_backoff")
