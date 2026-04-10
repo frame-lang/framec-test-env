@@ -1,0 +1,61 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system ApprovalChain {
+    interface:
+        submit()
+        approve(reviewer: str)
+        reject(reviewer: str)
+        status(): str
+
+    machine:
+        $Draft {
+            submit() { -> $Review1 }
+            status(): str { @@:("draft") }
+        }
+        $Review1 {
+            approve(reviewer: str) {
+                printf("Approved by %s\n", reviewer);
+                -> $Review2
+            }
+            reject(reviewer: str) {
+                printf("Rejected by %s\n", reviewer);
+                -> $Draft
+            }
+            status(): str { @@:("awaiting first review") }
+        }
+        $Review2 {
+            approve(reviewer: str) {
+                printf("Approved by %s\n", reviewer);
+                -> $Published
+            }
+            reject(reviewer: str) {
+                printf("Rejected by %s\n", reviewer);
+                -> $Draft
+            }
+            status(): str { @@:("awaiting second review") }
+        }
+        $Published {
+            status(): str { @@:("published") }
+        }
+}
+
+int main() {
+    ApprovalChain* doc = @@ApprovalChain();
+    ApprovalChain_submit(doc);
+    if (strcmp(ApprovalChain_status(doc), "awaiting first review") != 0) { printf("FAIL\n"); return 1; }
+    ApprovalChain_approve(doc, "Alice");
+    if (strcmp(ApprovalChain_status(doc), "awaiting second review") != 0) { printf("FAIL\n"); return 1; }
+    ApprovalChain_reject(doc, "Bob");
+    if (strcmp(ApprovalChain_status(doc), "draft") != 0) { printf("FAIL\n"); return 1; }
+    ApprovalChain_submit(doc);
+    ApprovalChain_approve(doc, "Alice");
+    ApprovalChain_approve(doc, "Bob");
+    if (strcmp(ApprovalChain_status(doc), "published") != 0) { printf("FAIL\n"); return 1; }
+    printf("PASS: approval_chain\n");
+    ApprovalChain_destroy(doc);
+    return 0;
+}

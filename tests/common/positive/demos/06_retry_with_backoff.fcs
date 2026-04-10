@@ -1,0 +1,58 @@
+@@target csharp
+
+using System;
+
+@@system Retrier {
+    interface:
+        start()
+        status(): String
+
+    machine:
+        $Idle {
+            start() {
+                this.attempts = 0;
+                -> $Trying
+            }
+        }
+        $Trying {
+            $>() {
+                this.attempts = this.attempts + 1;
+                if (this.try_operation()) {
+                    -> $Succeeded
+                } else {
+                    if (this.attempts >= this.max_retries) {
+                        -> $Failed
+                    } else {
+                        -> $Trying
+                    }
+                }
+            }
+            status(): String { @@:("trying") }
+        }
+        $Succeeded {
+            status(): String { @@:("succeeded") }
+        }
+        $Failed {
+            status(): String { @@:("failed after max retries") }
+        }
+
+    actions:
+        try_operation() {
+            return false;
+        }
+
+    domain:
+        attempts: int = 0
+        max_retries: int = 3
+}
+
+class Program {
+    static void Main(string[] args) {
+        var r = new Retrier();
+        r.start();
+        var result = (string) r.status();
+        if (result != "failed after max retries") throw new Exception("Got: " + result);
+        if (r.attempts != 3) throw new Exception("Expected 3 attempts, got " + r.attempts);
+        Console.WriteLine("PASS: retry_with_backoff");
+    }
+}

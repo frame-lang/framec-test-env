@@ -1,0 +1,53 @@
+@@target javascript
+
+@@system ApprovalChain {
+    interface:
+        submit()
+        approve(reviewer: str)
+        reject(reviewer: str)
+        status(): str
+
+    machine:
+        $Draft {
+            submit() { -> $Review1 }
+            status(): str { @@:("draft") }
+        }
+        $Review1 {
+            approve(reviewer: str) {
+                console.log("Approved by " + reviewer)
+                -> $Review2
+            }
+            reject(reviewer: str) {
+                console.log("Rejected by " + reviewer)
+                -> $Draft
+            }
+            status(): str { @@:("awaiting first review") }
+        }
+        $Review2 {
+            approve(reviewer: str) {
+                console.log("Approved by " + reviewer)
+                -> $Published
+            }
+            reject(reviewer: str) {
+                console.log("Rejected by " + reviewer)
+                -> $Draft
+            }
+            status(): str { @@:("awaiting second review") }
+        }
+        $Published {
+            status(): str { @@:("published") }
+        }
+}
+
+const doc = @@ApprovalChain();
+doc.submit();
+if (doc.status() !== "awaiting first review") { console.log("FAIL"); process.exit(1); }
+doc.approve("Alice");
+if (doc.status() !== "awaiting second review") { console.log("FAIL"); process.exit(1); }
+doc.reject("Bob");
+if (doc.status() !== "draft") { console.log("FAIL"); process.exit(1); }
+doc.submit();
+doc.approve("Alice");
+doc.approve("Bob");
+if (doc.status() !== "published") { console.log("FAIL"); process.exit(1); }
+console.log("PASS: approval_chain");

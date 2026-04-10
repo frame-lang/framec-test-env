@@ -1,0 +1,71 @@
+@@target csharp
+
+using System;
+
+@@system Account(owner: String, initial_balance: int = 0) {
+    interface:
+        deposit(amount: int)
+        withdraw(amount: int): bool
+        balance(): int
+        owner_name(): String
+        close()
+
+    machine:
+        $Open {
+            deposit(amount: int) {
+                this.bal = this.bal + amount;
+            }
+            withdraw(amount: int): bool {
+                if (this.bal >= amount) {
+                    this.bal = this.bal - amount;
+                    @@:(true)
+                } else {
+                    @@:(false)
+                }
+            }
+            balance(): int { @@:(this.bal) }
+            owner_name(): String { @@:(this.who) }
+            close() { -> $Closed }
+        }
+        $Closed {
+            deposit(amount: int) {
+                // Closed accounts ignore deposits.
+            }
+            withdraw(amount: int): bool { @@:(false) }
+            balance(): int { @@:(this.bal) }
+            owner_name(): String { @@:(this.who) }
+        }
+
+    domain:
+        bal = initial_balance
+        who = owner
+}
+
+class Program {
+    static void Main(string[] args) {
+        var a = new Account("Alice", 100);
+        if ((string) a.owner_name() != "Alice") throw new Exception("owner");
+        if ((int) a.balance() != 100) throw new Exception("balance");
+
+        a.deposit(50);
+        if ((int) a.balance() != 150) throw new Exception("deposit");
+
+        if ((bool) a.withdraw(60) != true) throw new Exception("withdraw ok");
+        if ((int) a.balance() != 90) throw new Exception("balance after withdraw");
+
+        if ((bool) a.withdraw(200) != false) throw new Exception("withdraw insufficient");
+        if ((int) a.balance() != 90) throw new Exception("balance unchanged");
+
+        a.close();
+        if ((bool) a.withdraw(10) != false) throw new Exception("closed withdraw");
+        if ((int) a.balance() != 90) throw new Exception("closed balance");
+
+        var b = new Account("Bob");
+        if ((string) b.owner_name() != "Bob") throw new Exception("bob owner");
+        if ((int) b.balance() != 0) throw new Exception("bob balance");
+        b.deposit(25);
+        if ((int) b.balance() != 25) throw new Exception("bob deposit");
+
+        Console.WriteLine("ok 1 - 21_bank_account");
+    }
+}

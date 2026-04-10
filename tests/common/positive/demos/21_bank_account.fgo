@@ -1,0 +1,74 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system Account(owner: string, initial_balance: int = 0) {
+    interface:
+        deposit(amount: int)
+        withdraw(amount: int): bool
+        balance(): int
+        owner_name(): string
+        close()
+
+    machine:
+        $Open {
+            deposit(amount: int) {
+                s.bal = s.bal + amount
+            }
+            withdraw(amount: int): bool {
+                if (s.bal >= amount) {
+                    s.bal = s.bal - amount
+                    @@:(true)
+                } else {
+                    @@:(false)
+                }
+            }
+            balance(): int { @@:(s.bal) }
+            owner_name(): string { @@:(s.who) }
+            close() { -> $Closed }
+        }
+        $Closed {
+            deposit(amount: int) {
+                // Closed accounts ignore deposits.
+            }
+            withdraw(amount: int): bool { @@:(false) }
+            balance(): int { @@:(s.bal) }
+            owner_name(): string { @@:(s.who) }
+        }
+
+    domain:
+        bal = initial_balance
+        who = owner
+}
+
+func main() {
+	a := NewAccount("Alice", 100)
+	if a.Owner_name() != "Alice" { fmt.Println("FAIL: owner"); os.Exit(1) }
+	if a.Balance() != 100 { fmt.Println("FAIL: balance"); os.Exit(1) }
+
+	a.Deposit(50)
+	if a.Balance() != 150 { fmt.Println("FAIL: deposit"); os.Exit(1) }
+
+	if a.Withdraw(60) != true { fmt.Println("FAIL: withdraw ok"); os.Exit(1) }
+	if a.Balance() != 90 { fmt.Println("FAIL: balance after withdraw"); os.Exit(1) }
+
+	if a.Withdraw(200) != false { fmt.Println("FAIL: withdraw insufficient"); os.Exit(1) }
+	if a.Balance() != 90 { fmt.Println("FAIL: balance unchanged"); os.Exit(1) }
+
+	a.Close()
+	if a.Withdraw(10) != false { fmt.Println("FAIL: closed withdraw"); os.Exit(1) }
+	if a.Balance() != 90 { fmt.Println("FAIL: closed balance"); os.Exit(1) }
+
+	b := NewAccount("Bob")
+	if b.Owner_name() != "Bob" { fmt.Println("FAIL: bob owner"); os.Exit(1) }
+	if b.Balance() != 0 { fmt.Println("FAIL: bob balance"); os.Exit(1) }
+	b.Deposit(25)
+	if b.Balance() != 25 { fmt.Println("FAIL: bob deposit"); os.Exit(1) }
+
+	fmt.Println("ok 1 - 21_bank_account")
+}

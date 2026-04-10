@@ -1,0 +1,72 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system Account(owner: str, initial_balance: int = 0) {
+    interface:
+        deposit(amount: int)
+        withdraw(amount: int): bool
+        balance(): int
+        owner_name(): str
+        close()
+
+    machine:
+        $Open {
+            deposit(amount: int) {
+                this->bal = this->bal + amount;
+            }
+            withdraw(amount: int): bool {
+                if (this->bal >= amount) {
+                    this->bal = this->bal - amount;
+                    @@:(true)
+                } else {
+                    @@:(false)
+                }
+            }
+            balance(): int { @@:(this->bal) }
+            owner_name(): str { @@:(std::string(this->who)) }
+            close() { -> $Closed }
+        }
+        $Closed {
+            deposit(amount: int) {
+                // Closed accounts ignore deposits.
+            }
+            withdraw(amount: int): bool { @@:(false) }
+            balance(): int { @@:(this->bal) }
+            owner_name(): str { @@:(std::string(this->who)) }
+        }
+
+    domain:
+        bal = initial_balance
+        who = owner
+}
+
+int main() {
+    Account a("Alice", 100);
+    assert(std::any_cast<std::string>(a.owner_name()) == "Alice");
+    assert(std::any_cast<int>(a.balance()) == 100);
+
+    a.deposit(50);
+    assert(std::any_cast<int>(a.balance()) == 150);
+
+    assert(std::any_cast<bool>(a.withdraw(60)) == true);
+    assert(std::any_cast<int>(a.balance()) == 90);
+
+    assert(std::any_cast<bool>(a.withdraw(200)) == false);
+    assert(std::any_cast<int>(a.balance()) == 90);
+
+    a.close();
+    assert(std::any_cast<bool>(a.withdraw(10)) == false);
+    assert(std::any_cast<int>(a.balance()) == 90);
+
+    Account b("Bob");
+    assert(std::any_cast<std::string>(b.owner_name()) == "Bob");
+    assert(std::any_cast<int>(b.balance()) == 0);
+    b.deposit(25);
+    assert(std::any_cast<int>(b.balance()) == 25);
+
+    printf("ok 1 - 21_bank_account\n");
+    return 0;
+}

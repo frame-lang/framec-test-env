@@ -1,0 +1,65 @@
+@@target lua
+
+@@system Account(owner: str, initial_balance: int = 0) {
+    interface:
+        deposit(amount: int)
+        withdraw(amount: int): bool
+        balance(): int
+        owner_name(): str
+        close()
+
+    machine:
+        $Open {
+            deposit(amount: int) {
+                self.bal = self.bal + amount
+            }
+            withdraw(amount: int): bool {
+                if self.bal >= amount then
+                    self.bal = self.bal - amount
+                    @@:(true)
+                else
+                    @@:(false)
+                end
+            }
+            balance(): int { @@:(self.bal) }
+            owner_name(): str { @@:(self.who) }
+            close() { -> $Closed }
+        }
+        $Closed {
+            deposit(amount: int) {
+                -- Closed accounts ignore deposits.
+            }
+            withdraw(amount: int): bool { @@:(false) }
+            balance(): int { @@:(self.bal) }
+            owner_name(): str { @@:(self.who) }
+        }
+
+    domain:
+        bal = initial_balance
+        who = owner
+}
+
+local a = @@Account("Alice", 100)
+assert(a:owner_name() == "Alice", "owner")
+assert(a:balance() == 100, "balance")
+
+a:deposit(50)
+assert(a:balance() == 150, "deposit")
+
+assert(a:withdraw(60) == true, "withdraw ok")
+assert(a:balance() == 90, "balance after withdraw")
+
+assert(a:withdraw(200) == false, "withdraw insufficient")
+assert(a:balance() == 90, "balance unchanged")
+
+a:close()
+assert(a:withdraw(10) == false, "closed withdraw")
+assert(a:balance() == 90, "closed balance")
+
+local b = @@Account("Bob")
+assert(b:owner_name() == "Bob", "bob owner")
+assert(b:balance() == 0, "bob balance")
+b:deposit(25)
+assert(b:balance() == 25, "bob deposit")
+
+print("ok 1 - 21_bank_account")

@@ -1,0 +1,60 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system Debouncer {
+    interface:
+        raw_high()
+        raw_low()
+        tick()
+        is_pressed(): bool
+
+    machine:
+        $Released {
+            $.stable_count: int = 0
+
+            raw_high() { $.stable_count = $.stable_count + 1 }
+            raw_low() { $.stable_count = 0 }
+            tick() {
+                if ($.stable_count >= 3) {
+                    -> $Pressed
+                }
+            }
+            is_pressed(): bool { @@:(false) }
+        }
+        $Pressed {
+            $.stable_count: int = 0
+
+            raw_low() { $.stable_count = $.stable_count + 1 }
+            raw_high() { $.stable_count = 0 }
+            tick() {
+                if ($.stable_count >= 3) {
+                    -> $Released
+                }
+            }
+            is_pressed(): bool { @@:(true) }
+        }
+}
+
+func main() {
+	d := NewDebouncer()
+	signals := []int{1, 0, 1, 1, 1}
+	for _, s := range signals {
+		if s != 0 {
+			d.RawHigh()
+		} else {
+			d.RawLow()
+		}
+		d.Tick()
+	}
+	if d.IsPressed() != true {
+		fmt.Println("FAIL: expected true")
+		os.Exit(1)
+	}
+	fmt.Println("PASS: switch_debouncer")
+}

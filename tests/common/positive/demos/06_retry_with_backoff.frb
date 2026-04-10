@@ -1,0 +1,51 @@
+@@target ruby
+
+@@system Retrier {
+    interface:
+        start()
+        status(): str
+
+    machine:
+        $Idle {
+            start() {
+                @attempts = 0
+                -> $Trying
+            }
+        }
+        $Trying {
+            $>() {
+                @attempts = @attempts + 1
+                if try_operation()
+                    -> $Succeeded
+                else
+                    if @attempts >= @max_retries
+                        -> $Failed
+                    else
+                        -> $Trying
+                    end
+                end
+            }
+            status(): str { @@:("trying") }
+        }
+        $Succeeded {
+            status(): str { @@:("succeeded") }
+        }
+        $Failed {
+            status(): str { @@:("failed after max retries") }
+        }
+
+    actions:
+        try_operation() {
+            false
+        }
+
+    domain:
+        attempts: int = 0
+        max_retries: int = 3
+}
+
+r = Retrier.new
+r.start()
+result = r.status()
+raise "Got: #{result}" unless result == "failed after max retries"
+puts "PASS: retry_with_backoff"

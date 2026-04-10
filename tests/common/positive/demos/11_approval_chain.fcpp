@@ -1,0 +1,60 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system ApprovalChain {
+    interface:
+        submit()
+        approve(reviewer: str)
+        reject(reviewer: str)
+        status(): str
+
+    machine:
+        $Draft {
+            submit() { -> $Review1 }
+            status(): str { @@:(std::string("draft")) }
+        }
+        $Review1 {
+            approve(reviewer: str) {
+                std::cout << "Approved by " << reviewer << std::endl;
+                -> $Review2
+            }
+            reject(reviewer: str) {
+                std::cout << "Rejected by " << reviewer << std::endl;
+                -> $Draft
+            }
+            status(): str { @@:(std::string("awaiting first review")) }
+        }
+        $Review2 {
+            approve(reviewer: str) {
+                std::cout << "Approved by " << reviewer << std::endl;
+                -> $Published
+            }
+            reject(reviewer: str) {
+                std::cout << "Rejected by " << reviewer << std::endl;
+                -> $Draft
+            }
+            status(): str { @@:(std::string("awaiting second review")) }
+        }
+        $Published {
+            status(): str { @@:(std::string("published")) }
+        }
+}
+
+int main() {
+    ApprovalChain doc;
+    doc.submit();
+    assert(std::any_cast<std::string>(doc.status()) == "awaiting first review");
+    doc.approve("Alice");
+    assert(std::any_cast<std::string>(doc.status()) == "awaiting second review");
+    doc.reject("Bob");
+    assert(std::any_cast<std::string>(doc.status()) == "draft");
+    doc.submit();
+    doc.approve("Alice");
+    doc.approve("Bob");
+    assert(std::any_cast<std::string>(doc.status()) == "published");
+    printf("PASS: approval_chain\n");
+    return 0;
+}

@@ -1,0 +1,67 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system Retrier {
+    interface:
+        start()
+        status(): string
+
+    machine:
+        $Idle {
+            start() {
+                s.attempts = 0
+                -> $Trying
+            }
+        }
+        $Trying {
+            $>() {
+                s.attempts = s.attempts + 1
+                if (s.tryOperation()) {
+                    -> $Succeeded
+                } else {
+                    if (s.attempts >= s.max_retries) {
+                        -> $Failed
+                    } else {
+                        -> $Trying
+                    }
+                }
+            }
+            status(): string { @@:("trying") }
+        }
+        $Succeeded {
+            status(): string { @@:("succeeded") }
+        }
+        $Failed {
+            status(): string { @@:("failed after max retries") }
+        }
+
+    actions:
+        tryOperation() {
+            return false
+        }
+
+    domain:
+        attempts: int = 0
+        max_retries: int = 3
+}
+
+func main() {
+	r := NewRetrier()
+	r.Start()
+	result := r.Status()
+	if result != "failed after max retries" {
+		fmt.Println("FAIL: Got: " + result.(string))
+		os.Exit(1)
+	}
+	if r.attempts != 3 {
+		fmt.Printf("FAIL: Expected 3 attempts, got %d\n", r.attempts)
+		os.Exit(1)
+	}
+	fmt.Println("PASS: retry_with_backoff")
+}

@@ -1,0 +1,54 @@
+@@target ruby
+
+@@system OrderProcessor {
+    interface:
+        submit(item: str)
+        cancel(reason: str)
+        status(): str
+
+    machine:
+        $Idle {
+            submit(item: str) {
+                @item = item
+                -> $Validating
+            }
+            status(): str { @@:("idle") }
+        }
+        $Validating {
+            $>() {
+                if validate(@item)
+                    -> $Processing
+                else
+                    -> $Rejected
+                end
+            }
+            status(): str { @@:("validating") }
+        }
+        $Processing {
+            cancel(reason: str) {
+                puts("Cancelled: #{reason}")
+                -> $Idle
+            }
+            status(): str { @@:("processing") }
+        }
+        $Rejected {
+            status(): str { @@:("rejected") }
+        }
+
+    actions:
+        validate(item) {
+            !item.nil? && !item.empty?
+        }
+
+    domain:
+        item: str = ""
+}
+
+op = OrderProcessor.new
+op.submit("widget")
+r1 = op.status()
+raise "Expected 'processing', got '#{r1}'" unless r1 == "processing"
+op.cancel("changed mind")
+r2 = op.status()
+raise "Expected 'idle', got '#{r2}'" unless r2 == "idle"
+puts "PASS: order_processor"

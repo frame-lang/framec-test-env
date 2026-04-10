@@ -1,0 +1,60 @@
+@@target csharp
+
+using System;
+
+@@system OrderProcessor {
+    interface:
+        submit(item: String)
+        cancel(reason: String)
+        status(): String
+
+    machine:
+        $Idle {
+            submit(item: String) {
+                this.item = item;
+                -> $Validating
+            }
+            status(): String { @@:("idle") }
+        }
+        $Validating {
+            $>() {
+                if (this.validate(this.item)) {
+                    -> $Processing
+                } else {
+                    -> $Rejected
+                }
+            }
+            status(): String { @@:("validating") }
+        }
+        $Processing {
+            cancel(reason: String) {
+                Console.WriteLine("Cancelled: " + reason);
+                -> $Idle
+            }
+            status(): String { @@:("processing") }
+        }
+        $Rejected {
+            status(): String { @@:("rejected") }
+        }
+
+    actions:
+        validate(item) {
+            return item != null && item.Length > 0;
+        }
+
+    domain:
+        item: String = ""
+}
+
+class Program {
+    static void Main(string[] args) {
+        var op = new OrderProcessor();
+        op.submit("widget");
+        var r1 = (string) op.status();
+        if (r1 != "processing") throw new Exception("Expected 'processing', got '" + r1 + "'");
+        op.cancel("changed mind");
+        var r2 = (string) op.status();
+        if (r2 != "idle") throw new Exception("Expected 'idle', got '" + r2 + "'");
+        Console.WriteLine("PASS: order_processor");
+    }
+}

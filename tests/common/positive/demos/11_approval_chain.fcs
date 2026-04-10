@@ -1,0 +1,59 @@
+@@target csharp
+
+using System;
+
+@@system ApprovalChain {
+    interface:
+        submit()
+        approve(reviewer: String)
+        reject(reviewer: String)
+        status(): String
+
+    machine:
+        $Draft {
+            submit() { -> $Review1 }
+            status(): String { @@:("draft") }
+        }
+        $Review1 {
+            approve(reviewer: String) {
+                Console.WriteLine("Approved by " + reviewer);
+                -> $Review2
+            }
+            reject(reviewer: String) {
+                Console.WriteLine("Rejected by " + reviewer);
+                -> $Draft
+            }
+            status(): String { @@:("awaiting first review") }
+        }
+        $Review2 {
+            approve(reviewer: String) {
+                Console.WriteLine("Approved by " + reviewer);
+                -> $Published
+            }
+            reject(reviewer: String) {
+                Console.WriteLine("Rejected by " + reviewer);
+                -> $Draft
+            }
+            status(): String { @@:("awaiting second review") }
+        }
+        $Published {
+            status(): String { @@:("published") }
+        }
+}
+
+class Program {
+    static void Main(string[] args) {
+        var doc = new ApprovalChain();
+        doc.submit();
+        if ((string) doc.status() != "awaiting first review") throw new Exception("FAIL");
+        doc.approve("Alice");
+        if ((string) doc.status() != "awaiting second review") throw new Exception("FAIL");
+        doc.reject("Bob");
+        if ((string) doc.status() != "draft") throw new Exception("FAIL");
+        doc.submit();
+        doc.approve("Alice");
+        doc.approve("Bob");
+        if ((string) doc.status() != "published") throw new Exception("FAIL");
+        Console.WriteLine("PASS: approval_chain");
+    }
+}

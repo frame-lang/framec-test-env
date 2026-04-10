@@ -1,0 +1,55 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system LoginFlow {
+    interface:
+        submit(value: str): str
+
+    machine:
+        $EnterUsername {
+            submit(value: str): str {
+                this->username = value;
+                @@:(std::string("enter password"))
+                -> $EnterPassword
+            }
+        }
+        $EnterPassword {
+            submit(value: str): str {
+                if (this->authenticate(this->username, value)) {
+                    @@:(std::string("welcome"))
+                    -> $LoggedIn
+                } else {
+                    @@:(std::string("invalid - try again"))
+                    -> $EnterUsername
+                }
+            }
+        }
+        $LoggedIn {
+            submit(value: str): str { @@:(std::string("already logged in")) }
+        }
+
+    actions:
+        authenticate(user, password) {
+            return user == "admin" && password == "secret";
+        }
+
+    domain:
+        username: str = ""
+}
+
+int main() {
+    LoginFlow login;
+    auto r1 = std::any_cast<std::string>(login.submit("admin"));
+    assert(r1 == "enter password");
+    auto r2 = std::any_cast<std::string>(login.submit("wrong"));
+    assert(r2 == "invalid - try again");
+    auto r3 = std::any_cast<std::string>(login.submit("admin"));
+    assert(r3 == "enter password");
+    auto r4 = std::any_cast<std::string>(login.submit("secret"));
+    assert(r4 == "welcome");
+    printf("PASS: login_flow\n");
+    return 0;
+}

@@ -1,0 +1,62 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system OrderProcessor {
+    interface:
+        submit(item: str)
+        cancel(reason: str)
+        status(): str
+
+    machine:
+        $Idle {
+            submit(item: str) {
+                self->item = item;
+                -> $Validating
+            }
+            status(): str { @@:("idle") }
+        }
+        $Validating {
+            $>() {
+                if (OrderProcessor_validate(self, self->item)) {
+                    -> $Processing
+                } else {
+                    -> $Rejected
+                }
+            }
+            status(): str { @@:("validating") }
+        }
+        $Processing {
+            cancel(reason: str) {
+                printf("Cancelled: %s\n", reason);
+                -> $Idle
+            }
+            status(): str { @@:("processing") }
+        }
+        $Rejected {
+            status(): str { @@:("rejected") }
+        }
+
+    actions:
+        validate(item) {
+            return item != NULL && strlen(item) > 0;
+        }
+
+    domain:
+        item: str = ""
+}
+
+int main() {
+    OrderProcessor* op = @@OrderProcessor();
+    OrderProcessor_submit(op, "widget");
+    const char* r1 = OrderProcessor_status(op);
+    if (strcmp(r1, "processing") != 0) { printf("FAIL: Expected 'processing', got '%s'\n", r1); return 1; }
+    OrderProcessor_cancel(op, "changed mind");
+    const char* r2 = OrderProcessor_status(op);
+    if (strcmp(r2, "idle") != 0) { printf("FAIL: Expected 'idle', got '%s'\n", r2); return 1; }
+    printf("PASS: order_processor\n");
+    OrderProcessor_destroy(op);
+    return 0;
+}

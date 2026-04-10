@@ -1,0 +1,48 @@
+@@target ruby
+
+@@system Debouncer {
+    interface:
+        raw_high()
+        raw_low()
+        tick()
+        is_pressed(): bool
+
+    machine:
+        $Released {
+            $.stable_count: int = 0
+
+            raw_high() { $.stable_count = $.stable_count + 1 }
+            raw_low() { $.stable_count = 0 }
+            tick() {
+                if $.stable_count >= 3
+                    -> $Pressed
+                end
+            }
+            is_pressed(): bool { @@:(false) }
+        }
+        $Pressed {
+            $.stable_count: int = 0
+
+            raw_low() { $.stable_count = $.stable_count + 1 }
+            raw_high() { $.stable_count = 0 }
+            tick() {
+                if $.stable_count >= 3
+                    -> $Released
+                end
+            }
+            is_pressed(): bool { @@:(true) }
+        }
+}
+
+d = Debouncer.new
+signals = [1, 0, 1, 1, 1]
+signals.each do |s|
+    if s != 0
+        d.raw_high()
+    else
+        d.raw_low()
+    end
+    d.tick()
+end
+raise "FAIL: expected true" unless d.is_pressed() == true
+puts "PASS: switch_debouncer"

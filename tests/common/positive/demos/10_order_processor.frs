@@ -1,0 +1,56 @@
+@@target rust
+
+@@system OrderProcessor {
+    interface:
+        submit(item: String)
+        cancel(reason: String)
+        status(): String
+
+    machine:
+        $Idle {
+            submit(item: String) {
+                self.item = item.clone();
+                -> $Validating
+            }
+            status(): String { @@:("idle".to_string()) }
+        }
+        $Validating {
+            $>() {
+                if self.validate(&self.item.clone()) {
+                    -> $Processing
+                } else {
+                    -> $Rejected
+                }
+            }
+            status(): String { @@:("validating".to_string()) }
+        }
+        $Processing {
+            cancel(reason: String) {
+                println!("Cancelled: {}", reason);
+                -> $Idle
+            }
+            status(): String { @@:("processing".to_string()) }
+        }
+        $Rejected {
+            status(): String { @@:("rejected".to_string()) }
+        }
+
+    actions:
+        validate(item) {
+            return !item.is_empty();
+        }
+
+    domain:
+        item: String = String::new()
+}
+
+fn main() {
+    let mut op = @@OrderProcessor();
+    op.submit("widget".to_string());
+    let r1 = op.status();
+    assert_eq!(r1, "processing", "Expected 'processing', got '{}'", r1);
+    op.cancel("changed mind".to_string());
+    let r2 = op.status();
+    assert_eq!(r2, "idle", "Expected 'idle', got '{}'", r2);
+    println!("PASS: order_processor");
+}

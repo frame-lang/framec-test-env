@@ -1,0 +1,59 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system Retrier {
+    interface:
+        start()
+        status(): str
+
+    machine:
+        $Idle {
+            start() {
+                this->attempts = 0;
+                -> $Trying
+            }
+        }
+        $Trying {
+            $>() {
+                this->attempts = this->attempts + 1;
+                if (this->try_operation()) {
+                    -> $Succeeded
+                } else {
+                    if (this->attempts >= this->max_retries) {
+                        -> $Failed
+                    } else {
+                        -> $Trying
+                    }
+                }
+            }
+            status(): str { @@:(std::string("trying")) }
+        }
+        $Succeeded {
+            status(): str { @@:(std::string("succeeded")) }
+        }
+        $Failed {
+            status(): str { @@:(std::string("failed after max retries")) }
+        }
+
+    actions:
+        try_operation() {
+            return false;
+        }
+
+    domain:
+        attempts: int = 0
+        max_retries: int = 3
+}
+
+int main() {
+    Retrier r;
+    r.start();
+    auto result = std::any_cast<std::string>(r.status());
+    assert(result == "failed after max retries");
+    assert(r.attempts == 3);
+    printf("PASS: retry_with_backoff\n");
+    return 0;
+}

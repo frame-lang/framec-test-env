@@ -1,0 +1,57 @@
+@@target gdscript
+
+extends SceneTree
+
+@@system OrderProcessor {
+    interface:
+        submit(item: str)
+        cancel(reason: str)
+        status(): str
+
+    machine:
+        $Idle {
+            submit(item: str) {
+                self.item = item
+                -> $Validating
+            }
+            status(): str { @@:("idle") }
+        }
+        $Validating {
+            $>() {
+                if self.validate(self.item):
+                    -> $Processing
+                else:
+                    -> $Rejected
+            }
+            status(): str { @@:("validating") }
+        }
+        $Processing {
+            cancel(reason: str) {
+                print("Cancelled: " + reason)
+                -> $Idle
+            }
+            status(): str { @@:("processing") }
+        }
+        $Rejected {
+            status(): str { @@:("rejected") }
+        }
+
+    actions:
+        validate(item) {
+            return item != null and item.length() > 0
+        }
+
+    domain:
+        item: str = ""
+}
+
+func _init():
+    var op = @@OrderProcessor()
+    op.submit("widget")
+    var r1 = op.status()
+    assert(r1 == "processing", "Expected 'processing', got '" + str(r1) + "'")
+    op.cancel("changed mind")
+    var r2 = op.status()
+    assert(r2 == "idle", "Expected 'idle', got '" + str(r2) + "'")
+    print("PASS: order_processor")
+    quit()

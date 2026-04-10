@@ -1,0 +1,69 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system OrderProcessor {
+    interface:
+        submit(item: string)
+        cancel(reason: string)
+        status(): string
+
+    machine:
+        $Idle {
+            submit(item: string) {
+                s.item = item
+                -> $Validating
+            }
+            status(): string { @@:("idle") }
+        }
+        $Validating {
+            $>() {
+                if (s.validate(s.item)) {
+                    -> $Processing
+                } else {
+                    -> $Rejected
+                }
+            }
+            status(): string { @@:("validating") }
+        }
+        $Processing {
+            cancel(reason: string) {
+                fmt.Println("Cancelled: " + reason)
+                -> $Idle
+            }
+            status(): string { @@:("processing") }
+        }
+        $Rejected {
+            status(): string { @@:("rejected") }
+        }
+
+    actions:
+        validate(item) {
+            return len(item) > 0
+        }
+
+    domain:
+        item: string = ""
+}
+
+func main() {
+	op := NewOrderProcessor()
+	op.Submit("widget")
+	r1 := op.Status()
+	if r1 != "processing" {
+		fmt.Printf("FAIL: Expected 'processing', got '%s'\n", r1)
+		os.Exit(1)
+	}
+	op.Cancel("changed mind")
+	r2 := op.Status()
+	if r2 != "idle" {
+		fmt.Printf("FAIL: Expected 'idle', got '%s'\n", r2)
+		os.Exit(1)
+	}
+	fmt.Println("PASS: order_processor")
+}

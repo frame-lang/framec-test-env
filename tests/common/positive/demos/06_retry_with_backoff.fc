@@ -1,0 +1,60 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system Retrier {
+    interface:
+        start()
+        status(): str
+
+    machine:
+        $Idle {
+            start() {
+                self->attempts = 0;
+                -> $Trying
+            }
+        }
+        $Trying {
+            $>() {
+                self->attempts = self->attempts + 1;
+                if (Retrier_try_operation(self)) {
+                    -> $Succeeded
+                } else {
+                    if (self->attempts >= self->max_retries) {
+                        -> $Failed
+                    } else {
+                        -> $Trying
+                    }
+                }
+            }
+            status(): str { @@:("trying") }
+        }
+        $Succeeded {
+            status(): str { @@:("succeeded") }
+        }
+        $Failed {
+            status(): str { @@:("failed after max retries") }
+        }
+
+    actions:
+        try_operation() {
+            return 0;
+        }
+
+    domain:
+        attempts: int = 0
+        max_retries: int = 3
+}
+
+int main() {
+    Retrier* r = @@Retrier();
+    Retrier_start(r);
+    const char* result = Retrier_status(r);
+    if (strcmp(result, "failed after max retries") != 0) { printf("FAIL: Got: %s\n", result); return 1; }
+    if (r->attempts != 3) { printf("FAIL: Expected 3 attempts, got %d\n", r->attempts); return 1; }
+    printf("PASS: retry_with_backoff\n");
+    Retrier_destroy(r);
+    return 0;
+}

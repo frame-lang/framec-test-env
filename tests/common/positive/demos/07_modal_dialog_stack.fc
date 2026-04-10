@@ -1,0 +1,75 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system DialogManager {
+    interface:
+        open(name: str)
+        close(): str
+        current(): str
+
+    machine:
+        $Main {
+            open(name: str) {
+                push$
+                -> (name) $Dialog
+            }
+            current(): str { @@:("main") }
+        }
+        $Dialog {
+            $.name: str = ""
+
+            $>(name: str) { $.name = name }
+
+            open(name: str) {
+                push$
+                -> (name) $Dialog
+            }
+            close(): str {
+                @@:($.name)
+                -> pop$
+            }
+            current(): str { @@:($.name) }
+        }
+}
+
+int main() {
+    DialogManager* dm = @@DialogManager();
+    if (strcmp(DialogManager_current(dm), "main") != 0) {
+        printf("FAIL: expected 'main'\n");
+        return 1;
+    }
+    DialogManager_open(dm, "Settings");
+    if (strcmp(DialogManager_current(dm), "Settings") != 0) {
+        printf("FAIL: expected 'Settings'\n");
+        return 1;
+    }
+    DialogManager_open(dm, "Confirm");
+    if (strcmp(DialogManager_current(dm), "Confirm") != 0) {
+        printf("FAIL: expected 'Confirm'\n");
+        return 1;
+    }
+    const char* closed = DialogManager_close(dm);
+    if (strcmp(closed, "Confirm") != 0) {
+        printf("FAIL: expected 'Confirm'\n");
+        return 1;
+    }
+    if (strcmp(DialogManager_current(dm), "Settings") != 0) {
+        printf("FAIL: expected 'Settings'\n");
+        return 1;
+    }
+    closed = DialogManager_close(dm);
+    if (strcmp(closed, "Settings") != 0) {
+        printf("FAIL: expected 'Settings'\n");
+        return 1;
+    }
+    if (strcmp(DialogManager_current(dm), "main") != 0) {
+        printf("FAIL: expected 'main'\n");
+        return 1;
+    }
+    printf("PASS: modal_dialog_stack\n");
+    DialogManager_destroy(dm);
+    return 0;
+}

@@ -1,0 +1,53 @@
+@@target ruby
+
+@@system ApprovalChain {
+    interface:
+        submit()
+        approve(reviewer: str)
+        reject(reviewer: str)
+        status(): str
+
+    machine:
+        $Draft {
+            submit() { -> $Review1 }
+            status(): str { @@:("draft") }
+        }
+        $Review1 {
+            approve(reviewer: str) {
+                puts("Approved by #{reviewer}")
+                -> $Review2
+            }
+            reject(reviewer: str) {
+                puts("Rejected by #{reviewer}")
+                -> $Draft
+            }
+            status(): str { @@:("awaiting first review") }
+        }
+        $Review2 {
+            approve(reviewer: str) {
+                puts("Approved by #{reviewer}")
+                -> $Published
+            }
+            reject(reviewer: str) {
+                puts("Rejected by #{reviewer}")
+                -> $Draft
+            }
+            status(): str { @@:("awaiting second review") }
+        }
+        $Published {
+            status(): str { @@:("published") }
+        }
+}
+
+doc = ApprovalChain.new
+doc.submit()
+raise "FAIL" unless doc.status() == "awaiting first review"
+doc.approve("Alice")
+raise "FAIL" unless doc.status() == "awaiting second review"
+doc.reject("Bob")
+raise "FAIL" unless doc.status() == "draft"
+doc.submit()
+doc.approve("Alice")
+doc.approve("Bob")
+raise "FAIL" unless doc.status() == "published"
+puts "PASS: approval_chain"

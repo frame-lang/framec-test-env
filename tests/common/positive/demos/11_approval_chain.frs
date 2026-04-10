@@ -1,0 +1,55 @@
+@@target rust
+
+@@system ApprovalChain {
+    interface:
+        submit()
+        approve(reviewer: String)
+        reject(reviewer: String)
+        status(): String
+
+    machine:
+        $Draft {
+            submit() { -> $Review1 }
+            status(): String { @@:("draft".to_string()) }
+        }
+        $Review1 {
+            approve(reviewer: String) {
+                println!("Approved by {}", reviewer);
+                -> $Review2
+            }
+            reject(reviewer: String) {
+                println!("Rejected by {}", reviewer);
+                -> $Draft
+            }
+            status(): String { @@:("awaiting first review".to_string()) }
+        }
+        $Review2 {
+            approve(reviewer: String) {
+                println!("Approved by {}", reviewer);
+                -> $Published
+            }
+            reject(reviewer: String) {
+                println!("Rejected by {}", reviewer);
+                -> $Draft
+            }
+            status(): String { @@:("awaiting second review".to_string()) }
+        }
+        $Published {
+            status(): String { @@:("published".to_string()) }
+        }
+}
+
+fn main() {
+    let mut doc = @@ApprovalChain();
+    doc.submit();
+    assert_eq!(doc.status(), "awaiting first review");
+    doc.approve("Alice".to_string());
+    assert_eq!(doc.status(), "awaiting second review");
+    doc.reject("Bob".to_string());
+    assert_eq!(doc.status(), "draft");
+    doc.submit();
+    doc.approve("Alice".to_string());
+    doc.approve("Bob".to_string());
+    assert_eq!(doc.status(), "published");
+    println!("PASS: approval_chain");
+}

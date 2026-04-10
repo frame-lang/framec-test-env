@@ -1,0 +1,52 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system Connection {
+    interface:
+        connect(host: str)
+        send(data: str): str
+        disconnect()
+
+    machine:
+        $Disconnected {
+            connect(host: str) {
+                self->host = host;
+                -> $Connecting
+            }
+        }
+        $Connecting {
+            $>() {
+                printf("Connecting to %s...\n", self->host);
+                -> $Connected
+            }
+        }
+        $Connected {
+            $>() { printf("Connected to %s\n", self->host); }
+            <$() { printf("Disconnecting from %s\n", self->host); }
+
+            send(data: str): str {
+                char __buf[256]; sprintf(__buf, "sent '%s' to %s", data, self->host); @@:(__buf)
+            }
+            disconnect() { -> $Disconnected }
+        }
+
+    domain:
+        host: str = ""
+}
+
+int main() {
+    Connection* c = @@Connection();
+    Connection_connect(c, "example.com");
+    const char* result = Connection_send(c, "hello");
+    if (strcmp(result, "sent 'hello' to example.com") != 0) {
+        printf("FAIL: Got: %s\n", result);
+        return 1;
+    }
+    Connection_disconnect(c);
+    printf("PASS: connection_manager\n");
+    Connection_destroy(c);
+    return 0;
+}

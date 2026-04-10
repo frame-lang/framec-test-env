@@ -1,0 +1,57 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system LoginFlow {
+    interface:
+        submit(value: string): string
+
+    machine:
+        $EnterUsername {
+            submit(value: string): string {
+                s.username = value
+                @@:("enter password")
+                -> $EnterPassword
+            }
+        }
+        $EnterPassword {
+            submit(value: string): string {
+                if (s.authenticate(s.username, value)) {
+                    @@:("welcome")
+                    -> $LoggedIn
+                } else {
+                    @@:("invalid - try again")
+                    -> $EnterUsername
+                }
+            }
+        }
+        $LoggedIn {
+            submit(value: string): string { @@:("already logged in") }
+        }
+
+    actions:
+        authenticate(user, password) {
+            return user == "admin" && password == "secret"
+        }
+
+    domain:
+        username: string = ""
+}
+
+func main() {
+	login := NewLoginFlow()
+	r1 := login.Submit("admin")
+	if r1 != "enter password" { fmt.Printf("FAIL: Expected 'enter password', got '%s'\n", r1); os.Exit(1) }
+	r2 := login.Submit("wrong")
+	if r2 != "invalid - try again" { fmt.Printf("FAIL: Expected 'invalid - try again', got '%s'\n", r2); os.Exit(1) }
+	r3 := login.Submit("admin")
+	if r3 != "enter password" { fmt.Printf("FAIL: Expected 'enter password', got '%s'\n", r3); os.Exit(1) }
+	r4 := login.Submit("secret")
+	if r4 != "welcome" { fmt.Printf("FAIL: Expected 'welcome', got '%s'\n", r4); os.Exit(1) }
+	fmt.Println("PASS: login_flow")
+}

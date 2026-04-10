@@ -1,0 +1,58 @@
+@@target java
+
+@@system OrderProcessor {
+    interface:
+        submit(item: String)
+        cancel(reason: String)
+        status(): String
+
+    machine:
+        $Idle {
+            submit(item: String) {
+                this.item = item;
+                -> $Validating
+            }
+            status(): String { @@:("idle") }
+        }
+        $Validating {
+            $>() {
+                if (this.validate(this.item)) {
+                    -> $Processing
+                } else {
+                    -> $Rejected
+                }
+            }
+            status(): String { @@:("validating") }
+        }
+        $Processing {
+            cancel(reason: String) {
+                System.out.println("Cancelled: " + reason);
+                -> $Idle
+            }
+            status(): String { @@:("processing") }
+        }
+        $Rejected {
+            status(): String { @@:("rejected") }
+        }
+
+    actions:
+        validate(item) {
+            return item != null && item.length() > 0;
+        }
+
+    domain:
+        item: String = ""
+}
+
+class Main {
+    public static void main(String[] args) {
+        var op = new OrderProcessor();
+        op.submit("widget");
+        var r1 = (String) op.status();
+        assert r1.equals("processing") : "Expected 'processing', got '" + r1 + "'";
+        op.cancel("changed mind");
+        var r2 = (String) op.status();
+        assert r2.equals("idle") : "Expected 'idle', got '" + r2 + "'";
+        System.out.println("PASS: order_processor");
+    }
+}

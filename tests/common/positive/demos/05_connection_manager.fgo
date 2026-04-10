@@ -1,0 +1,53 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system Connection {
+    interface:
+        connect(host: string)
+        send(data: string): string
+        disconnect()
+
+    machine:
+        $Disconnected {
+            connect(host: string) {
+                s.host = host
+                -> $Connecting
+            }
+        }
+        $Connecting {
+            $>() {
+                fmt.Println("Connecting to " + s.host + "...")
+                -> $Connected
+            }
+        }
+        $Connected {
+            $>() { fmt.Println("Connected to " + s.host) }
+            <$() { fmt.Println("Disconnecting from " + s.host) }
+
+            send(data: string): string {
+                @@:("sent '" + data + "' to " + s.host)
+            }
+            disconnect() { -> $Disconnected }
+        }
+
+    domain:
+        host: string = ""
+}
+
+func main() {
+	c := NewConnection()
+	c.Connect("example.com")
+	result := c.Send("hello")
+	if result != "sent 'hello' to example.com" {
+		fmt.Println("FAIL: Got: " + result.(string))
+		os.Exit(1)
+	}
+	c.Disconnect()
+	fmt.Println("PASS: connection_manager")
+}

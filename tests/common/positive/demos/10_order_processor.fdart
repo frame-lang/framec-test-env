@@ -1,0 +1,56 @@
+@@target dart
+
+@@system OrderProcessor {
+    interface:
+        submit(item: String)
+        cancel(reason: String)
+        status(): String
+
+    machine:
+        $Idle {
+            submit(item: String) {
+                this.item = item;
+                -> $Validating
+            }
+            status(): String { @@:("idle") }
+        }
+        $Validating {
+            $>() {
+                if (this.validate(this.item)) {
+                    -> $Processing
+                } else {
+                    -> $Rejected
+                }
+            }
+            status(): String { @@:("validating") }
+        }
+        $Processing {
+            cancel(reason: String) {
+                print("Cancelled: ${reason}");
+                -> $Idle
+            }
+            status(): String { @@:("processing") }
+        }
+        $Rejected {
+            status(): String { @@:("rejected") }
+        }
+
+    actions:
+        validate(item) {
+            return item != null && item.isNotEmpty;
+        }
+
+    domain:
+        item: String = ""
+}
+
+void main() {
+    final op = @@OrderProcessor();
+    op.submit("widget");
+    final r1 = op.status() as String;
+    assert(r1 == "processing");
+    op.cancel("changed mind");
+    final r2 = op.status() as String;
+    assert(r2 == "idle");
+    print("PASS: order_processor");
+}

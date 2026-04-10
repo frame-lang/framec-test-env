@@ -1,0 +1,54 @@
+@@target php
+
+<?php
+
+@@system Retrier {
+    interface:
+        start()
+        status(): str
+
+    machine:
+        $Idle {
+            start() {
+                $this->attempts = 0;
+                -> $Trying
+            }
+        }
+        $Trying {
+            $>() {
+                $this->attempts = $this->attempts + 1;
+                if ($this->try_operation()) {
+                    -> $Succeeded
+                } else {
+                    if ($this->attempts >= $this->max_retries) {
+                        -> $Failed
+                    } else {
+                        -> $Trying
+                    }
+                }
+            }
+            status(): str { @@:("trying") }
+        }
+        $Succeeded {
+            status(): str { @@:("succeeded") }
+        }
+        $Failed {
+            status(): str { @@:("failed after max retries") }
+        }
+
+    actions:
+        try_operation() {
+            return false;
+        }
+
+    domain:
+        attempts: int = 0
+        max_retries: int = 3
+}
+
+$r = @@Retrier();
+$r->start();
+$result = $r->status();
+assert($result === "failed after max retries", "Got: " . $result);
+assert($r->attempts === 3, "Expected 3 attempts, got " . $r->attempts);
+echo "PASS: retry_with_backoff\n";

@@ -1,0 +1,52 @@
+@@target swift
+
+@@system Retrier {
+    interface:
+        start()
+        status(): String
+
+    machine:
+        $Idle {
+            start() {
+                self.attempts = 0
+                -> $Trying
+            }
+        }
+        $Trying {
+            $>() {
+                self.attempts = self.attempts + 1
+                if self.try_operation() {
+                    -> $Succeeded
+                } else {
+                    if self.attempts >= self.max_retries {
+                        -> $Failed
+                    } else {
+                        -> $Trying
+                    }
+                }
+            }
+            status(): String { @@:("trying") }
+        }
+        $Succeeded {
+            status(): String { @@:("succeeded") }
+        }
+        $Failed {
+            status(): String { @@:("failed after max retries") }
+        }
+
+    actions:
+        try_operation() {
+            return false
+        }
+
+    domain:
+        attempts: Int = 0
+        max_retries: Int = 3
+}
+
+var r = @@Retrier()
+r.start()
+let result = r.status() as! String
+assert(result == "failed after max retries", "Got: \(result)")
+assert(r.attempts == 3, "Expected 3 attempts, got \(r.attempts)")
+print("PASS: retry_with_backoff")

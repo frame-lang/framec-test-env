@@ -1,0 +1,54 @@
+@@target rust
+
+@@system Retrier {
+    interface:
+        start()
+        status(): String
+
+    machine:
+        $Idle {
+            start() {
+                self.attempts = 0;
+                -> $Trying
+            }
+        }
+        $Trying {
+            $>() {
+                self.attempts = self.attempts + 1;
+                if self.try_operation() {
+                    -> $Succeeded
+                } else {
+                    if self.attempts >= self.max_retries {
+                        -> $Failed
+                    } else {
+                        -> $Trying
+                    }
+                }
+            }
+            status(): String { @@:("trying".to_string()) }
+        }
+        $Succeeded {
+            status(): String { @@:("succeeded".to_string()) }
+        }
+        $Failed {
+            status(): String { @@:("failed after max retries".to_string()) }
+        }
+
+    actions:
+        try_operation() {
+            return false;
+        }
+
+    domain:
+        attempts: i32 = 0
+        max_retries: i32 = 3
+}
+
+fn main() {
+    let mut r = @@Retrier();
+    r.start();
+    let result = r.status();
+    assert_eq!(result, "failed after max retries", "Got: {}", result);
+    assert_eq!(r.attempts, 3, "Expected 3 attempts, got {}", r.attempts);
+    println!("PASS: retry_with_backoff");
+}

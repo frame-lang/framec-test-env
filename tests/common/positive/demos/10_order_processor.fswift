@@ -1,0 +1,54 @@
+@@target swift
+
+@@system OrderProcessor {
+    interface:
+        submit(item: String)
+        cancel(reason: String)
+        status(): String
+
+    machine:
+        $Idle {
+            submit(item: String) {
+                self.item = item
+                -> $Validating
+            }
+            status(): String { @@:("idle") }
+        }
+        $Validating {
+            $>() {
+                if self.validate(self.item) {
+                    -> $Processing
+                } else {
+                    -> $Rejected
+                }
+            }
+            status(): String { @@:("validating") }
+        }
+        $Processing {
+            cancel(reason: String) {
+                print("Cancelled: \(reason)")
+                -> $Idle
+            }
+            status(): String { @@:("processing") }
+        }
+        $Rejected {
+            status(): String { @@:("rejected") }
+        }
+
+    actions:
+        validate(item) {
+            return !item.isEmpty
+        }
+
+    domain:
+        item: String = ""
+}
+
+var op = @@OrderProcessor()
+op.submit("widget")
+let r1 = op.status() as! String
+assert(r1 == "processing", "Expected 'processing', got '\(r1)'")
+op.cancel("changed mind")
+let r2 = op.status() as! String
+assert(r2 == "idle", "Expected 'idle', got '\(r2)'")
+print("PASS: order_processor")

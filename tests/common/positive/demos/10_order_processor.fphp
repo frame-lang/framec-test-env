@@ -1,0 +1,56 @@
+@@target php
+
+<?php
+
+@@system OrderProcessor {
+    interface:
+        submit(item: str)
+        cancel(reason: str)
+        status(): str
+
+    machine:
+        $Idle {
+            submit(item: str) {
+                $this->item = $item;
+                -> $Validating
+            }
+            status(): str { @@:("idle") }
+        }
+        $Validating {
+            $>() {
+                if ($this->validate($this->item)) {
+                    -> $Processing
+                } else {
+                    -> $Rejected
+                }
+            }
+            status(): str { @@:("validating") }
+        }
+        $Processing {
+            cancel(reason: str) {
+                echo "Cancelled: " . $reason . "\n";
+                -> $Idle
+            }
+            status(): str { @@:("processing") }
+        }
+        $Rejected {
+            status(): str { @@:("rejected") }
+        }
+
+    actions:
+        validate(item) {
+            return $item !== null && strlen($item) > 0;
+        }
+
+    domain:
+        item: str = ""
+}
+
+$op = @@OrderProcessor();
+$op->submit("widget");
+$r1 = $op->status();
+assert($r1 === "processing", "Expected 'processing', got '" . $r1 . "'");
+$op->cancel("changed mind");
+$r2 = $op->status();
+assert($r2 === "idle", "Expected 'idle', got '" . $r2 . "'");
+echo "PASS: order_processor\n";

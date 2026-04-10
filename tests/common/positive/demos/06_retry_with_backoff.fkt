@@ -1,0 +1,54 @@
+@@target kotlin
+
+@@system Retrier {
+    interface:
+        start()
+        status(): String
+
+    machine:
+        $Idle {
+            start() {
+                this.attempts = 0
+                -> $Trying
+            }
+        }
+        $Trying {
+            $>() {
+                this.attempts = this.attempts + 1
+                if (this.try_operation()) {
+                    -> $Succeeded
+                } else {
+                    if (this.attempts >= this.max_retries) {
+                        -> $Failed
+                    } else {
+                        -> $Trying
+                    }
+                }
+            }
+            status(): String { @@:("trying") }
+        }
+        $Succeeded {
+            status(): String { @@:("succeeded") }
+        }
+        $Failed {
+            status(): String { @@:("failed after max retries") }
+        }
+
+    actions:
+        try_operation() {
+            return false
+        }
+
+    domain:
+        attempts: Int = 0
+        max_retries: Int = 3
+}
+
+fun main() {
+    val r = Retrier()
+    r.start()
+    val result = r.status() as String
+    assert(result == "failed after max retries") { "Got: $result" }
+    assert(r.attempts == 3) { "Expected 3 attempts, got ${r.attempts}" }
+    println("PASS: retry_with_backoff")
+}

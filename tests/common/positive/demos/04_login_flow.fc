@@ -1,0 +1,56 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system LoginFlow {
+    interface:
+        submit(value: str): str
+
+    machine:
+        $EnterUsername {
+            submit(value: str): str {
+                self->username = value;
+                @@:("enter password")
+                -> $EnterPassword
+            }
+        }
+        $EnterPassword {
+            submit(value: str): str {
+                if (LoginFlow_authenticate(self, self->username, value)) {
+                    @@:("welcome")
+                    -> $LoggedIn
+                } else {
+                    @@:("invalid - try again")
+                    -> $EnterUsername
+                }
+            }
+        }
+        $LoggedIn {
+            submit(value: str): str { @@:("already logged in") }
+        }
+
+    actions:
+        authenticate(user, password) {
+            return strcmp(user, "admin") == 0 && strcmp(password, "secret") == 0;
+        }
+
+    domain:
+        username: str = ""
+}
+
+int main() {
+    LoginFlow* login = @@LoginFlow();
+    const char* r1 = LoginFlow_submit(login, "admin");
+    if (strcmp(r1, "enter password") != 0) { printf("FAIL: Expected 'enter password', got '%s'\n", r1); return 1; }
+    const char* r2 = LoginFlow_submit(login, "wrong");
+    if (strcmp(r2, "invalid - try again") != 0) { printf("FAIL: Expected 'invalid - try again', got '%s'\n", r2); return 1; }
+    const char* r3 = LoginFlow_submit(login, "admin");
+    if (strcmp(r3, "enter password") != 0) { printf("FAIL: Expected 'enter password', got '%s'\n", r3); return 1; }
+    const char* r4 = LoginFlow_submit(login, "secret");
+    if (strcmp(r4, "welcome") != 0) { printf("FAIL: Expected 'welcome', got '%s'\n", r4); return 1; }
+    printf("PASS: login_flow\n");
+    LoginFlow_destroy(login);
+    return 0;
+}

@@ -1,0 +1,54 @@
+@@target typescript
+
+@@system OrderProcessor {
+    interface:
+        submit(item: str)
+        cancel(reason: str)
+        status(): str
+
+    machine:
+        $Idle {
+            submit(item: str) {
+                this.item = item;
+                -> $Validating
+            }
+            status(): str { @@:("idle") }
+        }
+        $Validating {
+            $>() {
+                if (this.validate(this.item)) {
+                    -> $Processing
+                } else {
+                    -> $Rejected
+                }
+            }
+            status(): str { @@:("validating") }
+        }
+        $Processing {
+            cancel(reason: str) {
+                console.log("Cancelled: " + reason);
+                -> $Idle
+            }
+            status(): str { @@:("processing") }
+        }
+        $Rejected {
+            status(): str { @@:("rejected") }
+        }
+
+    actions:
+        validate(item) {
+            return item !== null && item.length > 0;
+        }
+
+    domain:
+        item: str = ""
+}
+
+const op = @@OrderProcessor();
+op.submit("widget");
+const r1 = op.status();
+if (r1 !== "processing") { console.log("FAIL: Expected 'processing', got '" + r1 + "'"); process.exit(1); }
+op.cancel("changed mind");
+const r2 = op.status();
+if (r2 !== "idle") { console.log("FAIL: Expected 'idle', got '" + r2 + "'"); process.exit(1); }
+console.log("PASS: order_processor");

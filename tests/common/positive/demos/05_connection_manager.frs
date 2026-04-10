@@ -1,0 +1,43 @@
+@@target rust
+
+@@system Connection {
+    interface:
+        connect(host: String)
+        send(data: String): String
+        disconnect()
+
+    machine:
+        $Disconnected {
+            connect(host: String) {
+                self.host = host.clone();
+                -> $Connecting
+            }
+        }
+        $Connecting {
+            $>() {
+                println!("Connecting to {}...", self.host);
+                -> $Connected
+            }
+        }
+        $Connected {
+            $>() { println!("Connected to {}", self.host); }
+            <$() { println!("Disconnecting from {}", self.host); }
+
+            send(data: String): String {
+                @@:(format!("sent '{}' to {}", data, self.host))
+            }
+            disconnect() { -> $Disconnected }
+        }
+
+    domain:
+        host: String = String::new()
+}
+
+fn main() {
+    let mut c = @@Connection();
+    c.connect("example.com".to_string());
+    let result = c.send("hello".to_string());
+    assert_eq!(result, "sent 'hello' to example.com", "Got: {}", result);
+    c.disconnect();
+    println!("PASS: connection_manager");
+}

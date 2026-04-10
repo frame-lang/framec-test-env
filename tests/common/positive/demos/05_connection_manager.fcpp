@@ -1,0 +1,48 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system Connection {
+    interface:
+        connect(host: str)
+        send(data: str): str
+        disconnect()
+
+    machine:
+        $Disconnected {
+            connect(host: str) {
+                this->host = host;
+                -> $Connecting
+            }
+        }
+        $Connecting {
+            $>() {
+                printf("Connecting to %s...\n", this->host.c_str());
+                -> $Connected
+            }
+        }
+        $Connected {
+            $>() { printf("Connected to %s\n", this->host.c_str()); }
+            <$() { printf("Disconnecting from %s\n", this->host.c_str()); }
+
+            send(data: str): str {
+                @@:(std::string("sent '") + data + "' to " + this->host)
+            }
+            disconnect() { -> $Disconnected }
+        }
+
+    domain:
+        host: str = ""
+}
+
+int main() {
+    Connection c;
+    c.connect("example.com");
+    auto result = std::any_cast<std::string>(c.send("hello"));
+    assert(result == "sent 'hello' to example.com");
+    c.disconnect();
+    printf("PASS: connection_manager\n");
+    return 0;
+}

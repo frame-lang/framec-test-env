@@ -1,0 +1,62 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system ApprovalChain {
+    interface:
+        submit()
+        approve(reviewer: string)
+        reject(reviewer: string)
+        status(): string
+
+    machine:
+        $Draft {
+            submit() { -> $Review1 }
+            status(): string { @@:("draft") }
+        }
+        $Review1 {
+            approve(reviewer: string) {
+                fmt.Println("Approved by " + reviewer)
+                -> $Review2
+            }
+            reject(reviewer: string) {
+                fmt.Println("Rejected by " + reviewer)
+                -> $Draft
+            }
+            status(): string { @@:("awaiting first review") }
+        }
+        $Review2 {
+            approve(reviewer: string) {
+                fmt.Println("Approved by " + reviewer)
+                -> $Published
+            }
+            reject(reviewer: string) {
+                fmt.Println("Rejected by " + reviewer)
+                -> $Draft
+            }
+            status(): string { @@:("awaiting second review") }
+        }
+        $Published {
+            status(): string { @@:("published") }
+        }
+}
+
+func main() {
+	doc := NewApprovalChain()
+	doc.Submit()
+	if doc.Status() != "awaiting first review" { fmt.Println("FAIL"); os.Exit(1) }
+	doc.Approve("Alice")
+	if doc.Status() != "awaiting second review" { fmt.Println("FAIL"); os.Exit(1) }
+	doc.Reject("Bob")
+	if doc.Status() != "draft" { fmt.Println("FAIL"); os.Exit(1) }
+	doc.Submit()
+	doc.Approve("Alice")
+	doc.Approve("Bob")
+	if doc.Status() != "published" { fmt.Println("FAIL"); os.Exit(1) }
+	fmt.Println("PASS: approval_chain")
+}

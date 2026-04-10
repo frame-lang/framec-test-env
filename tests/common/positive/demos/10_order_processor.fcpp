@@ -1,0 +1,61 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system OrderProcessor {
+    interface:
+        submit(item: str)
+        cancel(reason: str)
+        status(): str
+
+    machine:
+        $Idle {
+            submit(item: str) {
+                this->item = item;
+                -> $Validating
+            }
+            status(): str { @@:(std::string("idle")) }
+        }
+        $Validating {
+            $>() {
+                if (this->validate(this->item)) {
+                    -> $Processing
+                } else {
+                    -> $Rejected
+                }
+            }
+            status(): str { @@:(std::string("validating")) }
+        }
+        $Processing {
+            cancel(reason: str) {
+                printf("Cancelled: %s\n", reason.c_str());
+                -> $Idle
+            }
+            status(): str { @@:(std::string("processing")) }
+        }
+        $Rejected {
+            status(): str { @@:(std::string("rejected")) }
+        }
+
+    actions:
+        validate(item) {
+            return !item.empty();
+        }
+
+    domain:
+        item: str = ""
+}
+
+int main() {
+    OrderProcessor op;
+    op.submit("widget");
+    auto r1 = std::any_cast<std::string>(op.status());
+    assert(r1 == "processing");
+    op.cancel("changed mind");
+    auto r2 = std::any_cast<std::string>(op.status());
+    assert(r2 == "idle");
+    printf("PASS: order_processor\n");
+    return 0;
+}

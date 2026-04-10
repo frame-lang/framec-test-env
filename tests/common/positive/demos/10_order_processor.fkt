@@ -1,0 +1,56 @@
+@@target kotlin
+
+@@system OrderProcessor {
+    interface:
+        submit(item: String)
+        cancel(reason: String)
+        status(): String
+
+    machine:
+        $Idle {
+            submit(item: String) {
+                this.item = item
+                -> $Validating
+            }
+            status(): String { @@:("idle") }
+        }
+        $Validating {
+            $>() {
+                if (this.validate(this.item)) {
+                    -> $Processing
+                } else {
+                    -> $Rejected
+                }
+            }
+            status(): String { @@:("validating") }
+        }
+        $Processing {
+            cancel(reason: String) {
+                println("Cancelled: $reason")
+                -> $Idle
+            }
+            status(): String { @@:("processing") }
+        }
+        $Rejected {
+            status(): String { @@:("rejected") }
+        }
+
+    actions:
+        validate(item) {
+            return item != null && item.length > 0
+        }
+
+    domain:
+        item: String = ""
+}
+
+fun main() {
+    val op = OrderProcessor()
+    op.submit("widget")
+    val r1 = op.status() as String
+    assert(r1 == "processing") { "Expected 'processing', got '$r1'" }
+    op.cancel("changed mind")
+    val r2 = op.status() as String
+    assert(r2 == "idle") { "Expected 'idle', got '$r2'" }
+    println("PASS: order_processor")
+}

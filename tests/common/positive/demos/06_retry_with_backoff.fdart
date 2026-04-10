@@ -1,0 +1,54 @@
+@@target dart
+
+@@system Retrier {
+    interface:
+        start()
+        status(): String
+
+    machine:
+        $Idle {
+            start() {
+                this.attempts = 0;
+                -> $Trying
+            }
+        }
+        $Trying {
+            $>() {
+                this.attempts = this.attempts + 1;
+                if (this.try_operation()) {
+                    -> $Succeeded
+                } else {
+                    if (this.attempts >= this.max_retries) {
+                        -> $Failed
+                    } else {
+                        -> $Trying
+                    }
+                }
+            }
+            status(): String { @@:("trying") }
+        }
+        $Succeeded {
+            status(): String { @@:("succeeded") }
+        }
+        $Failed {
+            status(): String { @@:("failed after max retries") }
+        }
+
+    actions:
+        try_operation() {
+            return false;
+        }
+
+    domain:
+        attempts: int = 0
+        max_retries: int = 3
+}
+
+void main() {
+    final r = @@Retrier();
+    r.start();
+    final result = r.status() as String;
+    assert(result == "failed after max retries");
+    assert(r.attempts == 3);
+    print("PASS: retry_with_backoff");
+}
