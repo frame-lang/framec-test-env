@@ -106,12 +106,20 @@ test-gdscript: $(STAMP_DIR)/framec-amd64 $(STAMP_DIR)/image-gdscript
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-amd64 $(COMPOSE) run --rm gdscript 2>/dev/null | grep "^# \|^not ok"
 
 test: $(STAMP_DIR)/framec-native build
-	@echo "=== Running all tests ($(words $(LANGS)) languages) ==="
-	@for lang in $(LANGS); do \
-		FRAMEC_BIN=$(DOCKER_DIR)/framec-native $(COMPOSE) run --rm $$lang 2>/dev/null | grep "^# "; \
-	done
+	@echo "=== Running all tests in parallel ($(words $(LANGS)) languages) ==="
+	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native $(COMPOSE) up -d $(LANGS)
+	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native ./collect-results.sh $(LANGS)
+	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native $(COMPOSE) down --remove-orphans 2>/dev/null || true
 
-test-all: test test-gdscript
+test-all: $(STAMP_DIR)/framec-native $(STAMP_DIR)/framec-amd64 build
+	@echo "=== Running all tests in parallel ($(words $(ALL_LANGS)) languages) ==="
+	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
+	 FRAMEC_BIN_GD=$(DOCKER_DIR)/framec-amd64 \
+	 $(COMPOSE) up -d $(ALL_LANGS)
+	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
+	 FRAMEC_BIN_GD=$(DOCKER_DIR)/framec-amd64 \
+	 ./collect-results.sh $(ALL_LANGS)
+	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native $(COMPOSE) down --remove-orphans 2>/dev/null || true
 
 # --- Compile-only mode ---
 
@@ -123,10 +131,10 @@ endef
 $(foreach lang,$(LANGS),$(eval $(call LANG_COMPILE_RULE,$(lang))))
 
 compile: $(STAMP_DIR)/framec-native build
-	@echo "=== Compile-only ($(words $(LANGS)) languages) ==="
-	@for lang in $(LANGS); do \
-		FRAMEC_BIN=$(DOCKER_DIR)/framec-native COMPILE_ONLY=true $(COMPOSE) run --rm $$lang 2>/dev/null | grep "^# "; \
-	done
+	@echo "=== Compile-only in parallel ($(words $(LANGS)) languages) ==="
+	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native COMPILE_ONLY=true $(COMPOSE) up -d $(LANGS)
+	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native ./collect-results.sh $(LANGS)
+	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native $(COMPOSE) down --remove-orphans 2>/dev/null || true
 
 # --- Clean ---
 
@@ -182,7 +190,7 @@ help:
 	@echo "  make rebuild            Full clean + rebuild"
 	@echo ""
 	@echo "Test:"
-	@echo "  make test               Run 16 languages (excludes GDScript)"
+	@echo "  make test               Run 16 languages in parallel"
 	@echo "  make test-python        Run single language"
 	@echo "  make test-gdscript      GDScript (x86 emulation, ~7 min)"
 	@echo "  make test-all           All 17 languages"

@@ -71,7 +71,16 @@ Per container, the `runner.sh` script:
 
 ### Parallel Execution
 
-All 17 containers run simultaneously via `docker compose up`. Each container outputs its own TAP stream. The `run.sh` orchestrator aggregates results into a summary table.
+All containers launch simultaneously via `docker compose up -d`. The `collect-results.sh` script polls until every container exits, then reads per-service logs via `docker compose logs --no-log-prefix <service>` to extract TAP results without interleaving. A summary report lists per-language pass/fail counts, with all failure lines grouped at the end.
+
+GDScript requires an x86_64 `framec` binary (Godot has no ARM64 build). The compose file uses a separate volume anchor (`FRAMEC_BIN_GD`) so all 17 containers can launch from a single `docker compose up -d` invocation with different binaries.
+
+```bash
+# Via Makefile (recommended):
+make test          # 16 native-arch languages in parallel
+make test-all      # All 17 including GDScript
+make test-python   # Single language (sequential, for debugging)
+```
 
 ## Container Reference
 
@@ -117,10 +126,12 @@ All 17 containers run simultaneously via `docker compose up`. Each container out
 
 ```
 docker/
+├── Makefile                    # Build orchestration, parallel test targets
 ├── docker-compose.yml          # 17 services, parameterized FRAMEC_BIN
+├── collect-results.sh          # Waits for parallel containers, collects TAP results
 ├── run.sh                      # Orchestrator: clean, run, compare
-├── framec-linux                # Cached Linux binary (gitignored)
-├── Dockerfile.framec-builder   # Cross-compile framec for Linux
+├── framec-native               # Cached native-arch Linux binary (gitignored)
+├── framec-amd64                # Cached x86_64 binary for GDScript (gitignored)
 ├── README.md                   # This file
 ├── base/                       # One Dockerfile per language
 │   ├── python/Dockerfile
@@ -160,7 +171,8 @@ docker/
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `FRAMEC_BIN` | Path to Linux framec binary | Required |
+| `FRAMEC_BIN` | Path to Linux framec binary (native arch) | Required |
+| `FRAMEC_BIN_GD` | Path to x86_64 framec binary (GDScript only) | Falls back to `FRAMEC_BIN` |
 | `COMPILE_ONLY` | Skip execution, transpile+compile only | `false` |
 
 ## Adding a New Language
