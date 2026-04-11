@@ -1,0 +1,41 @@
+@@target rust
+
+use serde_json;
+
+@@persist
+@@system Session {
+    interface:
+        login(user: String)
+        logout()
+        who(): String
+
+    machine:
+        $LoggedOut {
+            login(user: String) {
+                self.user = user;
+                -> $LoggedIn
+            }
+            who(): String { @@:("nobody".to_string()) }
+        }
+        $LoggedIn {
+            logout() {
+                self.user = String::new();
+                -> $LoggedOut
+            }
+            who(): String { @@:(self.user.clone()) }
+        }
+
+    domain:
+        user: String = String::new()
+}
+
+fn main() {
+    let mut s = @@Session();
+    s.login("alice".to_string());
+    assert_eq!(s.who(), "alice");
+
+    let data = s.save_state();
+    let mut s2 = Session::restore_state(&data);
+    assert_eq!(s2.who(), "alice");
+    println!("PASS: session_persistence");
+}

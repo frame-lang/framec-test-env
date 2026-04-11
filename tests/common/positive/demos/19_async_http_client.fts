@@ -1,0 +1,83 @@
+@@target typescript
+
+@@system AsyncWorker {
+    interface:
+        async start()
+        async process(data: str): str
+        async stop()
+        get_status(): str
+
+    machine:
+        $Idle {
+            $>() {
+                self.log.push("idle:ready")
+            }
+            start() {
+                -> $Working
+            }
+            get_status(): str { @@:("idle") }
+        }
+        $Working {
+            $>() {
+                self.log.push("working:entered")
+            }
+            <$() {
+                self.log.push("working:exited")
+            }
+            process(data: str): str {
+                const result = `processed:${data}`
+                self.log.push(result)
+                @@:(result)
+            }
+            stop() {
+                -> $Idle
+            }
+            get_status(): str { @@:("working") }
+        }
+
+    domain:
+        log: string[] = []
+}
+
+async function main() {
+    const w = @@AsyncWorker();
+    await w.init();
+
+    let status = await w.get_status() as string;
+    if (status !== "idle") {
+        console.log(`FAIL: expected idle, got ${status}`);
+        process.exit(1);
+    }
+    if (!w.log.includes("idle:ready")) {
+        console.log("FAIL: missing idle:ready in log");
+        process.exit(1);
+    }
+
+    await w.start();
+    status = await w.get_status() as string;
+    if (status !== "working") {
+        console.log(`FAIL: expected working, got ${status}`);
+        process.exit(1);
+    }
+
+    const result = await w.process("hello") as string;
+    if (result !== "processed:hello") {
+        console.log(`FAIL: expected 'processed:hello', got '${result}'`);
+        process.exit(1);
+    }
+
+    await w.stop();
+    status = await w.get_status() as string;
+    if (status !== "idle") {
+        console.log(`FAIL: expected idle after stop, got ${status}`);
+        process.exit(1);
+    }
+    if (!w.log.includes("working:exited")) {
+        console.log("FAIL: missing working:exited in log");
+        process.exit(1);
+    }
+
+    console.log("PASS: async_http_client");
+}
+
+main();

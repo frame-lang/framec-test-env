@@ -1,0 +1,53 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@persist
+@@system Session {
+    interface:
+        login(user: str)
+        logout()
+        who(): str
+
+    machine:
+        $LoggedOut {
+            login(user: str) {
+                self->user = user;
+                -> $LoggedIn
+            }
+            who(): str { @@:("nobody") }
+        }
+        $LoggedIn {
+            logout() {
+                self->user = "";
+                -> $LoggedOut
+            }
+            who(): str { @@:(self->user) }
+        }
+
+    domain:
+        user = ""
+}
+
+int main() {
+    Session* s = @@Session();
+    Session_login(s, "alice");
+    if (strcmp(Session_who(s), "alice") != 0) {
+        printf("FAIL: expected 'alice'\n");
+        return 1;
+    }
+    char* data = Session_save_state(s);
+    Session* s2 = Session_restore_state(data);
+    if (strcmp(Session_who(s2), "alice") != 0) {
+        printf("FAIL: expected 'alice' after restore\n");
+        free(data);
+        return 1;
+    }
+    printf("PASS: session_persistence\n");
+    free(data);
+    Session_destroy(s);
+    Session_destroy(s2);
+    return 0;
+}

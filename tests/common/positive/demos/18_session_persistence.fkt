@@ -1,0 +1,44 @@
+@@target kotlin
+
+import kotlinx.serialization.json.*
+
+@@persist
+@@system Session {
+    interface:
+        login(user: String)
+        logout()
+        who(): String
+
+    machine:
+        $LoggedOut {
+            login(user: String) {
+                this.user = user
+                -> $LoggedIn
+            }
+            who(): String { @@:("nobody") }
+        }
+        $LoggedIn {
+            logout() {
+                this.user = ""
+                -> $LoggedOut
+            }
+            who(): String { @@:(this.user) }
+        }
+
+    domain:
+        user: String = ""
+}
+
+fun main() {
+    val s = Session()
+    s.login("alice")
+    if (s.who() as String != "alice") {
+        throw RuntimeException("Expected 'alice'")
+    }
+    val data = s.save_state()
+    val s2 = Session.restore_state(data)
+    if (s2.who() as String != "alice") {
+        throw RuntimeException("Expected 'alice' after restore")
+    }
+    println("PASS: session_persistence")
+}

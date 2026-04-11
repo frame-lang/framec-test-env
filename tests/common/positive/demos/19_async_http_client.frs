@@ -1,0 +1,63 @@
+@@target rust
+
+use tokio;
+
+@@system AsyncWorker {
+    interface:
+        async start()
+        async process(data: String): String
+        async stop()
+        get_status(): String
+
+    machine:
+        $Idle {
+            $>() {
+                self.log.push("idle:ready".to_string());
+            }
+            start() {
+                -> $Working
+            }
+            get_status(): String { @@:("idle".to_string()) }
+        }
+        $Working {
+            $>() {
+                self.log.push("working:entered".to_string());
+            }
+            <$() {
+                self.log.push("working:exited".to_string());
+            }
+            process(data: String): String {
+                let result = format!("processed:{}", data);
+                self.log.push(result.clone());
+                @@:(result)
+            }
+            stop() {
+                -> $Idle
+            }
+            get_status(): String { @@:("working".to_string()) }
+        }
+
+    domain:
+        log: Vec<String> = Vec::new()
+}
+
+#[tokio::main]
+async fn main() {
+    let mut w = @@AsyncWorker();
+    w.init().await;
+
+    assert_eq!(w.get_status().await, "idle");
+    assert!(w.log.contains(&"idle:ready".to_string()));
+
+    w.start().await;
+    assert_eq!(w.get_status().await, "working");
+
+    let result = w.process("hello".to_string()).await;
+    assert_eq!(result, "processed:hello");
+
+    w.stop().await;
+    assert_eq!(w.get_status().await, "idle");
+    assert!(w.log.contains(&"working:exited".to_string()));
+
+    println!("PASS: async_http_client");
+}

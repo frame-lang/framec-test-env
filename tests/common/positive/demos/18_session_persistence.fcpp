@@ -1,0 +1,45 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system Session {
+    interface:
+        login(user: str)
+        logout()
+        who(): str
+
+    machine:
+        $LoggedOut {
+            login(user: str) {
+                self->user = user;
+                -> $LoggedIn
+            }
+            who(): str { @@:(std::string("nobody")) }
+        }
+        $LoggedIn {
+            logout() {
+                self->user = "";
+                -> $LoggedOut
+            }
+            who(): str { @@:(self->user) }
+        }
+
+    domain:
+        user: std::string = ""
+}
+
+int main() {
+    Session s;
+    s.login("alice");
+    assert(std::any_cast<std::string>(s.who()) == "alice");
+
+    auto data = s.save_state();
+    auto s2 = Session::restore_state(data);
+    assert(std::any_cast<std::string>(s2.who()) == "alice");
+    printf("PASS: session_persistence\n");
+    return 0;
+}

@@ -1,0 +1,47 @@
+@@target csharp
+
+using System;
+using System.Text.Json;
+
+@@persist
+@@system Session {
+    interface:
+        login(user: String)
+        logout()
+        who(): String
+
+    machine:
+        $LoggedOut {
+            login(user: String) {
+                this.user = user;
+                -> $LoggedIn
+            }
+            who(): String { @@:("nobody") }
+        }
+        $LoggedIn {
+            logout() {
+                this.user = "";
+                -> $LoggedOut
+            }
+            who(): String { @@:(this.user) }
+        }
+
+    domain:
+        user: String = ""
+}
+
+class Program {
+    static void Main(string[] args) {
+        var s = new Session();
+        s.login("alice");
+        if ((string) s.who() != "alice") {
+            throw new Exception("Expected 'alice'");
+        }
+        var data = s.SaveState();
+        var s2 = Session.RestoreState(data);
+        if ((string) s2.who() != "alice") {
+            throw new Exception("Expected 'alice' after restore");
+        }
+        Console.WriteLine("PASS: session_persistence");
+    }
+}
