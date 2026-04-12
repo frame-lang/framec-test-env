@@ -1,0 +1,69 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system WorkerPool($(max_retries: int), $>(start_msg: string), pool_size: int) {
+    interface:
+        Submit(task: string)
+        GetStatus(): string
+
+    machine:
+        $Idle(max_retries: int) {
+            $>(start_msg: string) {
+                fmt.Println("Pool ready: " + start_msg)
+            }
+
+            Submit(task: string) {
+                s.pending = append(s.pending, task)
+                if len(s.pending) >= s.pool_size {
+                    -> $Processing
+                }
+            }
+
+            GetStatus(): string {
+                @@:(fmt.Sprintf("idle (%d/%d pending)", len(s.pending), s.pool_size))
+            }
+        }
+
+        $Processing {
+            $>() {
+                fmt.Println(fmt.Sprintf("Processing batch of %d tasks", len(s.pending)))
+                s.pending = nil
+            }
+
+            Submit(task: string) {
+                s.pending = append(s.pending, task)
+            }
+
+            GetStatus(): string {
+                @@:("processing")
+            }
+        }
+
+    domain:
+        pool_size int = pool_size
+        pending []string = []string{}
+}
+
+func main() {
+	pool := @@WorkerPool($(5), $>("v1.0"), 3)
+	pool.Submit("task_a")
+	status := pool.GetStatus()
+	if status != "idle (1/3 pending)" {
+		fmt.Printf("FAIL: Expected idle, got: %s\n", status)
+		os.Exit(1)
+	}
+	pool.Submit("task_b")
+	pool.Submit("task_c")
+	status = pool.GetStatus()
+	if status != "processing" {
+		fmt.Printf("FAIL: Expected processing, got: %s\n", status)
+		os.Exit(1)
+	}
+	fmt.Println("PASS: worker_pool")
+}

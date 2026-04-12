@@ -1,0 +1,57 @@
+@@target rust
+
+@@system WorkerPool($(max_retries: i64), $>(start_msg: String), pool_size: i64) {
+    interface:
+        submit(task: String)
+        get_status(): String
+
+    machine:
+        $Idle(max_retries: i64) {
+            $>(start_msg: String) {
+                println!("Pool ready: {}", start_msg);
+            }
+
+            submit(task: String) {
+                self.pending.push(task.clone());
+                if self.pending.len() as i64 >= self.pool_size:
+                    -> $Processing
+            }
+
+            get_status(): String {
+                @@:(format!("idle ({}/{} pending)", self.pending.len(), self.pool_size))
+                return;
+            }
+        }
+
+        $Processing {
+            $>() {
+                println!("Processing batch of {} tasks", self.pending.len());
+                self.pending.clear();
+            }
+
+            submit(task: String) {
+                self.pending.push(task.clone());
+            }
+
+            get_status(): String {
+                @@:(String::from("processing"))
+                return;
+            }
+        }
+
+    domain:
+        pool_size: i64 = pool_size
+        pending: Vec<String> = Vec::new()
+}
+
+fn main() {
+    let mut pool = @@WorkerPool($(5), $>("v1.0".to_string()), 3);
+    pool.submit("task_a".to_string());
+    let status1 = pool.get_status();
+    assert_eq!(status1, "idle (1/3 pending)", "Expected idle, got: {}", status1);
+    pool.submit("task_b".to_string());
+    pool.submit("task_c".to_string());
+    let status2 = pool.get_status();
+    assert_eq!(status2, "processing", "Expected processing, got: {}", status2);
+    println!("PASS: worker_pool");
+}

@@ -1,0 +1,61 @@
+@@target swift
+
+@@system WorkerPool($(max_retries: int), $>(start_msg: str), pool_size: int) {
+    interface:
+        submit(task: str)
+        get_status(): str
+
+    machine:
+        $Idle(max_retries: int) {
+            $>(start_msg: str) {
+                print("Pool ready: \(start_msg)")
+            }
+
+            submit(task: str) {
+                self.pending.append(task)
+                if self.pending.count >= self.pool_size:
+                    -> $Processing
+            }
+
+            get_status(): str {
+                @@:("idle (\(self.pending.count)/\(self.pool_size) pending)")
+                return;
+            }
+        }
+
+        $Processing {
+            $>() {
+                print("Processing batch of \(self.pending.count) tasks")
+                self.pending.removeAll()
+            }
+
+            submit(task: str) {
+                self.pending.append(task)
+            }
+
+            get_status(): str {
+                @@:("processing")
+                return;
+            }
+        }
+
+    domain:
+        pool_size: Int = pool_size
+        pending: [String] = []
+}
+
+var pool = @@WorkerPool($(5), $>("v1.0"), 3)
+pool.submit("task_a")
+let status1 = pool.get_status()
+if status1 != "idle (1/3 pending)" {
+    print("FAIL: expected idle, got: \(status1)")
+    fatalError()
+}
+pool.submit("task_b")
+pool.submit("task_c")
+let status2 = pool.get_status()
+if status2 != "processing" {
+    print("FAIL: expected processing, got: \(status2)")
+    fatalError()
+}
+print("PASS: worker_pool")

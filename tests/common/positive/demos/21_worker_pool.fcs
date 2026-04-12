@@ -1,0 +1,68 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@system WorkerPool($(max_retries: int), $>(start_msg: str), pool_size: int) {
+    interface:
+        submit(task: str)
+        get_status(): str
+
+    machine:
+        $Idle(max_retries: int) {
+            $>(start_msg: str) {
+                Console.WriteLine("Pool ready: " + start_msg);
+            }
+
+            submit(task: str) {
+                this.pending.Add(task);
+                if (this.pending.Count >= this.pool_size):
+                    -> $Processing
+            }
+
+            get_status(): str {
+                @@:($"idle ({this.pending.Count}/{this.pool_size} pending)")
+                return;
+            }
+        }
+
+        $Processing {
+            $>() {
+                Console.WriteLine("Processing batch of " + this.pending.Count + " tasks");
+                this.pending.Clear();
+            }
+
+            submit(task: str) {
+                this.pending.Add(task);
+            }
+
+            get_status(): str {
+                @@:("processing")
+                return;
+            }
+        }
+
+    domain:
+        pool_size: int = pool_size
+        pending: List<string> = new List<string>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        var pool = @@WorkerPool($(5), $>("v1.0"), 3);
+        pool.submit("task_a");
+        var status1 = pool.get_status();
+        if (status1 != "idle (1/3 pending)") {
+            Console.WriteLine("FAIL: expected idle, got: " + status1);
+            Environment.Exit(1);
+        }
+        pool.submit("task_b");
+        pool.submit("task_c");
+        var status2 = pool.get_status();
+        if (status2 != "processing") {
+            Console.WriteLine("FAIL: expected processing, got: " + status2);
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: worker_pool");
+    }
+}

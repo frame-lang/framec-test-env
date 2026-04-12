@@ -1,0 +1,63 @@
+@@target kotlin
+
+@@system WorkerPool($(max_retries: int), $>(start_msg: str), pool_size: int) {
+    interface:
+        submit(task: str)
+        get_status(): str
+
+    machine:
+        $Idle(max_retries: int) {
+            $>(start_msg: str) {
+                println("Pool ready: $start_msg")
+            }
+
+            submit(task: str) {
+                this.pending.add(task)
+                if (this.pending.size >= this.pool_size):
+                    -> $Processing
+            }
+
+            get_status(): str {
+                @@:("idle (" + this.pending.size + "/" + this.pool_size + " pending)")
+                return;
+            }
+        }
+
+        $Processing {
+            $>() {
+                println("Processing batch of " + this.pending.size + " tasks")
+                this.pending.clear()
+            }
+
+            submit(task: str) {
+                this.pending.add(task)
+            }
+
+            get_status(): str {
+                @@:("processing")
+                return;
+            }
+        }
+
+    domain:
+        var pool_size: Int = pool_size
+        var pending: MutableList<String> = mutableListOf()
+}
+
+fun main() {
+    val pool = @@WorkerPool($(5), $>("v1.0"), 3)
+    pool.submit("task_a")
+    val status1 = pool.get_status()
+    if (status1 != "idle (1/3 pending)") {
+        println("FAIL: expected idle, got: $status1")
+        kotlin.system.exitProcess(1)
+    }
+    pool.submit("task_b")
+    pool.submit("task_c")
+    val status2 = pool.get_status()
+    if (status2 != "processing") {
+        println("FAIL: expected processing, got: $status2")
+        kotlin.system.exitProcess(1)
+    }
+    println("PASS: worker_pool")
+}

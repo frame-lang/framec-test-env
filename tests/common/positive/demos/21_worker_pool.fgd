@@ -1,0 +1,63 @@
+@@target gdscript
+
+extends SceneTree
+
+@@system WorkerPool($(max_retries: int), $>(start_msg: str), pool_size: int) {
+    interface:
+        submit(task: str)
+        get_status(): str
+
+    machine:
+        $Idle(max_retries: int) {
+            $>(start_msg: str) {
+                print("Pool ready: " + start_msg)
+            }
+
+            submit(task: str) {
+                self.pending.append(task)
+                if self.pending.size() >= self.pool_size:
+                    -> $Processing
+            }
+
+            get_status(): str {
+                @@:("idle (" + str(self.pending.size()) + "/" + str(self.pool_size) + " pending)")
+            }
+        }
+
+        $Processing {
+            $>() {
+                print("Processing batch of " + str(self.pending.size()) + " tasks")
+                self.pending.clear()
+            }
+
+            submit(task: str) {
+                self.pending.append(task)
+            }
+
+            get_status(): str {
+                @@:("processing")
+            }
+        }
+
+    domain:
+        var pending = []
+        var pool_size = pool_size
+}
+
+func _init():
+    var pool = @@WorkerPool($(5), $>("v1.0"), 3)
+    pool.submit("task_a")
+    var status = pool.get_status()
+    if status != "idle (1/3 pending)":
+        print("FAIL: Expected idle, got: " + status)
+        quit()
+        return
+    pool.submit("task_b")
+    pool.submit("task_c")
+    status = pool.get_status()
+    if status != "processing":
+        print("FAIL: Expected processing, got: " + status)
+        quit()
+        return
+    print("PASS: worker_pool")
+    quit()

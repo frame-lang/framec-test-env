@@ -1,0 +1,61 @@
+@@target dart
+
+@@system WorkerPool($(max_retries: int), $>(start_msg: str), pool_size: int) {
+    interface:
+        submit(task: str)
+        get_status(): str
+
+    machine:
+        $Idle(max_retries: int) {
+            $>(start_msg: str) {
+                print("Pool ready: $start_msg");
+            }
+
+            submit(task: str) {
+                this.pending.add(task);
+                if (this.pending.length >= this.pool_size):
+                    -> $Processing
+            }
+
+            get_status(): str {
+                @@:("idle (${this.pending.length}/${this.pool_size} pending)")
+                return;
+            }
+        }
+
+        $Processing {
+            $>() {
+                print("Processing batch of ${this.pending.length} tasks");
+                this.pending.clear();
+            }
+
+            submit(task: str) {
+                this.pending.add(task);
+            }
+
+            get_status(): str {
+                @@:("processing")
+                return;
+            }
+        }
+
+    domain:
+        int pool_size = pool_size
+        List<String> pending = []
+}
+
+void main() {
+    final pool = @@WorkerPool($(5), $>("v1.0"), 3);
+    pool.submit("task_a");
+    final status1 = pool.get_status();
+    if (status1 != "idle (1/3 pending)") {
+        throw "FAIL: expected idle, got: $status1";
+    }
+    pool.submit("task_b");
+    pool.submit("task_c");
+    final status2 = pool.get_status();
+    if (status2 != "processing") {
+        throw "FAIL: expected processing, got: $status2";
+    }
+    print("PASS: worker_pool");
+}

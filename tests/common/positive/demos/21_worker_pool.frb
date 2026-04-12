@@ -1,0 +1,60 @@
+@@target ruby
+
+@@system WorkerPool($(max_retries: int), $>(start_msg: str), pool_size: int) {
+    interface:
+        submit(task: str)
+        get_status(): str
+
+    machine:
+        $Idle(max_retries: int) {
+            $>(start_msg: str) {
+                puts "Pool ready: #{start_msg}"
+            }
+
+            submit(task: str) {
+                self.pending.push(task)
+                if self.pending.length >= self.pool_size
+                    -> $Processing
+                end
+            }
+
+            get_status(): str {
+                @@:("idle (#{self.pending.length}/#{self.pool_size} pending)")
+            }
+        }
+
+        $Processing {
+            $>() {
+                puts "Processing batch of #{self.pending.length} tasks"
+                self.pending.clear
+            }
+
+            submit(task: str) {
+                self.pending.push(task)
+            }
+
+            get_status(): str {
+                @@:("processing")
+            }
+        }
+
+    domain:
+        pending = []
+        pool_size = pool_size
+}
+
+pool = @@WorkerPool($(5), $>("v1.0"), 3)
+pool.submit("task_a")
+status = pool.get_status
+if status != "idle (1/3 pending)"
+    puts "FAIL: Expected idle, got: #{status}"
+    exit(1)
+end
+pool.submit("task_b")
+pool.submit("task_c")
+status = pool.get_status
+if status != "processing"
+    puts "FAIL: Expected processing, got: #{status}"
+    exit(1)
+end
+puts "PASS: worker_pool"

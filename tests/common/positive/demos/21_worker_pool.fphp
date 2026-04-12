@@ -1,0 +1,62 @@
+@@target php
+
+<?php
+
+@@system WorkerPool($(max_retries: int), $>(start_msg: str), pool_size: int) {
+    interface:
+        submit(task: str)
+        get_status(): str
+
+    machine:
+        $Idle(max_retries: int) {
+            $>(start_msg: str) {
+                echo "Pool ready: " . $start_msg . "\n";
+            }
+
+            submit(task: str) {
+                $this->pending[] = $task;
+                if (count($this->pending) >= $this->pool_size) {
+                    -> $Processing
+                }
+            }
+
+            get_status(): str {
+                @@:("idle (" . count($this->pending) . "/" . $this->pool_size . " pending)")
+            }
+        }
+
+        $Processing {
+            $>() {
+                echo "Processing batch of " . count($this->pending) . " tasks\n";
+                $this->pending = [];
+            }
+
+            submit(task: str) {
+                $this->pending[] = $task;
+            }
+
+            get_status(): str {
+                @@:("processing")
+            }
+        }
+
+    domain:
+        pool_size = $pool_size
+        pending = []
+}
+
+$pool = @@WorkerPool($(5), $>("v1.0"), 3);
+$pool->submit("task_a");
+$status = $pool->get_status();
+if ($status !== "idle (1/3 pending)") {
+    echo "FAIL: Expected idle, got: $status\n";
+    exit(1);
+}
+$pool->submit("task_b");
+$pool->submit("task_c");
+$status = $pool->get_status();
+if ($status !== "processing") {
+    echo "FAIL: Expected processing, got: $status\n";
+    exit(1);
+}
+echo "PASS: worker_pool\n";

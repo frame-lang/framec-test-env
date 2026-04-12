@@ -1,0 +1,59 @@
+@@target typescript
+
+@@system WorkerPool($(max_retries: int), $>(start_msg: str), pool_size: int) {
+    interface:
+        submit(task: str)
+        get_status(): str
+
+    machine:
+        $Idle(max_retries: int) {
+            $>(start_msg: str) {
+                console.log("Pool ready: " + start_msg)
+            }
+
+            submit(task: str) {
+                this.pending.push(task)
+                if (this.pending.length >= this.pool_size):
+                    -> $Processing
+            }
+
+            get_status(): str {
+                @@:(`idle (${this.pending.length}/${this.pool_size} pending)`)
+            }
+        }
+
+        $Processing {
+            $>() {
+                console.log("Processing batch of " + this.pending.length + " tasks")
+                this.pending = []
+            }
+
+            submit(task: str) {
+                this.pending.push(task)
+            }
+
+            get_status(): str {
+                @@:("processing")
+            }
+        }
+
+    domain:
+        pool_size: number = pool_size
+        pending: string[] = []
+}
+
+const pool = @@WorkerPool($(5), $>("v1.0"), 3);
+pool.submit("task_a");
+const status1 = pool.get_status();
+if (status1 !== "idle (1/3 pending)") {
+    console.log("FAIL: expected idle, got: " + status1);
+    process.exit(1);
+}
+pool.submit("task_b");
+pool.submit("task_c");
+const status2 = pool.get_status();
+if (status2 !== "processing") {
+    console.log("FAIL: expected processing, got: " + status2);
+    process.exit(1);
+}
+console.log("PASS: worker_pool");
