@@ -1,0 +1,84 @@
+// Self-Calibrating Sensor — @@:self demo (Swift)
+
+@@system Sensor {
+    interface:
+        calibrate(): str
+        reading(): float
+        trigger_shutdown()
+        attempt_post_shutdown(): str
+        status(): str
+
+    machine:
+        $Active {
+            calibrate(): str {
+                let baseline = @@:self.reading()
+                self.offset = baseline * -1
+                @@:("calibrated: offset=\(self.offset)")
+            }
+
+            reading(): float {
+                @@:(self.raw_value + self.offset)
+            }
+
+            trigger_shutdown() {
+                -> $Shutdown
+            }
+
+            attempt_post_shutdown(): str {
+                self.trace = "before"
+                @@:self.trigger_shutdown()
+                self.trace = "after"
+                @@:(self.trace)
+            }
+
+            status(): str { @@:("active") }
+        }
+
+        $Shutdown {
+            status(): str { @@:("shutdown") }
+        }
+
+    domain:
+        raw_value: Double = 42.0
+        offset: Double = 0.0
+        trace: String = ""
+}
+
+let sensor = @@Sensor()
+var failures = 0
+
+let r1 = sensor.reading()
+if abs(r1 - 42.0) > 1e-9 {
+    print("FAIL: reading() expected 42.0, got \(r1)")
+    failures += 1
+}
+
+let cal = sensor.calibrate()
+if !cal.contains("calibrated") {
+    print("FAIL: calibrate() expected 'calibrated', got '\(cal)'")
+    failures += 1
+}
+
+let r2 = sensor.reading()
+if abs(r2) > 1e-9 {
+    print("FAIL: reading() after calibrate expected 0.0, got \(r2)")
+    failures += 1
+}
+
+let result = sensor.attempt_post_shutdown()
+if result != "before" {
+    print("FAIL: attempt_post_shutdown() expected 'before', got '\(result)'")
+    failures += 1
+}
+
+let st = sensor.status()
+if st != "shutdown" {
+    print("FAIL: status() expected 'shutdown', got '\(st)'")
+    failures += 1
+}
+
+if failures > 0 {
+    print("FAIL: self_calibrating_sensor (\(failures) failures)")
+    fatalError()
+}
+print("PASS: self_calibrating_sensor")

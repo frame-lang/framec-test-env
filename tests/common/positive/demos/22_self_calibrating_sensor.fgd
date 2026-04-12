@@ -1,0 +1,67 @@
+@@target gdscript
+
+extends SceneTree
+
+@@system Sensor {
+    interface:
+        calibrate(): str
+        reading(): float
+        trigger_shutdown()
+        attempt_post_shutdown(): str
+        status(): str
+
+    machine:
+        $Active {
+            calibrate(): str {
+                var baseline = @@:self.reading()
+                self.offset = baseline * -1
+                @@:("calibrated: offset=" + str(self.offset))
+            }
+
+            reading(): float {
+                @@:(self.raw_value + self.offset)
+            }
+
+            trigger_shutdown() {
+                -> $Shutdown
+            }
+
+            attempt_post_shutdown(): str {
+                self.trace = "before"
+                @@:self.trigger_shutdown()
+                self.trace = "after"
+                @@:(self.trace)
+            }
+
+            status(): str { @@:("active") }
+        }
+
+        $Shutdown {
+            status(): str { @@:("shutdown") }
+        }
+
+    domain:
+        raw_value = 42.0
+        offset = 0.0
+        trace = ""
+}
+
+func _init():
+    var s = @@Sensor()
+
+    var r1 = s.reading()
+    assert(abs(r1 - 42.0) < 0.01, "Expected 42.0, got " + str(r1))
+
+    var cal = s.calibrate()
+    assert(cal.find("calibrated") != -1, "Expected calibrated, got: " + cal)
+
+    var r2 = s.reading()
+    assert(abs(r2) < 0.01, "Expected 0.0, got " + str(r2))
+
+    var s2 = @@Sensor()
+    s2.attempt_post_shutdown()
+    assert(s2.trace == "before", "Expected 'before', got: " + s2.trace)
+    assert(s2.status() == "shutdown", "Expected 'shutdown', got: " + s2.status())
+
+    print("PASS: self_calibrating_sensor")
+    quit()

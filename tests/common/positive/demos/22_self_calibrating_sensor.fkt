@@ -1,0 +1,86 @@
+// Self-Calibrating Sensor — @@:self demo (Kotlin)
+
+@@system Sensor {
+    interface:
+        calibrate(): str
+        reading(): float
+        trigger_shutdown()
+        attempt_post_shutdown(): str
+        status(): str
+
+    machine:
+        $Active {
+            calibrate(): str {
+                val baseline = @@:self.reading()
+                this.offset = baseline * -1
+                @@:("calibrated: offset=${this.offset}")
+            }
+
+            reading(): float {
+                @@:(this.raw_value + this.offset)
+            }
+
+            trigger_shutdown() {
+                -> $Shutdown
+            }
+
+            attempt_post_shutdown(): str {
+                this.trace = "before"
+                @@:self.trigger_shutdown()
+                this.trace = "after"
+                @@:(this.trace)
+            }
+
+            status(): str { @@:("active") }
+        }
+
+        $Shutdown {
+            status(): str { @@:("shutdown") }
+        }
+
+    domain:
+        raw_value: Double = 42.0
+        offset: Double = 0.0
+        trace: String = ""
+}
+
+fun main() {
+    val sensor = @@Sensor()
+    var failures = 0
+
+    val r1 = sensor.reading()
+    if (Math.abs(r1 - 42.0) > 1e-9) {
+        println("FAIL: reading() expected 42.0, got $r1")
+        failures++
+    }
+
+    val cal = sensor.calibrate()
+    if (!cal.contains("calibrated")) {
+        println("FAIL: calibrate() expected 'calibrated', got '$cal'")
+        failures++
+    }
+
+    val r2 = sensor.reading()
+    if (Math.abs(r2) > 1e-9) {
+        println("FAIL: reading() after calibrate expected 0.0, got $r2")
+        failures++
+    }
+
+    val result = sensor.attempt_post_shutdown()
+    if (result != "before") {
+        println("FAIL: attempt_post_shutdown() expected 'before', got '$result'")
+        failures++
+    }
+
+    val st = sensor.status()
+    if (st != "shutdown") {
+        println("FAIL: status() expected 'shutdown', got '$st'")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: self_calibrating_sensor ($failures failures)")
+        kotlin.system.exitProcess(1)
+    }
+    println("PASS: self_calibrating_sensor")
+}

@@ -1,0 +1,95 @@
+// Self-Calibrating Sensor — @@:self demo (Go)
+
+package main
+
+import (
+    "fmt"
+    "math"
+    "os"
+    "strings"
+)
+
+@@system Sensor {
+    interface:
+        calibrate(): str
+        reading(): float
+        trigger_shutdown()
+        attempt_post_shutdown(): str
+        status(): str
+
+    machine:
+        $Active {
+            calibrate(): str {
+                baseline := @@:self.reading()
+                self.offset = baseline * -1
+                @@:(fmt.Sprintf("calibrated: offset=%v", self.offset))
+            }
+
+            reading(): float {
+                @@:(self.raw_value + self.offset)
+            }
+
+            trigger_shutdown() {
+                -> $Shutdown
+            }
+
+            attempt_post_shutdown(): str {
+                self.trace = "before"
+                @@:self.trigger_shutdown()
+                self.trace = "after"
+                @@:(self.trace)
+            }
+
+            status(): str { @@:("active") }
+        }
+
+        $Shutdown {
+            status(): str { @@:("shutdown") }
+        }
+
+    domain:
+        raw_value: float64 = 42.0
+        offset: float64 = 0.0
+        trace: string = ""
+}
+
+func main() {
+    sensor := @@Sensor()
+    failures := 0
+
+    r1 := sensor.Reading()
+    if math.Abs(r1 - 42.0) > 1e-9 {
+        fmt.Printf("FAIL: Reading() expected 42.0, got %v\n", r1)
+        failures++
+    }
+
+    cal := sensor.Calibrate()
+    if !strings.Contains(cal, "calibrated") {
+        fmt.Printf("FAIL: Calibrate() expected 'calibrated', got '%v'\n", cal)
+        failures++
+    }
+
+    r2 := sensor.Reading()
+    if math.Abs(r2) > 1e-9 {
+        fmt.Printf("FAIL: Reading() after calibrate expected 0.0, got %v\n", r2)
+        failures++
+    }
+
+    result := sensor.AttemptPostShutdown()
+    if result != "before" {
+        fmt.Printf("FAIL: AttemptPostShutdown() expected 'before', got '%v'\n", result)
+        failures++
+    }
+
+    st := sensor.Status()
+    if st != "shutdown" {
+        fmt.Printf("FAIL: Status() expected 'shutdown', got '%v'\n", st)
+        failures++
+    }
+
+    if failures > 0 {
+        fmt.Printf("FAIL: self_calibrating_sensor (%d failures)\n", failures)
+        os.Exit(1)
+    }
+    fmt.Println("PASS: self_calibrating_sensor")
+}

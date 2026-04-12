@@ -1,0 +1,64 @@
+@@target python_3
+
+@@system Sensor {
+    interface:
+        calibrate(): str
+        reading(): float
+        trigger_shutdown()
+        attempt_post_shutdown(): str
+        status(): str
+
+    machine:
+        $Active {
+            calibrate(): str {
+                # @@:self dispatches through the full kernel pipeline.
+                baseline = @@:self.reading()
+                self.offset = baseline * -1
+                @@:(f"calibrated: offset={self.offset}")
+            }
+
+            reading(): float {
+                @@:(self.raw_value + self.offset)
+            }
+
+            trigger_shutdown() {
+                -> $Shutdown
+            }
+
+            attempt_post_shutdown(): str {
+                self.trace = "before"
+                # This self-call transitions to $Shutdown.
+                @@:self.trigger_shutdown()
+                # SUPPRESSED by transition guard — system is in $Shutdown now.
+                self.trace = "after"
+                @@:(self.trace)
+            }
+
+            status(): str { @@:("active") }
+        }
+
+        $Shutdown {
+            status(): str { @@:("shutdown") }
+        }
+
+    domain:
+        raw_value: float = 42.0
+        offset: float = 0.0
+        trace: str = ""
+}
+
+if __name__ == '__main__':
+    # Self-call basics
+    s = @@Sensor()
+    assert s.reading() == 42.0, f"Expected 42.0, got {s.reading()}"
+    result = s.calibrate()
+    assert "calibrated" in result, f"Expected calibrated, got: {result}"
+    assert s.reading() == 0.0, f"Expected 0.0 after calibration, got {s.reading()}"
+
+    # Transition guard
+    s2 = @@Sensor()
+    s2.attempt_post_shutdown()
+    assert s2.trace == "before", f"Expected 'before' (guard suppressed 'after'), got: '{s2.trace}'"
+    assert s2.status() == "shutdown", f"Expected 'shutdown', got: '{s2.status()}'"
+
+    print("PASS: self_calibrating_sensor")

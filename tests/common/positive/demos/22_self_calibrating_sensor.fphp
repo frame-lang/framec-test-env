@@ -1,0 +1,85 @@
+<?php
+// Self-Calibrating Sensor — @@:self demo (PHP)
+
+@@system Sensor {
+    interface:
+        calibrate(): str
+        reading(): float
+        trigger_shutdown()
+        attempt_post_shutdown(): str
+        status(): str
+
+    machine:
+        $Active {
+            calibrate(): str {
+                $baseline = @@:self.reading();
+                $this->offset = $baseline * -1;
+                @@:("calibrated: offset=" . $this->offset)
+            }
+
+            reading(): float {
+                @@:($this->raw_value + $this->offset)
+            }
+
+            trigger_shutdown() {
+                -> $Shutdown
+            }
+
+            attempt_post_shutdown(): str {
+                $this->trace = "before";
+                @@:self.trigger_shutdown();
+                $this->trace = "after";
+                @@:($this->trace)
+            }
+
+            status(): str { @@:("active") }
+        }
+
+        $Shutdown {
+            status(): str { @@:("shutdown") }
+        }
+
+    domain:
+        raw_value = 42.0
+        offset = 0.0
+        trace = ""
+}
+
+$sensor = @@Sensor();
+$failures = 0;
+
+$r1 = $sensor->reading();
+if (abs($r1 - 42.0) > 1e-9) {
+    echo "FAIL: reading() expected 42.0, got $r1\n";
+    $failures++;
+}
+
+$cal = $sensor->calibrate();
+if (strpos($cal, "calibrated") === false) {
+    echo "FAIL: calibrate() expected 'calibrated', got '$cal'\n";
+    $failures++;
+}
+
+$r2 = $sensor->reading();
+if (abs($r2) > 1e-9) {
+    echo "FAIL: reading() after calibrate expected 0.0, got $r2\n";
+    $failures++;
+}
+
+$result = $sensor->attempt_post_shutdown();
+if ($result !== "before") {
+    echo "FAIL: attempt_post_shutdown() expected 'before', got '$result'\n";
+    $failures++;
+}
+
+$st = $sensor->status();
+if ($st !== "shutdown") {
+    echo "FAIL: status() expected 'shutdown', got '$st'\n";
+    $failures++;
+}
+
+if ($failures > 0) {
+    echo "FAIL: self_calibrating_sensor ($failures failures)\n";
+    exit(1);
+}
+echo "PASS: self_calibrating_sensor\n";

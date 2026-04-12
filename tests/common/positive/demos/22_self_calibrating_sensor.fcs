@@ -1,0 +1,88 @@
+// Self-Calibrating Sensor — @@:self demo (C#)
+
+@@system Sensor {
+    interface:
+        calibrate(): str
+        reading(): float
+        trigger_shutdown()
+        attempt_post_shutdown(): str
+        status(): str
+
+    machine:
+        $Active {
+            calibrate(): str {
+                double baseline = @@:self.reading();
+                this.offset = baseline * -1;
+                @@:($"calibrated: offset={this.offset}")
+            }
+
+            reading(): float {
+                @@:(this.raw_value + this.offset)
+            }
+
+            trigger_shutdown() {
+                -> $Shutdown
+            }
+
+            attempt_post_shutdown(): str {
+                this.trace = "before";
+                @@:self.trigger_shutdown();
+                this.trace = "after";
+                @@:(this.trace)
+            }
+
+            status(): str { @@:("active") }
+        }
+
+        $Shutdown {
+            status(): str { @@:("shutdown") }
+        }
+
+    domain:
+        raw_value: double = 42.0
+        offset: double = 0.0
+        trace: string = ""
+}
+
+class Program {
+    static void Main(string[] args) {
+        Sensor sensor = @@Sensor();
+        int failures = 0;
+
+        double r1 = sensor.reading();
+        if (Math.Abs(r1 - 42.0) > 1e-9) {
+            Console.WriteLine($"FAIL: reading() expected 42.0, got {r1}");
+            failures++;
+        }
+
+        string cal = sensor.calibrate();
+        if (!cal.Contains("calibrated")) {
+            Console.WriteLine($"FAIL: calibrate() expected 'calibrated', got '{cal}'");
+            failures++;
+        }
+
+        double r2 = sensor.reading();
+        if (Math.Abs(r2) > 1e-9) {
+            Console.WriteLine($"FAIL: reading() after calibrate expected 0.0, got {r2}");
+            failures++;
+        }
+
+        string result = sensor.attempt_post_shutdown();
+        if (result != "before") {
+            Console.WriteLine($"FAIL: attempt_post_shutdown() expected 'before', got '{result}'");
+            failures++;
+        }
+
+        string st = sensor.status();
+        if (st != "shutdown") {
+            Console.WriteLine($"FAIL: status() expected 'shutdown', got '{st}'");
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine($"FAIL: self_calibrating_sensor ({failures} failures)");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: self_calibrating_sensor");
+    }
+}
