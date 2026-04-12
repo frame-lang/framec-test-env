@@ -1,0 +1,96 @@
+@@target java
+
+import java.util.*;
+
+// Test: @@:self.method() — reentrant interface call with transition guard
+//
+// Validates:
+// 1. Basic self-call dispatch (calls own interface method through kernel)
+// 2. Return value propagation from self-call
+// 3. Transition guard (code after self-call that transitions is suppressed)
+
+@@system SelfCallTest {
+    interface:
+        calibrate(): String
+        reading(): double
+        trigger_transition()
+        check_after_transition(): String
+        status(): String
+
+    machine:
+        $Active {
+            calibrate(): String {
+                double baseline = (double) @@:self.reading();
+                this.offset = baseline * -1;
+                @@:(String.format("calibrated:offset=%s", this.offset))
+            }
+
+            reading(): double {
+                @@:(this.raw_value + this.offset)
+            }
+
+            trigger_transition() {
+                -> $Done
+            }
+
+            check_after_transition(): String {
+                this.trace = "before";
+                @@:self.trigger_transition();
+                // This line should NOT execute — transition guard suppresses it
+                this.trace = "after";
+                @@:(this.trace)
+            }
+
+            status(): String {
+                @@:("active")
+            }
+        }
+
+        $Done {
+            status(): String {
+                @@:("done")
+            }
+        }
+
+    domain:
+        double raw_value = 42.0
+        double offset = 0.0
+        String trace = ""
+}
+
+class Main {
+    public static void main(String[] args) {
+        var s = @@SelfCallTest();
+
+        // Test 1: Self-call returns correct value
+        String result = (String) s.calibrate();
+        if (!result.equals("calibrated:offset=-42.0")) {
+            System.out.println("FAIL: Expected 'calibrated:offset=-42.0', got '" + result + "'");
+            System.exit(1);
+        }
+
+        // Test 2: Self-call modified domain state correctly
+        double r = (double) s.reading();
+        if (r != 0.0) {
+            System.out.println("FAIL: Expected 0.0 after calibration, got " + r);
+            System.exit(1);
+        }
+
+        // Test 3: Transition guard — code after self-call that transitions is suppressed
+        var s2 = @@SelfCallTest();
+        s2.check_after_transition();
+        if (!s2.trace.equals("before")) {
+            System.out.println("FAIL: Expected 'before' (guard suppressed 'after'), got '" + s2.trace + "'");
+            System.exit(1);
+        }
+
+        // Test 4: System transitioned to $Done
+        String st = (String) s2.status();
+        if (!st.equals("done")) {
+            System.out.println("FAIL: Expected 'done' after transition, got '" + st + "'");
+            System.exit(1);
+        }
+
+        System.out.println("PASS: self_call");
+    }
+}

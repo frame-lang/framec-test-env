@@ -1,0 +1,94 @@
+@@target typescript
+
+// Test: @@:self.method() — reentrant interface call with transition guard
+//
+// Validates:
+// 1. Basic self-call dispatch (calls own interface method through kernel)
+// 2. Return value propagation from self-call
+// 3. Transition guard (code after self-call that transitions is suppressed)
+
+@@system SelfCallTest {
+    interface:
+        calibrate(): string
+        reading(): number
+        trigger_transition()
+        check_after_transition(): string
+        status(): string
+
+    machine:
+        $Active {
+            calibrate(): string {
+                const baseline = @@:self.reading();
+                this.offset = baseline * -1;
+                @@:(`calibrated:offset=${this.offset}`)
+            }
+
+            reading(): number {
+                @@:(this.raw_value + this.offset)
+            }
+
+            trigger_transition() {
+                -> $Done
+            }
+
+            check_after_transition(): string {
+                this.trace = "before";
+                @@:self.trigger_transition();
+                // This line should NOT execute — transition guard suppresses it
+                this.trace = "after";
+                @@:(this.trace)
+            }
+
+            status(): string {
+                @@:("active")
+            }
+        }
+
+        $Done {
+            status(): string {
+                @@:("done")
+            }
+        }
+
+    domain:
+        raw_value: number = 42.0
+        offset: number = 0.0
+        trace: string = ""
+}
+
+function main(): void {
+    const s = @@SelfCallTest();
+
+    // Test 1: Self-call returns correct value
+    const result = s.calibrate();
+    if (result !== "calibrated:offset=-42") {
+        console.log(`FAIL: Expected 'calibrated:offset=-42', got '${result}'`);
+        process.exit(1);
+    }
+
+    // Test 2: Self-call modified domain state correctly
+    const r = s.reading();
+    if (r !== 0) {
+        console.log(`FAIL: Expected 0 after calibration, got ${r}`);
+        process.exit(1);
+    }
+
+    // Test 3: Transition guard — code after self-call that transitions is suppressed
+    const s2 = @@SelfCallTest();
+    s2.check_after_transition();
+    if (s2.trace !== "before") {
+        console.log(`FAIL: Expected 'before' (guard suppressed 'after'), got '${s2.trace}'`);
+        process.exit(1);
+    }
+
+    // Test 4: System transitioned to $Done
+    const st = s2.status();
+    if (st !== "done") {
+        console.log(`FAIL: Expected 'done' after transition, got '${st}'`);
+        process.exit(1);
+    }
+
+    console.log("PASS: self_call");
+}
+
+main();

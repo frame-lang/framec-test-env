@@ -1,0 +1,97 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+// Test: @@:self.method() — reentrant interface call with transition guard
+//
+// Validates:
+// 1. Basic self-call dispatch (calls own interface method through kernel)
+// 2. Return value propagation from self-call
+// 3. Transition guard (code after self-call that transitions is suppressed)
+
+@@system SelfCallTest {
+    interface:
+        calibrate(): string
+        reading(): double
+        trigger_transition()
+        check_after_transition(): string
+        status(): string
+
+    machine:
+        $Active {
+            calibrate(): string {
+                double baseline = (double) @@:self.reading();
+                this.offset = baseline * -1;
+                @@:($"calibrated:offset={this.offset}")
+            }
+
+            reading(): double {
+                @@:(this.raw_value + this.offset)
+            }
+
+            trigger_transition() {
+                -> $Done
+            }
+
+            check_after_transition(): string {
+                this.trace = "before";
+                @@:self.trigger_transition();
+                // This line should NOT execute — transition guard suppresses it
+                this.trace = "after";
+                @@:(this.trace)
+            }
+
+            status(): string {
+                @@:("active")
+            }
+        }
+
+        $Done {
+            status(): string {
+                @@:("done")
+            }
+        }
+
+    domain:
+        double raw_value = 42.0
+        double offset = 0.0
+        string trace = ""
+}
+
+class Program {
+    static void Main(string[] args) {
+        var s = @@SelfCallTest();
+
+        // Test 1: Self-call returns correct value
+        var result = (string)s.calibrate();
+        if (result != "calibrated:offset=-42") {
+            Console.WriteLine("FAIL: Expected 'calibrated:offset=-42', got '" + result + "'");
+            Environment.Exit(1);
+        }
+
+        // Test 2: Self-call modified domain state correctly
+        var r = (double)s.reading();
+        if (r != 0.0) {
+            Console.WriteLine("FAIL: Expected 0.0 after calibration, got " + r);
+            Environment.Exit(1);
+        }
+
+        // Test 3: Transition guard — code after self-call that transitions is suppressed
+        var s2 = @@SelfCallTest();
+        s2.check_after_transition();
+        if ((string)s2.trace != "before") {
+            Console.WriteLine("FAIL: Expected 'before' (guard suppressed 'after'), got '" + s2.trace + "'");
+            Environment.Exit(1);
+        }
+
+        // Test 4: System transitioned to $Done
+        var st = (string)s2.status();
+        if (st != "done") {
+            Console.WriteLine("FAIL: Expected 'done' after transition, got '" + st + "'");
+            Environment.Exit(1);
+        }
+
+        Console.WriteLine("PASS: self_call");
+    }
+}

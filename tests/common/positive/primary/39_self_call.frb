@@ -1,0 +1,76 @@
+@@target ruby
+
+# Test: @@:self.method() — reentrant interface call with transition guard
+#
+# Validates:
+# 1. Basic self-call dispatch (calls own interface method through kernel)
+# 2. Return value propagation from self-call
+# 3. Transition guard (code after self-call that transitions is suppressed)
+
+@@system SelfCallTest {
+    interface:
+        calibrate(): str
+        reading(): float
+        trigger_transition()
+        check_after_transition(): str
+        status(): str
+
+    machine:
+        $Active {
+            calibrate(): str {
+                baseline = self.reading()
+                self.offset = baseline * -1
+                @@:("calibrated:offset=#{self.offset}")
+            }
+
+            reading(): float {
+                @@:(self.raw_value + self.offset)
+            }
+
+            trigger_transition() {
+                -> $Done
+            }
+
+            check_after_transition(): str {
+                self.trace = "before"
+                self.trigger_transition()
+                # This line should NOT execute — transition guard suppresses it
+                self.trace = "after"
+                @@:(self.trace)
+            }
+
+            status(): str {
+                @@:("active")
+            }
+        }
+
+        $Done {
+            status(): str {
+                @@:("done")
+            }
+        }
+
+    domain:
+        raw_value: float = 42.0
+        offset: float = 0.0
+        trace: str = ""
+}
+
+# Test 1: Self-call returns correct value
+s = @@SelfCallTest()
+result = s.calibrate()
+raise "Expected 'calibrated:offset=-42.0', got '#{result}'" unless result == "calibrated:offset=-42.0"
+
+# Test 2: Self-call modified domain state correctly
+r = s.reading()
+raise "Expected 0.0 after calibration, got #{r}" unless r == 0.0
+
+# Test 3: Transition guard — code after self-call that transitions is suppressed
+s2 = @@SelfCallTest()
+s2.check_after_transition()
+raise "Expected 'before' (guard suppressed 'after'), got '#{s2.trace}'" unless s2.trace == "before"
+
+# Test 4: System transitioned to $Done
+raise "Expected 'done' after transition, got '#{s2.status()}'" unless s2.status() == "done"
+
+puts("PASS: self_call")

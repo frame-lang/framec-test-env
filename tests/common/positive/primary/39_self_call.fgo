@@ -1,0 +1,96 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// Test: @@:self.method() — reentrant interface call with transition guard
+//
+// Validates:
+// 1. Basic self-call dispatch (calls own interface method through kernel)
+// 2. Return value propagation from self-call
+// 3. Transition guard (code after self-call that transitions is suppressed)
+
+@@system SelfCallTest {
+    interface:
+        Calibrate(): string
+        Reading(): float64
+        TriggerTransition()
+        CheckAfterTransition(): string
+        Status(): string
+
+    machine:
+        $Active {
+            Calibrate(): string {
+                baseline := s.Reading()
+                s.offset = baseline * -1
+                @@:(fmt.Sprintf("calibrated:offset=%g", s.offset))
+            }
+
+            Reading(): float64 {
+                @@:(s.raw_value + s.offset)
+            }
+
+            TriggerTransition() {
+                -> $Done
+            }
+
+            CheckAfterTransition(): string {
+                s.trace = "before"
+                s.TriggerTransition()
+                // This line should NOT execute — transition guard suppresses it
+                s.trace = "after"
+                @@:(s.trace)
+            }
+
+            Status(): string {
+                @@:("active")
+            }
+        }
+
+        $Done {
+            Status(): string {
+                @@:("done")
+            }
+        }
+
+    domain:
+        raw_value: float64 = 42.0
+        offset: float64 = 0.0
+        trace: string = ""
+}
+
+func main() {
+	// Test 1: Self-call returns correct value
+	s := @@SelfCallTest()
+	result := s.Calibrate()
+	if result != "calibrated:offset=-42" {
+		fmt.Printf("FAIL: Expected 'calibrated:offset=-42', got '%s'\n", result)
+		os.Exit(1)
+	}
+
+	// Test 2: Self-call modified domain state correctly
+	r := s.Reading()
+	if r != 0.0 {
+		fmt.Printf("FAIL: Expected 0 after calibration, got %g\n", r)
+		os.Exit(1)
+	}
+
+	// Test 3: Transition guard — code after self-call that transitions is suppressed
+	s2 := @@SelfCallTest()
+	_ = s2.CheckAfterTransition()
+	// trace should be "before" — the "after" assignment was suppressed
+	if s2.trace != "before" {
+		fmt.Printf("FAIL: Expected 'before' (guard suppressed 'after'), got '%s'\n", s2.trace)
+		os.Exit(1)
+	}
+
+	// Test 4: System transitioned to $Done
+	if s2.Status() != "done" {
+		fmt.Printf("FAIL: Expected 'done' after transition, got '%s'\n", s2.Status())
+		os.Exit(1)
+	}
+
+	fmt.Println("PASS: self_call")
+}

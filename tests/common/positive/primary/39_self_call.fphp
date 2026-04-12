@@ -1,0 +1,89 @@
+<?php
+@@target php
+
+// Test: @@:self.method() — reentrant interface call with transition guard
+//
+// Validates:
+// 1. Basic self-call dispatch (calls own interface method through kernel)
+// 2. Return value propagation from self-call
+// 3. Transition guard (code after self-call that transitions is suppressed)
+
+@@system SelfCallTest {
+    interface:
+        calibrate(): str
+        reading(): float
+        trigger_transition()
+        check_after_transition(): str
+        status(): str
+
+    machine:
+        $Active {
+            calibrate(): str {
+                $baseline = $this->reading();
+                $this->offset = $baseline * -1;
+                @@:("calibrated:offset=" . strval($this->offset))
+            }
+
+            reading(): float {
+                @@:($this->raw_value + $this->offset)
+            }
+
+            trigger_transition() {
+                -> $Done
+            }
+
+            check_after_transition(): str {
+                $this->trace = "before";
+                $this->trigger_transition();
+                // This line should NOT execute — transition guard suppresses it
+                $this->trace = "after";
+                @@:($this->trace)
+            }
+
+            status(): str {
+                @@:("active")
+            }
+        }
+
+        $Done {
+            status(): str {
+                @@:("done")
+            }
+        }
+
+    domain:
+        raw_value: float = 42.0
+        offset: float = 0.0
+        trace: str = ""
+}
+
+// Test 1: Self-call returns correct value
+$s = new SelfCallTest();
+$result = $s->calibrate();
+if ($result !== "calibrated:offset=-42") {
+    echo "FAIL: Expected 'calibrated:offset=-42', got '{$result}'\n";
+    exit(1);
+}
+
+// Test 2: Self-call modified domain state correctly
+$r = $s->reading();
+if ($r != 0.0) {
+    echo "FAIL: Expected 0 after calibration, got {$r}\n";
+    exit(1);
+}
+
+// Test 3: Transition guard — code after self-call that transitions is suppressed
+$s2 = new SelfCallTest();
+$s2->check_after_transition();
+if ($s2->trace !== "before") {
+    echo "FAIL: Expected 'before' (guard suppressed 'after'), got '{$s2->trace}'\n";
+    exit(1);
+}
+
+// Test 4: System transitioned to $Done
+if ($s2->status() !== "done") {
+    echo "FAIL: Expected 'done' after transition, got '{$s2->status()}'\n";
+    exit(1);
+}
+
+echo "PASS: self_call\n";

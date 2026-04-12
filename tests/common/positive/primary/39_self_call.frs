@@ -1,0 +1,80 @@
+@@target rust
+
+// Test: @@:self.method() — reentrant interface call with transition guard
+//
+// Validates:
+// 1. Basic self-call dispatch (calls own interface method through kernel)
+// 2. Return value propagation from self-call
+// 3. Transition guard (code after self-call that transitions is suppressed)
+
+@@system SelfCallTest {
+    interface:
+        calibrate(): String
+        reading(): f64
+        trigger_transition()
+        check_after_transition(): String
+        status(): String
+
+    machine:
+        $Active {
+            calibrate(): String {
+                let baseline = @@:self.reading();
+                self.offset = baseline * -1.0;
+                @@:(format!("calibrated:offset={}", self.offset))
+            }
+
+            reading(): f64 {
+                @@:(self.raw_value + self.offset)
+            }
+
+            trigger_transition() {
+                -> $Done
+            }
+
+            check_after_transition(): String {
+                self.trace = "before".to_string();
+                @@:self.trigger_transition();
+                // This line should NOT execute — transition guard suppresses it
+                self.trace = "after".to_string();
+                @@:(self.trace.clone())
+            }
+
+            status(): String {
+                @@:("active".to_string())
+            }
+        }
+
+        $Done {
+            status(): String {
+                @@:("done".to_string())
+            }
+        }
+
+    domain:
+        raw_value: f64
+        offset: f64
+        trace: String
+}
+
+fn main() {
+    let mut s = @@SelfCallTest();
+
+    // Test 1: Self-call returns correct value
+    let result = s.calibrate();
+    assert_eq!(result, "calibrated:offset=-42", "Expected 'calibrated:offset=-42', got '{}'", result);
+
+    // Test 2: Self-call modified domain state correctly
+    let r = s.reading();
+    assert_eq!(r, 0.0, "Expected 0.0 after calibration, got {}", r);
+
+    // Test 3: Transition guard — code after self-call that transitions is suppressed
+    let mut s2 = @@SelfCallTest();
+    s2.check_after_transition();
+    assert_eq!(s2.trace, "before", "Expected 'before' (guard suppressed 'after'), got '{}'", s2.trace);
+
+    // Test 4: System transitioned to $Done
+    let st = s2.status();
+    assert_eq!(st, "done", "Expected 'done' after transition, got '{}'", st);
+
+    println!("PASS: self_call");
+}
