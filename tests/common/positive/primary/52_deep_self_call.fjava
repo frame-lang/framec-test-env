@@ -1,0 +1,217 @@
+@@target java
+
+import java.util.*;
+
+// Test: deep @@:self.iface() stack — transition guard propagation
+//
+// Validates:
+// 1. Full chain completes when no transition fires
+// 2. Transition at depth 3 suppresses all "after" traces
+// 3. Transition at depth 2 prevents deeper calls
+// 4. Sequential self-calls: second suppressed after first transitions
+// 5. Sequential self-calls: both complete when no transition
+
+@@system DeepSelfCall {
+    interface:
+        start_chain(mode: String): String
+        level_one(mode: String): String
+        level_two(mode: String): String
+        level_three(mode: String): String
+        get_trace(): String
+        get_state(): String
+        reset()
+
+    machine:
+        $Active {
+            start_chain(mode: String): String {
+                this.trace = "";
+                this.trace = this.trace + "start:before;";
+                @@:self.level_one(mode)
+                this.trace = this.trace + "start:after;";
+                @@:(this.trace)
+            }
+
+            level_one(mode: String): String {
+                this.trace = this.trace + "L1:before;";
+                @@:self.level_two(mode)
+                this.trace = this.trace + "L1:after;";
+                @@:(this.trace)
+            }
+
+            level_two(mode: String): String {
+                this.trace = this.trace + "L2:before;";
+                if (mode.equals("transition_at_two")) {
+                    this.trace = this.trace + "L2:transitioning;";
+                    -> $Done
+                }
+                @@:self.level_three(mode)
+                this.trace = this.trace + "L2:after;";
+                @@:(this.trace)
+            }
+
+            level_three(mode: String): String {
+                this.trace = this.trace + "L3:before;";
+                if (mode.equals("transition_at_three")) {
+                    this.trace = this.trace + "L3:transitioning;";
+                    -> $Done
+                }
+                this.trace = this.trace + "L3:after;";
+                @@:(this.trace)
+            }
+
+            get_trace(): String {
+                @@:(this.trace)
+            }
+
+            get_state(): String { @@:(@@:system.state) }
+
+            reset() {
+                this.trace = "";
+            }
+        }
+
+        $Done {
+            get_trace(): String {
+                @@:(this.trace)
+            }
+
+            get_state(): String { @@:(@@:system.state) }
+
+            reset() {
+                this.trace = "";
+                -> $Active
+            }
+        }
+
+    domain:
+        String trace = ""
+}
+
+@@system SequentialSelfCall {
+    interface:
+        run_sequence(mode: String): String
+        first_call(mode: String): String
+        second_call(): String
+        get_trace(): String
+        get_state(): String
+
+    machine:
+        $Active {
+            run_sequence(mode: String): String {
+                this.trace = "";
+                this.trace = this.trace + "seq:before_first;";
+                @@:self.first_call(mode)
+                this.trace = this.trace + "seq:between;";
+                @@:self.second_call()
+                this.trace = this.trace + "seq:after_second;";
+                @@:(this.trace)
+            }
+
+            first_call(mode: String): String {
+                if (mode.equals("transition_first")) {
+                    this.trace = this.trace + "first:transitioning;";
+                    -> $Done
+                }
+                this.trace = this.trace + "first:complete;";
+                @@:(this.trace)
+            }
+
+            second_call(): String {
+                this.trace = this.trace + "second:complete;";
+                @@:(this.trace)
+            }
+
+            get_trace(): String { @@:(this.trace) }
+            get_state(): String { @@:(@@:system.state) }
+        }
+
+        $Done {
+            get_trace(): String { @@:(this.trace) }
+            get_state(): String { @@:(@@:system.state) }
+        }
+
+    domain:
+        String trace = ""
+}
+
+class Main {
+    public static void main(String[] args) {
+        int failures = 0;
+
+        // === Scenario 1: No transition — full chain completes ===
+        DeepSelfCall s = new DeepSelfCall();
+        String result = (String) s.start_chain("no_transition");
+        String expected = "start:before;L1:before;L2:before;L3:before;L3:after;L2:after;L1:after;start:after;";
+        if (!expected.equals(result)) {
+            System.out.println("FAIL scenario 1: expected '" + expected + "'");
+            System.out.println("                 got      '" + result + "'");
+            failures++;
+        }
+        if (!"Active".equals(s.get_state())) {
+            System.out.println("FAIL scenario 1: state should be Active, got '" + s.get_state() + "'");
+            failures++;
+        }
+
+        // === Scenario 2: Transition at level_three — all "after" traces suppressed ===
+        s.reset();
+        s.start_chain("transition_at_three");
+        String trace = (String) s.get_trace();
+        String expected_trace = "start:before;L1:before;L2:before;L3:before;L3:transitioning;";
+        if (!expected_trace.equals(trace)) {
+            System.out.println("FAIL scenario 2 trace: expected '" + expected_trace + "'");
+            System.out.println("                       got      '" + trace + "'");
+            failures++;
+        }
+        if (!"Done".equals(s.get_state())) {
+            System.out.println("FAIL scenario 2: state should be Done, got '" + s.get_state() + "'");
+            failures++;
+        }
+
+        // === Scenario 3: Transition at level_two — level_three never called ===
+        s.reset();
+        s.start_chain("transition_at_two");
+        trace = (String) s.get_trace();
+        expected_trace = "start:before;L1:before;L2:before;L2:transitioning;";
+        if (!expected_trace.equals(trace)) {
+            System.out.println("FAIL scenario 3 trace: expected '" + expected_trace + "'");
+            System.out.println("                       got      '" + trace + "'");
+            failures++;
+        }
+        if (!"Done".equals(s.get_state())) {
+            System.out.println("FAIL scenario 3: state should be Done, got '" + s.get_state() + "'");
+            failures++;
+        }
+
+        // === Scenario 4: Sequential self-calls — second suppressed after first transitions ===
+        SequentialSelfCall s2 = new SequentialSelfCall();
+        s2.run_sequence("transition_first");
+        trace = (String) s2.get_trace();
+        expected_trace = "seq:before_first;first:transitioning;";
+        if (!expected_trace.equals(trace)) {
+            System.out.println("FAIL scenario 4 trace: expected '" + expected_trace + "'");
+            System.out.println("                       got      '" + trace + "'");
+            failures++;
+        }
+        if (!"Done".equals(s2.get_state())) {
+            System.out.println("FAIL scenario 4: state should be Done, got '" + s2.get_state() + "'");
+            failures++;
+        }
+
+        // === Scenario 5: Sequential self-calls — no transition, both complete ===
+        SequentialSelfCall s3 = new SequentialSelfCall();
+        s3.run_sequence("no_transition");
+        trace = (String) s3.get_trace();
+        expected_trace = "seq:before_first;first:complete;seq:between;second:complete;seq:after_second;";
+        if (!expected_trace.equals(trace)) {
+            System.out.println("FAIL scenario 5 trace: expected '" + expected_trace + "'");
+            System.out.println("                       got      '" + trace + "'");
+            failures++;
+        }
+
+        if (failures > 0) {
+            System.out.println("FAIL: deep_self_call (" + failures + " failures)");
+            System.exit(1);
+        }
+        System.out.println("PASS: deep_self_call");
+    }
+}

@@ -1,0 +1,200 @@
+@@target python_3
+
+# Test: deep @@:self.iface() stack — transition guard propagation
+#
+# Validates:
+# 1. Full chain completes when no transition fires
+# 2. Transition at depth 3 suppresses all "after" traces
+# 3. Transition at depth 2 prevents deeper calls
+# 4. Sequential self-calls: second suppressed after first transitions
+# 5. Sequential self-calls: both complete when no transition
+
+@@system DeepSelfCall {
+    interface:
+        start_chain(mode: str): str
+        level_one(mode: str): str
+        level_two(mode: str): str
+        level_three(mode: str): str
+        get_trace(): str
+        get_state(): str
+        reset()
+
+    machine:
+        $Active {
+            start_chain(mode: str): str {
+                self.trace = ""
+                self.trace = self.trace + "start:before;"
+                @@:self.level_one(mode)
+                self.trace = self.trace + "start:after;"
+                @@:(self.trace)
+            }
+
+            level_one(mode: str): str {
+                self.trace = self.trace + "L1:before;"
+                @@:self.level_two(mode)
+                self.trace = self.trace + "L1:after;"
+                @@:(self.trace)
+            }
+
+            level_two(mode: str): str {
+                self.trace = self.trace + "L2:before;"
+                if mode == "transition_at_two":
+                    self.trace = self.trace + "L2:transitioning;"
+                    -> $Done
+                @@:self.level_three(mode)
+                self.trace = self.trace + "L2:after;"
+                @@:(self.trace)
+            }
+
+            level_three(mode: str): str {
+                self.trace = self.trace + "L3:before;"
+                if mode == "transition_at_three":
+                    self.trace = self.trace + "L3:transitioning;"
+                    -> $Done
+                self.trace = self.trace + "L3:after;"
+                @@:(self.trace)
+            }
+
+            get_trace(): str {
+                @@:(self.trace)
+            }
+
+            get_state(): str { @@:(@@:system.state) }
+
+            reset() {
+                self.trace = ""
+            }
+        }
+
+        $Done {
+            get_trace(): str {
+                @@:(self.trace)
+            }
+
+            get_state(): str { @@:(@@:system.state) }
+
+            reset() {
+                self.trace = ""
+                -> $Active
+            }
+        }
+
+    domain:
+        trace: str = ""
+}
+
+@@system SequentialSelfCall {
+    interface:
+        run_sequence(mode: str): str
+        first_call(mode: str): str
+        second_call(): str
+        get_trace(): str
+        get_state(): str
+
+    machine:
+        $Active {
+            run_sequence(mode: str): str {
+                self.trace = ""
+                self.trace = self.trace + "seq:before_first;"
+                @@:self.first_call(mode)
+                self.trace = self.trace + "seq:between;"
+                @@:self.second_call()
+                self.trace = self.trace + "seq:after_second;"
+                @@:(self.trace)
+            }
+
+            first_call(mode: str): str {
+                if mode == "transition_first":
+                    self.trace = self.trace + "first:transitioning;"
+                    -> $Done
+                self.trace = self.trace + "first:complete;"
+                @@:(self.trace)
+            }
+
+            second_call(): str {
+                self.trace = self.trace + "second:complete;"
+                @@:(self.trace)
+            }
+
+            get_trace(): str { @@:(self.trace) }
+            get_state(): str { @@:(@@:system.state) }
+        }
+
+        $Done {
+            get_trace(): str { @@:(self.trace) }
+            get_state(): str { @@:(@@:system.state) }
+        }
+
+    domain:
+        trace: str = ""
+}
+
+import sys
+
+failures = 0
+
+# === Scenario 1: No transition — full chain completes ===
+s = @@DeepSelfCall()
+result = s.start_chain("no_transition")
+expected = "start:before;L1:before;L2:before;L3:before;L3:after;L2:after;L1:after;start:after;"
+if result != expected:
+    print(f"FAIL scenario 1: expected '{expected}'")
+    print(f"                 got      '{result}'")
+    failures += 1
+if s.get_state() != "Active":
+    print(f"FAIL scenario 1: state should be Active, got '{s.get_state()}'")
+    failures += 1
+
+# === Scenario 2: Transition at level_three — all "after" traces suppressed ===
+s.reset()
+result = s.start_chain("transition_at_three")
+trace = s.get_trace()
+expected_trace = "start:before;L1:before;L2:before;L3:before;L3:transitioning;"
+if trace != expected_trace:
+    print(f"FAIL scenario 2 trace: expected '{expected_trace}'")
+    print(f"                       got      '{trace}'")
+    failures += 1
+if s.get_state() != "Done":
+    print(f"FAIL scenario 2: state should be Done, got '{s.get_state()}'")
+    failures += 1
+
+# === Scenario 3: Transition at level_two — level_three never called ===
+s.reset()
+result = s.start_chain("transition_at_two")
+trace = s.get_trace()
+expected_trace = "start:before;L1:before;L2:before;L2:transitioning;"
+if trace != expected_trace:
+    print(f"FAIL scenario 3 trace: expected '{expected_trace}'")
+    print(f"                       got      '{trace}'")
+    failures += 1
+if s.get_state() != "Done":
+    print(f"FAIL scenario 3: state should be Done, got '{s.get_state()}'")
+    failures += 1
+
+# === Scenario 4: Sequential self-calls — second suppressed after first transitions ===
+s2 = @@SequentialSelfCall()
+result = s2.run_sequence("transition_first")
+trace = s2.get_trace()
+expected_trace = "seq:before_first;first:transitioning;"
+if trace != expected_trace:
+    print(f"FAIL scenario 4 trace: expected '{expected_trace}'")
+    print(f"                       got      '{trace}'")
+    failures += 1
+if s2.get_state() != "Done":
+    print(f"FAIL scenario 4: state should be Done, got '{s2.get_state()}'")
+    failures += 1
+
+# === Scenario 5: Sequential self-calls — no transition, both complete ===
+s3 = @@SequentialSelfCall()
+result = s3.run_sequence("no_transition")
+trace = s3.get_trace()
+expected_trace = "seq:before_first;first:complete;seq:between;second:complete;seq:after_second;"
+if trace != expected_trace:
+    print(f"FAIL scenario 5 trace: expected '{expected_trace}'")
+    print(f"                       got      '{trace}'")
+    failures += 1
+
+if failures > 0:
+    print(f"FAIL: deep_self_call ({failures} failures)")
+    sys.exit(1)
+print("PASS: deep_self_call")

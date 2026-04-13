@@ -1,0 +1,213 @@
+@@target rust
+
+// Test: deep @@:self.iface() stack — transition guard propagation
+//
+// Validates:
+// 1. Full chain completes when no transition fires
+// 2. Transition at depth 3 suppresses all "after" traces
+// 3. Transition at depth 2 prevents deeper calls
+// 4. Sequential self-calls: second suppressed after first transitions
+// 5. Sequential self-calls: both complete when no transition
+
+@@system DeepSelfCall {
+    interface:
+        start_chain(mode: String): String
+        level_one(mode: String): String
+        level_two(mode: String): String
+        level_three(mode: String): String
+        get_trace(): String
+        get_state(): String
+        reset()
+
+    machine:
+        $Active {
+            start_chain(mode: String): String {
+                self.trace = String::from("");
+                self.trace = format!("{}start:before;", self.trace);
+                @@:self.level_one(mode)
+                self.trace = format!("{}start:after;", self.trace);
+                @@:(self.trace.clone())
+            }
+
+            level_one(mode: String): String {
+                self.trace = format!("{}L1:before;", self.trace);
+                @@:self.level_two(mode)
+                self.trace = format!("{}L1:after;", self.trace);
+                @@:(self.trace.clone())
+            }
+
+            level_two(mode: String): String {
+                self.trace = format!("{}L2:before;", self.trace);
+                if mode == "transition_at_two" {
+                    self.trace = format!("{}L2:transitioning;", self.trace);
+                    -> $Done
+                }
+                @@:self.level_three(mode)
+                self.trace = format!("{}L2:after;", self.trace);
+                @@:(self.trace.clone())
+            }
+
+            level_three(mode: String): String {
+                self.trace = format!("{}L3:before;", self.trace);
+                if mode == "transition_at_three" {
+                    self.trace = format!("{}L3:transitioning;", self.trace);
+                    -> $Done
+                }
+                self.trace = format!("{}L3:after;", self.trace);
+                @@:(self.trace.clone())
+            }
+
+            get_trace(): String {
+                @@:(self.trace.clone())
+            }
+
+            get_state(): String { @@:(@@:system.state) }
+
+            reset() {
+                self.trace = String::from("");
+            }
+        }
+
+        $Done {
+            get_trace(): String {
+                @@:(self.trace.clone())
+            }
+
+            get_state(): String { @@:(@@:system.state) }
+
+            reset() {
+                self.trace = String::from("");
+                -> $Active
+            }
+        }
+
+    domain:
+        trace: String = String::from("")
+}
+
+@@system SequentialSelfCall {
+    interface:
+        run_sequence(mode: String): String
+        first_call(mode: String): String
+        second_call(): String
+        get_trace(): String
+        get_state(): String
+
+    machine:
+        $Active {
+            run_sequence(mode: String): String {
+                self.trace = String::from("");
+                self.trace = format!("{}seq:before_first;", self.trace);
+                @@:self.first_call(mode)
+                self.trace = format!("{}seq:between;", self.trace);
+                @@:self.second_call()
+                self.trace = format!("{}seq:after_second;", self.trace);
+                @@:(self.trace.clone())
+            }
+
+            first_call(mode: String): String {
+                if mode == "transition_first" {
+                    self.trace = format!("{}first:transitioning;", self.trace);
+                    -> $Done
+                }
+                self.trace = format!("{}first:complete;", self.trace);
+                @@:(self.trace.clone())
+            }
+
+            second_call(): String {
+                self.trace = format!("{}second:complete;", self.trace);
+                @@:(self.trace.clone())
+            }
+
+            get_trace(): String { @@:(self.trace.clone()) }
+            get_state(): String { @@:(@@:system.state) }
+        }
+
+        $Done {
+            get_trace(): String { @@:(self.trace.clone()) }
+            get_state(): String { @@:(@@:system.state) }
+        }
+
+    domain:
+        trace: String = String::from("")
+}
+
+fn main() {
+    let mut failures = 0;
+
+    // === Scenario 1: No transition — full chain completes ===
+    let mut s = DeepSelfCall::new();
+    let result = s.start_chain(String::from("no_transition"));
+    let expected = "start:before;L1:before;L2:before;L3:before;L3:after;L2:after;L1:after;start:after;";
+    if result != expected {
+        println!("FAIL scenario 1: expected '{}'", expected);
+        println!("                 got      '{}'", result);
+        failures += 1;
+    }
+    if s.get_state() != "Active" {
+        println!("FAIL scenario 1: state should be Active, got '{}'", s.get_state());
+        failures += 1;
+    }
+
+    // === Scenario 2: Transition at level_three — all "after" traces suppressed ===
+    s.reset();
+    let _ = s.start_chain(String::from("transition_at_three"));
+    let trace = s.get_trace();
+    let expected_trace = "start:before;L1:before;L2:before;L3:before;L3:transitioning;";
+    if trace != expected_trace {
+        println!("FAIL scenario 2 trace: expected '{}'", expected_trace);
+        println!("                       got      '{}'", trace);
+        failures += 1;
+    }
+    if s.get_state() != "Done" {
+        println!("FAIL scenario 2: state should be Done, got '{}'", s.get_state());
+        failures += 1;
+    }
+
+    // === Scenario 3: Transition at level_two — level_three never called ===
+    s.reset();
+    let _ = s.start_chain(String::from("transition_at_two"));
+    let trace = s.get_trace();
+    let expected_trace = "start:before;L1:before;L2:before;L2:transitioning;";
+    if trace != expected_trace {
+        println!("FAIL scenario 3 trace: expected '{}'", expected_trace);
+        println!("                       got      '{}'", trace);
+        failures += 1;
+    }
+    if s.get_state() != "Done" {
+        println!("FAIL scenario 3: state should be Done, got '{}'", s.get_state());
+        failures += 1;
+    }
+
+    // === Scenario 4: Sequential self-calls — second suppressed after first transitions ===
+    let mut s2 = SequentialSelfCall::new();
+    let _ = s2.run_sequence(String::from("transition_first"));
+    let trace = s2.get_trace();
+    let expected_trace = "seq:before_first;first:transitioning;";
+    if trace != expected_trace {
+        println!("FAIL scenario 4 trace: expected '{}'", expected_trace);
+        println!("                       got      '{}'", trace);
+        failures += 1;
+    }
+    if s2.get_state() != "Done" {
+        println!("FAIL scenario 4: state should be Done, got '{}'", s2.get_state());
+        failures += 1;
+    }
+
+    // === Scenario 5: Sequential self-calls — no transition, both complete ===
+    let mut s3 = SequentialSelfCall::new();
+    let _ = s3.run_sequence(String::from("no_transition"));
+    let trace = s3.get_trace();
+    let expected_trace = "seq:before_first;first:complete;seq:between;second:complete;seq:after_second;";
+    if trace != expected_trace {
+        println!("FAIL scenario 5 trace: expected '{}'", expected_trace);
+        println!("                       got      '{}'", trace);
+        failures += 1;
+    }
+
+    if failures > 0 {
+        println!("FAIL: deep_self_call ({} failures)", failures);
+        std::process::exit(1);
+    }
+    println!("PASS: deep_self_call");
+}

@@ -1,0 +1,201 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cstdlib>
+
+// Test: deep @@:self.iface() stack — transition guard propagation
+//
+// Validates:
+// 1. Full chain completes when no transition fires
+// 2. Transition at depth 3 suppresses all "after" traces
+// 3. Transition at depth 2 prevents deeper calls
+// 4. Sequential self-calls: second suppressed after first transitions
+// 5. Sequential self-calls: both complete when no transition
+//
+// NOTE: C++ cannot use two systems in one file. Both DeepSelfCall and
+// SequentialSelfCall are merged into a single system.
+
+@@system DeepSelfCall {
+    interface:
+        start_chain(mode: std::string): std::string
+        level_one(mode: std::string): std::string
+        level_two(mode: std::string): std::string
+        level_three(mode: std::string): std::string
+        run_sequence(mode: std::string): std::string
+        first_call(mode: std::string): std::string
+        second_call(): std::string
+        get_trace(): std::string
+        get_state(): std::string
+        reset()
+
+    machine:
+        $Active {
+            start_chain(mode: std::string): std::string {
+                trace = "";
+                trace = trace + "start:before;";
+                @@:self.level_one(mode)
+                trace = trace + "start:after;";
+                @@:(trace)
+            }
+
+            level_one(mode: std::string): std::string {
+                trace = trace + "L1:before;";
+                @@:self.level_two(mode)
+                trace = trace + "L1:after;";
+                @@:(trace)
+            }
+
+            level_two(mode: std::string): std::string {
+                trace = trace + "L2:before;";
+                if (mode == "transition_at_two") {
+                    trace = trace + "L2:transitioning;";
+                    -> $Done
+                }
+                @@:self.level_three(mode)
+                trace = trace + "L2:after;";
+                @@:(trace)
+            }
+
+            level_three(mode: std::string): std::string {
+                trace = trace + "L3:before;";
+                if (mode == "transition_at_three") {
+                    trace = trace + "L3:transitioning;";
+                    -> $Done
+                }
+                trace = trace + "L3:after;";
+                @@:(trace)
+            }
+
+            run_sequence(mode: std::string): std::string {
+                trace = "";
+                trace = trace + "seq:before_first;";
+                @@:self.first_call(mode)
+                trace = trace + "seq:between;";
+                @@:self.second_call()
+                trace = trace + "seq:after_second;";
+                @@:(trace)
+            }
+
+            first_call(mode: std::string): std::string {
+                if (mode == "transition_first") {
+                    trace = trace + "first:transitioning;";
+                    -> $Done
+                }
+                trace = trace + "first:complete;";
+                @@:(trace)
+            }
+
+            second_call(): std::string {
+                trace = trace + "second:complete;";
+                @@:(trace)
+            }
+
+            get_trace(): std::string {
+                @@:(trace)
+            }
+
+            get_state(): std::string { @@:(@@:system.state) }
+
+            reset() {
+                trace = "";
+            }
+        }
+
+        $Done {
+            get_trace(): std::string {
+                @@:(trace)
+            }
+
+            get_state(): std::string { @@:(@@:system.state) }
+
+            reset() {
+                trace = "";
+                -> $Active
+            }
+        }
+
+    domain:
+        std::string trace = ""
+}
+
+int main() {
+    int failures = 0;
+
+    // === Scenario 1: No transition — full chain completes ===
+    DeepSelfCall s;
+    std::string result = s.start_chain("no_transition");
+    std::string expected = "start:before;L1:before;L2:before;L3:before;L3:after;L2:after;L1:after;start:after;";
+    if (result != expected) {
+        printf("FAIL scenario 1: expected '%s'\n", expected.c_str());
+        printf("                 got      '%s'\n", result.c_str());
+        failures++;
+    }
+    if (s.get_state() != "Active") {
+        printf("FAIL scenario 1: state should be Active, got '%s'\n", s.get_state().c_str());
+        failures++;
+    }
+
+    // === Scenario 2: Transition at level_three — all "after" traces suppressed ===
+    s.reset();
+    s.start_chain("transition_at_three");
+    std::string trace = s.get_trace();
+    std::string expected_trace = "start:before;L1:before;L2:before;L3:before;L3:transitioning;";
+    if (trace != expected_trace) {
+        printf("FAIL scenario 2 trace: expected '%s'\n", expected_trace.c_str());
+        printf("                       got      '%s'\n", trace.c_str());
+        failures++;
+    }
+    if (s.get_state() != "Done") {
+        printf("FAIL scenario 2: state should be Done, got '%s'\n", s.get_state().c_str());
+        failures++;
+    }
+
+    // === Scenario 3: Transition at level_two — level_three never called ===
+    s.reset();
+    s.start_chain("transition_at_two");
+    trace = s.get_trace();
+    expected_trace = "start:before;L1:before;L2:before;L2:transitioning;";
+    if (trace != expected_trace) {
+        printf("FAIL scenario 3 trace: expected '%s'\n", expected_trace.c_str());
+        printf("                       got      '%s'\n", trace.c_str());
+        failures++;
+    }
+    if (s.get_state() != "Done") {
+        printf("FAIL scenario 3: state should be Done, got '%s'\n", s.get_state().c_str());
+        failures++;
+    }
+
+    // === Scenario 4: Sequential self-calls — second suppressed after first transitions ===
+    s.reset();
+    s.run_sequence("transition_first");
+    trace = s.get_trace();
+    expected_trace = "seq:before_first;first:transitioning;";
+    if (trace != expected_trace) {
+        printf("FAIL scenario 4 trace: expected '%s'\n", expected_trace.c_str());
+        printf("                       got      '%s'\n", trace.c_str());
+        failures++;
+    }
+    if (s.get_state() != "Done") {
+        printf("FAIL scenario 4: state should be Done, got '%s'\n", s.get_state().c_str());
+        failures++;
+    }
+
+    // === Scenario 5: Sequential self-calls — no transition, both complete ===
+    s.reset();
+    s.run_sequence("no_transition");
+    trace = s.get_trace();
+    expected_trace = "seq:before_first;first:complete;seq:between;second:complete;seq:after_second;";
+    if (trace != expected_trace) {
+        printf("FAIL scenario 5 trace: expected '%s'\n", expected_trace.c_str());
+        printf("                       got      '%s'\n", trace.c_str());
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: deep_self_call (%d failures)\n", failures);
+        exit(1);
+    }
+    printf("PASS: deep_self_call\n");
+    return 0;
+}
