@@ -35,17 +35,24 @@ LANGS := python typescript javascript rust c cpp csharp java go php kotlin swift
 # --- Stamp files ---
 STAMP_DIR     := .stamps
 RUNNER_HASH   := $(shell shasum -a 256 $(RUNNER) 2>/dev/null | cut -c1-16)
-# Track source changes via Cargo.lock (changes whenever source or deps change)
-SRC_HASH      := $(shell shasum -a 256 $(FRAMEPILER_SRC)/Cargo.lock 2>/dev/null | cut -c1-16)
+# Track source changes: hash Cargo.lock + all .rs files so any code change triggers rebuild
+SRC_HASH      := $(shell (shasum -a 256 $(FRAMEPILER_SRC)/Cargo.lock; find $(FRAMEPILER_SRC)/framec/src -name '*.rs' -exec shasum -a 256 {} +) 2>/dev/null | shasum -a 256 | cut -c1-16)
+# Stamp file encodes the hash — if source changes, the stamp path changes, forcing rebuild
+SRC_STAMP     := $(STAMP_DIR)/framec-src-$(SRC_HASH)
 
 $(STAMP_DIR):
 	@mkdir -p $(STAMP_DIR)
+
+# Source-change sentinel: touched whenever the source hash changes
+$(SRC_STAMP): | $(STAMP_DIR)
+	@rm -f $(STAMP_DIR)/framec-src-*
+	@touch $@
 
 # --- framec binaries ---
 # Built from source inside Docker. Always produces the right Linux binary.
 
 # Native-arch binary (matches Docker's default platform)
-$(STAMP_DIR)/framec-native: $(FRAMEPILER_SRC)/Cargo.lock | $(STAMP_DIR)
+$(STAMP_DIR)/framec-native: $(SRC_STAMP) | $(STAMP_DIR)
 	@echo "=== Building framec (native arch) ==="
 	@docker run --rm \
 		-v "$(FRAMEPILER_SRC):/src:ro" \
@@ -58,7 +65,7 @@ $(STAMP_DIR)/framec-native: $(FRAMEPILER_SRC)/Cargo.lock | $(STAMP_DIR)
 	@echo "Built: framec-native ($$(file framec-native | grep -o 'x86-64\|aarch64'))"
 
 # amd64 binary (for GDScript container which requires x86_64)
-$(STAMP_DIR)/framec-amd64: $(FRAMEPILER_SRC)/Cargo.lock | $(STAMP_DIR)
+$(STAMP_DIR)/framec-amd64: $(SRC_STAMP) | $(STAMP_DIR)
 	@echo "=== Building framec (amd64 for GDScript) ==="
 	@docker run --rm --platform linux/amd64 \
 		-v "$(FRAMEPILER_SRC):/src:ro" \
