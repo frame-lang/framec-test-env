@@ -1,109 +1,100 @@
--- Vending Machine — operations + system params (Lua)
+@@target lua
 
-@@system VendingMachine {
+@@system VendingMachine(stock = 0) {
     operations:
-        get_balance(): int {
+        get_balance() {
             return self.balance
+        }
+        get_stock() {
+            return self.stock
         }
 
     interface:
-        insert_coin(amount: int)
-        select(item: str): str
-        refund(): int
-        status(): str
+        insert_coin(amount)
+        select(): str = "error"
+        cancel(): int = 0
 
     machine:
         $Idle {
-            insert_coin(amount: int) {
+            insert_coin(amount) {
                 self.balance = amount
                 -> $HasCredit
             }
-            select(item: str): str { @@:("no credit") }
-            refund(): int { @@:(0) }
-            status(): str { @@:("idle") }
+            select(): str { @@:("insert coin first") }
+            cancel(): int { @@:(0) }
         }
+
         $HasCredit {
-            insert_coin(amount: int) {
+            insert_coin(amount) {
                 self.balance = self.balance + amount
             }
-            select(item: str): str {
-                if self.balance >= self.item_price {
-                    self.balance = self.balance - self.item_price
-                    if self.balance == 0 {
-                        -> $Idle
-                    }
-                    @@:(item)
-                } else {
-                    @@:("insufficient credit")
-                }
+            select(): str {
+                if self.balance < self.price then
+                    @@:("need more")
+                elseif self.stock <= 0 then
+                    @@:("sold out")
+                else
+                    self.stock = self.stock - 1
+                    self.balance = self.balance - self.price
+                    @@:("dispensing")
+                    -> $Dispensing
+                end
             }
-            refund(): int {
-                local r = self.balance
+            cancel(): int {
+                local refund = self.balance
                 self.balance = 0
-                @@:(r)
+                @@:(refund)
                 -> $Idle
             }
-            status(): str { @@:("has_credit") }
+        }
+
+        $Dispensing {
+            $>() {
+                local change = self.balance
+                self.balance = 0
+                if change > 0 then
+                    print("Change: " .. change)
+                end
+                -> $Idle
+            }
         }
 
     domain:
         balance = 0
-        item_price = 100
+        stock = 0
+        price = 100
 }
 
-local vm = @@VendingMachine()
+local vm = @@VendingMachine(3)
 local failures = 0
 
-if vm:status() ~= "idle" then
-    print("FAIL: expected idle")
+if vm:get_stock() ~= 3 then
+    print("FAIL: initial stock expected 3, got " .. tostring(vm:get_stock()))
     failures = failures + 1
 end
-if vm:select("soda") ~= "no credit" then
-    print("FAIL: select without credit")
+
+local r1 = vm:select()
+if r1 ~= "insert coin first" then
+    print("FAIL: expected 'insert coin first', got '" .. tostring(r1) .. "'")
     failures = failures + 1
 end
-if vm:refund() ~= 0 then
-    print("FAIL: refund from idle")
+
+vm:insert_coin(100)
+local r2 = vm:select()
+if r2 ~= "dispensing" then
+    print("FAIL: expected 'dispensing', got '" .. tostring(r2) .. "'")
+    failures = failures + 1
+end
+
+if vm:get_stock() ~= 2 then
+    print("FAIL: stock after buy expected 2")
     failures = failures + 1
 end
 
 vm:insert_coin(50)
-if vm:status() ~= "has_credit" then
-    print("FAIL: expected has_credit")
-    failures = failures + 1
-end
-if vm:get_balance() ~= 50 then
-    print("FAIL: balance should be 50")
-    failures = failures + 1
-end
-if vm:select("soda") ~= "insufficient credit" then
-    print("FAIL: should be insufficient")
-    failures = failures + 1
-end
-
-vm:insert_coin(50)
-if vm:get_balance() ~= 100 then
-    print("FAIL: balance should be 100")
-    failures = failures + 1
-end
-local item = vm:select("soda")
-if item ~= "soda" then
-    print("FAIL: expected soda, got " .. item)
-    failures = failures + 1
-end
-if vm:status() ~= "idle" then
-    print("FAIL: should be idle after exact purchase")
-    failures = failures + 1
-end
-
-vm:insert_coin(200)
-local r = vm:refund()
-if r ~= 200 then
-    print("FAIL: refund should be 200, got " .. r)
-    failures = failures + 1
-end
-if vm:status() ~= "idle" then
-    print("FAIL: should be idle after refund")
+local refund = vm:cancel()
+if refund ~= 50 then
+    print("FAIL: refund expected 50, got " .. tostring(refund))
     failures = failures + 1
 end
 

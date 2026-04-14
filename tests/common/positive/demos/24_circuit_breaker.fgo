@@ -1,106 +1,72 @@
 @@target go
-// Circuit Breaker — state vars + domain vars demo (Go)
 
 package main
 
 import (
-    "fmt"
-    "os"
+	"fmt"
+	"os"
 )
 
 @@system CircuitBreaker {
     interface:
         Call(): string
-        Succeed()
-        Fail()
-        Reset()
+        Success()
+        Failure()
+        Tick()
         Status(): string
 
     machine:
         $Closed {
             $.failures: int = 0
-
             Call(): string { @@:("allowed") }
-            Succeed() {
-                $.failures = 0
-            }
-            Fail() {
+            Success() { $.failures = 0 }
+            Failure() {
                 $.failures = $.failures + 1
                 if $.failures >= s.threshold {
                     -> $Open
                 }
             }
-            Reset() { $.failures = 0 }
             Status(): string { @@:("closed") }
         }
         $Open {
+            $.cooldown_remaining: int = 0
+            $>() {
+                $.cooldown_remaining = s.cooldown
+            }
             Call(): string { @@:("blocked") }
-            Reset() { -> $HalfOpen }
+            Tick() {
+                $.cooldown_remaining = $.cooldown_remaining - 1
+                if $.cooldown_remaining <= 0 {
+                    -> $HalfOpen
+                }
+            }
             Status(): string { @@:("open") }
         }
         $HalfOpen {
-            Call(): string { @@:("trial") }
-            Succeed() { -> $Closed }
-            Fail() { -> $Open }
-            Status(): string { @@:("half_open") }
+            Call(): string { @@:("testing") }
+            Success() { -> $Closed }
+            Failure() { -> $Open }
+            Status(): string { @@:("half-open") }
         }
 
     domain:
         threshold : int = 3
+        cooldown : int = 5
 }
 
 func main() {
-    cb := NewCircuitBreaker()
-    failures := 0
+	cb := NewCircuitBreaker()
+	failures := 0
 
-    if cb.Status() != "closed" {
-        fmt.Println("FAIL: initial status expected closed")
-        failures++
-    }
+	cb.Failure(); cb.Failure(); cb.Failure()
+	if cb.Call() != "blocked" { fmt.Println("FAIL: expected blocked"); failures++ }
 
-    if cb.Call() != "allowed" {
-        fmt.Println("FAIL: call in closed expected allowed")
-        failures++
-    }
+	for i := 0; i < 5; i++ { cb.Tick() }
+	if cb.Call() != "testing" { fmt.Println("FAIL: expected testing"); failures++ }
 
-    cb.Fail()
-    cb.Fail()
-    if cb.Status() != "closed" {
-        fmt.Println("FAIL: still closed after 2 failures")
-        failures++
-    }
+	cb.Success()
+	if cb.Status() != "closed" { fmt.Println("FAIL: expected closed"); failures++ }
 
-    cb.Fail()
-    if cb.Status() != "open" {
-        fmt.Println("FAIL: should be open after 3 failures")
-        failures++
-    }
-
-    if cb.Call() != "blocked" {
-        fmt.Println("FAIL: call in open expected blocked")
-        failures++
-    }
-
-    cb.Reset()
-    if cb.Status() != "half_open" {
-        fmt.Println("FAIL: should be half_open after reset")
-        failures++
-    }
-
-    if cb.Call() != "trial" {
-        fmt.Println("FAIL: call in half_open expected trial")
-        failures++
-    }
-
-    cb.Succeed()
-    if cb.Status() != "closed" {
-        fmt.Println("FAIL: should be closed after succeed in half_open")
-        failures++
-    }
-
-    if failures > 0 {
-        fmt.Printf("FAIL: circuit_breaker (%d failures)\n", failures)
-        os.Exit(1)
-    }
-    fmt.Println("PASS: circuit_breaker")
+	if failures > 0 { fmt.Printf("FAIL: circuit_breaker (%d)\n", failures); os.Exit(1) }
+	fmt.Println("PASS: circuit_breaker")
 }

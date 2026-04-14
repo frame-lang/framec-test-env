@@ -4,94 +4,64 @@ import 'dart:io';
 
 @@system CircuitBreaker {
     interface:
-        call(): str
-        succeed()
-        fail()
-        reset()
-        status(): str
+        call(): String = "error"
+        success()
+        failure()
+        tick()
+        status(): String = ""
 
     machine:
         $Closed {
             $.failures: int = 0
-
-            call(): str { @@:("allowed") }
-            succeed() {
-                $.failures = 0;
-            }
-            fail() {
+            call(): String { @@:("allowed") }
+            success() { $.failures = 0; }
+            failure() {
                 $.failures = $.failures + 1;
                 if ($.failures >= this.threshold) {
                     -> $Open
                 }
             }
-            reset() { $.failures = 0; }
-            status(): str { @@:("closed") }
+            status(): String { @@:("closed (${$.failures} failures)") }
         }
         $Open {
-            call(): str { @@:("blocked") }
-            reset() { -> $HalfOpen }
-            status(): str { @@:("open") }
+            $.cooldown_remaining: int = 0
+            $>() {
+                $.cooldown_remaining = this.cooldown;
+            }
+            call(): String { @@:("blocked") }
+            tick() {
+                $.cooldown_remaining = $.cooldown_remaining - 1;
+                if ($.cooldown_remaining <= 0) {
+                    -> $HalfOpen
+                }
+            }
+            status(): String { @@:("open (${$.cooldown_remaining} ticks left)") }
         }
         $HalfOpen {
-            call(): str { @@:("trial") }
-            succeed() { -> $Closed }
-            fail() { -> $Open }
-            status(): str { @@:("half_open") }
+            call(): String { @@:("testing") }
+            success() { -> $Closed }
+            failure() { -> $Open }
+            status(): String { @@:("half-open") }
         }
 
     domain:
-        threshold: int = 3
+        threshold : int = 3
+        cooldown : int = 5
 }
 
 void main() {
     var cb = @@CircuitBreaker();
     int failures = 0;
 
-    if (cb.status() != "closed") {
-        print("FAIL: expected closed");
-        failures++;
-    }
+    cb.failure(); cb.failure(); cb.failure();
+    if (cb.call() != "blocked") { print("FAIL: expected blocked"); failures++; }
 
-    cb.fail();
-    cb.fail();
-    if (cb.status() != "closed") {
-        print("FAIL: expected still closed after 2 failures");
-        failures++;
-    }
+    for (int i = 0; i < 5; i++) { cb.tick(); }
+    if (cb.call() != "testing") { print("FAIL: expected testing"); failures++; }
 
-    cb.fail();
-    if (cb.status() != "open") {
-        print("FAIL: expected open after 3 failures");
-        failures++;
-    }
+    cb.success();
+    if (cb.status() != "closed (0 failures)") { print("FAIL: expected reset, got ${cb.status()}"); failures++; }
 
-    var r1 = cb.call();
-    if (r1 != "blocked") {
-        print("FAIL: expected blocked, got $r1");
-        failures++;
-    }
-
-    cb.reset();
-    if (cb.status() != "half_open") {
-        print("FAIL: expected half_open");
-        failures++;
-    }
-
-    var r2 = cb.call();
-    if (r2 != "trial") {
-        print("FAIL: expected trial, got $r2");
-        failures++;
-    }
-
-    cb.succeed();
-    if (cb.status() != "closed") {
-        print("FAIL: expected closed after succeed");
-        failures++;
-    }
-
-    if (failures > 0) {
-        print("FAIL: circuit_breaker ($failures failures)");
-        exit(1);
-    }
+    if (failures > 0) { print("FAIL: circuit_breaker ($failures)"); exit(1); }
     print("PASS: circuit_breaker");
 }

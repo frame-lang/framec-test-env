@@ -1,109 +1,95 @@
-# Vending Machine — operations + system params (Ruby)
+@@target ruby
 
-@@system VendingMachine {
+@@system VendingMachine(inventory = {}) {
     operations:
-        get_balance(): int {
-            return self.balance
+        stock(product, qty) {
+            self.inventory[product] = (self.inventory[product] || 0) + qty
+        }
+        check_stock(product) {
+            return self.inventory[product] || 0
         }
 
     interface:
-        insert_coin(amount: int)
-        select(item: str): str
-        refund(): int
-        status(): str
+        insert_coin(amount)
+        select(product): str = "error"
+        cancel(): int = 0
 
     machine:
         $Idle {
-            insert_coin(amount: int) {
+            insert_coin(amount) {
                 self.balance = amount
                 -> $HasCredit
             }
-            select(item: str): str { @@:("no credit") }
-            refund(): int { @@:(0) }
-            status(): str { @@:("idle") }
+            select(product): str { @@:("insert coin first") }
+            cancel(): int { @@:(0) }
         }
         $HasCredit {
-            insert_coin(amount: int) {
+            insert_coin(amount) {
                 self.balance = self.balance + amount
             }
-            select(item: str): str {
-                if self.balance >= self.item_price {
-                    self.balance = self.balance - self.item_price
-                    if self.balance == 0 {
-                        -> $Idle
-                    }
-                    @@:(item)
-                } else {
-                    @@:("insufficient credit")
-                }
+            select(product): str {
+                price = self.get_price(product)
+                if price.nil?
+                    @@:("unknown product")
+                elsif self.balance < price
+                    @@:("need #{price - self.balance} more")
+                elsif (self.inventory[product] || 0) <= 0
+                    @@:("sold out")
+                else
+                    self.inventory[product] = self.inventory[product] - 1
+                    self.balance = self.balance - price
+                    @@:("dispensing #{product}")
+                    -> $Dispensing
+                end
             }
-            refund(): int {
-                r = self.balance
+            cancel(): int {
+                refund = self.balance
                 self.balance = 0
-                @@:(r)
+                @@:(refund)
                 -> $Idle
             }
-            status(): str { @@:("has_credit") }
+        }
+        $Dispensing {
+            $>() {
+                change = self.balance
+                self.balance = 0
+                if change > 0
+                    puts "Change: #{change}"
+                end
+                -> $Idle
+            }
+        }
+
+    actions:
+        get_price(product) {
+            prices = {"cola" => 100, "chips" => 75, "water" => 50}
+            return prices[product]
         }
 
     domain:
         balance = 0
-        item_price = 100
+        inventory = {}
 }
 
-vm = @@VendingMachine()
+vm = @@VendingMachine(inventory = {"cola" => 2, "chips" => 1})
+vm.stock("water", 5)
 failures = 0
 
-if vm.status() != "idle"
-    puts "FAIL: expected idle"
-    failures += 1
-end
-if vm.select("soda") != "no credit"
-    puts "FAIL: select without credit"
-    failures += 1
-end
-if vm.refund() != 0
-    puts "FAIL: refund from idle"
+if vm.check_stock("water") != 5
+    puts "FAIL: water stock"
     failures += 1
 end
 
-vm.insert_coin(50)
-if vm.status() != "has_credit"
-    puts "FAIL: expected has_credit"
-    failures += 1
-end
-if vm.get_balance() != 50
-    puts "FAIL: balance should be 50"
-    failures += 1
-end
-if vm.select("soda") != "insufficient credit"
-    puts "FAIL: should be insufficient"
+r = vm.select("cola")
+if r != "insert coin first"
+    puts "FAIL: expected 'insert coin first', got '#{r}'"
     failures += 1
 end
 
-vm.insert_coin(50)
-if vm.get_balance() != 100
-    puts "FAIL: balance should be 100"
-    failures += 1
-end
-item = vm.select("soda")
-if item != "soda"
-    puts "FAIL: expected soda, got #{item}"
-    failures += 1
-end
-if vm.status() != "idle"
-    puts "FAIL: should be idle after exact purchase"
-    failures += 1
-end
-
-vm.insert_coin(200)
-r = vm.refund()
-if r != 200
-    puts "FAIL: refund should be 200, got #{r}"
-    failures += 1
-end
-if vm.status() != "idle"
-    puts "FAIL: should be idle after refund"
+vm.insert_coin(100)
+r = vm.select("cola")
+if r != "dispensing cola"
+    puts "FAIL: expected 'dispensing cola', got '#{r}'"
     failures += 1
 end
 

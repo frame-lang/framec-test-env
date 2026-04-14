@@ -1,103 +1,70 @@
 @@target cpp_17
-// Circuit Breaker — state vars + domain vars demo (C++)
 
 #include <iostream>
 #include <string>
+#include <cassert>
 
 @@system CircuitBreaker {
     interface:
-        call(): str
-        succeed()
-        fail()
-        reset()
-        status(): str
+        call(): std::string
+        success()
+        failure()
+        tick()
+        status(): std::string
 
     machine:
         $Closed {
             $.failures: int = 0
-
-            call(): str { @@:("allowed") }
-            succeed() {
-                $.failures = 0;
-            }
-            fail() {
+            call(): std::string { @@:(std::string("allowed")) }
+            success() { $.failures = 0; }
+            failure() {
                 $.failures = $.failures + 1;
-                if $.failures >= this->threshold {
+                if ($.failures >= this->threshold) {
                     -> $Open
                 }
             }
-            reset() { $.failures = 0; }
-            status(): str { @@:("closed") }
+            status(): std::string { @@:(std::string("closed")) }
         }
         $Open {
-            call(): str { @@:("blocked") }
-            reset() { -> $HalfOpen }
-            status(): str { @@:("open") }
+            $.cooldown_remaining: int = 0
+            $>() {
+                $.cooldown_remaining = this->cooldown;
+            }
+            call(): std::string { @@:(std::string("blocked")) }
+            tick() {
+                $.cooldown_remaining = $.cooldown_remaining - 1;
+                if ($.cooldown_remaining <= 0) {
+                    -> $HalfOpen
+                }
+            }
+            status(): std::string { @@:(std::string("open")) }
         }
         $HalfOpen {
-            call(): str { @@:("trial") }
-            succeed() { -> $Closed }
-            fail() { -> $Open }
-            status(): str { @@:("half_open") }
+            call(): std::string { @@:(std::string("testing")) }
+            success() { -> $Closed }
+            failure() { -> $Open }
+            status(): std::string { @@:(std::string("half-open")) }
         }
 
     domain:
         threshold : int = 3
+        cooldown : int = 5
 }
 
 int main() {
-    auto cb = @@CircuitBreaker();
-    int failures = 0;
+    CircuitBreaker cb;
 
-    if (cb.status() != std::string("closed")) {
-        std::cout << "FAIL: initial status expected closed" << std::endl;
-        failures++;
-    }
+    cb.failure();
+    cb.failure();
+    cb.failure();
+    assert(cb.call() == "blocked");
 
-    if (cb.call() != std::string("allowed")) {
-        std::cout << "FAIL: call in closed expected allowed" << std::endl;
-        failures++;
-    }
+    for (int i = 0; i < 5; i++) { cb.tick(); }
+    assert(cb.call() == "testing");
 
-    cb.fail();
-    cb.fail();
-    if (cb.status() != std::string("closed")) {
-        std::cout << "FAIL: still closed after 2 failures" << std::endl;
-        failures++;
-    }
+    cb.success();
+    assert(cb.status() == "closed");
 
-    cb.fail();
-    if (cb.status() != std::string("open")) {
-        std::cout << "FAIL: should be open after 3 failures" << std::endl;
-        failures++;
-    }
-
-    if (cb.call() != std::string("blocked")) {
-        std::cout << "FAIL: call in open expected blocked" << std::endl;
-        failures++;
-    }
-
-    cb.reset();
-    if (cb.status() != std::string("half_open")) {
-        std::cout << "FAIL: should be half_open after reset" << std::endl;
-        failures++;
-    }
-
-    if (cb.call() != std::string("trial")) {
-        std::cout << "FAIL: call in half_open expected trial" << std::endl;
-        failures++;
-    }
-
-    cb.succeed();
-    if (cb.status() != std::string("closed")) {
-        std::cout << "FAIL: should be closed after succeed in half_open" << std::endl;
-        failures++;
-    }
-
-    if (failures > 0) {
-        std::cout << "FAIL: circuit_breaker (" << failures << " failures)" << std::endl;
-        return 1;
-    }
     std::cout << "PASS: circuit_breaker" << std::endl;
     return 0;
 }

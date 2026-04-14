@@ -5,63 +5,73 @@ extends SceneTree
 @@system CircuitBreaker {
     interface:
         invoke(): str
-        succeed()
-        fail()
-        reset()
+        success()
+        failure()
+        tick()
         status(): str
 
     machine:
         $Closed {
             $.failures: int = 0
-
             invoke(): str { @@:("allowed") }
-            succeed() {
-                $.failures = 0
-            }
-            fail() {
+            success() { $.failures = 0 }
+            failure() {
                 $.failures = $.failures + 1
-                if $.failures >= self.threshold {
+                if $.failures >= self.threshold:
                     -> $Open
-                }
             }
-            reset() { $.failures = 0 }
             status(): str { @@:("closed") }
         }
         $Open {
+            $.cooldown_remaining: int = 0
+            $>() {
+                $.cooldown_remaining = self.cooldown
+            }
             invoke(): str { @@:("blocked") }
-            reset() { -> $HalfOpen }
+            tick() {
+                $.cooldown_remaining = $.cooldown_remaining - 1
+                if $.cooldown_remaining <= 0:
+                    -> $HalfOpen
+            }
             status(): str { @@:("open") }
         }
         $HalfOpen {
-            invoke(): str { @@:("trial") }
-            succeed() { -> $Closed }
-            fail() { -> $Open }
-            status(): str { @@:("half_open") }
+            invoke(): str { @@:("testing") }
+            success() { -> $Closed }
+            failure() { -> $Open }
+            status(): str { @@:("half-open") }
         }
 
     domain:
         threshold = 3
+        cooldown = 5
 }
 
-func _init():
+func main():
     var cb = @@CircuitBreaker()
+    var failures = 0
 
-    assert(cb.status() == "closed", "Expected closed")
+    cb.failure(); cb.failure(); cb.failure()
+    if cb.invoke() != "blocked":
+        print("FAIL: expected blocked")
+        failures += 1
 
-    cb.fail()
-    cb.fail()
-    assert(cb.status() == "closed", "Expected still closed after 2 failures")
+    for i in range(5):
+        cb.tick()
+    if cb.invoke() != "testing":
+        print("FAIL: expected testing")
+        failures += 1
 
-    cb.fail()
-    assert(cb.status() == "open", "Expected open after 3 failures")
-    assert(cb.invoke() == "blocked", "Expected blocked")
+    cb.success()
+    if cb.status() != "closed":
+        print("FAIL: expected closed, got " + str(cb.status()))
+        failures += 1
 
-    cb.reset()
-    assert(cb.status() == "half_open", "Expected half_open")
-    assert(cb.invoke() == "trial", "Expected trial")
-
-    cb.succeed()
-    assert(cb.status() == "closed", "Expected closed after succeed")
-
+    if failures > 0:
+        print("FAIL: circuit_breaker (" + str(failures) + " failures)")
+        quit(1)
     print("PASS: circuit_breaker")
+
+func _init():
+    main()
     quit()

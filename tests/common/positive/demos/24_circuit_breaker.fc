@@ -1,5 +1,4 @@
 @@target c
-// Circuit Breaker — state vars + domain vars demo (C)
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,100 +6,79 @@
 
 @@system CircuitBreaker {
     interface:
-        call(): str
-        succeed()
-        fail()
-        reset()
-        status(): str
+        call(): char*
+        success()
+        failure()
+        tick()
+        status(): char*
 
     machine:
         $Closed {
             $.failures: int = 0
-
-            call(): str { @@:("allowed") }
-            succeed() {
-                $.failures = 0;
-            }
-            fail() {
+            call(): char* { @@:("allowed") }
+            success() { $.failures = 0; }
+            failure() {
                 $.failures = $.failures + 1;
-                if $.failures >= self->threshold {
+                if ($.failures >= self->threshold) {
                     -> $Open
                 }
             }
-            reset() { $.failures = 0; }
-            status(): str { @@:("closed") }
+            status(): char* { @@:("closed") }
         }
         $Open {
-            call(): str { @@:("blocked") }
-            reset() { -> $HalfOpen }
-            status(): str { @@:("open") }
+            $.cooldown_remaining: int = 0
+            $>() {
+                $.cooldown_remaining = self->cooldown;
+            }
+            call(): char* { @@:("blocked") }
+            tick() {
+                $.cooldown_remaining = $.cooldown_remaining - 1;
+                if ($.cooldown_remaining <= 0) {
+                    -> $HalfOpen
+                }
+            }
+            status(): char* { @@:("open") }
         }
         $HalfOpen {
-            call(): str { @@:("trial") }
-            succeed() { -> $Closed }
-            fail() { -> $Open }
-            status(): str { @@:("half_open") }
+            call(): char* { @@:("testing") }
+            success() { -> $Closed }
+            failure() { -> $Open }
+            status(): char* { @@:("half-open") }
         }
 
     domain:
         threshold : int = 3
+        cooldown : int = 5
 }
 
 int main() {
-    CircuitBreaker* cb = @@CircuitBreaker();
+    CircuitBreaker* cb = CircuitBreaker_new();
     int failures = 0;
 
-    if (strcmp(CircuitBreaker_status(cb), "closed") != 0) {
-        printf("FAIL: initial status expected closed\n");
-        failures++;
-    }
-
-    if (strcmp(CircuitBreaker_call(cb), "allowed") != 0) {
-        printf("FAIL: call in closed expected allowed\n");
-        failures++;
-    }
-
-    CircuitBreaker_fail(cb);
-    CircuitBreaker_fail(cb);
-    if (strcmp(CircuitBreaker_status(cb), "closed") != 0) {
-        printf("FAIL: still closed after 2 failures\n");
-        failures++;
-    }
-
-    CircuitBreaker_fail(cb);
-    if (strcmp(CircuitBreaker_status(cb), "open") != 0) {
-        printf("FAIL: should be open after 3 failures\n");
-        failures++;
-    }
-
+    CircuitBreaker_failure(cb);
+    CircuitBreaker_failure(cb);
+    CircuitBreaker_failure(cb);
     if (strcmp(CircuitBreaker_call(cb), "blocked") != 0) {
-        printf("FAIL: call in open expected blocked\n");
+        printf("FAIL: expected blocked\n");
         failures++;
     }
 
-    CircuitBreaker_reset(cb);
-    if (strcmp(CircuitBreaker_status(cb), "half_open") != 0) {
-        printf("FAIL: should be half_open after reset\n");
+    for (int i = 0; i < 5; i++) { CircuitBreaker_tick(cb); }
+    if (strcmp(CircuitBreaker_call(cb), "testing") != 0) {
+        printf("FAIL: expected testing\n");
         failures++;
     }
 
-    if (strcmp(CircuitBreaker_call(cb), "trial") != 0) {
-        printf("FAIL: call in half_open expected trial\n");
-        failures++;
-    }
-
-    CircuitBreaker_succeed(cb);
+    CircuitBreaker_success(cb);
     if (strcmp(CircuitBreaker_status(cb), "closed") != 0) {
-        printf("FAIL: should be closed after succeed in half_open\n");
+        printf("FAIL: expected closed after success\n");
         failures++;
     }
 
     if (failures > 0) {
         printf("FAIL: circuit_breaker (%d failures)\n", failures);
-        CircuitBreaker_destroy(cb);
         return 1;
     }
     printf("PASS: circuit_breaker\n");
-    CircuitBreaker_destroy(cb);
     return 0;
 }

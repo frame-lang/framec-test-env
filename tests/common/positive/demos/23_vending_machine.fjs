@@ -1,78 +1,88 @@
-// Vending Machine — operations + system params (JavaScript)
+@@target javascript
 
-@@system VendingMachine {
+@@system VendingMachine(inventory = {}) {
     operations:
-        get_balance(): int {
-            return this.balance;
+        stock(product, qty) {
+            this.inventory[product] = (this.inventory[product] || 0) + qty
+        }
+        check_stock(product) {
+            return this.inventory[product] || 0
         }
 
     interface:
-        insert_coin(amount: int)
-        select(item: str): str
-        refund(): int
-        status(): str
+        insert_coin(amount)
+        select(product): str = "error"
+        cancel(): int = 0
 
     machine:
         $Idle {
-            insert_coin(amount: int) {
+            insert_coin(amount) {
                 this.balance = amount
                 -> $HasCredit
             }
-            select(item: str): str { @@:("no credit") }
-            refund(): int { @@:(0) }
-            status(): str { @@:("idle") }
+            select(product): str { @@:("insert coin first") }
+            cancel(): int { @@:(0) }
         }
         $HasCredit {
-            insert_coin(amount: int) {
+            insert_coin(amount) {
                 this.balance = this.balance + amount
             }
-            select(item: str): str {
-                if (this.balance >= this.item_price) {
-                    this.balance = this.balance - this.item_price
-                    if (this.balance === 0) {
-                        -> $Idle
-                    }
-                    @@:(item)
+            select(product): str {
+                const price = this.get_price(product)
+                if (price === null) {
+                    @@:("unknown product")
+                } else if (this.balance < price) {
+                    @@:(`need ${price - this.balance} more`)
+                } else if ((this.inventory[product] || 0) <= 0) {
+                    @@:("sold out")
                 } else {
-                    @@:("insufficient credit")
+                    this.inventory[product] = this.inventory[product] - 1
+                    this.balance = this.balance - price
+                    @@:(`dispensing ${product}`)
+                    -> $Dispensing
                 }
             }
-            refund(): int {
-                let r = this.balance
+            cancel(): int {
+                const refund = this.balance
                 this.balance = 0
-                @@:(r)
+                @@:(refund)
                 -> $Idle
             }
-            status(): str { @@:("has_credit") }
+        }
+        $Dispensing {
+            $>() {
+                const change = this.balance
+                this.balance = 0
+                if (change > 0) {
+                    console.log(`Change: ${change}`)
+                }
+                -> $Idle
+            }
+        }
+
+    actions:
+        get_price(product) {
+            const prices = {"cola": 100, "chips": 75, "water": 50}
+            return prices[product] !== undefined ? prices[product] : null
         }
 
     domain:
         balance = 0
-        item_price = 100
+        inventory = {}
 }
 
-const vm = @@VendingMachine()
+const vm = @@VendingMachine(inventory = {"cola": 2, "chips": 1})
+vm.stock("water", 5)
 let failures = 0
 
-if (vm.status() !== "idle") { console.log("FAIL: expected idle"); failures++ }
-if (vm.select("soda") !== "no credit") { console.log("FAIL: select without credit"); failures++ }
-if (vm.refund() !== 0) { console.log("FAIL: refund from idle"); failures++ }
+if (vm.check_stock("water") !== 5) { console.log("FAIL: water stock"); failures++ }
 
-vm.insert_coin(50)
-if (vm.status() !== "has_credit") { console.log("FAIL: expected has_credit"); failures++ }
-if (vm.get_balance() !== 50) { console.log("FAIL: balance should be 50"); failures++ }
-if (vm.select("soda") !== "insufficient credit") { console.log("FAIL: should be insufficient"); failures++ }
+let r = vm.select("cola")
+if (r !== "insert coin first") { console.log("FAIL: expected 'insert coin first', got " + r); failures++ }
 
-vm.insert_coin(50)
-if (vm.get_balance() !== 100) { console.log("FAIL: balance should be 100"); failures++ }
-const item = vm.select("soda")
-if (item !== "soda") { console.log("FAIL: expected soda, got " + item); failures++ }
-if (vm.status() !== "idle") { console.log("FAIL: should be idle after exact purchase"); failures++ }
+vm.insert_coin(100)
+r = vm.select("cola")
+if (r !== "dispensing cola") { console.log("FAIL: expected 'dispensing cola', got " + r); failures++ }
 
-vm.insert_coin(200)
-const r = vm.refund()
-if (r !== 200) { console.log("FAIL: refund should be 200, got " + r); failures++ }
-if (vm.status() !== "idle") { console.log("FAIL: should be idle after refund"); failures++ }
-
-if (failures > 0) { console.log("FAIL: vending_machine (" + failures + " failures)"); process.exit(1) }
+if (failures > 0) { console.log("FAIL: vending_machine (" + failures + ")"); process.exit(1) }
 console.log("PASS: vending_machine")

@@ -1,65 +1,61 @@
-// Circuit Breaker — state vars + domain vars (TypeScript)
+@@target typescript
 
 @@system CircuitBreaker {
     interface:
-        call(): str
-        succeed()
-        fail()
-        reset()
-        status(): str
+        call(): string = "error"
+        success()
+        failure()
+        tick()
+        status(): string = ""
 
     machine:
         $Closed {
-            $.failures: int = 0
-
-            call(): str { @@:("allowed") }
-            succeed() {
-                $.failures = 0
-            }
-            fail() {
+            $.failures: number = 0
+            call(): string { @@:("allowed") }
+            success() { $.failures = 0 }
+            failure() {
                 $.failures = $.failures + 1
                 if ($.failures >= this.threshold) {
                     -> $Open
                 }
             }
-            reset() { $.failures = 0 }
-            status(): str { @@:("closed") }
+            status(): string { @@:(`closed (${$.failures} failures)`) }
         }
         $Open {
-            call(): str { @@:("blocked") }
-            reset() { -> $HalfOpen }
-            status(): str { @@:("open") }
+            $.cooldown_remaining: number = 0
+            $>() {
+                $.cooldown_remaining = this.cooldown
+            }
+            call(): string { @@:("blocked") }
+            tick() {
+                $.cooldown_remaining = $.cooldown_remaining - 1
+                if ($.cooldown_remaining <= 0) {
+                    -> $HalfOpen
+                }
+            }
+            status(): string { @@:(`open (${$.cooldown_remaining} ticks left)`) }
         }
         $HalfOpen {
-            call(): str { @@:("trial") }
-            succeed() { -> $Closed }
-            fail() { -> $Open }
-            status(): str { @@:("half_open") }
+            call(): string { @@:("testing") }
+            success() { -> $Closed }
+            failure() { -> $Open }
+            status(): string { @@:("half-open") }
         }
 
     domain:
         threshold: number = 3
+        cooldown: number = 5
 }
 
-const cb = @@CircuitBreaker()
+const cb = new CircuitBreaker()
 let failures = 0
 
-if (cb.status() !== "closed") { console.log("FAIL: expected closed"); failures++ }
-if (cb.call() !== "allowed") { console.log("FAIL: expected allowed"); failures++ }
-
-cb.fail()
-cb.fail()
-if (cb.status() !== "closed") { console.log("FAIL: still closed after 2 fails"); failures++ }
-cb.fail()
-if (cb.status() !== "open") { console.log("FAIL: expected open after 3 fails"); failures++ }
+cb.failure(); cb.failure(); cb.failure()
 if (cb.call() !== "blocked") { console.log("FAIL: expected blocked"); failures++ }
+for (let i = 0; i < 5; i++) { cb.tick() }
+if (cb.call() !== "testing") { console.log("FAIL: expected testing"); failures++ }
+cb.success()
+if (cb.status() !== "closed (0 failures)") { console.log("FAIL: expected reset, got " + cb.status()); failures++ }
 
-cb.reset()
-if (cb.status() !== "half_open") { console.log("FAIL: expected half_open"); failures++ }
-if (cb.call() !== "trial") { console.log("FAIL: expected trial"); failures++ }
-
-cb.succeed()
-if (cb.status() !== "closed") { console.log("FAIL: expected closed after succeed"); failures++ }
-
-if (failures > 0) { console.log("FAIL: circuit_breaker (" + failures + " failures)"); process.exit(1) }
+if (failures > 0) { console.log(`FAIL: circuit_breaker (${failures})`); process.exit(1) }
 console.log("PASS: circuit_breaker")

@@ -1,115 +1,119 @@
 @@target csharp
-// Vending Machine — operations + domain demo (C#)
 
 using System;
+using System.Collections.Generic;
 
-@@system VendingMachine {
+@@system VendingMachine(stock: int = 0) {
     operations:
-        get_balance(): int {
+        GetBalance(): int {
             return this.balance;
+        }
+        GetStock(): int {
+            return this.stock;
         }
 
     interface:
-        insert_coin(amount: int)
-        select_item(item: String): String
-        refund(): int
-        status(): String
+        InsertCoin(amount: int)
+        Select(): string
+        Cancel(): int
 
     machine:
         $Idle {
-            insert_coin(amount: int) {
+            InsertCoin(amount: int) {
                 this.balance = amount;
                 -> $HasCredit
             }
-            select_item(item: String): String { @@:("no credit") }
-            refund(): int { @@:(0) }
-            status(): String { @@:("idle") }
+            Select(): string {
+                @@:("insert coin first")
+            }
+            Cancel(): int {
+                @@:(0)
+            }
         }
+
         $HasCredit {
-            insert_coin(amount: int) {
+            InsertCoin(amount: int) {
                 this.balance = this.balance + amount;
             }
-            select_item(item: String): String {
-                if this.balance >= this.item_price {
-                    this.balance = this.balance - this.item_price;
-                    if this.balance == 0 {
-                        -> $Idle
-                    }
-                    @@:(item)
+            Select(): string {
+                if (this.balance < this.price) {
+                    @@:("need more")
+                } else if (this.stock <= 0) {
+                    @@:("sold out")
                 } else {
-                    @@:("insufficient credit")
+                    this.stock = this.stock - 1;
+                    this.balance = this.balance - this.price;
+                    @@:("dispensing")
+                    -> $Dispensing
                 }
             }
-            refund(): int {
-                int r = this.balance;
+            Cancel(): int {
+                var refund = this.balance;
                 this.balance = 0;
+                @@:(refund)
                 -> $Idle
-                @@:(r)
             }
-            status(): String { @@:("has_credit") }
+        }
+
+        $Dispensing {
+            $>() {
+                var change = this.balance;
+                this.balance = 0;
+                if (change > 0) {
+                    Console.WriteLine("Change: " + change);
+                }
+                -> $Idle
+            }
         }
 
     domain:
         balance : int = 0
-        item_price : int = 100
+        stock : int = 0
+        price : int = 100
 }
 
 class Program {
     static void Main(string[] args) {
-        var vm = @@VendingMachine();
+        var vm = @@VendingMachine(3);
         int failures = 0;
 
-        if ((string)vm.status() != "idle") {
-            Console.WriteLine("FAIL: initial status expected idle");
+        // Verify initial stock via operation
+        if ((int) vm.GetStock() != 3) {
+            Console.WriteLine("FAIL: initial stock expected 3, got " + vm.GetStock());
             failures++;
         }
 
-        if ((string)vm.select_item("soda") != "no credit") {
-            Console.WriteLine("FAIL: select with no credit");
+        // Select without inserting coin
+        var r1 = (string) vm.Select();
+        if (r1 != "insert coin first") {
+            Console.WriteLine("FAIL: expected 'insert coin first', got '" + r1 + "'");
             failures++;
         }
 
-        vm.insert_coin(50);
-        if ((string)vm.status() != "has_credit") {
-            Console.WriteLine("FAIL: status after insert");
+        // Insert coin and select
+        vm.InsertCoin(100);
+        var r2 = (string) vm.Select();
+        if (r2 != "dispensing") {
+            Console.WriteLine("FAIL: expected 'dispensing', got '" + r2 + "'");
             failures++;
         }
 
-        if ((int)vm.get_balance() != 50) {
-            Console.WriteLine("FAIL: balance expected 50");
+        // Verify stock decremented
+        if ((int) vm.GetStock() != 2) {
+            Console.WriteLine("FAIL: stock after buy expected 2, got " + vm.GetStock());
             failures++;
         }
 
-        if ((string)vm.select_item("soda") != "insufficient credit") {
-            Console.WriteLine("FAIL: select with insufficient credit");
-            failures++;
-        }
-
-        vm.insert_coin(50);
-        if ((int)vm.get_balance() != 100) {
-            Console.WriteLine("FAIL: balance expected 100");
-            failures++;
-        }
-
-        if ((string)vm.select_item("soda") != "soda") {
-            Console.WriteLine("FAIL: select with exact credit");
-            failures++;
-        }
-
-        if ((string)vm.status() != "idle") {
-            Console.WriteLine("FAIL: status after exact purchase");
-            failures++;
-        }
-
-        vm.insert_coin(200);
-        int refunded = (int)vm.refund();
-        if (refunded != 200) {
-            Console.WriteLine($"FAIL: refund expected 200, got {refunded}");
+        // Insert coin, cancel, get refund
+        vm.InsertCoin(50);
+        var refund = (int) vm.Cancel();
+        if (refund != 50) {
+            Console.WriteLine("FAIL: refund expected 50, got " + refund);
             failures++;
         }
 
         if (failures > 0) {
-            Console.WriteLine($"FAIL: vending_machine ({failures} failures)");
+            Console.WriteLine("FAIL: vending_machine (" + failures + " failures)");
             Environment.Exit(1);
         }
         Console.WriteLine("PASS: vending_machine");

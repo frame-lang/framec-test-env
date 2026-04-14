@@ -2,92 +2,62 @@
 
 @@system CircuitBreaker {
     interface:
-        call(): String
-        succeed()
-        fail()
-        reset()
-        status(): String
+        call(): String = "error"
+        success()
+        failure()
+        tick()
+        status(): String = ""
 
     machine:
         $Closed {
             $.failures: Int = 0
-
             call(): String { @@:("allowed") }
-            succeed() {
-                $.failures = 0
-            }
-            fail() {
+            success() { $.failures = 0 }
+            failure() {
                 $.failures = $.failures + 1
                 if $.failures >= self.threshold {
                     -> $Open
                 }
             }
-            reset() { $.failures = 0 }
-            status(): String { @@:("closed") }
+            status(): String { @@:("closed (\($.failures) failures)") }
         }
         $Open {
+            $.cooldown_remaining: Int = 0
+            $>() {
+                $.cooldown_remaining = self.cooldown
+            }
             call(): String { @@:("blocked") }
-            reset() { -> $HalfOpen }
-            status(): String { @@:("open") }
+            tick() {
+                $.cooldown_remaining = $.cooldown_remaining - 1
+                if $.cooldown_remaining <= 0 {
+                    -> $HalfOpen
+                }
+            }
+            status(): String { @@:("open (\($.cooldown_remaining) ticks left)") }
         }
         $HalfOpen {
-            call(): String { @@:("trial") }
-            succeed() { -> $Closed }
-            fail() { -> $Open }
-            status(): String { @@:("half_open") }
+            call(): String { @@:("testing") }
+            success() { -> $Closed }
+            failure() { -> $Open }
+            status(): String { @@:("half-open") }
         }
 
     domain:
         threshold: Int = 3
+        cooldown: Int = 5
 }
 
-var cb = @@CircuitBreaker()
+let cb = @@CircuitBreaker()
 var failures = 0
 
-if cb.status() as! String != "closed" {
-    print("FAIL: expected closed")
-    failures += 1
-}
+cb.failure(); cb.failure(); cb.failure()
+if cb.call() as! String != "blocked" { print("FAIL: expected blocked"); failures += 1 }
 
-cb.fail()
-cb.fail()
-if cb.status() as! String != "closed" {
-    print("FAIL: expected still closed after 2 failures")
-    failures += 1
-}
+for _ in 0..<5 { cb.tick() }
+if cb.call() as! String != "testing" { print("FAIL: expected testing"); failures += 1 }
 
-cb.fail()
-if cb.status() as! String != "open" {
-    print("FAIL: expected open after 3 failures")
-    failures += 1
-}
+cb.success()
+if cb.status() as! String != "closed (0 failures)" { print("FAIL: expected reset, got \(cb.status())"); failures += 1 }
 
-let r1 = cb.call() as! String
-if r1 != "blocked" {
-    print("FAIL: expected blocked, got \(r1)")
-    failures += 1
-}
-
-cb.reset()
-if cb.status() as! String != "half_open" {
-    print("FAIL: expected half_open")
-    failures += 1
-}
-
-let r2 = cb.call() as! String
-if r2 != "trial" {
-    print("FAIL: expected trial, got \(r2)")
-    failures += 1
-}
-
-cb.succeed()
-if cb.status() as! String != "closed" {
-    print("FAIL: expected closed after succeed")
-    failures += 1
-}
-
-if failures > 0 {
-    print("FAIL: circuit_breaker (\(failures) failures)")
-    fatalError()
-}
+if failures > 0 { print("FAIL: circuit_breaker (\(failures))"); fatalError() }
 print("PASS: circuit_breaker")

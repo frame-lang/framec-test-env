@@ -1,24 +1,21 @@
 @@target go
-// Vending Machine — operations + domain demo (Go)
 
 package main
 
 import (
-    "fmt"
-    "os"
+	"fmt"
+	"os"
 )
 
-@@system VendingMachine {
+@@system VendingMachine(stock: int = 0) {
     operations:
-        GetBalance(): int {
-            return s.balance
-        }
+        GetBalance(): int { return s.balance }
+        GetStock(): int { return s.stock }
 
     interface:
         InsertCoin(amount: int)
-        SelectItem(item: string): string
-        Refund(): int
-        Status(): string
+        Select(): string
+        Cancel(): int
 
     machine:
         $Idle {
@@ -26,95 +23,57 @@ import (
                 s.balance = amount
                 -> $HasCredit
             }
-            SelectItem(item: string): string { @@:("no credit") }
-            Refund(): int { @@:(0) }
-            Status(): string { @@:("idle") }
+            Select(): string { @@:("insert coin first") }
+            Cancel(): int { @@:(0) }
         }
         $HasCredit {
-            InsertCoin(amount: int) {
-                s.balance = s.balance + amount
-            }
-            SelectItem(item: string): string {
-                if s.balance >= s.item_price {
-                    s.balance = s.balance - s.item_price
-                    if s.balance == 0 {
-                        -> $Idle
-                    }
-                    @@:(item)
+            InsertCoin(amount: int) { s.balance = s.balance + amount }
+            Select(): string {
+                if s.balance < s.price {
+                    @@:("need more")
+                } else if s.stock <= 0 {
+                    @@:("sold out")
                 } else {
-                    @@:("insufficient credit")
+                    s.stock = s.stock - 1
+                    s.balance = s.balance - s.price
+                    @@:("dispensing")
+                    -> $Dispensing
                 }
             }
-            Refund(): int {
-                r := s.balance
+            Cancel(): int {
+                refund := s.balance
                 s.balance = 0
+                @@:(refund)
                 -> $Idle
-                @@:(r)
             }
-            Status(): string { @@:("has_credit") }
+        }
+        $Dispensing {
+            $>() {
+                change := s.balance
+                s.balance = 0
+                if change > 0 {
+                    fmt.Printf("Change: %d\n", change)
+                }
+                -> $Idle
+            }
         }
 
     domain:
         balance : int = 0
-        item_price : int = 100
+        stock : int = 0
+        price : int = 100
 }
 
 func main() {
-    vm := NewVendingMachine()
-    failures := 0
+	vm := @@VendingMachine(3)
+	failures := 0
 
-    if vm.Status() != "idle" {
-        fmt.Println("FAIL: initial status expected idle")
-        failures++
-    }
+	if vm.GetStock() != 3 { fmt.Println("FAIL: stock"); failures++ }
+	if vm.Select() != "insert coin first" { fmt.Println("FAIL: select"); failures++ }
+	vm.InsertCoin(100)
+	if vm.Select() != "dispensing" { fmt.Println("FAIL: dispensing"); failures++ }
+	if vm.GetStock() != 2 { fmt.Println("FAIL: stock after"); failures++ }
 
-    if vm.SelectItem("soda") != "no credit" {
-        fmt.Println("FAIL: select with no credit")
-        failures++
-    }
-
-    vm.InsertCoin(50)
-    if vm.Status() != "has_credit" {
-        fmt.Println("FAIL: status after insert")
-        failures++
-    }
-
-    if vm.GetBalance() != 50 {
-        fmt.Println("FAIL: balance expected 50")
-        failures++
-    }
-
-    if vm.SelectItem("soda") != "insufficient credit" {
-        fmt.Println("FAIL: select with insufficient credit")
-        failures++
-    }
-
-    vm.InsertCoin(50)
-    if vm.GetBalance() != 100 {
-        fmt.Println("FAIL: balance expected 100")
-        failures++
-    }
-
-    if vm.SelectItem("soda") != "soda" {
-        fmt.Println("FAIL: select with exact credit")
-        failures++
-    }
-
-    if vm.Status() != "idle" {
-        fmt.Println("FAIL: status after exact purchase")
-        failures++
-    }
-
-    vm.InsertCoin(200)
-    refunded := vm.Refund()
-    if refunded != 200 {
-        fmt.Printf("FAIL: refund expected 200, got %d\n", refunded)
-        failures++
-    }
-
-    if failures > 0 {
-        fmt.Printf("FAIL: vending_machine (%d failures)\n", failures)
-        os.Exit(1)
-    }
-    fmt.Println("PASS: vending_machine")
+	if failures > 0 { fmt.Printf("FAIL: vending_machine (%d)\n", failures); os.Exit(1) }
+	fmt.Println("PASS: vending_machine")
 }

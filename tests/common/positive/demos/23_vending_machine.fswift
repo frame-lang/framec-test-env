@@ -1,16 +1,18 @@
 @@target swift
 
-@@system VendingMachine {
+@@system VendingMachine(stock: Int = 0) {
     operations:
         get_balance(): Int {
-            @@:(self.balance)
+            return self.balance
+        }
+        get_stock(): Int {
+            return self.stock
         }
 
     interface:
         insert_coin(amount: Int)
-        select(item: String): String
-        refund(): Int
-        status(): String
+        select(): String
+        cancel(): Int
 
     machine:
         $Idle {
@@ -18,85 +20,87 @@
                 self.balance = amount
                 -> $HasCredit
             }
-            select(item: String): String { @@:("no credit") }
-            refund(): Int { @@:(0) }
-            status(): String { @@:("idle") }
+            select(): String {
+                @@:("insert coin first")
+            }
+            cancel(): Int {
+                @@:(0)
+            }
         }
+
         $HasCredit {
             insert_coin(amount: Int) {
                 self.balance = self.balance + amount
             }
-            select(item: String): String {
-                if self.balance >= self.item_price {
-                    self.balance = self.balance - self.item_price
-                    if self.balance == 0 {
-                        -> $Idle
-                    }
-                    @@:(item)
+            select(): String {
+                if self.balance < self.price {
+                    @@:("need more")
+                } else if self.stock <= 0 {
+                    @@:("sold out")
                 } else {
-                    @@:("insufficient credit")
+                    self.stock = self.stock - 1
+                    self.balance = self.balance - self.price
+                    @@:("dispensing")
+                    -> $Dispensing
                 }
             }
-            refund(): Int {
-                let r = self.balance
+            cancel(): Int {
+                let refund = self.balance
                 self.balance = 0
-                @@:(r)
+                @@:(refund)
                 -> $Idle
             }
-            status(): String { @@:("has_credit") }
+        }
+
+        $Dispensing {
+            $>() {
+                let change = self.balance
+                self.balance = 0
+                if change > 0 {
+                    print("Change: \(change)")
+                }
+                -> $Idle
+            }
         }
 
     domain:
         balance: Int = 0
-        item_price: Int = 100
+        stock: Int = 0
+        price: Int = 100
 }
 
-var vm = @@VendingMachine()
+let vm = @@VendingMachine(3)
 var failures = 0
 
-if vm.status() as! String != "idle" {
-    print("FAIL: expected idle")
+if vm.get_stock() as! Int != 3 {
+    print("FAIL: initial stock expected 3, got \(vm.get_stock())")
     failures += 1
 }
 
-let b0 = vm.get_balance() as! Int
-if b0 != 0 {
-    print("FAIL: expected balance 0, got \(b0)")
+let r1 = vm.select() as! String
+if r1 != "insert coin first" {
+    print("FAIL: expected 'insert coin first', got '\(r1)'")
+    failures += 1
+}
+
+vm.insert_coin(100)
+let r2 = vm.select() as! String
+if r2 != "dispensing" {
+    print("FAIL: expected 'dispensing', got '\(r2)'")
+    failures += 1
+}
+
+if vm.get_stock() as! Int != 2 {
+    print("FAIL: stock after buy expected 2")
     failures += 1
 }
 
 vm.insert_coin(50)
-if vm.status() as! String != "has_credit" {
-    print("FAIL: expected has_credit")
+let refund = vm.cancel() as! Int
+if refund != 50 {
+    print("FAIL: refund expected 50, got \(refund)")
     failures += 1
 }
 
-let r1 = vm.select("soda") as! String
-if r1 != "insufficient credit" {
-    print("FAIL: expected insufficient credit, got \(r1)")
-    failures += 1
-}
-
-vm.insert_coin(60)
-let r2 = vm.select("soda") as! String
-if r2 != "soda" {
-    print("FAIL: expected soda, got \(r2)")
-    failures += 1
-}
-
-let refund = vm.refund() as! Int
-if refund != 10 {
-    print("FAIL: expected refund 10, got \(refund)")
-    failures += 1
-}
-
-if vm.status() as! String != "idle" {
-    print("FAIL: expected idle after refund")
-    failures += 1
-}
-
-if failures > 0 {
-    print("FAIL: vending_machine (\(failures) failures)")
-    fatalError()
-}
+if failures > 0 { print("FAIL: vending_machine (\(failures))"); fatalError() }
 print("PASS: vending_machine")

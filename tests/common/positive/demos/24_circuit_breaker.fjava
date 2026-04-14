@@ -1,101 +1,67 @@
 @@target java
-// Circuit Breaker — state vars + domain vars demo (Java)
 
 @@system CircuitBreaker {
     interface:
         call(): String
-        succeed()
-        fail()
-        reset()
+        success()
+        failure()
+        tick()
         status(): String
 
     machine:
         $Closed {
             $.failures: int = 0
-
             call(): String { @@:("allowed") }
-            succeed() {
-                $.failures = 0;
-            }
-            fail() {
+            success() { $.failures = 0; }
+            failure() {
                 $.failures = $.failures + 1;
-                if $.failures >= this.threshold {
+                if ($.failures >= this.threshold) {
                     -> $Open
                 }
             }
-            reset() { $.failures = 0; }
             status(): String { @@:("closed") }
         }
         $Open {
+            $.cooldown_remaining: int = 0
+            $>() {
+                $.cooldown_remaining = this.cooldown;
+            }
             call(): String { @@:("blocked") }
-            reset() { -> $HalfOpen }
+            tick() {
+                $.cooldown_remaining = $.cooldown_remaining - 1;
+                if ($.cooldown_remaining <= 0) {
+                    -> $HalfOpen
+                }
+            }
             status(): String { @@:("open") }
         }
         $HalfOpen {
-            call(): String { @@:("trial") }
-            succeed() { -> $Closed }
-            fail() { -> $Open }
-            status(): String { @@:("half_open") }
+            call(): String { @@:("testing") }
+            success() { -> $Closed }
+            failure() { -> $Open }
+            status(): String { @@:("half-open") }
         }
 
     domain:
         threshold : int = 3
+        cooldown : int = 5
 }
 
 class Main {
     public static void main(String[] args) {
-        CircuitBreaker cb = @@CircuitBreaker();
+        var cb = @@CircuitBreaker();
         int failures = 0;
 
-        if (!cb.status().equals("closed")) {
-            System.out.println("FAIL: initial status expected closed");
-            failures++;
-        }
+        cb.failure(); cb.failure(); cb.failure();
+        if (!cb.call().equals("blocked")) { System.out.println("FAIL: expected blocked"); failures++; }
 
-        if (!cb.call().equals("allowed")) {
-            System.out.println("FAIL: call in closed expected allowed");
-            failures++;
-        }
+        for (int i = 0; i < 5; i++) { cb.tick(); }
+        if (!cb.call().equals("testing")) { System.out.println("FAIL: expected testing"); failures++; }
 
-        cb.fail();
-        cb.fail();
-        if (!cb.status().equals("closed")) {
-            System.out.println("FAIL: still closed after 2 failures");
-            failures++;
-        }
+        cb.success();
+        if (!cb.status().equals("closed")) { System.out.println("FAIL: expected closed, got " + cb.status()); failures++; }
 
-        cb.fail();
-        if (!cb.status().equals("open")) {
-            System.out.println("FAIL: should be open after 3 failures");
-            failures++;
-        }
-
-        if (!cb.call().equals("blocked")) {
-            System.out.println("FAIL: call in open expected blocked");
-            failures++;
-        }
-
-        cb.reset();
-        if (!cb.status().equals("half_open")) {
-            System.out.println("FAIL: should be half_open after reset");
-            failures++;
-        }
-
-        if (!cb.call().equals("trial")) {
-            System.out.println("FAIL: call in half_open expected trial");
-            failures++;
-        }
-
-        cb.succeed();
-        if (!cb.status().equals("closed")) {
-            System.out.println("FAIL: should be closed after succeed in half_open");
-            failures++;
-        }
-
-        if (failures > 0) {
-            System.out.println("FAIL: circuit_breaker (" + failures + " failures)");
-            System.exit(1);
-        }
+        if (failures > 0) { System.out.println("FAIL: circuit_breaker (" + failures + ")"); System.exit(1); }
         System.out.println("PASS: circuit_breaker");
     }
 }

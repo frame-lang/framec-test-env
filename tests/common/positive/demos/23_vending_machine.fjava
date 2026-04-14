@@ -1,17 +1,18 @@
 @@target java
-// Vending Machine — operations + domain demo (Java)
 
-@@system VendingMachine {
+@@system VendingMachine(stock: int = 0) {
     operations:
         get_balance(): int {
             return this.balance;
         }
+        get_stock(): int {
+            return this.stock;
+        }
 
     interface:
         insert_coin(amount: int)
-        select_item(item: String): String
-        refund(): int
-        status(): String
+        select(): String
+        cancel(): int
 
     machine:
         $Idle {
@@ -19,97 +20,68 @@
                 this.balance = amount;
                 -> $HasCredit
             }
-            select_item(item: String): String { @@:("no credit") }
-            refund(): int { @@:(0) }
-            status(): String { @@:("idle") }
+            select(): String { @@:("insert coin first") }
+            cancel(): int { @@:(0) }
         }
         $HasCredit {
             insert_coin(amount: int) {
                 this.balance = this.balance + amount;
             }
-            select_item(item: String): String {
-                if this.balance >= this.item_price {
-                    this.balance = this.balance - this.item_price;
-                    if this.balance == 0 {
-                        -> $Idle
-                    }
-                    @@:(item)
+            select(): String {
+                if (this.balance < this.price) {
+                    @@:("need more")
+                } else if (this.stock <= 0) {
+                    @@:("sold out")
                 } else {
-                    @@:("insufficient credit")
+                    this.stock = this.stock - 1;
+                    this.balance = this.balance - this.price;
+                    @@:("dispensing")
+                    -> $Dispensing
                 }
             }
-            refund(): int {
-                int r = this.balance;
+            cancel(): int {
+                var refund = this.balance;
                 this.balance = 0;
+                @@:(refund)
                 -> $Idle
-                @@:(r)
             }
-            status(): String { @@:("has_credit") }
+        }
+        $Dispensing {
+            $>() {
+                var change = this.balance;
+                this.balance = 0;
+                if (change > 0) {
+                    System.out.println("Change: " + change);
+                }
+                -> $Idle
+            }
         }
 
     domain:
         balance : int = 0
-        item_price : int = 100
+        stock : int = 0
+        price : int = 100
 }
 
 class Main {
     public static void main(String[] args) {
-        VendingMachine vm = @@VendingMachine();
+        var vm = @@VendingMachine(3);
         int failures = 0;
 
-        if (!vm.status().equals("idle")) {
-            System.out.println("FAIL: initial status expected idle");
-            failures++;
+        if ((int) vm.get_stock() != 3) { System.out.println("FAIL: stock"); failures++; }
+
+        if (!((String) vm.select()).equals("insert coin first")) {
+            System.out.println("FAIL: select without coin"); failures++;
         }
 
-        if (!vm.select_item("soda").equals("no credit")) {
-            System.out.println("FAIL: select with no credit");
-            failures++;
+        vm.insert_coin(100);
+        if (!((String) vm.select()).equals("dispensing")) {
+            System.out.println("FAIL: select with coin"); failures++;
         }
 
-        vm.insert_coin(50);
-        if (!vm.status().equals("has_credit")) {
-            System.out.println("FAIL: status after insert");
-            failures++;
-        }
+        if ((int) vm.get_stock() != 2) { System.out.println("FAIL: stock after buy"); failures++; }
 
-        if (vm.get_balance() != 50) {
-            System.out.println("FAIL: balance expected 50");
-            failures++;
-        }
-
-        if (!vm.select_item("soda").equals("insufficient credit")) {
-            System.out.println("FAIL: select with insufficient credit");
-            failures++;
-        }
-
-        vm.insert_coin(50);
-        if (vm.get_balance() != 100) {
-            System.out.println("FAIL: balance expected 100");
-            failures++;
-        }
-
-        if (!vm.select_item("soda").equals("soda")) {
-            System.out.println("FAIL: select with exact credit");
-            failures++;
-        }
-
-        if (!vm.status().equals("idle")) {
-            System.out.println("FAIL: status after exact purchase");
-            failures++;
-        }
-
-        vm.insert_coin(200);
-        int refunded = vm.refund();
-        if (refunded != 200) {
-            System.out.println("FAIL: refund expected 200, got " + refunded);
-            failures++;
-        }
-
-        if (failures > 0) {
-            System.out.println("FAIL: vending_machine (" + failures + " failures)");
-            System.exit(1);
-        }
+        if (failures > 0) { System.out.println("FAIL: vending_machine (" + failures + ")"); System.exit(1); }
         System.out.println("PASS: vending_machine");
     }
 }

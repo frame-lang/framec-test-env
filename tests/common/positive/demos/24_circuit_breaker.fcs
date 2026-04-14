@@ -1,47 +1,52 @@
 @@target csharp
-// Circuit Breaker — state vars + domain vars demo (C#)
 
 using System;
 
 @@system CircuitBreaker {
     interface:
-        call(): String
-        succeed()
-        fail()
-        reset()
-        status(): String
+        Call(): string
+        Success()
+        Failure()
+        Tick()
+        Status(): string
 
     machine:
         $Closed {
             $.failures: int = 0
-
-            call(): String { @@:("allowed") }
-            succeed() {
-                $.failures = 0;
-            }
-            fail() {
+            Call(): string { @@:("allowed") }
+            Success() { $.failures = 0; }
+            Failure() {
                 $.failures = $.failures + 1;
-                if $.failures >= this.threshold {
+                if ($.failures >= this.threshold) {
                     -> $Open
                 }
             }
-            reset() { $.failures = 0; }
-            status(): String { @@:("closed") }
+            Status(): string { @@:("closed") }
         }
         $Open {
-            call(): String { @@:("blocked") }
-            reset() { -> $HalfOpen }
-            status(): String { @@:("open") }
+            $.cooldown_remaining: int = 0
+            $>() {
+                $.cooldown_remaining = this.cooldown;
+            }
+            Call(): string { @@:("blocked") }
+            Tick() {
+                $.cooldown_remaining = $.cooldown_remaining - 1;
+                if ($.cooldown_remaining <= 0) {
+                    -> $HalfOpen
+                }
+            }
+            Status(): string { @@:("open") }
         }
         $HalfOpen {
-            call(): String { @@:("trial") }
-            succeed() { -> $Closed }
-            fail() { -> $Open }
-            status(): String { @@:("half_open") }
+            Call(): string { @@:("testing") }
+            Success() { -> $Closed }
+            Failure() { -> $Open }
+            Status(): string { @@:("half-open") }
         }
 
     domain:
         threshold : int = 3
+        cooldown : int = 5
 }
 
 class Program {
@@ -49,55 +54,16 @@ class Program {
         var cb = @@CircuitBreaker();
         int failures = 0;
 
-        if ((string)cb.status() != "closed") {
-            Console.WriteLine("FAIL: initial status expected closed");
-            failures++;
-        }
+        cb.Failure(); cb.Failure(); cb.Failure();
+        if ((string)cb.Call() != "blocked") { Console.WriteLine("FAIL: expected blocked"); failures++; }
 
-        if ((string)cb.call() != "allowed") {
-            Console.WriteLine("FAIL: call in closed expected allowed");
-            failures++;
-        }
+        for (int i = 0; i < 5; i++) { cb.Tick(); }
+        if ((string)cb.Call() != "testing") { Console.WriteLine("FAIL: expected testing"); failures++; }
 
-        cb.fail();
-        cb.fail();
-        if ((string)cb.status() != "closed") {
-            Console.WriteLine("FAIL: still closed after 2 failures");
-            failures++;
-        }
+        cb.Success();
+        if ((string)cb.Status() != "closed") { Console.WriteLine("FAIL: expected closed, got " + cb.Status()); failures++; }
 
-        cb.fail();
-        if ((string)cb.status() != "open") {
-            Console.WriteLine("FAIL: should be open after 3 failures");
-            failures++;
-        }
-
-        if ((string)cb.call() != "blocked") {
-            Console.WriteLine("FAIL: call in open expected blocked");
-            failures++;
-        }
-
-        cb.reset();
-        if ((string)cb.status() != "half_open") {
-            Console.WriteLine("FAIL: should be half_open after reset");
-            failures++;
-        }
-
-        if ((string)cb.call() != "trial") {
-            Console.WriteLine("FAIL: call in half_open expected trial");
-            failures++;
-        }
-
-        cb.succeed();
-        if ((string)cb.status() != "closed") {
-            Console.WriteLine("FAIL: should be closed after succeed in half_open");
-            failures++;
-        }
-
-        if (failures > 0) {
-            Console.WriteLine($"FAIL: circuit_breaker ({failures} failures)");
-            Environment.Exit(1);
-        }
+        if (failures > 0) { Console.WriteLine("FAIL: circuit_breaker (" + failures + ")"); Environment.Exit(1); }
         Console.WriteLine("PASS: circuit_breaker");
     }
 }

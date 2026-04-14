@@ -1,21 +1,22 @@
 @@target c
-// Vending Machine — operations + domain demo (C)
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
-@@system VendingMachine {
+@@system VendingMachine(stock: int = 0) {
     operations:
         get_balance(): int {
             return self->balance;
         }
+        get_stock(): int {
+            return self->stock;
+        }
 
     interface:
         insert_coin(amount: int)
-        select_item(item: str): str
-        refund(): int
-        status(): str
+        select(): char*
+        cancel(): int
 
     machine:
         $Idle {
@@ -23,98 +24,67 @@
                 self->balance = amount;
                 -> $HasCredit
             }
-            select_item(item: str): str { @@:("no credit") }
-            refund(): int { @@:(0) }
-            status(): str { @@:("idle") }
+            select(): char* { @@:("insert coin first") }
+            cancel(): int { @@:(0) }
         }
         $HasCredit {
             insert_coin(amount: int) {
                 self->balance = self->balance + amount;
             }
-            select_item(item: str): str {
-                if self->balance >= self->item_price {
-                    self->balance = self->balance - self->item_price;
-                    if self->balance == 0 {
-                        -> $Idle
-                    }
-                    @@:(item)
+            select(): char* {
+                if (self->balance < self->price) {
+                    @@:("need more")
+                } else if (self->stock <= 0) {
+                    @@:("sold out")
                 } else {
-                    @@:("insufficient credit")
+                    self->stock = self->stock - 1;
+                    self->balance = self->balance - self->price;
+                    @@:("dispensing")
+                    -> $Dispensing
                 }
             }
-            refund(): int {
-                int r = self->balance;
+            cancel(): int {
+                int refund = self->balance;
                 self->balance = 0;
+                @@:(refund)
                 -> $Idle
-                @@:(r)
             }
-            status(): str { @@:("has_credit") }
+        }
+        $Dispensing {
+            $>() {
+                int change = self->balance;
+                self->balance = 0;
+                if (change > 0) {
+                    printf("Change: %d\n", change);
+                }
+                -> $Idle
+            }
         }
 
     domain:
         balance : int = 0
-        item_price : int = 100
+        stock : int = 0
+        price : int = 100
 }
 
 int main() {
-    VendingMachine* vm = @@VendingMachine();
+    VendingMachine* vm = @@VendingMachine(3);
     int failures = 0;
 
-    if (strcmp(VendingMachine_status(vm), "idle") != 0) {
-        printf("FAIL: initial status expected idle\n");
-        failures++;
+    if (VendingMachine_get_stock(vm) != 3) { printf("FAIL: stock\n"); failures++; }
+
+    if (strcmp(VendingMachine_select(vm), "insert coin first") != 0) {
+        printf("FAIL: select without coin\n"); failures++;
     }
 
-    if (strcmp(VendingMachine_select_item(vm, "soda"), "no credit") != 0) {
-        printf("FAIL: select with no credit\n");
-        failures++;
+    VendingMachine_insert_coin(vm, 100);
+    if (strcmp(VendingMachine_select(vm), "dispensing") != 0) {
+        printf("FAIL: select with exact coin\n"); failures++;
     }
 
-    VendingMachine_insert_coin(vm, 50);
-    if (strcmp(VendingMachine_status(vm), "has_credit") != 0) {
-        printf("FAIL: status after insert\n");
-        failures++;
-    }
+    if (VendingMachine_get_stock(vm) != 2) { printf("FAIL: stock after buy\n"); failures++; }
 
-    if (VendingMachine_get_balance(vm) != 50) {
-        printf("FAIL: balance expected 50\n");
-        failures++;
-    }
-
-    if (strcmp(VendingMachine_select_item(vm, "soda"), "insufficient credit") != 0) {
-        printf("FAIL: select with insufficient credit\n");
-        failures++;
-    }
-
-    VendingMachine_insert_coin(vm, 50);
-    if (VendingMachine_get_balance(vm) != 100) {
-        printf("FAIL: balance expected 100\n");
-        failures++;
-    }
-
-    if (strcmp(VendingMachine_select_item(vm, "soda"), "soda") != 0) {
-        printf("FAIL: select with exact credit\n");
-        failures++;
-    }
-
-    if (strcmp(VendingMachine_status(vm), "idle") != 0) {
-        printf("FAIL: status after exact purchase\n");
-        failures++;
-    }
-
-    VendingMachine_insert_coin(vm, 200);
-    int refunded = VendingMachine_refund(vm);
-    if (refunded != 200) {
-        printf("FAIL: refund expected 200, got %d\n", refunded);
-        failures++;
-    }
-
-    if (failures > 0) {
-        printf("FAIL: vending_machine (%d failures)\n", failures);
-        VendingMachine_destroy(vm);
-        return 1;
-    }
+    if (failures > 0) { printf("FAIL: vending_machine (%d)\n", failures); return 1; }
     printf("PASS: vending_machine\n");
-    VendingMachine_destroy(vm);
     return 0;
 }

@@ -1,20 +1,24 @@
 @@target cpp_17
-// Vending Machine — operations + domain demo (C++)
 
 #include <iostream>
 #include <string>
+#include <cassert>
+#include <map>
 
-@@system VendingMachine {
+@@system VendingMachine(inventory: std::map<std::string, int> = {}) {
     operations:
-        get_balance(): int {
-            return this->balance;
+        stock(product: std::string, qty: int) {
+            this->inventory[product] = this->inventory[product] + qty;
+        }
+        check_stock(product: std::string): int {
+            auto it = this->inventory.find(product);
+            return it != this->inventory.end() ? it->second : 0;
         }
 
     interface:
         insert_coin(amount: int)
-        select_item(item: str): str
-        refund(): int
-        status(): str
+        select(product: std::string): std::string
+        cancel(): int
 
     machine:
         $Idle {
@@ -22,96 +26,75 @@
                 this->balance = amount;
                 -> $HasCredit
             }
-            select_item(item: str): str { @@:("no credit") }
-            refund(): int { @@:(0) }
-            status(): str { @@:("idle") }
+            select(product: std::string): std::string { @@:(std::string("insert coin first")) }
+            cancel(): int { @@:(0) }
         }
         $HasCredit {
             insert_coin(amount: int) {
                 this->balance = this->balance + amount;
             }
-            select_item(item: str): str {
-                if this->balance >= this->item_price {
-                    this->balance = this->balance - this->item_price;
-                    if this->balance == 0 {
-                        -> $Idle
-                    }
-                    @@:(item)
+            select(product: std::string): std::string {
+                int price = this->get_price(product);
+                if (price < 0) {
+                    @@:(std::string("unknown product"))
+                } else if (this->balance < price) {
+                    @@:(std::string("need more"))
+                } else if (this->check_stock(product) <= 0) {
+                    @@:(std::string("sold out"))
                 } else {
-                    @@:("insufficient credit")
+                    this->inventory[product] = this->inventory[product] - 1;
+                    this->balance = this->balance - price;
+                    @@:(std::string("dispensing ") + product)
+                    -> $Dispensing
                 }
             }
-            refund(): int {
-                int r = this->balance;
+            cancel(): int {
+                int refund = this->balance;
                 this->balance = 0;
+                @@:(refund)
                 -> $Idle
-                @@:(r)
             }
-            status(): str { @@:("has_credit") }
+        }
+        $Dispensing {
+            $>() {
+                int change = this->balance;
+                this->balance = 0;
+                if (change > 0) {
+                    std::cout << "Change: " << change << std::endl;
+                }
+                -> $Idle
+            }
+        }
+
+    actions:
+        get_price(product: std::string): int {
+            if (product == "cola") return 100;
+            if (product == "chips") return 75;
+            if (product == "water") return 50;
+            return -1;
         }
 
     domain:
         balance : int = 0
-        item_price : int = 100
+        inventory : std::map<std::string, int> = {}
 }
 
 int main() {
-    auto vm = @@VendingMachine();
+    std::map<std::string, int> inv = {{"cola", 2}, {"chips", 1}};
+    auto vm = @@VendingMachine(inv);
+    vm.stock("water", 5);
     int failures = 0;
 
-    if (vm.status() != std::string("idle")) {
-        std::cout << "FAIL: initial status expected idle" << std::endl;
-        failures++;
-    }
+    if (vm.check_stock("water") != 5) { std::cout << "FAIL: water stock" << std::endl; failures++; }
 
-    if (vm.select_item("soda") != std::string("no credit")) {
-        std::cout << "FAIL: select with no credit" << std::endl;
-        failures++;
-    }
+    auto r1 = vm.select("cola");
+    if (r1 != "insert coin first") { std::cout << "FAIL: " << r1 << std::endl; failures++; }
 
-    vm.insert_coin(50);
-    if (vm.status() != std::string("has_credit")) {
-        std::cout << "FAIL: status after insert" << std::endl;
-        failures++;
-    }
+    vm.insert_coin(100);
+    auto r2 = vm.select("cola");
+    if (r2 != "dispensing cola") { std::cout << "FAIL: " << r2 << std::endl; failures++; }
 
-    if (vm.get_balance() != 50) {
-        std::cout << "FAIL: balance expected 50" << std::endl;
-        failures++;
-    }
-
-    if (vm.select_item("soda") != std::string("insufficient credit")) {
-        std::cout << "FAIL: select with insufficient credit" << std::endl;
-        failures++;
-    }
-
-    vm.insert_coin(50);
-    if (vm.get_balance() != 100) {
-        std::cout << "FAIL: balance expected 100" << std::endl;
-        failures++;
-    }
-
-    if (vm.select_item("soda") != std::string("soda")) {
-        std::cout << "FAIL: select with exact credit" << std::endl;
-        failures++;
-    }
-
-    if (vm.status() != std::string("idle")) {
-        std::cout << "FAIL: status after exact purchase" << std::endl;
-        failures++;
-    }
-
-    vm.insert_coin(200);
-    int refunded = vm.refund();
-    if (refunded != 200) {
-        std::cout << "FAIL: refund expected 200, got " << refunded << std::endl;
-        failures++;
-    }
-
-    if (failures > 0) {
-        std::cout << "FAIL: vending_machine (" << failures << " failures)" << std::endl;
-        return 1;
-    }
+    if (failures > 0) { std::cout << "FAIL: vending_machine (" << failures << ")" << std::endl; return 1; }
     std::cout << "PASS: vending_machine" << std::endl;
     return 0;
 }

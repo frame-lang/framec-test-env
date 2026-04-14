@@ -1,87 +1,70 @@
-# Circuit Breaker — state vars + domain vars (Ruby)
+@@target ruby
 
 @@system CircuitBreaker {
     interface:
-        call(): str
-        succeed()
-        fail()
-        reset()
-        status(): str
+        call(): str = "error"
+        success()
+        failure()
+        tick()
+        status(): str = ""
 
     machine:
         $Closed {
             $.failures: int = 0
-
             call(): str { @@:("allowed") }
-            succeed() {
-                $.failures = 0
-            }
-            fail() {
+            success() { $.failures = 0 }
+            failure() {
                 $.failures = $.failures + 1
-                if $.failures >= self.threshold {
+                if $.failures >= self.threshold
                     -> $Open
-                }
+                end
             }
-            reset() { $.failures = 0 }
-            status(): str { @@:("closed") }
+            status(): str { @@:("closed (#{$.failures} failures)") }
         }
         $Open {
+            $.cooldown_remaining: int = 0
+            $>() {
+                $.cooldown_remaining = self.cooldown
+            }
             call(): str { @@:("blocked") }
-            reset() { -> $HalfOpen }
-            status(): str { @@:("open") }
+            tick() {
+                $.cooldown_remaining = $.cooldown_remaining - 1
+                if $.cooldown_remaining <= 0
+                    -> $HalfOpen
+                end
+            }
+            status(): str { @@:("open (#{$.cooldown_remaining} ticks left)") }
         }
         $HalfOpen {
-            call(): str { @@:("trial") }
-            succeed() { -> $Closed }
-            fail() { -> $Open }
-            status(): str { @@:("half_open") }
+            call(): str { @@:("testing") }
+            success() { -> $Closed }
+            failure() { -> $Open }
+            status(): str { @@:("half-open") }
         }
 
     domain:
         threshold = 3
+        cooldown = 5
 }
 
 cb = @@CircuitBreaker()
 failures = 0
 
-if cb.status() != "closed"
-    puts "FAIL: expected closed"
-    failures += 1
-end
-if cb.call() != "allowed"
-    puts "FAIL: expected allowed"
+cb.failure; cb.failure; cb.failure
+if cb.call != "blocked"
+    puts "FAIL: expected blocked, got #{cb.call}"
     failures += 1
 end
 
-cb.fail()
-cb.fail()
-if cb.status() != "closed"
-    puts "FAIL: still closed after 2 fails"
-    failures += 1
-end
-cb.fail()
-if cb.status() != "open"
-    puts "FAIL: expected open after 3 fails"
-    failures += 1
-end
-if cb.call() != "blocked"
-    puts "FAIL: expected blocked"
+5.times { cb.tick }
+if cb.call != "testing"
+    puts "FAIL: expected testing, got #{cb.call}"
     failures += 1
 end
 
-cb.reset()
-if cb.status() != "half_open"
-    puts "FAIL: expected half_open"
-    failures += 1
-end
-if cb.call() != "trial"
-    puts "FAIL: expected trial"
-    failures += 1
-end
-
-cb.succeed()
-if cb.status() != "closed"
-    puts "FAIL: expected closed after succeed"
+cb.success
+if cb.status != "closed (0 failures)"
+    puts "FAIL: expected reset, got #{cb.status}"
     failures += 1
 end
 

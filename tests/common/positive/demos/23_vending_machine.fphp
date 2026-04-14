@@ -1,79 +1,103 @@
 <?php
-// Vending Machine — operations + system params (PHP)
+@@target php
 
-@@system VendingMachine {
+@@system VendingMachine(stock = 0) {
     operations:
-        get_balance(): int {
+        get_balance() {
             return $this->balance;
+        }
+        get_stock() {
+            return $this->stock;
         }
 
     interface:
-        insert_coin(amount: int)
-        select(item: str): str
-        refund(): int
-        status(): str
+        insert_coin(amount)
+        select(): string = "error"
+        cancel(): int = 0
 
     machine:
         $Idle {
-            insert_coin(amount: int) {
+            insert_coin(amount) {
                 $this->balance = $amount;
                 -> $HasCredit
             }
-            select(item: str): str { @@:("no credit") }
-            refund(): int { @@:(0) }
-            status(): str { @@:("idle") }
+            select(): string { @@:("insert coin first") }
+            cancel(): int { @@:(0) }
         }
+
         $HasCredit {
-            insert_coin(amount: int) {
+            insert_coin(amount) {
                 $this->balance = $this->balance + $amount;
             }
-            select(item: str): str {
-                if ($this->balance >= $this->item_price) {
-                    $this->balance = $this->balance - $this->item_price;
-                    if ($this->balance === 0) {
-                        -> $Idle
-                    }
-                    @@:($item)
+            select(): string {
+                if ($this->balance < $this->price) {
+                    @@:("need more")
+                } elseif ($this->stock <= 0) {
+                    @@:("sold out")
                 } else {
-                    @@:("insufficient credit")
+                    $this->stock = $this->stock - 1;
+                    $this->balance = $this->balance - $this->price;
+                    @@:("dispensing")
+                    -> $Dispensing
                 }
             }
-            refund(): int {
-                $r = $this->balance;
+            cancel(): int {
+                $refund = $this->balance;
                 $this->balance = 0;
-                @@:($r)
+                @@:($refund)
                 -> $Idle
             }
-            status(): str { @@:("has_credit") }
+        }
+
+        $Dispensing {
+            $>() {
+                $change = $this->balance;
+                $this->balance = 0;
+                if ($change > 0) {
+                    echo "Change: $change\n";
+                }
+                -> $Idle
+            }
         }
 
     domain:
         balance = 0
-        item_price = 100
+        stock = 0
+        price = 100
 }
 
-$vm = @@VendingMachine();
+$vm = @@VendingMachine(3);
 $failures = 0;
 
-if ($vm->status() !== "idle") { echo "FAIL: expected idle\n"; $failures++; }
-if ($vm->select("soda") !== "no credit") { echo "FAIL: select without credit\n"; $failures++; }
-if ($vm->refund() !== 0) { echo "FAIL: refund from idle\n"; $failures++; }
+if ($vm->get_stock() !== 3) {
+    echo "FAIL: initial stock expected 3\n";
+    $failures++;
+}
+
+$r1 = $vm->select();
+if ($r1 !== "insert coin first") {
+    echo "FAIL: expected 'insert coin first', got '$r1'\n";
+    $failures++;
+}
+
+$vm->insert_coin(100);
+$r2 = $vm->select();
+if ($r2 !== "dispensing") {
+    echo "FAIL: expected 'dispensing', got '$r2'\n";
+    $failures++;
+}
+
+if ($vm->get_stock() !== 2) {
+    echo "FAIL: stock after buy expected 2\n";
+    $failures++;
+}
 
 $vm->insert_coin(50);
-if ($vm->status() !== "has_credit") { echo "FAIL: expected has_credit\n"; $failures++; }
-if ($vm->get_balance() !== 50) { echo "FAIL: balance should be 50\n"; $failures++; }
-if ($vm->select("soda") !== "insufficient credit") { echo "FAIL: should be insufficient\n"; $failures++; }
+$refund = $vm->cancel();
+if ($refund !== 50) {
+    echo "FAIL: refund expected 50, got $refund\n";
+    $failures++;
+}
 
-$vm->insert_coin(50);
-if ($vm->get_balance() !== 100) { echo "FAIL: balance should be 100\n"; $failures++; }
-$item = $vm->select("soda");
-if ($item !== "soda") { echo "FAIL: expected soda, got $item\n"; $failures++; }
-if ($vm->status() !== "idle") { echo "FAIL: should be idle after exact purchase\n"; $failures++; }
-
-$vm->insert_coin(200);
-$r = $vm->refund();
-if ($r !== 200) { echo "FAIL: refund should be 200, got $r\n"; $failures++; }
-if ($vm->status() !== "idle") { echo "FAIL: should be idle after refund\n"; $failures++; }
-
-if ($failures > 0) { echo "FAIL: vending_machine ($failures failures)\n"; exit(1); }
+if ($failures > 0) { echo "FAIL: vending_machine ($failures)\n"; exit(1); }
 echo "PASS: vending_machine\n";

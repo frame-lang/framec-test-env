@@ -1,0 +1,111 @@
+@@target rust
+
+@@system VendingMachine(stock: i32 = 0) {
+    operations:
+        get_balance(): i32 {
+            return self.balance;
+        }
+        get_stock(): i32 {
+            return self.stock;
+        }
+
+    interface:
+        insert_coin(amount: i32)
+        select(): String
+        cancel(): i32
+
+    machine:
+        $Idle {
+            insert_coin(amount: i32) {
+                self.balance = amount;
+                -> $HasCredit
+            }
+            select(): String {
+                @@:(String::from("insert coin first"))
+            }
+            cancel(): i32 {
+                @@:(0)
+            }
+        }
+
+        $HasCredit {
+            insert_coin(amount: i32) {
+                self.balance = self.balance + amount;
+            }
+            select(): String {
+                if self.balance < self.price {
+                    @@:(String::from("need more"))
+                } else if self.stock <= 0 {
+                    @@:(String::from("sold out"))
+                } else {
+                    self.stock = self.stock - 1;
+                    self.balance = self.balance - self.price;
+                    @@:(String::from("dispensing"))
+                    -> $Dispensing
+                }
+            }
+            cancel(): i32 {
+                let refund = self.balance;
+                self.balance = 0;
+                @@:(refund)
+                -> $Idle
+            }
+        }
+
+        $Dispensing {
+            $>() {
+                let change = self.balance;
+                self.balance = 0;
+                if change > 0 {
+                    println!("Change: {}", change);
+                }
+                -> $Idle
+            }
+        }
+
+    domain:
+        balance: i32 = 0
+        stock: i32 = 0
+        price: i32 = 100
+}
+
+fn main() {
+    let mut vm = @@VendingMachine(3);
+    let mut failures = 0;
+
+    if vm.get_stock() != 3 {
+        println!("FAIL: initial stock expected 3, got {}", vm.get_stock());
+        failures += 1;
+    }
+
+    let r1 = vm.select();
+    if r1 != "insert coin first" {
+        println!("FAIL: expected 'insert coin first', got '{}'", r1);
+        failures += 1;
+    }
+
+    vm.insert_coin(100);
+    let r2 = vm.select();
+    if r2 != "dispensing" {
+        println!("FAIL: expected 'dispensing', got '{}'", r2);
+        failures += 1;
+    }
+
+    if vm.get_stock() != 2 {
+        println!("FAIL: stock after buy expected 2, got {}", vm.get_stock());
+        failures += 1;
+    }
+
+    vm.insert_coin(50);
+    let refund = vm.cancel();
+    if refund != 50 {
+        println!("FAIL: refund expected 50, got {}", refund);
+        failures += 1;
+    }
+
+    if failures > 0 {
+        println!("FAIL: vending_machine ({} failures)", failures);
+        std::process::exit(1);
+    }
+    println!("PASS: vending_machine");
+}

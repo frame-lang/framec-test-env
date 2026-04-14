@@ -1,16 +1,20 @@
 @@target kotlin
 
-@@system VendingMachine {
+import kotlin.system.exitProcess
+
+@@system VendingMachine(stock: Int = 0) {
     operations:
-        get_balance(): int {
-            @@:(this.balance)
+        get_balance(): Int {
+            return this.balance
+        }
+        get_stock(): Int {
+            return this.stock
         }
 
     interface:
         insert_coin(amount: Int)
-        select(item: String): String
-        refund(): Int
-        status(): String
+        select(): String
+        cancel(): Int
 
     machine:
         $Idle {
@@ -18,87 +22,89 @@
                 this.balance = amount
                 -> $HasCredit
             }
-            select(item: String): String { @@:("no credit") }
-            refund(): Int { @@:(0) }
-            status(): String { @@:("idle") }
+            select(): String {
+                @@:("insert coin first")
+            }
+            cancel(): Int {
+                @@:(0)
+            }
         }
+
         $HasCredit {
             insert_coin(amount: Int) {
                 this.balance = this.balance + amount
             }
-            select(item: String): String {
-                if (this.balance >= this.item_price) {
-                    this.balance = this.balance - this.item_price
-                    if (this.balance == 0) {
-                        -> $Idle
-                    }
-                    @@:(item)
+            select(): String {
+                if (this.balance < this.price) {
+                    @@:("need more")
+                } else if (this.stock <= 0) {
+                    @@:("sold out")
                 } else {
-                    @@:("insufficient credit")
+                    this.stock = this.stock - 1
+                    this.balance = this.balance - this.price
+                    @@:("dispensing")
+                    -> $Dispensing
                 }
             }
-            refund(): Int {
-                val r = this.balance
+            cancel(): Int {
+                val refund = this.balance
                 this.balance = 0
-                @@:(r)
+                @@:(refund)
                 -> $Idle
             }
-            status(): String { @@:("has_credit") }
+        }
+
+        $Dispensing {
+            $>() {
+                val change = this.balance
+                this.balance = 0
+                if (change > 0) {
+                    println("Change: $change")
+                }
+                -> $Idle
+            }
         }
 
     domain:
-        balance: Int = 0
-        item_price: Int = 100
+        balance = 0
+        stock = 0
+        price = 100
 }
 
 fun main() {
-    val vm = VendingMachine()
+    val vm = @@VendingMachine(3)
     var failures = 0
 
-    if (vm.status() as String != "idle") {
-        println("FAIL: expected idle")
+    if (vm.get_stock() as Int != 3) {
+        println("FAIL: initial stock expected 3, got ${vm.get_stock()}")
         failures++
     }
 
-    val b0 = vm.get_balance()
-    if (b0 != 0) {
-        println("FAIL: expected balance 0, got $b0")
+    val r1 = vm.select() as String
+    if (r1 != "insert coin first") {
+        println("FAIL: expected 'insert coin first', got '$r1'")
+        failures++
+    }
+
+    vm.insert_coin(100)
+    val r2 = vm.select() as String
+    if (r2 != "dispensing") {
+        println("FAIL: expected 'dispensing', got '$r2'")
+        failures++
+    }
+
+    if (vm.get_stock() as Int != 2) {
+        println("FAIL: stock after buy expected 2, got ${vm.get_stock()}")
         failures++
     }
 
     vm.insert_coin(50)
-    if (vm.status() as String != "has_credit") {
-        println("FAIL: expected has_credit")
+    val refund = vm.cancel() as Int
+    if (refund != 50) {
+        println("FAIL: refund expected 50, got $refund")
         failures++
     }
 
-    val r1 = vm.select("soda") as String
-    if (r1 != "insufficient credit") {
-        println("FAIL: expected insufficient credit, got $r1")
-        failures++
-    }
-
-    vm.insert_coin(60)
-    val r2 = vm.select("soda") as String
-    if (r2 != "soda") {
-        println("FAIL: expected soda, got $r2")
-        failures++
-    }
-
-    val refund = vm.refund() as Int
-    if (refund != 10) {
-        println("FAIL: expected refund 10, got $refund")
-        failures++
-    }
-
-    if (vm.status() as String != "idle") {
-        println("FAIL: expected idle after refund")
-        failures++
-    }
-
-    if (failures > 0) {
-        println("FAIL: vending_machine ($failures failures)")
-        kotlin.system.exitProcess(1)
-    }
+    if (failures > 0) { println("FAIL: vending_machine ($failures)"); exitProcess(1) }
     println("PASS: vending_machine")
 }
