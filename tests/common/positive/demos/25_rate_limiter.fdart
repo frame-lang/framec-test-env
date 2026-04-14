@@ -4,91 +4,55 @@ import 'dart:io';
 
 @@system RateLimiter {
     operations:
-        static get_max_requests(): int {
-            @@:(5)
+        static tokens_for_rate(rps: int, interval_ms: int): int {
+            return [1, (rps * interval_ms) ~/ 1000].reduce((a, b) => a > b ? a : b);
         }
-        get_count(): int {
-            @@:(this.count)
+        tokens_remaining(): int {
+            return this.tokens;
         }
 
     interface:
-        request(): str
-        reset()
-        status(): str
+        request(): String
+        tick()
 
     machine:
-        $Allowing {
-            request(): str {
-                this.count = this.count + 1;
-                if (this.count >= this.max_requests) {
-                    -> $Throttling
+        $Accepting {
+            request(): String {
+                this.tokens = this.tokens - 1;
+                @@:("accepted")
+                if (this.tokens <= 0) {
+                    -> $Throttled
                 }
-                @@:("allowed")
             }
-            reset() {
-                this.count = 0;
+            tick() {
+                this.tokens = this.tokens + 1;
+                if (this.tokens > this.max_tokens) { this.tokens = this.max_tokens; }
             }
-            status(): str { @@:("allowing") }
         }
-        $Throttling {
-            request(): str { @@:("throttled") }
-            reset() {
-                this.count = 0;
-                -> $Allowing
+        $Throttled {
+            request(): String { @@:("throttled") }
+            tick() {
+                this.tokens = this.tokens + 1;
+                if (this.tokens > 0) {
+                    -> $Accepting
+                }
             }
-            status(): str { @@:("throttling") }
         }
 
     domain:
-        count: int = 0
-        max_requests: int = 5
+        tokens : int = 10
+        max_tokens : int = 10
 }
 
 void main() {
-    var rl = @@RateLimiter();
     int failures = 0;
+    if (RateLimiter.tokens_for_rate(100, 50) != 5) { print("FAIL: static op"); failures++; }
+    var rl = @@RateLimiter();
+    for (int i = 0; i < 10; i++) { rl.request(); }
+    if (rl.request() != "throttled") { print("FAIL: throttled"); failures++; }
+    rl.tick();
+    if (rl.request() != "accepted") { print("FAIL: accepted"); failures++; }
 
-    var max = RateLimiter.get_max_requests();
-    if (max != 5) {
-        print("FAIL: expected max 5, got $max");
-        failures++;
-    }
-
-    for (int i = 0; i < 4; i++) {
-        var r = rl.request();
-        if (r != "allowed") {
-            print("FAIL: expected allowed, got $r");
-            failures++;
-        }
-    }
-
-    rl.request();
-    if (rl.status() != "throttling") {
-        print("FAIL: expected throttling after 5 requests");
-        failures++;
-    }
-
-    var r2 = rl.request();
-    if (r2 != "throttled") {
-        print("FAIL: expected throttled, got $r2");
-        failures++;
-    }
-
-    rl.reset();
-    if (rl.status() != "allowing") {
-        print("FAIL: expected allowing after reset");
-        failures++;
-    }
-
-    var cnt = rl.get_count();
-    if (cnt != 0) {
-        print("FAIL: expected count 0 after reset, got $cnt");
-        failures++;
-    }
-
-    if (failures > 0) {
-        print("FAIL: rate_limiter ($failures failures)");
-        exit(1);
-    }
+    if (failures > 0) { print("FAIL: rate_limiter ($failures)"); exit(1); }
     print("PASS: rate_limiter");
 }

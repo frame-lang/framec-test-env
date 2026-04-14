@@ -1,0 +1,57 @@
+@@target rust
+
+@@system RateLimiter {
+    operations:
+        static tokens_for_rate(rps: i32, interval_ms: i32): i32 {
+            let val = (rps * interval_ms) / 1000;
+            return if val > 1 { val } else { 1 };
+        }
+        tokens_remaining(): i32 {
+            return self.tokens;
+        }
+
+    interface:
+        request(): String
+        tick()
+
+    machine:
+        $Accepting {
+            request(): String {
+                self.tokens = self.tokens - 1;
+                @@:(String::from("accepted"))
+                if self.tokens <= 0 {
+                    -> $Throttled
+                }
+            }
+            tick() {
+                self.tokens = self.tokens + 1;
+                if self.tokens > self.max_tokens { self.tokens = self.max_tokens; }
+            }
+        }
+        $Throttled {
+            request(): String { @@:(String::from("throttled")) }
+            tick() {
+                self.tokens = self.tokens + 1;
+                if self.tokens > 0 {
+                    -> $Accepting
+                }
+            }
+        }
+
+    domain:
+        tokens: i32 = 10
+        max_tokens: i32 = 10
+}
+
+fn main() {
+    let mut failures = 0;
+    if RateLimiter::tokens_for_rate(100, 50) != 5 { println!("FAIL: static op"); failures += 1; }
+    let mut rl = @@RateLimiter();
+    for _ in 0..10 { rl.request(); }
+    if rl.request() != "throttled" { println!("FAIL: throttled"); failures += 1; }
+    rl.tick();
+    if rl.request() != "accepted" { println!("FAIL: accepted"); failures += 1; }
+
+    if failures > 0 { println!("FAIL: rate_limiter ({})", failures); std::process::exit(1); }
+    println!("PASS: rate_limiter");
+}

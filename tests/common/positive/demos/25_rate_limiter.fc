@@ -1,5 +1,4 @@
 @@target c
-// Rate Limiter — static operations demo (C)
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -7,95 +6,57 @@
 
 @@system RateLimiter {
     operations:
-        static get_max_requests(): int {
-            return 5;
+        static tokens_for_rate(rps: int, interval_ms: int): int {
+            int val = (rps * interval_ms) / 1000;
+            return val > 1 ? val : 1;
         }
-        get_count(): int {
-            return self->count;
+        tokens_remaining(): int {
+            return self->tokens;
         }
 
     interface:
-        request(): str
-        reset()
-        status(): str
+        request(): char*
+        tick()
 
     machine:
-        $Allowing {
-            request(): str {
-                self->count = self->count + 1;
-                if self->count >= self->max_requests {
-                    -> $Throttling
+        $Accepting {
+            request(): char* {
+                self->tokens = self->tokens - 1;
+                @@:("accepted")
+                if (self->tokens <= 0) {
+                    -> $Throttled
                 }
-                @@:("allowed")
             }
-            reset() {
-                self->count = 0;
+            tick() {
+                self->tokens = self->tokens + 1;
+                if (self->tokens > self->max_tokens) { self->tokens = self->max_tokens; }
             }
-            status(): str { @@:("allowing") }
         }
-        $Throttling {
-            request(): str { @@:("throttled") }
-            reset() {
-                self->count = 0;
-                -> $Allowing
+        $Throttled {
+            request(): char* { @@:("throttled") }
+            tick() {
+                self->tokens = self->tokens + 1;
+                if (self->tokens > 0) {
+                    -> $Accepting
+                }
             }
-            status(): str { @@:("throttling") }
         }
 
     domain:
-        count : int = 0
-        max_requests : int = 5
+        tokens : int = 10
+        max_tokens : int = 10
 }
 
 int main() {
-    RateLimiter* rl = @@RateLimiter();
     int failures = 0;
+    if (RateLimiter_tokens_for_rate(100, 50) != 5) { printf("FAIL: static op\n"); failures++; }
+    RateLimiter* rl = @@RateLimiter();
+    for (int i = 0; i < 10; i++) { RateLimiter_request(rl); }
+    if (strcmp(RateLimiter_request(rl), "throttled") != 0) { printf("FAIL: throttled\n"); failures++; }
+    RateLimiter_tick(rl);
+    if (strcmp(RateLimiter_request(rl), "accepted") != 0) { printf("FAIL: accepted\n"); failures++; }
 
-    if (strcmp(RateLimiter_status(rl), "allowing") != 0) {
-        printf("FAIL: initial status expected allowing\n");
-        failures++;
-    }
-
-    if (RateLimiter_get_max_requests() != 5) {
-        printf("FAIL: static get_max_requests expected 5\n");
-        failures++;
-    }
-
-    for (int i = 0; i < 4; i++) {
-        if (strcmp(RateLimiter_request(rl), "allowed") != 0) {
-            printf("FAIL: request %d expected allowed\n", i + 1);
-            failures++;
-        }
-    }
-
-    RateLimiter_request(rl);
-    if (strcmp(RateLimiter_status(rl), "throttling") != 0) {
-        printf("FAIL: should be throttling after 5 requests\n");
-        failures++;
-    }
-
-    if (strcmp(RateLimiter_request(rl), "throttled") != 0) {
-        printf("FAIL: request while throttling expected throttled\n");
-        failures++;
-    }
-
-    RateLimiter_reset(rl);
-    if (strcmp(RateLimiter_status(rl), "allowing") != 0) {
-        printf("FAIL: should be allowing after reset\n");
-        failures++;
-    }
-
-    if (RateLimiter_get_count(rl) != 0) {
-        printf("FAIL: count after reset expected 0\n");
-        failures++;
-    }
-
-    if (failures > 0) {
-        printf("FAIL: rate_limiter (%d failures)\n", failures);
-        RateLimiter_destroy(rl);
-        return 1;
-    }
+    if (failures > 0) { printf("FAIL: rate_limiter (%d)\n", failures); return 1; }
     printf("PASS: rate_limiter\n");
-    RateLimiter_destroy(rl);
     return 0;
 }

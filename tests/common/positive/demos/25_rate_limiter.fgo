@@ -1,101 +1,68 @@
 @@target go
-// Rate Limiter — static operations demo (Go)
 
 package main
 
 import (
-    "fmt"
-    "os"
+	"fmt"
+	"os"
 )
 
 @@system RateLimiter {
     operations:
-        static GetMaxRequests(): int {
-            return 5
+        static TokensForRate(rps: int, interval_ms: int): int {
+            if rps * interval_ms / 1000 > 1 {
+                return rps * interval_ms / 1000
+            }
+            return 1
         }
-        GetCount(): int {
-            return s.count
+        TokensRemaining(): int {
+            return s.tokens
         }
 
     interface:
         Request(): string
-        Reset()
-        Status(): string
+        Tick()
 
     machine:
-        $Allowing {
+        $Accepting {
             Request(): string {
-                s.count = s.count + 1
-                if s.count >= s.max_requests {
-                    -> $Throttling
+                s.tokens = s.tokens - 1
+                @@:("accepted")
+                if s.tokens <= 0 {
+                    -> $Throttled
                 }
-                @@:("allowed")
             }
-            Reset() {
-                s.count = 0
+            Tick() {
+                s.tokens = s.tokens + 1
+                if s.tokens > s.max_tokens {
+                    s.tokens = s.max_tokens
+                }
             }
-            Status(): string { @@:("allowing") }
         }
-        $Throttling {
+        $Throttled {
             Request(): string { @@:("throttled") }
-            Reset() {
-                s.count = 0
-                -> $Allowing
+            Tick() {
+                s.tokens = s.tokens + 1
+                if s.tokens > 0 {
+                    -> $Accepting
+                }
             }
-            Status(): string { @@:("throttling") }
         }
 
     domain:
-        count : int = 0
-        max_requests : int = 5
+        tokens : int = 10
+        max_tokens : int = 10
 }
 
 func main() {
-    rl := NewRateLimiter()
-    failures := 0
+	failures := 0
+	if TokensForRate(100, 50) != 5 { fmt.Println("FAIL: static op"); failures++ }
+	rl := @@RateLimiter()
+	for i := 0; i < 10; i++ { rl.Request() }
+	if rl.Request() != "throttled" { fmt.Println("FAIL: throttled"); failures++ }
+	rl.Tick()
+	if rl.Request() != "accepted" { fmt.Println("FAIL: accepted"); failures++ }
 
-    if rl.Status() != "allowing" {
-        fmt.Println("FAIL: initial status expected allowing")
-        failures++
-    }
-
-    if RateLimiterGetMaxRequests() != 5 {
-        fmt.Println("FAIL: static GetMaxRequests expected 5")
-        failures++
-    }
-
-    for i := 0; i < 4; i++ {
-        if rl.Request() != "allowed" {
-            fmt.Printf("FAIL: request %d expected allowed\n", i+1)
-            failures++
-        }
-    }
-
-    rl.Request()
-    if rl.Status() != "throttling" {
-        fmt.Println("FAIL: should be throttling after 5 requests")
-        failures++
-    }
-
-    if rl.Request() != "throttled" {
-        fmt.Println("FAIL: request while throttling expected throttled")
-        failures++
-    }
-
-    rl.Reset()
-    if rl.Status() != "allowing" {
-        fmt.Println("FAIL: should be allowing after reset")
-        failures++
-    }
-
-    if rl.GetCount() != 0 {
-        fmt.Println("FAIL: count after reset expected 0")
-        failures++
-    }
-
-    if failures > 0 {
-        fmt.Printf("FAIL: rate_limiter (%d failures)\n", failures)
-        os.Exit(1)
-    }
-    fmt.Println("PASS: rate_limiter")
+	if failures > 0 { fmt.Printf("FAIL: rate_limiter (%d)\n", failures); os.Exit(1) }
+	fmt.Println("PASS: rate_limiter")
 }

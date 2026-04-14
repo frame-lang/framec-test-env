@@ -1,96 +1,54 @@
 @@target java
-// Rate Limiter — static operations demo (Java)
 
 @@system RateLimiter {
     operations:
-        static get_max_requests(): int {
-            return 5;
+        static tokens_for_rate(rps: int, interval_ms: int): int {
+            return Math.max(1, (rps * interval_ms) / 1000);
         }
-        get_count(): int {
-            return this.count;
+        tokens_remaining(): int {
+            return this.tokens;
         }
 
     interface:
         request(): String
-        reset()
-        status(): String
+        tick()
 
     machine:
-        $Allowing {
+        $Accepting {
             request(): String {
-                this.count = this.count + 1;
-                if this.count >= this.max_requests {
-                    -> $Throttling
+                this.tokens = this.tokens - 1;
+                @@:("accepted")
+                if (this.tokens <= 0) {
+                    -> $Throttled
                 }
-                @@:("allowed")
             }
-            reset() {
-                this.count = 0;
-            }
-            status(): String { @@:("allowing") }
+            tick() { this.tokens = Math.min(this.tokens + 1, this.max_tokens); }
         }
-        $Throttling {
+        $Throttled {
             request(): String { @@:("throttled") }
-            reset() {
-                this.count = 0;
-                -> $Allowing
+            tick() {
+                this.tokens = this.tokens + 1;
+                if (this.tokens > 0) {
+                    -> $Accepting
+                }
             }
-            status(): String { @@:("throttling") }
         }
 
     domain:
-        count : int = 0
-        max_requests : int = 5
+        tokens : int = 10
+        max_tokens : int = 10
 }
 
 class Main {
     public static void main(String[] args) {
-        RateLimiter rl = @@RateLimiter();
         int failures = 0;
-
-        if (!rl.status().equals("allowing")) {
-            System.out.println("FAIL: initial status expected allowing");
-            failures++;
-        }
-
-        if (RateLimiter.get_max_requests() != 5) {
-            System.out.println("FAIL: static get_max_requests expected 5");
-            failures++;
-        }
-
-        for (int i = 0; i < 4; i++) {
-            if (!rl.request().equals("allowed")) {
-                System.out.println("FAIL: request " + (i + 1) + " expected allowed");
-                failures++;
-            }
-        }
-
-        rl.request();
-        if (!rl.status().equals("throttling")) {
-            System.out.println("FAIL: should be throttling after 5 requests");
-            failures++;
-        }
-
-        if (!rl.request().equals("throttled")) {
-            System.out.println("FAIL: request while throttling expected throttled");
-            failures++;
-        }
-
-        rl.reset();
-        if (!rl.status().equals("allowing")) {
-            System.out.println("FAIL: should be allowing after reset");
-            failures++;
-        }
-
-        if (rl.get_count() != 0) {
-            System.out.println("FAIL: count after reset expected 0");
-            failures++;
-        }
-
-        if (failures > 0) {
-            System.out.println("FAIL: rate_limiter (" + failures + " failures)");
-            System.exit(1);
-        }
+        if (RateLimiter.tokens_for_rate(100, 50) != 5) { System.out.println("FAIL: static op"); failures++; }
+        var rl = @@RateLimiter();
+        for (int i = 0; i < 10; i++) { rl.request(); }
+        if (!((String) rl.request()).equals("throttled")) { System.out.println("FAIL: throttled"); failures++; }
+        rl.tick();
+        if (!((String) rl.request()).equals("accepted")) { System.out.println("FAIL: accepted"); failures++; }
+        if (failures > 0) { System.out.println("FAIL: rate_limiter (" + failures + ")"); System.exit(1); }
         System.out.println("PASS: rate_limiter");
     }
 }

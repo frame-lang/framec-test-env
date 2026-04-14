@@ -1,98 +1,60 @@
 @@target cpp_17
-// Rate Limiter — static operations demo (C++)
 
 #include <iostream>
 #include <string>
+#include <algorithm>
 
 @@system RateLimiter {
     operations:
-        static get_max_requests(): int {
-            return 5;
+        static tokens_for_rate(rps: int, interval_ms: int): int {
+            return std::max(1, (rps * interval_ms) / 1000);
         }
-        get_count(): int {
-            return this->count;
+        tokens_remaining(): int {
+            return this->tokens;
         }
 
     interface:
-        request(): str
-        reset()
-        status(): str
+        request(): std::string
+        tick()
 
     machine:
-        $Allowing {
-            request(): str {
-                this->count = this->count + 1;
-                if this->count >= this->max_requests {
-                    -> $Throttling
+        $Accepting {
+            request(): std::string {
+                this->tokens = this->tokens - 1;
+                @@:(std::string("accepted"))
+                if (this->tokens <= 0) {
+                    -> $Throttled
                 }
-                @@:("allowed")
             }
-            reset() {
-                this->count = 0;
-            }
-            status(): str { @@:("allowing") }
+            tick() { this->tokens = std::min(this->tokens + 1, this->max_tokens); }
         }
-        $Throttling {
-            request(): str { @@:("throttled") }
-            reset() {
-                this->count = 0;
-                -> $Allowing
+        $Throttled {
+            request(): std::string { @@:(std::string("throttled")) }
+            tick() {
+                this->tokens = this->tokens + 1;
+                if (this->tokens > 0) {
+                    -> $Accepting
+                }
             }
-            status(): str { @@:("throttling") }
         }
 
     domain:
-        count : int = 0
-        max_requests : int = 5
+        tokens : int = 10
+        max_tokens : int = 10
 }
 
 int main() {
-    auto rl = @@RateLimiter();
     int failures = 0;
 
-    if (rl.status() != std::string("allowing")) {
-        std::cout << "FAIL: initial status expected allowing" << std::endl;
-        failures++;
-    }
+    if (RateLimiter::tokens_for_rate(100, 50) != 5) { std::cout << "FAIL: static op" << std::endl; failures++; }
 
-    if (RateLimiter::get_max_requests() != 5) {
-        std::cout << "FAIL: static get_max_requests expected 5" << std::endl;
-        failures++;
-    }
+    auto rl = @@RateLimiter();
+    for (int i = 0; i < 10; i++) { rl.request(); }
+    if (rl.request() != "throttled") { std::cout << "FAIL: throttled" << std::endl; failures++; }
+    rl.tick();
+    if (rl.request() != "accepted") { std::cout << "FAIL: accepted after tick" << std::endl; failures++; }
 
-    for (int i = 0; i < 4; i++) {
-        if (rl.request() != std::string("allowed")) {
-            std::cout << "FAIL: request " << (i + 1) << " expected allowed" << std::endl;
-            failures++;
-        }
-    }
-
-    rl.request();
-    if (rl.status() != std::string("throttling")) {
-        std::cout << "FAIL: should be throttling after 5 requests" << std::endl;
-        failures++;
-    }
-
-    if (rl.request() != std::string("throttled")) {
-        std::cout << "FAIL: request while throttling expected throttled" << std::endl;
-        failures++;
-    }
-
-    rl.reset();
-    if (rl.status() != std::string("allowing")) {
-        std::cout << "FAIL: should be allowing after reset" << std::endl;
-        failures++;
-    }
-
-    if (rl.get_count() != 0) {
-        std::cout << "FAIL: count after reset expected 0" << std::endl;
-        failures++;
-    }
-
-    if (failures > 0) {
-        std::cout << "FAIL: rate_limiter (" << failures << " failures)" << std::endl;
-        return 1;
-    }
+    if (failures > 0) { std::cout << "FAIL: rate_limiter (" << failures << ")" << std::endl; return 1; }
     std::cout << "PASS: rate_limiter" << std::endl;
     return 0;
 }

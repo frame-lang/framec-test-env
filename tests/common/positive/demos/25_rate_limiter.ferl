@@ -2,42 +2,45 @@
 
 @@system RateLimiter {
     operations:
-        static get_max_requests(): int {
-            @@:(5)
+        static tokens_for_rate(rps: int, interval_ms: int): int {
+            Val = (rps * interval_ms) div 1000,
+            if Val > 1 -> Val; true -> 1 end
         }
-        get_count(): int {
-            @@:(self.count)
+        tokens_remaining(): int {
+            @@:(self.tokens)
         }
 
     interface:
         request(): str
-        reset()
-        status(): str
+        tick()
 
     machine:
-        $Allowing {
+        $Accepting {
             request(): str {
-                self.count = self.count + 1
-                if self.count >= self.max_requests {
-                    -> $Throttling
+                self.tokens = self.tokens - 1
+                @@:("accepted")
+                if self.tokens =< 0 {
+                    -> $Throttled
                 }
-                @@:("allowed")
             }
-            reset() {
-                self.count = 0
+            tick() {
+                self.tokens = self.tokens + 1
+                if self.tokens > self.max_tokens {
+                    self.tokens = self.max_tokens
+                }
             }
-            status(): str { @@:("allowing") }
         }
-        $Throttling {
+        $Throttled {
             request(): str { @@:("throttled") }
-            reset() {
-                self.count = 0
-                -> $Allowing
+            tick() {
+                self.tokens = self.tokens + 1
+                if self.tokens > 0 {
+                    -> $Accepting
+                }
             }
-            status(): str { @@:("throttling") }
         }
 
     domain:
-        count = 0
-        max_requests = 5
+        tokens = 10
+        max_tokens = 10
 }

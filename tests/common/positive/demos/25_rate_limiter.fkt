@@ -1,92 +1,55 @@
 @@target kotlin
 
+import kotlin.system.exitProcess
+
 @@system RateLimiter {
     operations:
-        static get_max_requests(): Int {
-            @@:(5)
+        static tokens_for_rate(rps: Int, interval_ms: Int): Int {
+            return maxOf(1, (rps * interval_ms) / 1000)
         }
-        get_count(): Int {
-            @@:(this.count)
+        tokens_remaining(): Int {
+            return this.tokens
         }
 
     interface:
         request(): String
-        reset()
-        status(): String
+        tick()
 
     machine:
-        $Allowing {
+        $Accepting {
             request(): String {
-                this.count = this.count + 1
-                if (this.count >= this.max_requests) {
-                    -> $Throttling
+                this.tokens = this.tokens - 1
+                @@:("accepted")
+                if (this.tokens <= 0) {
+                    -> $Throttled
                 }
-                @@:("allowed")
             }
-            reset() {
-                this.count = 0
-            }
-            status(): String { @@:("allowing") }
+            tick() { this.tokens = minOf(this.tokens + 1, this.max_tokens) }
         }
-        $Throttling {
+        $Throttled {
             request(): String { @@:("throttled") }
-            reset() {
-                this.count = 0
-                -> $Allowing
+            tick() {
+                this.tokens = this.tokens + 1
+                if (this.tokens > 0) {
+                    -> $Accepting
+                }
             }
-            status(): String { @@:("throttling") }
         }
 
     domain:
-        count: Int = 0
-        max_requests: Int = 5
+        tokens = 10
+        max_tokens = 10
 }
 
 fun main() {
-    val rl = RateLimiter()
     var failures = 0
+    if (RateLimiter.tokens_for_rate(100, 50) != 5) { println("FAIL: static op"); failures++ }
+    val rl = @@RateLimiter()
+    for (i in 1..10) { rl.request() }
+    if (rl.request() as String != "throttled") { println("FAIL: throttled"); failures++ }
+    rl.tick()
+    if (rl.request() as String != "accepted") { println("FAIL: accepted"); failures++ }
 
-    val max = RateLimiter.get_max_requests()
-    if (max != 5) {
-        println("FAIL: expected max 5, got $max")
-        failures++
-    }
-
-    for (i in 1..4) {
-        val r = rl.request() as String
-        if (r != "allowed") {
-            println("FAIL: expected allowed on request $i, got $r")
-            failures++
-        }
-    }
-
-    rl.request()
-    if (rl.status() as String != "throttling") {
-        println("FAIL: expected throttling after 5 requests")
-        failures++
-    }
-
-    val r2 = rl.request() as String
-    if (r2 != "throttled") {
-        println("FAIL: expected throttled, got $r2")
-        failures++
-    }
-
-    rl.reset()
-    if (rl.status() as String != "allowing") {
-        println("FAIL: expected allowing after reset")
-        failures++
-    }
-
-    val cnt = rl.get_count()
-    if (cnt != 0) {
-        println("FAIL: expected count 0 after reset, got $cnt")
-        failures++
-    }
-
-    if (failures > 0) {
-        println("FAIL: rate_limiter ($failures failures)")
-        kotlin.system.exitProcess(1)
-    }
+    if (failures > 0) { println("FAIL: rate_limiter ($failures)"); exitProcess(1) }
     println("PASS: rate_limiter")
 }

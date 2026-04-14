@@ -1,94 +1,63 @@
-# Rate Limiter — static + instance operations (Ruby)
+@@target ruby
 
 @@system RateLimiter {
     operations:
-        static get_max_requests(): int {
-            return 5
+        static tokens_for_rate(rps, interval_ms) {
+            return [1, (rps * interval_ms) / 1000].max
         }
-        get_count(): int {
-            return self.count
+        tokens_remaining() {
+            return self.tokens
         }
 
     interface:
-        request(): str
-        reset()
-        status(): str
+        request(): str = "error"
+        tick()
 
     machine:
-        $Allowing {
+        $Accepting {
             request(): str {
-                self.count = self.count + 1
-                if self.count >= self.max_requests {
-                    -> $Throttling
-                }
-                @@:("allowed")
+                self.tokens = self.tokens - 1
+                @@:("accepted")
+                if self.tokens <= 0
+                    -> $Throttled
+                end
             }
-            reset() {
-                self.count = 0
-            }
-            status(): str { @@:("allowing") }
+            tick() { self.tokens = [self.tokens + 1, self.max_tokens].min }
         }
-        $Throttling {
+        $Throttled {
             request(): str { @@:("throttled") }
-            reset() {
-                self.count = 0
-                -> $Allowing
+            tick() {
+                self.tokens = self.tokens + 1
+                if self.tokens > 0
+                    -> $Accepting
+                end
             }
-            status(): str { @@:("throttling") }
         }
 
     domain:
-        count = 0
-        max_requests = 5
+        tokens = 10
+        max_tokens = 10
 }
 
-rl = @@RateLimiter()
 failures = 0
-
-max_req = RateLimiter.get_max_requests()
-if max_req != 5
-    puts "FAIL: static get_max_requests expected 5, got #{max_req}"
+if RateLimiter.tokens_for_rate(100, 50) != 5
+    puts "FAIL: static op"
     failures += 1
 end
-
-4.times do |i|
-    r = rl.request()
-    if r != "allowed"
-        puts "FAIL: request #{i} should be allowed"
-        failures += 1
-    end
-end
-if rl.get_count() != 4
-    puts "FAIL: count should be 4"
+rl = @@RateLimiter()
+10.times { rl.request }
+if rl.request != "throttled"
+    puts "FAIL: throttled"
     failures += 1
 end
-if rl.status() != "allowing"
-    puts "FAIL: should still be allowing"
-    failures += 1
-end
-
-rl.request()
-if rl.status() != "throttling"
-    puts "FAIL: should be throttling after 5"
-    failures += 1
-end
-if rl.request() != "throttled"
-    puts "FAIL: should be throttled"
-    failures += 1
-end
-
-rl.reset()
-if rl.status() != "allowing"
-    puts "FAIL: should be allowing after reset"
-    failures += 1
-end
-if rl.get_count() != 0
-    puts "FAIL: count should be 0 after reset"
+rl.tick
+if rl.request != "accepted"
+    puts "FAIL: accepted after tick"
     failures += 1
 end
 
 if failures > 0
-    puts "FAIL: rate_limiter (#{failures} failures)"
+    puts "FAIL: rate_limiter (#{failures})"
     exit(1)
 end
 puts "PASS: rate_limiter"

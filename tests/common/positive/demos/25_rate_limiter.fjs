@@ -1,67 +1,52 @@
-// Rate Limiter — static + instance operations (JavaScript)
+@@target javascript
 
 @@system RateLimiter {
     operations:
-        static get_max_requests(): int {
-            return 5;
+        static tokens_for_rate(rps, interval_ms) {
+            return Math.max(1, Math.floor((rps * interval_ms) / 1000))
         }
-        get_count(): int {
-            return this.count;
+        tokens_remaining() {
+            return this.tokens
         }
 
     interface:
-        request(): str
-        reset()
-        status(): str
+        request(): str = "error"
+        tick()
 
     machine:
-        $Allowing {
+        $Accepting {
             request(): str {
-                this.count = this.count + 1
-                if (this.count >= this.max_requests) {
-                    -> $Throttling
+                this.tokens = this.tokens - 1
+                @@:("accepted")
+                if (this.tokens <= 0) {
+                    -> $Throttled
                 }
-                @@:("allowed")
             }
-            reset() {
-                this.count = 0
-            }
-            status(): str { @@:("allowing") }
+            tick() { this.tokens = Math.min(this.tokens + 1, this.max_tokens) }
         }
-        $Throttling {
+        $Throttled {
             request(): str { @@:("throttled") }
-            reset() {
-                this.count = 0
-                -> $Allowing
+            tick() {
+                this.tokens = this.tokens + 1
+                if (this.tokens > 0) {
+                    -> $Accepting
+                }
             }
-            status(): str { @@:("throttling") }
         }
 
     domain:
-        count = 0
-        max_requests = 5
+        tokens = 10
+        max_tokens = 10
 }
 
-const rl = @@RateLimiter()
 let failures = 0
+if (RateLimiter.tokens_for_rate(100, 50) !== 5) { console.log("FAIL: static op"); failures++ }
+const rl = @@RateLimiter()
+for (let i = 0; i < 10; i++) { rl.request() }
+if (rl.request() !== "throttled") { console.log("FAIL: throttled"); failures++ }
+rl.tick()
+if (rl.request() !== "accepted") { console.log("FAIL: accepted after tick"); failures++ }
+if (rl.tokens_remaining() !== 0) { console.log("FAIL: remaining expected 0, got " + rl.tokens_remaining()); failures++ }
 
-const maxReq = RateLimiter.get_max_requests()
-if (maxReq !== 5) { console.log("FAIL: static get_max_requests expected 5, got " + maxReq); failures++ }
-
-for (let i = 0; i < 4; i++) {
-    const r = rl.request()
-    if (r !== "allowed") { console.log("FAIL: request " + i + " should be allowed"); failures++ }
-}
-if (rl.get_count() !== 4) { console.log("FAIL: count should be 4"); failures++ }
-if (rl.status() !== "allowing") { console.log("FAIL: should still be allowing"); failures++ }
-
-rl.request()
-if (rl.status() !== "throttling") { console.log("FAIL: should be throttling after 5"); failures++ }
-if (rl.request() !== "throttled") { console.log("FAIL: should be throttled"); failures++ }
-
-rl.reset()
-if (rl.status() !== "allowing") { console.log("FAIL: should be allowing after reset"); failures++ }
-if (rl.get_count() !== 0) { console.log("FAIL: count should be 0 after reset"); failures++ }
-
-if (failures > 0) { console.log("FAIL: rate_limiter (" + failures + " failures)"); process.exit(1) }
+if (failures > 0) { console.log("FAIL: rate_limiter (" + failures + ")"); process.exit(1) }
 console.log("PASS: rate_limiter")
