@@ -23,7 +23,6 @@ DOCKER_DIR     := $(shell pwd)
 TEST_ENV_ROOT  := $(shell cd .. && pwd)
 RUNNER         := runners/runner.sh
 COMPOSE        := docker compose
-RUST_IMAGE     := rust:latest
 
 # Detect host architecture for build targets
 HOST_ARCH      := $(shell uname -m)
@@ -49,31 +48,25 @@ $(SRC_STAMP): | $(STAMP_DIR)
 	@touch $@
 
 # --- framec binaries ---
-# Built from source inside Docker. Always produces the right Linux binary.
+# Cross-compiled from macOS using cargo-zigbuild (no Docker build step).
+# Requires: cargo install cargo-zigbuild, brew install zig,
+#           rustup target add aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu
 
-# Native-arch binary (matches Docker's default platform)
+# Native-arch binary (ARM64 Linux for Docker's default platform on Apple Silicon)
 $(STAMP_DIR)/framec-native: $(SRC_STAMP) | $(STAMP_DIR)
-	@echo "=== Building framec (native arch) ==="
-	@docker run --rm \
-		-v "$(FRAMEPILER_SRC):/src:ro" \
-		-v "$(DOCKER_DIR):/out" \
-		$(RUST_IMAGE) \
-		bash -c "cp -r /src /build && rm -rf /build/target && cd /build && \
-		         cargo build --release -p framec 2>&1 | tail -3 && \
-		         cp target/release/framec /out/framec-native"
+	@echo "=== Cross-compiling framec (aarch64-linux) ==="
+	@cd "$(FRAMEPILER_SRC)" && \
+		cargo zigbuild --release -p framec --target aarch64-unknown-linux-gnu 2>&1 | tail -3 && \
+		cp target/aarch64-unknown-linux-gnu/release/framec "$(DOCKER_DIR)/framec-native"
 	@touch $@
 	@echo "Built: framec-native ($$(file framec-native | grep -o 'x86-64\|aarch64'))"
 
 # amd64 binary (for GDScript container which requires x86_64)
 $(STAMP_DIR)/framec-amd64: $(SRC_STAMP) | $(STAMP_DIR)
-	@echo "=== Building framec (amd64 for GDScript) ==="
-	@docker run --rm --platform linux/amd64 \
-		-v "$(FRAMEPILER_SRC):/src:ro" \
-		-v "$(DOCKER_DIR):/out" \
-		$(RUST_IMAGE) \
-		bash -c "cp -r /src /build && rm -rf /build/target && cd /build && \
-		         cargo build --release -p framec 2>&1 | tail -3 && \
-		         cp target/release/framec /out/framec-amd64"
+	@echo "=== Cross-compiling framec (x86_64-linux) ==="
+	@cd "$(FRAMEPILER_SRC)" && \
+		cargo zigbuild --release -p framec --target x86_64-unknown-linux-gnu 2>&1 | tail -3 && \
+		cp target/x86_64-unknown-linux-gnu/release/framec "$(DOCKER_DIR)/framec-amd64"
 	@touch $@
 	@echo "Built: framec-amd64"
 
