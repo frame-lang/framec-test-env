@@ -1,0 +1,96 @@
+@@target cpp_17
+// Auth Flow — multi-system demo (C++)
+
+#include <iostream>
+#include <string>
+
+@@system LoginManager {
+    interface:
+        login(user: str, pass: str): str
+        status(): str
+
+    machine:
+        $LoggedOut {
+            login(user: str, pass: str): str {
+                if std::string(user) == "admin" && std::string(pass) == "secret" {
+                    this->current_user = user;
+                    -> $LoggedIn
+                    @@:("ok")
+                } else {
+                    @@:("denied")
+                }
+            }
+            status(): str { @@:("logged_out") }
+        }
+        $LoggedIn {
+            login(user: str, pass: str): str { @@:("already_logged_in") }
+            status(): str { @@:("logged_in") }
+        }
+
+    domain:
+        current_user : std::string = ""
+}
+
+@@system App {
+    interface:
+        authenticate(user: str, pass: str): str
+        app_status(): str
+
+    machine:
+        $Unauthenticated {
+            authenticate(user: str, pass: str): str {
+                std::string result = this->auth.login(user, pass);
+                if (result == "ok") {
+                    -> $Authenticated
+                }
+                @@:(result)
+            }
+            app_status(): str { @@:("unauthenticated") }
+        }
+        $Authenticated {
+            authenticate(user: str, pass: str): str { @@:("already_authenticated") }
+            app_status(): str { @@:("authenticated") }
+        }
+
+    domain:
+        auth : LoginManager = @@LoginManager()
+}
+
+int main() {
+    auto app = @@App();
+    int failures = 0;
+
+    if (app.app_status() != std::string("unauthenticated")) {
+        std::cout << "FAIL: initial app_status expected unauthenticated" << std::endl;
+        failures++;
+    }
+
+    auto r1 = app.authenticate("user", "wrong");
+    if (r1 != std::string("denied")) {
+        std::cout << "FAIL: bad login expected denied" << std::endl;
+        failures++;
+    }
+
+    if (app.app_status() != std::string("unauthenticated")) {
+        std::cout << "FAIL: still unauthenticated after bad login" << std::endl;
+        failures++;
+    }
+
+    auto r2 = app.authenticate("admin", "secret");
+    if (r2 != std::string("ok")) {
+        std::cout << "FAIL: good login expected ok" << std::endl;
+        failures++;
+    }
+
+    if (app.app_status() != std::string("authenticated")) {
+        std::cout << "FAIL: should be authenticated after good login" << std::endl;
+        failures++;
+    }
+
+    if (failures > 0) {
+        std::cout << "FAIL: auth_flow (" << failures << " failures)" << std::endl;
+        return 1;
+    }
+    std::cout << "PASS: auth_flow" << std::endl;
+    return 0;
+}

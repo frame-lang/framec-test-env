@@ -1,0 +1,90 @@
+@@target swift
+
+@@system RateLimiter {
+    operations:
+        static get_max_requests(): Int {
+            @@:(5)
+        }
+        get_count(): Int {
+            @@:(self.count)
+        }
+
+    interface:
+        request(): String
+        reset()
+        status(): String
+
+    machine:
+        $Allowing {
+            request(): String {
+                self.count = self.count + 1
+                if self.count >= self.max_requests {
+                    -> $Throttling
+                }
+                @@:("allowed")
+            }
+            reset() {
+                self.count = 0
+            }
+            status(): String { @@:("allowing") }
+        }
+        $Throttling {
+            request(): String { @@:("throttled") }
+            reset() {
+                self.count = 0
+                -> $Allowing
+            }
+            status(): String { @@:("throttling") }
+        }
+
+    domain:
+        count: Int = 0
+        max_requests: Int = 5
+}
+
+var rl = @@RateLimiter()
+var failures = 0
+
+let max = RateLimiter.get_max_requests()
+if max != 5 {
+    print("FAIL: expected max 5, got \(max)")
+    failures += 1
+}
+
+for _ in 1...4 {
+    let r = rl.request() as! String
+    if r != "allowed" {
+        print("FAIL: expected allowed, got \(r)")
+        failures += 1
+    }
+}
+
+rl.request()
+if rl.status() as! String != "throttling" {
+    print("FAIL: expected throttling after 5 requests")
+    failures += 1
+}
+
+let r2 = rl.request() as! String
+if r2 != "throttled" {
+    print("FAIL: expected throttled, got \(r2)")
+    failures += 1
+}
+
+rl.reset()
+if rl.status() as! String != "allowing" {
+    print("FAIL: expected allowing after reset")
+    failures += 1
+}
+
+let cnt = rl.get_count() as! Int
+if cnt != 0 {
+    print("FAIL: expected count 0 after reset, got \(cnt)")
+    failures += 1
+}
+
+if failures > 0 {
+    print("FAIL: rate_limiter (\(failures) failures)")
+    fatalError()
+}
+print("PASS: rate_limiter")

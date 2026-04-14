@@ -1,0 +1,96 @@
+@@target csharp
+// Auth Flow — multi-system demo (C#)
+
+using System;
+
+@@system LoginManager {
+    interface:
+        login(user: String, pass: String): String
+        status(): String
+
+    machine:
+        $LoggedOut {
+            login(user: String, pass: String): String {
+                if (user == "admin" && pass == "secret") {
+                    this.current_user = user;
+                    -> $LoggedIn
+                    @@:("ok")
+                } else {
+                    @@:("denied")
+                }
+            }
+            status(): String { @@:("logged_out") }
+        }
+        $LoggedIn {
+            login(user: String, pass: String): String { @@:("already_logged_in") }
+            status(): String { @@:("logged_in") }
+        }
+
+    domain:
+        current_user : string = ""
+}
+
+@@system App {
+    interface:
+        authenticate(user: String, pass: String): String
+        app_status(): String
+
+    machine:
+        $Unauthenticated {
+            authenticate(user: String, pass: String): String {
+                string result = (string)this.auth.login(user, pass);
+                if (result == "ok") {
+                    -> $Authenticated
+                }
+                @@:(result)
+            }
+            app_status(): String { @@:("unauthenticated") }
+        }
+        $Authenticated {
+            authenticate(user: String, pass: String): String { @@:("already_authenticated") }
+            app_status(): String { @@:("authenticated") }
+        }
+
+    domain:
+        auth : LoginManager = @@LoginManager()
+}
+
+class Program {
+    static void Main(string[] args) {
+        var app = @@App();
+        int failures = 0;
+
+        if ((string)app.app_status() != "unauthenticated") {
+            Console.WriteLine("FAIL: initial app_status expected unauthenticated");
+            failures++;
+        }
+
+        string r1 = (string)app.authenticate("user", "wrong");
+        if (r1 != "denied") {
+            Console.WriteLine("FAIL: bad login expected denied");
+            failures++;
+        }
+
+        if ((string)app.app_status() != "unauthenticated") {
+            Console.WriteLine("FAIL: still unauthenticated after bad login");
+            failures++;
+        }
+
+        string r2 = (string)app.authenticate("admin", "secret");
+        if (r2 != "ok") {
+            Console.WriteLine("FAIL: good login expected ok");
+            failures++;
+        }
+
+        if ((string)app.app_status() != "authenticated") {
+            Console.WriteLine("FAIL: should be authenticated after good login");
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine($"FAIL: auth_flow ({failures} failures)");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: auth_flow");
+    }
+}

@@ -1,0 +1,92 @@
+@@target swift
+
+@@system DeploymentPipeline {
+    interface:
+        start(version: String)
+        approve()
+        reject()
+        status(): String
+
+    machine:
+        $Idle {
+            start(version: String) {
+                self.version = version
+                -> ("build") $Stage
+            }
+            status(): String { @@:("idle") }
+        }
+        $Stage {
+            $.name: String = ""
+
+            $>(name: String) { $.name = name }
+
+            approve() {
+                if $.name == "build" {
+                    push$
+                    -> ("test") $Stage
+                } else {
+                    if $.name == "test" {
+                        push$
+                        -> ("deploy") $Stage
+                    } else {
+                        -> $Done
+                    }
+                }
+            }
+            reject() {
+                -> pop$
+            }
+            status(): String { @@:($.name) }
+        }
+        $Done {
+            status(): String { @@:("done") }
+        }
+
+    domain:
+        version: String = ""
+}
+
+var dp = @@DeploymentPipeline()
+var failures = 0
+
+if dp.status() as! String != "idle" {
+    print("FAIL: expected idle")
+    failures += 1
+}
+
+dp.start("v1.0")
+if dp.status() as! String != "build" {
+    print("FAIL: expected build")
+    failures += 1
+}
+
+dp.approve()
+if dp.status() as! String != "test" {
+    print("FAIL: expected test")
+    failures += 1
+}
+
+dp.reject()
+if dp.status() as! String != "build" {
+    print("FAIL: expected build after reject")
+    failures += 1
+}
+
+dp.approve()
+dp.approve()
+if dp.status() as! String != "deploy" {
+    print("FAIL: expected deploy")
+    failures += 1
+}
+
+dp.approve()
+if dp.status() as! String != "done" {
+    print("FAIL: expected done")
+    failures += 1
+}
+
+if failures > 0 {
+    print("FAIL: deployment_pipeline (\(failures) failures)")
+    fatalError()
+}
+print("PASS: deployment_pipeline")

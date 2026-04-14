@@ -1,0 +1,99 @@
+@@target csharp
+// Pipeline Processor — enter handler chain, 5 stages demo (C#)
+
+using System;
+
+@@system PipelineProcessor {
+    interface:
+        start(data: String)
+        status(): String
+
+    machine:
+        $Idle {
+            start(data: String) {
+                this.data = data;
+                -> $Validate
+            }
+            status(): String { @@:("idle") }
+        }
+        $Validate {
+            $>() {
+                this.step_count = this.step_count + 1;
+                -> $Transform
+            }
+            status(): String { @@:("validate") }
+        }
+        $Transform {
+            $>() {
+                this.step_count = this.step_count + 1;
+                -> $Enrich
+            }
+            status(): String { @@:("transform") }
+        }
+        $Enrich {
+            $>() {
+                this.step_count = this.step_count + 1;
+                -> $Store
+            }
+            status(): String { @@:("enrich") }
+        }
+        $Store {
+            $>() {
+                this.step_count = this.step_count + 1;
+                -> $Complete
+            }
+            status(): String { @@:("store") }
+        }
+        $Complete {
+            status(): String { @@:("complete") }
+            start(data: String) {
+                this.data = data;
+                this.step_count = 0;
+                -> $Validate
+            }
+        }
+
+    domain:
+        data : string = ""
+        step_count : int = 0
+}
+
+class Program {
+    static void Main(string[] args) {
+        var pp = @@PipelineProcessor();
+        int failures = 0;
+
+        if ((string)pp.status() != "idle") {
+            Console.WriteLine("FAIL: initial status expected idle");
+            failures++;
+        }
+
+        pp.start("test_data");
+        if ((string)pp.status() != "complete") {
+            Console.WriteLine($"FAIL: status after start expected complete (auto-chain), got {pp.status()}");
+            failures++;
+        }
+
+        if (pp.step_count != 4) {
+            Console.WriteLine($"FAIL: step_count expected 4, got {pp.step_count}");
+            failures++;
+        }
+
+        pp.start("more_data");
+        if ((string)pp.status() != "complete") {
+            Console.WriteLine("FAIL: status after restart expected complete");
+            failures++;
+        }
+
+        if (pp.step_count != 4) {
+            Console.WriteLine($"FAIL: step_count after restart expected 4, got {pp.step_count}");
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine($"FAIL: pipeline_processor ({failures} failures)");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: pipeline_processor");
+    }
+}

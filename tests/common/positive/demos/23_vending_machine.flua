@@ -1,0 +1,114 @@
+-- Vending Machine — operations + system params (Lua)
+
+@@system VendingMachine {
+    operations:
+        get_balance(): int {
+            return self.balance
+        }
+
+    interface:
+        insert_coin(amount: int)
+        select(item: str): str
+        refund(): int
+        status(): str
+
+    machine:
+        $Idle {
+            insert_coin(amount: int) {
+                self.balance = amount
+                -> $HasCredit
+            }
+            select(item: str): str { @@:("no credit") }
+            refund(): int { @@:(0) }
+            status(): str { @@:("idle") }
+        }
+        $HasCredit {
+            insert_coin(amount: int) {
+                self.balance = self.balance + amount
+            }
+            select(item: str): str {
+                if self.balance >= self.item_price {
+                    self.balance = self.balance - self.item_price
+                    if self.balance == 0 {
+                        -> $Idle
+                    }
+                    @@:(item)
+                } else {
+                    @@:("insufficient credit")
+                }
+            }
+            refund(): int {
+                local r = self.balance
+                self.balance = 0
+                @@:(r)
+                -> $Idle
+            }
+            status(): str { @@:("has_credit") }
+        }
+
+    domain:
+        balance = 0
+        item_price = 100
+}
+
+local vm = @@VendingMachine()
+local failures = 0
+
+if vm:status() ~= "idle" then
+    print("FAIL: expected idle")
+    failures = failures + 1
+end
+if vm:select("soda") ~= "no credit" then
+    print("FAIL: select without credit")
+    failures = failures + 1
+end
+if vm:refund() ~= 0 then
+    print("FAIL: refund from idle")
+    failures = failures + 1
+end
+
+vm:insert_coin(50)
+if vm:status() ~= "has_credit" then
+    print("FAIL: expected has_credit")
+    failures = failures + 1
+end
+if vm:get_balance() ~= 50 then
+    print("FAIL: balance should be 50")
+    failures = failures + 1
+end
+if vm:select("soda") ~= "insufficient credit" then
+    print("FAIL: should be insufficient")
+    failures = failures + 1
+end
+
+vm:insert_coin(50)
+if vm:get_balance() ~= 100 then
+    print("FAIL: balance should be 100")
+    failures = failures + 1
+end
+local item = vm:select("soda")
+if item ~= "soda" then
+    print("FAIL: expected soda, got " .. item)
+    failures = failures + 1
+end
+if vm:status() ~= "idle" then
+    print("FAIL: should be idle after exact purchase")
+    failures = failures + 1
+end
+
+vm:insert_coin(200)
+local r = vm:refund()
+if r ~= 200 then
+    print("FAIL: refund should be 200, got " .. r)
+    failures = failures + 1
+end
+if vm:status() ~= "idle" then
+    print("FAIL: should be idle after refund")
+    failures = failures + 1
+end
+
+if failures > 0 then
+    print("FAIL: vending_machine (" .. failures .. " failures)")
+    os.exit(1)
+end
+print("PASS: vending_machine")

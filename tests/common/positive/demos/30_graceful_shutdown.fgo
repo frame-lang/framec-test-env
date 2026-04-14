@@ -1,0 +1,94 @@
+@@target go
+// Graceful Shutdown — enter handler chain + HSM demo (Go)
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system GracefulShutdown {
+    interface:
+        Tick(): string
+        Status(): string
+
+    machine:
+        $Starting {
+            $>() {
+                s.log_count = s.log_count + 1
+                -> $Running
+            }
+            Status(): string { @@:("starting") }
+        }
+        $Running => $Active {
+            $>() {
+                s.log_count = s.log_count + 1
+            }
+            Tick(): string {
+                s.cycles = s.cycles + 1
+                if s.cycles >= s.max_cycles {
+                    -> $ShuttingDown
+                }
+                @@:("running")
+            }
+            Status(): string { @@:("running") }
+            => $^
+        }
+        $Active {
+            Tick(): string { @@:("active_tick") }
+        }
+        $ShuttingDown {
+            $>() {
+                s.log_count = s.log_count + 1
+            }
+            Tick(): string { @@:("shutting_down") }
+            Status(): string { @@:("shutting_down") }
+        }
+
+    domain:
+        cycles : int = 0
+        max_cycles : int = 3
+        log_count : int = 0
+}
+
+func main() {
+    gs := NewGracefulShutdown()
+    failures := 0
+
+    if gs.Status() != "running" {
+        fmt.Printf("FAIL: status after init expected running, got %s\n", gs.Status())
+        failures++
+    }
+
+    if gs.log_count < 2 {
+        fmt.Printf("FAIL: log_count expected >= 2, got %d\n", gs.log_count)
+        failures++
+    }
+
+    r1 := gs.Tick()
+    if r1 != "running" {
+        fmt.Printf("FAIL: tick 1 expected running, got %s\n", r1)
+        failures++
+    }
+
+    gs.Tick()
+    gs.Tick()
+
+    if gs.Status() != "shutting_down" {
+        fmt.Println("FAIL: should be shutting_down after max_cycles ticks")
+        failures++
+    }
+
+    r2 := gs.Tick()
+    if r2 != "shutting_down" {
+        fmt.Printf("FAIL: tick after shutdown expected shutting_down, got %s\n", r2)
+        failures++
+    }
+
+    if failures > 0 {
+        fmt.Printf("FAIL: graceful_shutdown (%d failures)\n", failures)
+        os.Exit(1)
+    }
+    fmt.Println("PASS: graceful_shutdown")
+}

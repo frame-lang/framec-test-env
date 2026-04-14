@@ -1,0 +1,99 @@
+@@target swift
+
+@@system GracefulShutdown {
+    interface:
+        start()
+        tick(): String
+        status(): String
+
+    machine:
+        $Idle {
+            start() {
+                -> $Running
+            }
+            status(): String { @@:("idle") }
+        }
+        $Running {
+            tick(): String {
+                self.cycles = self.cycles + 1
+                if self.cycles >= self.max_cycles {
+                    -> $ShuttingDown
+                }
+                @@:("running")
+            }
+            status(): String { @@:("running") }
+        }
+        $ShuttingDown {
+            $>() {
+                -> $Draining
+            }
+            status(): String { @@:("shutting_down") }
+        }
+        $Draining => $Shutdown {
+            $>() {
+                self.drain_count = self.drain_count + 1
+                -> $Cleanup
+            }
+            status(): String { @@:("draining") }
+            => $^
+        }
+        $Cleanup => $Shutdown {
+            $>() {
+                self.drain_count = self.drain_count + 1
+                -> $Stopped
+            }
+            status(): String { @@:("cleanup") }
+            => $^
+        }
+        $Shutdown {
+            tick(): String { @@:("shutting_down") }
+        }
+        $Stopped {
+            tick(): String { @@:("stopped") }
+            status(): String { @@:("stopped") }
+        }
+
+    domain:
+        cycles: Int = 0
+        max_cycles: Int = 3
+        drain_count: Int = 0
+}
+
+var gs = @@GracefulShutdown()
+var failures = 0
+
+if gs.status() as! String != "idle" {
+    print("FAIL: expected idle")
+    failures += 1
+}
+
+gs.start()
+if gs.status() as! String != "running" {
+    print("FAIL: expected running")
+    failures += 1
+}
+
+gs.tick()
+gs.tick()
+gs.tick()
+if gs.status() as! String != "stopped" {
+    print("FAIL: expected stopped after max cycles")
+    failures += 1
+}
+
+if gs.drain_count != 2 {
+    print("FAIL: expected drain_count 2, got \(gs.drain_count)")
+    failures += 1
+}
+
+let r2 = gs.tick() as! String
+if r2 != "stopped" {
+    print("FAIL: expected stopped tick, got \(r2)")
+    failures += 1
+}
+
+if failures > 0 {
+    print("FAIL: graceful_shutdown (\(failures) failures)")
+    fatalError()
+}
+print("PASS: graceful_shutdown")

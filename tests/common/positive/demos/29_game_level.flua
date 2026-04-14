@@ -1,0 +1,103 @@
+-- Game Level — multi-system (SurvivalLevel + Game) (Lua)
+
+@@system SurvivalLevel {
+    interface:
+        take_hit(damage: int)
+        heal(amount: int)
+        get_hp(): int
+        status(): str
+
+    machine:
+        $Alive {
+            take_hit(damage: int) {
+                self.hp = self.hp - damage
+                if self.hp <= 0 {
+                    self.hp = 0
+                    -> $Dead
+                }
+            }
+            heal(amount: int) {
+                self.hp = self.hp + amount
+                if self.hp > self.max_hp {
+                    self.hp = self.max_hp
+                }
+            }
+            get_hp(): int { @@:(self.hp) }
+            status(): str { @@:("alive") }
+        }
+        $Dead {
+            get_hp(): int { @@:(0) }
+            status(): str { @@:("dead") }
+        }
+
+    domain:
+        hp = 100
+        max_hp = 100
+}
+
+@@system Game {
+    interface:
+        attack(damage: int)
+        use_potion()
+        player_hp(): int
+        player_status(): str
+
+    machine:
+        $Playing {
+            attack(damage: int) {
+                self.level:take_hit(damage)
+                if self.level:status() == "dead" {
+                    -> $GameOver
+                }
+            }
+            use_potion() {
+                self.level:heal(30)
+            }
+            player_hp(): int { @@:(self.level:get_hp()) }
+            player_status(): str { @@:(self.level:status()) }
+        }
+        $GameOver {
+            player_hp(): int { @@:(0) }
+            player_status(): str { @@:("game_over") }
+        }
+
+    domain:
+        level = SurvivalLevel:new()
+}
+
+local game = Game:new()
+local failures = 0
+
+if game:player_hp() ~= 100 then
+    print("FAIL: expected 100 hp")
+    failures = failures + 1
+end
+if game:player_status() ~= "alive" then
+    print("FAIL: expected alive")
+    failures = failures + 1
+end
+
+game:attack(30)
+if game:player_hp() ~= 70 then
+    print("FAIL: expected 70 hp")
+    failures = failures + 1
+end
+
+game:use_potion()
+if game:player_hp() ~= 100 then
+    print("FAIL: expected 100 hp after heal")
+    failures = failures + 1
+end
+
+game:attack(90)
+game:attack(20)
+if game:player_status() ~= "game_over" then
+    print("FAIL: expected game_over")
+    failures = failures + 1
+end
+
+if failures > 0 then
+    print("FAIL: game_level (" .. failures .. " failures)")
+    os.exit(1)
+end
+print("PASS: game_level")

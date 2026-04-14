@@ -1,0 +1,84 @@
+<?php
+// Test Harness — @@:system.state in operations (PHP)
+
+@@system TestHarness {
+    operations:
+        current_state(): str {
+            @@:(@@:system.state)
+        }
+
+    interface:
+        run()
+        pass_test()
+        fail(reason: str)
+        get_state(): str
+        get_result(): str
+
+    machine:
+        $Ready {
+            $.ticks: int = 0
+
+            run() {
+                $this->result = "";
+                -> $Running
+            }
+            get_state(): str { @@:("ready") }
+            get_result(): str { @@:($this->result) }
+        }
+        $Running {
+            $.ticks: int = 0
+
+            pass_test() {
+                $this->result = "pass";
+                -> $Passed
+            }
+            fail(reason: str) {
+                $this->result = $reason;
+                -> $Failed
+            }
+            get_state(): str { @@:("running") }
+            get_result(): str { @@:("") }
+        }
+        $Passed {
+            run() {
+                $this->result = "";
+                -> $Running
+            }
+            get_state(): str { @@:("passed") }
+            get_result(): str { @@:($this->result) }
+        }
+        $Failed {
+            run() {
+                $this->result = "";
+                -> $Running
+            }
+            get_state(): str { @@:("failed") }
+            get_result(): str { @@:($this->result) }
+        }
+
+    domain:
+        result = ""
+}
+
+$th = @@TestHarness();
+$failures = 0;
+
+if ($th->get_state() !== "ready") { echo "FAIL: expected ready\n"; $failures++; }
+
+$cs1 = $th->current_state();
+if ($cs1 !== "Ready") { echo "FAIL: current_state expected Ready, got $cs1\n"; $failures++; }
+
+$th->run();
+if ($th->get_state() !== "running") { echo "FAIL: expected running\n"; $failures++; }
+
+$th->pass_test();
+if ($th->get_state() !== "passed") { echo "FAIL: expected passed\n"; $failures++; }
+if ($th->get_result() !== "pass") { echo "FAIL: result expected pass\n"; $failures++; }
+
+$th->run();
+$th->fail("timeout");
+if ($th->get_state() !== "failed") { echo "FAIL: expected failed\n"; $failures++; }
+if ($th->get_result() !== "timeout") { echo "FAIL: result expected timeout\n"; $failures++; }
+
+if ($failures > 0) { echo "FAIL: test_harness ($failures failures)\n"; exit(1); }
+echo "PASS: test_harness\n";

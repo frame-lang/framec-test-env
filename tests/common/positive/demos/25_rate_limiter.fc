@@ -1,0 +1,101 @@
+@@target c
+// Rate Limiter — static operations demo (C)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system RateLimiter {
+    operations:
+        static get_max_requests(): int {
+            return 5;
+        }
+        get_count(): int {
+            return self->count;
+        }
+
+    interface:
+        request(): str
+        reset()
+        status(): str
+
+    machine:
+        $Allowing {
+            request(): str {
+                self->count = self->count + 1;
+                if self->count >= self->max_requests {
+                    -> $Throttling
+                }
+                @@:("allowed")
+            }
+            reset() {
+                self->count = 0;
+            }
+            status(): str { @@:("allowing") }
+        }
+        $Throttling {
+            request(): str { @@:("throttled") }
+            reset() {
+                self->count = 0;
+                -> $Allowing
+            }
+            status(): str { @@:("throttling") }
+        }
+
+    domain:
+        count : int = 0
+        max_requests : int = 5
+}
+
+int main() {
+    RateLimiter* rl = @@RateLimiter();
+    int failures = 0;
+
+    if (strcmp(RateLimiter_status(rl), "allowing") != 0) {
+        printf("FAIL: initial status expected allowing\n");
+        failures++;
+    }
+
+    if (RateLimiter_get_max_requests() != 5) {
+        printf("FAIL: static get_max_requests expected 5\n");
+        failures++;
+    }
+
+    for (int i = 0; i < 4; i++) {
+        if (strcmp(RateLimiter_request(rl), "allowed") != 0) {
+            printf("FAIL: request %d expected allowed\n", i + 1);
+            failures++;
+        }
+    }
+
+    RateLimiter_request(rl);
+    if (strcmp(RateLimiter_status(rl), "throttling") != 0) {
+        printf("FAIL: should be throttling after 5 requests\n");
+        failures++;
+    }
+
+    if (strcmp(RateLimiter_request(rl), "throttled") != 0) {
+        printf("FAIL: request while throttling expected throttled\n");
+        failures++;
+    }
+
+    RateLimiter_reset(rl);
+    if (strcmp(RateLimiter_status(rl), "allowing") != 0) {
+        printf("FAIL: should be allowing after reset\n");
+        failures++;
+    }
+
+    if (RateLimiter_get_count(rl) != 0) {
+        printf("FAIL: count after reset expected 0\n");
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: rate_limiter (%d failures)\n", failures);
+        RateLimiter_destroy(rl);
+        return 1;
+    }
+    printf("PASS: rate_limiter\n");
+    RateLimiter_destroy(rl);
+    return 0;
+}

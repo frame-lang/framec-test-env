@@ -1,0 +1,92 @@
+# Thermostat — HSM with parent forwarding (Ruby)
+
+@@system Thermostat {
+    interface:
+        set_target(temp: int)
+        tick(): str
+        status(): str
+
+    machine:
+        $Off {
+            set_target(temp: int) {
+                self.target = temp
+                -> $Heating
+            }
+            status(): str { @@:("off") }
+        }
+        $Heating => $Active {
+            tick(): str {
+                self.current = self.current + self.heat_rate
+                if self.current >= self.target {
+                    -> $Cooling
+                }
+                @@:("heating")
+            }
+            status(): str { @@:("heating") }
+            => $^
+        }
+        $Cooling => $Active {
+            tick(): str {
+                self.current = self.current - 1
+                if self.current <= self.target - 2 {
+                    -> $Heating
+                }
+                @@:("cooling")
+            }
+            status(): str { @@:("cooling") }
+            => $^
+        }
+        $Active {
+            set_target(temp: int) {
+                self.target = temp
+            }
+        }
+
+    domain:
+        current = 60
+        target = 72
+        heat_rate = 2
+}
+
+t = @@Thermostat()
+failures = 0
+
+if t.status() != "off"
+    puts "FAIL: expected off"
+    failures += 1
+end
+t.set_target(64)
+if t.status() != "heating"
+    puts "FAIL: expected heating"
+    failures += 1
+end
+
+t.tick()
+if t.current != 62
+    puts "FAIL: current should be 62, got #{t.current}"
+    failures += 1
+end
+t.tick()
+if t.current != 64
+    puts "FAIL: current should be 64, got #{t.current}"
+    failures += 1
+end
+if t.status() != "cooling"
+    puts "FAIL: expected cooling after reaching target"
+    failures += 1
+end
+
+t.set_target(63)
+t.tick()
+t.tick()
+t.tick()
+if t.status() != "heating"
+    puts "FAIL: expected heating after dropping below target-2"
+    failures += 1
+end
+
+if failures > 0
+    puts "FAIL: thermostat (#{failures} failures)"
+    exit(1)
+end
+puts "PASS: thermostat"

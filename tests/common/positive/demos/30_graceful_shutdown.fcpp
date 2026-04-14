@@ -1,0 +1,91 @@
+@@target cpp_17
+// Graceful Shutdown — enter handler chain + HSM demo (C++)
+
+#include <iostream>
+#include <string>
+
+@@system GracefulShutdown {
+    interface:
+        tick(): str
+        status(): str
+
+    machine:
+        $Starting {
+            $>() {
+                this->log_count = this->log_count + 1;
+                -> $Running
+            }
+            status(): str { @@:("starting") }
+        }
+        $Running => $Active {
+            $>() {
+                this->log_count = this->log_count + 1;
+            }
+            tick(): str {
+                this->cycles = this->cycles + 1;
+                if this->cycles >= this->max_cycles {
+                    -> $ShuttingDown
+                }
+                @@:("running")
+            }
+            status(): str { @@:("running") }
+            => $^
+        }
+        $Active {
+            tick(): str { @@:("active_tick") }
+        }
+        $ShuttingDown {
+            $>() {
+                this->log_count = this->log_count + 1;
+            }
+            tick(): str { @@:("shutting_down") }
+            status(): str { @@:("shutting_down") }
+        }
+
+    domain:
+        cycles : int = 0
+        max_cycles : int = 3
+        log_count : int = 0
+}
+
+int main() {
+    auto gs = @@GracefulShutdown();
+    int failures = 0;
+
+    if (gs.status() != std::string("running")) {
+        std::cout << "FAIL: status after init expected running" << std::endl;
+        failures++;
+    }
+
+    if (gs.log_count < 2) {
+        std::cout << "FAIL: log_count expected >= 2, got " << gs.log_count << std::endl;
+        failures++;
+    }
+
+    auto r1 = gs.tick();
+    if (r1 != std::string("running")) {
+        std::cout << "FAIL: tick 1 expected running" << std::endl;
+        failures++;
+    }
+
+    gs.tick();
+    gs.tick();
+
+    if (gs.status() != std::string("shutting_down")) {
+        std::cout << "FAIL: should be shutting_down after max_cycles ticks" << std::endl;
+        failures++;
+    }
+
+    auto r2 = gs.tick();
+    if (r2 != std::string("shutting_down")) {
+        std::cout << "FAIL: tick after shutdown expected shutting_down" << std::endl;
+        failures++;
+    }
+
+    if (failures > 0) {
+        std::cout << "FAIL: graceful_shutdown (" << failures << " failures)" << std::endl;
+        return 1;
+    }
+    std::cout << "PASS: graceful_shutdown" << std::endl;
+    return 0;
+}

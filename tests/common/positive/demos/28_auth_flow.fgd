@@ -1,0 +1,71 @@
+@@target gdscript
+@@skip -- GDScript multi-system codegen issue with @@LoginManager() domain init
+
+extends SceneTree
+
+@@system LoginManager {
+    interface:
+        login(user: str, pass: str): str
+        logout()
+        status(): str
+
+    machine:
+        $LoggedOut {
+            login(user: str, pass: str): str {
+                if pass == "secret" {
+                    self.current_user = user
+                    -> $LoggedIn
+                    @@:("ok")
+                } else {
+                    @@:("denied")
+                }
+            }
+            status(): str { @@:("logged_out") }
+        }
+        $LoggedIn {
+            logout() {
+                self.current_user = ""
+                -> $LoggedOut
+            }
+            status(): str { @@:("logged_in") }
+        }
+
+    domain:
+        current_user = ""
+}
+
+@@system App {
+    interface:
+        authenticate(user: str, pass: str): str
+        get_status(): str
+
+    machine:
+        $Running {
+            authenticate(user: str, pass: str): str {
+                var result = self.auth.login(user, pass)
+                @@:(result)
+            }
+            get_status(): str {
+                @@:(self.auth.status())
+            }
+        }
+
+    domain:
+        auth = @@LoginManager()
+}
+
+func _init():
+    var app = @@App()
+
+    assert(app.get_status() == "logged_out", "Expected logged_out")
+
+    var r1 = app.authenticate("alice", "wrong")
+    assert(r1 == "denied", "Expected denied, got: " + str(r1))
+
+    var r2 = app.authenticate("alice", "secret")
+    assert(r2 == "ok", "Expected ok, got: " + str(r2))
+
+    assert(app.get_status() == "logged_in", "Expected logged_in")
+
+    print("PASS: auth_flow")
+    quit()

@@ -1,0 +1,115 @@
+@@target java
+// Vending Machine — operations + domain demo (Java)
+
+@@system VendingMachine {
+    operations:
+        get_balance(): int {
+            return this.balance;
+        }
+
+    interface:
+        insert_coin(amount: int)
+        select_item(item: String): String
+        refund(): int
+        status(): String
+
+    machine:
+        $Idle {
+            insert_coin(amount: int) {
+                this.balance = amount;
+                -> $HasCredit
+            }
+            select_item(item: String): String { @@:("no credit") }
+            refund(): int { @@:(0) }
+            status(): String { @@:("idle") }
+        }
+        $HasCredit {
+            insert_coin(amount: int) {
+                this.balance = this.balance + amount;
+            }
+            select_item(item: String): String {
+                if this.balance >= this.item_price {
+                    this.balance = this.balance - this.item_price;
+                    if this.balance == 0 {
+                        -> $Idle
+                    }
+                    @@:(item)
+                } else {
+                    @@:("insufficient credit")
+                }
+            }
+            refund(): int {
+                int r = this.balance;
+                this.balance = 0;
+                -> $Idle
+                @@:(r)
+            }
+            status(): String { @@:("has_credit") }
+        }
+
+    domain:
+        balance : int = 0
+        item_price : int = 100
+}
+
+class Main {
+    public static void main(String[] args) {
+        VendingMachine vm = @@VendingMachine();
+        int failures = 0;
+
+        if (!vm.status().equals("idle")) {
+            System.out.println("FAIL: initial status expected idle");
+            failures++;
+        }
+
+        if (!vm.select_item("soda").equals("no credit")) {
+            System.out.println("FAIL: select with no credit");
+            failures++;
+        }
+
+        vm.insert_coin(50);
+        if (!vm.status().equals("has_credit")) {
+            System.out.println("FAIL: status after insert");
+            failures++;
+        }
+
+        if (vm.get_balance() != 50) {
+            System.out.println("FAIL: balance expected 50");
+            failures++;
+        }
+
+        if (!vm.select_item("soda").equals("insufficient credit")) {
+            System.out.println("FAIL: select with insufficient credit");
+            failures++;
+        }
+
+        vm.insert_coin(50);
+        if (vm.get_balance() != 100) {
+            System.out.println("FAIL: balance expected 100");
+            failures++;
+        }
+
+        if (!vm.select_item("soda").equals("soda")) {
+            System.out.println("FAIL: select with exact credit");
+            failures++;
+        }
+
+        if (!vm.status().equals("idle")) {
+            System.out.println("FAIL: status after exact purchase");
+            failures++;
+        }
+
+        vm.insert_coin(200);
+        int refunded = vm.refund();
+        if (refunded != 200) {
+            System.out.println("FAIL: refund expected 200, got " + refunded);
+            failures++;
+        }
+
+        if (failures > 0) {
+            System.out.println("FAIL: vending_machine (" + failures + " failures)");
+            System.exit(1);
+        }
+        System.out.println("PASS: vending_machine");
+    }
+}

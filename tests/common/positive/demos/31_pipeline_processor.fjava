@@ -1,0 +1,97 @@
+@@target java
+// Pipeline Processor — enter handler chain, 5 stages demo (Java)
+
+@@system PipelineProcessor {
+    interface:
+        start(data: String)
+        status(): String
+
+    machine:
+        $Idle {
+            start(data: String) {
+                this.data = data;
+                -> $Validate
+            }
+            status(): String { @@:("idle") }
+        }
+        $Validate {
+            $>() {
+                this.step_count = this.step_count + 1;
+                -> $Transform
+            }
+            status(): String { @@:("validate") }
+        }
+        $Transform {
+            $>() {
+                this.step_count = this.step_count + 1;
+                -> $Enrich
+            }
+            status(): String { @@:("transform") }
+        }
+        $Enrich {
+            $>() {
+                this.step_count = this.step_count + 1;
+                -> $Store
+            }
+            status(): String { @@:("enrich") }
+        }
+        $Store {
+            $>() {
+                this.step_count = this.step_count + 1;
+                -> $Complete
+            }
+            status(): String { @@:("store") }
+        }
+        $Complete {
+            status(): String { @@:("complete") }
+            start(data: String) {
+                this.data = data;
+                this.step_count = 0;
+                -> $Validate
+            }
+        }
+
+    domain:
+        data : String = ""
+        step_count : int = 0
+}
+
+class Main {
+    public static void main(String[] args) {
+        PipelineProcessor pp = @@PipelineProcessor();
+        int failures = 0;
+
+        if (!pp.status().equals("idle")) {
+            System.out.println("FAIL: initial status expected idle");
+            failures++;
+        }
+
+        pp.start("test_data");
+        if (!pp.status().equals("complete")) {
+            System.out.println("FAIL: status after start expected complete (auto-chain), got " + pp.status());
+            failures++;
+        }
+
+        if (pp.step_count != 4) {
+            System.out.println("FAIL: step_count expected 4, got " + pp.step_count);
+            failures++;
+        }
+
+        pp.start("more_data");
+        if (!pp.status().equals("complete")) {
+            System.out.println("FAIL: status after restart expected complete");
+            failures++;
+        }
+
+        if (pp.step_count != 4) {
+            System.out.println("FAIL: step_count after restart expected 4, got " + pp.step_count);
+            failures++;
+        }
+
+        if (failures > 0) {
+            System.out.println("FAIL: pipeline_processor (" + failures + " failures)");
+            System.exit(1);
+        }
+        System.out.println("PASS: pipeline_processor");
+    }
+}

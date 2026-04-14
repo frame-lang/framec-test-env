@@ -1,0 +1,99 @@
+-- Auth Flow — multi-system with LoginManager + App (Lua)
+
+@@system LoginManager {
+    interface:
+        login(user: str, pass: str): str
+        logout(): str
+        status(): str
+
+    machine:
+        $LoggedOut {
+            login(user: str, pass: str): str {
+                if pass == "secret" {
+                    self.current_user = user
+                    -> $LoggedIn
+                    @@:("ok")
+                } else {
+                    @@:("denied")
+                }
+            }
+            status(): str { @@:("logged_out") }
+        }
+        $LoggedIn {
+            logout(): str {
+                local u = self.current_user
+                self.current_user = ""
+                -> $LoggedOut
+                @@:(u)
+            }
+            status(): str { @@:("logged_in") }
+        }
+
+    domain:
+        current_user = ""
+}
+
+@@system App {
+    interface:
+        do_login(user: str, pass: str): str
+        do_logout(): str
+        app_status(): str
+
+    machine:
+        $Ready {
+            do_login(user: str, pass: str): str {
+                local result = self.login_mgr:login(user, pass)
+                @@:(result)
+            }
+            do_logout(): str {
+                local result = self.login_mgr:logout()
+                @@:(result)
+            }
+            app_status(): str {
+                @@:(self.login_mgr:status())
+            }
+        }
+
+    domain:
+        login_mgr = LoginManager:new()
+}
+
+local app = App:new()
+local failures = 0
+
+if app:app_status() ~= "logged_out" then
+    print("FAIL: expected logged_out")
+    failures = failures + 1
+end
+
+local r1 = app:do_login("alice", "wrong")
+if r1 ~= "denied" then
+    print("FAIL: expected denied, got " .. tostring(r1))
+    failures = failures + 1
+end
+
+local r2 = app:do_login("alice", "secret")
+if r2 ~= "ok" then
+    print("FAIL: expected ok, got " .. tostring(r2))
+    failures = failures + 1
+end
+if app:app_status() ~= "logged_in" then
+    print("FAIL: expected logged_in")
+    failures = failures + 1
+end
+
+local r3 = app:do_logout()
+if r3 ~= "alice" then
+    print("FAIL: expected alice, got " .. tostring(r3))
+    failures = failures + 1
+end
+if app:app_status() ~= "logged_out" then
+    print("FAIL: expected logged_out after logout")
+    failures = failures + 1
+end
+
+if failures > 0 then
+    print("FAIL: auth_flow (" .. failures .. " failures)")
+    os.exit(1)
+end
+print("PASS: auth_flow")

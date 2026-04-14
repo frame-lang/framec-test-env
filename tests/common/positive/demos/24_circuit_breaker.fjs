@@ -1,0 +1,65 @@
+// Circuit Breaker — state vars + domain vars (JavaScript)
+
+@@system CircuitBreaker {
+    interface:
+        call(): str
+        succeed()
+        fail()
+        reset()
+        status(): str
+
+    machine:
+        $Closed {
+            $.failures: int = 0
+
+            call(): str { @@:("allowed") }
+            succeed() {
+                $.failures = 0
+            }
+            fail() {
+                $.failures = $.failures + 1
+                if ($.failures >= this.threshold) {
+                    -> $Open
+                }
+            }
+            reset() { $.failures = 0 }
+            status(): str { @@:("closed") }
+        }
+        $Open {
+            call(): str { @@:("blocked") }
+            reset() { -> $HalfOpen }
+            status(): str { @@:("open") }
+        }
+        $HalfOpen {
+            call(): str { @@:("trial") }
+            succeed() { -> $Closed }
+            fail() { -> $Open }
+            status(): str { @@:("half_open") }
+        }
+
+    domain:
+        threshold = 3
+}
+
+const cb = @@CircuitBreaker()
+let failures = 0
+
+if (cb.status() !== "closed") { console.log("FAIL: expected closed"); failures++ }
+if (cb.call() !== "allowed") { console.log("FAIL: expected allowed"); failures++ }
+
+cb.fail()
+cb.fail()
+if (cb.status() !== "closed") { console.log("FAIL: still closed after 2 fails"); failures++ }
+cb.fail()
+if (cb.status() !== "open") { console.log("FAIL: expected open after 3 fails"); failures++ }
+if (cb.call() !== "blocked") { console.log("FAIL: expected blocked"); failures++ }
+
+cb.reset()
+if (cb.status() !== "half_open") { console.log("FAIL: expected half_open"); failures++ }
+if (cb.call() !== "trial") { console.log("FAIL: expected trial"); failures++ }
+
+cb.succeed()
+if (cb.status() !== "closed") { console.log("FAIL: expected closed after succeed"); failures++ }
+
+if (failures > 0) { console.log("FAIL: circuit_breaker (" + failures + " failures)"); process.exit(1) }
+console.log("PASS: circuit_breaker")

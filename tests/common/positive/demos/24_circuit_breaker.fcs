@@ -1,0 +1,103 @@
+@@target csharp
+// Circuit Breaker — state vars + domain vars demo (C#)
+
+using System;
+
+@@system CircuitBreaker {
+    interface:
+        call(): String
+        succeed()
+        fail()
+        reset()
+        status(): String
+
+    machine:
+        $Closed {
+            $.failures: int = 0
+
+            call(): String { @@:("allowed") }
+            succeed() {
+                $.failures = 0;
+            }
+            fail() {
+                $.failures = $.failures + 1;
+                if $.failures >= this.threshold {
+                    -> $Open
+                }
+            }
+            reset() { $.failures = 0; }
+            status(): String { @@:("closed") }
+        }
+        $Open {
+            call(): String { @@:("blocked") }
+            reset() { -> $HalfOpen }
+            status(): String { @@:("open") }
+        }
+        $HalfOpen {
+            call(): String { @@:("trial") }
+            succeed() { -> $Closed }
+            fail() { -> $Open }
+            status(): String { @@:("half_open") }
+        }
+
+    domain:
+        threshold : int = 3
+}
+
+class Program {
+    static void Main(string[] args) {
+        var cb = @@CircuitBreaker();
+        int failures = 0;
+
+        if ((string)cb.status() != "closed") {
+            Console.WriteLine("FAIL: initial status expected closed");
+            failures++;
+        }
+
+        if ((string)cb.call() != "allowed") {
+            Console.WriteLine("FAIL: call in closed expected allowed");
+            failures++;
+        }
+
+        cb.fail();
+        cb.fail();
+        if ((string)cb.status() != "closed") {
+            Console.WriteLine("FAIL: still closed after 2 failures");
+            failures++;
+        }
+
+        cb.fail();
+        if ((string)cb.status() != "open") {
+            Console.WriteLine("FAIL: should be open after 3 failures");
+            failures++;
+        }
+
+        if ((string)cb.call() != "blocked") {
+            Console.WriteLine("FAIL: call in open expected blocked");
+            failures++;
+        }
+
+        cb.reset();
+        if ((string)cb.status() != "half_open") {
+            Console.WriteLine("FAIL: should be half_open after reset");
+            failures++;
+        }
+
+        if ((string)cb.call() != "trial") {
+            Console.WriteLine("FAIL: call in half_open expected trial");
+            failures++;
+        }
+
+        cb.succeed();
+        if ((string)cb.status() != "closed") {
+            Console.WriteLine("FAIL: should be closed after succeed in half_open");
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine($"FAIL: circuit_breaker ({failures} failures)");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: circuit_breaker");
+    }
+}

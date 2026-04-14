@@ -1,0 +1,86 @@
+@@target python_3
+
+import random
+
+@@system SurvivalLevel {
+    interface:
+        tick()
+        input(action: str): str = ""
+
+    machine:
+        $Playing {
+            $.health: int = 100
+            $.score: int = 0
+
+            tick() {
+                $.health = $.health - random.randint(1, 15)
+                if $.health <= 0:
+                    self.final_score = $.score
+                    -> $Lost
+            }
+            input(action: str): str {
+                if action == "attack":
+                    $.score = $.score + 10
+                    @@:(f"attack! score={$.score}")
+            }
+        }
+        $Lost {
+            $>() {
+                self.parent.level_complete(False, self.final_score)
+            }
+        }
+
+    domain:
+        parent = None
+        final_score: int = 0
+}
+
+@@system Game {
+    interface:
+        start()
+        tick()
+        input(action: str): str = ""
+        level_complete(won: bool, score: int)
+        status(): str = ""
+
+    machine:
+        $MainMenu {
+            start() {
+                self.total_score = 0
+                -> $InLevel
+            }
+            status(): str { @@:("main menu") }
+        }
+        $InLevel {
+            $.level_mgr = None
+            $>() {
+                $.level_mgr = @@SurvivalLevel()
+                $.level_mgr.parent = self
+            }
+
+            tick() { $.level_mgr.tick() }
+            input(action: str): str { @@:($.level_mgr.input(action)) }
+            level_complete(won: bool, score: int) {
+                self.total_score = self.total_score + score
+                -> $GameOver
+            }
+            status(): str { @@:("in level") }
+        }
+        $GameOver {
+            status(): str { @@:(f"game over ({self.total_score})") }
+        }
+
+    domain:
+        total_score: int = 0
+}
+
+if __name__ == '__main__':
+    random.seed(0)
+    game = @@Game()
+    game.start()
+    for _ in range(20):
+        game.tick()
+        game.input("attack")
+    assert "game over" in game.status(), f"Expected game over, got {game.status()}"
+    assert game.total_score > 0, f"Expected positive score, got {game.total_score}"
+    print("PASS: game_level")

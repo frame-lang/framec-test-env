@@ -1,0 +1,106 @@
+@@target csharp
+// Game Level — multi-system demo (C#)
+
+using System;
+
+@@system EnemySpawner {
+    interface:
+        spawn(): String
+        status(): String
+
+    machine:
+        $Ready {
+            spawn(): String {
+                this.spawned = this.spawned + 1;
+                if this.spawned >= this.max_enemies {
+                    -> $Exhausted
+                }
+                @@:("enemy_spawned")
+            }
+            status(): String { @@:("ready") }
+        }
+        $Exhausted {
+            spawn(): String { @@:("no_more_enemies") }
+            status(): String { @@:("exhausted") }
+        }
+
+    domain:
+        spawned : int = 0
+        max_enemies : int = 3
+}
+
+@@system GameLevel {
+    interface:
+        start()
+        spawn_enemy(): String
+        complete()
+        level_status(): String
+
+    machine:
+        $Loading {
+            start() {
+                -> $Playing
+            }
+            level_status(): String { @@:("loading") }
+        }
+        $Playing {
+            spawn_enemy(): String {
+                string result = (string)this.spawner.spawn();
+                @@:(result)
+            }
+            complete() {
+                -> $Victory
+            }
+            level_status(): String { @@:("playing") }
+        }
+        $Victory {
+            level_status(): String { @@:("victory") }
+        }
+
+    domain:
+        spawner : EnemySpawner = @@EnemySpawner()
+}
+
+class Program {
+    static void Main(string[] args) {
+        var level = @@GameLevel();
+        int failures = 0;
+
+        if ((string)level.level_status() != "loading") {
+            Console.WriteLine("FAIL: initial status expected loading");
+            failures++;
+        }
+
+        level.start();
+        if ((string)level.level_status() != "playing") {
+            Console.WriteLine("FAIL: status after start expected playing");
+            failures++;
+        }
+
+        for (int i = 0; i < 3; i++) {
+            string r = (string)level.spawn_enemy();
+            if (r != "enemy_spawned") {
+                Console.WriteLine($"FAIL: spawn {i + 1} expected enemy_spawned");
+                failures++;
+            }
+        }
+
+        string r2 = (string)level.spawn_enemy();
+        if (r2 != "no_more_enemies") {
+            Console.WriteLine("FAIL: spawn after exhausted expected no_more_enemies");
+            failures++;
+        }
+
+        level.complete();
+        if ((string)level.level_status() != "victory") {
+            Console.WriteLine("FAIL: status after complete expected victory");
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine($"FAIL: game_level ({failures} failures)");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: game_level");
+    }
+}

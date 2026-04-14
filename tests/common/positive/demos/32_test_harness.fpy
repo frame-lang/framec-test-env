@@ -1,0 +1,78 @@
+@@target python_3
+
+@@system TrafficLight {
+    operations:
+        current_state(): str {
+            return @@:system.state
+        }
+        is_in_state(name: str): bool {
+            return @@:system.state == name
+        }
+        get_config(): dict {
+            return {"green": self.green_dur, "yellow": self.yellow_dur, "red": self.red_dur}
+        }
+
+    interface:
+        next()
+        emergency()
+        resume()
+
+    machine:
+        $Green {
+            $.ticks: int = 0
+            next() {
+                $.ticks = $.ticks + 1
+                if $.ticks >= self.green_dur:
+                    -> $Yellow
+            }
+            emergency() { -> $EmergencyRed }
+        }
+        $Yellow {
+            $.ticks: int = 0
+            next() {
+                $.ticks = $.ticks + 1
+                if $.ticks >= self.yellow_dur:
+                    -> $Red
+            }
+            emergency() { -> $EmergencyRed }
+        }
+        $Red {
+            $.ticks: int = 0
+            next() {
+                $.ticks = $.ticks + 1
+                if $.ticks >= self.red_dur:
+                    -> $Green
+            }
+            emergency() { -> $EmergencyRed }
+        }
+        $EmergencyRed {
+            resume() { -> $Red }
+        }
+
+    domain:
+        green_dur: int = 3
+        yellow_dur: int = 1
+        red_dur: int = 2
+}
+
+if __name__ == '__main__':
+    tl = @@TrafficLight()
+    assert tl.is_in_state("Green"), f"Expected Green, got {tl.current_state()}"
+
+    for _ in range(3): tl.next()
+    assert tl.is_in_state("Yellow"), f"Expected Yellow, got {tl.current_state()}"
+
+    tl.next()
+    assert tl.is_in_state("Red"), f"Expected Red, got {tl.current_state()}"
+
+    tl.emergency()
+    assert tl.is_in_state("EmergencyRed"), f"Expected EmergencyRed, got {tl.current_state()}"
+    tl.next()  # ignored
+    assert tl.is_in_state("EmergencyRed"), f"Still EmergencyRed, got {tl.current_state()}"
+    tl.resume()
+    assert tl.is_in_state("Red"), f"Expected Red, got {tl.current_state()}"
+
+    config = tl.get_config()
+    assert config["green"] == 3
+
+    print("PASS: test_harness")

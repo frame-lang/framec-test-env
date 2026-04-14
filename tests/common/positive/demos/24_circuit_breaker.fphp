@@ -1,0 +1,66 @@
+<?php
+// Circuit Breaker — state vars + domain vars (PHP)
+
+@@system CircuitBreaker {
+    interface:
+        call(): str
+        succeed()
+        fail()
+        reset()
+        status(): str
+
+    machine:
+        $Closed {
+            $.failures: int = 0
+
+            call(): str { @@:("allowed") }
+            succeed() {
+                $.failures = 0;
+            }
+            fail() {
+                $.failures = $.failures + 1;
+                if ($.failures >= $this->threshold) {
+                    -> $Open
+                }
+            }
+            reset() { $.failures = 0; }
+            status(): str { @@:("closed") }
+        }
+        $Open {
+            call(): str { @@:("blocked") }
+            reset() { -> $HalfOpen }
+            status(): str { @@:("open") }
+        }
+        $HalfOpen {
+            call(): str { @@:("trial") }
+            succeed() { -> $Closed }
+            fail() { -> $Open }
+            status(): str { @@:("half_open") }
+        }
+
+    domain:
+        threshold = 3
+}
+
+$cb = @@CircuitBreaker();
+$failures = 0;
+
+if ($cb->status() !== "closed") { echo "FAIL: expected closed\n"; $failures++; }
+if ($cb->call() !== "allowed") { echo "FAIL: expected allowed\n"; $failures++; }
+
+$cb->fail();
+$cb->fail();
+if ($cb->status() !== "closed") { echo "FAIL: still closed after 2 fails\n"; $failures++; }
+$cb->fail();
+if ($cb->status() !== "open") { echo "FAIL: expected open after 3 fails\n"; $failures++; }
+if ($cb->call() !== "blocked") { echo "FAIL: expected blocked\n"; $failures++; }
+
+$cb->reset();
+if ($cb->status() !== "half_open") { echo "FAIL: expected half_open\n"; $failures++; }
+if ($cb->call() !== "trial") { echo "FAIL: expected trial\n"; $failures++; }
+
+$cb->succeed();
+if ($cb->status() !== "closed") { echo "FAIL: expected closed after succeed\n"; $failures++; }
+
+if ($failures > 0) { echo "FAIL: circuit_breaker ($failures failures)\n"; exit(1); }
+echo "PASS: circuit_breaker\n";

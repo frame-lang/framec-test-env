@@ -1,0 +1,96 @@
+@@target dart
+
+import 'dart:io';
+
+@@system DeploymentPipeline {
+    interface:
+        start(version: str)
+        approve()
+        reject()
+        status(): str
+
+    machine:
+        $Idle {
+            start(version: str) {
+                this.version = version;
+                -> ("build") $Stage
+            }
+            status(): str { @@:("idle") }
+        }
+        $Stage {
+            $.name: str = ""
+
+            $>(name: str) { $.name = name; }
+
+            approve() {
+                if ($.name == "build") {
+                    push$
+                    -> ("test") $Stage
+                } else {
+                    if ($.name == "test") {
+                        push$
+                        -> ("deploy") $Stage
+                    } else {
+                        -> $Done
+                    }
+                }
+            }
+            reject() {
+                -> pop$
+            }
+            status(): str { @@:($.name) }
+        }
+        $Done {
+            status(): str { @@:("done") }
+        }
+
+    domain:
+        version: String = ""
+}
+
+void main() {
+    var dp = @@DeploymentPipeline();
+    int failures = 0;
+
+    if (dp.status() != "idle") {
+        print("FAIL: expected idle");
+        failures++;
+    }
+
+    dp.start("v1.0");
+    if (dp.status() != "build") {
+        print("FAIL: expected build");
+        failures++;
+    }
+
+    dp.approve();
+    if (dp.status() != "test") {
+        print("FAIL: expected test");
+        failures++;
+    }
+
+    dp.reject();
+    if (dp.status() != "build") {
+        print("FAIL: expected build after reject");
+        failures++;
+    }
+
+    dp.approve();
+    dp.approve();
+    if (dp.status() != "deploy") {
+        print("FAIL: expected deploy");
+        failures++;
+    }
+
+    dp.approve();
+    if (dp.status() != "done") {
+        print("FAIL: expected done");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: deployment_pipeline ($failures failures)");
+        exit(1);
+    }
+    print("PASS: deployment_pipeline");
+}

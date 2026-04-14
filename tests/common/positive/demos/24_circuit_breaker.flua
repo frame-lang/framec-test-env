@@ -1,0 +1,92 @@
+-- Circuit Breaker — state vars + domain vars (Lua)
+
+@@system CircuitBreaker {
+    interface:
+        call(): str
+        succeed()
+        fail()
+        reset()
+        status(): str
+
+    machine:
+        $Closed {
+            $.failures: int = 0
+
+            call(): str { @@:("allowed") }
+            succeed() {
+                $.failures = 0
+            }
+            fail() {
+                $.failures = $.failures + 1
+                if $.failures >= self.threshold {
+                    -> $Open
+                }
+            }
+            reset() { $.failures = 0 }
+            status(): str { @@:("closed") }
+        }
+        $Open {
+            call(): str { @@:("blocked") }
+            reset() { -> $HalfOpen }
+            status(): str { @@:("open") }
+        }
+        $HalfOpen {
+            call(): str { @@:("trial") }
+            succeed() { -> $Closed }
+            fail() { -> $Open }
+            status(): str { @@:("half_open") }
+        }
+
+    domain:
+        threshold = 3
+}
+
+local cb = @@CircuitBreaker()
+local failures = 0
+
+if cb:status() ~= "closed" then
+    print("FAIL: expected closed")
+    failures = failures + 1
+end
+if cb:call() ~= "allowed" then
+    print("FAIL: expected allowed")
+    failures = failures + 1
+end
+
+cb:fail()
+cb:fail()
+if cb:status() ~= "closed" then
+    print("FAIL: still closed after 2 fails")
+    failures = failures + 1
+end
+cb:fail()
+if cb:status() ~= "open" then
+    print("FAIL: expected open after 3 fails")
+    failures = failures + 1
+end
+if cb:call() ~= "blocked" then
+    print("FAIL: expected blocked")
+    failures = failures + 1
+end
+
+cb:reset()
+if cb:status() ~= "half_open" then
+    print("FAIL: expected half_open")
+    failures = failures + 1
+end
+if cb:call() ~= "trial" then
+    print("FAIL: expected trial")
+    failures = failures + 1
+end
+
+cb:succeed()
+if cb:status() ~= "closed" then
+    print("FAIL: expected closed after succeed")
+    failures = failures + 1
+end
+
+if failures > 0 then
+    print("FAIL: circuit_breaker (" .. failures .. " failures)")
+    os.exit(1)
+end
+print("PASS: circuit_breaker")

@@ -1,0 +1,94 @@
+@@target csharp
+// Thermostat — HSM (2-level) demo (C#)
+
+using System;
+
+@@system Thermostat {
+    interface:
+        set_target(temp: int)
+        tick(): String
+        status(): String
+
+    machine:
+        $Off {
+            set_target(temp: int) {
+                this.target = temp;
+                -> $Heating
+            }
+            status(): String { @@:("off") }
+        }
+        $Heating => $Active {
+            tick(): String {
+                this.current = this.current + this.heat_rate;
+                if this.current >= this.target {
+                    -> $Cooling
+                }
+                @@:("heating")
+            }
+            status(): String { @@:("heating") }
+            => $^
+        }
+        $Cooling => $Active {
+            tick(): String {
+                this.current = this.current - 1;
+                if this.current <= this.target - 2 {
+                    -> $Heating
+                }
+                @@:("cooling")
+            }
+            status(): String { @@:("cooling") }
+            => $^
+        }
+        $Active {
+            set_target(temp: int) {
+                this.target = temp;
+            }
+        }
+
+    domain:
+        current : int = 60
+        target : int = 72
+        heat_rate : int = 2
+}
+
+class Program {
+    static void Main(string[] args) {
+        var t = @@Thermostat();
+        int failures = 0;
+
+        if ((string)t.status() != "off") {
+            Console.WriteLine("FAIL: initial status expected off");
+            failures++;
+        }
+
+        t.set_target(64);
+        if ((string)t.status() != "heating") {
+            Console.WriteLine("FAIL: should be heating after set_target");
+            failures++;
+        }
+
+        string r = (string)t.tick();
+        if (r != "heating") {
+            Console.WriteLine($"FAIL: tick while heating expected heating, got {r}");
+            failures++;
+        }
+
+        t.tick();
+        if ((string)t.status() != "cooling") {
+            Console.WriteLine("FAIL: should be cooling after reaching target");
+            failures++;
+        }
+
+        t.set_target(65);
+        if ((string)t.status() != "cooling") {
+            Console.WriteLine("FAIL: set_target in Active parent should keep cooling");
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine($"FAIL: thermostat ({failures} failures)");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: thermostat");
+    }
+}

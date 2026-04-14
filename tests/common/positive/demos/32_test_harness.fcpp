@@ -1,0 +1,111 @@
+@@target cpp_17
+// Test Harness — @@:system.state in operations demo (C++)
+
+#include <iostream>
+#include <string>
+
+@@system TestHarness {
+    operations:
+        current_state(): str {
+            @@:(@@:system.state)
+        }
+
+    interface:
+        run()
+        pass_test()
+        fail(reason: str)
+        get_state(): str
+        get_result(): str
+
+    machine:
+        $Ready {
+            run() {
+                this->result = "";
+                -> $Running
+            }
+            get_state(): str { @@:("ready") }
+            get_result(): str { @@:(this->result) }
+        }
+        $Running {
+            pass_test() {
+                this->result = "pass";
+                -> $Passed
+            }
+            fail(reason: str) {
+                this->result = reason;
+                -> $Failed
+            }
+            get_state(): str { @@:("running") }
+            get_result(): str { @@:("") }
+        }
+        $Passed {
+            run() {
+                this->result = "";
+                -> $Running
+            }
+            get_state(): str { @@:("passed") }
+            get_result(): str { @@:(this->result) }
+        }
+        $Failed {
+            run() {
+                this->result = "";
+                -> $Running
+            }
+            get_state(): str { @@:("failed") }
+            get_result(): str { @@:(this->result) }
+        }
+
+    domain:
+        result : std::string = ""
+}
+
+int main() {
+    auto th = @@TestHarness();
+    int failures = 0;
+
+    if (th.current_state() != std::string("Ready")) {
+        std::cout << "FAIL: current_state expected Ready, got " << th.current_state() << std::endl;
+        failures++;
+    }
+
+    if (th.get_state() != std::string("ready")) {
+        std::cout << "FAIL: get_state expected ready" << std::endl;
+        failures++;
+    }
+
+    th.run();
+    if (th.current_state() != std::string("Running")) {
+        std::cout << "FAIL: current_state expected Running, got " << th.current_state() << std::endl;
+        failures++;
+    }
+
+    th.pass_test();
+    if (th.current_state() != std::string("Passed")) {
+        std::cout << "FAIL: current_state expected Passed, got " << th.current_state() << std::endl;
+        failures++;
+    }
+
+    if (th.get_result() != std::string("pass")) {
+        std::cout << "FAIL: get_result expected pass" << std::endl;
+        failures++;
+    }
+
+    th.run();
+    th.fail("timeout");
+    if (th.current_state() != std::string("Failed")) {
+        std::cout << "FAIL: current_state expected Failed, got " << th.current_state() << std::endl;
+        failures++;
+    }
+
+    if (th.get_result() != std::string("timeout")) {
+        std::cout << "FAIL: get_result expected timeout" << std::endl;
+        failures++;
+    }
+
+    if (failures > 0) {
+        std::cout << "FAIL: test_harness (" << failures << " failures)" << std::endl;
+        return 1;
+    }
+    std::cout << "PASS: test_harness" << std::endl;
+    return 0;
+}

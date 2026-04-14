@@ -1,0 +1,83 @@
+@@target swift
+
+@@system LoginManager {
+    interface:
+        login(user: String, pass: String): String
+        logout()
+        status(): String
+
+    machine:
+        $LoggedOut {
+            login(user: String, pass: String): String {
+                if pass == "secret" {
+                    self.current_user = user
+                    -> $LoggedIn
+                    @@:("ok")
+                } else {
+                    @@:("denied")
+                }
+            }
+            status(): String { @@:("logged_out") }
+        }
+        $LoggedIn {
+            logout() {
+                self.current_user = ""
+                -> $LoggedOut
+            }
+            status(): String { @@:("logged_in") }
+        }
+
+    domain:
+        current_user: String = ""
+}
+
+@@system App {
+    interface:
+        authenticate(user: String, pass: String): String
+        get_status(): String
+
+    machine:
+        $Running {
+            authenticate(user: String, pass: String): String {
+                let result = self.auth.login(user, pass) as! String
+                @@:(result)
+            }
+            get_status(): String {
+                @@:(self.auth.status() as! String)
+            }
+        }
+
+    domain:
+        auth: LoginManager = LoginManager()
+}
+
+var app = @@App()
+var failures = 0
+
+if app.get_status() as! String != "logged_out" {
+    print("FAIL: expected logged_out")
+    failures += 1
+}
+
+let r1 = app.authenticate("alice", "wrong") as! String
+if r1 != "denied" {
+    print("FAIL: expected denied, got \(r1)")
+    failures += 1
+}
+
+let r2 = app.authenticate("alice", "secret") as! String
+if r2 != "ok" {
+    print("FAIL: expected ok, got \(r2)")
+    failures += 1
+}
+
+if app.get_status() as! String != "logged_in" {
+    print("FAIL: expected logged_in")
+    failures += 1
+}
+
+if failures > 0 {
+    print("FAIL: auth_flow (\(failures) failures)")
+    fatalError()
+}
+print("PASS: auth_flow")

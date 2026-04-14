@@ -1,0 +1,56 @@
+@@target python_3
+
+@@system CircuitBreaker {
+    interface:
+        call(): str = "error"
+        success()
+        failure()
+        tick()
+        status(): str = ""
+
+    machine:
+        $Closed {
+            $.failures: int = 0
+            call(): str { @@:("allowed") }
+            success() { $.failures = 0 }
+            failure() {
+                $.failures = $.failures + 1
+                if $.failures >= self.threshold:
+                    -> $Open
+            }
+            status(): str { @@:(f"closed ({$.failures} failures)") }
+        }
+        $Open {
+            $.cooldown_remaining: int = 0
+            $>() {
+                $.cooldown_remaining = self.cooldown
+            }
+            call(): str { @@:("blocked") }
+            tick() {
+                $.cooldown_remaining = $.cooldown_remaining - 1
+                if $.cooldown_remaining <= 0:
+                    -> $HalfOpen
+            }
+            status(): str { @@:(f"open ({$.cooldown_remaining} ticks left)") }
+        }
+        $HalfOpen {
+            call(): str { @@:("testing") }
+            success() { -> $Closed }
+            failure() { -> $Open }
+            status(): str { @@:("half-open") }
+        }
+
+    domain:
+        threshold: int = 3
+        cooldown: int = 5
+}
+
+if __name__ == '__main__':
+    cb = @@CircuitBreaker()
+    cb.failure(); cb.failure(); cb.failure()
+    assert cb.call() == "blocked", f"Expected blocked, got {cb.call()}"
+    for _ in range(5): cb.tick()
+    assert cb.call() == "testing", f"Expected testing, got {cb.call()}"
+    cb.success()
+    assert cb.status() == "closed (0 failures)", f"Expected closed, got {cb.status()}"
+    print("PASS: circuit_breaker")

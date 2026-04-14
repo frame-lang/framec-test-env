@@ -1,0 +1,94 @@
+@@target kotlin
+
+@@system PipelineProcessor {
+    interface:
+        start(data: String)
+        status(): String
+
+    machine:
+        $Idle {
+            start(data: String) {
+                this.data = data
+                -> $Validate
+            }
+            status(): String { @@:("idle") }
+        }
+        $Validate {
+            $>() {
+                this.step_count = this.step_count + 1
+                -> $Transform
+            }
+            status(): String { @@:("validate") }
+        }
+        $Transform {
+            $>() {
+                this.step_count = this.step_count + 1
+                -> $Enrich
+            }
+            status(): String { @@:("transform") }
+        }
+        $Enrich {
+            $>() {
+                this.step_count = this.step_count + 1
+                -> $Store
+            }
+            status(): String { @@:("enrich") }
+        }
+        $Store {
+            $>() {
+                this.step_count = this.step_count + 1
+                -> $Complete
+            }
+            status(): String { @@:("store") }
+        }
+        $Complete {
+            status(): String { @@:("complete") }
+            start(data: String) {
+                this.data = data
+                this.step_count = 0
+                -> $Validate
+            }
+        }
+
+    domain:
+        data: String = ""
+        step_count: Int = 0
+}
+
+fun main() {
+    val pp = PipelineProcessor()
+    var failures = 0
+
+    if (pp.status() as String != "idle") {
+        println("FAIL: expected idle")
+        failures++
+    }
+
+    pp.start("test_data")
+    if (pp.status() as String != "complete") {
+        println("FAIL: expected complete, got ${pp.status()}")
+        failures++
+    }
+
+    if (pp.step_count != 4) {
+        println("FAIL: expected step_count 4, got ${pp.step_count}")
+        failures++
+    }
+
+    pp.start("second_run")
+    if (pp.status() as String != "complete") {
+        println("FAIL: expected complete on second run")
+        failures++
+    }
+
+    if (pp.step_count != 4) {
+        println("FAIL: expected step_count 4 on second run, got ${pp.step_count}")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: pipeline_processor ($failures failures)")
+        kotlin.system.exitProcess(1)
+    }
+    println("PASS: pipeline_processor")
+}

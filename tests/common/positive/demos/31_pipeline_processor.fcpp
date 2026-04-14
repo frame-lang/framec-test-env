@@ -1,0 +1,99 @@
+@@target cpp_17
+// Pipeline Processor — enter handler chain, 5 stages demo (C++)
+
+#include <iostream>
+#include <string>
+
+@@system PipelineProcessor {
+    interface:
+        start(data: str)
+        status(): str
+
+    machine:
+        $Idle {
+            start(data: str) {
+                this->data = data;
+                -> $Validate
+            }
+            status(): str { @@:("idle") }
+        }
+        $Validate {
+            $>() {
+                this->step_count = this->step_count + 1;
+                -> $Transform
+            }
+            status(): str { @@:("validate") }
+        }
+        $Transform {
+            $>() {
+                this->step_count = this->step_count + 1;
+                -> $Enrich
+            }
+            status(): str { @@:("transform") }
+        }
+        $Enrich {
+            $>() {
+                this->step_count = this->step_count + 1;
+                -> $Store
+            }
+            status(): str { @@:("enrich") }
+        }
+        $Store {
+            $>() {
+                this->step_count = this->step_count + 1;
+                -> $Complete
+            }
+            status(): str { @@:("store") }
+        }
+        $Complete {
+            status(): str { @@:("complete") }
+            start(data: str) {
+                this->data = data;
+                this->step_count = 0;
+                -> $Validate
+            }
+        }
+
+    domain:
+        data : std::string = ""
+        step_count : int = 0
+}
+
+int main() {
+    auto pp = @@PipelineProcessor();
+    int failures = 0;
+
+    if (pp.status() != std::string("idle")) {
+        std::cout << "FAIL: initial status expected idle" << std::endl;
+        failures++;
+    }
+
+    pp.start("test_data");
+    if (pp.status() != std::string("complete")) {
+        std::cout << "FAIL: status after start expected complete (auto-chain)" << std::endl;
+        failures++;
+    }
+
+    if (pp.step_count != 4) {
+        std::cout << "FAIL: step_count expected 4, got " << pp.step_count << std::endl;
+        failures++;
+    }
+
+    pp.start("more_data");
+    if (pp.status() != std::string("complete")) {
+        std::cout << "FAIL: status after restart expected complete" << std::endl;
+        failures++;
+    }
+
+    if (pp.step_count != 4) {
+        std::cout << "FAIL: step_count after restart expected 4, got " << pp.step_count << std::endl;
+        failures++;
+    }
+
+    if (failures > 0) {
+        std::cout << "FAIL: pipeline_processor (" << failures << " failures)" << std::endl;
+        return 1;
+    }
+    std::cout << "PASS: pipeline_processor" << std::endl;
+    return 0;
+}

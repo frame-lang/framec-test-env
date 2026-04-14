@@ -1,0 +1,120 @@
+@@target go
+// Vending Machine — operations + domain demo (Go)
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system VendingMachine {
+    operations:
+        GetBalance(): int {
+            return s.balance
+        }
+
+    interface:
+        InsertCoin(amount: int)
+        SelectItem(item: string): string
+        Refund(): int
+        Status(): string
+
+    machine:
+        $Idle {
+            InsertCoin(amount: int) {
+                s.balance = amount
+                -> $HasCredit
+            }
+            SelectItem(item: string): string { @@:("no credit") }
+            Refund(): int { @@:(0) }
+            Status(): string { @@:("idle") }
+        }
+        $HasCredit {
+            InsertCoin(amount: int) {
+                s.balance = s.balance + amount
+            }
+            SelectItem(item: string): string {
+                if s.balance >= s.item_price {
+                    s.balance = s.balance - s.item_price
+                    if s.balance == 0 {
+                        -> $Idle
+                    }
+                    @@:(item)
+                } else {
+                    @@:("insufficient credit")
+                }
+            }
+            Refund(): int {
+                r := s.balance
+                s.balance = 0
+                -> $Idle
+                @@:(r)
+            }
+            Status(): string { @@:("has_credit") }
+        }
+
+    domain:
+        balance : int = 0
+        item_price : int = 100
+}
+
+func main() {
+    vm := NewVendingMachine()
+    failures := 0
+
+    if vm.Status() != "idle" {
+        fmt.Println("FAIL: initial status expected idle")
+        failures++
+    }
+
+    if vm.SelectItem("soda") != "no credit" {
+        fmt.Println("FAIL: select with no credit")
+        failures++
+    }
+
+    vm.InsertCoin(50)
+    if vm.Status() != "has_credit" {
+        fmt.Println("FAIL: status after insert")
+        failures++
+    }
+
+    if vm.GetBalance() != 50 {
+        fmt.Println("FAIL: balance expected 50")
+        failures++
+    }
+
+    if vm.SelectItem("soda") != "insufficient credit" {
+        fmt.Println("FAIL: select with insufficient credit")
+        failures++
+    }
+
+    vm.InsertCoin(50)
+    if vm.GetBalance() != 100 {
+        fmt.Println("FAIL: balance expected 100")
+        failures++
+    }
+
+    if vm.SelectItem("soda") != "soda" {
+        fmt.Println("FAIL: select with exact credit")
+        failures++
+    }
+
+    if vm.Status() != "idle" {
+        fmt.Println("FAIL: status after exact purchase")
+        failures++
+    }
+
+    vm.InsertCoin(200)
+    refunded := vm.Refund()
+    if refunded != 200 {
+        fmt.Printf("FAIL: refund expected 200, got %d\n", refunded)
+        failures++
+    }
+
+    if failures > 0 {
+        fmt.Printf("FAIL: vending_machine (%d failures)\n", failures)
+        os.Exit(1)
+    }
+    fmt.Println("PASS: vending_machine")
+}

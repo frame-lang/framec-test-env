@@ -1,0 +1,94 @@
+@@target c
+// Graceful Shutdown — enter handler chain + HSM demo (C)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system GracefulShutdown {
+    interface:
+        tick(): str
+        status(): str
+
+    machine:
+        $Starting {
+            $>() {
+                self->log_count = self->log_count + 1;
+                -> $Running
+            }
+            status(): str { @@:("starting") }
+        }
+        $Running => $Active {
+            $>() {
+                self->log_count = self->log_count + 1;
+            }
+            tick(): str {
+                self->cycles = self->cycles + 1;
+                if self->cycles >= self->max_cycles {
+                    -> $ShuttingDown
+                }
+                @@:("running")
+            }
+            status(): str { @@:("running") }
+            => $^
+        }
+        $Active {
+            tick(): str { @@:("active_tick") }
+        }
+        $ShuttingDown {
+            $>() {
+                self->log_count = self->log_count + 1;
+            }
+            tick(): str { @@:("shutting_down") }
+            status(): str { @@:("shutting_down") }
+        }
+
+    domain:
+        cycles : int = 0
+        max_cycles : int = 3
+        log_count : int = 0
+}
+
+int main() {
+    GracefulShutdown* gs = @@GracefulShutdown();
+    int failures = 0;
+
+    if (strcmp(GracefulShutdown_status(gs), "running") != 0) {
+        printf("FAIL: status after init expected running, got %s\n", GracefulShutdown_status(gs));
+        failures++;
+    }
+
+    if (gs->log_count < 2) {
+        printf("FAIL: log_count expected >= 2 (Starting enter + Running enter), got %d\n", gs->log_count);
+        failures++;
+    }
+
+    const char* r1 = GracefulShutdown_tick(gs);
+    if (strcmp(r1, "running") != 0) {
+        printf("FAIL: tick 1 expected running, got %s\n", r1);
+        failures++;
+    }
+
+    GracefulShutdown_tick(gs);
+    GracefulShutdown_tick(gs);
+
+    if (strcmp(GracefulShutdown_status(gs), "shutting_down") != 0) {
+        printf("FAIL: should be shutting_down after max_cycles ticks\n");
+        failures++;
+    }
+
+    const char* r2 = GracefulShutdown_tick(gs);
+    if (strcmp(r2, "shutting_down") != 0) {
+        printf("FAIL: tick after shutdown expected shutting_down, got %s\n", r2);
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: graceful_shutdown (%d failures)\n", failures);
+        GracefulShutdown_destroy(gs);
+        return 1;
+    }
+    printf("PASS: graceful_shutdown\n");
+    GracefulShutdown_destroy(gs);
+    return 0;
+}

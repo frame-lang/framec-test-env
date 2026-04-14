@@ -1,0 +1,91 @@
+# Deployment Pipeline — push$/pop$, enter args (Ruby)
+
+@@system DeploymentPipeline {
+    interface:
+        start(version: str)
+        approve()
+        reject()
+        status(): str
+
+    machine:
+        $Idle {
+            start(version: str) {
+                self.version = version
+                -> ("build") $Stage
+            }
+            status(): str { @@:("idle") }
+        }
+        $Stage {
+            $.name: str = ""
+
+            $>(name: str) { $.name = name }
+
+            approve() {
+                if $.name == "build" {
+                    push$
+                    -> ("test") $Stage
+                } else {
+                    if $.name == "test" {
+                        push$
+                        -> ("deploy") $Stage
+                    } else {
+                        -> $Done
+                    }
+                }
+            }
+            reject() {
+                -> pop$
+            }
+            status(): str { @@:($.name) }
+        }
+        $Done {
+            status(): str { @@:("done") }
+        }
+
+    domain:
+        version = ""
+}
+
+dp = @@DeploymentPipeline()
+failures = 0
+
+if dp.status() != "idle"
+    puts "FAIL: expected idle"
+    failures += 1
+end
+
+dp.start("v2.0")
+if dp.status() != "build"
+    puts "FAIL: expected build"
+    failures += 1
+end
+
+dp.approve()
+if dp.status() != "test"
+    puts "FAIL: expected test"
+    failures += 1
+end
+
+dp.reject()
+if dp.status() != "build"
+    puts "FAIL: expected build after reject"
+    failures += 1
+end
+
+dp.approve()
+dp.approve()
+if dp.status() != "deploy"
+    puts "FAIL: expected deploy"
+    failures += 1
+end
+dp.approve()
+if dp.status() != "done"
+    puts "FAIL: expected done"
+    failures += 1
+end
+
+if failures > 0
+    puts "FAIL: deployment_pipeline (#{failures} failures)"
+    exit(1)
+end
+puts "PASS: deployment_pipeline"

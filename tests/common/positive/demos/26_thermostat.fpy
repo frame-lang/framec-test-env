@@ -1,0 +1,67 @@
+@@target python_3
+
+@@system Thermostat {
+    interface:
+        set_temp(target: int)
+        tick()
+        status(): str = "unknown"
+
+    machine:
+        $Off {
+            set_temp(target: int) {
+                self.target = target
+                -> $LowHeat
+            }
+            status(): str { @@:("off") }
+        }
+        $LowHeat => $On {
+            $>() { self.heat_rate = 1 }
+            status(): str { @@:(f"low heat ({self.current} -> {self.target})") }
+            => $^
+        }
+        $HighHeat => $On {
+            $>() { self.heat_rate = 2 }
+            status(): str { @@:(f"high heat ({self.current} -> {self.target})") }
+            => $^
+        }
+        $On {
+            tick() {
+                self.current = self.current + self.heat_rate
+                if self.current >= self.target:
+                    self.current = self.target
+                    -> $Cooling
+                elif self.target - self.current > 5:
+                    if self.heat_rate < 2:
+                        -> $HighHeat
+                elif self.target - self.current <= 3:
+                    if self.heat_rate > 1:
+                        -> $LowHeat
+            }
+            set_temp(target: int) { self.target = target }
+        }
+        $Cooling {
+            $>() { self.heat_rate = 0 }
+            tick() {
+                self.current = self.current - 1
+                if self.current <= self.target:
+                    -> $Off
+            }
+            status(): str { @@:(f"cooling ({self.current} -> {self.target})") }
+        }
+
+    domain:
+        current: int = 65
+        target: int = 65
+        heat_rate: int = 0
+}
+
+if __name__ == '__main__':
+    t = @@Thermostat()
+    assert t.status() == "off"
+    t.set_temp(75)
+    log = []
+    for i in range(20):
+        t.tick()
+        log.append(t.status())
+    assert any("cooling" in s or "off" in s for s in log), f"Never cooled: {log}"
+    print("PASS: thermostat")

@@ -1,0 +1,97 @@
+@@target go
+// Thermostat — HSM (2-level) demo (Go)
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system Thermostat {
+    interface:
+        SetTarget(temp: int)
+        Tick(): string
+        Status(): string
+
+    machine:
+        $Off {
+            SetTarget(temp: int) {
+                s.target = temp
+                -> $Heating
+            }
+            Status(): string { @@:("off") }
+        }
+        $Heating => $Active {
+            Tick(): string {
+                s.current = s.current + s.heat_rate
+                if s.current >= s.target {
+                    -> $Cooling
+                }
+                @@:("heating")
+            }
+            Status(): string { @@:("heating") }
+            => $^
+        }
+        $Cooling => $Active {
+            Tick(): string {
+                s.current = s.current - 1
+                if s.current <= s.target - 2 {
+                    -> $Heating
+                }
+                @@:("cooling")
+            }
+            Status(): string { @@:("cooling") }
+            => $^
+        }
+        $Active {
+            SetTarget(temp: int) {
+                s.target = temp
+            }
+        }
+
+    domain:
+        current : int = 60
+        target : int = 72
+        heat_rate : int = 2
+}
+
+func main() {
+    t := NewThermostat()
+    failures := 0
+
+    if t.Status() != "off" {
+        fmt.Println("FAIL: initial status expected off")
+        failures++
+    }
+
+    t.SetTarget(64)
+    if t.Status() != "heating" {
+        fmt.Println("FAIL: should be heating after set_target")
+        failures++
+    }
+
+    r := t.Tick()
+    if r != "heating" {
+        fmt.Printf("FAIL: tick while heating expected heating, got %s\n", r)
+        failures++
+    }
+
+    t.Tick()
+    if t.Status() != "cooling" {
+        fmt.Println("FAIL: should be cooling after reaching target")
+        failures++
+    }
+
+    t.SetTarget(65)
+    if t.Status() != "cooling" {
+        fmt.Println("FAIL: set_target in Active parent should keep cooling")
+        failures++
+    }
+
+    if failures > 0 {
+        fmt.Printf("FAIL: thermostat (%d failures)\n", failures)
+        os.Exit(1)
+    }
+    fmt.Println("PASS: thermostat")
+}

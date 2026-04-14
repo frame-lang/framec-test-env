@@ -1,0 +1,66 @@
+<?php
+// Graceful Shutdown — service pattern with enter handler chain (PHP)
+
+@@system GracefulShutdown {
+    interface:
+        process_data(): str
+        status(): str
+        get_cycles(): int
+
+    machine:
+        $Init {
+            $>() {
+                $this->cycles = 0;
+                -> $ProcessData
+            }
+        }
+        $ProcessData {
+            $>() {
+                $this->cycles = $this->cycles + 1;
+            }
+
+            process_data(): str {
+                if ($this->cycles >= $this->max_cycles) {
+                    -> $ShuttingDown
+                    @@:("shutting_down")
+                } else {
+                    -> $ProcessData
+                    @@:("processed")
+                }
+            }
+            status(): str { @@:("processing") }
+            get_cycles(): int { @@:($this->cycles) }
+        }
+        $ShuttingDown {
+            $>() {
+                $this->cleanup_done = true;
+            }
+
+            status(): str { @@:("shutdown") }
+            get_cycles(): int { @@:($this->cycles) }
+        }
+
+    domain:
+        cycles = 0
+        max_cycles = 3
+        cleanup_done = false
+}
+
+$svc = @@GracefulShutdown();
+$failures = 0;
+
+if ($svc->status() !== "processing") { echo "FAIL: expected processing\n"; $failures++; }
+if ($svc->get_cycles() !== 1) { echo "FAIL: expected 1 cycle\n"; $failures++; }
+
+$r1 = $svc->process_data();
+if ($r1 !== "processed") { echo "FAIL: expected processed\n"; $failures++; }
+
+$r2 = $svc->process_data();
+if ($r2 !== "processed") { echo "FAIL: expected processed\n"; $failures++; }
+
+$r3 = $svc->process_data();
+if ($r3 !== "shutting_down") { echo "FAIL: expected shutting_down\n"; $failures++; }
+if ($svc->status() !== "shutdown") { echo "FAIL: expected shutdown\n"; $failures++; }
+
+if ($failures > 0) { echo "FAIL: graceful_shutdown ($failures failures)\n"; exit(1); }
+echo "PASS: graceful_shutdown\n";

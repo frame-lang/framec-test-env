@@ -1,0 +1,99 @@
+@@target csharp
+// Deployment Pipeline — push$/pop$, enter args demo (C#)
+
+using System;
+
+@@system DeploymentPipeline {
+    interface:
+        start(version: String)
+        approve()
+        reject()
+        status(): String
+
+    machine:
+        $Idle {
+            start(version: String) {
+                this.version = version;
+                -> ("build") $Stage
+            }
+            status(): String { @@:("idle") }
+        }
+        $Stage {
+            $.name: String = ""
+
+            $>(name: String) { $.name = name; }
+
+            approve() {
+                if $.name == "build" {
+                    push$
+                    -> ("test") $Stage
+                } else {
+                    if $.name == "test" {
+                        push$
+                        -> ("deploy") $Stage
+                    } else {
+                        -> $Done
+                    }
+                }
+            }
+            reject() {
+                -> pop$
+            }
+            status(): String { @@:($.name) }
+        }
+        $Done {
+            status(): String { @@:("done") }
+        }
+
+    domain:
+        version : string = ""
+}
+
+class Program {
+    static void Main(string[] args) {
+        var dp = @@DeploymentPipeline();
+        int failures = 0;
+
+        if ((string)dp.status() != "idle") {
+            Console.WriteLine("FAIL: initial status expected idle");
+            failures++;
+        }
+
+        dp.start("v1.0");
+        if ((string)dp.status() != "build") {
+            Console.WriteLine($"FAIL: status after start expected build, got {dp.status()}");
+            failures++;
+        }
+
+        dp.approve();
+        if ((string)dp.status() != "test") {
+            Console.WriteLine($"FAIL: status after first approve expected test, got {dp.status()}");
+            failures++;
+        }
+
+        dp.reject();
+        if ((string)dp.status() != "build") {
+            Console.WriteLine($"FAIL: status after reject expected build (pop), got {dp.status()}");
+            failures++;
+        }
+
+        dp.approve();
+        dp.approve();
+        if ((string)dp.status() != "deploy") {
+            Console.WriteLine($"FAIL: status expected deploy, got {dp.status()}");
+            failures++;
+        }
+
+        dp.approve();
+        if ((string)dp.status() != "done") {
+            Console.WriteLine($"FAIL: status after final approve expected done, got {dp.status()}");
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine($"FAIL: deployment_pipeline ({failures} failures)");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: deployment_pipeline");
+    }
+}

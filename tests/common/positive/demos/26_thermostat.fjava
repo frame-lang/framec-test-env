@@ -1,0 +1,92 @@
+@@target java
+// Thermostat — HSM (2-level) demo (Java)
+
+@@system Thermostat {
+    interface:
+        set_target(temp: int)
+        tick(): String
+        status(): String
+
+    machine:
+        $Off {
+            set_target(temp: int) {
+                this.target = temp;
+                -> $Heating
+            }
+            status(): String { @@:("off") }
+        }
+        $Heating => $Active {
+            tick(): String {
+                this.current = this.current + this.heat_rate;
+                if this.current >= this.target {
+                    -> $Cooling
+                }
+                @@:("heating")
+            }
+            status(): String { @@:("heating") }
+            => $^
+        }
+        $Cooling => $Active {
+            tick(): String {
+                this.current = this.current - 1;
+                if this.current <= this.target - 2 {
+                    -> $Heating
+                }
+                @@:("cooling")
+            }
+            status(): String { @@:("cooling") }
+            => $^
+        }
+        $Active {
+            set_target(temp: int) {
+                this.target = temp;
+            }
+        }
+
+    domain:
+        current : int = 60
+        target : int = 72
+        heat_rate : int = 2
+}
+
+class Main {
+    public static void main(String[] args) {
+        Thermostat t = @@Thermostat();
+        int failures = 0;
+
+        if (!t.status().equals("off")) {
+            System.out.println("FAIL: initial status expected off");
+            failures++;
+        }
+
+        t.set_target(64);
+        if (!t.status().equals("heating")) {
+            System.out.println("FAIL: should be heating after set_target");
+            failures++;
+        }
+
+        String r = t.tick();
+        if (!r.equals("heating")) {
+            System.out.println("FAIL: tick while heating expected heating, got " + r);
+            failures++;
+        }
+
+        t.tick();
+        if (!t.status().equals("cooling")) {
+            System.out.println("FAIL: should be cooling after reaching target");
+            failures++;
+        }
+
+        t.set_target(65);
+        if (!t.status().equals("cooling")) {
+            System.out.println("FAIL: set_target in Active parent should keep cooling");
+            failures++;
+        }
+
+        if (failures > 0) {
+            System.out.println("FAIL: thermostat (" + failures + " failures)");
+            System.exit(1);
+        }
+        System.out.println("PASS: thermostat");
+    }
+}

@@ -1,0 +1,106 @@
+@@target c
+// Circuit Breaker — state vars + domain vars demo (C)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system CircuitBreaker {
+    interface:
+        call(): str
+        succeed()
+        fail()
+        reset()
+        status(): str
+
+    machine:
+        $Closed {
+            $.failures: int = 0
+
+            call(): str { @@:("allowed") }
+            succeed() {
+                $.failures = 0;
+            }
+            fail() {
+                $.failures = $.failures + 1;
+                if $.failures >= self->threshold {
+                    -> $Open
+                }
+            }
+            reset() { $.failures = 0; }
+            status(): str { @@:("closed") }
+        }
+        $Open {
+            call(): str { @@:("blocked") }
+            reset() { -> $HalfOpen }
+            status(): str { @@:("open") }
+        }
+        $HalfOpen {
+            call(): str { @@:("trial") }
+            succeed() { -> $Closed }
+            fail() { -> $Open }
+            status(): str { @@:("half_open") }
+        }
+
+    domain:
+        threshold : int = 3
+}
+
+int main() {
+    CircuitBreaker* cb = @@CircuitBreaker();
+    int failures = 0;
+
+    if (strcmp(CircuitBreaker_status(cb), "closed") != 0) {
+        printf("FAIL: initial status expected closed\n");
+        failures++;
+    }
+
+    if (strcmp(CircuitBreaker_call(cb), "allowed") != 0) {
+        printf("FAIL: call in closed expected allowed\n");
+        failures++;
+    }
+
+    CircuitBreaker_fail(cb);
+    CircuitBreaker_fail(cb);
+    if (strcmp(CircuitBreaker_status(cb), "closed") != 0) {
+        printf("FAIL: still closed after 2 failures\n");
+        failures++;
+    }
+
+    CircuitBreaker_fail(cb);
+    if (strcmp(CircuitBreaker_status(cb), "open") != 0) {
+        printf("FAIL: should be open after 3 failures\n");
+        failures++;
+    }
+
+    if (strcmp(CircuitBreaker_call(cb), "blocked") != 0) {
+        printf("FAIL: call in open expected blocked\n");
+        failures++;
+    }
+
+    CircuitBreaker_reset(cb);
+    if (strcmp(CircuitBreaker_status(cb), "half_open") != 0) {
+        printf("FAIL: should be half_open after reset\n");
+        failures++;
+    }
+
+    if (strcmp(CircuitBreaker_call(cb), "trial") != 0) {
+        printf("FAIL: call in half_open expected trial\n");
+        failures++;
+    }
+
+    CircuitBreaker_succeed(cb);
+    if (strcmp(CircuitBreaker_status(cb), "closed") != 0) {
+        printf("FAIL: should be closed after succeed in half_open\n");
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: circuit_breaker (%d failures)\n", failures);
+        CircuitBreaker_destroy(cb);
+        return 1;
+    }
+    printf("PASS: circuit_breaker\n");
+    CircuitBreaker_destroy(cb);
+    return 0;
+}

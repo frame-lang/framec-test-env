@@ -1,0 +1,94 @@
+@@target cpp_17
+// Thermostat — HSM (2-level) demo (C++)
+
+#include <iostream>
+#include <string>
+
+@@system Thermostat {
+    interface:
+        set_target(temp: int)
+        tick(): str
+        status(): str
+
+    machine:
+        $Off {
+            set_target(temp: int) {
+                this->target = temp;
+                -> $Heating
+            }
+            status(): str { @@:("off") }
+        }
+        $Heating => $Active {
+            tick(): str {
+                this->current = this->current + this->heat_rate;
+                if this->current >= this->target {
+                    -> $Cooling
+                }
+                @@:("heating")
+            }
+            status(): str { @@:("heating") }
+            => $^
+        }
+        $Cooling => $Active {
+            tick(): str {
+                this->current = this->current - 1;
+                if this->current <= this->target - 2 {
+                    -> $Heating
+                }
+                @@:("cooling")
+            }
+            status(): str { @@:("cooling") }
+            => $^
+        }
+        $Active {
+            set_target(temp: int) {
+                this->target = temp;
+            }
+        }
+
+    domain:
+        current : int = 60
+        target : int = 72
+        heat_rate : int = 2
+}
+
+int main() {
+    auto t = @@Thermostat();
+    int failures = 0;
+
+    if (t.status() != std::string("off")) {
+        std::cout << "FAIL: initial status expected off" << std::endl;
+        failures++;
+    }
+
+    t.set_target(64);
+    if (t.status() != std::string("heating")) {
+        std::cout << "FAIL: should be heating after set_target" << std::endl;
+        failures++;
+    }
+
+    auto r = t.tick();
+    if (r != std::string("heating")) {
+        std::cout << "FAIL: tick while heating expected heating" << std::endl;
+        failures++;
+    }
+
+    t.tick();
+    if (t.status() != std::string("cooling")) {
+        std::cout << "FAIL: should be cooling after reaching target" << std::endl;
+        failures++;
+    }
+
+    t.set_target(65);
+    if (t.status() != std::string("cooling")) {
+        std::cout << "FAIL: set_target in Active parent should keep cooling" << std::endl;
+        failures++;
+    }
+
+    if (failures > 0) {
+        std::cout << "FAIL: thermostat (" << failures << " failures)" << std::endl;
+        return 1;
+    }
+    std::cout << "PASS: thermostat" << std::endl;
+    return 0;
+}

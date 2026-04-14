@@ -1,0 +1,77 @@
+@@target gdscript
+
+extends SceneTree
+
+@@system VendingMachine {
+    operations:
+        get_balance(): int {
+            @@:(self.balance)
+        }
+
+    interface:
+        insert_coin(amount: int)
+        select(item: str): str
+        refund(): int
+        status(): str
+
+    machine:
+        $Idle {
+            insert_coin(amount: int) {
+                self.balance = amount
+                -> $HasCredit
+            }
+            select(item: str): str { @@:("no credit") }
+            refund(): int { @@:(0) }
+            status(): str { @@:("idle") }
+        }
+        $HasCredit {
+            insert_coin(amount: int) {
+                self.balance = self.balance + amount
+            }
+            select(item: str): str {
+                if self.balance >= self.item_price {
+                    self.balance = self.balance - self.item_price
+                    if self.balance == 0 {
+                        -> $Idle
+                    }
+                    @@:(item)
+                } else {
+                    @@:("insufficient credit")
+                }
+            }
+            refund(): int {
+                var r = self.balance
+                self.balance = 0
+                @@:(r)
+                -> $Idle
+            }
+            status(): str { @@:("has_credit") }
+        }
+
+    domain:
+        balance = 0
+        item_price = 100
+}
+
+func _init():
+    var vm = @@VendingMachine()
+
+    assert(vm.status() == "idle", "Expected idle")
+    assert(vm.get_balance() == 0, "Expected balance 0")
+
+    vm.insert_coin(50)
+    assert(vm.status() == "has_credit", "Expected has_credit")
+
+    var r1 = vm.select("soda")
+    assert(r1 == "insufficient credit", "Expected insufficient credit, got: " + str(r1))
+
+    vm.insert_coin(60)
+    var r2 = vm.select("soda")
+    assert(r2 == "soda", "Expected soda, got: " + str(r2))
+
+    var refund = vm.refund()
+    assert(refund == 10, "Expected refund 10, got: " + str(refund))
+    assert(vm.status() == "idle", "Expected idle after refund")
+
+    print("PASS: vending_machine")
+    quit()

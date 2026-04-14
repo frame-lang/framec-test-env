@@ -1,0 +1,141 @@
+@@target python_3
+
+@@system ToolRunner {
+    interface:
+        execute(tool: str, params: dict)
+
+    machine:
+        $Ready {
+            execute(tool: str, params: dict) {
+                self.current_tool = tool
+                self.current_params = params
+                -> $Running
+            }
+        }
+        $Running {
+            $>() {
+                result = self.simulate(self.current_tool, self.current_params)
+                self.parent.tool_completed(
+                    self.current_tool, result["success"], result["data"]
+                )
+            }
+        }
+
+    actions:
+        simulate(tool, params) {
+            if tool == "read_file":
+                return {"success": True, "data": f"read {params.get('path', '?')}"}
+            elif tool == "write_file":
+                return {"success": True, "data": f"wrote {params.get('path', '?')}"}
+            elif tool == "run_terminal":
+                return {"success": True, "data": "tests passed"}
+            return {"success": False, "data": f"unknown: {tool}"}
+        }
+
+    domain:
+        parent = None
+        current_tool: str = ""
+        current_params: dict = {}
+}
+
+@@system Agent {
+    interface:
+        task(description: str)
+        approve()
+        abort()
+        tool_completed(tool: str, success: bool, data: str)
+        plan_ready(steps: list)
+        coding_done()
+        tests_passed()
+        status(): str = ""
+
+    machine:
+        $Idle {
+            task(description: str) {
+                self.task_desc = description
+                -> $Planning
+            }
+            status(): str { @@:("idle") }
+        }
+        $Planning => $Active {
+            $>() {
+                steps = self.make_plan(self.task_desc)
+                @@:self.plan_ready(steps)
+            }
+            plan_ready(steps: list) {
+                self.plan = steps
+                -> $AwaitingApproval
+            }
+            => $^
+        }
+        $AwaitingApproval => $Active {
+            approve() {
+                self.step = 0
+                -> $Coding
+            }
+            => $^
+        }
+        $Coding => $Active {
+            $>() {
+                if self.step >= len(self.plan):
+                    @@:self.coding_done()
+                    return
+                tool = self.step_to_tool(self.plan[self.step])
+                self.tool_runner = @@ToolRunner()
+                self.tool_runner.parent = self
+                self.tool_runner.execute(tool["tool"], tool["params"])
+            }
+            coding_done() { -> $Testing }
+            tool_completed(tool: str, success: bool, data: str) {
+                self.step = self.step + 1
+                -> $Coding
+            }
+            => $^
+        }
+        $Testing => $Active {
+            $>() {
+                self.tool_runner = @@ToolRunner()
+                self.tool_runner.parent = self
+                self.tool_runner.execute("run_terminal", {"command": "pytest"})
+            }
+            tool_completed(tool: str, success: bool, data: str) {
+                @@:self.tests_passed()
+            }
+            tests_passed() { -> $Complete }
+            => $^
+        }
+        $Active {
+            abort() { -> $Idle }
+        }
+        $Complete {
+            $>() { }
+            status(): str { @@:("complete") }
+        }
+
+    actions:
+        make_plan(desc) {
+            return ["Read files", f"Implement: {desc[:40]}", "Write files"]
+        }
+        step_to_tool(step_text) {
+            lower = step_text.lower()
+            if "read" in lower:
+                return {"tool": "read_file", "params": {"path": "src/main.py"}}
+            elif "write" in lower:
+                return {"tool": "write_file", "params": {"path": "src/main.py"}}
+            return {"tool": "run_terminal", "params": {"command": f"echo '{step_text}'"}}
+        }
+
+    domain:
+        task_desc: str = ""
+        plan: list = []
+        step: int = 0
+        tool_runner = None
+}
+
+if __name__ == '__main__':
+    agent = @@Agent()
+    assert agent.status() == "idle"
+    agent.task("Add validation")
+    agent.approve()
+    assert agent.status() == "complete", f"Expected complete, got {agent.status()}"
+    print("PASS: ai_agent")

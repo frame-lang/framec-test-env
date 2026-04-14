@@ -1,0 +1,103 @@
+@@target cpp_17
+// Circuit Breaker — state vars + domain vars demo (C++)
+
+#include <iostream>
+#include <string>
+
+@@system CircuitBreaker {
+    interface:
+        call(): str
+        succeed()
+        fail()
+        reset()
+        status(): str
+
+    machine:
+        $Closed {
+            $.failures: int = 0
+
+            call(): str { @@:("allowed") }
+            succeed() {
+                $.failures = 0;
+            }
+            fail() {
+                $.failures = $.failures + 1;
+                if $.failures >= this->threshold {
+                    -> $Open
+                }
+            }
+            reset() { $.failures = 0; }
+            status(): str { @@:("closed") }
+        }
+        $Open {
+            call(): str { @@:("blocked") }
+            reset() { -> $HalfOpen }
+            status(): str { @@:("open") }
+        }
+        $HalfOpen {
+            call(): str { @@:("trial") }
+            succeed() { -> $Closed }
+            fail() { -> $Open }
+            status(): str { @@:("half_open") }
+        }
+
+    domain:
+        threshold : int = 3
+}
+
+int main() {
+    auto cb = @@CircuitBreaker();
+    int failures = 0;
+
+    if (cb.status() != std::string("closed")) {
+        std::cout << "FAIL: initial status expected closed" << std::endl;
+        failures++;
+    }
+
+    if (cb.call() != std::string("allowed")) {
+        std::cout << "FAIL: call in closed expected allowed" << std::endl;
+        failures++;
+    }
+
+    cb.fail();
+    cb.fail();
+    if (cb.status() != std::string("closed")) {
+        std::cout << "FAIL: still closed after 2 failures" << std::endl;
+        failures++;
+    }
+
+    cb.fail();
+    if (cb.status() != std::string("open")) {
+        std::cout << "FAIL: should be open after 3 failures" << std::endl;
+        failures++;
+    }
+
+    if (cb.call() != std::string("blocked")) {
+        std::cout << "FAIL: call in open expected blocked" << std::endl;
+        failures++;
+    }
+
+    cb.reset();
+    if (cb.status() != std::string("half_open")) {
+        std::cout << "FAIL: should be half_open after reset" << std::endl;
+        failures++;
+    }
+
+    if (cb.call() != std::string("trial")) {
+        std::cout << "FAIL: call in half_open expected trial" << std::endl;
+        failures++;
+    }
+
+    cb.succeed();
+    if (cb.status() != std::string("closed")) {
+        std::cout << "FAIL: should be closed after succeed in half_open" << std::endl;
+        failures++;
+    }
+
+    if (failures > 0) {
+        std::cout << "FAIL: circuit_breaker (" << failures << " failures)" << std::endl;
+        return 1;
+    }
+    std::cout << "PASS: circuit_breaker" << std::endl;
+    return 0;
+}

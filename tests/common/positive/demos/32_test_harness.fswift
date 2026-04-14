@@ -1,0 +1,101 @@
+@@target swift
+
+@@system TestHarness {
+    operations:
+        current_state(): String {
+            @@:(@@:system.state)
+        }
+
+    interface:
+        run()
+        pass_test()
+        fail(reason: String)
+        get_state(): String
+        get_result(): String
+
+    machine:
+        $Ready {
+            run() {
+                self.result = ""
+                -> $Running
+            }
+            get_state(): String { @@:("ready") }
+            get_result(): String { @@:(self.result) }
+        }
+        $Running {
+            pass_test() {
+                self.result = "pass"
+                -> $Passed
+            }
+            fail(reason: String) {
+                self.result = reason
+                -> $Failed
+            }
+            get_state(): String { @@:("running") }
+            get_result(): String { @@:("") }
+        }
+        $Passed {
+            run() {
+                self.result = ""
+                -> $Running
+            }
+            get_state(): String { @@:("passed") }
+            get_result(): String { @@:(self.result) }
+        }
+        $Failed {
+            run() {
+                self.result = ""
+                -> $Running
+            }
+            get_state(): String { @@:("failed") }
+            get_result(): String { @@:(self.result) }
+        }
+
+    domain:
+        result: String = ""
+}
+
+var th = @@TestHarness()
+var failures = 0
+
+var cs = th.current_state() as! String
+if cs != "Ready" {
+    print("FAIL: current_state expected Ready, got \(cs)")
+    failures += 1
+}
+
+th.run()
+cs = th.current_state() as! String
+if cs != "Running" {
+    print("FAIL: current_state expected Running, got \(cs)")
+    failures += 1
+}
+
+th.pass_test()
+if th.get_result() as! String != "pass" {
+    print("FAIL: expected result pass")
+    failures += 1
+}
+cs = th.current_state() as! String
+if cs != "Passed" {
+    print("FAIL: current_state expected Passed, got \(cs)")
+    failures += 1
+}
+
+th.run()
+th.fail("timeout")
+if th.get_result() as! String != "timeout" {
+    print("FAIL: expected result timeout")
+    failures += 1
+}
+cs = th.current_state() as! String
+if cs != "Failed" {
+    print("FAIL: current_state expected Failed, got \(cs)")
+    failures += 1
+}
+
+if failures > 0 {
+    print("FAIL: test_harness (\(failures) failures)")
+    fatalError()
+}
+print("PASS: test_harness")

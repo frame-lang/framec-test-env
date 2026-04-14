@@ -1,0 +1,111 @@
+@@target dart
+
+import 'dart:io';
+
+@@system SurvivalLevel {
+    interface:
+        take_damage(amount: int)
+        heal(amount: int)
+        get_hp(): int
+        status(): str
+
+    machine:
+        $Alive {
+            take_damage(amount: int) {
+                this.hp = this.hp - amount;
+                if (this.hp <= 0) {
+                    this.hp = 0;
+                    -> $Dead
+                }
+            }
+            heal(amount: int) {
+                this.hp = this.hp + amount;
+                if (this.hp > this.max_hp) {
+                    this.hp = this.max_hp;
+                }
+            }
+            get_hp(): int { @@:(this.hp) }
+            status(): str { @@:("alive") }
+        }
+        $Dead {
+            get_hp(): int { @@:(0) }
+            status(): str { @@:("dead") }
+        }
+
+    domain:
+        hp: int = 100
+        max_hp: int = 100
+}
+
+@@system Game {
+    interface:
+        attack(dmg: int)
+        heal(amount: int)
+        get_level_status(): str
+        get_level_hp(): int
+
+    machine:
+        $Playing {
+            attack(dmg: int) {
+                this.level.take_damage(dmg);
+                if (this.level.status() == "dead") {
+                    -> $GameOver
+                }
+            }
+            heal(amount: int) {
+                this.level.heal(amount);
+            }
+            get_level_status(): str {
+                @@:(this.level.status())
+            }
+            get_level_hp(): int {
+                @@:(this.level.get_hp())
+            }
+        }
+        $GameOver {
+            get_level_status(): str { @@:("game_over") }
+            get_level_hp(): int { @@:(0) }
+        }
+
+    domain:
+        level: SurvivalLevel = SurvivalLevel()
+}
+
+void main() {
+    var game = @@Game();
+    int failures = 0;
+
+    if (game.get_level_status() != "alive") {
+        print("FAIL: expected alive");
+        failures++;
+    }
+
+    if (game.get_level_hp() != 100) {
+        print("FAIL: expected hp 100");
+        failures++;
+    }
+
+    game.attack(30);
+    if (game.get_level_hp() != 70) {
+        print("FAIL: expected hp 70");
+        failures++;
+    }
+
+    game.heal(10);
+    if (game.get_level_hp() != 80) {
+        print("FAIL: expected hp 80");
+        failures++;
+    }
+
+    game.attack(90);
+    if (game.get_level_status() != "game_over") {
+        print("FAIL: expected game_over");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: game_level ($failures failures)");
+        exit(1);
+    }
+    print("PASS: game_level");
+}

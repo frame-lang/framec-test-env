@@ -1,0 +1,102 @@
+@@target swift
+
+@@system VendingMachine {
+    operations:
+        get_balance(): Int {
+            @@:(self.balance)
+        }
+
+    interface:
+        insert_coin(amount: Int)
+        select(item: String): String
+        refund(): Int
+        status(): String
+
+    machine:
+        $Idle {
+            insert_coin(amount: Int) {
+                self.balance = amount
+                -> $HasCredit
+            }
+            select(item: String): String { @@:("no credit") }
+            refund(): Int { @@:(0) }
+            status(): String { @@:("idle") }
+        }
+        $HasCredit {
+            insert_coin(amount: Int) {
+                self.balance = self.balance + amount
+            }
+            select(item: String): String {
+                if self.balance >= self.item_price {
+                    self.balance = self.balance - self.item_price
+                    if self.balance == 0 {
+                        -> $Idle
+                    }
+                    @@:(item)
+                } else {
+                    @@:("insufficient credit")
+                }
+            }
+            refund(): Int {
+                let r = self.balance
+                self.balance = 0
+                @@:(r)
+                -> $Idle
+            }
+            status(): String { @@:("has_credit") }
+        }
+
+    domain:
+        balance: Int = 0
+        item_price: Int = 100
+}
+
+var vm = @@VendingMachine()
+var failures = 0
+
+if vm.status() as! String != "idle" {
+    print("FAIL: expected idle")
+    failures += 1
+}
+
+let b0 = vm.get_balance() as! Int
+if b0 != 0 {
+    print("FAIL: expected balance 0, got \(b0)")
+    failures += 1
+}
+
+vm.insert_coin(50)
+if vm.status() as! String != "has_credit" {
+    print("FAIL: expected has_credit")
+    failures += 1
+}
+
+let r1 = vm.select("soda") as! String
+if r1 != "insufficient credit" {
+    print("FAIL: expected insufficient credit, got \(r1)")
+    failures += 1
+}
+
+vm.insert_coin(60)
+let r2 = vm.select("soda") as! String
+if r2 != "soda" {
+    print("FAIL: expected soda, got \(r2)")
+    failures += 1
+}
+
+let refund = vm.refund() as! Int
+if refund != 10 {
+    print("FAIL: expected refund 10, got \(refund)")
+    failures += 1
+}
+
+if vm.status() as! String != "idle" {
+    print("FAIL: expected idle after refund")
+    failures += 1
+}
+
+if failures > 0 {
+    print("FAIL: vending_machine (\(failures) failures)")
+    fatalError()
+}
+print("PASS: vending_machine")

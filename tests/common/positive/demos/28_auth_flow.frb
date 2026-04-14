@@ -1,0 +1,99 @@
+# Auth Flow — multi-system with LoginManager + App (Ruby)
+
+@@system LoginManager {
+    interface:
+        login(user: str, pass: str): str
+        logout(): str
+        status(): str
+
+    machine:
+        $LoggedOut {
+            login(user: str, pass: str): str {
+                if pass == "secret" {
+                    self.current_user = user
+                    -> $LoggedIn
+                    @@:("ok")
+                } else {
+                    @@:("denied")
+                }
+            }
+            status(): str { @@:("logged_out") }
+        }
+        $LoggedIn {
+            logout(): str {
+                u = self.current_user
+                self.current_user = ""
+                -> $LoggedOut
+                @@:(u)
+            }
+            status(): str { @@:("logged_in") }
+        }
+
+    domain:
+        current_user = ""
+}
+
+@@system App {
+    interface:
+        do_login(user: str, pass: str): str
+        do_logout(): str
+        app_status(): str
+
+    machine:
+        $Ready {
+            do_login(user: str, pass: str): str {
+                result = self.login_mgr.login(user, pass)
+                @@:(result)
+            }
+            do_logout(): str {
+                result = self.login_mgr.logout()
+                @@:(result)
+            }
+            app_status(): str {
+                @@:(self.login_mgr.status())
+            }
+        }
+
+    domain:
+        login_mgr = @@LoginManager()
+}
+
+app = @@App()
+failures = 0
+
+if app.app_status() != "logged_out"
+    puts "FAIL: expected logged_out"
+    failures += 1
+end
+
+r1 = app.do_login("alice", "wrong")
+if r1 != "denied"
+    puts "FAIL: expected denied, got #{r1}"
+    failures += 1
+end
+
+r2 = app.do_login("alice", "secret")
+if r2 != "ok"
+    puts "FAIL: expected ok, got #{r2}"
+    failures += 1
+end
+if app.app_status() != "logged_in"
+    puts "FAIL: expected logged_in"
+    failures += 1
+end
+
+r3 = app.do_logout()
+if r3 != "alice"
+    puts "FAIL: expected alice, got #{r3}"
+    failures += 1
+end
+if app.app_status() != "logged_out"
+    puts "FAIL: expected logged_out after logout"
+    failures += 1
+end
+
+if failures > 0
+    puts "FAIL: auth_flow (#{failures} failures)"
+    exit(1)
+end
+puts "PASS: auth_flow"

@@ -1,0 +1,104 @@
+@@target java
+// Game Level — multi-system demo (Java)
+
+@@system EnemySpawner {
+    interface:
+        spawn(): String
+        status(): String
+
+    machine:
+        $Ready {
+            spawn(): String {
+                this.spawned = this.spawned + 1;
+                if this.spawned >= this.max_enemies {
+                    -> $Exhausted
+                }
+                @@:("enemy_spawned")
+            }
+            status(): String { @@:("ready") }
+        }
+        $Exhausted {
+            spawn(): String { @@:("no_more_enemies") }
+            status(): String { @@:("exhausted") }
+        }
+
+    domain:
+        spawned : int = 0
+        max_enemies : int = 3
+}
+
+@@system GameLevel {
+    interface:
+        start()
+        spawn_enemy(): String
+        complete()
+        level_status(): String
+
+    machine:
+        $Loading {
+            start() {
+                -> $Playing
+            }
+            level_status(): String { @@:("loading") }
+        }
+        $Playing {
+            spawn_enemy(): String {
+                String result = this.spawner.spawn();
+                @@:(result)
+            }
+            complete() {
+                -> $Victory
+            }
+            level_status(): String { @@:("playing") }
+        }
+        $Victory {
+            level_status(): String { @@:("victory") }
+        }
+
+    domain:
+        spawner : EnemySpawner = @@EnemySpawner()
+}
+
+class Main {
+    public static void main(String[] args) {
+        GameLevel level = @@GameLevel();
+        int failures = 0;
+
+        if (!level.level_status().equals("loading")) {
+            System.out.println("FAIL: initial status expected loading");
+            failures++;
+        }
+
+        level.start();
+        if (!level.level_status().equals("playing")) {
+            System.out.println("FAIL: status after start expected playing");
+            failures++;
+        }
+
+        for (int i = 0; i < 3; i++) {
+            String r = level.spawn_enemy();
+            if (!r.equals("enemy_spawned")) {
+                System.out.println("FAIL: spawn " + (i + 1) + " expected enemy_spawned");
+                failures++;
+            }
+        }
+
+        String r = level.spawn_enemy();
+        if (!r.equals("no_more_enemies")) {
+            System.out.println("FAIL: spawn after exhausted expected no_more_enemies");
+            failures++;
+        }
+
+        level.complete();
+        if (!level.level_status().equals("victory")) {
+            System.out.println("FAIL: status after complete expected victory");
+            failures++;
+        }
+
+        if (failures > 0) {
+            System.out.println("FAIL: game_level (" + failures + " failures)");
+            System.exit(1);
+        }
+        System.out.println("PASS: game_level");
+    }
+}

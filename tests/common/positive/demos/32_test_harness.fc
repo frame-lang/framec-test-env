@@ -1,0 +1,114 @@
+@@target c
+// Test Harness — @@:system.state in operations demo (C)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system TestHarness {
+    operations:
+        current_state(): str {
+            @@:(@@:system.state)
+        }
+
+    interface:
+        run()
+        pass_test()
+        fail(reason: str)
+        get_state(): str
+        get_result(): str
+
+    machine:
+        $Ready {
+            run() {
+                self->result = "";
+                -> $Running
+            }
+            get_state(): str { @@:("ready") }
+            get_result(): str { @@:(self->result) }
+        }
+        $Running {
+            pass_test() {
+                self->result = "pass";
+                -> $Passed
+            }
+            fail(reason: str) {
+                self->result = reason;
+                -> $Failed
+            }
+            get_state(): str { @@:("running") }
+            get_result(): str { @@:("") }
+        }
+        $Passed {
+            run() {
+                self->result = "";
+                -> $Running
+            }
+            get_state(): str { @@:("passed") }
+            get_result(): str { @@:(self->result) }
+        }
+        $Failed {
+            run() {
+                self->result = "";
+                -> $Running
+            }
+            get_state(): str { @@:("failed") }
+            get_result(): str { @@:(self->result) }
+        }
+
+    domain:
+        result : char* = ""
+}
+
+int main() {
+    TestHarness* th = @@TestHarness();
+    int failures = 0;
+
+    if (strcmp(TestHarness_current_state(th), "Ready") != 0) {
+        printf("FAIL: current_state expected Ready, got %s\n", TestHarness_current_state(th));
+        failures++;
+    }
+
+    if (strcmp(TestHarness_get_state(th), "ready") != 0) {
+        printf("FAIL: get_state expected ready\n");
+        failures++;
+    }
+
+    TestHarness_run(th);
+    if (strcmp(TestHarness_current_state(th), "Running") != 0) {
+        printf("FAIL: current_state expected Running, got %s\n", TestHarness_current_state(th));
+        failures++;
+    }
+
+    TestHarness_pass_test(th);
+    if (strcmp(TestHarness_current_state(th), "Passed") != 0) {
+        printf("FAIL: current_state expected Passed, got %s\n", TestHarness_current_state(th));
+        failures++;
+    }
+
+    if (strcmp(TestHarness_get_result(th), "pass") != 0) {
+        printf("FAIL: get_result expected pass\n");
+        failures++;
+    }
+
+    TestHarness_run(th);
+    TestHarness_fail(th, "timeout");
+    if (strcmp(TestHarness_current_state(th), "Failed") != 0) {
+        printf("FAIL: current_state expected Failed, got %s\n", TestHarness_current_state(th));
+        failures++;
+    }
+
+    if (strcmp(TestHarness_get_result(th), "timeout") != 0) {
+        printf("FAIL: get_result expected timeout\n");
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: test_harness (%d failures)\n", failures);
+        TestHarness_destroy(th);
+        return 1;
+    }
+    printf("PASS: test_harness\n");
+    TestHarness_destroy(th);
+    return 0;
+}

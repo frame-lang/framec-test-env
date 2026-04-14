@@ -1,0 +1,117 @@
+@@target csharp
+// Vending Machine — operations + domain demo (C#)
+
+using System;
+
+@@system VendingMachine {
+    operations:
+        get_balance(): int {
+            return this.balance;
+        }
+
+    interface:
+        insert_coin(amount: int)
+        select_item(item: String): String
+        refund(): int
+        status(): String
+
+    machine:
+        $Idle {
+            insert_coin(amount: int) {
+                this.balance = amount;
+                -> $HasCredit
+            }
+            select_item(item: String): String { @@:("no credit") }
+            refund(): int { @@:(0) }
+            status(): String { @@:("idle") }
+        }
+        $HasCredit {
+            insert_coin(amount: int) {
+                this.balance = this.balance + amount;
+            }
+            select_item(item: String): String {
+                if this.balance >= this.item_price {
+                    this.balance = this.balance - this.item_price;
+                    if this.balance == 0 {
+                        -> $Idle
+                    }
+                    @@:(item)
+                } else {
+                    @@:("insufficient credit")
+                }
+            }
+            refund(): int {
+                int r = this.balance;
+                this.balance = 0;
+                -> $Idle
+                @@:(r)
+            }
+            status(): String { @@:("has_credit") }
+        }
+
+    domain:
+        balance : int = 0
+        item_price : int = 100
+}
+
+class Program {
+    static void Main(string[] args) {
+        var vm = @@VendingMachine();
+        int failures = 0;
+
+        if ((string)vm.status() != "idle") {
+            Console.WriteLine("FAIL: initial status expected idle");
+            failures++;
+        }
+
+        if ((string)vm.select_item("soda") != "no credit") {
+            Console.WriteLine("FAIL: select with no credit");
+            failures++;
+        }
+
+        vm.insert_coin(50);
+        if ((string)vm.status() != "has_credit") {
+            Console.WriteLine("FAIL: status after insert");
+            failures++;
+        }
+
+        if ((int)vm.get_balance() != 50) {
+            Console.WriteLine("FAIL: balance expected 50");
+            failures++;
+        }
+
+        if ((string)vm.select_item("soda") != "insufficient credit") {
+            Console.WriteLine("FAIL: select with insufficient credit");
+            failures++;
+        }
+
+        vm.insert_coin(50);
+        if ((int)vm.get_balance() != 100) {
+            Console.WriteLine("FAIL: balance expected 100");
+            failures++;
+        }
+
+        if ((string)vm.select_item("soda") != "soda") {
+            Console.WriteLine("FAIL: select with exact credit");
+            failures++;
+        }
+
+        if ((string)vm.status() != "idle") {
+            Console.WriteLine("FAIL: status after exact purchase");
+            failures++;
+        }
+
+        vm.insert_coin(200);
+        int refunded = (int)vm.refund();
+        if (refunded != 200) {
+            Console.WriteLine($"FAIL: refund expected 200, got {refunded}");
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine($"FAIL: vending_machine ({failures} failures)");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: vending_machine");
+    }
+}

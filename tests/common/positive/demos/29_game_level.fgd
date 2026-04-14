@@ -1,0 +1,91 @@
+@@target gdscript
+@@skip -- GDScript multi-system codegen issue with @@SurvivalLevel() domain init
+
+extends SceneTree
+
+@@system SurvivalLevel {
+    interface:
+        take_damage(amount: int)
+        heal(amount: int)
+        get_hp(): int
+        status(): str
+
+    machine:
+        $Alive {
+            take_damage(amount: int) {
+                self.hp = self.hp - amount
+                if self.hp <= 0 {
+                    self.hp = 0
+                    -> $Dead
+                }
+            }
+            heal(amount: int) {
+                self.hp = self.hp + amount
+                if self.hp > self.max_hp {
+                    self.hp = self.max_hp
+                }
+            }
+            get_hp(): int { @@:(self.hp) }
+            status(): str { @@:("alive") }
+        }
+        $Dead {
+            get_hp(): int { @@:(0) }
+            status(): str { @@:("dead") }
+        }
+
+    domain:
+        hp = 100
+        max_hp = 100
+}
+
+@@system Game {
+    interface:
+        attack(dmg: int)
+        heal(amount: int)
+        get_level_status(): str
+        get_level_hp(): int
+
+    machine:
+        $Playing {
+            attack(dmg: int) {
+                self.level.take_damage(dmg)
+                if self.level.status() == "dead" {
+                    -> $GameOver
+                }
+            }
+            heal(amount: int) {
+                self.level.heal(amount)
+            }
+            get_level_status(): str {
+                @@:(self.level.status())
+            }
+            get_level_hp(): int {
+                @@:(self.level.get_hp())
+            }
+        }
+        $GameOver {
+            get_level_status(): str { @@:("game_over") }
+            get_level_hp(): int { @@:(0) }
+        }
+
+    domain:
+        level = @@SurvivalLevel()
+}
+
+func _init():
+    var game = @@Game()
+
+    assert(game.get_level_status() == "alive", "Expected alive")
+    assert(game.get_level_hp() == 100, "Expected hp 100")
+
+    game.attack(30)
+    assert(game.get_level_hp() == 70, "Expected hp 70")
+
+    game.heal(10)
+    assert(game.get_level_hp() == 80, "Expected hp 80")
+
+    game.attack(90)
+    assert(game.get_level_status() == "game_over", "Expected game_over")
+
+    print("PASS: game_level")
+    quit()

@@ -1,0 +1,72 @@
+<?php
+// Thermostat — HSM with parent forwarding (PHP)
+
+@@system Thermostat {
+    interface:
+        set_target(temp: int)
+        tick(): str
+        status(): str
+
+    machine:
+        $Off {
+            set_target(temp: int) {
+                $this->target = $temp;
+                -> $Heating
+            }
+            status(): str { @@:("off") }
+        }
+        $Heating => $Active {
+            tick(): str {
+                $this->current = $this->current + $this->heat_rate;
+                if ($this->current >= $this->target) {
+                    -> $Cooling
+                }
+                @@:("heating")
+            }
+            status(): str { @@:("heating") }
+            => $^
+        }
+        $Cooling => $Active {
+            tick(): str {
+                $this->current = $this->current - 1;
+                if ($this->current <= $this->target - 2) {
+                    -> $Heating
+                }
+                @@:("cooling")
+            }
+            status(): str { @@:("cooling") }
+            => $^
+        }
+        $Active {
+            set_target(temp: int) {
+                $this->target = $temp;
+            }
+        }
+
+    domain:
+        current = 60
+        target = 72
+        heat_rate = 2
+}
+
+$t = @@Thermostat();
+$failures = 0;
+
+if ($t->status() !== "off") { echo "FAIL: expected off\n"; $failures++; }
+$t->set_target(64);
+if ($t->status() !== "heating") { echo "FAIL: expected heating\n"; $failures++; }
+
+$t->tick();
+if ($t->current !== 62) { echo "FAIL: current should be 62\n"; $failures++; }
+$t->tick();
+if ($t->current !== 64) { echo "FAIL: current should be 64\n"; $failures++; }
+if ($t->status() !== "cooling") { echo "FAIL: expected cooling\n"; $failures++; }
+
+$t->set_target(63);
+$t->tick();
+$t->tick();
+$t->tick();
+if ($t->status() !== "heating") { echo "FAIL: expected heating after drop\n"; $failures++; }
+
+if ($failures > 0) { echo "FAIL: thermostat ($failures failures)\n"; exit(1); }
+echo "PASS: thermostat\n";

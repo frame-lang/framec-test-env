@@ -1,0 +1,68 @@
+// Graceful Shutdown — service pattern with enter handler chain (JavaScript)
+
+@@system GracefulShutdown {
+    interface:
+        process_data(): str
+        status(): str
+        get_cycles(): int
+
+    machine:
+        $Init {
+            $>() {
+                this.cycles = 0
+                -> $ProcessData
+            }
+        }
+        $ProcessData {
+            $>() {
+                this.cycles = this.cycles + 1
+            }
+
+            process_data(): str {
+                if (this.cycles >= this.max_cycles) {
+                    -> $ShuttingDown
+                    @@:("shutting_down")
+                } else {
+                    -> $ProcessData
+                    @@:("processed")
+                }
+            }
+            status(): str { @@:("processing") }
+            get_cycles(): int { @@:(this.cycles) }
+        }
+        $ShuttingDown {
+            $>() {
+                this.cleanup_done = true
+            }
+
+            status(): str { @@:("shutdown") }
+            get_cycles(): int { @@:(this.cycles) }
+        }
+
+    domain:
+        cycles = 0
+        max_cycles = 3
+        cleanup_done = false
+}
+
+const svc = @@GracefulShutdown()
+let failures = 0
+
+if (svc.status() !== "processing") { console.log("FAIL: expected processing, got " + svc.status()); failures++ }
+if (svc.get_cycles() !== 1) { console.log("FAIL: expected 1 cycle, got " + svc.get_cycles()); failures++ }
+
+const r1 = svc.process_data()
+if (r1 !== "processed") { console.log("FAIL: expected processed, got " + r1); failures++ }
+if (svc.get_cycles() !== 2) { console.log("FAIL: expected 2 cycles"); failures++ }
+
+const r2 = svc.process_data()
+if (r2 !== "processed") { console.log("FAIL: expected processed"); failures++ }
+if (svc.get_cycles() !== 3) { console.log("FAIL: expected 3 cycles"); failures++ }
+
+const r3 = svc.process_data()
+if (r3 !== "shutting_down") { console.log("FAIL: expected shutting_down, got " + r3); failures++ }
+if (svc.status() !== "shutdown") { console.log("FAIL: expected shutdown, got " + svc.status()); failures++ }
+if (!svc.cleanup_done) { console.log("FAIL: cleanup_done should be true"); failures++ }
+
+if (failures > 0) { console.log("FAIL: graceful_shutdown (" + failures + " failures)"); process.exit(1) }
+console.log("PASS: graceful_shutdown")

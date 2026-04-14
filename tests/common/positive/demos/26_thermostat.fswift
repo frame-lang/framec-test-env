@@ -1,0 +1,87 @@
+@@target swift
+
+@@system Thermostat {
+    interface:
+        set_target(temp: Int)
+        tick(): String
+        status(): String
+
+    machine:
+        $Off {
+            set_target(temp: Int) {
+                self.target = temp
+                -> $Heating
+            }
+            status(): String { @@:("off") }
+        }
+        $Heating => $Active {
+            tick(): String {
+                self.current = self.current + self.heat_rate
+                if self.current >= self.target {
+                    -> $Cooling
+                }
+                @@:("heating")
+            }
+            status(): String { @@:("heating") }
+            => $^
+        }
+        $Cooling => $Active {
+            tick(): String {
+                self.current = self.current - 1
+                if self.current <= self.target - 2 {
+                    -> $Heating
+                }
+                @@:("cooling")
+            }
+            status(): String { @@:("cooling") }
+            => $^
+        }
+        $Active {
+            set_target(temp: Int) {
+                self.target = temp
+            }
+        }
+
+    domain:
+        current: Int = 60
+        target: Int = 72
+        heat_rate: Int = 2
+}
+
+var t = @@Thermostat()
+var failures = 0
+
+if t.status() as! String != "off" {
+    print("FAIL: expected off")
+    failures += 1
+}
+
+t.set_target(64)
+if t.status() as! String != "heating" {
+    print("FAIL: expected heating")
+    failures += 1
+}
+
+var r = t.tick() as! String
+if r != "heating" {
+    print("FAIL: expected heating tick, got \(r)")
+    failures += 1
+}
+
+r = t.tick() as! String
+if t.status() as! String != "cooling" {
+    print("FAIL: expected cooling after reaching target")
+    failures += 1
+}
+
+t.set_target(66)
+if t.status() as! String != "cooling" {
+    print("FAIL: expected still cooling after set_target (HSM parent)")
+    failures += 1
+}
+
+if failures > 0 {
+    print("FAIL: thermostat (\(failures) failures)")
+    fatalError()
+}
+print("PASS: thermostat")

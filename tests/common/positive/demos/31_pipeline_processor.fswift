@@ -1,0 +1,92 @@
+@@target swift
+
+@@system PipelineProcessor {
+    interface:
+        start(data: String)
+        status(): String
+
+    machine:
+        $Idle {
+            start(data: String) {
+                self.data = data
+                -> $Validate
+            }
+            status(): String { @@:("idle") }
+        }
+        $Validate {
+            $>() {
+                self.step_count = self.step_count + 1
+                -> $Transform
+            }
+            status(): String { @@:("validate") }
+        }
+        $Transform {
+            $>() {
+                self.step_count = self.step_count + 1
+                -> $Enrich
+            }
+            status(): String { @@:("transform") }
+        }
+        $Enrich {
+            $>() {
+                self.step_count = self.step_count + 1
+                -> $Store
+            }
+            status(): String { @@:("enrich") }
+        }
+        $Store {
+            $>() {
+                self.step_count = self.step_count + 1
+                -> $Complete
+            }
+            status(): String { @@:("store") }
+        }
+        $Complete {
+            status(): String { @@:("complete") }
+            start(data: String) {
+                self.data = data
+                self.step_count = 0
+                -> $Validate
+            }
+        }
+
+    domain:
+        data: String = ""
+        step_count: Int = 0
+}
+
+var pp = @@PipelineProcessor()
+var failures = 0
+
+if pp.status() as! String != "idle" {
+    print("FAIL: expected idle")
+    failures += 1
+}
+
+pp.start("test_data")
+if pp.status() as! String != "complete" {
+    print("FAIL: expected complete")
+    failures += 1
+}
+
+if pp.step_count != 4 {
+    print("FAIL: expected step_count 4, got \(pp.step_count)")
+    failures += 1
+}
+
+pp.start("second_run")
+if pp.status() as! String != "complete" {
+    print("FAIL: expected complete on second run")
+    failures += 1
+}
+
+if pp.step_count != 4 {
+    print("FAIL: expected step_count 4 on second run, got \(pp.step_count)")
+    failures += 1
+}
+
+if failures > 0 {
+    print("FAIL: pipeline_processor (\(failures) failures)")
+    fatalError()
+}
+print("PASS: pipeline_processor")

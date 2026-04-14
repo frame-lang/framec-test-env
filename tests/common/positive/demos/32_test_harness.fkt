@@ -1,0 +1,103 @@
+@@target kotlin
+
+@@system TestHarness {
+    operations:
+        current_state(): String {
+            @@:(@@:system.state)
+        }
+
+    interface:
+        run()
+        pass_test()
+        fail(reason: String)
+        get_state(): String
+        get_result(): String
+
+    machine:
+        $Ready {
+            run() {
+                this.result = ""
+                -> $Running
+            }
+            get_state(): String { @@:("ready") }
+            get_result(): String { @@:(this.result) }
+        }
+        $Running {
+            pass_test() {
+                this.result = "pass"
+                -> $Passed
+            }
+            fail(reason: String) {
+                this.result = reason
+                -> $Failed
+            }
+            get_state(): String { @@:("running") }
+            get_result(): String { @@:("") }
+        }
+        $Passed {
+            run() {
+                this.result = ""
+                -> $Running
+            }
+            get_state(): String { @@:("passed") }
+            get_result(): String { @@:(this.result) }
+        }
+        $Failed {
+            run() {
+                this.result = ""
+                -> $Running
+            }
+            get_state(): String { @@:("failed") }
+            get_result(): String { @@:(this.result) }
+        }
+
+    domain:
+        result: String = ""
+}
+
+fun main() {
+    val th = TestHarness()
+    var failures = 0
+
+    var cs = th.current_state() as String
+    if (cs != "Ready") {
+        println("FAIL: current_state expected Ready, got $cs")
+        failures++
+    }
+
+    th.run()
+    cs = th.current_state() as String
+    if (cs != "Running") {
+        println("FAIL: current_state expected Running, got $cs")
+        failures++
+    }
+
+    th.pass_test()
+    if (th.get_result() as String != "pass") {
+        println("FAIL: expected result pass")
+        failures++
+    }
+    cs = th.current_state() as String
+    if (cs != "Passed") {
+        println("FAIL: current_state expected Passed, got $cs")
+        failures++
+    }
+
+    th.run()
+    th.fail("timeout")
+    if (th.get_result() as String != "timeout") {
+        println("FAIL: expected result timeout")
+        failures++
+    }
+    cs = th.current_state() as String
+    if (cs != "Failed") {
+        println("FAIL: current_state expected Failed, got $cs")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: test_harness ($failures failures)")
+        kotlin.system.exitProcess(1)
+    }
+    println("PASS: test_harness")
+}

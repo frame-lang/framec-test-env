@@ -1,0 +1,107 @@
+@@target swift
+
+@@system SurvivalLevel {
+    interface:
+        take_damage(amount: Int)
+        heal(amount: Int)
+        get_hp(): Int
+        status(): String
+
+    machine:
+        $Alive {
+            take_damage(amount: Int) {
+                self.hp = self.hp - amount
+                if self.hp <= 0 {
+                    self.hp = 0
+                    -> $Dead
+                }
+            }
+            heal(amount: Int) {
+                self.hp = self.hp + amount
+                if self.hp > self.max_hp {
+                    self.hp = self.max_hp
+                }
+            }
+            get_hp(): Int { @@:(self.hp) }
+            status(): String { @@:("alive") }
+        }
+        $Dead {
+            get_hp(): Int { @@:(0) }
+            status(): String { @@:("dead") }
+        }
+
+    domain:
+        hp: Int = 100
+        max_hp: Int = 100
+}
+
+@@system Game {
+    interface:
+        attack(dmg: Int)
+        heal(amount: Int)
+        get_level_status(): String
+        get_level_hp(): Int
+
+    machine:
+        $Playing {
+            attack(dmg: Int) {
+                self.level.take_damage(dmg)
+                if self.level.status() as! String == "dead" {
+                    -> $GameOver
+                }
+            }
+            heal(amount: Int) {
+                self.level.heal(amount)
+            }
+            get_level_status(): String {
+                @@:(self.level.status() as! String)
+            }
+            get_level_hp(): Int {
+                @@:(self.level.get_hp() as! Int)
+            }
+        }
+        $GameOver {
+            get_level_status(): String { @@:("game_over") }
+            get_level_hp(): Int { @@:(0) }
+        }
+
+    domain:
+        level: SurvivalLevel = SurvivalLevel()
+}
+
+var game = @@Game()
+var failures = 0
+
+if game.get_level_status() as! String != "alive" {
+    print("FAIL: expected alive")
+    failures += 1
+}
+
+if game.get_level_hp() as! Int != 100 {
+    print("FAIL: expected hp 100")
+    failures += 1
+}
+
+game.attack(30)
+if game.get_level_hp() as! Int != 70 {
+    print("FAIL: expected hp 70")
+    failures += 1
+}
+
+game.heal(10)
+if game.get_level_hp() as! Int != 80 {
+    print("FAIL: expected hp 80")
+    failures += 1
+}
+
+game.attack(90)
+if game.get_level_status() as! String != "game_over" {
+    print("FAIL: expected game_over")
+    failures += 1
+}
+
+if failures > 0 {
+    print("FAIL: game_level (\(failures) failures)")
+    fatalError()
+}
+print("PASS: game_level")

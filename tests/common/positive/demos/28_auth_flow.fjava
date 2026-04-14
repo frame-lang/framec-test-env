@@ -1,0 +1,94 @@
+@@target java
+// Auth Flow — multi-system demo (Java)
+
+@@system LoginManager {
+    interface:
+        login(user: String, pass: String): String
+        status(): String
+
+    machine:
+        $LoggedOut {
+            login(user: String, pass: String): String {
+                if user.equals("admin") && pass.equals("secret") {
+                    this.current_user = user;
+                    -> $LoggedIn
+                    @@:("ok")
+                } else {
+                    @@:("denied")
+                }
+            }
+            status(): String { @@:("logged_out") }
+        }
+        $LoggedIn {
+            login(user: String, pass: String): String { @@:("already_logged_in") }
+            status(): String { @@:("logged_in") }
+        }
+
+    domain:
+        current_user : String = ""
+}
+
+@@system App {
+    interface:
+        authenticate(user: String, pass: String): String
+        app_status(): String
+
+    machine:
+        $Unauthenticated {
+            authenticate(user: String, pass: String): String {
+                String result = this.auth.login(user, pass);
+                if (result.equals("ok")) {
+                    -> $Authenticated
+                }
+                @@:(result)
+            }
+            app_status(): String { @@:("unauthenticated") }
+        }
+        $Authenticated {
+            authenticate(user: String, pass: String): String { @@:("already_authenticated") }
+            app_status(): String { @@:("authenticated") }
+        }
+
+    domain:
+        auth : LoginManager = @@LoginManager()
+}
+
+class Main {
+    public static void main(String[] args) {
+        App app = @@App();
+        int failures = 0;
+
+        if (!app.app_status().equals("unauthenticated")) {
+            System.out.println("FAIL: initial app_status expected unauthenticated");
+            failures++;
+        }
+
+        String r1 = app.authenticate("user", "wrong");
+        if (!r1.equals("denied")) {
+            System.out.println("FAIL: bad login expected denied");
+            failures++;
+        }
+
+        if (!app.app_status().equals("unauthenticated")) {
+            System.out.println("FAIL: still unauthenticated after bad login");
+            failures++;
+        }
+
+        String r2 = app.authenticate("admin", "secret");
+        if (!r2.equals("ok")) {
+            System.out.println("FAIL: good login expected ok");
+            failures++;
+        }
+
+        if (!app.app_status().equals("authenticated")) {
+            System.out.println("FAIL: should be authenticated after good login");
+            failures++;
+        }
+
+        if (failures > 0) {
+            System.out.println("FAIL: auth_flow (" + failures + " failures)");
+            System.exit(1);
+        }
+        System.out.println("PASS: auth_flow");
+    }
+}

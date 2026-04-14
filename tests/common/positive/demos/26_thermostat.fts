@@ -1,0 +1,73 @@
+// Thermostat — HSM with parent forwarding (TypeScript)
+
+@@system Thermostat {
+    interface:
+        set_target(temp: int)
+        tick(): str
+        status(): str
+
+    machine:
+        $Off {
+            set_target(temp: int) {
+                this.target = temp
+                -> $Heating
+            }
+            status(): str { @@:("off") }
+        }
+        $Heating => $Active {
+            tick(): str {
+                this.current = this.current + this.heat_rate
+                if (this.current >= this.target) {
+                    -> $Cooling
+                }
+                @@:("heating")
+            }
+            status(): str { @@:("heating") }
+            => $^
+        }
+        $Cooling => $Active {
+            tick(): str {
+                this.current = this.current - 1
+                if (this.current <= this.target - 2) {
+                    -> $Heating
+                }
+                @@:("cooling")
+            }
+            status(): str { @@:("cooling") }
+            => $^
+        }
+        $Active {
+            set_target(temp: int) {
+                this.target = temp
+            }
+        }
+
+    domain:
+        current: number = 60
+        target: number = 72
+        heat_rate: number = 2
+}
+
+const t = @@Thermostat()
+let failures = 0
+
+if (t.status() !== "off") { console.log("FAIL: expected off"); failures++ }
+t.set_target(64)
+if (t.status() !== "heating") { console.log("FAIL: expected heating"); failures++ }
+
+t.tick()
+if ((t as any).current !== 62) { console.log("FAIL: current should be 62"); failures++ }
+t.tick()
+if ((t as any).current !== 64) { console.log("FAIL: current should be 64"); failures++ }
+if (t.status() !== "cooling") { console.log("FAIL: expected cooling after reaching target"); failures++ }
+
+t.set_target(63)
+if (t.status() !== "cooling") { console.log("FAIL: should still be cooling"); failures++ }
+
+t.tick()
+t.tick()
+t.tick()
+if (t.status() !== "heating") { console.log("FAIL: expected heating after dropping below target-2"); failures++ }
+
+if (failures > 0) { console.log("FAIL: thermostat (" + failures + " failures)"); process.exit(1) }
+console.log("PASS: thermostat")

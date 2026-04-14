@@ -1,0 +1,114 @@
+# Vending Machine — operations + system params (Ruby)
+
+@@system VendingMachine {
+    operations:
+        get_balance(): int {
+            return self.balance
+        }
+
+    interface:
+        insert_coin(amount: int)
+        select(item: str): str
+        refund(): int
+        status(): str
+
+    machine:
+        $Idle {
+            insert_coin(amount: int) {
+                self.balance = amount
+                -> $HasCredit
+            }
+            select(item: str): str { @@:("no credit") }
+            refund(): int { @@:(0) }
+            status(): str { @@:("idle") }
+        }
+        $HasCredit {
+            insert_coin(amount: int) {
+                self.balance = self.balance + amount
+            }
+            select(item: str): str {
+                if self.balance >= self.item_price {
+                    self.balance = self.balance - self.item_price
+                    if self.balance == 0 {
+                        -> $Idle
+                    }
+                    @@:(item)
+                } else {
+                    @@:("insufficient credit")
+                }
+            }
+            refund(): int {
+                r = self.balance
+                self.balance = 0
+                @@:(r)
+                -> $Idle
+            }
+            status(): str { @@:("has_credit") }
+        }
+
+    domain:
+        balance = 0
+        item_price = 100
+}
+
+vm = @@VendingMachine()
+failures = 0
+
+if vm.status() != "idle"
+    puts "FAIL: expected idle"
+    failures += 1
+end
+if vm.select("soda") != "no credit"
+    puts "FAIL: select without credit"
+    failures += 1
+end
+if vm.refund() != 0
+    puts "FAIL: refund from idle"
+    failures += 1
+end
+
+vm.insert_coin(50)
+if vm.status() != "has_credit"
+    puts "FAIL: expected has_credit"
+    failures += 1
+end
+if vm.get_balance() != 50
+    puts "FAIL: balance should be 50"
+    failures += 1
+end
+if vm.select("soda") != "insufficient credit"
+    puts "FAIL: should be insufficient"
+    failures += 1
+end
+
+vm.insert_coin(50)
+if vm.get_balance() != 100
+    puts "FAIL: balance should be 100"
+    failures += 1
+end
+item = vm.select("soda")
+if item != "soda"
+    puts "FAIL: expected soda, got #{item}"
+    failures += 1
+end
+if vm.status() != "idle"
+    puts "FAIL: should be idle after exact purchase"
+    failures += 1
+end
+
+vm.insert_coin(200)
+r = vm.refund()
+if r != 200
+    puts "FAIL: refund should be 200, got #{r}"
+    failures += 1
+end
+if vm.status() != "idle"
+    puts "FAIL: should be idle after refund"
+    failures += 1
+end
+
+if failures > 0
+    puts "FAIL: vending_machine (#{failures} failures)"
+    exit(1)
+end
+puts "PASS: vending_machine"

@@ -1,0 +1,91 @@
+@@target dart
+
+import 'dart:io';
+
+@@system Thermostat {
+    interface:
+        set_target(temp: int)
+        tick(): str
+        status(): str
+
+    machine:
+        $Off {
+            set_target(temp: int) {
+                this.target = temp;
+                -> $Heating
+            }
+            status(): str { @@:("off") }
+        }
+        $Heating => $Active {
+            tick(): str {
+                this.current = this.current + this.heat_rate;
+                if (this.current >= this.target) {
+                    -> $Cooling
+                }
+                @@:("heating")
+            }
+            status(): str { @@:("heating") }
+            => $^
+        }
+        $Cooling => $Active {
+            tick(): str {
+                this.current = this.current - 1;
+                if (this.current <= this.target - 2) {
+                    -> $Heating
+                }
+                @@:("cooling")
+            }
+            status(): str { @@:("cooling") }
+            => $^
+        }
+        $Active {
+            set_target(temp: int) {
+                this.target = temp;
+            }
+        }
+
+    domain:
+        current: int = 60
+        target: int = 72
+        heat_rate: int = 2
+}
+
+void main() {
+    var t = @@Thermostat();
+    int failures = 0;
+
+    if (t.status() != "off") {
+        print("FAIL: expected off");
+        failures++;
+    }
+
+    t.set_target(64);
+    if (t.status() != "heating") {
+        print("FAIL: expected heating");
+        failures++;
+    }
+
+    var r = t.tick();
+    if (r != "heating") {
+        print("FAIL: expected heating tick, got $r");
+        failures++;
+    }
+
+    r = t.tick();
+    if (t.status() != "cooling") {
+        print("FAIL: expected cooling after reaching target");
+        failures++;
+    }
+
+    t.set_target(66);
+    if (t.status() != "cooling") {
+        print("FAIL: expected still cooling after set_target (HSM parent)");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: thermostat ($failures failures)");
+        exit(1);
+    }
+    print("PASS: thermostat");
+}

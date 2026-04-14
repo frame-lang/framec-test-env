@@ -1,0 +1,97 @@
+@@target java
+// Deployment Pipeline — push$/pop$, enter args demo (Java)
+
+@@system DeploymentPipeline {
+    interface:
+        start(version: String)
+        approve()
+        reject()
+        status(): String
+
+    machine:
+        $Idle {
+            start(version: String) {
+                this.version = version;
+                -> ("build") $Stage
+            }
+            status(): String { @@:("idle") }
+        }
+        $Stage {
+            $.name: String = ""
+
+            $>(name: String) { $.name = name; }
+
+            approve() {
+                if $.name.equals("build") {
+                    push$
+                    -> ("test") $Stage
+                } else {
+                    if $.name.equals("test") {
+                        push$
+                        -> ("deploy") $Stage
+                    } else {
+                        -> $Done
+                    }
+                }
+            }
+            reject() {
+                -> pop$
+            }
+            status(): String { @@:($.name) }
+        }
+        $Done {
+            status(): String { @@:("done") }
+        }
+
+    domain:
+        version : String = ""
+}
+
+class Main {
+    public static void main(String[] args) {
+        DeploymentPipeline dp = @@DeploymentPipeline();
+        int failures = 0;
+
+        if (!dp.status().equals("idle")) {
+            System.out.println("FAIL: initial status expected idle");
+            failures++;
+        }
+
+        dp.start("v1.0");
+        if (!dp.status().equals("build")) {
+            System.out.println("FAIL: status after start expected build, got " + dp.status());
+            failures++;
+        }
+
+        dp.approve();
+        if (!dp.status().equals("test")) {
+            System.out.println("FAIL: status after first approve expected test, got " + dp.status());
+            failures++;
+        }
+
+        dp.reject();
+        if (!dp.status().equals("build")) {
+            System.out.println("FAIL: status after reject expected build (pop), got " + dp.status());
+            failures++;
+        }
+
+        dp.approve();
+        dp.approve();
+        if (!dp.status().equals("deploy")) {
+            System.out.println("FAIL: status expected deploy, got " + dp.status());
+            failures++;
+        }
+
+        dp.approve();
+        if (!dp.status().equals("done")) {
+            System.out.println("FAIL: status after final approve expected done, got " + dp.status());
+            failures++;
+        }
+
+        if (failures > 0) {
+            System.out.println("FAIL: deployment_pipeline (" + failures + " failures)");
+            System.exit(1);
+        }
+        System.out.println("PASS: deployment_pipeline");
+    }
+}

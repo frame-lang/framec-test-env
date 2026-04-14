@@ -1,0 +1,85 @@
+@@target python_3
+
+@@system LoginManager {
+    interface:
+        submit(field: str, value: str): str = ""
+        cancel()
+
+    machine:
+        $EnterUsername {
+            submit(field: str, value: str): str {
+                if field == "username":
+                    self.username = value
+                    @@:("enter password")
+                    -> $EnterPassword
+                @@:("enter username")
+            }
+            cancel() { self.parent.auth_cancelled() }
+        }
+        $EnterPassword {
+            $.attempts: int = 0
+            submit(field: str, value: str): str {
+                if field == "password":
+                    if self.username == "admin" and value == "secret":
+                        self.parent.auth_succeeded(self.username)
+                        @@:return("authenticated")
+                    $.attempts = $.attempts + 1
+                    if $.attempts >= 3:
+                        self.parent.auth_locked(self.username)
+                        @@:return("account locked")
+                    @@:return(f"wrong ({3 - $.attempts} left)")
+                @@:("enter password")
+            }
+            cancel() { -> $EnterUsername }
+        }
+
+    domain:
+        parent = None
+        username: str = ""
+}
+
+@@system App {
+    interface:
+        submit(field: str, value: str): str = ""
+        cancel()
+        auth_succeeded(username: str)
+        auth_cancelled()
+        auth_locked(username: str)
+        status(): str = ""
+
+    machine:
+        $LoggedOut {
+            $.login_mgr = None
+            $>() {
+                $.login_mgr = @@LoginManager()
+                $.login_mgr.parent = self
+            }
+            submit(field: str, value: str): str { @@:($.login_mgr.submit(field, value)) }
+            cancel() { $.login_mgr.cancel() }
+            auth_succeeded(username: str) {
+                self.current_user = username
+                -> $LoggedIn
+            }
+            auth_cancelled() { }
+            auth_locked(username: str) { -> $Locked }
+            status(): str { @@:("logged out") }
+        }
+        $LoggedIn {
+            status(): str { @@:(f"logged in as {self.current_user}") }
+        }
+        $Locked {
+            status(): str { @@:("locked") }
+        }
+
+    domain:
+        current_user: str = ""
+}
+
+if __name__ == '__main__':
+    app = @@App()
+    r = app.submit("username", "admin")
+    assert r == "enter password", f"Expected 'enter password', got '{r}'"
+    r = app.submit("password", "secret")
+    assert r == "authenticated", f"Expected 'authenticated', got '{r}'"
+    assert app.status() == "logged in as admin", f"Expected 'logged in', got '{app.status()}'"
+    print("PASS: auth_flow")

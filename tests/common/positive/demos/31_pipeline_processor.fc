@@ -1,0 +1,102 @@
+@@target c
+// Pipeline Processor — enter handler chain, 5 stages demo (C)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system PipelineProcessor {
+    interface:
+        start(data: str)
+        status(): str
+
+    machine:
+        $Idle {
+            start(data: str) {
+                self->data = data;
+                -> $Validate
+            }
+            status(): str { @@:("idle") }
+        }
+        $Validate {
+            $>() {
+                self->step_count = self->step_count + 1;
+                -> $Transform
+            }
+            status(): str { @@:("validate") }
+        }
+        $Transform {
+            $>() {
+                self->step_count = self->step_count + 1;
+                -> $Enrich
+            }
+            status(): str { @@:("transform") }
+        }
+        $Enrich {
+            $>() {
+                self->step_count = self->step_count + 1;
+                -> $Store
+            }
+            status(): str { @@:("enrich") }
+        }
+        $Store {
+            $>() {
+                self->step_count = self->step_count + 1;
+                -> $Complete
+            }
+            status(): str { @@:("store") }
+        }
+        $Complete {
+            status(): str { @@:("complete") }
+            start(data: str) {
+                self->data = data;
+                self->step_count = 0;
+                -> $Validate
+            }
+        }
+
+    domain:
+        data : char* = ""
+        step_count : int = 0
+}
+
+int main() {
+    PipelineProcessor* pp = @@PipelineProcessor();
+    int failures = 0;
+
+    if (strcmp(PipelineProcessor_status(pp), "idle") != 0) {
+        printf("FAIL: initial status expected idle\n");
+        failures++;
+    }
+
+    PipelineProcessor_start(pp, "test_data");
+    if (strcmp(PipelineProcessor_status(pp), "complete") != 0) {
+        printf("FAIL: status after start expected complete (auto-chain), got %s\n", PipelineProcessor_status(pp));
+        failures++;
+    }
+
+    if (pp->step_count != 4) {
+        printf("FAIL: step_count expected 4, got %d\n", pp->step_count);
+        failures++;
+    }
+
+    PipelineProcessor_start(pp, "more_data");
+    if (strcmp(PipelineProcessor_status(pp), "complete") != 0) {
+        printf("FAIL: status after restart expected complete\n");
+        failures++;
+    }
+
+    if (pp->step_count != 4) {
+        printf("FAIL: step_count after restart expected 4, got %d\n", pp->step_count);
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: pipeline_processor (%d failures)\n", failures);
+        PipelineProcessor_destroy(pp);
+        return 1;
+    }
+    printf("PASS: pipeline_processor\n");
+    PipelineProcessor_destroy(pp);
+    return 0;
+}

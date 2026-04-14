@@ -1,0 +1,92 @@
+@@target kotlin
+
+@@system RateLimiter {
+    operations:
+        static get_max_requests(): Int {
+            @@:(5)
+        }
+        get_count(): Int {
+            @@:(this.count)
+        }
+
+    interface:
+        request(): String
+        reset()
+        status(): String
+
+    machine:
+        $Allowing {
+            request(): String {
+                this.count = this.count + 1
+                if (this.count >= this.max_requests) {
+                    -> $Throttling
+                }
+                @@:("allowed")
+            }
+            reset() {
+                this.count = 0
+            }
+            status(): String { @@:("allowing") }
+        }
+        $Throttling {
+            request(): String { @@:("throttled") }
+            reset() {
+                this.count = 0
+                -> $Allowing
+            }
+            status(): String { @@:("throttling") }
+        }
+
+    domain:
+        count: Int = 0
+        max_requests: Int = 5
+}
+
+fun main() {
+    val rl = RateLimiter()
+    var failures = 0
+
+    val max = RateLimiter.get_max_requests()
+    if (max != 5) {
+        println("FAIL: expected max 5, got $max")
+        failures++
+    }
+
+    for (i in 1..4) {
+        val r = rl.request() as String
+        if (r != "allowed") {
+            println("FAIL: expected allowed on request $i, got $r")
+            failures++
+        }
+    }
+
+    rl.request()
+    if (rl.status() as String != "throttling") {
+        println("FAIL: expected throttling after 5 requests")
+        failures++
+    }
+
+    val r2 = rl.request() as String
+    if (r2 != "throttled") {
+        println("FAIL: expected throttled, got $r2")
+        failures++
+    }
+
+    rl.reset()
+    if (rl.status() as String != "allowing") {
+        println("FAIL: expected allowing after reset")
+        failures++
+    }
+
+    val cnt = rl.get_count()
+    if (cnt != 0) {
+        println("FAIL: expected count 0 after reset, got $cnt")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: rate_limiter ($failures failures)")
+        kotlin.system.exitProcess(1)
+    }
+    println("PASS: rate_limiter")
+}

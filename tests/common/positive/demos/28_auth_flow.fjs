@@ -1,0 +1,79 @@
+// Auth Flow — multi-system with LoginManager + App (JavaScript)
+
+@@system LoginManager {
+    interface:
+        login(user: str, pass: str): str
+        logout(): str
+        status(): str
+
+    machine:
+        $LoggedOut {
+            login(user: str, pass: str): str {
+                if (pass === "secret") {
+                    this.current_user = user
+                    -> $LoggedIn
+                    @@:("ok")
+                } else {
+                    @@:("denied")
+                }
+            }
+            status(): str { @@:("logged_out") }
+        }
+        $LoggedIn {
+            logout(): str {
+                let u = this.current_user
+                this.current_user = ""
+                -> $LoggedOut
+                @@:(u)
+            }
+            status(): str { @@:("logged_in") }
+        }
+
+    domain:
+        current_user = ""
+}
+
+@@system App {
+    interface:
+        do_login(user: str, pass: str): str
+        do_logout(): str
+        app_status(): str
+
+    machine:
+        $Ready {
+            do_login(user: str, pass: str): str {
+                let result = this.login_mgr.login(user, pass)
+                @@:(result)
+            }
+            do_logout(): str {
+                let result = this.login_mgr.logout()
+                @@:(result)
+            }
+            app_status(): str {
+                @@:(this.login_mgr.status())
+            }
+        }
+
+    domain:
+        login_mgr = @@LoginManager()
+}
+
+const app = @@App()
+let failures = 0
+
+if (app.app_status() !== "logged_out") { console.log("FAIL: expected logged_out"); failures++ }
+
+const r1 = app.do_login("alice", "wrong")
+if (r1 !== "denied") { console.log("FAIL: expected denied, got " + r1); failures++ }
+if (app.app_status() !== "logged_out") { console.log("FAIL: still logged_out"); failures++ }
+
+const r2 = app.do_login("alice", "secret")
+if (r2 !== "ok") { console.log("FAIL: expected ok, got " + r2); failures++ }
+if (app.app_status() !== "logged_in") { console.log("FAIL: expected logged_in"); failures++ }
+
+const r3 = app.do_logout()
+if (r3 !== "alice") { console.log("FAIL: expected alice, got " + r3); failures++ }
+if (app.app_status() !== "logged_out") { console.log("FAIL: expected logged_out after logout"); failures++ }
+
+if (failures > 0) { console.log("FAIL: auth_flow (" + failures + " failures)"); process.exit(1) }
+console.log("PASS: auth_flow")

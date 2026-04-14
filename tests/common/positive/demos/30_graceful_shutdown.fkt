@@ -1,0 +1,101 @@
+@@target kotlin
+
+@@system GracefulShutdown {
+    interface:
+        start()
+        tick(): String
+        status(): String
+
+    machine:
+        $Idle {
+            start() {
+                -> $Running
+            }
+            status(): String { @@:("idle") }
+        }
+        $Running {
+            tick(): String {
+                this.cycles = this.cycles + 1
+                if (this.cycles >= this.max_cycles) {
+                    -> $ShuttingDown
+                }
+                @@:("running")
+            }
+            status(): String { @@:("running") }
+        }
+        $ShuttingDown {
+            $>() {
+                -> $Draining
+            }
+            status(): String { @@:("shutting_down") }
+        }
+        $Draining => $Shutdown {
+            $>() {
+                this.drain_count = this.drain_count + 1
+                -> $Cleanup
+            }
+            status(): String { @@:("draining") }
+            => $^
+        }
+        $Cleanup => $Shutdown {
+            $>() {
+                this.drain_count = this.drain_count + 1
+                -> $Stopped
+            }
+            status(): String { @@:("cleanup") }
+            => $^
+        }
+        $Shutdown {
+            tick(): String { @@:("shutting_down") }
+        }
+        $Stopped {
+            tick(): String { @@:("stopped") }
+            status(): String { @@:("stopped") }
+        }
+
+    domain:
+        cycles: Int = 0
+        max_cycles: Int = 3
+        drain_count: Int = 0
+}
+
+fun main() {
+    val gs = GracefulShutdown()
+    var failures = 0
+
+    if (gs.status() as String != "idle") {
+        println("FAIL: expected idle")
+        failures++
+    }
+
+    gs.start()
+    if (gs.status() as String != "running") {
+        println("FAIL: expected running")
+        failures++
+    }
+
+    gs.tick()
+    gs.tick()
+    val r = gs.tick() as String
+    if (gs.status() as String != "stopped") {
+        println("FAIL: expected stopped after max cycles, got ${gs.status()}")
+        failures++
+    }
+
+    if (gs.drain_count != 2) {
+        println("FAIL: expected drain_count 2, got ${gs.drain_count}")
+        failures++
+    }
+
+    val r2 = gs.tick() as String
+    if (r2 != "stopped") {
+        println("FAIL: expected stopped tick, got $r2")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: graceful_shutdown ($failures failures)")
+        kotlin.system.exitProcess(1)
+    }
+    println("PASS: graceful_shutdown")
+}

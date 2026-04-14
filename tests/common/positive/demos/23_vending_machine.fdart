@@ -1,0 +1,106 @@
+@@target dart
+
+import 'dart:io';
+
+@@system VendingMachine {
+    operations:
+        get_balance(): int {
+            @@:(this.balance)
+        }
+
+    interface:
+        insert_coin(amount: int)
+        select(item: str): str
+        refund(): int
+        status(): str
+
+    machine:
+        $Idle {
+            insert_coin(amount: int) {
+                this.balance = amount;
+                -> $HasCredit
+            }
+            select(item: str): str { @@:("no credit") }
+            refund(): int { @@:(0) }
+            status(): str { @@:("idle") }
+        }
+        $HasCredit {
+            insert_coin(amount: int) {
+                this.balance = this.balance + amount;
+            }
+            select(item: str): str {
+                if (this.balance >= this.item_price) {
+                    this.balance = this.balance - this.item_price;
+                    if (this.balance == 0) {
+                        -> $Idle
+                    }
+                    @@:(item)
+                } else {
+                    @@:("insufficient credit")
+                }
+            }
+            refund(): int {
+                int r = this.balance;
+                this.balance = 0;
+                @@:(r)
+                -> $Idle
+            }
+            status(): str { @@:("has_credit") }
+        }
+
+    domain:
+        balance: int = 0
+        item_price: int = 100
+}
+
+void main() {
+    var vm = @@VendingMachine();
+    int failures = 0;
+
+    if (vm.status() != "idle") {
+        print("FAIL: expected idle");
+        failures++;
+    }
+
+    var b0 = vm.get_balance();
+    if (b0 != 0) {
+        print("FAIL: expected balance 0, got $b0");
+        failures++;
+    }
+
+    vm.insert_coin(50);
+    if (vm.status() != "has_credit") {
+        print("FAIL: expected has_credit");
+        failures++;
+    }
+
+    var r1 = vm.select("soda");
+    if (r1 != "insufficient credit") {
+        print("FAIL: expected insufficient credit, got $r1");
+        failures++;
+    }
+
+    vm.insert_coin(60);
+    var r2 = vm.select("soda");
+    if (r2 != "soda") {
+        print("FAIL: expected soda, got $r2");
+        failures++;
+    }
+
+    var refund = vm.refund();
+    if (refund != 10) {
+        print("FAIL: expected refund 10, got $refund");
+        failures++;
+    }
+
+    if (vm.status() != "idle") {
+        print("FAIL: expected idle after refund");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: vending_machine ($failures failures)");
+        exit(1);
+    }
+    print("PASS: vending_machine");
+}

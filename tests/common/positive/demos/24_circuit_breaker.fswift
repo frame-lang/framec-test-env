@@ -1,0 +1,93 @@
+@@target swift
+
+@@system CircuitBreaker {
+    interface:
+        call(): String
+        succeed()
+        fail()
+        reset()
+        status(): String
+
+    machine:
+        $Closed {
+            $.failures: Int = 0
+
+            call(): String { @@:("allowed") }
+            succeed() {
+                $.failures = 0
+            }
+            fail() {
+                $.failures = $.failures + 1
+                if $.failures >= self.threshold {
+                    -> $Open
+                }
+            }
+            reset() { $.failures = 0 }
+            status(): String { @@:("closed") }
+        }
+        $Open {
+            call(): String { @@:("blocked") }
+            reset() { -> $HalfOpen }
+            status(): String { @@:("open") }
+        }
+        $HalfOpen {
+            call(): String { @@:("trial") }
+            succeed() { -> $Closed }
+            fail() { -> $Open }
+            status(): String { @@:("half_open") }
+        }
+
+    domain:
+        threshold: Int = 3
+}
+
+var cb = @@CircuitBreaker()
+var failures = 0
+
+if cb.status() as! String != "closed" {
+    print("FAIL: expected closed")
+    failures += 1
+}
+
+cb.fail()
+cb.fail()
+if cb.status() as! String != "closed" {
+    print("FAIL: expected still closed after 2 failures")
+    failures += 1
+}
+
+cb.fail()
+if cb.status() as! String != "open" {
+    print("FAIL: expected open after 3 failures")
+    failures += 1
+}
+
+let r1 = cb.call() as! String
+if r1 != "blocked" {
+    print("FAIL: expected blocked, got \(r1)")
+    failures += 1
+}
+
+cb.reset()
+if cb.status() as! String != "half_open" {
+    print("FAIL: expected half_open")
+    failures += 1
+}
+
+let r2 = cb.call() as! String
+if r2 != "trial" {
+    print("FAIL: expected trial, got \(r2)")
+    failures += 1
+}
+
+cb.succeed()
+if cb.status() as! String != "closed" {
+    print("FAIL: expected closed after succeed")
+    failures += 1
+}
+
+if failures > 0 {
+    print("FAIL: circuit_breaker (\(failures) failures)")
+    fatalError()
+}
+print("PASS: circuit_breaker")

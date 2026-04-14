@@ -1,0 +1,80 @@
+<?php
+// Auth Flow — multi-system with LoginManager + App (PHP)
+@@skip -- PHP cannot use new expressions in class property default
+
+@@system LoginManager {
+    interface:
+        login(user: str, pass: str): str
+        logout(): str
+        status(): str
+
+    machine:
+        $LoggedOut {
+            login(user: str, pass: str): str {
+                if ($pass === "secret") {
+                    $this->current_user = $user;
+                    -> $LoggedIn
+                    @@:("ok")
+                } else {
+                    @@:("denied")
+                }
+            }
+            status(): str { @@:("logged_out") }
+        }
+        $LoggedIn {
+            logout(): str {
+                $u = $this->current_user;
+                $this->current_user = "";
+                -> $LoggedOut
+                @@:($u)
+            }
+            status(): str { @@:("logged_in") }
+        }
+
+    domain:
+        current_user = ""
+}
+
+@@system App {
+    interface:
+        do_login(user: str, pass: str): str
+        do_logout(): str
+        app_status(): str
+
+    machine:
+        $Ready {
+            do_login(user: str, pass: str): str {
+                $result = $this->login_mgr->login($user, $pass);
+                @@:($result)
+            }
+            do_logout(): str {
+                $result = $this->login_mgr->logout();
+                @@:($result)
+            }
+            app_status(): str {
+                @@:($this->login_mgr->status())
+            }
+        }
+
+    domain:
+        login_mgr = @@LoginManager()
+}
+
+$app = @@App();
+$failures = 0;
+
+if ($app->app_status() !== "logged_out") { echo "FAIL: expected logged_out\n"; $failures++; }
+
+$r1 = $app->do_login("alice", "wrong");
+if ($r1 !== "denied") { echo "FAIL: expected denied\n"; $failures++; }
+
+$r2 = $app->do_login("alice", "secret");
+if ($r2 !== "ok") { echo "FAIL: expected ok\n"; $failures++; }
+if ($app->app_status() !== "logged_in") { echo "FAIL: expected logged_in\n"; $failures++; }
+
+$r3 = $app->do_logout();
+if ($r3 !== "alice") { echo "FAIL: expected alice\n"; $failures++; }
+if ($app->app_status() !== "logged_out") { echo "FAIL: expected logged_out after logout\n"; $failures++; }
+
+if ($failures > 0) { echo "FAIL: auth_flow ($failures failures)\n"; exit(1); }
+echo "PASS: auth_flow\n";

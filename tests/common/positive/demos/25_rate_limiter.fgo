@@ -1,0 +1,101 @@
+@@target go
+// Rate Limiter — static operations demo (Go)
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system RateLimiter {
+    operations:
+        static GetMaxRequests(): int {
+            return 5
+        }
+        GetCount(): int {
+            return s.count
+        }
+
+    interface:
+        Request(): string
+        Reset()
+        Status(): string
+
+    machine:
+        $Allowing {
+            Request(): string {
+                s.count = s.count + 1
+                if s.count >= s.max_requests {
+                    -> $Throttling
+                }
+                @@:("allowed")
+            }
+            Reset() {
+                s.count = 0
+            }
+            Status(): string { @@:("allowing") }
+        }
+        $Throttling {
+            Request(): string { @@:("throttled") }
+            Reset() {
+                s.count = 0
+                -> $Allowing
+            }
+            Status(): string { @@:("throttling") }
+        }
+
+    domain:
+        count : int = 0
+        max_requests : int = 5
+}
+
+func main() {
+    rl := NewRateLimiter()
+    failures := 0
+
+    if rl.Status() != "allowing" {
+        fmt.Println("FAIL: initial status expected allowing")
+        failures++
+    }
+
+    if RateLimiterGetMaxRequests() != 5 {
+        fmt.Println("FAIL: static GetMaxRequests expected 5")
+        failures++
+    }
+
+    for i := 0; i < 4; i++ {
+        if rl.Request() != "allowed" {
+            fmt.Printf("FAIL: request %d expected allowed\n", i+1)
+            failures++
+        }
+    }
+
+    rl.Request()
+    if rl.Status() != "throttling" {
+        fmt.Println("FAIL: should be throttling after 5 requests")
+        failures++
+    }
+
+    if rl.Request() != "throttled" {
+        fmt.Println("FAIL: request while throttling expected throttled")
+        failures++
+    }
+
+    rl.Reset()
+    if rl.Status() != "allowing" {
+        fmt.Println("FAIL: should be allowing after reset")
+        failures++
+    }
+
+    if rl.GetCount() != 0 {
+        fmt.Println("FAIL: count after reset expected 0")
+        failures++
+    }
+
+    if failures > 0 {
+        fmt.Printf("FAIL: rate_limiter (%d failures)\n", failures)
+        os.Exit(1)
+    }
+    fmt.Println("PASS: rate_limiter")
+}

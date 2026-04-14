@@ -1,0 +1,96 @@
+@@target dart
+
+import 'dart:io';
+
+@@system PipelineProcessor {
+    interface:
+        start(data: str)
+        status(): str
+
+    machine:
+        $Idle {
+            start(data: str) {
+                this.data = data;
+                -> $Validate
+            }
+            status(): str { @@:("idle") }
+        }
+        $Validate {
+            $>() {
+                this.step_count = this.step_count + 1;
+                -> $Transform
+            }
+            status(): str { @@:("validate") }
+        }
+        $Transform {
+            $>() {
+                this.step_count = this.step_count + 1;
+                -> $Enrich
+            }
+            status(): str { @@:("transform") }
+        }
+        $Enrich {
+            $>() {
+                this.step_count = this.step_count + 1;
+                -> $Store
+            }
+            status(): str { @@:("enrich") }
+        }
+        $Store {
+            $>() {
+                this.step_count = this.step_count + 1;
+                -> $Complete
+            }
+            status(): str { @@:("store") }
+        }
+        $Complete {
+            status(): str { @@:("complete") }
+            start(data: str) {
+                this.data = data;
+                this.step_count = 0;
+                -> $Validate
+            }
+        }
+
+    domain:
+        data: String = ""
+        step_count: int = 0
+}
+
+void main() {
+    var pp = @@PipelineProcessor();
+    int failures = 0;
+
+    if (pp.status() != "idle") {
+        print("FAIL: expected idle");
+        failures++;
+    }
+
+    pp.start("test_data");
+    if (pp.status() != "complete") {
+        print("FAIL: expected complete");
+        failures++;
+    }
+
+    if (pp.step_count != 4) {
+        print("FAIL: expected step_count 4, got ${pp.step_count}");
+        failures++;
+    }
+
+    pp.start("second_run");
+    if (pp.status() != "complete") {
+        print("FAIL: expected complete on second run");
+        failures++;
+    }
+
+    if (pp.step_count != 4) {
+        print("FAIL: expected step_count 4 on second run, got ${pp.step_count}");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: pipeline_processor ($failures failures)");
+        exit(1);
+    }
+    print("PASS: pipeline_processor");
+}

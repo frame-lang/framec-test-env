@@ -1,0 +1,73 @@
+@@target gdscript
+
+extends SceneTree
+
+@@system DeploymentPipeline {
+    interface:
+        start(version: str)
+        approve()
+        reject()
+        status(): str
+
+    machine:
+        $Idle {
+            start(version: str) {
+                self.version = version
+                -> ("build") $Stage
+            }
+            status(): str { @@:("idle") }
+        }
+        $Stage {
+            $.name: str = ""
+
+            $>(name: str) { $.name = name }
+
+            approve() {
+                if $.name == "build" {
+                    push$
+                    -> ("test") $Stage
+                } else {
+                    if $.name == "test" {
+                        push$
+                        -> ("deploy") $Stage
+                    } else {
+                        -> $Done
+                    }
+                }
+            }
+            reject() {
+                -> pop$
+            }
+            status(): str { @@:($.name) }
+        }
+        $Done {
+            status(): str { @@:("done") }
+        }
+
+    domain:
+        version = ""
+}
+
+func _init():
+    var dp = @@DeploymentPipeline()
+
+    assert(dp.status() == "idle", "Expected idle")
+
+    dp.start("v1.0")
+    assert(dp.status() == "build", "Expected build")
+
+    dp.approve()
+    assert(dp.status() == "test", "Expected test")
+
+    dp.reject()
+    assert(dp.status() == "build", "Expected build after reject")
+
+    dp.approve()
+    dp.approve()
+    assert(dp.status() == "deploy", "Expected deploy")
+
+    dp.approve()
+    assert(dp.status() == "done", "Expected done")
+
+    print("PASS: deployment_pipeline")
+    quit()

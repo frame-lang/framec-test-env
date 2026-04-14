@@ -1,0 +1,99 @@
+@@target cpp_17
+// Deployment Pipeline — push$/pop$, enter args demo (C++)
+
+#include <iostream>
+#include <string>
+
+@@system DeploymentPipeline {
+    interface:
+        start(version: str)
+        approve()
+        reject()
+        status(): str
+
+    machine:
+        $Idle {
+            start(version: str) {
+                this->version = version;
+                -> ("build") $Stage
+            }
+            status(): str { @@:("idle") }
+        }
+        $Stage {
+            $.name: str = ""
+
+            $>(name: str) { $.name = name; }
+
+            approve() {
+                if std::string($.name) == "build" {
+                    push$
+                    -> ("test") $Stage
+                } else {
+                    if std::string($.name) == "test" {
+                        push$
+                        -> ("deploy") $Stage
+                    } else {
+                        -> $Done
+                    }
+                }
+            }
+            reject() {
+                -> pop$
+            }
+            status(): str { @@:($.name) }
+        }
+        $Done {
+            status(): str { @@:("done") }
+        }
+
+    domain:
+        version : std::string = ""
+}
+
+int main() {
+    auto dp = @@DeploymentPipeline();
+    int failures = 0;
+
+    if (dp.status() != std::string("idle")) {
+        std::cout << "FAIL: initial status expected idle" << std::endl;
+        failures++;
+    }
+
+    dp.start("v1.0");
+    if (dp.status() != std::string("build")) {
+        std::cout << "FAIL: status after start expected build" << std::endl;
+        failures++;
+    }
+
+    dp.approve();
+    if (dp.status() != std::string("test")) {
+        std::cout << "FAIL: status after first approve expected test" << std::endl;
+        failures++;
+    }
+
+    dp.reject();
+    if (dp.status() != std::string("build")) {
+        std::cout << "FAIL: status after reject expected build (pop)" << std::endl;
+        failures++;
+    }
+
+    dp.approve();
+    dp.approve();
+    if (dp.status() != std::string("deploy")) {
+        std::cout << "FAIL: status expected deploy" << std::endl;
+        failures++;
+    }
+
+    dp.approve();
+    if (dp.status() != std::string("done")) {
+        std::cout << "FAIL: status after final approve expected done" << std::endl;
+        failures++;
+    }
+
+    if (failures > 0) {
+        std::cout << "FAIL: deployment_pipeline (" << failures << " failures)" << std::endl;
+        return 1;
+    }
+    std::cout << "PASS: deployment_pipeline" << std::endl;
+    return 0;
+}

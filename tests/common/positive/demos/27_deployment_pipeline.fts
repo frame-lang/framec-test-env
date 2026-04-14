@@ -1,0 +1,70 @@
+// Deployment Pipeline — push$/pop$, enter args (TypeScript)
+
+@@system DeploymentPipeline {
+    interface:
+        start(version: str)
+        approve()
+        reject()
+        status(): str
+
+    machine:
+        $Idle {
+            start(version: str) {
+                this.version = version
+                -> ("build") $Stage
+            }
+            status(): str { @@:("idle") }
+        }
+        $Stage {
+            $.name: str = ""
+
+            $>(name: str) { $.name = name }
+
+            approve() {
+                if ($.name === "build") {
+                    push$
+                    -> ("test") $Stage
+                } else {
+                    if ($.name === "test") {
+                        push$
+                        -> ("deploy") $Stage
+                    } else {
+                        -> $Done
+                    }
+                }
+            }
+            reject() {
+                -> pop$
+            }
+            status(): str { @@:($.name) }
+        }
+        $Done {
+            status(): str { @@:("done") }
+        }
+
+    domain:
+        version: string = ""
+}
+
+const dp = @@DeploymentPipeline()
+let failures = 0
+
+if (dp.status() !== "idle") { console.log("FAIL: expected idle"); failures++ }
+
+dp.start("v2.0")
+if (dp.status() !== "build") { console.log("FAIL: expected build"); failures++ }
+
+dp.approve()
+if (dp.status() !== "test") { console.log("FAIL: expected test"); failures++ }
+
+dp.reject()
+if (dp.status() !== "build") { console.log("FAIL: expected build after reject"); failures++ }
+
+dp.approve()
+dp.approve()
+if (dp.status() !== "deploy") { console.log("FAIL: expected deploy"); failures++ }
+dp.approve()
+if (dp.status() !== "done") { console.log("FAIL: expected done"); failures++ }
+
+if (failures > 0) { console.log("FAIL: deployment_pipeline (" + failures + " failures)"); process.exit(1) }
+console.log("PASS: deployment_pipeline")

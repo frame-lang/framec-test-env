@@ -1,0 +1,106 @@
+@@target go
+// Circuit Breaker — state vars + domain vars demo (Go)
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system CircuitBreaker {
+    interface:
+        Call(): string
+        Succeed()
+        Fail()
+        Reset()
+        Status(): string
+
+    machine:
+        $Closed {
+            $.failures: int = 0
+
+            Call(): string { @@:("allowed") }
+            Succeed() {
+                $.failures = 0
+            }
+            Fail() {
+                $.failures = $.failures + 1
+                if $.failures >= s.threshold {
+                    -> $Open
+                }
+            }
+            Reset() { $.failures = 0 }
+            Status(): string { @@:("closed") }
+        }
+        $Open {
+            Call(): string { @@:("blocked") }
+            Reset() { -> $HalfOpen }
+            Status(): string { @@:("open") }
+        }
+        $HalfOpen {
+            Call(): string { @@:("trial") }
+            Succeed() { -> $Closed }
+            Fail() { -> $Open }
+            Status(): string { @@:("half_open") }
+        }
+
+    domain:
+        threshold : int = 3
+}
+
+func main() {
+    cb := NewCircuitBreaker()
+    failures := 0
+
+    if cb.Status() != "closed" {
+        fmt.Println("FAIL: initial status expected closed")
+        failures++
+    }
+
+    if cb.Call() != "allowed" {
+        fmt.Println("FAIL: call in closed expected allowed")
+        failures++
+    }
+
+    cb.Fail()
+    cb.Fail()
+    if cb.Status() != "closed" {
+        fmt.Println("FAIL: still closed after 2 failures")
+        failures++
+    }
+
+    cb.Fail()
+    if cb.Status() != "open" {
+        fmt.Println("FAIL: should be open after 3 failures")
+        failures++
+    }
+
+    if cb.Call() != "blocked" {
+        fmt.Println("FAIL: call in open expected blocked")
+        failures++
+    }
+
+    cb.Reset()
+    if cb.Status() != "half_open" {
+        fmt.Println("FAIL: should be half_open after reset")
+        failures++
+    }
+
+    if cb.Call() != "trial" {
+        fmt.Println("FAIL: call in half_open expected trial")
+        failures++
+    }
+
+    cb.Succeed()
+    if cb.Status() != "closed" {
+        fmt.Println("FAIL: should be closed after succeed in half_open")
+        failures++
+    }
+
+    if failures > 0 {
+        fmt.Printf("FAIL: circuit_breaker (%d failures)\n", failures)
+        os.Exit(1)
+    }
+    fmt.Println("PASS: circuit_breaker")
+}

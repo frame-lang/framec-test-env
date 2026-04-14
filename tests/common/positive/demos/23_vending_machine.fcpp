@@ -1,0 +1,117 @@
+@@target cpp_17
+// Vending Machine — operations + domain demo (C++)
+
+#include <iostream>
+#include <string>
+
+@@system VendingMachine {
+    operations:
+        get_balance(): int {
+            return this->balance;
+        }
+
+    interface:
+        insert_coin(amount: int)
+        select_item(item: str): str
+        refund(): int
+        status(): str
+
+    machine:
+        $Idle {
+            insert_coin(amount: int) {
+                this->balance = amount;
+                -> $HasCredit
+            }
+            select_item(item: str): str { @@:("no credit") }
+            refund(): int { @@:(0) }
+            status(): str { @@:("idle") }
+        }
+        $HasCredit {
+            insert_coin(amount: int) {
+                this->balance = this->balance + amount;
+            }
+            select_item(item: str): str {
+                if this->balance >= this->item_price {
+                    this->balance = this->balance - this->item_price;
+                    if this->balance == 0 {
+                        -> $Idle
+                    }
+                    @@:(item)
+                } else {
+                    @@:("insufficient credit")
+                }
+            }
+            refund(): int {
+                int r = this->balance;
+                this->balance = 0;
+                -> $Idle
+                @@:(r)
+            }
+            status(): str { @@:("has_credit") }
+        }
+
+    domain:
+        balance : int = 0
+        item_price : int = 100
+}
+
+int main() {
+    auto vm = @@VendingMachine();
+    int failures = 0;
+
+    if (vm.status() != std::string("idle")) {
+        std::cout << "FAIL: initial status expected idle" << std::endl;
+        failures++;
+    }
+
+    if (vm.select_item("soda") != std::string("no credit")) {
+        std::cout << "FAIL: select with no credit" << std::endl;
+        failures++;
+    }
+
+    vm.insert_coin(50);
+    if (vm.status() != std::string("has_credit")) {
+        std::cout << "FAIL: status after insert" << std::endl;
+        failures++;
+    }
+
+    if (vm.get_balance() != 50) {
+        std::cout << "FAIL: balance expected 50" << std::endl;
+        failures++;
+    }
+
+    if (vm.select_item("soda") != std::string("insufficient credit")) {
+        std::cout << "FAIL: select with insufficient credit" << std::endl;
+        failures++;
+    }
+
+    vm.insert_coin(50);
+    if (vm.get_balance() != 100) {
+        std::cout << "FAIL: balance expected 100" << std::endl;
+        failures++;
+    }
+
+    if (vm.select_item("soda") != std::string("soda")) {
+        std::cout << "FAIL: select with exact credit" << std::endl;
+        failures++;
+    }
+
+    if (vm.status() != std::string("idle")) {
+        std::cout << "FAIL: status after exact purchase" << std::endl;
+        failures++;
+    }
+
+    vm.insert_coin(200);
+    int refunded = vm.refund();
+    if (refunded != 200) {
+        std::cout << "FAIL: refund expected 200, got " << refunded << std::endl;
+        failures++;
+    }
+
+    if (failures > 0) {
+        std::cout << "FAIL: vending_machine (" << failures << " failures)" << std::endl;
+        return 1;
+    }
+    std::cout << "PASS: vending_machine" << std::endl;
+    return 0;
+}

@@ -1,0 +1,92 @@
+# Circuit Breaker — state vars + domain vars (Ruby)
+
+@@system CircuitBreaker {
+    interface:
+        call(): str
+        succeed()
+        fail()
+        reset()
+        status(): str
+
+    machine:
+        $Closed {
+            $.failures: int = 0
+
+            call(): str { @@:("allowed") }
+            succeed() {
+                $.failures = 0
+            }
+            fail() {
+                $.failures = $.failures + 1
+                if $.failures >= self.threshold {
+                    -> $Open
+                }
+            }
+            reset() { $.failures = 0 }
+            status(): str { @@:("closed") }
+        }
+        $Open {
+            call(): str { @@:("blocked") }
+            reset() { -> $HalfOpen }
+            status(): str { @@:("open") }
+        }
+        $HalfOpen {
+            call(): str { @@:("trial") }
+            succeed() { -> $Closed }
+            fail() { -> $Open }
+            status(): str { @@:("half_open") }
+        }
+
+    domain:
+        threshold = 3
+}
+
+cb = @@CircuitBreaker()
+failures = 0
+
+if cb.status() != "closed"
+    puts "FAIL: expected closed"
+    failures += 1
+end
+if cb.call() != "allowed"
+    puts "FAIL: expected allowed"
+    failures += 1
+end
+
+cb.fail()
+cb.fail()
+if cb.status() != "closed"
+    puts "FAIL: still closed after 2 fails"
+    failures += 1
+end
+cb.fail()
+if cb.status() != "open"
+    puts "FAIL: expected open after 3 fails"
+    failures += 1
+end
+if cb.call() != "blocked"
+    puts "FAIL: expected blocked"
+    failures += 1
+end
+
+cb.reset()
+if cb.status() != "half_open"
+    puts "FAIL: expected half_open"
+    failures += 1
+end
+if cb.call() != "trial"
+    puts "FAIL: expected trial"
+    failures += 1
+end
+
+cb.succeed()
+if cb.status() != "closed"
+    puts "FAIL: expected closed after succeed"
+    failures += 1
+end
+
+if failures > 0
+    puts "FAIL: circuit_breaker (#{failures} failures)"
+    exit(1)
+end
+puts "PASS: circuit_breaker"

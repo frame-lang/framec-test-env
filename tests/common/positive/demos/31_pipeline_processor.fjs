@@ -1,0 +1,75 @@
+// Pipeline Processor — 5-stage enter handler chain (JavaScript)
+
+@@system PipelineProcessor {
+    interface:
+        start(data: str)
+        status(): str
+        get_step_count(): int
+
+    machine:
+        $Idle {
+            start(data: str) {
+                this.data = data
+                -> $Validate
+            }
+            status(): str { @@:("idle") }
+            get_step_count(): int { @@:(this.step_count) }
+        }
+        $Validate {
+            $>() {
+                this.step_count = this.step_count + 1
+                -> $Transform
+            }
+            status(): str { @@:("validate") }
+        }
+        $Transform {
+            $>() {
+                this.step_count = this.step_count + 1
+                -> $Enrich
+            }
+            status(): str { @@:("transform") }
+        }
+        $Enrich {
+            $>() {
+                this.step_count = this.step_count + 1
+                -> $Store
+            }
+            status(): str { @@:("enrich") }
+        }
+        $Store {
+            $>() {
+                this.step_count = this.step_count + 1
+                -> $Complete
+            }
+            status(): str { @@:("store") }
+        }
+        $Complete {
+            status(): str { @@:("complete") }
+            get_step_count(): int { @@:(this.step_count) }
+            start(data: str) {
+                this.data = data
+                this.step_count = 0
+                -> $Validate
+            }
+        }
+
+    domain:
+        data = ""
+        step_count = 0
+}
+
+const pp = @@PipelineProcessor()
+let failures = 0
+
+if (pp.status() !== "idle") { console.log("FAIL: expected idle"); failures++ }
+
+pp.start("batch_1")
+if (pp.status() !== "complete") { console.log("FAIL: expected complete, got " + pp.status()); failures++ }
+if (pp.get_step_count() !== 4) { console.log("FAIL: expected 4 steps, got " + pp.get_step_count()); failures++ }
+
+pp.start("batch_2")
+if (pp.status() !== "complete") { console.log("FAIL: expected complete on second run"); failures++ }
+if (pp.get_step_count() !== 4) { console.log("FAIL: expected 4 steps on second run"); failures++ }
+
+if (failures > 0) { console.log("FAIL: pipeline_processor (" + failures + " failures)"); process.exit(1) }
+console.log("PASS: pipeline_processor")

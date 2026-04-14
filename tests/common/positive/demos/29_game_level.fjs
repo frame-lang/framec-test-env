@@ -1,0 +1,88 @@
+// Game Level — multi-system (SurvivalLevel + Game) (JavaScript)
+
+@@system SurvivalLevel {
+    interface:
+        take_hit(damage: int)
+        heal(amount: int)
+        get_hp(): int
+        status(): str
+
+    machine:
+        $Alive {
+            take_hit(damage: int) {
+                this.hp = this.hp - damage
+                if (this.hp <= 0) {
+                    this.hp = 0
+                    -> $Dead
+                }
+            }
+            heal(amount: int) {
+                this.hp = this.hp + amount
+                if (this.hp > this.max_hp) {
+                    this.hp = this.max_hp
+                }
+            }
+            get_hp(): int { @@:(this.hp) }
+            status(): str { @@:("alive") }
+        }
+        $Dead {
+            get_hp(): int { @@:(0) }
+            status(): str { @@:("dead") }
+        }
+
+    domain:
+        hp = 100
+        max_hp = 100
+}
+
+@@system Game {
+    interface:
+        attack(damage: int)
+        use_potion()
+        player_hp(): int
+        player_status(): str
+
+    machine:
+        $Playing {
+            attack(damage: int) {
+                this.level.take_hit(damage)
+                if (this.level.status() === "dead") {
+                    -> $GameOver
+                }
+            }
+            use_potion() {
+                this.level.heal(30)
+            }
+            player_hp(): int { @@:(this.level.get_hp()) }
+            player_status(): str { @@:(this.level.status()) }
+        }
+        $GameOver {
+            player_hp(): int { @@:(0) }
+            player_status(): str { @@:("game_over") }
+        }
+
+    domain:
+        level = @@SurvivalLevel()
+}
+
+const game = @@Game()
+let failures = 0
+
+if (game.player_hp() !== 100) { console.log("FAIL: expected 100 hp"); failures++ }
+if (game.player_status() !== "alive") { console.log("FAIL: expected alive"); failures++ }
+
+game.attack(30)
+if (game.player_hp() !== 70) { console.log("FAIL: expected 70 hp, got " + game.player_hp()); failures++ }
+
+game.use_potion()
+if (game.player_hp() !== 100) { console.log("FAIL: expected 100 hp after heal, got " + game.player_hp()); failures++ }
+
+game.attack(90)
+if (game.player_hp() !== 10) { console.log("FAIL: expected 10 hp"); failures++ }
+
+game.attack(20)
+if (game.player_status() !== "game_over") { console.log("FAIL: expected game_over"); failures++ }
+if (game.player_hp() !== 0) { console.log("FAIL: expected 0 hp"); failures++ }
+
+if (failures > 0) { console.log("FAIL: game_level (" + failures + " failures)"); process.exit(1) }
+console.log("PASS: game_level")

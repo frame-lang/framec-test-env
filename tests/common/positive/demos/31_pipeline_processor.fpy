@@ -1,0 +1,74 @@
+@@target python_3
+
+@@system Pipeline {
+    interface:
+        run(data: list)
+        result(): list = []
+        status(): str = ""
+
+    machine:
+        $Idle {
+            run(data: list) {
+                self.data = data
+                self.log = []
+                -> $Validate
+            }
+        }
+        $Validate {
+            $>() {
+                self.log.append("validate")
+                self.data = [x for x in self.data if x is not None and x != ""]
+                if len(self.data) == 0:
+                    -> $Error
+                else:
+                    -> $Normalize
+            }
+        }
+        $Normalize {
+            $>() {
+                self.log.append("normalize")
+                self.data = [str(x).lower().strip() for x in self.data]
+                -> $Deduplicate
+            }
+        }
+        $Deduplicate {
+            $>() {
+                self.log.append("deduplicate")
+                seen = set()
+                unique = []
+                for item in self.data:
+                    if item not in seen:
+                        seen.add(item)
+                        unique.append(item)
+                self.data = unique
+                -> $Sort
+            }
+        }
+        $Sort {
+            $>() {
+                self.log.append("sort")
+                self.data = sorted(self.data)
+                -> $Complete
+            }
+        }
+        $Complete {
+            result(): list { @@:(self.data) }
+            status(): str { @@:(' -> '.join(self.log)) }
+        }
+        $Error {
+            result(): list { @@:([]) }
+            status(): str { @@:("error") }
+        }
+
+    domain:
+        data: list = []
+        log: list = []
+}
+
+if __name__ == '__main__':
+    p = @@Pipeline()
+    p.run(["Banana", " apple ", "CHERRY", "apple", None, "banana"])
+    r = p.result()
+    assert r == ['apple', 'banana', 'cherry'], f"Expected sorted deduped list, got {r}"
+    assert "validate" in p.status()
+    print("PASS: pipeline")

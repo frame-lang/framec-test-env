@@ -1,0 +1,97 @@
+@@target c
+// Thermostat — HSM (2-level) demo (C)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system Thermostat {
+    interface:
+        set_target(temp: int)
+        tick(): str
+        status(): str
+
+    machine:
+        $Off {
+            set_target(temp: int) {
+                self->target = temp;
+                -> $Heating
+            }
+            status(): str { @@:("off") }
+        }
+        $Heating => $Active {
+            tick(): str {
+                self->current = self->current + self->heat_rate;
+                if self->current >= self->target {
+                    -> $Cooling
+                }
+                @@:("heating")
+            }
+            status(): str { @@:("heating") }
+            => $^
+        }
+        $Cooling => $Active {
+            tick(): str {
+                self->current = self->current - 1;
+                if self->current <= self->target - 2 {
+                    -> $Heating
+                }
+                @@:("cooling")
+            }
+            status(): str { @@:("cooling") }
+            => $^
+        }
+        $Active {
+            set_target(temp: int) {
+                self->target = temp;
+            }
+        }
+
+    domain:
+        current : int = 60
+        target : int = 72
+        heat_rate : int = 2
+}
+
+int main() {
+    Thermostat* t = @@Thermostat();
+    int failures = 0;
+
+    if (strcmp(Thermostat_status(t), "off") != 0) {
+        printf("FAIL: initial status expected off\n");
+        failures++;
+    }
+
+    Thermostat_set_target(t, 64);
+    if (strcmp(Thermostat_status(t), "heating") != 0) {
+        printf("FAIL: should be heating after set_target\n");
+        failures++;
+    }
+
+    const char* r = Thermostat_tick(t);
+    if (strcmp(r, "heating") != 0) {
+        printf("FAIL: tick while heating expected heating, got %s\n", r);
+        failures++;
+    }
+
+    Thermostat_tick(t);
+    if (strcmp(Thermostat_status(t), "cooling") != 0) {
+        printf("FAIL: should be cooling after reaching target\n");
+        failures++;
+    }
+
+    Thermostat_set_target(t, 65);
+    if (strcmp(Thermostat_status(t), "cooling") != 0) {
+        printf("FAIL: set_target in Active parent should keep cooling\n");
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: thermostat (%d failures)\n", failures);
+        Thermostat_destroy(t);
+        return 1;
+    }
+    printf("PASS: thermostat\n");
+    Thermostat_destroy(t);
+    return 0;
+}

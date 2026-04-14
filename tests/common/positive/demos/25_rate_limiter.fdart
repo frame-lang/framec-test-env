@@ -1,0 +1,94 @@
+@@target dart
+
+import 'dart:io';
+
+@@system RateLimiter {
+    operations:
+        static get_max_requests(): int {
+            @@:(5)
+        }
+        get_count(): int {
+            @@:(this.count)
+        }
+
+    interface:
+        request(): str
+        reset()
+        status(): str
+
+    machine:
+        $Allowing {
+            request(): str {
+                this.count = this.count + 1;
+                if (this.count >= this.max_requests) {
+                    -> $Throttling
+                }
+                @@:("allowed")
+            }
+            reset() {
+                this.count = 0;
+            }
+            status(): str { @@:("allowing") }
+        }
+        $Throttling {
+            request(): str { @@:("throttled") }
+            reset() {
+                this.count = 0;
+                -> $Allowing
+            }
+            status(): str { @@:("throttling") }
+        }
+
+    domain:
+        count: int = 0
+        max_requests: int = 5
+}
+
+void main() {
+    var rl = @@RateLimiter();
+    int failures = 0;
+
+    var max = RateLimiter.get_max_requests();
+    if (max != 5) {
+        print("FAIL: expected max 5, got $max");
+        failures++;
+    }
+
+    for (int i = 0; i < 4; i++) {
+        var r = rl.request();
+        if (r != "allowed") {
+            print("FAIL: expected allowed, got $r");
+            failures++;
+        }
+    }
+
+    rl.request();
+    if (rl.status() != "throttling") {
+        print("FAIL: expected throttling after 5 requests");
+        failures++;
+    }
+
+    var r2 = rl.request();
+    if (r2 != "throttled") {
+        print("FAIL: expected throttled, got $r2");
+        failures++;
+    }
+
+    rl.reset();
+    if (rl.status() != "allowing") {
+        print("FAIL: expected allowing after reset");
+        failures++;
+    }
+
+    var cnt = rl.get_count();
+    if (cnt != 0) {
+        print("FAIL: expected count 0 after reset, got $cnt");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: rate_limiter ($failures failures)");
+        exit(1);
+    }
+    print("PASS: rate_limiter");
+}

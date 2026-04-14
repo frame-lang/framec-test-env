@@ -1,0 +1,82 @@
+@@target gdscript
+
+extends SceneTree
+
+@@system GracefulShutdown {
+    interface:
+        start()
+        tick(): str
+        status(): str
+
+    machine:
+        $Idle {
+            start() {
+                -> $Running
+            }
+            status(): str { @@:("idle") }
+        }
+        $Running {
+            tick(): str {
+                self.cycles = self.cycles + 1
+                if self.cycles >= self.max_cycles {
+                    -> $ShuttingDown
+                }
+                @@:("running")
+            }
+            status(): str { @@:("running") }
+        }
+        $ShuttingDown {
+            $>() {
+                -> $Draining
+            }
+            status(): str { @@:("shutting_down") }
+        }
+        $Draining => $Shutdown {
+            $>() {
+                self.drain_count = self.drain_count + 1
+                -> $Cleanup
+            }
+            status(): str { @@:("draining") }
+            => $^
+        }
+        $Cleanup => $Shutdown {
+            $>() {
+                self.drain_count = self.drain_count + 1
+                -> $Stopped
+            }
+            status(): str { @@:("cleanup") }
+            => $^
+        }
+        $Shutdown {
+            tick(): str { @@:("shutting_down") }
+        }
+        $Stopped {
+            tick(): str { @@:("stopped") }
+            status(): str { @@:("stopped") }
+        }
+
+    domain:
+        cycles = 0
+        max_cycles = 3
+        drain_count = 0
+}
+
+func _init():
+    var gs = @@GracefulShutdown()
+
+    assert(gs.status() == "idle", "Expected idle")
+
+    gs.start()
+    assert(gs.status() == "running", "Expected running")
+
+    gs.tick()
+    gs.tick()
+    gs.tick()
+    assert(gs.status() == "stopped", "Expected stopped after max cycles")
+    assert(gs.drain_count == 2, "Expected drain_count 2, got: " + str(gs.drain_count))
+
+    var r2 = gs.tick()
+    assert(r2 == "stopped", "Expected stopped tick, got: " + str(r2))
+
+    print("PASS: graceful_shutdown")
+    quit()

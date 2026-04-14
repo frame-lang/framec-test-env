@@ -1,0 +1,114 @@
+@@target go
+// Test Harness — @@:system.state in operations demo (Go)
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system TestHarness {
+    operations:
+        CurrentState(): string {
+            @@:(@@:system.state)
+        }
+
+    interface:
+        Run()
+        PassTest()
+        Fail(reason: string)
+        GetState(): string
+        GetResult(): string
+
+    machine:
+        $Ready {
+            Run() {
+                s.result = ""
+                -> $Running
+            }
+            GetState(): string { @@:("ready") }
+            GetResult(): string { @@:(s.result) }
+        }
+        $Running {
+            PassTest() {
+                s.result = "pass"
+                -> $Passed
+            }
+            Fail(reason: string) {
+                s.result = reason
+                -> $Failed
+            }
+            GetState(): string { @@:("running") }
+            GetResult(): string { @@:("") }
+        }
+        $Passed {
+            Run() {
+                s.result = ""
+                -> $Running
+            }
+            GetState(): string { @@:("passed") }
+            GetResult(): string { @@:(s.result) }
+        }
+        $Failed {
+            Run() {
+                s.result = ""
+                -> $Running
+            }
+            GetState(): string { @@:("failed") }
+            GetResult(): string { @@:(s.result) }
+        }
+
+    domain:
+        result : string = ""
+}
+
+func main() {
+    th := NewTestHarness()
+    failures := 0
+
+    if th.CurrentState() != "Ready" {
+        fmt.Printf("FAIL: CurrentState expected Ready, got %s\n", th.CurrentState())
+        failures++
+    }
+
+    if th.GetState() != "ready" {
+        fmt.Println("FAIL: GetState expected ready")
+        failures++
+    }
+
+    th.Run()
+    if th.CurrentState() != "Running" {
+        fmt.Printf("FAIL: CurrentState expected Running, got %s\n", th.CurrentState())
+        failures++
+    }
+
+    th.PassTest()
+    if th.CurrentState() != "Passed" {
+        fmt.Printf("FAIL: CurrentState expected Passed, got %s\n", th.CurrentState())
+        failures++
+    }
+
+    if th.GetResult() != "pass" {
+        fmt.Println("FAIL: GetResult expected pass")
+        failures++
+    }
+
+    th.Run()
+    th.Fail("timeout")
+    if th.CurrentState() != "Failed" {
+        fmt.Printf("FAIL: CurrentState expected Failed, got %s\n", th.CurrentState())
+        failures++
+    }
+
+    if th.GetResult() != "timeout" {
+        fmt.Println("FAIL: GetResult expected timeout")
+        failures++
+    }
+
+    if failures > 0 {
+        fmt.Printf("FAIL: test_harness (%d failures)\n", failures)
+        os.Exit(1)
+    }
+    fmt.Println("PASS: test_harness")
+}

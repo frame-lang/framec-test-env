@@ -1,0 +1,111 @@
+@@target csharp
+// Test Harness — @@:system.state in operations demo (C#)
+
+using System;
+
+@@system TestHarness {
+    operations:
+        current_state(): String {
+            @@:(@@:system.state)
+        }
+
+    interface:
+        run()
+        pass_test()
+        fail(reason: String)
+        get_state(): String
+        get_result(): String
+
+    machine:
+        $Ready {
+            run() {
+                this.result = "";
+                -> $Running
+            }
+            get_state(): String { @@:("ready") }
+            get_result(): String { @@:(this.result) }
+        }
+        $Running {
+            pass_test() {
+                this.result = "pass";
+                -> $Passed
+            }
+            fail(reason: String) {
+                this.result = reason;
+                -> $Failed
+            }
+            get_state(): String { @@:("running") }
+            get_result(): String { @@:("") }
+        }
+        $Passed {
+            run() {
+                this.result = "";
+                -> $Running
+            }
+            get_state(): String { @@:("passed") }
+            get_result(): String { @@:(this.result) }
+        }
+        $Failed {
+            run() {
+                this.result = "";
+                -> $Running
+            }
+            get_state(): String { @@:("failed") }
+            get_result(): String { @@:(this.result) }
+        }
+
+    domain:
+        result : string = ""
+}
+
+class Program {
+    static void Main(string[] args) {
+        var th = @@TestHarness();
+        int failures = 0;
+
+        if ((string)th.current_state() != "Ready") {
+            Console.WriteLine($"FAIL: current_state expected Ready, got {th.current_state()}");
+            failures++;
+        }
+
+        if ((string)th.get_state() != "ready") {
+            Console.WriteLine("FAIL: get_state expected ready");
+            failures++;
+        }
+
+        th.run();
+        if ((string)th.current_state() != "Running") {
+            Console.WriteLine($"FAIL: current_state expected Running, got {th.current_state()}");
+            failures++;
+        }
+
+        th.pass_test();
+        if ((string)th.current_state() != "Passed") {
+            Console.WriteLine($"FAIL: current_state expected Passed, got {th.current_state()}");
+            failures++;
+        }
+
+        if ((string)th.get_result() != "pass") {
+            Console.WriteLine("FAIL: get_result expected pass");
+            failures++;
+        }
+
+        th.run();
+        th.fail("timeout");
+        if ((string)th.current_state() != "Failed") {
+            Console.WriteLine($"FAIL: current_state expected Failed, got {th.current_state()}");
+            failures++;
+        }
+
+        if ((string)th.get_result() != "timeout") {
+            Console.WriteLine("FAIL: get_result expected timeout");
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine($"FAIL: test_harness ({failures} failures)");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: test_harness");
+    }
+}

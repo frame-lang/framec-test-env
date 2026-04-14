@@ -1,0 +1,48 @@
+@@target python_3
+
+@@system RateLimiter {
+    operations:
+        static tokens_for_rate(rps: int, interval_ms: int): int {
+            return max(1, (rps * interval_ms) // 1000)
+        }
+        tokens_remaining(): int {
+            return self.tokens
+        }
+
+    interface:
+        request(): str = "error"
+        tick()
+
+    machine:
+        $Accepting {
+            request(): str {
+                self.tokens = self.tokens - 1
+                @@:("accepted")
+                if self.tokens <= 0:
+                    -> $Throttled
+            }
+            tick() { self.tokens = min(self.tokens + 1, self.max_tokens) }
+        }
+        $Throttled {
+            request(): str { @@:("throttled") }
+            tick() {
+                self.tokens = self.tokens + 1
+                if self.tokens > 0:
+                    -> $Accepting
+            }
+        }
+
+    domain:
+        tokens: int = 10
+        max_tokens: int = 10
+}
+
+if __name__ == '__main__':
+    assert RateLimiter.tokens_for_rate(100, 50) == 5
+    rl = @@RateLimiter()
+    for i in range(10):
+        rl.request()
+    assert rl.request() == "throttled", f"Expected throttled after 10"
+    rl.tick()
+    assert rl.request() == "accepted", f"Expected accepted after tick"
+    print("PASS: rate_limiter")

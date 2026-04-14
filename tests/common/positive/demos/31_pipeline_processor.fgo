@@ -1,0 +1,102 @@
+@@target go
+// Pipeline Processor — enter handler chain, 5 stages demo (Go)
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system PipelineProcessor {
+    interface:
+        Start(data: string)
+        Status(): string
+
+    machine:
+        $Idle {
+            Start(data: string) {
+                s.data = data
+                -> $Validate
+            }
+            Status(): string { @@:("idle") }
+        }
+        $Validate {
+            $>() {
+                s.step_count = s.step_count + 1
+                -> $Transform
+            }
+            Status(): string { @@:("validate") }
+        }
+        $Transform {
+            $>() {
+                s.step_count = s.step_count + 1
+                -> $Enrich
+            }
+            Status(): string { @@:("transform") }
+        }
+        $Enrich {
+            $>() {
+                s.step_count = s.step_count + 1
+                -> $Store
+            }
+            Status(): string { @@:("enrich") }
+        }
+        $Store {
+            $>() {
+                s.step_count = s.step_count + 1
+                -> $Complete
+            }
+            Status(): string { @@:("store") }
+        }
+        $Complete {
+            Status(): string { @@:("complete") }
+            Start(data: string) {
+                s.data = data
+                s.step_count = 0
+                -> $Validate
+            }
+        }
+
+    domain:
+        data : string = ""
+        step_count : int = 0
+}
+
+func main() {
+    pp := NewPipelineProcessor()
+    failures := 0
+
+    if pp.Status() != "idle" {
+        fmt.Println("FAIL: initial status expected idle")
+        failures++
+    }
+
+    pp.Start("test_data")
+    if pp.Status() != "complete" {
+        fmt.Printf("FAIL: status after start expected complete (auto-chain), got %s\n", pp.Status())
+        failures++
+    }
+
+    if pp.step_count != 4 {
+        fmt.Printf("FAIL: step_count expected 4, got %d\n", pp.step_count)
+        failures++
+    }
+
+    pp.Start("more_data")
+    if pp.Status() != "complete" {
+        fmt.Println("FAIL: status after restart expected complete")
+        failures++
+    }
+
+    if pp.step_count != 4 {
+        fmt.Printf("FAIL: step_count after restart expected 4, got %d\n", pp.step_count)
+        failures++
+    }
+
+    if failures > 0 {
+        fmt.Printf("FAIL: pipeline_processor (%d failures)\n", failures)
+        os.Exit(1)
+    }
+    fmt.Println("PASS: pipeline_processor")
+}

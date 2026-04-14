@@ -1,0 +1,91 @@
+@@target python_3
+
+@@system VendingMachine(inventory: dict = {}) {
+    operations:
+        stock(product: str, qty: int) {
+            self.inventory[product] = self.inventory.get(product, 0) + qty
+        }
+        check_stock(product: str): int {
+            return self.inventory.get(product, 0)
+        }
+
+    interface:
+        insert_coin(amount: int)
+        select(product: str): str = "error"
+        cancel(): int = 0
+
+    machine:
+        $Idle {
+            insert_coin(amount: int) {
+                self.balance = amount
+                -> $HasCredit
+            }
+            select(product: str): str { @@:("insert coin first") }
+            cancel(): int { @@:(0) }
+        }
+        $HasCredit {
+            insert_coin(amount: int) {
+                self.balance = self.balance + amount
+            }
+            select(product: str): str {
+                price = self.get_price(product)
+                if price is None:
+                    @@:("unknown product")
+                elif self.balance < price:
+                    @@:(f"need {price - self.balance} more")
+                elif self.inventory.get(product, 0) <= 0:
+                    @@:("sold out")
+                else:
+                    self.inventory[product] = self.inventory[product] - 1
+                    self.balance = self.balance - price
+                    @@:(f"dispensing {product}")
+                    -> $Dispensing
+            }
+            cancel(): int {
+                refund = self.balance
+                self.balance = 0
+                @@:(refund)
+                -> $Idle
+            }
+        }
+        $Dispensing {
+            $>() {
+                change = self.balance
+                self.balance = 0
+                if change > 0:
+                    print(f"Change: {change}")
+                -> $Idle
+            }
+        }
+
+    actions:
+        get_price(product) {
+            prices = {"cola": 100, "chips": 75, "water": 50}
+            return prices.get(product)
+        }
+
+    domain:
+        balance: int = 0
+        inventory: dict = {}
+}
+
+if __name__ == '__main__':
+    failures = 0
+    vm = @@VendingMachine(inventory={"cola": 2, "chips": 1})
+    vm.stock("water", 5)
+    if vm.check_stock("water") != 5:
+        print(f"FAIL: water stock expected 5, got {vm.check_stock('water')}")
+        failures += 1
+    r = vm.select("cola")
+    if r != "insert coin first":
+        print(f"FAIL: expected 'insert coin first', got '{r}'")
+        failures += 1
+    vm.insert_coin(100)
+    r = vm.select("cola")
+    if r != "dispensing cola":
+        print(f"FAIL: expected 'dispensing cola', got '{r}'")
+        failures += 1
+    if failures > 0:
+        print(f"FAIL: vending_machine ({failures} failures)")
+        import sys; sys.exit(1)
+    print("PASS: vending_machine")

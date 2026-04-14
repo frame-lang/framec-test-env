@@ -1,0 +1,102 @@
+@@target go
+// Deployment Pipeline — push$/pop$, enter args demo (Go)
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system DeploymentPipeline {
+    interface:
+        Start(version: string)
+        Approve()
+        Reject()
+        Status(): string
+
+    machine:
+        $Idle {
+            Start(version: string) {
+                s.version = version
+                -> ("build") $Stage
+            }
+            Status(): string { @@:("idle") }
+        }
+        $Stage {
+            $.name: string = ""
+
+            $>(name: string) { $.name = name }
+
+            Approve() {
+                if $.name == "build" {
+                    push$
+                    -> ("test") $Stage
+                } else {
+                    if $.name == "test" {
+                        push$
+                        -> ("deploy") $Stage
+                    } else {
+                        -> $Done
+                    }
+                }
+            }
+            Reject() {
+                -> pop$
+            }
+            Status(): string { @@:($.name) }
+        }
+        $Done {
+            Status(): string { @@:("done") }
+        }
+
+    domain:
+        version : string = ""
+}
+
+func main() {
+    dp := NewDeploymentPipeline()
+    failures := 0
+
+    if dp.Status() != "idle" {
+        fmt.Println("FAIL: initial status expected idle")
+        failures++
+    }
+
+    dp.Start("v1.0")
+    if dp.Status() != "build" {
+        fmt.Printf("FAIL: status after start expected build, got %s\n", dp.Status())
+        failures++
+    }
+
+    dp.Approve()
+    if dp.Status() != "test" {
+        fmt.Printf("FAIL: status after first approve expected test, got %s\n", dp.Status())
+        failures++
+    }
+
+    dp.Reject()
+    if dp.Status() != "build" {
+        fmt.Printf("FAIL: status after reject expected build (pop), got %s\n", dp.Status())
+        failures++
+    }
+
+    dp.Approve()
+    dp.Approve()
+    if dp.Status() != "deploy" {
+        fmt.Printf("FAIL: status expected deploy, got %s\n", dp.Status())
+        failures++
+    }
+
+    dp.Approve()
+    if dp.Status() != "done" {
+        fmt.Printf("FAIL: status after final approve expected done, got %s\n", dp.Status())
+        failures++
+    }
+
+    if failures > 0 {
+        fmt.Printf("FAIL: deployment_pipeline (%d failures)\n", failures)
+        os.Exit(1)
+    }
+    fmt.Println("PASS: deployment_pipeline")
+}

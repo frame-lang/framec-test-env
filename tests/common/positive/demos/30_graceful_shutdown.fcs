@@ -1,0 +1,91 @@
+@@target csharp
+// Graceful Shutdown — enter handler chain + HSM demo (C#)
+
+using System;
+
+@@system GracefulShutdown {
+    interface:
+        tick(): String
+        status(): String
+
+    machine:
+        $Starting {
+            $>() {
+                this.log_count = this.log_count + 1;
+                -> $Running
+            }
+            status(): String { @@:("starting") }
+        }
+        $Running => $Active {
+            $>() {
+                this.log_count = this.log_count + 1;
+            }
+            tick(): String {
+                this.cycles = this.cycles + 1;
+                if this.cycles >= this.max_cycles {
+                    -> $ShuttingDown
+                }
+                @@:("running")
+            }
+            status(): String { @@:("running") }
+            => $^
+        }
+        $Active {
+            tick(): String { @@:("active_tick") }
+        }
+        $ShuttingDown {
+            $>() {
+                this.log_count = this.log_count + 1;
+            }
+            tick(): String { @@:("shutting_down") }
+            status(): String { @@:("shutting_down") }
+        }
+
+    domain:
+        cycles : int = 0
+        max_cycles : int = 3
+        log_count : int = 0
+}
+
+class Program {
+    static void Main(string[] args) {
+        var gs = @@GracefulShutdown();
+        int failures = 0;
+
+        if ((string)gs.status() != "running") {
+            Console.WriteLine($"FAIL: status after init expected running, got {gs.status()}");
+            failures++;
+        }
+
+        if (gs.log_count < 2) {
+            Console.WriteLine($"FAIL: log_count expected >= 2, got {gs.log_count}");
+            failures++;
+        }
+
+        string r1 = (string)gs.tick();
+        if (r1 != "running") {
+            Console.WriteLine($"FAIL: tick 1 expected running, got {r1}");
+            failures++;
+        }
+
+        gs.tick();
+        gs.tick();
+
+        if ((string)gs.status() != "shutting_down") {
+            Console.WriteLine("FAIL: should be shutting_down after max_cycles ticks");
+            failures++;
+        }
+
+        string r2 = (string)gs.tick();
+        if (r2 != "shutting_down") {
+            Console.WriteLine($"FAIL: tick after shutdown expected shutting_down, got {r2}");
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine($"FAIL: graceful_shutdown ({failures} failures)");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: graceful_shutdown");
+    }
+}

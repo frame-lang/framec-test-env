@@ -1,0 +1,106 @@
+@@target cpp_17
+// Game Level — multi-system demo (C++)
+
+#include <iostream>
+#include <string>
+
+@@system EnemySpawner {
+    interface:
+        spawn(): str
+        status(): str
+
+    machine:
+        $Ready {
+            spawn(): str {
+                this->spawned = this->spawned + 1;
+                if this->spawned >= this->max_enemies {
+                    -> $Exhausted
+                }
+                @@:("enemy_spawned")
+            }
+            status(): str { @@:("ready") }
+        }
+        $Exhausted {
+            spawn(): str { @@:("no_more_enemies") }
+            status(): str { @@:("exhausted") }
+        }
+
+    domain:
+        spawned : int = 0
+        max_enemies : int = 3
+}
+
+@@system GameLevel {
+    interface:
+        start()
+        spawn_enemy(): str
+        complete(): str
+        level_status(): str
+
+    machine:
+        $Loading {
+            start() {
+                -> $Playing
+            }
+            level_status(): str { @@:("loading") }
+        }
+        $Playing {
+            spawn_enemy(): str {
+                std::string result = this->spawner.spawn();
+                @@:(result)
+            }
+            complete() {
+                -> $Victory
+            }
+            level_status(): str { @@:("playing") }
+        }
+        $Victory {
+            level_status(): str { @@:("victory") }
+        }
+
+    domain:
+        spawner : EnemySpawner = @@EnemySpawner()
+}
+
+int main() {
+    auto level = @@GameLevel();
+    int failures = 0;
+
+    if (level.level_status() != std::string("loading")) {
+        std::cout << "FAIL: initial status expected loading" << std::endl;
+        failures++;
+    }
+
+    level.start();
+    if (level.level_status() != std::string("playing")) {
+        std::cout << "FAIL: status after start expected playing" << std::endl;
+        failures++;
+    }
+
+    for (int i = 0; i < 3; i++) {
+        auto r = level.spawn_enemy();
+        if (r != std::string("enemy_spawned")) {
+            std::cout << "FAIL: spawn " << (i + 1) << " expected enemy_spawned" << std::endl;
+            failures++;
+        }
+    }
+
+    auto r = level.spawn_enemy();
+    if (r != std::string("no_more_enemies")) {
+        std::cout << "FAIL: spawn after exhausted expected no_more_enemies" << std::endl;
+        failures++;
+    }
+
+    level.complete();
+    if (level.level_status() != std::string("victory")) {
+        std::cout << "FAIL: status after complete expected victory" << std::endl;
+        failures++;
+    }
+
+    if (failures > 0) {
+        std::cout << "FAIL: game_level (" << failures << " failures)" << std::endl;
+        return 1;
+    }
+    std::cout << "PASS: game_level" << std::endl;
+    return 0;
+}

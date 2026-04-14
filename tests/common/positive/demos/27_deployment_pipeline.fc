@@ -1,0 +1,102 @@
+@@target c
+// Deployment Pipeline — push$/pop$, enter args demo (C)
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system DeploymentPipeline {
+    interface:
+        start(version: str)
+        approve()
+        reject()
+        status(): str
+
+    machine:
+        $Idle {
+            start(version: str) {
+                self->version = version;
+                -> ("build") $Stage
+            }
+            status(): str { @@:("idle") }
+        }
+        $Stage {
+            $.name: str = ""
+
+            $>(name: str) { $.name = name; }
+
+            approve() {
+                if strcmp($.name, "build") == 0 {
+                    push$
+                    -> ("test") $Stage
+                } else {
+                    if strcmp($.name, "test") == 0 {
+                        push$
+                        -> ("deploy") $Stage
+                    } else {
+                        -> $Done
+                    }
+                }
+            }
+            reject() {
+                -> pop$
+            }
+            status(): str { @@:($.name) }
+        }
+        $Done {
+            status(): str { @@:("done") }
+        }
+
+    domain:
+        version : char* = ""
+}
+
+int main() {
+    DeploymentPipeline* dp = @@DeploymentPipeline();
+    int failures = 0;
+
+    if (strcmp(DeploymentPipeline_status(dp), "idle") != 0) {
+        printf("FAIL: initial status expected idle\n");
+        failures++;
+    }
+
+    DeploymentPipeline_start(dp, "v1.0");
+    if (strcmp(DeploymentPipeline_status(dp), "build") != 0) {
+        printf("FAIL: status after start expected build, got %s\n", DeploymentPipeline_status(dp));
+        failures++;
+    }
+
+    DeploymentPipeline_approve(dp);
+    if (strcmp(DeploymentPipeline_status(dp), "test") != 0) {
+        printf("FAIL: status after first approve expected test, got %s\n", DeploymentPipeline_status(dp));
+        failures++;
+    }
+
+    DeploymentPipeline_reject(dp);
+    if (strcmp(DeploymentPipeline_status(dp), "build") != 0) {
+        printf("FAIL: status after reject expected build (pop), got %s\n", DeploymentPipeline_status(dp));
+        failures++;
+    }
+
+    DeploymentPipeline_approve(dp);
+    DeploymentPipeline_approve(dp);
+    if (strcmp(DeploymentPipeline_status(dp), "deploy") != 0) {
+        printf("FAIL: status expected deploy, got %s\n", DeploymentPipeline_status(dp));
+        failures++;
+    }
+
+    DeploymentPipeline_approve(dp);
+    if (strcmp(DeploymentPipeline_status(dp), "done") != 0) {
+        printf("FAIL: status after final approve expected done, got %s\n", DeploymentPipeline_status(dp));
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: deployment_pipeline (%d failures)\n", failures);
+        DeploymentPipeline_destroy(dp);
+        return 1;
+    }
+    printf("PASS: deployment_pipeline\n");
+    DeploymentPipeline_destroy(dp);
+    return 0;
+}

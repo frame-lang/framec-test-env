@@ -1,0 +1,97 @@
+@@target dart
+
+import 'dart:io';
+
+@@system CircuitBreaker {
+    interface:
+        call(): str
+        succeed()
+        fail()
+        reset()
+        status(): str
+
+    machine:
+        $Closed {
+            $.failures: int = 0
+
+            call(): str { @@:("allowed") }
+            succeed() {
+                $.failures = 0;
+            }
+            fail() {
+                $.failures = $.failures + 1;
+                if ($.failures >= this.threshold) {
+                    -> $Open
+                }
+            }
+            reset() { $.failures = 0; }
+            status(): str { @@:("closed") }
+        }
+        $Open {
+            call(): str { @@:("blocked") }
+            reset() { -> $HalfOpen }
+            status(): str { @@:("open") }
+        }
+        $HalfOpen {
+            call(): str { @@:("trial") }
+            succeed() { -> $Closed }
+            fail() { -> $Open }
+            status(): str { @@:("half_open") }
+        }
+
+    domain:
+        threshold: int = 3
+}
+
+void main() {
+    var cb = @@CircuitBreaker();
+    int failures = 0;
+
+    if (cb.status() != "closed") {
+        print("FAIL: expected closed");
+        failures++;
+    }
+
+    cb.fail();
+    cb.fail();
+    if (cb.status() != "closed") {
+        print("FAIL: expected still closed after 2 failures");
+        failures++;
+    }
+
+    cb.fail();
+    if (cb.status() != "open") {
+        print("FAIL: expected open after 3 failures");
+        failures++;
+    }
+
+    var r1 = cb.call();
+    if (r1 != "blocked") {
+        print("FAIL: expected blocked, got $r1");
+        failures++;
+    }
+
+    cb.reset();
+    if (cb.status() != "half_open") {
+        print("FAIL: expected half_open");
+        failures++;
+    }
+
+    var r2 = cb.call();
+    if (r2 != "trial") {
+        print("FAIL: expected trial, got $r2");
+        failures++;
+    }
+
+    cb.succeed();
+    if (cb.status() != "closed") {
+        print("FAIL: expected closed after succeed");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: circuit_breaker ($failures failures)");
+        exit(1);
+    }
+    print("PASS: circuit_breaker");
+}

@@ -1,0 +1,76 @@
+<?php
+// Pipeline Processor — 5-stage enter handler chain (PHP)
+
+@@system PipelineProcessor {
+    interface:
+        start(data: str)
+        status(): str
+        get_step_count(): int
+
+    machine:
+        $Idle {
+            start(data: str) {
+                $this->data = $data;
+                -> $Validate
+            }
+            status(): str { @@:("idle") }
+            get_step_count(): int { @@:($this->step_count) }
+        }
+        $Validate {
+            $>() {
+                $this->step_count = $this->step_count + 1;
+                -> $Transform
+            }
+            status(): str { @@:("validate") }
+        }
+        $Transform {
+            $>() {
+                $this->step_count = $this->step_count + 1;
+                -> $Enrich
+            }
+            status(): str { @@:("transform") }
+        }
+        $Enrich {
+            $>() {
+                $this->step_count = $this->step_count + 1;
+                -> $Store
+            }
+            status(): str { @@:("enrich") }
+        }
+        $Store {
+            $>() {
+                $this->step_count = $this->step_count + 1;
+                -> $Complete
+            }
+            status(): str { @@:("store") }
+        }
+        $Complete {
+            status(): str { @@:("complete") }
+            get_step_count(): int { @@:($this->step_count) }
+            start(data: str) {
+                $this->data = $data;
+                $this->step_count = 0;
+                -> $Validate
+            }
+        }
+
+    domain:
+        data = ""
+        step_count = 0
+}
+
+$pp = @@PipelineProcessor();
+$failures = 0;
+
+if ($pp->status() !== "idle") { echo "FAIL: expected idle\n"; $failures++; }
+
+$pp->start("batch_1");
+if ($pp->status() !== "complete") { echo "FAIL: expected complete\n"; $failures++; }
+if ($pp->get_step_count() !== 4) { echo "FAIL: expected 4 steps\n"; $failures++; }
+
+$pp->start("batch_2");
+if ($pp->status() !== "complete") { echo "FAIL: expected complete on second run\n"; $failures++; }
+if ($pp->get_step_count() !== 4) { echo "FAIL: expected 4 steps on second run\n"; $failures++; }
+
+if ($failures > 0) { echo "FAIL: pipeline_processor ($failures failures)\n"; exit(1); }
+echo "PASS: pipeline_processor\n";

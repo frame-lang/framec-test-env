@@ -1,0 +1,95 @@
+@@target kotlin
+
+@@system CircuitBreaker {
+    interface:
+        call(): String
+        succeed()
+        fail()
+        reset()
+        status(): String
+
+    machine:
+        $Closed {
+            $.failures: Int = 0
+
+            call(): String { @@:("allowed") }
+            succeed() {
+                $.failures = 0
+            }
+            fail() {
+                $.failures = $.failures + 1
+                if ($.failures >= this.threshold) {
+                    -> $Open
+                }
+            }
+            reset() { $.failures = 0 }
+            status(): String { @@:("closed") }
+        }
+        $Open {
+            call(): String { @@:("blocked") }
+            reset() { -> $HalfOpen }
+            status(): String { @@:("open") }
+        }
+        $HalfOpen {
+            call(): String { @@:("trial") }
+            succeed() { -> $Closed }
+            fail() { -> $Open }
+            status(): String { @@:("half_open") }
+        }
+
+    domain:
+        threshold: Int = 3
+}
+
+fun main() {
+    val cb = CircuitBreaker()
+    var failures = 0
+
+    if (cb.status() as String != "closed") {
+        println("FAIL: expected closed")
+        failures++
+    }
+
+    cb.fail()
+    cb.fail()
+    if (cb.status() as String != "closed") {
+        println("FAIL: expected still closed after 2 failures")
+        failures++
+    }
+
+    cb.fail()
+    if (cb.status() as String != "open") {
+        println("FAIL: expected open after 3 failures")
+        failures++
+    }
+
+    val r1 = cb.call() as String
+    if (r1 != "blocked") {
+        println("FAIL: expected blocked, got $r1")
+        failures++
+    }
+
+    cb.reset()
+    if (cb.status() as String != "half_open") {
+        println("FAIL: expected half_open")
+        failures++
+    }
+
+    val r2 = cb.call() as String
+    if (r2 != "trial") {
+        println("FAIL: expected trial, got $r2")
+        failures++
+    }
+
+    cb.succeed()
+    if (cb.status() as String != "closed") {
+        println("FAIL: expected closed after succeed")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: circuit_breaker ($failures failures)")
+        kotlin.system.exitProcess(1)
+    }
+    println("PASS: circuit_breaker")
+}

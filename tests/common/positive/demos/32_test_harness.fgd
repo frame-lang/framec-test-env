@@ -1,0 +1,82 @@
+@@target gdscript
+
+extends SceneTree
+
+@@system TestHarness {
+    operations:
+        current_state(): str {
+            @@:(@@:system.state)
+        }
+
+    interface:
+        run()
+        pass_test()
+        fail(reason: str)
+        get_state(): str
+        get_result(): str
+
+    machine:
+        $Ready {
+            run() {
+                self.result = ""
+                -> $Running
+            }
+            get_state(): str { @@:("ready") }
+            get_result(): str { @@:(self.result) }
+        }
+        $Running {
+            pass_test() {
+                self.result = "pass"
+                -> $Passed
+            }
+            fail(reason: str) {
+                self.result = reason
+                -> $Failed
+            }
+            get_state(): str { @@:("running") }
+            get_result(): str { @@:("") }
+        }
+        $Passed {
+            run() {
+                self.result = ""
+                -> $Running
+            }
+            get_state(): str { @@:("passed") }
+            get_result(): str { @@:(self.result) }
+        }
+        $Failed {
+            run() {
+                self.result = ""
+                -> $Running
+            }
+            get_state(): str { @@:("failed") }
+            get_result(): str { @@:(self.result) }
+        }
+
+    domain:
+        result = ""
+}
+
+func _init():
+    var th = @@TestHarness()
+
+    var cs = th.current_state()
+    assert(cs == "Ready", "current_state expected Ready, got: " + str(cs))
+
+    th.run()
+    cs = th.current_state()
+    assert(cs == "Running", "current_state expected Running, got: " + str(cs))
+
+    th.pass_test()
+    assert(th.get_result() == "pass", "Expected result pass")
+    cs = th.current_state()
+    assert(cs == "Passed", "current_state expected Passed, got: " + str(cs))
+
+    th.run()
+    th.fail("timeout")
+    assert(th.get_result() == "timeout", "Expected result timeout")
+    cs = th.current_state()
+    assert(cs == "Failed", "current_state expected Failed, got: " + str(cs))
+
+    print("PASS: test_harness")
+    quit()

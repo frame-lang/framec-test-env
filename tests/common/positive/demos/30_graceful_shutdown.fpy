@@ -1,0 +1,53 @@
+@@target python_3
+
+@@system Worker {
+    interface:
+        quit()
+
+    machine:
+        $Init {
+            $>() {
+                -> $FetchData
+            }
+        }
+        $FetchData => $Running {
+            $>() {
+                self.cycles = self.cycles + 1
+                -> $ProcessData
+            }
+            => $^
+        }
+        $ProcessData => $Running {
+            $>() {
+                if self.cycles >= self.max_cycles:
+                    -> $ShuttingDown
+                else:
+                    -> $FetchData
+            }
+            => $^
+        }
+        $Running {
+            quit() {
+                -> $ShuttingDown
+            }
+        }
+        $ShuttingDown {
+            $>() {
+                self.shutdown_complete = True
+                -> $Done
+            }
+        }
+        $Done {
+        }
+
+    domain:
+        cycles: int = 0
+        max_cycles: int = 3
+        shutdown_complete = False
+}
+
+if __name__ == '__main__':
+    w = @@Worker()
+    assert w.shutdown_complete == True, f"Expected shutdown, got {w.shutdown_complete}"
+    assert w.cycles == 3, f"Expected 3 cycles, got {w.cycles}"
+    print("PASS: graceful_shutdown")

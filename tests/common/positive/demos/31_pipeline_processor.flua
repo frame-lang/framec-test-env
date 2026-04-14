@@ -1,0 +1,93 @@
+-- Pipeline Processor — 5-stage enter handler chain (Lua)
+
+@@system PipelineProcessor {
+    interface:
+        start(data: str)
+        status(): str
+        get_step_count(): int
+
+    machine:
+        $Idle {
+            start(data: str) {
+                self.data = data
+                -> $Validate
+            }
+            status(): str { @@:("idle") }
+            get_step_count(): int { @@:(self.step_count) }
+        }
+        $Validate {
+            $>() {
+                self.step_count = self.step_count + 1
+                -> $Transform
+            }
+            status(): str { @@:("validate") }
+        }
+        $Transform {
+            $>() {
+                self.step_count = self.step_count + 1
+                -> $Enrich
+            }
+            status(): str { @@:("transform") }
+        }
+        $Enrich {
+            $>() {
+                self.step_count = self.step_count + 1
+                -> $Store
+            }
+            status(): str { @@:("enrich") }
+        }
+        $Store {
+            $>() {
+                self.step_count = self.step_count + 1
+                -> $Complete
+            }
+            status(): str { @@:("store") }
+        }
+        $Complete {
+            status(): str { @@:("complete") }
+            get_step_count(): int { @@:(self.step_count) }
+            start(data: str) {
+                self.data = data
+                self.step_count = 0
+                -> $Validate
+            }
+        }
+
+    domain:
+        data = ""
+        step_count = 0
+}
+
+local pp = @@PipelineProcessor()
+local failures = 0
+
+if pp:status() ~= "idle" then
+    print("FAIL: expected idle")
+    failures = failures + 1
+end
+
+pp:start("batch_1")
+if pp:status() ~= "complete" then
+    print("FAIL: expected complete")
+    failures = failures + 1
+end
+if pp:get_step_count() ~= 4 then
+    print("FAIL: expected 4 steps, got " .. pp:get_step_count())
+    failures = failures + 1
+end
+
+pp:start("batch_2")
+if pp:status() ~= "complete" then
+    print("FAIL: expected complete on second run")
+    failures = failures + 1
+end
+if pp:get_step_count() ~= 4 then
+    print("FAIL: expected 4 steps on second run")
+    failures = failures + 1
+end
+
+if failures > 0 then
+    print("FAIL: pipeline_processor (" .. failures .. " failures)")
+    os.exit(1)
+end
+print("PASS: pipeline_processor")

@@ -1,0 +1,91 @@
+-- Deployment Pipeline — push$/pop$, enter args (Lua)
+
+@@system DeploymentPipeline {
+    interface:
+        start(version: str)
+        approve()
+        reject()
+        status(): str
+
+    machine:
+        $Idle {
+            start(version: str) {
+                self.version = version
+                -> ("build") $Stage
+            }
+            status(): str { @@:("idle") }
+        }
+        $Stage {
+            $.name: str = ""
+
+            $>(name: str) { $.name = name }
+
+            approve() {
+                if $.name == "build" {
+                    push$
+                    -> ("test") $Stage
+                } else {
+                    if $.name == "test" {
+                        push$
+                        -> ("deploy") $Stage
+                    } else {
+                        -> $Done
+                    }
+                }
+            }
+            reject() {
+                -> pop$
+            }
+            status(): str { @@:($.name) }
+        }
+        $Done {
+            status(): str { @@:("done") }
+        }
+
+    domain:
+        version = ""
+}
+
+local dp = @@DeploymentPipeline()
+local failures = 0
+
+if dp:status() ~= "idle" then
+    print("FAIL: expected idle")
+    failures = failures + 1
+end
+
+dp:start("v2.0")
+if dp:status() ~= "build" then
+    print("FAIL: expected build")
+    failures = failures + 1
+end
+
+dp:approve()
+if dp:status() ~= "test" then
+    print("FAIL: expected test")
+    failures = failures + 1
+end
+
+dp:reject()
+if dp:status() ~= "build" then
+    print("FAIL: expected build after reject")
+    failures = failures + 1
+end
+
+dp:approve()
+dp:approve()
+if dp:status() ~= "deploy" then
+    print("FAIL: expected deploy")
+    failures = failures + 1
+end
+dp:approve()
+if dp:status() ~= "done" then
+    print("FAIL: expected done")
+    failures = failures + 1
+end
+
+if failures > 0 then
+    print("FAIL: deployment_pipeline (" .. failures .. " failures)")
+    os.exit(1)
+end
+print("PASS: deployment_pipeline")

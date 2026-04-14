@@ -1,0 +1,86 @@
+# Graceful Shutdown — service pattern with enter handler chain (Ruby)
+
+@@system GracefulShutdown {
+    interface:
+        process_data(): str
+        status(): str
+        get_cycles(): int
+
+    machine:
+        $Init {
+            $>() {
+                self.cycles = 0
+                -> $ProcessData
+            }
+        }
+        $ProcessData {
+            $>() {
+                self.cycles = self.cycles + 1
+            }
+
+            process_data(): str {
+                if self.cycles >= self.max_cycles {
+                    -> $ShuttingDown
+                    @@:("shutting_down")
+                } else {
+                    -> $ProcessData
+                    @@:("processed")
+                }
+            }
+            status(): str { @@:("processing") }
+            get_cycles(): int { @@:(self.cycles) }
+        }
+        $ShuttingDown {
+            $>() {
+                self.cleanup_done = true
+            }
+
+            status(): str { @@:("shutdown") }
+            get_cycles(): int { @@:(self.cycles) }
+        }
+
+    domain:
+        cycles = 0
+        max_cycles = 3
+        cleanup_done = false
+}
+
+svc = @@GracefulShutdown()
+failures = 0
+
+if svc.status() != "processing"
+    puts "FAIL: expected processing, got #{svc.status()}"
+    failures += 1
+end
+if svc.get_cycles() != 1
+    puts "FAIL: expected 1 cycle"
+    failures += 1
+end
+
+r1 = svc.process_data()
+if r1 != "processed"
+    puts "FAIL: expected processed"
+    failures += 1
+end
+
+r2 = svc.process_data()
+if r2 != "processed"
+    puts "FAIL: expected processed"
+    failures += 1
+end
+
+r3 = svc.process_data()
+if r3 != "shutting_down"
+    puts "FAIL: expected shutting_down, got #{r3}"
+    failures += 1
+end
+if svc.status() != "shutdown"
+    puts "FAIL: expected shutdown"
+    failures += 1
+end
+
+if failures > 0
+    puts "FAIL: graceful_shutdown (#{failures} failures)"
+    exit(1)
+end
+puts "PASS: graceful_shutdown"

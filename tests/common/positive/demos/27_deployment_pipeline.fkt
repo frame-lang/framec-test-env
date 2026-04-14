@@ -1,0 +1,94 @@
+@@target kotlin
+
+@@system DeploymentPipeline {
+    interface:
+        start(version: String)
+        approve()
+        reject()
+        status(): String
+
+    machine:
+        $Idle {
+            start(version: String) {
+                this.version = version
+                -> ("build") $Stage
+            }
+            status(): String { @@:("idle") }
+        }
+        $Stage {
+            $.name: String = ""
+
+            $>(name: String) { $.name = name }
+
+            approve() {
+                if ($.name == "build") {
+                    push$
+                    -> ("test") $Stage
+                } else {
+                    if ($.name == "test") {
+                        push$
+                        -> ("deploy") $Stage
+                    } else {
+                        -> $Done
+                    }
+                }
+            }
+            reject() {
+                -> pop$
+            }
+            status(): String { @@:($.name) }
+        }
+        $Done {
+            status(): String { @@:("done") }
+        }
+
+    domain:
+        version: String = ""
+}
+
+fun main() {
+    val dp = DeploymentPipeline()
+    var failures = 0
+
+    if (dp.status() as String != "idle") {
+        println("FAIL: expected idle")
+        failures++
+    }
+
+    dp.start("v1.0")
+    if (dp.status() as String != "build") {
+        println("FAIL: expected build, got ${dp.status()}")
+        failures++
+    }
+
+    dp.approve()
+    if (dp.status() as String != "test") {
+        println("FAIL: expected test, got ${dp.status()}")
+        failures++
+    }
+
+    dp.reject()
+    if (dp.status() as String != "build") {
+        println("FAIL: expected build after reject, got ${dp.status()}")
+        failures++
+    }
+
+    dp.approve()
+    dp.approve()
+    if (dp.status() as String != "deploy") {
+        println("FAIL: expected deploy, got ${dp.status()}")
+        failures++
+    }
+
+    dp.approve()
+    if (dp.status() as String != "done") {
+        println("FAIL: expected done, got ${dp.status()}")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: deployment_pipeline ($failures failures)")
+        kotlin.system.exitProcess(1)
+    }
+    println("PASS: deployment_pipeline")
+}

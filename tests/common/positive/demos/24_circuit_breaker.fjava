@@ -1,0 +1,101 @@
+@@target java
+// Circuit Breaker — state vars + domain vars demo (Java)
+
+@@system CircuitBreaker {
+    interface:
+        call(): String
+        succeed()
+        fail()
+        reset()
+        status(): String
+
+    machine:
+        $Closed {
+            $.failures: int = 0
+
+            call(): String { @@:("allowed") }
+            succeed() {
+                $.failures = 0;
+            }
+            fail() {
+                $.failures = $.failures + 1;
+                if $.failures >= this.threshold {
+                    -> $Open
+                }
+            }
+            reset() { $.failures = 0; }
+            status(): String { @@:("closed") }
+        }
+        $Open {
+            call(): String { @@:("blocked") }
+            reset() { -> $HalfOpen }
+            status(): String { @@:("open") }
+        }
+        $HalfOpen {
+            call(): String { @@:("trial") }
+            succeed() { -> $Closed }
+            fail() { -> $Open }
+            status(): String { @@:("half_open") }
+        }
+
+    domain:
+        threshold : int = 3
+}
+
+class Main {
+    public static void main(String[] args) {
+        CircuitBreaker cb = @@CircuitBreaker();
+        int failures = 0;
+
+        if (!cb.status().equals("closed")) {
+            System.out.println("FAIL: initial status expected closed");
+            failures++;
+        }
+
+        if (!cb.call().equals("allowed")) {
+            System.out.println("FAIL: call in closed expected allowed");
+            failures++;
+        }
+
+        cb.fail();
+        cb.fail();
+        if (!cb.status().equals("closed")) {
+            System.out.println("FAIL: still closed after 2 failures");
+            failures++;
+        }
+
+        cb.fail();
+        if (!cb.status().equals("open")) {
+            System.out.println("FAIL: should be open after 3 failures");
+            failures++;
+        }
+
+        if (!cb.call().equals("blocked")) {
+            System.out.println("FAIL: call in open expected blocked");
+            failures++;
+        }
+
+        cb.reset();
+        if (!cb.status().equals("half_open")) {
+            System.out.println("FAIL: should be half_open after reset");
+            failures++;
+        }
+
+        if (!cb.call().equals("trial")) {
+            System.out.println("FAIL: call in half_open expected trial");
+            failures++;
+        }
+
+        cb.succeed();
+        if (!cb.status().equals("closed")) {
+            System.out.println("FAIL: should be closed after succeed in half_open");
+            failures++;
+        }
+
+        if (failures > 0) {
+            System.out.println("FAIL: circuit_breaker (" + failures + " failures)");
+            System.exit(1);
+        }
+        System.out.println("PASS: circuit_breaker");
+    }
+}

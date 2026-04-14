@@ -1,0 +1,87 @@
+@@target dart
+
+import 'dart:io';
+
+@@system LoginManager {
+    interface:
+        login(user: str, pass: str): str
+        logout()
+        status(): str
+
+    machine:
+        $LoggedOut {
+            login(user: str, pass: str): str {
+                if (pass == "secret") {
+                    this.current_user = user;
+                    -> $LoggedIn
+                    @@:("ok")
+                } else {
+                    @@:("denied")
+                }
+            }
+            status(): str { @@:("logged_out") }
+        }
+        $LoggedIn {
+            logout() {
+                this.current_user = "";
+                -> $LoggedOut
+            }
+            status(): str { @@:("logged_in") }
+        }
+
+    domain:
+        current_user: String = ""
+}
+
+@@system App {
+    interface:
+        authenticate(user: str, pass: str): str
+        get_status(): str
+
+    machine:
+        $Running {
+            authenticate(user: str, pass: str): str {
+                var result = this.auth.login(user, pass);
+                @@:(result)
+            }
+            get_status(): str {
+                @@:(this.auth.status())
+            }
+        }
+
+    domain:
+        auth: LoginManager = LoginManager()
+}
+
+void main() {
+    var app = @@App();
+    int failures = 0;
+
+    if (app.get_status() != "logged_out") {
+        print("FAIL: expected logged_out");
+        failures++;
+    }
+
+    var r1 = app.authenticate("alice", "wrong");
+    if (r1 != "denied") {
+        print("FAIL: expected denied, got $r1");
+        failures++;
+    }
+
+    var r2 = app.authenticate("alice", "secret");
+    if (r2 != "ok") {
+        print("FAIL: expected ok, got $r2");
+        failures++;
+    }
+
+    if (app.get_status() != "logged_in") {
+        print("FAIL: expected logged_in");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: auth_flow ($failures failures)");
+        exit(1);
+    }
+    print("PASS: auth_flow");
+}

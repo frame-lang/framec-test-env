@@ -1,0 +1,71 @@
+@@target python_3
+
+@@system Deployer {
+    interface:
+        deploy(version: str)
+        verify(): str = ""
+        rollback(): str = ""
+        status(): str = ""
+
+    machine:
+        $Ready {
+            $.version: str = "none"
+            deploy(version: str) {
+                push$
+                -> (version) $Deploying
+            }
+            status(): str { @@:(f"ready (v{$.version})") }
+        }
+        $Deploying {
+            $.version: str = ""
+            $.step: int = 0
+            $.steps: list = []
+
+            $>(version: str) {
+                $.version = version
+                $.steps = ["provision", "configure", "migrate", "healthcheck"]
+            }
+            verify(): str {
+                if $.step < len($.steps):
+                    current = $.steps[$.step]
+                    $.step = $.step + 1
+                    @@:(f"v {current}")
+                else:
+                    @@:("all passed")
+                    -> ($.version) $Live
+            }
+            rollback(): str {
+                @@:(f"rolling back v{$.version}")
+                -> pop$
+            }
+            status(): str { @@:(f"deploying v{$.version}") }
+        }
+        $Live {
+            $.version: str = ""
+            $>(version: str) {
+                $.version = version
+            }
+            deploy(version: str) {
+                push$
+                -> (version) $Deploying
+            }
+            rollback(): str {
+                @@:(f"rolling back from v{$.version}")
+                -> pop$
+            }
+            status(): str { @@:(f"live (v{$.version})") }
+        }
+}
+
+if __name__ == '__main__':
+    d = @@Deployer()
+    d.deploy("1.0")
+    for i in range(5):
+        r = d.verify()
+    assert "live" in d.status(), f"Expected live, got {d.status()}"
+    d.deploy("2.0")
+    d.verify()
+    r = d.rollback()
+    assert "rolling back" in r, f"Expected rollback, got {r}"
+    assert "live" in d.status(), f"Expected live after rollback, got {d.status()}"
+    print("PASS: deployer")

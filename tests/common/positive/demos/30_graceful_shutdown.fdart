@@ -1,0 +1,103 @@
+@@target dart
+
+import 'dart:io';
+
+@@system GracefulShutdown {
+    interface:
+        start()
+        tick(): str
+        status(): str
+
+    machine:
+        $Idle {
+            start() {
+                -> $Running
+            }
+            status(): str { @@:("idle") }
+        }
+        $Running {
+            tick(): str {
+                this.cycles = this.cycles + 1;
+                if (this.cycles >= this.max_cycles) {
+                    -> $ShuttingDown
+                }
+                @@:("running")
+            }
+            status(): str { @@:("running") }
+        }
+        $ShuttingDown {
+            $>() {
+                -> $Draining
+            }
+            status(): str { @@:("shutting_down") }
+        }
+        $Draining => $Shutdown {
+            $>() {
+                this.drain_count = this.drain_count + 1;
+                -> $Cleanup
+            }
+            status(): str { @@:("draining") }
+            => $^
+        }
+        $Cleanup => $Shutdown {
+            $>() {
+                this.drain_count = this.drain_count + 1;
+                -> $Stopped
+            }
+            status(): str { @@:("cleanup") }
+            => $^
+        }
+        $Shutdown {
+            tick(): str { @@:("shutting_down") }
+        }
+        $Stopped {
+            tick(): str { @@:("stopped") }
+            status(): str { @@:("stopped") }
+        }
+
+    domain:
+        cycles: int = 0
+        max_cycles: int = 3
+        drain_count: int = 0
+}
+
+void main() {
+    var gs = @@GracefulShutdown();
+    int failures = 0;
+
+    if (gs.status() != "idle") {
+        print("FAIL: expected idle");
+        failures++;
+    }
+
+    gs.start();
+    if (gs.status() != "running") {
+        print("FAIL: expected running");
+        failures++;
+    }
+
+    gs.tick();
+    gs.tick();
+    gs.tick();
+    if (gs.status() != "stopped") {
+        print("FAIL: expected stopped after max cycles");
+        failures++;
+    }
+
+    if (gs.drain_count != 2) {
+        print("FAIL: expected drain_count 2, got ${gs.drain_count}");
+        failures++;
+    }
+
+    var r2 = gs.tick();
+    if (r2 != "stopped") {
+        print("FAIL: expected stopped tick, got $r2");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: graceful_shutdown ($failures failures)");
+        exit(1);
+    }
+    print("PASS: graceful_shutdown");
+}

@@ -1,0 +1,109 @@
+@@target kotlin
+
+@@system SurvivalLevel {
+    interface:
+        take_damage(amount: Int)
+        heal(amount: Int)
+        get_hp(): Int
+        status(): String
+
+    machine:
+        $Alive {
+            take_damage(amount: Int) {
+                this.hp = this.hp - amount
+                if (this.hp <= 0) {
+                    this.hp = 0
+                    -> $Dead
+                }
+            }
+            heal(amount: Int) {
+                this.hp = this.hp + amount
+                if (this.hp > this.max_hp) {
+                    this.hp = this.max_hp
+                }
+            }
+            get_hp(): Int { @@:(this.hp) }
+            status(): String { @@:("alive") }
+        }
+        $Dead {
+            get_hp(): Int { @@:(0) }
+            status(): String { @@:("dead") }
+        }
+
+    domain:
+        hp: Int = 100
+        max_hp: Int = 100
+}
+
+@@system Game {
+    interface:
+        attack(dmg: Int)
+        heal(amount: Int)
+        get_level_status(): String
+        get_level_hp(): Int
+
+    machine:
+        $Playing {
+            attack(dmg: Int) {
+                this.level.take_damage(dmg)
+                if (this.level.status() as String == "dead") {
+                    -> $GameOver
+                }
+            }
+            heal(amount: Int) {
+                this.level.heal(amount)
+            }
+            get_level_status(): String {
+                @@:(this.level.status() as String)
+            }
+            get_level_hp(): Int {
+                @@:(this.level.get_hp() as Int)
+            }
+        }
+        $GameOver {
+            get_level_status(): String { @@:("game_over") }
+            get_level_hp(): Int { @@:(0) }
+        }
+
+    domain:
+        level: SurvivalLevel = SurvivalLevel()
+}
+
+fun main() {
+    val game = Game()
+    var failures = 0
+
+    if (game.get_level_status() as String != "alive") {
+        println("FAIL: expected alive")
+        failures++
+    }
+
+    if (game.get_level_hp() as Int != 100) {
+        println("FAIL: expected hp 100")
+        failures++
+    }
+
+    game.attack(30)
+    if (game.get_level_hp() as Int != 70) {
+        println("FAIL: expected hp 70")
+        failures++
+    }
+
+    game.heal(10)
+    if (game.get_level_hp() as Int != 80) {
+        println("FAIL: expected hp 80")
+        failures++
+    }
+
+    game.attack(90)
+    if (game.get_level_status() as String != "game_over") {
+        println("FAIL: expected game_over")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: game_level ($failures failures)")
+        kotlin.system.exitProcess(1)
+    }
+    println("PASS: game_level")
+}

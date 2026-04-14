@@ -1,0 +1,98 @@
+@@target csharp
+// Rate Limiter — static operations demo (C#)
+
+using System;
+
+@@system RateLimiter {
+    operations:
+        static get_max_requests(): int {
+            return 5;
+        }
+        get_count(): int {
+            return this.count;
+        }
+
+    interface:
+        request(): String
+        reset()
+        status(): String
+
+    machine:
+        $Allowing {
+            request(): String {
+                this.count = this.count + 1;
+                if this.count >= this.max_requests {
+                    -> $Throttling
+                }
+                @@:("allowed")
+            }
+            reset() {
+                this.count = 0;
+            }
+            status(): String { @@:("allowing") }
+        }
+        $Throttling {
+            request(): String { @@:("throttled") }
+            reset() {
+                this.count = 0;
+                -> $Allowing
+            }
+            status(): String { @@:("throttling") }
+        }
+
+    domain:
+        count : int = 0
+        max_requests : int = 5
+}
+
+class Program {
+    static void Main(string[] args) {
+        var rl = @@RateLimiter();
+        int failures = 0;
+
+        if ((string)rl.status() != "allowing") {
+            Console.WriteLine("FAIL: initial status expected allowing");
+            failures++;
+        }
+
+        if (RateLimiter.get_max_requests() != 5) {
+            Console.WriteLine("FAIL: static get_max_requests expected 5");
+            failures++;
+        }
+
+        for (int i = 0; i < 4; i++) {
+            if ((string)rl.request() != "allowed") {
+                Console.WriteLine($"FAIL: request {i + 1} expected allowed");
+                failures++;
+            }
+        }
+
+        rl.request();
+        if ((string)rl.status() != "throttling") {
+            Console.WriteLine("FAIL: should be throttling after 5 requests");
+            failures++;
+        }
+
+        if ((string)rl.request() != "throttled") {
+            Console.WriteLine("FAIL: request while throttling expected throttled");
+            failures++;
+        }
+
+        rl.reset();
+        if ((string)rl.status() != "allowing") {
+            Console.WriteLine("FAIL: should be allowing after reset");
+            failures++;
+        }
+
+        if ((int)rl.get_count() != 0) {
+            Console.WriteLine("FAIL: count after reset expected 0");
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine($"FAIL: rate_limiter ({failures} failures)");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: rate_limiter");
+    }
+}

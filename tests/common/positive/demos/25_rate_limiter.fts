@@ -1,0 +1,67 @@
+// Rate Limiter — static + instance operations (TypeScript)
+
+@@system RateLimiter {
+    operations:
+        static get_max_requests(): int {
+            return 5;
+        }
+        get_count(): int {
+            return this.count;
+        }
+
+    interface:
+        request(): str
+        reset()
+        status(): str
+
+    machine:
+        $Allowing {
+            request(): str {
+                this.count = this.count + 1
+                if (this.count >= this.max_requests) {
+                    -> $Throttling
+                }
+                @@:("allowed")
+            }
+            reset() {
+                this.count = 0
+            }
+            status(): str { @@:("allowing") }
+        }
+        $Throttling {
+            request(): str { @@:("throttled") }
+            reset() {
+                this.count = 0
+                -> $Allowing
+            }
+            status(): str { @@:("throttling") }
+        }
+
+    domain:
+        count: number = 0
+        max_requests: number = 5
+}
+
+const rl = @@RateLimiter()
+let failures = 0
+
+const maxReq = RateLimiter.get_max_requests()
+if (maxReq !== 5) { console.log("FAIL: static get_max_requests expected 5, got " + maxReq); failures++ }
+
+for (let i = 0; i < 4; i++) {
+    const r = rl.request()
+    if (r !== "allowed") { console.log("FAIL: request " + i + " should be allowed"); failures++ }
+}
+if (rl.get_count() !== 4) { console.log("FAIL: count should be 4"); failures++ }
+if (rl.status() !== "allowing") { console.log("FAIL: should still be allowing"); failures++ }
+
+rl.request()
+if (rl.status() !== "throttling") { console.log("FAIL: should be throttling after 5"); failures++ }
+if (rl.request() !== "throttled") { console.log("FAIL: should be throttled"); failures++ }
+
+rl.reset()
+if (rl.status() !== "allowing") { console.log("FAIL: should be allowing after reset"); failures++ }
+if (rl.get_count() !== 0) { console.log("FAIL: count should be 0 after reset"); failures++ }
+
+if (failures > 0) { console.log("FAIL: rate_limiter (" + failures + " failures)"); process.exit(1) }
+console.log("PASS: rate_limiter")

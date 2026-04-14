@@ -1,0 +1,68 @@
+<?php
+// Rate Limiter — static + instance operations (PHP)
+
+@@system RateLimiter {
+    operations:
+        static get_max_requests(): int {
+            return 5;
+        }
+        get_count(): int {
+            return $this->count;
+        }
+
+    interface:
+        request(): str
+        reset()
+        status(): str
+
+    machine:
+        $Allowing {
+            request(): str {
+                $this->count = $this->count + 1;
+                if ($this->count >= $this->max_requests) {
+                    -> $Throttling
+                }
+                @@:("allowed")
+            }
+            reset() {
+                $this->count = 0;
+            }
+            status(): str { @@:("allowing") }
+        }
+        $Throttling {
+            request(): str { @@:("throttled") }
+            reset() {
+                $this->count = 0;
+                -> $Allowing
+            }
+            status(): str { @@:("throttling") }
+        }
+
+    domain:
+        count = 0
+        max_requests = 5
+}
+
+$rl = @@RateLimiter();
+$failures = 0;
+
+$maxReq = RateLimiter::get_max_requests();
+if ($maxReq !== 5) { echo "FAIL: static get_max_requests expected 5, got $maxReq\n"; $failures++; }
+
+for ($i = 0; $i < 4; $i++) {
+    $r = $rl->request();
+    if ($r !== "allowed") { echo "FAIL: request $i should be allowed\n"; $failures++; }
+}
+if ($rl->get_count() !== 4) { echo "FAIL: count should be 4\n"; $failures++; }
+if ($rl->status() !== "allowing") { echo "FAIL: should still be allowing\n"; $failures++; }
+
+$rl->request();
+if ($rl->status() !== "throttling") { echo "FAIL: should be throttling after 5\n"; $failures++; }
+if ($rl->request() !== "throttled") { echo "FAIL: should be throttled\n"; $failures++; }
+
+$rl->reset();
+if ($rl->status() !== "allowing") { echo "FAIL: should be allowing after reset\n"; $failures++; }
+if ($rl->get_count() !== 0) { echo "FAIL: count should be 0 after reset\n"; $failures++; }
+
+if ($failures > 0) { echo "FAIL: rate_limiter ($failures failures)\n"; exit(1); }
+echo "PASS: rate_limiter\n";

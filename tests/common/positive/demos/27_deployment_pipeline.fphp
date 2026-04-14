@@ -1,0 +1,71 @@
+<?php
+// Deployment Pipeline — push$/pop$, enter args (PHP)
+
+@@system DeploymentPipeline {
+    interface:
+        start(version: str)
+        approve()
+        reject()
+        status(): str
+
+    machine:
+        $Idle {
+            start(version: str) {
+                $this->version = $version;
+                -> ("build") $Stage
+            }
+            status(): str { @@:("idle") }
+        }
+        $Stage {
+            $.name: str = ""
+
+            $>(name: str) { $.name = $name; }
+
+            approve() {
+                if ($.name === "build") {
+                    push$
+                    -> ("test") $Stage
+                } else {
+                    if ($.name === "test") {
+                        push$
+                        -> ("deploy") $Stage
+                    } else {
+                        -> $Done
+                    }
+                }
+            }
+            reject() {
+                -> pop$
+            }
+            status(): str { @@:($.name) }
+        }
+        $Done {
+            status(): str { @@:("done") }
+        }
+
+    domain:
+        version = ""
+}
+
+$dp = @@DeploymentPipeline();
+$failures = 0;
+
+if ($dp->status() !== "idle") { echo "FAIL: expected idle\n"; $failures++; }
+
+$dp->start("v2.0");
+if ($dp->status() !== "build") { echo "FAIL: expected build\n"; $failures++; }
+
+$dp->approve();
+if ($dp->status() !== "test") { echo "FAIL: expected test\n"; $failures++; }
+
+$dp->reject();
+if ($dp->status() !== "build") { echo "FAIL: expected build after reject\n"; $failures++; }
+
+$dp->approve();
+$dp->approve();
+if ($dp->status() !== "deploy") { echo "FAIL: expected deploy\n"; $failures++; }
+$dp->approve();
+if ($dp->status() !== "done") { echo "FAIL: expected done\n"; $failures++; }
+
+if ($failures > 0) { echo "FAIL: deployment_pipeline ($failures failures)\n"; exit(1); }
+echo "PASS: deployment_pipeline\n";

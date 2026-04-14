@@ -1,0 +1,94 @@
+-- Rate Limiter — static + instance operations (Lua)
+
+@@system RateLimiter {
+    operations:
+        static get_max_requests(): int {
+            return 5
+        }
+        get_count(): int {
+            return self.count
+        }
+
+    interface:
+        request(): str
+        reset()
+        status(): str
+
+    machine:
+        $Allowing {
+            request(): str {
+                self.count = self.count + 1
+                if self.count >= self.max_requests {
+                    -> $Throttling
+                }
+                @@:("allowed")
+            }
+            reset() {
+                self.count = 0
+            }
+            status(): str { @@:("allowing") }
+        }
+        $Throttling {
+            request(): str { @@:("throttled") }
+            reset() {
+                self.count = 0
+                -> $Allowing
+            }
+            status(): str { @@:("throttling") }
+        }
+
+    domain:
+        count = 0
+        max_requests = 5
+}
+
+local rl = @@RateLimiter()
+local failures = 0
+
+local maxReq = RateLimiter.get_max_requests()
+if maxReq ~= 5 then
+    print("FAIL: static get_max_requests expected 5, got " .. maxReq)
+    failures = failures + 1
+end
+
+for i = 1, 4 do
+    local r = rl:request()
+    if r ~= "allowed" then
+        print("FAIL: request " .. i .. " should be allowed")
+        failures = failures + 1
+    end
+end
+if rl:get_count() ~= 4 then
+    print("FAIL: count should be 4")
+    failures = failures + 1
+end
+if rl:status() ~= "allowing" then
+    print("FAIL: should still be allowing")
+    failures = failures + 1
+end
+
+rl:request()
+if rl:status() ~= "throttling" then
+    print("FAIL: should be throttling after 5")
+    failures = failures + 1
+end
+if rl:request() ~= "throttled" then
+    print("FAIL: should be throttled")
+    failures = failures + 1
+end
+
+rl:reset()
+if rl:status() ~= "allowing" then
+    print("FAIL: should be allowing after reset")
+    failures = failures + 1
+end
+if rl:get_count() ~= 0 then
+    print("FAIL: count should be 0 after reset")
+    failures = failures + 1
+end
+
+if failures > 0 then
+    print("FAIL: rate_limiter (" .. failures .. " failures)")
+    os.exit(1)
+end
+print("PASS: rate_limiter")
