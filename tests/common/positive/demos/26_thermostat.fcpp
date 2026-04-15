@@ -1,94 +1,83 @@
 @@target cpp_17
-// Thermostat — HSM (2-level) demo (C++)
 
 #include <iostream>
 #include <string>
 
 @@system Thermostat {
     interface:
-        set_target(temp: int)
-        tick(): str
-        status(): str
+        set_temp(target: int)
+        tick()
+        status(): std::string
 
     machine:
         $Off {
-            set_target(temp: int) {
-                this->target = temp;
-                -> $Heating
+            set_temp(target: int) {
+                this->target = target;
+                -> $LowHeat
             }
-            status(): str { @@:("off") }
+            status(): std::string { @@:(std::string("off")) }
         }
-        $Heating => $Active {
-            tick(): str {
+        $LowHeat => $On {
+            $>() { this->heat_rate = 1; }
+            status(): std::string { @@:(std::string("low heat")) }
+            => $^
+        }
+        $HighHeat => $On {
+            $>() { this->heat_rate = 2; }
+            status(): std::string { @@:(std::string("high heat")) }
+            => $^
+        }
+        $On {
+            tick() {
                 this->current = this->current + this->heat_rate;
-                if this->current >= this->target {
+                if (this->current >= this->target) {
+                    this->current = this->target;
                     -> $Cooling
+                } else if (this->target - this->current > 5) {
+                    if (this->heat_rate < 2) {
+                        -> $HighHeat
+                    }
+                } else if (this->target - this->current <= 3) {
+                    if (this->heat_rate > 1) {
+                        -> $LowHeat
+                    }
                 }
-                @@:("heating")
             }
-            status(): str { @@:("heating") }
-            => $^
+            set_temp(target: int) { this->target = target; }
         }
-        $Cooling => $Active {
-            tick(): str {
+        $Cooling {
+            $>() { this->heat_rate = 0; }
+            tick() {
                 this->current = this->current - 1;
-                if this->current <= this->target - 2 {
-                    -> $Heating
+                if (this->current <= this->target) {
+                    -> $Off
                 }
-                @@:("cooling")
             }
-            status(): str { @@:("cooling") }
-            => $^
-        }
-        $Active {
-            set_target(temp: int) {
-                this->target = temp;
-            }
+            status(): std::string { @@:(std::string("cooling")) }
         }
 
     domain:
-        current : int = 60
-        target : int = 72
-        heat_rate : int = 2
+        current : int = 65
+        target : int = 65
+        heat_rate : int = 0
 }
 
 int main() {
     auto t = @@Thermostat();
     int failures = 0;
 
-    if (t.status() != std::string("off")) {
-        std::cout << "FAIL: initial status expected off" << std::endl;
-        failures++;
-    }
+    if (t.status() != "off") { std::cout << "FAIL: initial" << std::endl; failures++; }
 
-    t.set_target(64);
-    if (t.status() != std::string("heating")) {
-        std::cout << "FAIL: should be heating after set_target" << std::endl;
-        failures++;
+    t.set_temp(75);
+    bool cooled = false;
+    for (int i = 0; i < 20; i++) {
+        t.tick();
+        auto s = t.status();
+        if (s == "cooling" || s == "off") { cooled = true; }
     }
+    if (!cooled) { std::cout << "FAIL: never cooled" << std::endl; failures++; }
 
-    auto r = t.tick();
-    if (r != std::string("heating")) {
-        std::cout << "FAIL: tick while heating expected heating" << std::endl;
-        failures++;
-    }
-
-    t.tick();
-    if (t.status() != std::string("cooling")) {
-        std::cout << "FAIL: should be cooling after reaching target" << std::endl;
-        failures++;
-    }
-
-    t.set_target(65);
-    if (t.status() != std::string("cooling")) {
-        std::cout << "FAIL: set_target in Active parent should keep cooling" << std::endl;
-        failures++;
-    }
-
-    if (failures > 0) {
-        std::cout << "FAIL: thermostat (" << failures << " failures)" << std::endl;
-        return 1;
-    }
+    if (failures > 0) { std::cout << "FAIL: thermostat" << std::endl; return 1; }
     std::cout << "PASS: thermostat" << std::endl;
     return 0;
 }

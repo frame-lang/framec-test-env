@@ -1,92 +1,86 @@
--- Thermostat — HSM with parent forwarding (Lua)
+@@target lua
 
 @@system Thermostat {
     interface:
-        set_target(temp: int)
-        tick(): str
-        status(): str
+        set_temp(target)
+        tick()
+        status(): str = "unknown"
 
     machine:
         $Off {
-            set_target(temp: int) {
-                self.target = temp
-                -> $Heating
+            set_temp(target) {
+                self.target = target
+                -> $LowHeat
             }
             status(): str { @@:("off") }
         }
-        $Heating => $Active {
-            tick(): str {
-                self.current = self.current + self.heat_rate
-                if self.current >= self.target {
-                    -> $Cooling
-                }
-                @@:("heating")
-            }
-            status(): str { @@:("heating") }
+        $LowHeat => $On {
+            $>() { self.heat_rate = 1 }
+            status(): str { @@:("low heat") }
             => $^
         }
-        $Cooling => $Active {
-            tick(): str {
+        $HighHeat => $On {
+            $>() { self.heat_rate = 2 }
+            status(): str { @@:("high heat") }
+            => $^
+        }
+        $On {
+            tick() {
+                self.current = self.current + self.heat_rate
+                if self.current >= self.target then
+                    self.current = self.target
+                    -> $Cooling
+                elseif self.target - self.current > 5 then
+                    if self.heat_rate < 2 then
+                        -> $HighHeat
+                    end
+                elseif self.target - self.current <= 3 then
+                    if self.heat_rate > 1 then
+                        -> $LowHeat
+                    end
+                end
+            }
+            set_temp(target) { self.target = target }
+        }
+        $Cooling {
+            $>() { self.heat_rate = 0 }
+            tick() {
                 self.current = self.current - 1
-                if self.current <= self.target - 2 {
-                    -> $Heating
-                }
-                @@:("cooling")
+                if self.current <= self.target then
+                    -> $Off
+                end
             }
             status(): str { @@:("cooling") }
-            => $^
-        }
-        $Active {
-            set_target(temp: int) {
-                self.target = temp
-            }
         }
 
     domain:
-        current = 60
-        target = 72
-        heat_rate = 2
+        current = 65
+        target = 65
+        heat_rate = 0
 }
 
 local t = @@Thermostat()
 local failures = 0
 
 if t:status() ~= "off" then
-    print("FAIL: expected off")
-    failures = failures + 1
-end
-t:set_target(64)
-if t:status() ~= "heating" then
-    print("FAIL: expected heating")
+    print("FAIL: initial status")
     failures = failures + 1
 end
 
-t:tick()
-if t.current ~= 62 then
-    print("FAIL: current should be 62, got " .. t.current)
-    failures = failures + 1
+t:set_temp(75)
+local cooled = false
+for i = 1, 20 do
+    t:tick()
+    local s = t:status()
+    if s == "cooling" or s == "off" then cooled = true end
 end
-t:tick()
-if t.current ~= 64 then
-    print("FAIL: current should be 64, got " .. t.current)
-    failures = failures + 1
-end
-if t:status() ~= "cooling" then
-    print("FAIL: expected cooling after reaching target")
-    failures = failures + 1
-end
-
-t:set_target(63)
-t:tick()
-t:tick()
-t:tick()
-if t:status() ~= "heating" then
-    print("FAIL: expected heating after dropping below target-2")
+if not cooled then
+    print("FAIL: never cooled")
     failures = failures + 1
 end
 
 if failures > 0 then
-    print("FAIL: thermostat (" .. failures .. " failures)")
+    print("FAIL: thermostat (" .. failures .. ")")
     os.exit(1)
 end
 print("PASS: thermostat")

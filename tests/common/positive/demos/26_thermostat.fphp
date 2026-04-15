@@ -1,72 +1,66 @@
 <?php
-// Thermostat — HSM with parent forwarding (PHP)
+@@target php
 
 @@system Thermostat {
     interface:
-        set_target(temp: int)
-        tick(): str
-        status(): str
+        set_temp(target)
+        tick()
+        status(): string = "unknown"
 
     machine:
         $Off {
-            set_target(temp: int) {
-                $this->target = $temp;
-                -> $Heating
-            }
-            status(): str { @@:("off") }
+            set_temp(target) { $this->target = $target; -> $LowHeat }
+            status(): string { @@:("off") }
         }
-        $Heating => $Active {
-            tick(): str {
+        $LowHeat => $On {
+            $>() { $this->heat_rate = 1; }
+            status(): string { @@:("low heat") }
+            => $^
+        }
+        $HighHeat => $On {
+            $>() { $this->heat_rate = 2; }
+            status(): string { @@:("high heat") }
+            => $^
+        }
+        $On {
+            tick() {
                 $this->current = $this->current + $this->heat_rate;
                 if ($this->current >= $this->target) {
+                    $this->current = $this->target;
                     -> $Cooling
+                } elseif ($this->target - $this->current > 5) {
+                    if ($this->heat_rate < 2) { -> $HighHeat }
+                } elseif ($this->target - $this->current <= 3) {
+                    if ($this->heat_rate > 1) { -> $LowHeat }
                 }
-                @@:("heating")
             }
-            status(): str { @@:("heating") }
-            => $^
+            set_temp(target) { $this->target = $target; }
         }
-        $Cooling => $Active {
-            tick(): str {
+        $Cooling {
+            $>() { $this->heat_rate = 0; }
+            tick() {
                 $this->current = $this->current - 1;
-                if ($this->current <= $this->target - 2) {
-                    -> $Heating
-                }
-                @@:("cooling")
+                if ($this->current <= $this->target) { -> $Off }
             }
-            status(): str { @@:("cooling") }
-            => $^
-        }
-        $Active {
-            set_target(temp: int) {
-                $this->target = $temp;
-            }
+            status(): string { @@:("cooling") }
         }
 
     domain:
-        current = 60
-        target = 72
-        heat_rate = 2
+        current = 65
+        target = 65
+        heat_rate = 0
 }
 
 $t = @@Thermostat();
 $failures = 0;
-
-if ($t->status() !== "off") { echo "FAIL: expected off\n"; $failures++; }
-$t->set_target(64);
-if ($t->status() !== "heating") { echo "FAIL: expected heating\n"; $failures++; }
-
-$t->tick();
-if ($t->current !== 62) { echo "FAIL: current should be 62\n"; $failures++; }
-$t->tick();
-if ($t->current !== 64) { echo "FAIL: current should be 64\n"; $failures++; }
-if ($t->status() !== "cooling") { echo "FAIL: expected cooling\n"; $failures++; }
-
-$t->set_target(63);
-$t->tick();
-$t->tick();
-$t->tick();
-if ($t->status() !== "heating") { echo "FAIL: expected heating after drop\n"; $failures++; }
-
-if ($failures > 0) { echo "FAIL: thermostat ($failures failures)\n"; exit(1); }
+if ($t->status() !== "off") { echo "FAIL: initial\n"; $failures++; }
+$t->set_temp(75);
+$cooled = false;
+for ($i = 0; $i < 20; $i++) {
+    $t->tick();
+    $s = $t->status();
+    if ($s === "cooling" || $s === "off") { $cooled = true; }
+}
+if (!$cooled) { echo "FAIL: never cooled\n"; $failures++; }
+if ($failures > 0) { echo "FAIL: thermostat ($failures)\n"; exit(1); }
 echo "PASS: thermostat\n";

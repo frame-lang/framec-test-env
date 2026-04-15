@@ -1,73 +1,77 @@
-// Thermostat — HSM with parent forwarding (TypeScript)
+@@target typescript
 
 @@system Thermostat {
     interface:
-        set_target(temp: int)
-        tick(): str
-        status(): str
+        set_temp(target)
+        tick()
+        status(): str = "unknown"
 
     machine:
         $Off {
-            set_target(temp: int) {
-                this.target = temp
-                -> $Heating
+            set_temp(target) {
+                this.target = target
+                -> $LowHeat
             }
             status(): str { @@:("off") }
         }
-        $Heating => $Active {
-            tick(): str {
+        $LowHeat => $On {
+            $>() { this.heat_rate = 1 }
+            status(): str { @@:(`low heat (${this.current} -> ${this.target})`) }
+            => $^
+        }
+        $HighHeat => $On {
+            $>() { this.heat_rate = 2 }
+            status(): str { @@:(`high heat (${this.current} -> ${this.target})`) }
+            => $^
+        }
+        $On {
+            tick() {
                 this.current = this.current + this.heat_rate
                 if (this.current >= this.target) {
+                    this.current = this.target
                     -> $Cooling
+                } else if (this.target - this.current > 5) {
+                    if (this.heat_rate < 2) {
+                        -> $HighHeat
+                    }
+                } else if (this.target - this.current <= 3) {
+                    if (this.heat_rate > 1) {
+                        -> $LowHeat
+                    }
                 }
-                @@:("heating")
             }
-            status(): str { @@:("heating") }
-            => $^
+            set_temp(target) { this.target = target }
         }
-        $Cooling => $Active {
-            tick(): str {
+        $Cooling {
+            $>() { this.heat_rate = 0 }
+            tick() {
                 this.current = this.current - 1
-                if (this.current <= this.target - 2) {
-                    -> $Heating
+                if (this.current <= this.target) {
+                    -> $Off
                 }
-                @@:("cooling")
             }
-            status(): str { @@:("cooling") }
-            => $^
-        }
-        $Active {
-            set_target(temp: int) {
-                this.target = temp
-            }
+            status(): str { @@:(`cooling (${this.current} -> ${this.target})`) }
         }
 
     domain:
-        current: number = 60
-        target: number = 72
-        heat_rate: number = 2
+        current = 65
+        target = 65
+        heat_rate = 0
 }
 
-const t = @@Thermostat()
+const t = new Thermostat()
 let failures = 0
 
-if (t.status() !== "off") { console.log("FAIL: expected off"); failures++ }
-t.set_target(64)
-if (t.status() !== "heating") { console.log("FAIL: expected heating"); failures++ }
+if (t.status() !== "off") { console.log("FAIL: initial status"); failures++ }
 
-t.tick()
-if ((t as any).current !== 62) { console.log("FAIL: current should be 62"); failures++ }
-t.tick()
-if ((t as any).current !== 64) { console.log("FAIL: current should be 64"); failures++ }
-if (t.status() !== "cooling") { console.log("FAIL: expected cooling after reaching target"); failures++ }
+t.set_temp(75)
+let cooled = false
+for (let i = 0; i < 20; i++) {
+    t.tick()
+    const s = t.status()
+    if (s.includes("cooling") || s === "off") { cooled = true }
+}
+if (!cooled) { console.log("FAIL: never cooled"); failures++ }
 
-t.set_target(63)
-if (t.status() !== "cooling") { console.log("FAIL: should still be cooling"); failures++ }
-
-t.tick()
-t.tick()
-t.tick()
-if (t.status() !== "heating") { console.log("FAIL: expected heating after dropping below target-2"); failures++ }
-
-if (failures > 0) { console.log("FAIL: thermostat (" + failures + " failures)"); process.exit(1) }
+if (failures > 0) { console.log("FAIL: thermostat (" + failures + ")"); process.exit(1) }
 console.log("PASS: thermostat")

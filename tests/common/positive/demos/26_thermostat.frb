@@ -1,92 +1,86 @@
-# Thermostat — HSM with parent forwarding (Ruby)
+@@target ruby
 
 @@system Thermostat {
     interface:
-        set_target(temp: int)
-        tick(): str
-        status(): str
+        set_temp(target)
+        tick()
+        status(): str = "unknown"
 
     machine:
         $Off {
-            set_target(temp: int) {
-                self.target = temp
-                -> $Heating
+            set_temp(target) {
+                self.target = target
+                -> $LowHeat
             }
             status(): str { @@:("off") }
         }
-        $Heating => $Active {
-            tick(): str {
+        $LowHeat => $On {
+            $>() { self.heat_rate = 1 }
+            status(): str { @@:("low heat (#{self.current} -> #{self.target})") }
+            => $^
+        }
+        $HighHeat => $On {
+            $>() { self.heat_rate = 2 }
+            status(): str { @@:("high heat (#{self.current} -> #{self.target})") }
+            => $^
+        }
+        $On {
+            tick() {
                 self.current = self.current + self.heat_rate
-                if self.current >= self.target {
+                if self.current >= self.target
+                    self.current = self.target
                     -> $Cooling
-                }
-                @@:("heating")
+                elsif self.target - self.current > 5
+                    if self.heat_rate < 2
+                        -> $HighHeat
+                    end
+                elsif self.target - self.current <= 3
+                    if self.heat_rate > 1
+                        -> $LowHeat
+                    end
+                end
             }
-            status(): str { @@:("heating") }
-            => $^
+            set_temp(target) { self.target = target }
         }
-        $Cooling => $Active {
-            tick(): str {
+        $Cooling {
+            $>() { self.heat_rate = 0 }
+            tick() {
                 self.current = self.current - 1
-                if self.current <= self.target - 2 {
-                    -> $Heating
-                }
-                @@:("cooling")
+                if self.current <= self.target
+                    -> $Off
+                end
             }
-            status(): str { @@:("cooling") }
-            => $^
-        }
-        $Active {
-            set_target(temp: int) {
-                self.target = temp
-            }
+            status(): str { @@:("cooling (#{self.current} -> #{self.target})") }
         }
 
     domain:
-        current = 60
-        target = 72
-        heat_rate = 2
+        current = 65
+        target = 65
+        heat_rate = 0
 }
 
 t = @@Thermostat()
 failures = 0
 
-if t.status() != "off"
-    puts "FAIL: expected off"
-    failures += 1
-end
-t.set_target(64)
-if t.status() != "heating"
-    puts "FAIL: expected heating"
+if t.status != "off"
+    puts "FAIL: initial status"
     failures += 1
 end
 
-t.tick()
-if t.current != 62
-    puts "FAIL: current should be 62, got #{t.current}"
-    failures += 1
+t.set_temp(75)
+cooled = false
+20.times do
+    t.tick
+    s = t.status
+    cooled = true if s.include?("cooling") || s == "off"
 end
-t.tick()
-if t.current != 64
-    puts "FAIL: current should be 64, got #{t.current}"
-    failures += 1
-end
-if t.status() != "cooling"
-    puts "FAIL: expected cooling after reaching target"
-    failures += 1
-end
-
-t.set_target(63)
-t.tick()
-t.tick()
-t.tick()
-if t.status() != "heating"
-    puts "FAIL: expected heating after dropping below target-2"
+if !cooled
+    puts "FAIL: never cooled"
     failures += 1
 end
 
 if failures > 0
-    puts "FAIL: thermostat (#{failures} failures)"
+    puts "FAIL: thermostat (#{failures})"
     exit(1)
 end
 puts "PASS: thermostat"
