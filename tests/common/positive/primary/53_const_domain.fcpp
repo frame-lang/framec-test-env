@@ -1,0 +1,64 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <any>
+
+// Test: const domain field initialized from system param.
+
+@@system Sensor(threshold: int = 100) {
+    interface:
+        read(): int
+        calibrate(offset: int): void
+        get_threshold(): int
+
+    machine:
+        $Active {
+            read(): int {
+                @@:(this->value + this->offset)
+                return;
+            }
+            calibrate(offset: int) {
+                this->offset = offset;
+            }
+            get_threshold(): int {
+                @@:(this->threshold)
+                return;
+            }
+        }
+
+    domain:
+        const threshold : int = threshold
+        value : int = 50
+        offset : int = 0
+}
+
+int main() {
+    int failures = 0;
+
+    // Test 1: system param override
+    Sensor s = @@Sensor(200);
+    int t = s.get_threshold();
+    if (t != 200) { printf("FAIL test 1: expected 200, got %d\n", t); failures++; }
+
+    // Test 2: read returns value + offset
+    int v = s.read();
+    if (v != 50) { printf("FAIL test 2: expected 50, got %d\n", v); failures++; }
+
+    // Test 3: calibrate changes offset
+    s.calibrate(10);
+    v = s.read();
+    if (v != 60) { printf("FAIL test 3: expected 60, got %d\n", v); failures++; }
+
+    // Test 4: default system param
+    Sensor s2 = @@Sensor();
+    int t2 = s2.get_threshold();
+    if (t2 != 100) { printf("FAIL test 4: expected 100, got %d\n", t2); failures++; }
+
+    if (failures > 0) {
+        printf("FAIL: const_domain (%d failures)\n", failures);
+        return 1;
+    }
+    printf("PASS: const_domain\n");
+    return 0;
+}

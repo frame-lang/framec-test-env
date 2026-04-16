@@ -1,0 +1,76 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// Test: const domain field initialized from system param.
+
+@@system Sensor(threshold: int = 100) {
+    interface:
+        Read(): int
+        Calibrate(offset: int)
+        GetThreshold(): int
+
+    machine:
+        $Active {
+            Read(): int {
+                @@:(s.value + s.offset)
+                return;
+            }
+            Calibrate(offset: int) {
+                s.offset = offset
+            }
+            GetThreshold(): int {
+                @@:(s.threshold)
+                return;
+            }
+        }
+
+    domain:
+        const threshold : int = threshold
+        value : int = 50
+        offset : int = 0
+}
+
+func main() {
+	failures := 0
+
+	// Test 1: system param override
+	s := @@Sensor(200)
+	t := s.GetThreshold()
+	if t != 200 {
+		fmt.Printf("FAIL test 1: expected 200, got %d\n", t)
+		failures++
+	}
+
+	// Test 2: read returns value + offset
+	v := s.Read()
+	if v != 50 {
+		fmt.Printf("FAIL test 2: expected 50, got %d\n", v)
+		failures++
+	}
+
+	// Test 3: calibrate changes offset
+	s.Calibrate(10)
+	v = s.Read()
+	if v != 60 {
+		fmt.Printf("FAIL test 3: expected 60, got %d\n", v)
+		failures++
+	}
+
+	// Test 4: default system param
+	s2 := @@Sensor()
+	t2 := s2.GetThreshold()
+	if t2 != 100 {
+		fmt.Printf("FAIL test 4: expected 100, got %d\n", t2)
+		failures++
+	}
+
+	if failures > 0 {
+		fmt.Printf("FAIL: const_domain (%d failures)\n", failures)
+		os.Exit(1)
+	}
+	fmt.Println("PASS: const_domain")
+}
