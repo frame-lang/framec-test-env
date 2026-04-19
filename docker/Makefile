@@ -53,10 +53,12 @@ $(SRC_STAMP): | $(STAMP_DIR)
 #           rustup target add aarch64-unknown-linux-gnu x86_64-unknown-linux-gnu
 
 # Native-arch binary (ARM64 Linux for Docker's default platform on Apple Silicon)
+# Delete output first to prevent stale binaries surviving cargo's incremental cache.
 $(STAMP_DIR)/framec-native: $(SRC_STAMP) | $(STAMP_DIR)
 	@echo "=== Cross-compiling framec (aarch64-linux) ==="
+	@rm -f "$(DOCKER_DIR)/framec-native"
 	@cd "$(FRAMEPILER_SRC)" && \
-		cargo zigbuild --release -p framec --target aarch64-unknown-linux-gnu 2>&1 | tail -3 && \
+		CARGO_INCREMENTAL=0 cargo zigbuild --release -p framec --target aarch64-unknown-linux-gnu 2>&1 | tail -3 && \
 		cp target/aarch64-unknown-linux-gnu/release/framec "$(DOCKER_DIR)/framec-native"
 	@touch $@
 	@echo "Built: framec-native ($$(file framec-native | grep -o 'x86-64\|aarch64'))"
@@ -64,8 +66,9 @@ $(STAMP_DIR)/framec-native: $(SRC_STAMP) | $(STAMP_DIR)
 # amd64 binary (for GDScript container which requires x86_64)
 $(STAMP_DIR)/framec-amd64: $(SRC_STAMP) | $(STAMP_DIR)
 	@echo "=== Cross-compiling framec (x86_64-linux) ==="
+	@rm -f "$(DOCKER_DIR)/framec-amd64"
 	@cd "$(FRAMEPILER_SRC)" && \
-		cargo zigbuild --release -p framec --target x86_64-unknown-linux-gnu 2>&1 | tail -3 && \
+		CARGO_INCREMENTAL=0 cargo zigbuild --release -p framec --target x86_64-unknown-linux-gnu 2>&1 | tail -3 && \
 		cp target/x86_64-unknown-linux-gnu/release/framec "$(DOCKER_DIR)/framec-amd64"
 	@touch $@
 	@echo "Built: framec-amd64"

@@ -69,6 +69,9 @@ for test_file in $tests; do
         continue
     fi
 
+    # Clean compile dir before each test
+    rm -f "$COMPILE_DIR"/*.${out_ext} "$COMPILE_DIR"/*.class 2>/dev/null
+
     # Transpile
     if ! framec compile -l "$target" -o "$COMPILE_DIR" "$test_file" 2>/tmp/compile_err; then
         # Check if this is a transpile-error test (expected to fail)
@@ -84,6 +87,10 @@ for test_file in $tests; do
     fi
 
     out_file="$COMPILE_DIR/${test_name}.${out_ext}"
+    # Java: framec names the output after the public class, not the source file
+    if [ ! -f "$out_file" ] && [ "$LANG" = "java" ]; then
+        out_file=$(ls "$COMPILE_DIR"/*.java 2>/dev/null | head -1)
+    fi
     if [ ! -f "$out_file" ]; then
         echo "not ok $test_num - $test_name # no output file"
         fail=$((fail + 1))
@@ -106,7 +113,7 @@ for test_file in $tests; do
             run_output=$(python3 "$out_file" 2>&1) || run_status=$?
             ;;
         typescript)
-            run_output=$(cd /tmp/out && ts-node "$out_file" 2>&1) || run_status=$?
+            run_output=$(tsx "$out_file" 2>&1) || run_status=$?
             ;;
         javascript)
             js_run="${out_file%.js}.mjs"
