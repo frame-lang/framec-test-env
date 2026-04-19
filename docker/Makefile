@@ -27,8 +27,7 @@ COMPOSE        := docker compose
 # Detect host architecture for build targets
 HOST_ARCH      := $(shell uname -m)
 
-# All 17 target languages. GDScript uses framec-amd64 (Godot is x86_64-only);
-# the compose file routes it via FRAMEC_BIN_GD.
+# All 17 target languages. GDScript now uses native ARM64 Godot.
 LANGS := python typescript javascript rust c cpp csharp java go php kotlin swift ruby erlang lua dart gdscript
 
 # --- Stamp files ---
@@ -63,18 +62,7 @@ $(STAMP_DIR)/framec-native: $(SRC_STAMP) | $(STAMP_DIR)
 	@touch $@
 	@echo "Built: framec-native ($$(file framec-native | grep -o 'x86-64\|aarch64'))"
 
-# amd64 binary (for GDScript container which requires x86_64)
-$(STAMP_DIR)/framec-amd64: $(SRC_STAMP) | $(STAMP_DIR)
-	@echo "=== Cross-compiling framec (x86_64-linux) ==="
-	@rm -f "$(DOCKER_DIR)/framec-amd64"
-	@cd "$(FRAMEPILER_SRC)" && \
-		CARGO_INCREMENTAL=0 cargo zigbuild --release -p framec --target x86_64-unknown-linux-gnu 2>&1 | tail -3 && \
-		cp target/x86_64-unknown-linux-gnu/release/framec "$(DOCKER_DIR)/framec-amd64"
-	@touch $@
-	@echo "Built: framec-amd64"
-
 framec: $(STAMP_DIR)/framec-native
-framec-amd64: $(STAMP_DIR)/framec-amd64
 
 # --- Container images ---
 
@@ -100,22 +88,14 @@ test-$(1): $(STAMP_DIR)/framec-native $(STAMP_DIR)/image-$(1)
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native $(COMPOSE) run --rm $(1) 2>/dev/null | grep "^# \|^not ok"
 endef
 
-# GDScript single-language target uses amd64 binary
-test-gdscript: $(STAMP_DIR)/framec-amd64 $(STAMP_DIR)/image-gdscript
-	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
-	 FRAMEC_BIN_GD=$(DOCKER_DIR)/framec-amd64 \
-	 $(COMPOSE) run --rm gdscript 2>/dev/null | grep "^# \|^not ok"
+# Generate test-<lang> for all languages (including GDScript, now native ARM64)
+$(foreach lang,$(LANGS),$(eval $(call LANG_TEST_RULE,$(lang))))
 
-# Generate test-<lang> for all non-GDScript languages
-$(foreach lang,$(filter-out gdscript,$(LANGS)),$(eval $(call LANG_TEST_RULE,$(lang))))
-
-test: $(STAMP_DIR)/framec-native $(STAMP_DIR)/framec-amd64 build
+test: $(STAMP_DIR)/framec-native build
 	@echo "=== Running all tests in parallel ($(words $(LANGS)) languages) ==="
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
-	 FRAMEC_BIN_GD=$(DOCKER_DIR)/framec-amd64 \
 	 $(COMPOSE) up -d $(LANGS)
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
-	 FRAMEC_BIN_GD=$(DOCKER_DIR)/framec-amd64 \
 	 ./collect-results.sh $(LANGS)
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native $(COMPOSE) down --remove-orphans 2>/dev/null || true
 
@@ -130,13 +110,11 @@ endef
 
 $(foreach lang,$(LANGS),$(eval $(call LANG_COMPILE_RULE,$(lang))))
 
-compile: $(STAMP_DIR)/framec-native $(STAMP_DIR)/framec-amd64 build
+compile: $(STAMP_DIR)/framec-native build
 	@echo "=== Compile-only in parallel ($(words $(LANGS)) languages) ==="
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
-	 FRAMEC_BIN_GD=$(DOCKER_DIR)/framec-amd64 \
 	 COMPILE_ONLY=true $(COMPOSE) up -d $(LANGS)
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
-	 FRAMEC_BIN_GD=$(DOCKER_DIR)/framec-amd64 \
 	 ./collect-results.sh $(LANGS)
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native $(COMPOSE) down --remove-orphans 2>/dev/null || true
 
@@ -144,7 +122,7 @@ compile: $(STAMP_DIR)/framec-native $(STAMP_DIR)/framec-amd64 build
 
 clean:
 	@echo "=== Cleaning ==="
-	rm -f framec-native framec-amd64
+	rm -f framec-native
 	rm -rf $(STAMP_DIR)
 	rm -rf $(TEST_ENV_ROOT)/output/*/tests/*
 
@@ -169,7 +147,6 @@ status:
 	@echo ""
 	@echo "Binaries:"
 	@test -f framec-native && echo "  framec-native: $$(file framec-native | grep -o 'x86-64\|aarch64\|ELF.*')" || echo "  framec-native: not built"
-	@test -f framec-amd64 && echo "  framec-amd64:  $$(file framec-amd64 | grep -o 'x86-64\|aarch64\|ELF.*')" || echo "  framec-amd64:  not built"
 	@echo ""
 	@echo "Images:"
 	@for lang in $(LANGS); do \
@@ -190,7 +167,7 @@ help:
 	@echo "  make build              Build all container images"
 	@echo "  make build-python       Build single language image"
 	@echo "  make framec             Build framec (native arch)"
-	@echo "  make framec-amd64       Build framec (x86_64, for GDScript)"
+	@echo "  make framec             Build framec (native ARM64 Linux)"
 	@echo "  make rebuild            Full clean + rebuild"
 	@echo ""
 	@echo "Test:"
@@ -210,5 +187,5 @@ help:
 	@echo "Config:"
 	@echo "  FRAMEPILER_SRC=/path    Framepiler source (default: $(FRAMEPILER_SRC))"
 
-.PHONY: build framec framec-amd64 test test-all compile clean clean-images rebuild status help
+.PHONY: build framec test test-all compile clean clean-images rebuild status help
 .PHONY: $(foreach lang,$(LANGS),build-$(lang) test-$(lang) compile-$(lang) shell-$(lang))
