@@ -1,0 +1,308 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+// ErlangScopeScanner -- FSM for detecting fun(...) -> ... end closures.
+// Translated from framec's native_region_scanner/erlang_scope_scanner.frs
+//
+// Erlang reuses `end` to close: fun, case, if, receive, begin, try.
+// This FSM tracks a depth counter for all block-opening keywords so
+// only the `end` matching our `fun` terminates the scan.
+//
+// Skips % line comments and "..." / '...' string/atom literals.
+// Does NOT match `fun Module:Function/Arity` (function references).
+
+@@system ErlangScopeScannerFsm {
+    operations:
+        setup(input_bytes: ByteArray, start: Int, length: Int) {
+            this.bytes = input_bytes
+            this.pos = start
+            this.scan_end = length
+        }
+        get_result_pos(): Int {
+            return this.result_pos
+        }
+        get_success(): Int {
+            return this.success
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $CheckFun }
+        }
+
+        $CheckFun {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                // Must start with `fun` keyword
+                if (i + 3 > end) {
+                    this.success = 0
+                    return
+                }
+
+                if ((bs[i].toInt() and 0xFF) != 'f'.code || (bs[i + 1].toInt() and 0xFF) != 'u'.code || (bs[i + 2].toInt() and 0xFF) != 'n'.code) {
+                    this.success = 0
+                    return
+                }
+
+                // Check word boundary (not part of `function` etc.)
+                val after = i + 3
+                if (after < end && ((bs[after].toInt() and 0xFF).toChar().isLetterOrDigit() || (bs[after].toInt() and 0xFF) == '_'.code)) {
+                    this.success = 0
+                    return
+                }
+
+                // Skip whitespace after `fun`
+                var j = after
+                while (j < end && ((bs[j].toInt() and 0xFF) == ' '.code || (bs[j].toInt() and 0xFF) == '\t'.code || (bs[j].toInt() and 0xFF) == '\n'.code)) {
+                    j++
+                }
+
+                // Check for Module:Function/Arity pattern (function reference, not closure)
+                if (j < end && (bs[j].toInt() and 0xFF).toChar().isUpperCase()) {
+                    var k = j
+                    while (k < end && ((bs[k].toInt() and 0xFF).toChar().isLetterOrDigit() || (bs[k].toInt() and 0xFF) == '_'.code)) {
+                        k++
+                    }
+                    if (k < end && (bs[k].toInt() and 0xFF) == ':'.code) {
+                        this.success = 0
+                        return
+                    }
+                }
+
+                // It's a closure: fun(...) -> ... end
+                this.depth = 1
+                this.pos = after
+                -> $ScanBody
+            }
+        }
+
+        $ScanBody {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                while (i < end) {
+                    val b = bs[i].toInt() and 0xFF
+
+                    // Skip % line comments
+                    if (b == '%'.code) {
+                        while (i < end && (bs[i].toInt() and 0xFF) != '\n'.code) {
+                            i++
+                        }
+                        continue
+                    }
+
+                    // Skip "..." strings
+                    if (b == '"'.code) {
+                        i++
+                        while (i < end) {
+                            if ((bs[i].toInt() and 0xFF) == '\\'.code) { i += 2; continue }
+                            if ((bs[i].toInt() and 0xFF) == '"'.code) { i++; break }
+                            i++
+                        }
+                        continue
+                    }
+
+                    // Skip '...' quoted atoms
+                    if (b == '\''.code) {
+                        i++
+                        while (i < end) {
+                            if ((bs[i].toInt() and 0xFF) == '\\'.code) { i += 2; continue }
+                            if ((bs[i].toInt() and 0xFF) == '\''.code) { i++; break }
+                            i++
+                        }
+                        continue
+                    }
+
+                    // Check for block-opening keywords (increase depth)
+
+                    // fun
+                    if (b == 'f'.code && i + 3 <= end && (bs[i + 1].toInt() and 0xFF) == 'u'.code && (bs[i + 2].toInt() and 0xFF) == 'n'.code) {
+                        if (i + 3 >= end || (!(bs[i + 3].toInt() and 0xFF).toChar().isLetterOrDigit() && (bs[i + 3].toInt() and 0xFF) != '_'.code)) {
+                            this.depth++
+                            i += 3
+                            continue
+                        }
+                    }
+
+                    // case
+                    if (b == 'c'.code && i + 4 <= end && (bs[i + 1].toInt() and 0xFF) == 'a'.code && (bs[i + 2].toInt() and 0xFF) == 's'.code && (bs[i + 3].toInt() and 0xFF) == 'e'.code) {
+                        if (i + 4 >= end || (!(bs[i + 4].toInt() and 0xFF).toChar().isLetterOrDigit() && (bs[i + 4].toInt() and 0xFF) != '_'.code)) {
+                            this.depth++
+                            i += 4
+                            continue
+                        }
+                    }
+
+                    // if
+                    if (b == 'i'.code && i + 2 <= end && (bs[i + 1].toInt() and 0xFF) == 'f'.code) {
+                        if (i + 2 >= end || (!(bs[i + 2].toInt() and 0xFF).toChar().isLetterOrDigit() && (bs[i + 2].toInt() and 0xFF) != '_'.code)) {
+                            this.depth++
+                            i += 2
+                            continue
+                        }
+                    }
+
+                    // receive
+                    if (b == 'r'.code && i + 7 <= end && (bs[i + 1].toInt() and 0xFF) == 'e'.code && (bs[i + 2].toInt() and 0xFF) == 'c'.code && (bs[i + 3].toInt() and 0xFF) == 'e'.code && (bs[i + 4].toInt() and 0xFF) == 'i'.code && (bs[i + 5].toInt() and 0xFF) == 'v'.code && (bs[i + 6].toInt() and 0xFF) == 'e'.code) {
+                        if (i + 7 >= end || (!(bs[i + 7].toInt() and 0xFF).toChar().isLetterOrDigit() && (bs[i + 7].toInt() and 0xFF) != '_'.code)) {
+                            this.depth++
+                            i += 7
+                            continue
+                        }
+                    }
+
+                    // begin
+                    if (b == 'b'.code && i + 5 <= end && (bs[i + 1].toInt() and 0xFF) == 'e'.code && (bs[i + 2].toInt() and 0xFF) == 'g'.code && (bs[i + 3].toInt() and 0xFF) == 'i'.code && (bs[i + 4].toInt() and 0xFF) == 'n'.code) {
+                        if (i + 5 >= end || (!(bs[i + 5].toInt() and 0xFF).toChar().isLetterOrDigit() && (bs[i + 5].toInt() and 0xFF) != '_'.code)) {
+                            this.depth++
+                            i += 5
+                            continue
+                        }
+                    }
+
+                    // try
+                    if (b == 't'.code && i + 3 <= end && (bs[i + 1].toInt() and 0xFF) == 'r'.code && (bs[i + 2].toInt() and 0xFF) == 'y'.code) {
+                        if (i + 3 >= end || (!(bs[i + 3].toInt() and 0xFF).toChar().isLetterOrDigit() && (bs[i + 3].toInt() and 0xFF) != '_'.code)) {
+                            this.depth++
+                            i += 3
+                            continue
+                        }
+                    }
+
+                    // Check for `end` keyword (decrease depth)
+                    if (b == 'e'.code && i + 3 <= end && (bs[i + 1].toInt() and 0xFF) == 'n'.code && (bs[i + 2].toInt() and 0xFF) == 'd'.code) {
+                        if (i + 3 >= end || (!(bs[i + 3].toInt() and 0xFF).toChar().isLetterOrDigit() && (bs[i + 3].toInt() and 0xFF) != '_'.code)) {
+                            this.depth--
+                            if (this.depth == 0) {
+                                this.result_pos = i + 3
+                                this.success = 1
+                                return
+                            }
+                            i += 3
+                            continue
+                        }
+                    }
+
+                    // Skip identifiers (avoid false keyword matches mid-word)
+                    if (b.toChar().isLetter() || b == '_'.code) {
+                        while (i < end && ((bs[i].toInt() and 0xFF).toChar().isLetterOrDigit() || (bs[i].toInt() and 0xFF) == '_'.code)) {
+                            i++
+                        }
+                        continue
+                    }
+
+                    i++
+                }
+
+                // Ran out of bytes without finding matching `end`
+                this.success = 0
+            }
+        }
+
+    domain:
+        bytes: ByteArray = ByteArray(0)
+        pos: Int = 0
+        scan_end: Int = 0
+        result_pos: Int = 0
+        success: Int = 0
+        depth: Int = 0
+}
+
+fun main() {
+    var failures = 0
+
+    // Test 1: Simple fun -> end
+    val s1 = @@ErlangScopeScannerFsm()
+    val inp1 = "fun(X) -> X + 1 end rest".toByteArray()
+    s1.setup(inp1, 0, inp1.size)
+    s1.do_scan()
+    if (s1.get_success() != 1 || s1.get_result_pos() != 19) {
+        println("FAIL 1: success=${s1.get_success()}, pos=${s1.get_result_pos()}")
+        failures++
+    }
+
+    // Test 2: Nested fun -> case ... end end
+    val s2 = @@ErlangScopeScannerFsm()
+    val inp2 = "fun(X) -> case X of 1 -> ok end end rest".toByteArray()
+    s2.setup(inp2, 0, inp2.size)
+    s2.do_scan()
+    if (s2.get_success() != 1 || s2.get_result_pos() != 35) {
+        println("FAIL 2: success=${s2.get_success()}, pos=${s2.get_result_pos()}")
+        failures++
+    }
+
+    // Test 3: Not a fun keyword (function)
+    val s3 = @@ErlangScopeScannerFsm()
+    val inp3 = "function() -> ok end".toByteArray()
+    s3.setup(inp3, 0, inp3.size)
+    s3.do_scan()
+    if (s3.get_success() != 0) {
+        println("FAIL 3: should not match 'function'")
+        failures++
+    }
+
+    // Test 4: fun Module:Function/Arity (function reference, not closure)
+    val s4 = @@ErlangScopeScannerFsm()
+    val inp4 = "fun io:format/2".toByteArray()
+    s4.setup(inp4, 0, inp4.size)
+    s4.do_scan()
+    if (s4.get_success() != 0) {
+        println("FAIL 4: should not match function reference")
+        failures++
+    }
+
+    // Test 5: Nested if ... end inside fun
+    val s5 = @@ErlangScopeScannerFsm()
+    val inp5 = "fun() -> if true -> ok end end rest".toByteArray()
+    s5.setup(inp5, 0, inp5.size)
+    s5.do_scan()
+    if (s5.get_success() != 1 || s5.get_result_pos() != 30) {
+        println("FAIL 5: success=${s5.get_success()}, pos=${s5.get_result_pos()}")
+        failures++
+    }
+
+    // Test 6: String inside fun body (should skip)
+    val s6 = @@ErlangScopeScannerFsm()
+    val inp6 = "fun() -> \"end\" end rest".toByteArray()
+    s6.setup(inp6, 0, inp6.size)
+    s6.do_scan()
+    if (s6.get_success() != 1 || s6.get_result_pos() != 18) {
+        println("FAIL 6: success=${s6.get_success()}, pos=${s6.get_result_pos()}")
+        failures++
+    }
+
+    // Test 7: Comment inside fun body (should skip)
+    val s7 = @@ErlangScopeScannerFsm()
+    val inp7 = "fun() -> % end\nok end rest".toByteArray()
+    s7.setup(inp7, 0, inp7.size)
+    s7.do_scan()
+    if (s7.get_success() != 1 || s7.get_result_pos() != 21) {
+        println("FAIL 7: success=${s7.get_success()}, pos=${s7.get_result_pos()}")
+        failures++
+    }
+
+    // Test 8: Unmatched fun (no end)
+    val s8 = @@ErlangScopeScannerFsm()
+    val inp8 = "fun() -> X + 1".toByteArray()
+    s8.setup(inp8, 0, inp8.size)
+    s8.do_scan()
+    if (s8.get_success() != 0) {
+        println("FAIL 8: should fail with no matching end")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: $failures failures")
+        exitProcess(1)
+    }
+    println("PASS: erlang_scope_scanner (8 cases)")
+}

@@ -1,0 +1,366 @@
+@@target dart
+
+import 'dart:io';
+
+// CSharpSyntaxSkipper -- FSM for skipping C# comments and strings.
+// Translated from framec's native_region_scanner/csharp_skipper.frs
+//
+// Handles: // line comments, /* */ block comments, # preprocessor directives,
+// "..." simple strings, @"..." verbatim strings, $"..." interpolated strings,
+// $"""...""" raw strings, C-like line endings, balanced parens.
+
+@@system CSharpSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: List<int>, start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                // Preprocessor directive: # ... newline
+                if (i < end && bs[i] == 0x23) {
+                    int j = i + 1;
+                    while (j < end && bs[j] != 0x0A) {
+                        j++;
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                // Line comment: //
+                if (i + 1 < end && bs[i] == 0x2F && bs[i + 1] == 0x2F) {
+                    int j = i + 2;
+                    while (j < end && bs[j] != 0x0A) {
+                        j++;
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                // Block comment: /* ... */
+                if (i + 1 < end && bs[i] == 0x2F && bs[i + 1] == 0x2A) {
+                    int j = i + 2;
+                    while (j + 1 < end) {
+                        if (bs[j] == 0x2A && bs[j + 1] == 0x2F) {
+                            this.result_pos = j + 2;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                if (i >= end) {
+                    this.success = 0;
+                    return;
+                }
+
+                int b0 = bs[i];
+
+                // Verbatim string @"..." (doubled quotes for escape)
+                if (b0 == 0x40 && i + 1 < end && bs[i + 1] == 0x22) {
+                    int j = i + 2;
+                    while (j < end) {
+                        if (bs[j] == 0x22) {
+                            if (j + 1 < end && bs[j + 1] == 0x22) {
+                                j += 2;
+                                continue;
+                            }
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                // Interpolated string $"..." or $@"..." or raw $"""..."""
+                if (b0 == 0x24) {
+                    int j = i + 1;
+                    while (j < end && bs[j] == 0x24) {
+                        j++;
+                    }
+                    if (j < end && bs[j] == 0x40) {
+                        j++;
+                    }
+                    int quotes = 0;
+                    while (j < end && bs[j] == 0x22) {
+                        quotes++;
+                        j++;
+                    }
+                    if (quotes == 0) {
+                        this.success = 0;
+                        return;
+                    }
+                    if (quotes >= 3) {
+                        while (j < end) {
+                            if (bs[j] == 0x22) {
+                                int q = 0;
+                                int p = j;
+                                while (p < end && bs[p] == 0x22) {
+                                    q++;
+                                    p++;
+                                }
+                                if (q >= quotes) {
+                                    this.result_pos = p;
+                                    this.success = 1;
+                                    return;
+                                }
+                                j = p;
+                                continue;
+                            }
+                            j++;
+                        }
+                        this.result_pos = end;
+                        this.success = 1;
+                        return;
+                    }
+                    while (j < end) {
+                        if (bs[j] == 0x5C) {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == 0x22) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                // Simple string: " or '
+                if (b0 == 0x22 || b0 == 0x27) {
+                    int q = b0;
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == 0x5C) {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == q) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                while (j < end) {
+                    int b = bs[j];
+                    if (b == 0x0A || b == 0x3B) {
+                        break;
+                    }
+                    if (b == 0x2F && j + 1 < end && (bs[j + 1] == 0x2F || bs[j + 1] == 0x2A)) {
+                        break;
+                    }
+                    if (b == 0x23) {
+                        break;
+                    }
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                if (i >= end || bs[i] != 0x28) {
+                    this.success = 0;
+                    return;
+                }
+
+                int depth = 1;
+                int j = i + 1;
+                while (j < end && depth > 0) {
+                    int b = bs[j];
+                    if (b == 0x28) {
+                        depth++;
+                    } else if (b == 0x29) {
+                        depth--;
+                    } else if (b == 0x22 || b == 0x27) {
+                        int q = b;
+                        j++;
+                        while (j < end && bs[j] != q) {
+                            if (bs[j] == 0x5C) {
+                                j++;
+                            }
+                            j++;
+                        }
+                    }
+                    j++;
+                }
+
+                if (depth == 0) {
+                    this.result_pos = j;
+                    this.success = 1;
+                } else {
+                    this.result_pos = end;
+                    this.success = 0;
+                }
+            }
+        }
+
+    domain:
+        bytes: List<int> = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+void main() {
+    var failures = 0;
+
+    // Test 1: Skip // line comment
+    final s1 = @@CSharpSyntaxSkipperFsm();
+    final inp1 = "// comment\ncode".codeUnits;
+    s1.setup(inp1, 0, inp1.length);
+    s1.do_skip_comment();
+    if (s1.get_success() != 1 || s1.get_result_pos() != 10) {
+        print("FAIL 1: success=\${s1.get_success()}, pos=\${s1.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 2: Skip /* */ block comment
+    final s2 = @@CSharpSyntaxSkipperFsm();
+    final inp2 = "/* block */code".codeUnits;
+    s2.setup(inp2, 0, inp2.length);
+    s2.do_skip_comment();
+    if (s2.get_success() != 1 || s2.get_result_pos() != 11) {
+        print("FAIL 2: success=\${s2.get_success()}, pos=\${s2.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 3: Skip simple string "hello"
+    final s3 = @@CSharpSyntaxSkipperFsm();
+    final inp3 = '"hello" rest'.codeUnits;
+    s3.setup(inp3, 0, inp3.length);
+    s3.do_skip_string();
+    if (s3.get_success() != 1 || s3.get_result_pos() != 7) {
+        print("FAIL 3: success=\${s3.get_success()}, pos=\${s3.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 4: Skip verbatim string @"verbatim ""quote"""
+    final s4 = @@CSharpSyntaxSkipperFsm();
+    final inp4 = '@"verbatim ""quote""" rest'.codeUnits;
+    s4.setup(inp4, 0, inp4.length);
+    s4.do_skip_string();
+    if (s4.get_success() != 1 || s4.get_result_pos() != 21) {
+        print("FAIL 4: success=\${s4.get_success()}, pos=\${s4.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 5: Skip interpolated string $"interp {x}"
+    final s5 = @@CSharpSyntaxSkipperFsm();
+    final inp5 = '\$"interp {x}" rest'.codeUnits;
+    s5.setup(inp5, 0, inp5.length);
+    s5.do_skip_string();
+    if (s5.get_success() != 1 || s5.get_result_pos() != 13) {
+        print("FAIL 5: success=\${s5.get_success()}, pos=\${s5.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 6: Find line end (stops at // comment)
+    final s6 = @@CSharpSyntaxSkipperFsm();
+    final inp6 = "x + 1 // comment".codeUnits;
+    s6.setup(inp6, 0, inp6.length);
+    s6.do_find_line_end();
+    if (s6.get_result_pos() != 6) {
+        print("FAIL 6: pos=\${s6.get_result_pos()}, expected 6");
+        failures++;
+    }
+
+    // Test 7: Balanced parens
+    final s7 = @@CSharpSyntaxSkipperFsm();
+    final inp7 = "(a, f(b)) rest".codeUnits;
+    s7.setup(inp7, 0, inp7.length);
+    s7.do_balanced_paren_end();
+    if (s7.get_success() != 1 || s7.get_result_pos() != 9) {
+        print("FAIL 7: success=\${s7.get_success()}, pos=\${s7.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 8: Skip # preprocessor directive
+    final s8 = @@CSharpSyntaxSkipperFsm();
+    final inp8 = "#region Foo\ncode".codeUnits;
+    s8.setup(inp8, 0, inp8.length);
+    s8.do_skip_comment();
+    if (s8.get_success() != 1 || s8.get_result_pos() != 11) {
+        print("FAIL 8: success=\${s8.get_success()}, pos=\${s8.get_result_pos()}");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: \$failures failures");
+        exit(1);
+    }
+    print("PASS: csharp_skipper (8 cases)");
+}

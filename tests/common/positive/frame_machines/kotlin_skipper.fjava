@@ -1,0 +1,214 @@
+@@target java
+
+// kotlin_skipper -- FSM for skipping syntax constructs.
+
+@@system KotlinSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                if (i + 1 < end && (bs[i] & 0xFF) == '/' && (bs[i + 1] & 0xFF) == '/') {
+                    int j = i + 2;
+                    while (j < end && (bs[j] & 0xFF) != '\n') { j++; }
+                    this.result_pos = j; this.success = 1; return;
+                }
+                if (i + 1 < end && (bs[i] & 0xFF) == '/' && (bs[i + 1] & 0xFF) == '*') {
+                    int j = i + 2;
+                    while (j + 1 < end) {
+                        if ((bs[j] & 0xFF) == '*' && (bs[j + 1] & 0xFF) == '/') {
+                            this.result_pos = j + 2; this.success = 1; return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end; this.success = 1; return;
+                }
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                if (i + 2 < end && (bs[i] & 0xFF) == '"' && (bs[i+1] & 0xFF) == '"' && (bs[i+2] & 0xFF) == '"') {
+                    int j = i + 3;
+                    while (j + 2 < end) {
+                        if ((bs[j] & 0xFF) == '"' && (bs[j+1] & 0xFF) == '"' && (bs[j+2] & 0xFF) == '"') {
+                            this.result_pos = j + 3; this.success = 1; return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end; this.success = 1; return;
+                }
+
+                if (i < end && ((bs[i] & 0xFF) == '"' || (bs[i] & 0xFF) == '\'')) {
+                    int q = bs[i] & 0xFF;
+                    int j = i + 1;
+                    while (j < end) {
+                        if ((bs[j] & 0xFF) == '\\') { j += 2; continue; }
+                        if ((bs[j] & 0xFF) == q) { this.result_pos = j + 1; this.success = 1; return; }
+                        j++;
+                    }
+                    this.result_pos = end; this.success = 1; return;
+                }
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                while (j < end) {
+                    int b = bs[j] & 0xFF;
+                    if (b == '\n' || b == ';') { break; }
+                    if (b == '/' && j + 1 < end && (bs[j + 1] & 0xFF) == '/') { break; }
+                    if (b == '/' && j + 1 < end && (bs[j + 1] & 0xFF) == '*') { break; }
+                    j++;
+                }
+                this.result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                if (i >= end || (bs[i] & 0xFF) != '(') { this.success = 0; return; }
+                int depth = 1; int j = i + 1;
+                while (j < end && depth > 0) {
+                    int b = bs[j] & 0xFF;
+                    if (b == '(') { depth++; } else if (b == ')') { depth--; } else if (b == '"' || b == '\'') {
+                        int q = b; j++;
+                        while (j < end && (bs[j] & 0xFF) != q) { if ((bs[j] & 0xFF) == '\\') { j++; } j++; }
+                    }
+                    j++;
+                }
+                if (depth == 0) { this.result_pos = j; this.success = 1; }
+                else { this.result_pos = end; this.success = 0; }
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+class Main {
+    public static void main(String[] args) {
+        int failures = 0;
+
+        KotlinSyntaxSkipperFsm s1 = @@KotlinSyntaxSkipperFsm();
+        byte[] inp1 = "// hello\ncode".getBytes();
+        s1.setup(inp1, 0, inp1.length);
+        s1.do_skip_comment();
+        if (s1.get_success() != 1 || s1.get_result_pos() != 8) {
+            System.out.println("FAIL 1: Skip line comment");
+            failures++;
+        }
+
+        KotlinSyntaxSkipperFsm s2 = @@KotlinSyntaxSkipperFsm();
+        byte[] inp2 = "/* block */code".getBytes();
+        s2.setup(inp2, 0, inp2.length);
+        s2.do_skip_comment();
+        if (s2.get_success() != 1 || s2.get_result_pos() != 11) {
+            System.out.println("FAIL 2: Skip block comment");
+            failures++;
+        }
+
+        KotlinSyntaxSkipperFsm s3 = @@KotlinSyntaxSkipperFsm();
+        byte[] inp3 = "\"hello world\" rest".getBytes();
+        s3.setup(inp3, 0, inp3.length);
+        s3.do_skip_string();
+        if (s3.get_success() != 1 || s3.get_result_pos() != 13) {
+            System.out.println("FAIL 3: Skip double-quoted string");
+            failures++;
+        }
+
+        KotlinSyntaxSkipperFsm s4 = @@KotlinSyntaxSkipperFsm();
+        byte[] inp4 = "\"\"\"raw string content\"\"\" rest".getBytes();
+        s4.setup(inp4, 0, inp4.length);
+        s4.do_skip_string();
+        if (s4.get_success() != 1 || s4.get_result_pos() != 24) {
+            System.out.println("FAIL 4: Kotlin raw string");
+            failures++;
+        }
+
+        KotlinSyntaxSkipperFsm s5 = @@KotlinSyntaxSkipperFsm();
+        byte[] inp5 = "x + 1\nmore".getBytes();
+        s5.setup(inp5, 0, inp5.length);
+        s5.do_find_line_end();
+        if (s5.get_result_pos() != 5) {
+            System.out.println("FAIL 5: Find line end");
+            failures++;
+        }
+
+        KotlinSyntaxSkipperFsm s6 = @@KotlinSyntaxSkipperFsm();
+        byte[] inp6 = "x + 1".getBytes();
+        s6.setup(inp6, 0, inp6.length);
+        s6.do_skip_comment();
+        if (s6.get_success() != 0) {
+            System.out.println("FAIL 6: Not a comment");
+            failures++;
+        }
+
+        KotlinSyntaxSkipperFsm s7 = @@KotlinSyntaxSkipperFsm();
+        byte[] inp7 = "(a, f(b), c) rest".getBytes();
+        s7.setup(inp7, 0, inp7.length);
+        s7.do_balanced_paren_end();
+        if (s7.get_success() != 1 || s7.get_result_pos() != 12) {
+            System.out.println("FAIL 7: Balanced parens");
+            failures++;
+        }
+
+        KotlinSyntaxSkipperFsm s8 = @@KotlinSyntaxSkipperFsm();
+        byte[] inp8 = "x + 1 // comment".getBytes();
+        s8.setup(inp8, 0, inp8.length);
+        s8.do_find_line_end();
+        if (s8.get_result_pos() != 6) {
+            System.out.println("FAIL 8: Find line end at //");
+            failures++;
+        }
+
+        if (failures > 0) { System.out.println("FAIL: " + failures + " failures"); System.exit(1); }
+        System.out.println("PASS: kotlin_skipper (8 cases)");
+    }
+}

@@ -1,0 +1,267 @@
+@@target python_3
+
+# SwiftSyntaxSkipper -- FSM for skipping Swift-style comments and strings.
+# Translated from framec's native_region_scanner/swift_skipper.frs
+#
+# Like C skipper but with nestable /* /* */ */ block comments
+# and """...""" multi-line strings.
+
+@@system SwiftSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: list, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos(): int {
+            return self.result_pos
+        }
+        get_success(): int {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                # Try line comment: //
+                if i + 1 < end and bs[i] == ord('/') and bs[i + 1] == ord('/'):
+                    j = i + 2
+                    while j < end and bs[j] != ord('\n'):
+                        j += 1
+                    self.result_pos = j
+                    self.success = 1
+                    return
+
+                # Nestable block comments for Swift: /* /* ... */ */
+                if i + 1 < end and bs[i] == ord('/') and bs[i + 1] == ord('*'):
+                    j = i + 2
+                    depth = 1
+                    while j + 1 < end and depth > 0:
+                        if bs[j] == ord('/') and bs[j + 1] == ord('*'):
+                            depth += 1
+                            j += 2
+                        elif bs[j] == ord('*') and bs[j + 1] == ord('/'):
+                            depth -= 1
+                            j += 2
+                        else:
+                            j += 1
+                    self.result_pos = j
+                    self.success = 1
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                # Swift multi-line string """...""" (must check before simple string)
+                if i + 2 < end and bs[i] == ord('"') and bs[i + 1] == ord('"') and bs[i + 2] == ord('"'):
+                    j = i + 3
+                    while j + 2 < end:
+                        if bs[j] == ord('"') and bs[j + 1] == ord('"') and bs[j + 2] == ord('"'):
+                            self.result_pos = j + 3
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = end
+                    self.success = 1
+                    return
+
+                # Simple string: "..." or '...' with backslash escapes
+                if i < end and (bs[i] == ord('"') or bs[i] == ord("'")):
+                    q = bs[i]
+                    j = i + 1
+                    while j < end:
+                        if bs[j] == ord('\\'):
+                            j += 2
+                            continue
+                        if bs[j] == q:
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = end
+                    self.success = 1
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                while j < end:
+                    b = bs[j]
+                    if b == ord('\n') or b == ord(';'):
+                        break
+                    # Stop at // comment start
+                    if b == ord('/') and j + 1 < end and bs[j + 1] == ord('/'):
+                        break
+                    # Stop at /* comment start
+                    if b == ord('/') and j + 1 < end and bs[j + 1] == ord('*'):
+                        break
+                    j += 1
+
+                self.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                if i >= end or bs[i] != ord('('):
+                    self.success = 0
+                    return
+
+                depth = 1
+                j = i + 1
+                while j < end and depth > 0:
+                    b = bs[j]
+                    if b == ord('('):
+                        depth += 1
+                    elif b == ord(')'):
+                        depth -= 1
+                    elif b == ord('"') or b == ord("'"):
+                        q = b
+                        j += 1
+                        while j < end and bs[j] != q:
+                            if bs[j] == ord('\\'):
+                                j += 1
+                            j += 1
+                        # j is at closing quote
+                    j += 1
+
+                if depth == 0:
+                    self.result_pos = j
+                    self.success = 1
+                else:
+                    self.result_pos = end
+                    self.success = 0
+            }
+        }
+
+    domain:
+        bytes: list = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+if __name__ == '__main__':
+    failures = 0
+
+    # Test 1: Skip line comment
+    s1 = @@SwiftSyntaxSkipperFsm()
+    inp1 = list(b"// hello\ncode")
+    s1.setup(inp1, 0, len(inp1))
+    s1.do_skip_comment()
+    if s1.get_success() != 1 or s1.get_result_pos() != 8:
+        print(f"FAIL 1: success={s1.get_success()}, pos={s1.get_result_pos()}")
+        failures += 1
+
+    # Test 2: Skip block comment (non-nested)
+    s2 = @@SwiftSyntaxSkipperFsm()
+    inp2 = list(b"/* block */code")
+    s2.setup(inp2, 0, len(inp2))
+    s2.do_skip_comment()
+    if s2.get_success() != 1 or s2.get_result_pos() != 11:
+        print(f"FAIL 2: success={s2.get_success()}, pos={s2.get_result_pos()}")
+        failures += 1
+
+    # Test 3: Nested block comment /* /* inner */ outer */
+    s3 = @@SwiftSyntaxSkipperFsm()
+    inp3 = list(b"/* outer /* inner */ end */code")
+    s3.setup(inp3, 0, len(inp3))
+    s3.do_skip_comment()
+    if s3.get_success() != 1 or s3.get_result_pos() != 27:
+        print(f"FAIL 3: success={s3.get_success()}, pos={s3.get_result_pos()}")
+        failures += 1
+
+    # Test 4: Skip double-quoted string
+    s4 = @@SwiftSyntaxSkipperFsm()
+    inp4 = list(b'"hello world" rest')
+    s4.setup(inp4, 0, len(inp4))
+    s4.do_skip_string()
+    if s4.get_success() != 1 or s4.get_result_pos() != 13:
+        print(f"FAIL 4: success={s4.get_success()}, pos={s4.get_result_pos()}")
+        failures += 1
+
+    # Test 5: Swift multi-line string """..."""
+    s5 = @@SwiftSyntaxSkipperFsm()
+    inp5 = list(b'"""multi-line\ncontent""" rest')
+    s5.setup(inp5, 0, len(inp5))
+    s5.do_skip_string()
+    if s5.get_success() != 1 or s5.get_result_pos() != 24:
+        print(f"FAIL 5: success={s5.get_success()}, pos={s5.get_result_pos()}")
+        failures += 1
+
+    # Test 6: Find line end (stops at newline)
+    s6 = @@SwiftSyntaxSkipperFsm()
+    inp6 = list(b"x + 1\nmore")
+    s6.setup(inp6, 0, len(inp6))
+    s6.do_find_line_end()
+    if s6.get_result_pos() != 5:
+        print(f"FAIL 6: pos={s6.get_result_pos()}, expected 5")
+        failures += 1
+
+    # Test 7: Not a comment
+    s7 = @@SwiftSyntaxSkipperFsm()
+    inp7 = list(b"x + 1")
+    s7.setup(inp7, 0, len(inp7))
+    s7.do_skip_comment()
+    if s7.get_success() != 0:
+        print(f"FAIL 7: should not be a comment")
+        failures += 1
+
+    # Test 8: Balanced parens
+    s8 = @@SwiftSyntaxSkipperFsm()
+    inp8 = list(b"(a, f(b), c) rest")
+    s8.setup(inp8, 0, len(inp8))
+    s8.do_balanced_paren_end()
+    if s8.get_success() != 1 or s8.get_result_pos() != 12:
+        print(f"FAIL 8: success={s8.get_success()}, pos={s8.get_result_pos()}")
+        failures += 1
+
+    # Test 9: Find line end (stops at // comment)
+    s9 = @@SwiftSyntaxSkipperFsm()
+    inp9 = list(b"x + 1 // comment")
+    s9.setup(inp9, 0, len(inp9))
+    s9.do_find_line_end()
+    if s9.get_result_pos() != 6:
+        print(f"FAIL 9: pos={s9.get_result_pos()}, expected 6")
+        failures += 1
+
+    if failures > 0:
+        print(f"FAIL: {failures} failures")
+        exit(1)
+    print("PASS: swift_skipper (9 cases)")

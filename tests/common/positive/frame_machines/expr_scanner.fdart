@@ -1,0 +1,153 @@
+@@target dart
+
+import 'dart:io';
+
+// ExprScanner — PDA for scanning assignment RHS expressions.
+// Translated from framec's native_region_scanner/expr_scanner.frs
+//
+// Scans from pos (after =) to a terminator (; or \n) at depth 0,
+// respecting nested ()[]{}  and string literals with escape handling.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: List<int>, start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.end = length;
+        }
+        get_result(): int {
+            return this.result_end;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                int i = this.pos;
+                int end = this.end;
+                List<int> bs = this.bytes;
+                int depth = 0;
+                int inString = -1;
+
+                while (i < end) {
+                    int b = bs[i];
+
+                    if (inString != -1) {
+                        if (b == 0x5C && i + 1 < end) {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == inString) {
+                            inString = -1;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == 0x22 || b == 0x27) {
+                        inString = b;
+                        i++;
+                        continue;
+                    }
+
+                    if (b == 0x28 || b == 0x5B || b == 0x7B) {
+                        depth++;
+                    } else if (b == 0x29 || b == 0x5D || b == 0x7D) {
+                        depth--;
+                        if (depth < 0) depth = 0;
+                    } else if (b == 0x3B && depth == 0) {
+                        i++;
+                        break;
+                    } else if (b == 0x0A && depth == 0) {
+                        break;
+                    }
+
+                    i++;
+                }
+
+                this.result_end = i;
+            }
+        }
+
+    domain:
+        bytes: List<int> = []
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+void main() {
+    int failures = 0;
+
+    // Test 1: simple expression terminated by newline
+    final e1 = @@ExprScannerFsm();
+    final inp1 = " x + 1\nfoo".codeUnits;
+    e1.setup(inp1, 0, inp1.length);
+    e1.do_scan();
+    final r1 = e1.get_result() as int;
+    final expr1 = String.fromCharCodes(inp1.sublist(0, r1));
+    if (expr1 != " x + 1") {
+        print("FAIL 1: got '$expr1'");
+        failures++;
+    }
+
+    // Test 2: expression with semicolon terminator
+    final e2 = @@ExprScannerFsm();
+    final inp2 = " x + 1; y = 2".codeUnits;
+    e2.setup(inp2, 0, inp2.length);
+    e2.do_scan();
+    final r2 = e2.get_result() as int;
+    final expr2 = String.fromCharCodes(inp2.sublist(0, r2));
+    if (expr2 != " x + 1;") {
+        print("FAIL 2: got '$expr2'");
+        failures++;
+    }
+
+    // Test 3: nested parens not treated as terminator
+    final e3 = @@ExprScannerFsm();
+    final inp3 = " f(x, g(y))\nz".codeUnits;
+    e3.setup(inp3, 0, inp3.length);
+    e3.do_scan();
+    final r3 = e3.get_result() as int;
+    final expr3 = String.fromCharCodes(inp3.sublist(0, r3));
+    if (expr3 != " f(x, g(y))") {
+        print("FAIL 3: got '$expr3'");
+        failures++;
+    }
+
+    // Test 4: string with escaped quote
+    final e4 = @@ExprScannerFsm();
+    final inp4 = ' "hello\\"world"\n'.codeUnits;
+    e4.setup(inp4, 0, inp4.length);
+    e4.do_scan();
+    final r4 = e4.get_result() as int;
+    final expr4 = String.fromCharCodes(inp4.sublist(0, r4));
+    if (expr4 != ' "hello\\"world"') {
+        print("FAIL 4: got '$expr4'");
+        failures++;
+    }
+
+    // Test 5: semicolon inside string (should not terminate)
+    final e5 = @@ExprScannerFsm();
+    final inp5 = ' "a;b"\n'.codeUnits;
+    e5.setup(inp5, 0, inp5.length);
+    e5.do_scan();
+    final r5 = e5.get_result() as int;
+    final expr5 = String.fromCharCodes(inp5.sublist(0, r5));
+    if (expr5 != ' "a;b"') {
+        print("FAIL 5: got '$expr5'");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: $failures failures");
+        exit(1);
+    }
+    print("PASS: expr_scanner (5 cases)");
+}

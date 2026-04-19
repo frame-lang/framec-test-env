@@ -1,0 +1,334 @@
+@@target erlang
+
+%% RubySyntaxSkipper -- FSM for skipping Ruby comments and strings.
+%% Translated from framec's native_region_scanner/ruby_skipper.frs
+%%
+%% Handles: # line comments, "..." / '...' strings,
+%% %Q{} / %q[] / %w() etc. percent literals,
+%% Ruby-style line endings, balanced parens.
+
+@@system RubySyntaxSkipperFsm {
+    interface:
+        setup(input_bytes: binary, start: int, length: int)
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+        get_result_pos(): int
+        get_success(): int
+
+    machine:
+        $Init {
+            setup(input_bytes: binary, start: int, length: int) {
+                self.bytes = input_bytes
+                self.pos = start
+                self.scan_end = length
+            }
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipComment {
+            $>() {
+                {ResultPos, Success} = ruby_scan_comment(Data#data.bytes, Data#data.pos, Data#data.scan_end),
+                self.result_pos = ResultPos
+                self.success = Success
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipString {
+            $>() {
+                {ResultPos, Success} = ruby_scan_string(Data#data.bytes, Data#data.pos, Data#data.scan_end),
+                self.result_pos = ResultPos
+                self.success = Success
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $FindLineEnd {
+            $>() {
+                self.result_pos = ruby_scan_line_end(Data#data.bytes, Data#data.pos, Data#data.scan_end, 0)
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                {ResultPos, Success} = ruby_scan_balanced_paren(Data#data.bytes, Data#data.pos, Data#data.scan_end),
+                self.result_pos = ResultPos
+                self.success = Success
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+    domain:
+        bytes = <<>>
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+%% --- Skip comment helper ---
+ruby_scan_comment(Bs, I, End) when I < End ->
+    case binary:at(Bs, I) of
+        $# ->
+            J = ruby_scan_to_newline(Bs, I + 1, End),
+            {J, 1};
+        _ ->
+            {0, 0}
+    end;
+ruby_scan_comment(_Bs, _I, _End) ->
+    {0, 0}.
+
+ruby_scan_to_newline(_Bs, J, End) when J >= End -> J;
+ruby_scan_to_newline(Bs, J, End) ->
+    case binary:at(Bs, J) of
+        $\n -> J;
+        _ -> ruby_scan_to_newline(Bs, J + 1, End)
+    end.
+
+%% --- Skip string helper ---
+ruby_scan_string(Bs, I, End) when I < End ->
+    B = binary:at(Bs, I),
+    if
+        B =:= $% ->
+            ruby_scan_percent_literal(Bs, I, End);
+        B =:= $" orelse B =:= $' ->
+            ruby_scan_simple_str_loop(Bs, I + 1, End, B);
+        true ->
+            {0, 0}
+    end;
+ruby_scan_string(_Bs, _I, _End) ->
+    {0, 0}.
+
+ruby_scan_percent_literal(Bs, I, End) when I + 1 < End ->
+    C1 = binary:at(Bs, I + 1),
+    HasLetter = lists:member(C1, [$Q, $q, $w, $W, $i, $I, $r, $x, $s]),
+    if
+        HasLetter andalso I + 2 < End ->
+            Opener = binary:at(Bs, I + 2),
+            ruby_scan_percent_body(Bs, I + 3, End, Opener);
+        not HasLetter andalso not (C1 >= $a andalso C1 =< $z) andalso not (C1 >= $A andalso C1 =< $Z) andalso not (C1 >= $0 andalso C1 =< $9) andalso C1 =/= $_ ->
+            ruby_scan_percent_body(Bs, I + 2, End, C1);
+        true ->
+            {0, 0}
+    end;
+ruby_scan_percent_literal(_Bs, _I, _End) ->
+    {0, 0}.
+
+ruby_scan_percent_body(Bs, J, End, Opener) ->
+    {Closer, Paired} = case Opener of
+        ${ -> {$}, true};
+        $[ -> {$], true};
+        $( -> {$), true};
+        $< -> {$>, true};
+        _ -> {Opener, false}
+    end,
+    case Paired of
+        true ->
+            ruby_scan_nested(Bs, J, End, Opener, Closer, 1);
+        false ->
+            ruby_scan_to_delim(Bs, J, End, Closer)
+    end.
+
+ruby_scan_to_delim(_Bs, J, End, _Closer) when J >= End ->
+    {End, 1};
+ruby_scan_to_delim(Bs, J, End, Closer) ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\\ ->
+            ruby_scan_to_delim(Bs, J + 2, End, Closer);
+        B =:= Closer ->
+            {J + 1, 1};
+        true ->
+            ruby_scan_to_delim(Bs, J + 1, End, Closer)
+    end.
+
+ruby_scan_nested(_Bs, J, _End, _Opener, _Closer, 0) ->
+    {J, 1};
+ruby_scan_nested(_Bs, J, End, _Opener, _Closer, _Depth) when J >= End ->
+    {J, 1};
+ruby_scan_nested(Bs, J, End, Opener, Closer, Depth) ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\\ ->
+            ruby_scan_nested(Bs, J + 2, End, Opener, Closer, Depth);
+        B =:= Opener ->
+            ruby_scan_nested(Bs, J + 1, End, Opener, Closer, Depth + 1);
+        B =:= Closer ->
+            ruby_scan_nested(Bs, J + 1, End, Opener, Closer, Depth - 1);
+        true ->
+            ruby_scan_nested(Bs, J + 1, End, Opener, Closer, Depth)
+    end.
+
+ruby_scan_simple_str_loop(_Bs, J, End, _Q) when J >= End ->
+    {End, 1};
+ruby_scan_simple_str_loop(Bs, J, End, Q) ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\\ ->
+            ruby_scan_simple_str_loop(Bs, J + 2, End, Q);
+        B =:= Q ->
+            {J + 1, 1};
+        true ->
+            ruby_scan_simple_str_loop(Bs, J + 1, End, Q)
+    end.
+
+%% --- Find line end helper ---
+ruby_scan_line_end(_Bs, J, End, _InStr) when J >= End -> J;
+ruby_scan_line_end(Bs, J, End, InStr) ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\n ->
+            J;
+        InStr =/= 0 andalso B =:= $\\ ->
+            ruby_scan_line_end(Bs, J + 2, End, InStr);
+        InStr =/= 0 andalso B =:= InStr ->
+            ruby_scan_line_end(Bs, J + 1, End, 0);
+        InStr =/= 0 ->
+            ruby_scan_line_end(Bs, J + 1, End, InStr);
+        B =:= $# ->
+            J;
+        B =:= $' orelse B =:= $" ->
+            ruby_scan_line_end(Bs, J + 1, End, B);
+        true ->
+            ruby_scan_line_end(Bs, J + 1, End, InStr)
+    end.
+
+%% --- Balanced paren end helper ---
+ruby_scan_balanced_paren(_Bs, I, End) when I >= End ->
+    {0, 0};
+ruby_scan_balanced_paren(Bs, I, End) ->
+    case binary:at(Bs, I) of
+        $( ->
+            ruby_scan_balanced_loop(Bs, I, End, 0, 0);
+        _ ->
+            {0, 0}
+    end.
+
+ruby_scan_balanced_loop(_Bs, I, End, _Depth, _InStr) when I >= End ->
+    {0, 0};
+ruby_scan_balanced_loop(Bs, I, End, Depth, InStr) ->
+    B = binary:at(Bs, I),
+    if
+        InStr =/= 0 andalso B =:= $\\ ->
+            ruby_scan_balanced_loop(Bs, I + 2, End, Depth, InStr);
+        InStr =/= 0 andalso B =:= InStr ->
+            ruby_scan_balanced_loop(Bs, I + 1, End, Depth, 0);
+        InStr =/= 0 ->
+            ruby_scan_balanced_loop(Bs, I + 1, End, Depth, InStr);
+        B =:= $' orelse B =:= $" ->
+            ruby_scan_balanced_loop(Bs, I + 1, End, Depth, B);
+        B =:= $( ->
+            ruby_scan_balanced_loop(Bs, I + 1, End, Depth + 1, InStr);
+        B =:= $) ->
+            NewDepth = Depth - 1,
+            case NewDepth of
+                0 -> {I + 1, 1};
+                _ -> ruby_scan_balanced_loop(Bs, I + 1, End, NewDepth, InStr)
+            end;
+        true ->
+            ruby_scan_balanced_loop(Bs, I + 1, End, Depth, InStr)
+    end.
+
+main() ->
+    Failures = ruby_test_all(0),
+    case Failures of
+        0 -> io:format("PASS: ruby_skipper (8 cases)~n");
+        _ -> io:format("FAIL: ~p failures~n", [Failures]), halt(1)
+    end.
+
+ruby_test_all(F0) ->
+    M = ruby_syntax_skipper_fsm,
+
+    %% Test 1: Skip # comment
+    {ok, P1} = M:start_link(),
+    I1 = <<"# comment\ncode">>,
+    M:setup(P1, I1, 0, byte_size(I1)),
+    M:do_skip_comment(P1),
+    F1 = case {M:get_success(P1), M:get_result_pos(P1)} of
+        {1, 9} -> F0;
+        {S1, R1} -> io:format("FAIL 1: success=~p, pos=~p~n", [S1, R1]), F0 + 1
+    end,
+
+    %% Test 2: Skip double-quoted string
+    {ok, P2} = M:start_link(),
+    I2 = <<"\"hello\" rest">>,
+    M:setup(P2, I2, 0, byte_size(I2)),
+    M:do_skip_string(P2),
+    F2 = case {M:get_success(P2), M:get_result_pos(P2)} of
+        {1, 7} -> F1;
+        {S2, R2} -> io:format("FAIL 2: success=~p, pos=~p~n", [S2, R2]), F1 + 1
+    end,
+
+    %% Test 3: Skip single-quoted string
+    {ok, P3} = M:start_link(),
+    I3 = <<"'hello' rest">>,
+    M:setup(P3, I3, 0, byte_size(I3)),
+    M:do_skip_string(P3),
+    F3 = case {M:get_success(P3), M:get_result_pos(P3)} of
+        {1, 7} -> F2;
+        {S3, R3} -> io:format("FAIL 3: success=~p, pos=~p~n", [S3, R3]), F2 + 1
+    end,
+
+    %% Test 4: Skip %Q{text}
+    {ok, P4} = M:start_link(),
+    I4 = <<"%Q{text} rest">>,
+    M:setup(P4, I4, 0, byte_size(I4)),
+    M:do_skip_string(P4),
+    F4 = case {M:get_success(P4), M:get_result_pos(P4)} of
+        {1, 8} -> F3;
+        {S4, R4} -> io:format("FAIL 4: success=~p, pos=~p~n", [S4, R4]), F3 + 1
+    end,
+
+    %% Test 5: Skip %q[text]
+    {ok, P5} = M:start_link(),
+    I5 = <<"%q[text] rest">>,
+    M:setup(P5, I5, 0, byte_size(I5)),
+    M:do_skip_string(P5),
+    F5 = case {M:get_success(P5), M:get_result_pos(P5)} of
+        {1, 8} -> F4;
+        {S5, R5} -> io:format("FAIL 5: success=~p, pos=~p~n", [S5, R5]), F4 + 1
+    end,
+
+    %% Test 6: Find line end (stops at #)
+    {ok, P6} = M:start_link(),
+    I6 = <<"x + 1 # comment">>,
+    M:setup(P6, I6, 0, byte_size(I6)),
+    M:do_find_line_end(P6),
+    F6 = case M:get_result_pos(P6) of
+        6 -> F5;
+        R6 -> io:format("FAIL 6: pos=~p, expected 6~n", [R6]), F5 + 1
+    end,
+
+    %% Test 7: Balanced parens
+    {ok, P7} = M:start_link(),
+    I7 = <<"(a, f(b)) rest">>,
+    M:setup(P7, I7, 0, byte_size(I7)),
+    M:do_balanced_paren_end(P7),
+    F7 = case {M:get_success(P7), M:get_result_pos(P7)} of
+        {1, 9} -> F6;
+        {S7, R7} -> io:format("FAIL 7: success=~p, pos=~p~n", [S7, R7]), F6 + 1
+    end,
+
+    %% Test 8: Skip %Q with nested braces
+    {ok, P8} = M:start_link(),
+    I8 = <<"%Q{outer {inner} end} rest">>,
+    M:setup(P8, I8, 0, byte_size(I8)),
+    M:do_skip_string(P8),
+    F8 = case {M:get_success(P8), M:get_result_pos(P8)} of
+        {1, 21} -> F7;
+        {S8, R8} -> io:format("FAIL 8: success=~p, pos=~p~n", [S8, R8]), F7 + 1
+    end,
+
+    F8.

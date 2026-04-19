@@ -1,0 +1,267 @@
+@@target swift
+
+import Foundation
+
+// RustSyntaxSkipper — FSM for skipping Rust comments and strings.
+// Translated from framec's native_region_scanner/rust_skipper.frs
+//
+// Handles: // line comments, /* nested block comments */,
+// raw strings (r#"..."#), char literals vs lifetime annotations,
+// simple strings.
+
+@@system RustSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: [UInt8], start: Int, length: Int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos(): Int {
+            return self.result_pos
+        }
+        get_success(): Int {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                var i = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+
+                // // line comment
+                if i + 1 < end && bs[i] == UInt8(ascii: "/") && bs[i + 1] == UInt8(ascii: "/") {
+                    var j = i + 2
+                    while j < end && bs[j] != 0x0A {
+                        j += 1
+                    }
+                    self.result_pos = j
+                    self.success = 1
+                    return
+                }
+
+                // /* nested block comment */ — Rust allows nesting
+                if i + 1 < end && bs[i] == UInt8(ascii: "/") && bs[i + 1] == UInt8(ascii: "*") {
+                    var j = i + 2
+                    var depth = 1
+                    while j + 1 < end && depth > 0 {
+                        if bs[j] == UInt8(ascii: "/") && bs[j + 1] == UInt8(ascii: "*") {
+                            depth += 1
+                            j += 2
+                            continue
+                        }
+                        if bs[j] == UInt8(ascii: "*") && bs[j + 1] == UInt8(ascii: "/") {
+                            depth -= 1
+                            j += 2
+                            continue
+                        }
+                        j += 1
+                    }
+                    self.result_pos = j
+                    self.success = 1
+                    return
+                }
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                var i = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+
+                // Raw string: r#"..."# (count leading #s)
+                if i < end && bs[i] == UInt8(ascii: "r") {
+                    var j = i + 1
+                    var hash_count = 0
+                    while j < end && bs[j] == UInt8(ascii: "#") {
+                        hash_count += 1
+                        j += 1
+                    }
+                    if j < end && bs[j] == UInt8(ascii: "\"") {
+                        j += 1
+                        // Scan for closing "###
+                        while j < end {
+                            if bs[j] == UInt8(ascii: "\"") {
+                                var k = 0
+                                while k < hash_count && j + 1 + k < end && bs[j + 1 + k] == UInt8(ascii: "#") {
+                                    k += 1
+                                }
+                                if k == hash_count {
+                                    self.result_pos = j + 1 + hash_count
+                                    self.success = 1
+                                    return
+                                }
+                            }
+                            j += 1
+                        }
+                        self.result_pos = end
+                        self.success = 1
+                        return
+                    }
+                }
+
+                // Double-quoted string
+                if i < end && bs[i] == UInt8(ascii: "\"") {
+                    var j = i + 1
+                    while j < end {
+                        if bs[j] == UInt8(ascii: "\\") {
+                            j += 2
+                            continue
+                        }
+                        if bs[j] == UInt8(ascii: "\"") {
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        }
+                        j += 1
+                    }
+                    self.result_pos = end
+                    self.success = 1
+                    return
+                }
+
+                // Char literal: 'x' or '\n' (NOT lifetime 'a)
+                if i < end && bs[i] == UInt8(ascii: "'") {
+                    if i + 2 < end && bs[i + 1] == UInt8(ascii: "\\") && i + 3 < end && bs[i + 3] == UInt8(ascii: "'") {
+                        self.result_pos = i + 4
+                        self.success = 1
+                        return
+                    }
+                    if i + 2 < end && bs[i + 2] == UInt8(ascii: "'") {
+                        self.result_pos = i + 3
+                        self.success = 1
+                        return
+                    }
+                    self.success = 0
+                    return
+                }
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                var j = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+
+                while j < end {
+                    let b = bs[j]
+                    if b == 0x0A || b == UInt8(ascii: ";") {
+                        break
+                    }
+                    if b == UInt8(ascii: "/") && j + 1 < end && bs[j + 1] == UInt8(ascii: "/") {
+                        break
+                    }
+                    if b == UInt8(ascii: "/") && j + 1 < end && bs[j + 1] == UInt8(ascii: "*") {
+                        break
+                    }
+                    j += 1
+                }
+
+                self.result_pos = j
+            }
+        }
+
+    domain:
+        bytes: [UInt8] = []
+        pos: Int = 0
+        scan_end: Int = 0
+        result_pos: Int = 0
+        success: Int = 1
+}
+
+// main
+    var failures = 0
+
+    // Test 1: Skip // comment
+    let s1 = @@RustSyntaxSkipperFsm()
+    let inp1: [UInt8] = Array("// comment\ncode".utf8)
+    s1.setup(inp1, 0, inp1.count)
+    s1.do_skip_comment()
+    if (s1.get_success() as! Int) != 1 || (s1.get_result_pos() as! Int) != 10 {
+        print("FAIL 1: success=\(s1.get_success()), pos=\(s1.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 2: Skip nested /* /* */ */ block comment
+    let s2 = @@RustSyntaxSkipperFsm()
+    let inp2: [UInt8] = Array("/* outer /* inner */ */code".utf8)
+    s2.setup(inp2, 0, inp2.count)
+    s2.do_skip_comment()
+    if (s2.get_success() as! Int) != 1 || (s2.get_result_pos() as! Int) != 23 {
+        print("FAIL 2: success=\(s2.get_success()), pos=\(s2.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 3: Skip raw string r#"hello"#
+    let s3 = @@RustSyntaxSkipperFsm()
+    let inp3: [UInt8] = Array("r#\"hello\"#rest".utf8)
+    s3.setup(inp3, 0, inp3.count)
+    s3.do_skip_string()
+    if (s3.get_success() as! Int) != 1 || (s3.get_result_pos() as! Int) != 10 {
+        print("FAIL 3: success=\(s3.get_success()), pos=\(s3.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 4: Skip double-quoted string
+    let s4 = @@RustSyntaxSkipperFsm()
+    let inp4: [UInt8] = Array("\"hello\" rest".utf8)
+    s4.setup(inp4, 0, inp4.count)
+    s4.do_skip_string()
+    if (s4.get_success() as! Int) != 1 || (s4.get_result_pos() as! Int) != 7 {
+        print("FAIL 4: success=\(s4.get_success()), pos=\(s4.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 5: Char literal 'x' — IS a string
+    let s5 = @@RustSyntaxSkipperFsm()
+    let inp5: [UInt8] = Array("'x' rest".utf8)
+    s5.setup(inp5, 0, inp5.count)
+    s5.do_skip_string()
+    if (s5.get_success() as! Int) != 1 || (s5.get_result_pos() as! Int) != 3 {
+        print("FAIL 5: success=\(s5.get_success()), pos=\(s5.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 6: Lifetime 'a — NOT a string
+    let s6 = @@RustSyntaxSkipperFsm()
+    let inp6: [UInt8] = Array("'a rest".utf8)
+    s6.setup(inp6, 0, inp6.count)
+    s6.do_skip_string()
+    if (s6.get_success() as! Int) != 0 {
+        print("FAIL 6: lifetime should not be a string")
+        failures += 1
+    }
+
+    // Test 7: Escape char '\n'
+    let s7 = @@RustSyntaxSkipperFsm()
+    let inp7: [UInt8] = Array("'\\n' rest".utf8)
+    s7.setup(inp7, 0, inp7.count)
+    s7.do_skip_string()
+    if (s7.get_success() as! Int) != 1 || (s7.get_result_pos() as! Int) != 4 {
+        print("FAIL 7: success=\(s7.get_success()), pos=\(s7.get_result_pos())")
+        failures += 1
+    }
+
+    if failures > 0 {
+        print("FAIL: \(failures) failures")
+        exit(1)
+    }
+    print("PASS: rust_skipper (7 cases)")

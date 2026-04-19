@@ -1,0 +1,272 @@
+@@target ruby
+
+# swift_skipper -- FSM for skipping syntax constructs.
+
+@@system SwiftSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos() {
+            return self.result_pos
+        }
+        get_success() {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i = self.pos
+                the_end = self.scan_end
+                bs = self.bytes
+
+                if i + 1 < the_end && bs[i] == 0x2F && bs[i + 1] == 0x2F
+                    j = i + 2
+                    while j < the_end && bs[j] != 0x0A
+                        j += 1
+                    end
+                    self.result_pos = j
+                    self.success = 1
+                    return
+                end
+                if i + 1 < the_end && bs[i] == 0x2F && bs[i + 1] == 0x2A
+                    j = i + 2
+                    depth = 1
+                    while j + 1 < the_end && depth > 0
+                        if bs[j] == 0x2F && bs[j + 1] == 0x2A
+                            depth += 1
+                            j += 2
+                        elsif bs[j] == 0x2A && bs[j + 1] == 0x2F
+                            depth -= 1
+                            j += 2
+                        else
+                            j += 1
+                        end
+                    end
+                    self.result_pos = j
+                    self.success = 1
+                    return
+                end
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i = self.pos
+                the_end = self.scan_end
+                bs = self.bytes
+
+                if i + 2 < the_end && bs[i] == 0x22 && bs[i + 1] == 0x22 && bs[i + 2] == 0x22
+                    j = i + 3
+                    while j + 2 < the_end
+                        if bs[j] == 0x22 && bs[j + 1] == 0x22 && bs[j + 2] == 0x22
+                            self.result_pos = j + 3
+                            self.success = 1
+                            return
+                        end
+                        j += 1
+                    end
+                    self.result_pos = the_end
+                    self.success = 1
+                    return
+                end
+
+                if i < the_end && (bs[i] == 0x22 || bs[i] == 0x27)
+                    q = bs[i]
+                    j = i + 1
+                    while j < the_end
+                        if bs[j] == 0x5C
+                            j += 2
+                            next
+                        end
+                        if bs[j] == q
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        end
+                        j += 1
+                    end
+                    self.result_pos = the_end
+                    self.success = 1
+                    return
+                end
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j = self.pos
+                the_end = self.scan_end
+                bs = self.bytes
+
+                while j < the_end
+                    b = bs[j]
+                    if b == 0x0A || b == 0x3B
+                        break
+                    end
+                    if b == 0x2F && j + 1 < the_end && bs[j + 1] == 0x2F
+                        break
+                    end
+                    if b == 0x2F && j + 1 < the_end && bs[j + 1] == 0x2A
+                        break
+                    end
+                    j += 1
+                end
+                self.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                i = self.pos
+                the_end = self.scan_end
+                bs = self.bytes
+
+                if i >= the_end || bs[i] != 0x28
+                    self.success = 0
+                    return
+                end
+                depth = 1
+                j = i + 1
+                while j < the_end && depth > 0
+                    b = bs[j]
+                    if b == 0x28
+                        depth += 1
+                    elsif b == 0x29
+                        depth -= 1
+                    elsif b == 0x22 || b == 0x27
+                        q = b
+                        j += 1
+                        while j < the_end && bs[j] != q
+                            if bs[j] == 0x5C
+                                j += 1
+                            end
+                            j += 1
+                        end
+                    end
+                    j += 1
+                end
+                if depth == 0
+                    self.result_pos = j
+                    self.success = 1
+                else
+                    self.result_pos = the_end
+                    self.success = 0
+                end
+            }
+        }
+
+    domain:
+        bytes = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+failures = 0
+
+s1 = SwiftSyntaxSkipperFsm.new
+inp1 = "// hello\ncode".bytes
+s1.setup(inp1, 0, inp1.length)
+s1.do_skip_comment()
+if s1.get_success() != 1 || s1.get_result_pos() != 8
+    puts("FAIL 1: Skip line comment")
+    failures += 1
+end
+
+s2 = SwiftSyntaxSkipperFsm.new
+inp2 = "/* block */code".bytes
+s2.setup(inp2, 0, inp2.length)
+s2.do_skip_comment()
+if s2.get_success() != 1 || s2.get_result_pos() != 11
+    puts("FAIL 2: Skip block comment")
+    failures += 1
+end
+
+s3 = SwiftSyntaxSkipperFsm.new
+inp3 = "\"hello world\" rest".bytes
+s3.setup(inp3, 0, inp3.length)
+s3.do_skip_string()
+if s3.get_success() != 1 || s3.get_result_pos() != 13
+    puts("FAIL 3: Skip double-quoted string")
+    failures += 1
+end
+
+s4 = SwiftSyntaxSkipperFsm.new
+inp4 = "/* outer /* inner */ end */code".bytes
+s4.setup(inp4, 0, inp4.length)
+s4.do_skip_comment()
+if s4.get_success() != 1 || s4.get_result_pos() != 27
+    puts("FAIL 4: Nested block comment")
+    failures += 1
+end
+
+s5 = SwiftSyntaxSkipperFsm.new
+inp5 = "\"\"\"multi-line\ncontent\"\"\" rest".bytes
+s5.setup(inp5, 0, inp5.length)
+s5.do_skip_string()
+if s5.get_success() != 1 || s5.get_result_pos() != 24
+    puts("FAIL 5: Multi-line string")
+    failures += 1
+end
+
+s6 = SwiftSyntaxSkipperFsm.new
+inp6 = "x + 1\nmore".bytes
+s6.setup(inp6, 0, inp6.length)
+s6.do_find_line_end()
+if s6.get_result_pos() != 5
+    puts("FAIL 6: Find line end")
+    failures += 1
+end
+
+s7 = SwiftSyntaxSkipperFsm.new
+inp7 = "x + 1".bytes
+s7.setup(inp7, 0, inp7.length)
+s7.do_skip_comment()
+if s7.get_success() != 0
+    puts("FAIL 7: Not a comment")
+    failures += 1
+end
+
+s8 = SwiftSyntaxSkipperFsm.new
+inp8 = "(a, f(b), c) rest".bytes
+s8.setup(inp8, 0, inp8.length)
+s8.do_balanced_paren_end()
+if s8.get_success() != 1 || s8.get_result_pos() != 12
+    puts("FAIL 8: Balanced parens")
+    failures += 1
+end
+
+s9 = SwiftSyntaxSkipperFsm.new
+inp9 = "x + 1 // comment".bytes
+s9.setup(inp9, 0, inp9.length)
+s9.do_find_line_end()
+if s9.get_result_pos() != 6
+    puts("FAIL 9: Find line end at //")
+    failures += 1
+end
+
+if failures > 0
+    puts("FAIL: #{failures} failures")
+    exit(1)
+end
+puts("PASS: swift_skipper (9 cases)")

@@ -1,0 +1,296 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// CppSyntaxSkipper -- FSM for skipping C++-style comments and strings.
+// C++ adds raw strings R"delim(...)delim" on top of C-style comments.
+
+@@system CppSyntaxSkipperFsm {
+    operations:
+        Setup(input_bytes: []byte, start: int, length: int) {
+            s.bytes = input_bytes
+            s.pos = start
+            s.scanEnd = length
+        }
+        GetResultPos(): int {
+            return s.resultPos
+        }
+        GetSuccess(): int {
+            return s.success
+        }
+
+    interface:
+        DoSkipComment()
+        DoSkipString()
+        DoFindLineEnd()
+        DoBalancedParenEnd()
+
+    machine:
+        $Init {
+            DoSkipComment() { -> $SkipComment }
+            DoSkipString() { -> $SkipString }
+            DoFindLineEnd() { -> $FindLineEnd }
+            DoBalancedParenEnd() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i := s.pos
+                end := s.scanEnd
+                bs := s.bytes
+
+                if i+1 < end && bs[i] == '/' && bs[i+1] == '/' {
+                    j := i + 2
+                    for j < end && bs[j] != '\n' {
+                        j++
+                    }
+                    s.resultPos = j
+                    s.success = 1
+                    return
+                }
+
+                if i+1 < end && bs[i] == '/' && bs[i+1] == '*' {
+                    j := i + 2
+                    for j+1 < end {
+                        if bs[j] == '*' && bs[j+1] == '/' {
+                            s.resultPos = j + 2
+                            s.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    s.resultPos = end
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i := s.pos
+                end := s.scanEnd
+                bs := s.bytes
+
+                // C++ raw string: R"delim(...)delim"
+                if i+1 < end && bs[i] == 'R' && bs[i+1] == '"' {
+                    j := i + 2
+                    delim := make([]byte, 0)
+                    for j < end && bs[j] != '(' {
+                        delim = append(delim, bs[j])
+                        j++
+                        if len(delim) > 32 {
+                            s.success = 0
+                            return
+                        }
+                    }
+                    if j >= end || bs[j] != '(' {
+                        s.success = 0
+                        return
+                    }
+                    j++
+                    for j < end {
+                        if bs[j] == ')' {
+                            k := j + 1
+                            m := 0
+                            for m < len(delim) && k < end && bs[k] == delim[m] {
+                                k++
+                                m++
+                            }
+                            if m == len(delim) && k < end && bs[k] == '"' {
+                                s.resultPos = k + 1
+                                s.success = 1
+                                return
+                            }
+                        }
+                        j++
+                    }
+                    s.resultPos = end
+                    s.success = 1
+                    return
+                }
+
+                if i < end && (bs[i] == '"' || bs[i] == '\'') {
+                    q := bs[i]
+                    j := i + 1
+                    for j < end {
+                        if bs[j] == '\\' {
+                            j += 2
+                            continue
+                        }
+                        if bs[j] == q {
+                            s.resultPos = j + 1
+                            s.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    s.resultPos = end
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j := s.pos
+                end := s.scanEnd
+                bs := s.bytes
+
+                for j < end {
+                    b := bs[j]
+                    if b == '\n' || b == ';' {
+                        break
+                    }
+                    if b == '/' && j+1 < end && bs[j+1] == '/' {
+                        break
+                    }
+                    if b == '/' && j+1 < end && bs[j+1] == '*' {
+                        break
+                    }
+                    j++
+                }
+
+                s.resultPos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                i := s.pos
+                end := s.scanEnd
+                bs := s.bytes
+
+                if i >= end || bs[i] != '(' {
+                    s.success = 0
+                    return
+                }
+
+                depth := 1
+                j := i + 1
+                for j < end && depth > 0 {
+                    b := bs[j]
+                    if b == '(' {
+                        depth++
+                    } else if b == ')' {
+                        depth--
+                    } else if b == '"' || b == '\'' {
+                        q := b
+                        j++
+                        for j < end && bs[j] != q {
+                            if bs[j] == '\\' {
+                                j++
+                            }
+                            j++
+                        }
+                    }
+                    j++
+                }
+
+                if depth == 0 {
+                    s.resultPos = j
+                    s.success = 1
+                } else {
+                    s.resultPos = end
+                    s.success = 0
+                }
+            }
+        }
+
+    domain:
+        bytes: []byte = nil
+        pos: int = 0
+        scanEnd: int = 0
+        resultPos: int = 0
+        success: int = 1
+}
+
+func main() {
+	failures := 0
+
+	s1 := NewCppSyntaxSkipperFsm()
+	inp1 := []byte("// hello\ncode")
+	s1.Setup(inp1, 0, len(inp1))
+	s1.DoSkipComment()
+	if s1.GetSuccess() != 1 || s1.GetResultPos() != 8 {
+		fmt.Printf("FAIL 1: success=%d, pos=%d\n", s1.GetSuccess(), s1.GetResultPos())
+		failures++
+	}
+
+	s2 := NewCppSyntaxSkipperFsm()
+	inp2 := []byte("/* block */code")
+	s2.Setup(inp2, 0, len(inp2))
+	s2.DoSkipComment()
+	if s2.GetSuccess() != 1 || s2.GetResultPos() != 11 {
+		fmt.Printf("FAIL 2: success=%d, pos=%d\n", s2.GetSuccess(), s2.GetResultPos())
+		failures++
+	}
+
+	s3 := NewCppSyntaxSkipperFsm()
+	inp3 := []byte("\"hello world\" rest")
+	s3.Setup(inp3, 0, len(inp3))
+	s3.DoSkipString()
+	if s3.GetSuccess() != 1 || s3.GetResultPos() != 13 {
+		fmt.Printf("FAIL 3: success=%d, pos=%d\n", s3.GetSuccess(), s3.GetResultPos())
+		failures++
+	}
+
+	s4 := NewCppSyntaxSkipperFsm()
+	inp4 := []byte("R\"(raw string)\" rest")
+	s4.Setup(inp4, 0, len(inp4))
+	s4.DoSkipString()
+	if s4.GetSuccess() != 1 || s4.GetResultPos() != 15 {
+		fmt.Printf("FAIL 4: success=%d, pos=%d\n", s4.GetSuccess(), s4.GetResultPos())
+		failures++
+	}
+
+	s5 := NewCppSyntaxSkipperFsm()
+	inp5 := []byte("R\"xyz(raw content)xyz\" rest")
+	s5.Setup(inp5, 0, len(inp5))
+	s5.DoSkipString()
+	if s5.GetSuccess() != 1 || s5.GetResultPos() != 22 {
+		fmt.Printf("FAIL 5: success=%d, pos=%d\n", s5.GetSuccess(), s5.GetResultPos())
+		failures++
+	}
+
+	s6 := NewCppSyntaxSkipperFsm()
+	inp6 := []byte("x + 1\nmore")
+	s6.Setup(inp6, 0, len(inp6))
+	s6.DoFindLineEnd()
+	if s6.GetResultPos() != 5 {
+		fmt.Printf("FAIL 6: pos=%d, expected 5\n", s6.GetResultPos())
+		failures++
+	}
+
+	s7 := NewCppSyntaxSkipperFsm()
+	inp7 := []byte("x + 1")
+	s7.Setup(inp7, 0, len(inp7))
+	s7.DoSkipComment()
+	if s7.GetSuccess() != 0 {
+		fmt.Println("FAIL 7: should not be a comment")
+		failures++
+	}
+
+	s8 := NewCppSyntaxSkipperFsm()
+	inp8 := []byte("(a, f(b), c) rest")
+	s8.Setup(inp8, 0, len(inp8))
+	s8.DoBalancedParenEnd()
+	if s8.GetSuccess() != 1 || s8.GetResultPos() != 12 {
+		fmt.Printf("FAIL 8: success=%d, pos=%d\n", s8.GetSuccess(), s8.GetResultPos())
+		failures++
+	}
+
+	if failures > 0 {
+		fmt.Printf("FAIL: %d failures\n", failures)
+		os.Exit(1)
+	}
+	fmt.Println("PASS: cpp_skipper (8 cases)")
+}

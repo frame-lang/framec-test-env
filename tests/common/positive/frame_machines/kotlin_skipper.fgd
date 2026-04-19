@@ -1,0 +1,242 @@
+@@target gdscript
+extends SceneTree
+
+# kotlin_skipper -- FSM for skipping syntax constructs.
+
+@@system KotlinSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: Array, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos(): int {
+            return self.result_pos
+        }
+        get_success(): int {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                var i = self.pos
+                var scan_end = self.scan_end
+                var bs = self.bytes
+
+                if i + 1 < scan_end and bs[i] == 0x2F and bs[i + 1] == 0x2F:
+                    var j = i + 2
+                    while j < scan_end and bs[j] != 0x0A:
+                        j += 1
+                    self.result_pos = j
+                    self.success = 1
+                    return
+                if i + 1 < scan_end and bs[i] == 0x2F and bs[i + 1] == 0x2A:
+                    var j = i + 2
+                    while j + 1 < scan_end:
+                        if bs[j] == 0x2A and bs[j + 1] == 0x2F:
+                            self.result_pos = j + 2
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                var i = self.pos
+                var scan_end = self.scan_end
+                var bs = self.bytes
+
+                if i + 2 < scan_end and bs[i] == 0x22 and bs[i + 1] == 0x22 and bs[i + 2] == 0x22:
+                    var j = i + 3
+                    while j + 2 < scan_end:
+                        if bs[j] == 0x22 and bs[j + 1] == 0x22 and bs[j + 2] == 0x22:
+                            self.result_pos = j + 3
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+
+                if i < scan_end and (bs[i] == 0x22 or bs[i] == 0x27):
+                    var q = bs[i]
+                    var j = i + 1
+                    while j < scan_end:
+                        if bs[j] == 0x5C:
+                            j += 2
+                            continue
+                        if bs[j] == q:
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                var j = self.pos
+                var scan_end = self.scan_end
+                var bs = self.bytes
+
+                while j < scan_end:
+                    var b = bs[j]
+                    if b == 0x0A or b == 0x3B:
+                        break
+                    if b == 0x2F and j + 1 < scan_end and bs[j + 1] == 0x2F:
+                        break
+                    if b == 0x2F and j + 1 < scan_end and bs[j + 1] == 0x2A:
+                        break
+                    j += 1
+                self.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                var i = self.pos
+                var scan_end = self.scan_end
+                var bs = self.bytes
+
+                if i >= scan_end or bs[i] != 0x28:
+                    self.success = 0
+                    return
+                var depth = 1
+                var j = i + 1
+                while j < scan_end and depth > 0:
+                    var b = bs[j]
+                    if b == 0x28:
+                        depth += 1
+                    elif b == 0x29:
+                        depth -= 1
+                    elif b == 0x22 or b == 0x27:
+                        var q = b
+                        j += 1
+                        while j < scan_end and bs[j] != q:
+                            if bs[j] == 0x5C:
+                                j += 1
+                            j += 1
+                    j += 1
+                if depth == 0:
+                    self.result_pos = j
+                    self.success = 1
+                else:
+                    self.result_pos = scan_end
+                    self.success = 0
+            }
+        }
+
+    domain:
+        bytes: Array = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+func str_to_bytes(s: String) -> Array:
+    var arr = []
+    var buf = s.to_utf8_buffer()
+    for i in range(buf.size()):
+        arr.append(buf[i])
+    return arr
+
+func main():
+    var failures = 0
+
+    var s1 = @@KotlinSyntaxSkipperFsm()
+    var inp1 = str_to_bytes("// hello\ncode")
+    s1.setup(inp1, 0, inp1.size())
+    s1.do_skip_comment()
+    if s1.get_success() != 1 or s1.get_result_pos() != 8:
+        print("FAIL 1: Skip line comment")
+        failures += 1
+
+    var s2 = @@KotlinSyntaxSkipperFsm()
+    var inp2 = str_to_bytes("/* block */code")
+    s2.setup(inp2, 0, inp2.size())
+    s2.do_skip_comment()
+    if s2.get_success() != 1 or s2.get_result_pos() != 11:
+        print("FAIL 2: Skip block comment")
+        failures += 1
+
+    var s3 = @@KotlinSyntaxSkipperFsm()
+    var inp3 = str_to_bytes("\"hello world\" rest")
+    s3.setup(inp3, 0, inp3.size())
+    s3.do_skip_string()
+    if s3.get_success() != 1 or s3.get_result_pos() != 13:
+        print("FAIL 3: Skip double-quoted string")
+        failures += 1
+
+    var s4 = @@KotlinSyntaxSkipperFsm()
+    var inp4 = str_to_bytes("\"\"\"raw string content\"\"\" rest")
+    s4.setup(inp4, 0, inp4.size())
+    s4.do_skip_string()
+    if s4.get_success() != 1 or s4.get_result_pos() != 24:
+        print("FAIL 4: Kotlin raw string")
+        failures += 1
+
+    var s5 = @@KotlinSyntaxSkipperFsm()
+    var inp5 = str_to_bytes("x + 1\nmore")
+    s5.setup(inp5, 0, inp5.size())
+    s5.do_find_line_end()
+    if s5.get_result_pos() != 5:
+        print("FAIL 5: Find line end")
+        failures += 1
+
+    var s6 = @@KotlinSyntaxSkipperFsm()
+    var inp6 = str_to_bytes("x + 1")
+    s6.setup(inp6, 0, inp6.size())
+    s6.do_skip_comment()
+    if s6.get_success() != 0:
+        print("FAIL 6: Not a comment")
+        failures += 1
+
+    var s7 = @@KotlinSyntaxSkipperFsm()
+    var inp7 = str_to_bytes("(a, f(b), c) rest")
+    s7.setup(inp7, 0, inp7.size())
+    s7.do_balanced_paren_end()
+    if s7.get_success() != 1 or s7.get_result_pos() != 12:
+        print("FAIL 7: Balanced parens")
+        failures += 1
+
+    var s8 = @@KotlinSyntaxSkipperFsm()
+    var inp8 = str_to_bytes("x + 1 // comment")
+    s8.setup(inp8, 0, inp8.size())
+    s8.do_find_line_end()
+    if s8.get_result_pos() != 6:
+        print("FAIL 8: Find line end at //")
+        failures += 1
+
+    if failures > 0:
+        print("FAIL: " + str(failures) + " failures")
+        push_error(str(failures) + " test(s) failed")
+    else:
+        print("PASS: kotlin_skipper (8 cases)")
+
+func _init():
+    main()
+    quit()

@@ -1,0 +1,305 @@
+@@target lua
+
+-- ErlangSyntaxSkipper -- FSM for skipping Erlang comments and strings.
+-- Translated from framec's native_region_scanner/erlang_skipper.frs
+--
+-- Handles: % line comments, "..." strings, '...' quoted atoms,
+-- Erlang-style line endings, balanced parens.
+--
+-- NOTE: Lua is 1-indexed, but the scanner uses 0-indexed positions
+-- internally and adjusts when accessing the byte table.
+
+@@system ErlangSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos() {
+            return self.result_pos
+        }
+        get_success() {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                -- Erlang: % line comment only
+                if i < scan_end and bs[i + 1] == 0x25 then
+                    j = i + 1
+                    while j < scan_end and bs[j + 1] ~= 0x0A do
+                        j = j + 1
+                    end
+                    self.result_pos = j
+                    self.success = 1
+                    return
+                end
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                -- Simple string: "..."
+                if i < scan_end and bs[i + 1] == 0x22 then
+                    j = i + 1
+                    while j < scan_end do
+                        if bs[j + 1] == 0x5C then
+                            j = j + 2
+                            goto continue_dq
+                        end
+                        if bs[j + 1] == 0x22 then
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        end
+                        j = j + 1
+                        ::continue_dq::
+                    end
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+                end
+
+                -- Quoted atoms: '...'
+                if i < scan_end and bs[i + 1] == 0x27 then
+                    j = i + 1
+                    while j < scan_end do
+                        if bs[j + 1] == 0x5C then
+                            j = j + 2
+                            goto continue_sq
+                        end
+                        if bs[j + 1] == 0x27 then
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        end
+                        j = j + 1
+                        ::continue_sq::
+                    end
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+                end
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+                in_string = 0
+
+                while j < scan_end do
+                    b = bs[j + 1]
+                    if b == 0x0A then
+                        break
+                    end
+
+                    -- Inside string
+                    if in_string ~= 0 then
+                        if b == 0x5C then
+                            j = j + 2
+                            goto continue_find_line
+                        end
+                        if b == in_string then
+                            in_string = 0
+                        end
+                        j = j + 1
+                        goto continue_find_line
+                    end
+
+                    -- Terminators
+                    if b == 0x25 then
+                        break
+                    end
+
+                    -- String starts
+                    if b == 0x22 or b == 0x27 then
+                        in_string = b
+                        j = j + 1
+                        goto continue_find_line
+                    end
+
+                    j = j + 1
+                    ::continue_find_line::
+                end
+
+                self.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                if i >= scan_end or bs[i + 1] ~= 0x28 then
+                    self.success = 0
+                    return
+                end
+
+                depth = 0
+                in_string = 0
+
+                while i < scan_end do
+                    b = bs[i + 1]
+
+                    -- Inside string
+                    if in_string ~= 0 then
+                        if b == 0x5C then
+                            i = i + 2
+                            goto continue_paren
+                        end
+                        if b == in_string then
+                            in_string = 0
+                        end
+                        i = i + 1
+                        goto continue_paren
+                    end
+
+                    if b == 0x22 or b == 0x27 then
+                        in_string = b
+                        i = i + 1
+                    elseif b == 0x28 then
+                        depth = depth + 1
+                        i = i + 1
+                    elseif b == 0x29 then
+                        depth = depth - 1
+                        i = i + 1
+                        if depth == 0 then
+                            self.result_pos = i
+                            self.success = 1
+                            return
+                        end
+                    else
+                        i = i + 1
+                    end
+                    ::continue_paren::
+                end
+
+                self.success = 0
+            }
+        }
+
+    domain:
+        bytes = {}
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+local function str_to_bytes(s)
+    local t = {}
+    for i = 1, #s do
+        t[i] = string.byte(s, i)
+    end
+    return t
+end
+
+local failures = 0
+
+-- Test 1: Skip % comment
+local s1 = ErlangSyntaxSkipperFsm.new()
+local inp1 = str_to_bytes("% comment\ncode")
+s1:setup(inp1, 0, #inp1)
+s1:do_skip_comment()
+if s1:get_success() ~= 1 or s1:get_result_pos() ~= 9 then
+    print("FAIL 1: success=" .. s1:get_success() .. ", pos=" .. s1:get_result_pos())
+    failures = failures + 1
+end
+
+-- Test 2: Not a comment
+local s2 = ErlangSyntaxSkipperFsm.new()
+local inp2 = str_to_bytes("x + 1")
+s2:setup(inp2, 0, #inp2)
+s2:do_skip_comment()
+if s2:get_success() ~= 0 then
+    print("FAIL 2: should not be comment")
+    failures = failures + 1
+end
+
+-- Test 3: Skip double-quoted string
+local s3 = ErlangSyntaxSkipperFsm.new()
+local inp3 = str_to_bytes('"hello" rest')
+s3:setup(inp3, 0, #inp3)
+s3:do_skip_string()
+if s3:get_success() ~= 1 or s3:get_result_pos() ~= 7 then
+    print("FAIL 3: success=" .. s3:get_success() .. ", pos=" .. s3:get_result_pos())
+    failures = failures + 1
+end
+
+-- Test 4: Skip quoted atom
+local s4 = ErlangSyntaxSkipperFsm.new()
+local inp4 = str_to_bytes("'my_atom' rest")
+s4:setup(inp4, 0, #inp4)
+s4:do_skip_string()
+if s4:get_success() ~= 1 or s4:get_result_pos() ~= 9 then
+    print("FAIL 4: success=" .. s4:get_success() .. ", pos=" .. s4:get_result_pos())
+    failures = failures + 1
+end
+
+-- Test 5: Find line end (stops at %)
+local s5 = ErlangSyntaxSkipperFsm.new()
+local inp5 = str_to_bytes("X + 1 % comment")
+s5:setup(inp5, 0, #inp5)
+s5:do_find_line_end()
+if s5:get_result_pos() ~= 6 then
+    print("FAIL 5: pos=" .. s5:get_result_pos() .. ", expected 6")
+    failures = failures + 1
+end
+
+-- Test 6: Balanced parens
+local s6 = ErlangSyntaxSkipperFsm.new()
+local inp6 = str_to_bytes("(a, f(b)) rest")
+s6:setup(inp6, 0, #inp6)
+s6:do_balanced_paren_end()
+if s6:get_success() ~= 1 or s6:get_result_pos() ~= 9 then
+    print("FAIL 6: success=" .. s6:get_success() .. ", pos=" .. s6:get_result_pos())
+    failures = failures + 1
+end
+
+-- Test 7: String with escape
+local s7 = ErlangSyntaxSkipperFsm.new()
+local inp7 = str_to_bytes('"he\\"llo" rest')
+s7:setup(inp7, 0, #inp7)
+s7:do_skip_string()
+if s7:get_success() ~= 1 or s7:get_result_pos() ~= 9 then
+    print("FAIL 7: success=" .. s7:get_success() .. ", pos=" .. s7:get_result_pos())
+    failures = failures + 1
+end
+
+if failures > 0 then
+    print("FAIL: " .. failures .. " failures")
+    os.exit(1)
+end
+print("PASS: erlang_skipper (7 cases)")

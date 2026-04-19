@@ -1,0 +1,263 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// StateVarParser — FSM for parsing $.varName and $.varName = expr
+// Translated from framec's native_region_scanner/state_var_parser.frs
+//
+// Uses hierarchical composition: $ScanExpr creates an ExprScannerFsm
+// sub-machine when it detects an assignment.
+
+@@system ExprScannerFsm {
+    operations:
+        Setup(input_bytes: []byte, start: int, length: int) {
+            s.bytes = input_bytes
+            s.pos = start
+            s.end = length
+        }
+        GetResult(): int {
+            return s.result_end
+        }
+
+    interface:
+        DoScan()
+
+    machine:
+        $Init {
+            DoScan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                i := s.pos
+                end := s.end
+                bs := s.bytes
+                depth := 0
+                inString := byte(0)
+
+                for i < end {
+                    b := bs[i]
+
+                    if inString != 0 {
+                        if b == '\\' && i+1 < end {
+                            i += 2
+                            continue
+                        }
+                        if b == inString {
+                            inString = 0
+                        }
+                        i++
+                        continue
+                    }
+
+                    if b == '"' || b == '\'' {
+                        inString = b
+                        i++
+                        continue
+                    }
+
+                    if b == '(' || b == '[' || b == '{' {
+                        depth++
+                    } else if b == ')' || b == ']' || b == '}' {
+                        depth--
+                        if depth < 0 {
+                            depth = 0
+                        }
+                    } else if b == ';' && depth == 0 {
+                        i++
+                        break
+                    } else if b == '\n' && depth == 0 {
+                        break
+                    }
+
+                    i++
+                }
+
+                s.result_end = i
+            }
+        }
+
+    domain:
+        bytes: []byte = nil
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+@@system StateVarParserFsm {
+    operations:
+        Setup(input_bytes: []byte, start: int, length: int) {
+            s.bytes = input_bytes
+            s.pos = start
+            s.parse_end = length
+        }
+        GetResultEnd(): int {
+            return s.result_end
+        }
+        GetIsAssignment(): bool {
+            return s.is_assignment
+        }
+
+    interface:
+        DoParse()
+
+    machine:
+        $Init {
+            DoParse() { -> $ScanIdent }
+        }
+
+        $ScanIdent {
+            $>() {
+                // Skip "$." prefix and scan identifier
+                i := s.pos + 2
+                end := s.parse_end
+                bs := s.bytes
+
+                for i < end && (isAlnum(bs[i]) || bs[i] == '_') {
+                    i++
+                }
+
+                s.ident_end = i
+                -> $CheckAssign
+            }
+        }
+
+        $CheckAssign {
+            $>() {
+                // Lookahead: skip whitespace, check for = (but not == or => or =<)
+                j := s.ident_end
+                end := s.parse_end
+                bs := s.bytes
+
+                for j < end && (bs[j] == ' ' || bs[j] == '\t') {
+                    j++
+                }
+
+                if j < end && bs[j] == '=' && (j+1 >= end || (bs[j+1] != '=' && bs[j+1] != '<' && bs[j+1] != '>')) {
+                    // Assignment detected
+                    j++
+                    s.pos = j
+                    s.is_assignment = true
+                    -> $ScanExpr
+                } else {
+                    // Read-only access
+                    s.result_end = s.ident_end
+                    s.is_assignment = false
+                    -> $Done
+                }
+            }
+        }
+
+        $ScanExpr {
+            $>() {
+                // Create ExprScanner sub-machine
+                expr := NewExprScannerFsm()
+                expr.Setup(s.bytes, s.pos, s.parse_end)
+                expr.DoScan()
+                s.result_end = expr.GetResult()
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+            }
+        }
+
+    domain:
+        bytes: []byte = nil
+        pos: int = 0
+        parse_end: int = 0
+        ident_end: int = 0
+        result_end: int = 0
+        is_assignment: bool = false
+}
+
+func isAlnum(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+func main() {
+	failures := 0
+
+	// Test 1: Read-only access $.count
+	p1 := NewStateVarParserFsm()
+	inp1 := []byte("$.count + 1")
+	p1.Setup(inp1, 0, len(inp1))
+	p1.DoParse()
+	if p1.GetIsAssignment() {
+		fmt.Println("FAIL 1: should not be assignment")
+		failures++
+	}
+	r1 := p1.GetResultEnd()
+	name1 := string(inp1[2:r1])
+	if name1 != "count" {
+		fmt.Printf("FAIL 1: name='%s', expected 'count'\n", name1)
+		failures++
+	}
+
+	// Test 2: Assignment $.total = x + 1;\n
+	p2 := NewStateVarParserFsm()
+	inp2 := []byte("$.total = x + 1;\nmore")
+	p2.Setup(inp2, 0, len(inp2))
+	p2.DoParse()
+	if !p2.GetIsAssignment() {
+		fmt.Println("FAIL 2: should be assignment")
+		failures++
+	}
+	r2 := p2.GetResultEnd()
+	expr2 := string(inp2[0:r2])
+	found2 := false
+	for i := 0; i+6 <= len(expr2); i++ {
+		if expr2[i:i+6] == "x + 1;" {
+			found2 = true
+			break
+		}
+	}
+	if !found2 {
+		fmt.Printf("FAIL 2: expr='%s'\n", expr2)
+		failures++
+	}
+
+	// Test 3: Not assignment $.x == 5 (== is comparison, not assignment)
+	p3 := NewStateVarParserFsm()
+	inp3 := []byte("$.x == 5")
+	p3.Setup(inp3, 0, len(inp3))
+	p3.DoParse()
+	if p3.GetIsAssignment() {
+		fmt.Println("FAIL 3: == should not be treated as assignment")
+		failures++
+	}
+
+	// Test 4: Assignment with nested parens $.val = f(a, b)\n
+	p4 := NewStateVarParserFsm()
+	inp4 := []byte("$.val = f(a, b)\nrest")
+	p4.Setup(inp4, 0, len(inp4))
+	p4.DoParse()
+	if !p4.GetIsAssignment() {
+		fmt.Println("FAIL 4: should be assignment")
+		failures++
+	}
+	r4 := p4.GetResultEnd()
+	expr4 := string(inp4[0:r4])
+	found4 := false
+	for i := 0; i+7 <= len(expr4); i++ {
+		if expr4[i:i+7] == "f(a, b)" {
+			found4 = true
+			break
+		}
+	}
+	if !found4 {
+		fmt.Printf("FAIL 4: expr='%s'\n", expr4)
+		failures++
+	}
+
+	if failures > 0 {
+		fmt.Printf("FAIL: %d failures\n", failures)
+		os.Exit(1)
+	}
+	fmt.Println("PASS: state_var_parser (4 cases)")
+}

@@ -1,0 +1,261 @@
+@@target dart
+
+import 'dart:io';
+
+// PythonSyntaxSkipper — FSM for skipping Python comments and strings.
+// Translated from framec's native_region_scanner/python_skipper.frs
+//
+// Handles: # comments, triple-quoted strings, simple strings,
+// Python-style line endings, balanced parens.
+
+@@system PythonSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: List<int>, start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                // Python uses # for line comments
+                if (i < end && bs[i] == 0x23) { // #
+                    int j = i + 1;
+                    while (j < end && bs[j] != 0x0A) { // \n
+                        j++;
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                // Triple-quoted strings: """ or '''
+                if (i + 2 < end) {
+                    if ((bs[i] == 0x22 && bs[i+1] == 0x22 && bs[i+2] == 0x22) ||
+                        (bs[i] == 0x27 && bs[i+1] == 0x27 && bs[i+2] == 0x27)) {
+                        int q = bs[i];
+                        int j = i + 3;
+                        while (j + 2 < end) {
+                            if (bs[j] == q && bs[j+1] == q && bs[j+2] == q) {
+                                this.result_pos = j + 3;
+                                this.success = 1;
+                                return;
+                            }
+                            j++;
+                        }
+                        this.result_pos = end;
+                        this.success = 1;
+                        return;
+                    }
+                }
+
+                // Simple strings: " or '
+                if (i < end && (bs[i] == 0x22 || bs[i] == 0x27)) {
+                    int q = bs[i];
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == 0x5C) { // backslash
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == q) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                while (j < end) {
+                    int b = bs[j];
+                    if (b == 0x0A || b == 0x3B) { // \n or ;
+                        break;
+                    }
+                    // Stop at # comment
+                    if (b == 0x23) { // #
+                        break;
+                    }
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                if (i >= end || bs[i] != 0x28) { // (
+                    this.success = 0;
+                    return;
+                }
+
+                int depth = 1;
+                int j = i + 1;
+                while (j < end && depth > 0) {
+                    int b = bs[j];
+                    if (b == 0x28) { // (
+                        depth++;
+                    } else if (b == 0x29) { // )
+                        depth--;
+                    } else if (b == 0x22 || b == 0x27) { // " or '
+                        int q = b;
+                        j++;
+                        while (j < end && bs[j] != q) {
+                            if (bs[j] == 0x5C) { // backslash
+                                j++;
+                            }
+                            j++;
+                        }
+                    }
+                    j++;
+                }
+
+                if (depth == 0) {
+                    this.result_pos = j;
+                    this.success = 1;
+                } else {
+                    this.result_pos = end;
+                    this.success = 0;
+                }
+            }
+        }
+
+    domain:
+        bytes: List<int> = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+void main() {
+    int failures = 0;
+
+    // Test 1: Skip hash comment
+    final s1 = @@PythonSyntaxSkipperFsm();
+    final inp1 = "# comment\ncode".codeUnits;
+    s1.setup(inp1, 0, inp1.length);
+    s1.do_skip_comment();
+    if ((s1.get_success() as int) != 1 || (s1.get_result_pos() as int) != 9) {
+        print("FAIL 1: success=\${s1.get_success()}, pos=\${s1.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 2: Not a comment
+    final s2 = @@PythonSyntaxSkipperFsm();
+    final inp2 = "x + 1".codeUnits;
+    s2.setup(inp2, 0, inp2.length);
+    s2.do_skip_comment();
+    if ((s2.get_success() as int) != 0) {
+        print("FAIL 2: should not be comment");
+        failures++;
+    }
+
+    // Test 3: Skip triple-quoted string
+    final s3 = @@PythonSyntaxSkipperFsm();
+    final inp3 = '"""hello world"""rest'.codeUnits;
+    s3.setup(inp3, 0, inp3.length);
+    s3.do_skip_string();
+    if ((s3.get_success() as int) != 1 || (s3.get_result_pos() as int) != 17) {
+        print("FAIL 3: success=\${s3.get_success()}, pos=\${s3.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 4: Skip simple string
+    final s4 = @@PythonSyntaxSkipperFsm();
+    final inp4 = '"hello" rest'.codeUnits;
+    s4.setup(inp4, 0, inp4.length);
+    s4.do_skip_string();
+    if ((s4.get_success() as int) != 1 || (s4.get_result_pos() as int) != 7) {
+        print("FAIL 4: success=\${s4.get_success()}, pos=\${s4.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 5: Skip string with escape
+    final s5 = @@PythonSyntaxSkipperFsm();
+    final inp5 = "'he\\'llo' rest".codeUnits;
+    s5.setup(inp5, 0, inp5.length);
+    s5.do_skip_string();
+    if ((s5.get_success() as int) != 1 || (s5.get_result_pos() as int) != 9) {
+        print("FAIL 5: success=\${s5.get_success()}, pos=\${s5.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 6: Find line end (stops at #)
+    final s6 = @@PythonSyntaxSkipperFsm();
+    final inp6 = "x + 1 # comment".codeUnits;
+    s6.setup(inp6, 0, inp6.length);
+    s6.do_find_line_end();
+    if ((s6.get_result_pos() as int) != 6) {
+        print("FAIL 6: pos=\${s6.get_result_pos()}, expected 6");
+        failures++;
+    }
+
+    // Test 7: Balanced parens
+    final s7 = @@PythonSyntaxSkipperFsm();
+    final inp7 = "(a, f(b)) rest".codeUnits;
+    s7.setup(inp7, 0, inp7.length);
+    s7.do_balanced_paren_end();
+    if ((s7.get_success() as int) != 1 || (s7.get_result_pos() as int) != 9) {
+        print("FAIL 7: success=\${s7.get_success()}, pos=\${s7.get_result_pos()}");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: \$failures failures");
+        exit(1);
+    }
+    print("PASS: python_skipper (7 cases)");
+}

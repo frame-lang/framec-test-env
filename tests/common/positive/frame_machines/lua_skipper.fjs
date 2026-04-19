@@ -1,0 +1,199 @@
+@@target javascript
+
+// LuaSyntaxSkipper — FSM for skipping Lua comments and strings.
+// Translated from framec's native_region_scanner/lua_skipper.frs
+//
+// Handles: -- line comments, --[[ block comments ]], [[ long strings ]],
+// simple strings, Lua-style line endings.
+
+@@system LuaSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos() {
+            return this.result_pos;
+        }
+        get_success() {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                if (i + 1 < end && bs[i] === 0x2D && bs[i + 1] === 0x2D) {
+                    if (i + 3 < end && bs[i + 2] === 0x5B && bs[i + 3] === 0x5B) {
+                        let j = i + 4;
+                        while (j + 1 < end) {
+                            if (bs[j] === 0x5D && bs[j + 1] === 0x5D) {
+                                this.result_pos = j + 2;
+                                this.success = 1;
+                                return;
+                            }
+                            j++;
+                        }
+                        this.result_pos = end;
+                        this.success = 1;
+                        return;
+                    }
+                    let j = i + 2;
+                    while (j < end && bs[j] !== 0x0A) { j++; }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                if (i + 1 < end && bs[i] === 0x5B && bs[i + 1] === 0x5B) {
+                    let j = i + 2;
+                    while (j + 1 < end) {
+                        if (bs[j] === 0x5D && bs[j + 1] === 0x5D) {
+                            this.result_pos = j + 2;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                if (i < end && (bs[i] === 0x22 || bs[i] === 0x27)) {
+                    const q = bs[i];
+                    let j = i + 1;
+                    while (j < end) {
+                        if (bs[j] === 0x5C) { j += 2; continue; }
+                        if (bs[j] === q) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                let j = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                while (j < end) {
+                    const b = bs[j];
+                    if (b === 0x0A) { break; }
+                    if (b === 0x2D && j + 1 < end && bs[j + 1] === 0x2D) { break; }
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+    domain:
+        bytes = []
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+const enc = s => Array.from(Buffer.from(s));
+
+let failures = 0;
+
+// Test 1: Skip -- line comment
+const s1 = @@LuaSyntaxSkipperFsm();
+const inp1 = enc("-- comment\ncode");
+s1.setup(inp1, 0, inp1.length);
+s1.do_skip_comment();
+if (s1.get_success() !== 1 || s1.get_result_pos() !== 10) {
+    console.log("FAIL 1: success=" + s1.get_success() + ", pos=" + s1.get_result_pos());
+    failures++;
+}
+
+// Test 2: Skip --[[ block comment ]]
+const s2 = @@LuaSyntaxSkipperFsm();
+const inp2 = enc("--[[ block ]]code");
+s2.setup(inp2, 0, inp2.length);
+s2.do_skip_comment();
+if (s2.get_success() !== 1 || s2.get_result_pos() !== 13) {
+    console.log("FAIL 2: success=" + s2.get_success() + ", pos=" + s2.get_result_pos());
+    failures++;
+}
+
+// Test 3: Not a comment
+const s3 = @@LuaSyntaxSkipperFsm();
+const inp3 = enc("x + 1");
+s3.setup(inp3, 0, inp3.length);
+s3.do_skip_comment();
+if (s3.get_success() !== 0) {
+    console.log("FAIL 3: should not be comment");
+    failures++;
+}
+
+// Test 4: Skip [[ long string ]]
+const s4 = @@LuaSyntaxSkipperFsm();
+const inp4 = enc("[[hello world]]rest");
+s4.setup(inp4, 0, inp4.length);
+s4.do_skip_string();
+if (s4.get_success() !== 1 || s4.get_result_pos() !== 15) {
+    console.log("FAIL 4: success=" + s4.get_success() + ", pos=" + s4.get_result_pos());
+    failures++;
+}
+
+// Test 5: Skip simple string
+const s5 = @@LuaSyntaxSkipperFsm();
+const inp5 = enc('"hello" rest');
+s5.setup(inp5, 0, inp5.length);
+s5.do_skip_string();
+if (s5.get_success() !== 1 || s5.get_result_pos() !== 7) {
+    console.log("FAIL 5: success=" + s5.get_success() + ", pos=" + s5.get_result_pos());
+    failures++;
+}
+
+// Test 6: Find line end stops at --
+const s6 = @@LuaSyntaxSkipperFsm();
+const inp6 = enc("x + 1 -- comment");
+s6.setup(inp6, 0, inp6.length);
+s6.do_find_line_end();
+if (s6.get_result_pos() !== 6) {
+    console.log("FAIL 6: pos=" + s6.get_result_pos() + ", expected 6");
+    failures++;
+}
+
+if (failures > 0) { console.log("FAIL: " + failures + " failures"); process.exit(1); }
+console.log("PASS: lua_skipper (6 cases)");

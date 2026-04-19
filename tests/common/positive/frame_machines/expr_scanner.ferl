@@ -1,0 +1,67 @@
+@@target erlang
+
+%% ExprScanner — PDA for scanning assignment RHS expressions.
+%% Translated from framec's native_region_scanner/expr_scanner.frs
+%%
+%% Scans from pos (after =) to a terminator (; or \n) at depth 0,
+%% respecting nested ()[]{}  and string literals with escape handling.
+
+@@system ExprScannerFsm {
+    interface:
+        setup(input_bytes: binary, start: int, length: int)
+        do_scan()
+        get_result(): int
+
+    machine:
+        $Init {
+            setup(input_bytes: binary, start: int, length: int) {
+                self.bytes = input_bytes
+                self.pos = start
+                self.scan_end = length
+            }
+            do_scan() { -> $Scanning }
+            get_result(): int { @@:(self.result_end) }
+        }
+
+        $Scanning {
+            $>() {
+                self.result_end = scan_loop(Data#data.bytes, Data#data.pos, Data#data.scan_end, 0, -1)
+            }
+            get_result(): int { @@:(self.result_end) }
+        }
+
+    domain:
+        bytes = <<>>
+        pos = 0
+        scan_end = 0
+        result_end = 0
+}
+
+scan_loop(Bs, I, End, _Depth, _InString) when I >= End ->
+    I;
+scan_loop(Bs, I, End, Depth, InString) when InString >= 0 ->
+    B = binary:at(Bs, I),
+    if
+        B =:= $\\ andalso I + 1 < End ->
+            scan_loop(Bs, I + 2, End, Depth, InString);
+        B =:= InString ->
+            scan_loop(Bs, I + 1, End, Depth, -1);
+        true ->
+            scan_loop(Bs, I + 1, End, Depth, InString)
+    end;
+scan_loop(Bs, I, End, Depth, _InString) ->
+    B = binary:at(Bs, I),
+    if
+        B =:= $" orelse B =:= $' ->
+            scan_loop(Bs, I + 1, End, Depth, B);
+        B =:= $( orelse B =:= $[ orelse B =:= ${ ->
+            scan_loop(Bs, I + 1, End, Depth + 1, -1);
+        B =:= $) orelse B =:= $] orelse B =:= $} ->
+            scan_loop(Bs, I + 1, End, max(Depth - 1, 0), -1);
+        B =:= $; andalso Depth =:= 0 ->
+            I + 1;
+        B =:= $\n andalso Depth =:= 0 ->
+            I;
+        true ->
+            scan_loop(Bs, I + 1, End, Depth, -1)
+    end.

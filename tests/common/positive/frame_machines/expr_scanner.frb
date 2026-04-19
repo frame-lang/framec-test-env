@@ -1,0 +1,143 @@
+@@target ruby
+
+# ExprScanner — PDA for scanning assignment RHS expressions.
+# Translated from framec's native_region_scanner/expr_scanner.frs
+#
+# Scans from pos (after =) to a terminator (; or \n) at depth 0,
+# respecting nested ()[]{}  and string literals with escape handling.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.end = length
+        }
+        get_result() {
+            return self.result_end
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                i = self.pos
+                the_end = self.end
+                bs = self.bytes
+                depth = 0
+                in_string = nil
+
+                while i < the_end
+                    b = bs[i]
+
+                    if in_string != nil
+                        if b == 0x5C && i + 1 < the_end
+                            i += 2
+                            next
+                        end
+                        if b == in_string
+                            in_string = nil
+                        end
+                        i += 1
+                        next
+                    end
+
+                    if b == 0x22 || b == 0x27
+                        in_string = b
+                        i += 1
+                        next
+                    end
+
+                    if b == 0x28 || b == 0x5B || b == 0x7B
+                        depth += 1
+                    elsif b == 0x29 || b == 0x5D || b == 0x7D
+                        depth = [depth - 1, 0].max
+                    elsif b == 0x3B && depth == 0
+                        i += 1
+                        break
+                    elsif b == 0x0A && depth == 0
+                        break
+                    end
+
+                    i += 1
+                end
+
+                self.result_end = i
+            }
+        }
+
+    domain:
+        bytes = []
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+failures = 0
+
+# Test 1: simple expression terminated by newline
+e1 = ExprScannerFsm.new
+inp1 = " x + 1\nfoo".bytes
+e1.setup(inp1, 0, inp1.length)
+e1.do_scan()
+expr1 = inp1[0...e1.get_result()].pack("C*")
+if expr1 != " x + 1"
+    puts("FAIL 1: got '#{expr1}'")
+    failures += 1
+end
+
+# Test 2: expression with semicolon terminator
+e2 = ExprScannerFsm.new
+inp2 = " x + 1; y = 2".bytes
+e2.setup(inp2, 0, inp2.length)
+e2.do_scan()
+expr2 = inp2[0...e2.get_result()].pack("C*")
+if expr2 != " x + 1;"
+    puts("FAIL 2: got '#{expr2}'")
+    failures += 1
+end
+
+# Test 3: nested parens not treated as terminator
+e3 = ExprScannerFsm.new
+inp3 = " f(x, g(y))\nz".bytes
+e3.setup(inp3, 0, inp3.length)
+e3.do_scan()
+expr3 = inp3[0...e3.get_result()].pack("C*")
+if expr3 != " f(x, g(y))"
+    puts("FAIL 3: got '#{expr3}'")
+    failures += 1
+end
+
+# Test 4: string with escaped quote
+e4 = ExprScannerFsm.new
+inp4 = " \"hello\\\"world\"\n".bytes
+e4.setup(inp4, 0, inp4.length)
+e4.do_scan()
+expr4 = inp4[0...e4.get_result()].pack("C*")
+if expr4 != " \"hello\\\"world\""
+    puts("FAIL 4: got '#{expr4}'")
+    failures += 1
+end
+
+# Test 5: semicolon inside string (should not terminate)
+e5 = ExprScannerFsm.new
+inp5 = " \"a;b\"\n".bytes
+e5.setup(inp5, 0, inp5.length)
+e5.do_scan()
+expr5 = inp5[0...e5.get_result()].pack("C*")
+if expr5 != " \"a;b\""
+    puts("FAIL 5: got '#{expr5}'")
+    failures += 1
+end
+
+if failures > 0
+    puts("FAIL: #{failures} failures")
+    exit(1)
+end
+puts("PASS: expr_scanner (5 cases)")

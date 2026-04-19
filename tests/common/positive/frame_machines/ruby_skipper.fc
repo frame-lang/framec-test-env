@@ -1,0 +1,367 @@
+@@target c
+
+#include <string.h>
+
+// RubySyntaxSkipper -- FSM for skipping Ruby comments and strings.
+// Translated from framec's native_region_scanner/ruby_skipper.frs
+//
+// Handles: # line comments, "..." / '...' strings,
+// %Q{} / %q[] / %w() etc. percent literals,
+// Ruby-style line endings, balanced parens.
+
+@@system RubySyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: unsigned char*, start: int, length: int) {
+            self->bytes = input_bytes;
+            self->pos = start;
+            self->scan_end = length;
+        }
+        get_result_pos(): int {
+            return self->result_pos;
+        }
+        get_success(): int {
+            return self->success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                // Ruby: # line comment only
+                if (i < end && bs[i] == '#') {
+                    int j = i + 1;
+                    while (j < end && bs[j] != '\n') {
+                        j++;
+                    }
+                    self->result_pos = j;
+                    self->success = 1;
+                    return;
+                }
+
+                self->success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                // Percent literals: %Q{...}, %q[...], %w(...), etc.
+                if (i < end && bs[i] == '%') {
+                    if (i + 1 < end) {
+                        unsigned char c1 = bs[i + 1];
+                        // Check for %Q, %q, %w, %W, %i, %I, %r, %x, %s
+                        int has_letter = (c1 == 'Q' || c1 == 'q' || c1 == 'w' || c1 == 'W' || c1 == 'i' || c1 == 'I' || c1 == 'r' || c1 == 'x' || c1 == 's');
+                        unsigned char opener;
+                        int j;
+                        if (has_letter && i + 2 < end) {
+                            opener = bs[i + 2];
+                            j = i + 3;
+                        } else if (!((c1 >= 'a' && c1 <= 'z') || (c1 >= 'A' && c1 <= 'Z') || (c1 >= '0' && c1 <= '9') || c1 == '_')) {
+                            // %{...} or %[...] or %<...> without letter
+                            opener = c1;
+                            j = i + 2;
+                        } else {
+                            self->success = 0;
+                            return;
+                        }
+
+                        // Determine closer
+                        unsigned char closer;
+                        if (opener == '{') {
+                            closer = '}';
+                        } else if (opener == '[') {
+                            closer = ']';
+                        } else if (opener == '(') {
+                            closer = ')';
+                        } else if (opener == '<') {
+                            closer = '>';
+                        } else {
+                            // Non-paired delimiter (e.g. %Q!...!)
+                            closer = opener;
+                            // Scan to matching delimiter
+                            while (j < end) {
+                                if (bs[j] == '\\') {
+                                    j += 2;
+                                    continue;
+                                }
+                                if (bs[j] == closer) {
+                                    self->result_pos = j + 1;
+                                    self->success = 1;
+                                    return;
+                                }
+                                j++;
+                            }
+                            self->result_pos = end;
+                            self->success = 1;
+                            return;
+                        }
+
+                        // Paired delimiter: track nesting
+                        int depth = 1;
+                        while (j < end && depth > 0) {
+                            if (bs[j] == '\\') {
+                                j += 2;
+                                continue;
+                            }
+                            if (bs[j] == opener) {
+                                depth++;
+                            } else if (bs[j] == closer) {
+                                depth--;
+                            }
+                            j++;
+                        }
+                        self->result_pos = j;
+                        self->success = 1;
+                        return;
+                    }
+                }
+
+                // Simple string: " or '
+                if (i < end && (bs[i] == '"' || bs[i] == '\'')) {
+                    unsigned char q = bs[i];
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == q) {
+                            self->result_pos = j + 1;
+                            self->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    self->result_pos = end;
+                    self->success = 1;
+                    return;
+                }
+
+                self->success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+                int in_string = 0;
+
+                while (j < end) {
+                    unsigned char b = bs[j];
+                    if (b == '\n') {
+                        break;
+                    }
+
+                    // Inside string
+                    if (in_string != 0) {
+                        if (b == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = 0;
+                        }
+                        j++;
+                        continue;
+                    }
+
+                    // Terminators
+                    if (b == '#') {
+                        break;
+                    }
+
+                    // String starts
+                    if (b == '\'' || b == '"') {
+                        in_string = b;
+                        j++;
+                        continue;
+                    }
+
+                    j++;
+                }
+
+                self->result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                if (i >= end || bs[i] != '(') {
+                    self->success = 0;
+                    return;
+                }
+
+                int depth = 0;
+                int in_string = 0;
+
+                while (i < end) {
+                    unsigned char b = bs[i];
+
+                    // Inside string
+                    if (in_string != 0) {
+                        if (b == '\\') {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = 0;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '\'' || b == '"') {
+                        in_string = b;
+                        i++;
+                    } else if (b == '(') {
+                        depth++;
+                        i++;
+                    } else if (b == ')') {
+                        depth--;
+                        i++;
+                        if (depth == 0) {
+                            self->result_pos = i;
+                            self->success = 1;
+                            return;
+                        }
+                    } else {
+                        i++;
+                    }
+                }
+
+                self->success = 0;
+            }
+        }
+
+    domain:
+        bytes: unsigned char* = NULL
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+int main() {
+    int failures = 0;
+
+    // Test 1: Skip # comment
+    RubySyntaxSkipperFsm* s1 = @@RubySyntaxSkipperFsm();
+    unsigned char t1[] = "# comment\ncode";
+    RubySyntaxSkipperFsm_setup(s1, t1, 0, sizeof(t1)-1);
+    RubySyntaxSkipperFsm_do_skip_comment(s1);
+    if (RubySyntaxSkipperFsm_get_success(s1) != 1 || RubySyntaxSkipperFsm_get_result_pos(s1) != 9) {
+        printf("FAIL 1: success=%d, pos=%d\n", RubySyntaxSkipperFsm_get_success(s1), RubySyntaxSkipperFsm_get_result_pos(s1));
+        failures++;
+    }
+
+    // Test 2: Skip double-quoted string
+    RubySyntaxSkipperFsm* s2 = @@RubySyntaxSkipperFsm();
+    unsigned char t2[] = "\"hello\" rest";
+    RubySyntaxSkipperFsm_setup(s2, t2, 0, sizeof(t2)-1);
+    RubySyntaxSkipperFsm_do_skip_string(s2);
+    if (RubySyntaxSkipperFsm_get_success(s2) != 1 || RubySyntaxSkipperFsm_get_result_pos(s2) != 7) {
+        printf("FAIL 2: success=%d, pos=%d\n", RubySyntaxSkipperFsm_get_success(s2), RubySyntaxSkipperFsm_get_result_pos(s2));
+        failures++;
+    }
+
+    // Test 3: Skip single-quoted string
+    RubySyntaxSkipperFsm* s3 = @@RubySyntaxSkipperFsm();
+    unsigned char t3[] = "'hello' rest";
+    RubySyntaxSkipperFsm_setup(s3, t3, 0, sizeof(t3)-1);
+    RubySyntaxSkipperFsm_do_skip_string(s3);
+    if (RubySyntaxSkipperFsm_get_success(s3) != 1 || RubySyntaxSkipperFsm_get_result_pos(s3) != 7) {
+        printf("FAIL 3: success=%d, pos=%d\n", RubySyntaxSkipperFsm_get_success(s3), RubySyntaxSkipperFsm_get_result_pos(s3));
+        failures++;
+    }
+
+    // Test 4: Skip %Q{text}
+    RubySyntaxSkipperFsm* s4 = @@RubySyntaxSkipperFsm();
+    unsigned char t4[] = "%Q{text} rest";
+    RubySyntaxSkipperFsm_setup(s4, t4, 0, sizeof(t4)-1);
+    RubySyntaxSkipperFsm_do_skip_string(s4);
+    if (RubySyntaxSkipperFsm_get_success(s4) != 1 || RubySyntaxSkipperFsm_get_result_pos(s4) != 8) {
+        printf("FAIL 4: success=%d, pos=%d\n", RubySyntaxSkipperFsm_get_success(s4), RubySyntaxSkipperFsm_get_result_pos(s4));
+        failures++;
+    }
+
+    // Test 5: Skip %q[text]
+    RubySyntaxSkipperFsm* s5 = @@RubySyntaxSkipperFsm();
+    unsigned char t5[] = "%q[text] rest";
+    RubySyntaxSkipperFsm_setup(s5, t5, 0, sizeof(t5)-1);
+    RubySyntaxSkipperFsm_do_skip_string(s5);
+    if (RubySyntaxSkipperFsm_get_success(s5) != 1 || RubySyntaxSkipperFsm_get_result_pos(s5) != 8) {
+        printf("FAIL 5: success=%d, pos=%d\n", RubySyntaxSkipperFsm_get_success(s5), RubySyntaxSkipperFsm_get_result_pos(s5));
+        failures++;
+    }
+
+    // Test 6: Find line end (stops at #)
+    RubySyntaxSkipperFsm* s6 = @@RubySyntaxSkipperFsm();
+    unsigned char t6[] = "x + 1 # comment";
+    RubySyntaxSkipperFsm_setup(s6, t6, 0, sizeof(t6)-1);
+    RubySyntaxSkipperFsm_do_find_line_end(s6);
+    if (RubySyntaxSkipperFsm_get_result_pos(s6) != 6) {
+        printf("FAIL 6: pos=%d, expected 6\n", RubySyntaxSkipperFsm_get_result_pos(s6));
+        failures++;
+    }
+
+    // Test 7: Balanced parens
+    RubySyntaxSkipperFsm* s7 = @@RubySyntaxSkipperFsm();
+    unsigned char t7[] = "(a, f(b)) rest";
+    RubySyntaxSkipperFsm_setup(s7, t7, 0, sizeof(t7)-1);
+    RubySyntaxSkipperFsm_do_balanced_paren_end(s7);
+    if (RubySyntaxSkipperFsm_get_success(s7) != 1 || RubySyntaxSkipperFsm_get_result_pos(s7) != 9) {
+        printf("FAIL 7: success=%d, pos=%d\n", RubySyntaxSkipperFsm_get_success(s7), RubySyntaxSkipperFsm_get_result_pos(s7));
+        failures++;
+    }
+
+    // Test 8: Skip %Q with nested braces
+    RubySyntaxSkipperFsm* s8 = @@RubySyntaxSkipperFsm();
+    unsigned char t8[] = "%Q{outer {inner} end} rest";
+    RubySyntaxSkipperFsm_setup(s8, t8, 0, sizeof(t8)-1);
+    RubySyntaxSkipperFsm_do_skip_string(s8);
+    if (RubySyntaxSkipperFsm_get_success(s8) != 1 || RubySyntaxSkipperFsm_get_result_pos(s8) != 21) {
+        printf("FAIL 8: success=%d, pos=%d\n", RubySyntaxSkipperFsm_get_success(s8), RubySyntaxSkipperFsm_get_result_pos(s8));
+        failures++;
+    }
+
+    RubySyntaxSkipperFsm_destroy(s1);
+    RubySyntaxSkipperFsm_destroy(s2);
+    RubySyntaxSkipperFsm_destroy(s3);
+    RubySyntaxSkipperFsm_destroy(s4);
+    RubySyntaxSkipperFsm_destroy(s5);
+    RubySyntaxSkipperFsm_destroy(s6);
+    RubySyntaxSkipperFsm_destroy(s7);
+    RubySyntaxSkipperFsm_destroy(s8);
+
+    if (failures > 0) {
+        printf("FAIL: %d failures\n", failures);
+        return 1;
+    }
+    printf("PASS: ruby_skipper (8 cases)\n");
+    return 0;
+}

@@ -1,0 +1,237 @@
+@@target python_3
+
+# RustSyntaxSkipper — FSM for skipping Rust comments and strings.
+# Translated from framec's native_region_scanner/rust_skipper.frs
+#
+# Handles: // line comments, /* nested block comments */,
+# raw strings (r#"..."#), char literals vs lifetime annotations,
+# simple strings.
+
+@@system RustSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: list, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos(): int {
+            return self.result_pos
+        }
+        get_success(): int {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                # // line comment
+                if i + 1 < end and bs[i] == ord('/') and bs[i + 1] == ord('/'):
+                    j = i + 2
+                    while j < end and bs[j] != ord('\n'):
+                        j += 1
+                    self.result_pos = j
+                    self.success = 1
+                    return
+
+                # /* nested block comment */ — Rust allows nesting
+                if i + 1 < end and bs[i] == ord('/') and bs[i + 1] == ord('*'):
+                    j = i + 2
+                    depth = 1
+                    while j + 1 < end and depth > 0:
+                        if bs[j] == ord('/') and bs[j + 1] == ord('*'):
+                            depth += 1
+                            j += 2
+                            continue
+                        if bs[j] == ord('*') and bs[j + 1] == ord('/'):
+                            depth -= 1
+                            j += 2
+                            continue
+                        j += 1
+                    self.result_pos = j
+                    self.success = 1
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                # Raw string: r#"..."# (count leading #s)
+                if i < end and bs[i] == ord('r'):
+                    j = i + 1
+                    hash_count = 0
+                    while j < end and bs[j] == ord('#'):
+                        hash_count += 1
+                        j += 1
+                    if j < end and bs[j] == ord('"'):
+                        j += 1
+                        # Scan for closing "###
+                        while j < end:
+                            if bs[j] == ord('"'):
+                                # Check for matching hash count
+                                k = 0
+                                while k < hash_count and j + 1 + k < end and bs[j + 1 + k] == ord('#'):
+                                    k += 1
+                                if k == hash_count:
+                                    self.result_pos = j + 1 + hash_count
+                                    self.success = 1
+                                    return
+                            j += 1
+                        self.result_pos = end
+                        self.success = 1
+                        return
+
+                # Double-quoted string
+                if i < end and bs[i] == ord('"'):
+                    j = i + 1
+                    while j < end:
+                        if bs[j] == ord('\\'):
+                            j += 2
+                            continue
+                        if bs[j] == ord('"'):
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = end
+                    self.success = 1
+                    return
+
+                # Char literal: 'x' or '\n' (NOT lifetime 'a)
+                if i < end and bs[i] == ord("'"):
+                    if i + 2 < end and bs[i + 1] == ord('\\') and i + 3 < end and bs[i + 3] == ord("'"):
+                        # Escape char: '\n'
+                        self.result_pos = i + 4
+                        self.success = 1
+                        return
+                    if i + 2 < end and bs[i + 2] == ord("'"):
+                        # Simple char: 'x'
+                        self.result_pos = i + 3
+                        self.success = 1
+                        return
+                    # Lifetime annotation — not a string
+                    self.success = 0
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                while j < end:
+                    b = bs[j]
+                    if b == ord('\n') or b == ord(';'):
+                        break
+                    if b == ord('/') and j + 1 < end and bs[j + 1] == ord('/'):
+                        break
+                    if b == ord('/') and j + 1 < end and bs[j + 1] == ord('*'):
+                        break
+                    j += 1
+
+                self.result_pos = j
+            }
+        }
+
+    domain:
+        bytes: list = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+if __name__ == '__main__':
+    failures = 0
+
+    # Test 1: Skip // comment
+    s1 = @@RustSyntaxSkipperFsm()
+    inp1 = list(b"// comment\ncode")
+    s1.setup(inp1, 0, len(inp1))
+    s1.do_skip_comment()
+    if s1.get_success() != 1 or s1.get_result_pos() != 10:
+        print(f"FAIL 1: success={s1.get_success()}, pos={s1.get_result_pos()}")
+        failures += 1
+
+    # Test 2: Skip nested /* /* */ */ block comment
+    s2 = @@RustSyntaxSkipperFsm()
+    inp2 = list(b"/* outer /* inner */ */code")
+    s2.setup(inp2, 0, len(inp2))
+    s2.do_skip_comment()
+    if s2.get_success() != 1 or s2.get_result_pos() != 23:
+        print(f"FAIL 2: success={s2.get_success()}, pos={s2.get_result_pos()}")
+        failures += 1
+
+    # Test 3: Skip raw string r#"hello"#
+    s3 = @@RustSyntaxSkipperFsm()
+    inp3 = list(b'r#"hello"#rest')
+    s3.setup(inp3, 0, len(inp3))
+    s3.do_skip_string()
+    if s3.get_success() != 1 or s3.get_result_pos() != 10:
+        print(f"FAIL 3: success={s3.get_success()}, pos={s3.get_result_pos()}")
+        failures += 1
+
+    # Test 4: Skip double-quoted string
+    s4 = @@RustSyntaxSkipperFsm()
+    inp4 = list(b'"hello" rest')
+    s4.setup(inp4, 0, len(inp4))
+    s4.do_skip_string()
+    if s4.get_success() != 1 or s4.get_result_pos() != 7:
+        print(f"FAIL 4: success={s4.get_success()}, pos={s4.get_result_pos()}")
+        failures += 1
+
+    # Test 5: Char literal 'x' — IS a string
+    s5 = @@RustSyntaxSkipperFsm()
+    inp5 = list(b"'x' rest")
+    s5.setup(inp5, 0, len(inp5))
+    s5.do_skip_string()
+    if s5.get_success() != 1 or s5.get_result_pos() != 3:
+        print(f"FAIL 5: success={s5.get_success()}, pos={s5.get_result_pos()}")
+        failures += 1
+
+    # Test 6: Lifetime 'a — NOT a string
+    s6 = @@RustSyntaxSkipperFsm()
+    inp6 = list(b"'a rest")
+    s6.setup(inp6, 0, len(inp6))
+    s6.do_skip_string()
+    if s6.get_success() != 0:
+        print(f"FAIL 6: lifetime should not be a string")
+        failures += 1
+
+    # Test 7: Escape char '\n'
+    s7 = @@RustSyntaxSkipperFsm()
+    inp7 = list(b"'\\n' rest")
+    s7.setup(inp7, 0, len(inp7))
+    s7.do_skip_string()
+    if s7.get_success() != 1 or s7.get_result_pos() != 4:
+        print(f"FAIL 7: success={s7.get_success()}, pos={s7.get_result_pos()}")
+        failures += 1
+
+    if failures > 0:
+        print(f"FAIL: {failures} failures")
+        exit(1)
+    print("PASS: rust_skipper (7 cases)")

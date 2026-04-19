@@ -1,0 +1,257 @@
+@@target lua
+
+-- StateVarParser — FSM for parsing $.varName and $.varName = expr
+-- Translated from framec's native_region_scanner/state_var_parser.frs
+--
+-- Uses hierarchical composition: $ScanExpr creates an ExprScannerFsm
+-- sub-machine when it detects an assignment.
+--
+-- NOTE: Lua is 1-indexed, but the scanner uses 0-indexed positions
+-- internally and adjusts when accessing the byte table.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result() {
+            return self.result_end
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+                depth = 0
+                in_string = -1
+
+                while i < scan_end do
+                    b = bs[i + 1]
+
+                    if in_string ~= -1 then
+                        if b == 0x5C and i + 1 < scan_end then
+                            i = i + 2
+                            goto continue_loop
+                        end
+                        if b == in_string then
+                            in_string = -1
+                        end
+                        i = i + 1
+                        goto continue_loop
+                    end
+
+                    if b == 0x22 or b == 0x27 then
+                        in_string = b
+                        i = i + 1
+                        goto continue_loop
+                    end
+
+                    if b == 0x28 or b == 0x5B or b == 0x7B then
+                        depth = depth + 1
+                    elseif b == 0x29 or b == 0x5D or b == 0x7D then
+                        depth = math.max(depth - 1, 0)
+                    elseif b == 0x3B and depth == 0 then
+                        i = i + 1
+                        break
+                    elseif b == 0x0A and depth == 0 then
+                        break
+                    end
+
+                    i = i + 1
+                    ::continue_loop::
+                end
+
+                self.result_end = i
+            }
+        }
+
+    domain:
+        bytes = {}
+        pos: int = 0
+        scan_end: int = 0
+        result_end: int = 0
+}
+
+@@system StateVarParserFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.parse_end = length
+        }
+        get_result_end() {
+            return self.result_end
+        }
+        get_is_assignment() {
+            return self.is_assignment
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $ScanIdent }
+        }
+
+        $ScanIdent {
+            $>() {
+                -- Skip "$." prefix and scan identifier
+                i = self.pos + 2
+                parse_end = self.parse_end
+                bs = self.bytes
+
+                while i < parse_end do
+                    c = bs[i + 1]
+                    if (c >= 0x30 and c <= 0x39) or (c >= 0x41 and c <= 0x5A) or (c >= 0x61 and c <= 0x7A) or c == 0x5F then
+                        i = i + 1
+                    else
+                        break
+                    end
+                end
+
+                self.ident_end = i
+                -> $CheckAssign
+            }
+        }
+
+        $CheckAssign {
+            $>() {
+                -- Lookahead: skip whitespace, check for = (but not == or => or =<)
+                j = self.ident_end
+                parse_end = self.parse_end
+                bs = self.bytes
+
+                while j < parse_end and (bs[j + 1] == 0x20 or bs[j + 1] == 0x09) do
+                    j = j + 1
+                end
+
+                if j < parse_end and bs[j + 1] == 0x3D and (j + 1 >= parse_end or (bs[j + 2] ~= 0x3D and bs[j + 2] ~= 0x3C and bs[j + 2] ~= 0x3E)) then
+                    -- Assignment detected
+                    j = j + 1
+                    self.pos = j
+                    self.is_assignment = true
+                    -> $ScanExpr
+                else
+                    -- Read-only access
+                    self.result_end = self.ident_end
+                    self.is_assignment = false
+                    -> $Done
+                end
+            }
+        }
+
+        $ScanExpr {
+            $>() {
+                -- Create ExprScanner sub-machine
+                expr = ExprScannerFsm.new()
+                expr:setup(self.bytes, self.pos, self.parse_end)
+                expr:do_scan()
+                self.result_end = expr:get_result()
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+            }
+        }
+
+    domain:
+        bytes = {}
+        pos: int = 0
+        parse_end: int = 0
+        ident_end: int = 0
+        result_end: int = 0
+        is_assignment = false
+}
+
+local function str_to_bytes(s)
+    local t = {}
+    for i = 1, #s do
+        t[i] = string.byte(s, i)
+    end
+    return t
+end
+
+local function bytes_to_str(t, start_idx, end_idx)
+    local chars = {}
+    for i = start_idx + 1, end_idx do
+        chars[#chars + 1] = string.char(t[i])
+    end
+    return table.concat(chars)
+end
+
+local failures = 0
+
+-- Test 1: Read-only access $.count
+local p1 = StateVarParserFsm.new()
+local inp1 = str_to_bytes("$.count + 1")
+p1:setup(inp1, 0, #inp1)
+p1:do_parse()
+if p1:get_is_assignment() then
+    print("FAIL 1: should not be assignment")
+    failures = failures + 1
+end
+local name1 = bytes_to_str(inp1, 2, p1:get_result_end())
+if name1 ~= "count" then
+    print("FAIL 1: name='" .. name1 .. "', expected 'count'")
+    failures = failures + 1
+end
+
+-- Test 2: Assignment $.total = x + 1;\n
+local p2 = StateVarParserFsm.new()
+local inp2 = str_to_bytes("$.total = x + 1;\nmore")
+p2:setup(inp2, 0, #inp2)
+p2:do_parse()
+if not p2:get_is_assignment() then
+    print("FAIL 2: should be assignment")
+    failures = failures + 1
+end
+local expr2 = bytes_to_str(inp2, 0, p2:get_result_end())
+if not string.find(expr2, "x + 1;", 1, true) then
+    print("FAIL 2: expr='" .. expr2 .. "'")
+    failures = failures + 1
+end
+
+-- Test 3: Not assignment $.x == 5 (== is comparison, not assignment)
+local p3 = StateVarParserFsm.new()
+local inp3 = str_to_bytes("$.x == 5")
+p3:setup(inp3, 0, #inp3)
+p3:do_parse()
+if p3:get_is_assignment() then
+    print("FAIL 3: == should not be treated as assignment")
+    failures = failures + 1
+end
+
+-- Test 4: Assignment with nested parens $.val = f(a, b)\n
+local p4 = StateVarParserFsm.new()
+local inp4 = str_to_bytes("$.val = f(a, b)\nrest")
+p4:setup(inp4, 0, #inp4)
+p4:do_parse()
+if not p4:get_is_assignment() then
+    print("FAIL 4: should be assignment")
+    failures = failures + 1
+end
+local expr4 = bytes_to_str(inp4, 0, p4:get_result_end())
+if not string.find(expr4, "f(a, b)", 1, true) then
+    print("FAIL 4: expr='" .. expr4 .. "'")
+    failures = failures + 1
+end
+
+if failures > 0 then
+    print("FAIL: " .. failures .. " failures")
+    os.exit(1)
+end
+print("PASS: state_var_parser (4 cases)")

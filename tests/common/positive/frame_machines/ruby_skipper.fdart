@@ -1,0 +1,281 @@
+@@target dart
+
+import 'dart:io';
+
+// RubySyntaxSkipper -- FSM for skipping Ruby comments and strings.
+
+@@system RubySyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: List<int>, start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                if (i < end && bs[i] == 0x23) {
+                    int j = i + 1;
+                    while (j < end && bs[j] != 0x0A) { j++; }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                // Percent literals
+                if (i < end && bs[i] == 0x25) {
+                    if (i + 1 < end) {
+                        int c1 = bs[i + 1];
+                        bool has_letter = (c1 == 0x51 || c1 == 0x71 || c1 == 0x77 || c1 == 0x57 || c1 == 0x69 || c1 == 0x49 || c1 == 0x72 || c1 == 0x78 || c1 == 0x73);
+                        int opener;
+                        int j;
+                        if (has_letter && i + 2 < end) {
+                            opener = bs[i + 2];
+                            j = i + 3;
+                        } else if (!String.fromCharCode(c1).contains(RegExp(r'[a-zA-Z0-9_]'))) {
+                            opener = c1;
+                            j = i + 2;
+                        } else {
+                            this.success = 0;
+                            return;
+                        }
+
+                        int closer;
+                        if (opener == 0x7B) { closer = 0x7D; }
+                        else if (opener == 0x5B) { closer = 0x5D; }
+                        else if (opener == 0x28) { closer = 0x29; }
+                        else if (opener == 0x3C) { closer = 0x3E; }
+                        else {
+                            closer = opener;
+                            while (j < end) {
+                                if (bs[j] == 0x5C) { j += 2; continue; }
+                                if (bs[j] == closer) {
+                                    this.result_pos = j + 1;
+                                    this.success = 1;
+                                    return;
+                                }
+                                j++;
+                            }
+                            this.result_pos = end;
+                            this.success = 1;
+                            return;
+                        }
+
+                        int depth = 1;
+                        while (j < end && depth > 0) {
+                            if (bs[j] == 0x5C) { j += 2; continue; }
+                            if (bs[j] == opener) { depth++; }
+                            else if (bs[j] == closer) { depth--; }
+                            j++;
+                        }
+                        this.result_pos = j;
+                        this.success = 1;
+                        return;
+                    }
+                }
+
+                // Simple string
+                if (i < end && (bs[i] == 0x22 || bs[i] == 0x27)) {
+                    int q = bs[i];
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == 0x5C) { j += 2; continue; }
+                        if (bs[j] == q) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+                int in_string = 0;
+
+                while (j < end) {
+                    int b = bs[j];
+                    if (b == 0x0A) { break; }
+                    if (in_string != 0) {
+                        if (b == 0x5C) { j += 2; continue; }
+                        if (b == in_string) { in_string = 0; }
+                        j++;
+                        continue;
+                    }
+                    if (b == 0x23) { break; }
+                    if (b == 0x27 || b == 0x22) { in_string = b; j++; continue; }
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                if (i >= end || bs[i] != 0x28) {
+                    this.success = 0;
+                    return;
+                }
+
+                int depth = 0;
+                int in_string = 0;
+
+                while (i < end) {
+                    int b = bs[i];
+                    if (in_string != 0) {
+                        if (b == 0x5C) { i += 2; continue; }
+                        if (b == in_string) { in_string = 0; }
+                        i++;
+                        continue;
+                    }
+                    if (b == 0x27 || b == 0x22) { in_string = b; i++; }
+                    else if (b == 0x28) { depth++; i++; }
+                    else if (b == 0x29) {
+                        depth--;
+                        i++;
+                        if (depth == 0) { this.result_pos = i; this.success = 1; return; }
+                    } else { i++; }
+                }
+
+                this.success = 0;
+            }
+        }
+
+    domain:
+        bytes: List<int> = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+void main() {
+    var failures = 0;
+
+    final s1 = @@RubySyntaxSkipperFsm();
+    final inp1 = "# comment\ncode".codeUnits;
+    s1.setup(inp1, 0, inp1.length);
+    s1.do_skip_comment();
+    if (s1.get_success() != 1 || s1.get_result_pos() != 9) {
+        print("FAIL 1: success=\${s1.get_success()}, pos=\${s1.get_result_pos()}");
+        failures++;
+    }
+
+    final s2 = @@RubySyntaxSkipperFsm();
+    final inp2 = '"hello" rest'.codeUnits;
+    s2.setup(inp2, 0, inp2.length);
+    s2.do_skip_string();
+    if (s2.get_success() != 1 || s2.get_result_pos() != 7) {
+        print("FAIL 2: success=\${s2.get_success()}, pos=\${s2.get_result_pos()}");
+        failures++;
+    }
+
+    final s3 = @@RubySyntaxSkipperFsm();
+    final inp3 = "'hello' rest".codeUnits;
+    s3.setup(inp3, 0, inp3.length);
+    s3.do_skip_string();
+    if (s3.get_success() != 1 || s3.get_result_pos() != 7) {
+        print("FAIL 3: success=\${s3.get_success()}, pos=\${s3.get_result_pos()}");
+        failures++;
+    }
+
+    final s4 = @@RubySyntaxSkipperFsm();
+    final inp4 = "%Q{text} rest".codeUnits;
+    s4.setup(inp4, 0, inp4.length);
+    s4.do_skip_string();
+    if (s4.get_success() != 1 || s4.get_result_pos() != 8) {
+        print("FAIL 4: success=\${s4.get_success()}, pos=\${s4.get_result_pos()}");
+        failures++;
+    }
+
+    final s5 = @@RubySyntaxSkipperFsm();
+    final inp5 = "%q[text] rest".codeUnits;
+    s5.setup(inp5, 0, inp5.length);
+    s5.do_skip_string();
+    if (s5.get_success() != 1 || s5.get_result_pos() != 8) {
+        print("FAIL 5: success=\${s5.get_success()}, pos=\${s5.get_result_pos()}");
+        failures++;
+    }
+
+    final s6 = @@RubySyntaxSkipperFsm();
+    final inp6 = "x + 1 # comment".codeUnits;
+    s6.setup(inp6, 0, inp6.length);
+    s6.do_find_line_end();
+    if (s6.get_result_pos() != 6) {
+        print("FAIL 6: pos=\${s6.get_result_pos()}, expected 6");
+        failures++;
+    }
+
+    final s7 = @@RubySyntaxSkipperFsm();
+    final inp7 = "(a, f(b)) rest".codeUnits;
+    s7.setup(inp7, 0, inp7.length);
+    s7.do_balanced_paren_end();
+    if (s7.get_success() != 1 || s7.get_result_pos() != 9) {
+        print("FAIL 7: success=\${s7.get_success()}, pos=\${s7.get_result_pos()}");
+        failures++;
+    }
+
+    final s8 = @@RubySyntaxSkipperFsm();
+    final inp8 = "%Q{outer {inner} end} rest".codeUnits;
+    s8.setup(inp8, 0, inp8.length);
+    s8.do_skip_string();
+    if (s8.get_success() != 1 || s8.get_result_pos() != 21) {
+        print("FAIL 8: success=\${s8.get_success()}, pos=\${s8.get_result_pos()}");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: \$failures failures");
+        exit(1);
+    }
+    print("PASS: ruby_skipper (8 cases)");
+}

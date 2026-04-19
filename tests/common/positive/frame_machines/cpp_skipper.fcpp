@@ -1,0 +1,268 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <algorithm>
+
+// cpp_skipper -- FSM for skipping syntax constructs.
+
+@@system CppSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: std::vector<uint8_t>, start: int, length: int) {
+            this->bytes = input_bytes;
+            this->pos = start;
+            this->scan_end = length;
+        }
+        get_result_pos(): int {
+            return this->result_pos;
+        }
+        get_success(): int {
+            return this->success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                if (i + 1 < end && bs[i] == '/' && bs[i + 1] == '/') {
+                    int j = i + 2;
+                    while (j < end && bs[j] != '\n') { j++; }
+                    this->result_pos = j;
+                    this->success = 1;
+                    return;
+                }
+
+                if (i + 1 < end && bs[i] == '/' && bs[i + 1] == '*') {
+                    int j = i + 2;
+                    while (j + 1 < end) {
+                        if (bs[j] == '*' && bs[j + 1] == '/') {
+                            this->result_pos = j + 2;
+                            this->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this->result_pos = end;
+                    this->success = 1;
+                    return;
+                }
+
+                this->success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                // C++ raw string: R"delim(...)delim"
+                if (i + 1 < end && bs[i] == 'R' && bs[i + 1] == '"') {
+                    int j = i + 2;
+                    std::vector<uint8_t> delim(33);
+                    int dlen = 0;
+                    while (j < end && bs[j] != '(') {
+                        delim[dlen] = bs[j]; dlen++; j++;
+                        if (dlen > 32) { this->success = 0; return; }
+                    }
+                    if (j >= end || bs[j] != '(') { this->success = 0; return; }
+                    j++;
+                    while (j < end) {
+                        if (bs[j] == ')') {
+                            int k = j + 1; int m = 0;
+                            while (m < dlen && k < end && bs[k] == delim[m]) { k++; m++; }
+                            if (m == dlen && k < end && bs[k] == '"') {
+                                this->result_pos = k + 1;
+                                this->success = 1;
+                                return;
+                            }
+                        }
+                        j++;
+                    }
+                    this->result_pos = end;
+                    this->success = 1;
+                    return;
+                }
+
+                if (i < end && (bs[i] == '"' || bs[i] == '\'')) {
+                    int q = bs[i];
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == '\\') { j += 2; continue; }
+                        if (bs[j] == q) {
+                            this->result_pos = j + 1;
+                            this->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this->result_pos = end;
+                    this->success = 1;
+                    return;
+                }
+
+                this->success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                while (j < end) {
+                    int b = bs[j];
+                    if (b == '\n' || b == ';') { break; }
+                    if (b == '/' && j + 1 < end && bs[j + 1] == '/') { break; }
+                    if (b == '/' && j + 1 < end && bs[j + 1] == '*') { break; }
+                    j++;
+                }
+
+                this->result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                if (i >= end || bs[i] != '(') {
+                    this->success = 0;
+                    return;
+                }
+
+                int depth = 1;
+                int j = i + 1;
+                while (j < end && depth > 0) {
+                    int b = bs[j];
+                    if (b == '(') { depth++; }
+                    else if (b == ')') { depth--; }
+                    else if (b == '"' || b == '\'') {
+                        int q = b;
+                        j++;
+                        while (j < end && bs[j] != q) {
+                            if (bs[j] == '\\') { j++; }
+                            j++;
+                        }
+                    }
+                    j++;
+                }
+
+                if (depth == 0) { this->result_pos = j; this->success = 1; }
+                else { this->result_pos = end; this->success = 0; }
+            }
+        }
+
+    domain:
+        bytes: std::vector<uint8_t> = {}
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+int main() {
+    int failures = 0;
+
+    auto to_bytes = [](const std::string& s) -> std::vector<uint8_t> {
+        return std::vector<uint8_t>(s.begin(), s.end());
+    };
+
+    auto s1 = CppSyntaxSkipperFsm();
+    auto inp1 = to_bytes("// hello\ncode");
+    s1.setup(inp1, 0, inp1.size());
+    s1.do_skip_comment();
+    if (s1.get_success() != 1 || s1.get_result_pos() != 8) {
+        printf("FAIL 1: Skip line comment\n");
+        failures++;
+    }
+
+    auto s2 = CppSyntaxSkipperFsm();
+    auto inp2 = to_bytes("/* block */code");
+    s2.setup(inp2, 0, inp2.size());
+    s2.do_skip_comment();
+    if (s2.get_success() != 1 || s2.get_result_pos() != 11) {
+        printf("FAIL 2: Skip block comment\n");
+        failures++;
+    }
+
+    auto s3 = CppSyntaxSkipperFsm();
+    auto inp3 = to_bytes("\"hello world\" rest");
+    s3.setup(inp3, 0, inp3.size());
+    s3.do_skip_string();
+    if (s3.get_success() != 1 || s3.get_result_pos() != 13) {
+        printf("FAIL 3: Skip double-quoted string\n");
+        failures++;
+    }
+
+    auto s4 = CppSyntaxSkipperFsm();
+    auto inp4 = to_bytes("R\"(raw string)\" rest");
+    s4.setup(inp4, 0, inp4.size());
+    s4.do_skip_string();
+    if (s4.get_success() != 1 || s4.get_result_pos() != 15) {
+        printf("FAIL 4: C++ raw string\n");
+        failures++;
+    }
+
+    auto s5 = CppSyntaxSkipperFsm();
+    auto inp5 = to_bytes("R\"xyz(raw content)xyz\" rest");
+    s5.setup(inp5, 0, inp5.size());
+    s5.do_skip_string();
+    if (s5.get_success() != 1 || s5.get_result_pos() != 22) {
+        printf("FAIL 5: C++ raw string with delim\n");
+        failures++;
+    }
+
+    auto s6 = CppSyntaxSkipperFsm();
+    auto inp6 = to_bytes("x + 1\nmore");
+    s6.setup(inp6, 0, inp6.size());
+    s6.do_find_line_end();
+    if (s6.get_result_pos() != 5) {
+        printf("FAIL 6: Find line end\n");
+        failures++;
+    }
+
+    auto s7 = CppSyntaxSkipperFsm();
+    auto inp7 = to_bytes("x + 1");
+    s7.setup(inp7, 0, inp7.size());
+    s7.do_skip_comment();
+    if (s7.get_success() != 0) {
+        printf("FAIL 7: Not a comment\n");
+        failures++;
+    }
+
+    auto s8 = CppSyntaxSkipperFsm();
+    auto inp8 = to_bytes("(a, f(b), c) rest");
+    s8.setup(inp8, 0, inp8.size());
+    s8.do_balanced_paren_end();
+    if (s8.get_success() != 1 || s8.get_result_pos() != 12) {
+        printf("FAIL 8: Balanced parens\n");
+        failures++;
+    }
+
+    if (failures > 0) { printf("FAIL: %d failures\n", failures); return 1; }
+    printf("PASS: cpp_skipper (8 cases)\n");
+    return 0;
+}

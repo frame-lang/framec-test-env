@@ -1,0 +1,582 @@
+@@target csharp
+
+using System;
+using System.Text;
+
+// ContextParser -- FSM for parsing @@ context constructs.
+// Translated from framec's native_region_scanner/context_parser.frs
+//
+// Parses:
+//   @@:return [= expr]     kind=2 (ContextReturn)
+//   @@:event               kind=3 (ContextEvent)
+//   @@:data.key [= expr]   kind=4 (ContextData) or kind=5 (ContextDataAssign)
+//   @@:params.key           kind=6 (ContextParams)
+//   @@SystemName()          kind=7 (TaggedInstantiation)
+//   @@:(expr)               kind=8 (ContextReturnExpr)
+//   @@:return(expr)         kind=9 (ReturnCall)
+//   @@:self.method()        kind=10 (ContextSelfCall)
+//   @@:self                 kind=11 (ContextSelf)
+//   @@:system.state         kind=12 (ContextSystemState)
+//   other                   has_result=0
+
+@@system ContextParserFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        setup_with_paren_end(input_bytes: byte[], start: int, length: int, p_end: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+            this.paren_end = p_end;
+        }
+        get_result_end(): int {
+            return this.result_end;
+        }
+        get_result_kind(): int {
+            return this.result_kind;
+        }
+        get_has_result(): int {
+            return this.has_result;
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $Dispatching }
+        }
+
+        $Dispatching {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                if (i >= end) {
+                    this.has_result = 0;
+                    -> $Done
+                }
+
+                int b = bs[i];
+
+                if (b == (byte)':') {
+                    this.pos = i + 1;
+                    -> $DispatchColon
+                } else if (b >= (byte)'A' && b <= (byte)'Z') {
+                    // @@SystemName -- pos stays at start of name
+                    -> $ParseInstantiation
+                } else {
+                    this.result_end = i;
+                    this.has_result = 0;
+                    -> $Done
+                }
+            }
+        }
+
+        $DispatchColon {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Check for @@:return
+                if (i + 5 < end) {
+                    string tag = Encoding.UTF8.GetString(bs, i, 6);
+                    if (tag == "return") {
+                        this.pos = i + 6;
+                        -> $ParseReturn
+                    }
+                }
+
+                // Check for @@:event
+                if (i + 4 < end) {
+                    string tag = Encoding.UTF8.GetString(bs, i, 5);
+                    if (tag == "event") {
+                        this.result_end = i + 5;
+                        this.result_kind = 3;
+                        this.has_result = 1;
+                        -> $Done
+                    }
+                }
+
+                // Check for @@:data
+                if (i + 3 < end) {
+                    string tag = Encoding.UTF8.GetString(bs, i, 4);
+                    if (tag == "data") {
+                        this.pos = i + 4;
+                        -> $ParseData
+                    }
+                }
+
+                // Check for @@:params
+                if (i + 5 < end) {
+                    string tag = Encoding.UTF8.GetString(bs, i, 6);
+                    if (tag == "params") {
+                        this.pos = i + 6;
+                        -> $ParseParams
+                    }
+                }
+
+                // Check for @@:self
+                if (i + 3 < end) {
+                    string tag = Encoding.UTF8.GetString(bs, i, 4);
+                    if (tag == "self") {
+                        this.pos = i + 4;
+                        -> $ParseSelf
+                    }
+                }
+
+                // Check for @@:system
+                if (i + 5 < end) {
+                    string tag = Encoding.UTF8.GetString(bs, i, 6);
+                    if (tag == "system") {
+                        this.pos = i + 6;
+                        -> $ParseSystem
+                    }
+                }
+
+                // Check for @@:(expr)
+                if (i < end && bs[i] == (byte)'(') {
+                    this.pos = i;
+                    -> $ParseContextReturnExpr
+                }
+
+                // Unknown
+                this.result_end = i;
+                this.has_result = 0;
+                -> $Done
+            }
+        }
+
+        $ParseReturn {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Skip whitespace
+                while (i < end && (bs[i] == (byte)' ' || bs[i] == (byte)'\t')) {
+                    i++;
+                }
+
+                if (i < end && bs[i] == (byte)'(') {
+                    // @@:return(expr) -- scan balanced parens
+                    int depth = 1;
+                    i++;
+                    while (i < end && depth > 0) {
+                        if (bs[i] == (byte)'(') {
+                            depth++;
+                        }
+                        if (bs[i] == (byte)')') {
+                            depth--;
+                        }
+                        if (depth > 0) {
+                            i++;
+                        }
+                    }
+                    if (depth == 0) {
+                        i++;
+                    }
+                    this.result_end = i;
+                    this.result_kind = 9;
+                    this.has_result = 1;
+                    -> $Done
+                } else if (i < end && bs[i] == (byte)'=' && (i + 1 >= end || bs[i + 1] != (byte)'=')) {
+                    // @@:return = <expr> -- scan expression
+                    i++;
+                    // Skip whitespace after =
+                    while (i < end && (bs[i] == (byte)' ' || bs[i] == (byte)'\t')) {
+                        i++;
+                    }
+                    // Scan to end of expression (newline or ;)
+                    while (i < end && bs[i] != (byte)'\n' && bs[i] != (byte)';') {
+                        i++;
+                    }
+                    this.result_end = i;
+                    this.result_kind = 2;
+                    this.has_result = 1;
+                    -> $Done
+                } else {
+                    // @@:return (bare read)
+                    this.result_end = i;
+                    this.result_kind = 2;
+                    this.has_result = 1;
+                    -> $Done
+                }
+            }
+        }
+
+        $ParseContextReturnExpr {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                if (i < end && bs[i] == (byte)'(') {
+                    int depth = 1;
+                    i++;
+                    while (i < end && depth > 0) {
+                        int b = bs[i];
+                        if (b == (byte)'(') {
+                            depth++;
+                        } else if (b == (byte)')') {
+                            depth--;
+                        } else if (b == (byte)'"' || b == (byte)'\'') {
+                            int q = b;
+                            i++;
+                            while (i < end) {
+                                if (bs[i] == (byte)'\\' && i + 1 < end) {
+                                    i += 2;
+                                    continue;
+                                }
+                                if (bs[i] == q) {
+                                    break;
+                                }
+                                i++;
+                            }
+                        }
+                        i++;
+                    }
+                }
+
+                this.result_end = i;
+                this.result_kind = 8;
+                this.has_result = 1;
+                -> $Done
+            }
+        }
+
+        $ParseData {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Scan .key
+                if (i < end && bs[i] == (byte)'.') {
+                    i++;
+                    while (i < end && (Char.IsLetterOrDigit((char)bs[i]) || bs[i] == (byte)'_')) {
+                        i++;
+                    }
+                }
+
+                // Check for assignment
+                int j = i;
+                while (j < end && (bs[j] == (byte)' ' || bs[j] == (byte)'\t')) {
+                    j++;
+                }
+
+                if (j < end && bs[j] == (byte)'=' && (j + 1 >= end || bs[j + 1] != (byte)'=')) {
+                    // @@:data.key = expr
+                    j++;
+                    while (j < end && (bs[j] == (byte)' ' || bs[j] == (byte)'\t')) {
+                        j++;
+                    }
+                    while (j < end && bs[j] != (byte)'\n' && bs[j] != (byte)';') {
+                        j++;
+                    }
+                    this.result_end = j;
+                    this.result_kind = 5;
+                } else {
+                    this.result_end = i;
+                    this.result_kind = 4;
+                }
+
+                this.has_result = 1;
+                -> $Done
+            }
+        }
+
+        $ParseParams {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                if (i < end && bs[i] == (byte)'.') {
+                    i++;
+                    while (i < end && (Char.IsLetterOrDigit((char)bs[i]) || bs[i] == (byte)'_')) {
+                        i++;
+                    }
+                }
+
+                this.result_end = i;
+                this.result_kind = 6;
+                this.has_result = 1;
+                -> $Done
+            }
+        }
+
+        $ParseSelf {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                if (i < end && bs[i] == (byte)'.') {
+                    i++;
+                    // Scan identifier
+                    while (i < end && (Char.IsLetterOrDigit((char)bs[i]) || bs[i] == (byte)'_')) {
+                        i++;
+                    }
+                    if (i < end && bs[i] == (byte)'(') {
+                        // @@:self.method(args) -- scan balanced parens
+                        int depth = 1;
+                        i++;
+                        while (i < end && depth > 0) {
+                            if (bs[i] == (byte)'(') {
+                                depth++;
+                            }
+                            if (bs[i] == (byte)')') {
+                                depth--;
+                            }
+                            if (bs[i] == (byte)'"' || bs[i] == (byte)'\'') {
+                                int q = bs[i];
+                                i++;
+                                while (i < end) {
+                                    if (bs[i] == (byte)'\\' && i + 1 < end) {
+                                        i += 2;
+                                        continue;
+                                    }
+                                    if (bs[i] == q) {
+                                        break;
+                                    }
+                                    i++;
+                                }
+                            }
+                            if (depth > 0) {
+                                i++;
+                            }
+                        }
+                        if (depth == 0) {
+                            i++;
+                        }
+                        this.result_end = i;
+                        this.result_kind = 10;
+                        this.has_result = 1;
+                    } else {
+                        // @@:self.property
+                        this.result_end = i;
+                        this.result_kind = 11;
+                        this.has_result = 1;
+                    }
+                } else {
+                    // bare @@:self
+                    this.result_end = i;
+                    this.result_kind = 11;
+                    this.has_result = 1;
+                }
+
+                -> $Done
+            }
+        }
+
+        $ParseSystem {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                if (i + 5 < end) {
+                    string tag = Encoding.UTF8.GetString(bs, i, 6);
+                    if (tag == ".state") {
+                        int after = i + 6;
+                        if (after >= end || (!Char.IsLetterOrDigit((char)bs[after]) && bs[after] != (byte)'_')) {
+                            this.result_end = i + 6;
+                            this.result_kind = 12;
+                            this.has_result = 1;
+                            -> $Done
+                        }
+                    }
+                }
+
+                // Bare @@:system or unknown variant
+                this.result_end = i;
+                this.result_kind = 13;
+                this.has_result = 1;
+                -> $Done
+            }
+        }
+
+        $ParseInstantiation {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Scan identifier
+                while (i < end && (Char.IsLetterOrDigit((char)bs[i]) || bs[i] == (byte)'_')) {
+                    i++;
+                }
+
+                // Must be followed by (
+                if (i < end && bs[i] == (byte)'(') {
+                    if (this.paren_end > 0) {
+                        i = this.paren_end;
+                        this.result_end = i;
+                        this.result_kind = 7;
+                        this.has_result = 1;
+                    } else {
+                        this.result_end = i;
+                        this.has_result = 0;
+                    }
+                } else {
+                    this.result_end = i;
+                    this.has_result = 0;
+                }
+
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+                // Terminal state -- results are in domain vars
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        scan_end: int = 0
+        result_end: int = 0
+        result_kind: int = 0
+        has_result: int = 0
+        paren_end: int = 0
+}
+
+class Program {
+    static void Main(string[] args) {
+        int failures = 0;
+
+        // Test 1: @@:return (bare read)
+        var p1 = new ContextParserFsm();
+        byte[] inp1 = Encoding.UTF8.GetBytes(":return");
+        p1.setup(inp1, 0, inp1.Length);
+        p1.do_parse();
+        if ((int)p1.get_has_result() != 1 || (int)p1.get_result_kind() != 2) {
+            Console.WriteLine("FAIL 1: has_result=" + p1.get_has_result() + ", kind=" + p1.get_result_kind());
+            failures++;
+        }
+
+        // Test 2: @@:event
+        var p2 = new ContextParserFsm();
+        byte[] inp2 = Encoding.UTF8.GetBytes(":event");
+        p2.setup(inp2, 0, inp2.Length);
+        p2.do_parse();
+        if ((int)p2.get_has_result() != 1 || (int)p2.get_result_kind() != 3) {
+            Console.WriteLine("FAIL 2: has_result=" + p2.get_has_result() + ", kind=" + p2.get_result_kind());
+            failures++;
+        }
+
+        // Test 3: @@:data.key
+        var p3 = new ContextParserFsm();
+        byte[] inp3 = Encoding.UTF8.GetBytes(":data.name rest");
+        p3.setup(inp3, 0, inp3.Length);
+        p3.do_parse();
+        if ((int)p3.get_has_result() != 1 || (int)p3.get_result_kind() != 4) {
+            Console.WriteLine("FAIL 3: has_result=" + p3.get_has_result() + ", kind=" + p3.get_result_kind());
+            failures++;
+        }
+
+        // Test 4: @@:data.key = expr
+        var p4 = new ContextParserFsm();
+        byte[] inp4 = Encoding.UTF8.GetBytes(":data.key = value\n");
+        p4.setup(inp4, 0, inp4.Length);
+        p4.do_parse();
+        if ((int)p4.get_has_result() != 1 || (int)p4.get_result_kind() != 5) {
+            Console.WriteLine("FAIL 4: has_result=" + p4.get_has_result() + ", kind=" + p4.get_result_kind());
+            failures++;
+        }
+
+        // Test 5: @@:params.key
+        var p5 = new ContextParserFsm();
+        byte[] inp5 = Encoding.UTF8.GetBytes(":params.name rest");
+        p5.setup(inp5, 0, inp5.Length);
+        p5.do_parse();
+        if ((int)p5.get_has_result() != 1 || (int)p5.get_result_kind() != 6) {
+            Console.WriteLine("FAIL 5: has_result=" + p5.get_has_result() + ", kind=" + p5.get_result_kind());
+            failures++;
+        }
+
+        // Test 6: @@:(expr)
+        var p6 = new ContextParserFsm();
+        byte[] inp6 = Encoding.UTF8.GetBytes(":(x + 1) rest");
+        p6.setup(inp6, 0, inp6.Length);
+        p6.do_parse();
+        if ((int)p6.get_has_result() != 1 || (int)p6.get_result_kind() != 8) {
+            Console.WriteLine("FAIL 6: has_result=" + p6.get_has_result() + ", kind=" + p6.get_result_kind());
+            failures++;
+        }
+
+        // Test 7: @@:return(expr)
+        var p7 = new ContextParserFsm();
+        byte[] inp7 = Encoding.UTF8.GetBytes(":return(42) rest");
+        p7.setup(inp7, 0, inp7.Length);
+        p7.do_parse();
+        if ((int)p7.get_has_result() != 1 || (int)p7.get_result_kind() != 9) {
+            Console.WriteLine("FAIL 7: has_result=" + p7.get_has_result() + ", kind=" + p7.get_result_kind());
+            failures++;
+        }
+
+        // Test 8: @@:self (bare)
+        var p8 = new ContextParserFsm();
+        byte[] inp8 = Encoding.UTF8.GetBytes(":self rest");
+        p8.setup(inp8, 0, inp8.Length);
+        p8.do_parse();
+        if ((int)p8.get_has_result() != 1 || (int)p8.get_result_kind() != 11) {
+            Console.WriteLine("FAIL 8: has_result=" + p8.get_has_result() + ", kind=" + p8.get_result_kind());
+            failures++;
+        }
+
+        // Test 9: @@:self.method(args)
+        var p9 = new ContextParserFsm();
+        byte[] inp9 = Encoding.UTF8.GetBytes(":self.doWork(x) rest");
+        p9.setup(inp9, 0, inp9.Length);
+        p9.do_parse();
+        if ((int)p9.get_has_result() != 1 || (int)p9.get_result_kind() != 10) {
+            Console.WriteLine("FAIL 9: has_result=" + p9.get_has_result() + ", kind=" + p9.get_result_kind());
+            failures++;
+        }
+
+        // Test 10: @@:system.state
+        var p10 = new ContextParserFsm();
+        byte[] inp10 = Encoding.UTF8.GetBytes(":system.state rest");
+        p10.setup(inp10, 0, inp10.Length);
+        p10.do_parse();
+        if ((int)p10.get_has_result() != 1 || (int)p10.get_result_kind() != 12) {
+            Console.WriteLine("FAIL 10: has_result=" + p10.get_has_result() + ", kind=" + p10.get_result_kind());
+            failures++;
+        }
+
+        // Test 11: @@SystemName() with paren_end
+        var p11 = new ContextParserFsm();
+        byte[] inp11 = Encoding.UTF8.GetBytes("MySystem() rest");
+        p11.setup_with_paren_end(inp11, 0, inp11.Length, 10);
+        p11.do_parse();
+        if ((int)p11.get_has_result() != 1 || (int)p11.get_result_kind() != 7) {
+            Console.WriteLine("FAIL 11: has_result=" + p11.get_has_result() + ", kind=" + p11.get_result_kind());
+            failures++;
+        }
+
+        // Test 12: No match (lowercase, not a keyword)
+        var p12 = new ContextParserFsm();
+        byte[] inp12 = Encoding.UTF8.GetBytes("xyz");
+        p12.setup(inp12, 0, inp12.Length);
+        p12.do_parse();
+        if ((int)p12.get_has_result() != 0) {
+            Console.WriteLine("FAIL 12: should not match, has_result=" + p12.get_has_result());
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine("FAIL: " + failures + " failures");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: context_parser (12 cases)");
+    }
+}

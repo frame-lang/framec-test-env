@@ -1,0 +1,155 @@
+@@target csharp
+
+using System;
+using System.Text;
+
+// ExprScanner — PDA for scanning assignment RHS expressions.
+// Translated from framec's native_region_scanner/expr_scanner.frs
+//
+// Scans from pos (after =) to a terminator (; or \n) at depth 0,
+// respecting nested ()[]{}  and string literals with escape handling.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.end = length;
+        }
+        get_result(): int {
+            return this.result_end;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                int i = this.pos;
+                int end = this.end;
+                byte[] bs = this.bytes;
+                int depth = 0;
+                int inString = -1;
+
+                while (i < end) {
+                    int b = bs[i];
+
+                    if (inString != -1) {
+                        if (b == '\\' && i + 1 < end) {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == inString) {
+                            inString = -1;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '"' || b == '\'') {
+                        inString = b;
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '(' || b == '[' || b == '{') {
+                        depth++;
+                    } else if (b == ')' || b == ']' || b == '}') {
+                        depth = Math.Max(depth - 1, 0);
+                    } else if (b == ';' && depth == 0) {
+                        i++;
+                        break;
+                    } else if (b == '\n' && depth == 0) {
+                        break;
+                    }
+
+                    i++;
+                }
+
+                this.result_end = i;
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+class Program {
+    static void Main(string[] args) {
+        int failures = 0;
+
+        // Test 1: simple expression terminated by newline
+        var e1 = new ExprScannerFsm();
+        byte[] inp1 = Encoding.UTF8.GetBytes(" x + 1\nfoo");
+        e1.setup(inp1, 0, inp1.Length);
+        e1.do_scan();
+        int r1 = (int)e1.get_result();
+        string expr1 = Encoding.UTF8.GetString(inp1, 0, r1);
+        if (expr1 != " x + 1") {
+            Console.WriteLine("FAIL 1: got '" + expr1 + "'");
+            failures++;
+        }
+
+        // Test 2: expression with semicolon terminator
+        var e2 = new ExprScannerFsm();
+        byte[] inp2 = Encoding.UTF8.GetBytes(" x + 1; y = 2");
+        e2.setup(inp2, 0, inp2.Length);
+        e2.do_scan();
+        int r2 = (int)e2.get_result();
+        string expr2 = Encoding.UTF8.GetString(inp2, 0, r2);
+        if (expr2 != " x + 1;") {
+            Console.WriteLine("FAIL 2: got '" + expr2 + "'");
+            failures++;
+        }
+
+        // Test 3: nested parens not treated as terminator
+        var e3 = new ExprScannerFsm();
+        byte[] inp3 = Encoding.UTF8.GetBytes(" f(x, g(y))\nz");
+        e3.setup(inp3, 0, inp3.Length);
+        e3.do_scan();
+        int r3 = (int)e3.get_result();
+        string expr3 = Encoding.UTF8.GetString(inp3, 0, r3);
+        if (expr3 != " f(x, g(y))") {
+            Console.WriteLine("FAIL 3: got '" + expr3 + "'");
+            failures++;
+        }
+
+        // Test 4: string with escaped quote
+        var e4 = new ExprScannerFsm();
+        byte[] inp4 = Encoding.UTF8.GetBytes(" \"hello\\\"world\"\n");
+        e4.setup(inp4, 0, inp4.Length);
+        e4.do_scan();
+        int r4 = (int)e4.get_result();
+        string expr4 = Encoding.UTF8.GetString(inp4, 0, r4);
+        if (expr4 != " \"hello\\\"world\"") {
+            Console.WriteLine("FAIL 4: got '" + expr4 + "'");
+            failures++;
+        }
+
+        // Test 5: semicolon inside string (should not terminate)
+        var e5 = new ExprScannerFsm();
+        byte[] inp5 = Encoding.UTF8.GetBytes(" \"a;b\"\n");
+        e5.setup(inp5, 0, inp5.Length);
+        e5.do_scan();
+        int r5 = (int)e5.get_result();
+        string expr5 = Encoding.UTF8.GetString(inp5, 0, r5);
+        if (expr5 != " \"a;b\"") {
+            Console.WriteLine("FAIL 5: got '" + expr5 + "'");
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine("FAIL: " + failures + " failures");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: expr_scanner (5 cases)");
+    }
+}

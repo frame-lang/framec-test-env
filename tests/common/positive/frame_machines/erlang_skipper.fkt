@@ -1,0 +1,294 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+// ErlangSyntaxSkipper -- FSM for skipping Erlang comments and strings.
+// Translated from framec's native_region_scanner/erlang_skipper.frs
+//
+// Handles: % line comments, "..." strings, '...' quoted atoms,
+// Erlang-style line endings, balanced parens.
+
+@@system ErlangSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: ByteArray, start: Int, length: Int) {
+            this.bytes = input_bytes
+            this.pos = start
+            this.scan_end = length
+        }
+        get_result_pos(): Int {
+            return this.result_pos
+        }
+        get_success(): Int {
+            return this.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                // Erlang: % line comment only
+                if (i < end && (bs[i].toInt() and 0xFF) == '%'.code) {
+                    var j = i + 1
+                    while (j < end && (bs[j].toInt() and 0xFF) != '\n'.code) {
+                        j++
+                    }
+                    this.result_pos = j
+                    this.success = 1
+                    return
+                }
+
+                this.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                // Simple string: "..."
+                if (i < end && (bs[i].toInt() and 0xFF) == '"'.code) {
+                    var j = i + 1
+                    while (j < end) {
+                        if ((bs[j].toInt() and 0xFF) == '\\'.code) {
+                            j += 2
+                            continue
+                        }
+                        if ((bs[j].toInt() and 0xFF) == '"'.code) {
+                            this.result_pos = j + 1
+                            this.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    this.result_pos = end
+                    this.success = 1
+                    return
+                }
+
+                // Quoted atoms: '...'
+                if (i < end && (bs[i].toInt() and 0xFF) == '\''.code) {
+                    var j = i + 1
+                    while (j < end) {
+                        if ((bs[j].toInt() and 0xFF) == '\\'.code) {
+                            j += 2
+                            continue
+                        }
+                        if ((bs[j].toInt() and 0xFF) == '\''.code) {
+                            this.result_pos = j + 1
+                            this.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    this.result_pos = end
+                    this.success = 1
+                    return
+                }
+
+                this.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                var j = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+                var in_string = 0
+
+                while (j < end) {
+                    val b = bs[j].toInt() and 0xFF
+                    if (b == '\n'.code) {
+                        break
+                    }
+
+                    // Inside string
+                    if (in_string != 0) {
+                        if (b == '\\'.code) {
+                            j += 2
+                            continue
+                        }
+                        if (b == in_string) {
+                            in_string = 0
+                        }
+                        j++
+                        continue
+                    }
+
+                    // Terminators
+                    if (b == '%'.code) {
+                        break
+                    }
+
+                    // String starts
+                    if (b == '"'.code || b == '\''.code) {
+                        in_string = b
+                        j++
+                        continue
+                    }
+
+                    j++
+                }
+
+                this.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                if (i >= end || (bs[i].toInt() and 0xFF) != '('.code) {
+                    this.success = 0
+                    return
+                }
+
+                var depth = 0
+                var in_string = 0
+
+                while (i < end) {
+                    val b = bs[i].toInt() and 0xFF
+
+                    // Inside string
+                    if (in_string != 0) {
+                        if (b == '\\'.code) {
+                            i += 2
+                            continue
+                        }
+                        if (b == in_string) {
+                            in_string = 0
+                        }
+                        i++
+                        continue
+                    }
+
+                    if (b == '\''.code || b == '"'.code) {
+                        in_string = b
+                        i++
+                    } else if (b == '('.code) {
+                        depth++
+                        i++
+                    } else if (b == ')'.code) {
+                        depth--
+                        i++
+                        if (depth == 0) {
+                            this.result_pos = i
+                            this.success = 1
+                            return
+                        }
+                    } else {
+                        i++
+                    }
+                }
+
+                this.success = 0
+            }
+        }
+
+    domain:
+        bytes: ByteArray = ByteArray(0)
+        pos: Int = 0
+        scan_end: Int = 0
+        result_pos: Int = 0
+        success: Int = 1
+}
+
+fun main() {
+    var failures = 0
+
+    // Test 1: Skip % comment
+    val s1 = @@ErlangSyntaxSkipperFsm()
+    val inp1 = "% comment\ncode".toByteArray()
+    s1.setup(inp1, 0, inp1.size)
+    s1.do_skip_comment()
+    if (s1.get_success() != 1 || s1.get_result_pos() != 9) {
+        println("FAIL 1: success=${s1.get_success()}, pos=${s1.get_result_pos()}")
+        failures++
+    }
+
+    // Test 2: Not a comment
+    val s2 = @@ErlangSyntaxSkipperFsm()
+    val inp2 = "x + 1".toByteArray()
+    s2.setup(inp2, 0, inp2.size)
+    s2.do_skip_comment()
+    if (s2.get_success() != 0) {
+        println("FAIL 2: should not be comment")
+        failures++
+    }
+
+    // Test 3: Skip double-quoted string
+    val s3 = @@ErlangSyntaxSkipperFsm()
+    val inp3 = "\"hello\" rest".toByteArray()
+    s3.setup(inp3, 0, inp3.size)
+    s3.do_skip_string()
+    if (s3.get_success() != 1 || s3.get_result_pos() != 7) {
+        println("FAIL 3: success=${s3.get_success()}, pos=${s3.get_result_pos()}")
+        failures++
+    }
+
+    // Test 4: Skip quoted atom
+    val s4 = @@ErlangSyntaxSkipperFsm()
+    val inp4 = "'my_atom' rest".toByteArray()
+    s4.setup(inp4, 0, inp4.size)
+    s4.do_skip_string()
+    if (s4.get_success() != 1 || s4.get_result_pos() != 9) {
+        println("FAIL 4: success=${s4.get_success()}, pos=${s4.get_result_pos()}")
+        failures++
+    }
+
+    // Test 5: Find line end (stops at %)
+    val s5 = @@ErlangSyntaxSkipperFsm()
+    val inp5 = "X + 1 % comment".toByteArray()
+    s5.setup(inp5, 0, inp5.size)
+    s5.do_find_line_end()
+    if (s5.get_result_pos() != 6) {
+        println("FAIL 5: pos=${s5.get_result_pos()}, expected 6")
+        failures++
+    }
+
+    // Test 6: Balanced parens
+    val s6 = @@ErlangSyntaxSkipperFsm()
+    val inp6 = "(a, f(b)) rest".toByteArray()
+    s6.setup(inp6, 0, inp6.size)
+    s6.do_balanced_paren_end()
+    if (s6.get_success() != 1 || s6.get_result_pos() != 9) {
+        println("FAIL 6: success=${s6.get_success()}, pos=${s6.get_result_pos()}")
+        failures++
+    }
+
+    // Test 7: String with escape
+    val s7 = @@ErlangSyntaxSkipperFsm()
+    val inp7 = "\"he\\\"llo\" rest".toByteArray()
+    s7.setup(inp7, 0, inp7.size)
+    s7.do_skip_string()
+    if (s7.get_success() != 1 || s7.get_result_pos() != 9) {
+        println("FAIL 7: success=${s7.get_success()}, pos=${s7.get_result_pos()}")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: $failures failures")
+        exitProcess(1)
+    }
+    println("PASS: erlang_skipper (7 cases)")
+}

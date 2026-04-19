@@ -1,0 +1,219 @@
+@@target java
+
+// LuaSyntaxSkipper — FSM for skipping Lua comments and strings.
+// Translated from framec's native_region_scanner/lua_skipper.frs
+//
+// Handles: -- line comments, --[[ block comments ]], [[ long strings ]],
+// simple strings, Lua-style line endings.
+
+@@system LuaSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Lua line comment: --
+                if (i + 1 < end && (bs[i] & 0xFF) == '-' && (bs[i + 1] & 0xFF) == '-') {
+                    // Check for block comment: --[[ ... ]]
+                    if (i + 3 < end && (bs[i + 2] & 0xFF) == '[' && (bs[i + 3] & 0xFF) == '[') {
+                        int j = i + 4;
+                        while (j + 1 < end) {
+                            if ((bs[j] & 0xFF) == ']' && (bs[j + 1] & 0xFF) == ']') {
+                                this.result_pos = j + 2;
+                                this.success = 1;
+                                return;
+                            }
+                            j++;
+                        }
+                        this.result_pos = end;
+                        this.success = 1;
+                        return;
+                    }
+                    // Line comment
+                    int j = i + 2;
+                    while (j < end && (bs[j] & 0xFF) != '\n') {
+                        j++;
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Long string: [[ ... ]]
+                if (i + 1 < end && (bs[i] & 0xFF) == '[' && (bs[i + 1] & 0xFF) == '[') {
+                    int j = i + 2;
+                    while (j + 1 < end) {
+                        if ((bs[j] & 0xFF) == ']' && (bs[j + 1] & 0xFF) == ']') {
+                            this.result_pos = j + 2;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                // Simple string: " or '
+                if (i < end && ((bs[i] & 0xFF) == '"' || (bs[i] & 0xFF) == '\'')) {
+                    int q = bs[i] & 0xFF;
+                    int j = i + 1;
+                    while (j < end) {
+                        if ((bs[j] & 0xFF) == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if ((bs[j] & 0xFF) == q) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                while (j < end) {
+                    int b = bs[j] & 0xFF;
+                    if (b == '\n') {
+                        break;
+                    }
+                    // Stop at -- comment
+                    if (b == '-' && j + 1 < end && (bs[j + 1] & 0xFF) == '-') {
+                        break;
+                    }
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+class Main {
+    public static void main(String[] args) {
+        int failures = 0;
+
+        // Test 1: Skip -- line comment
+        LuaSyntaxSkipperFsm s1 = @@LuaSyntaxSkipperFsm();
+        byte[] inp1 = "-- comment\ncode".getBytes();
+        s1.setup(inp1, 0, inp1.length);
+        s1.do_skip_comment();
+        if (s1.get_success() != 1 || s1.get_result_pos() != 10) {
+            System.out.println("FAIL 1: success=" + s1.get_success() + ", pos=" + s1.get_result_pos());
+            failures++;
+        }
+
+        // Test 2: Skip --[[ block comment ]]
+        LuaSyntaxSkipperFsm s2 = @@LuaSyntaxSkipperFsm();
+        byte[] inp2 = "--[[ block ]]code".getBytes();
+        s2.setup(inp2, 0, inp2.length);
+        s2.do_skip_comment();
+        if (s2.get_success() != 1 || s2.get_result_pos() != 13) {
+            System.out.println("FAIL 2: success=" + s2.get_success() + ", pos=" + s2.get_result_pos());
+            failures++;
+        }
+
+        // Test 3: Not a comment
+        LuaSyntaxSkipperFsm s3 = @@LuaSyntaxSkipperFsm();
+        byte[] inp3 = "x + 1".getBytes();
+        s3.setup(inp3, 0, inp3.length);
+        s3.do_skip_comment();
+        if (s3.get_success() != 0) {
+            System.out.println("FAIL 3: should not be comment");
+            failures++;
+        }
+
+        // Test 4: Skip [[ long string ]]
+        LuaSyntaxSkipperFsm s4 = @@LuaSyntaxSkipperFsm();
+        byte[] inp4 = "[[hello world]]rest".getBytes();
+        s4.setup(inp4, 0, inp4.length);
+        s4.do_skip_string();
+        if (s4.get_success() != 1 || s4.get_result_pos() != 15) {
+            System.out.println("FAIL 4: success=" + s4.get_success() + ", pos=" + s4.get_result_pos());
+            failures++;
+        }
+
+        // Test 5: Skip simple string
+        LuaSyntaxSkipperFsm s5 = @@LuaSyntaxSkipperFsm();
+        byte[] inp5 = "\"hello\" rest".getBytes();
+        s5.setup(inp5, 0, inp5.length);
+        s5.do_skip_string();
+        if (s5.get_success() != 1 || s5.get_result_pos() != 7) {
+            System.out.println("FAIL 5: success=" + s5.get_success() + ", pos=" + s5.get_result_pos());
+            failures++;
+        }
+
+        // Test 6: Find line end stops at --
+        LuaSyntaxSkipperFsm s6 = @@LuaSyntaxSkipperFsm();
+        byte[] inp6 = "x + 1 -- comment".getBytes();
+        s6.setup(inp6, 0, inp6.length);
+        s6.do_find_line_end();
+        if (s6.get_result_pos() != 6) {
+            System.out.println("FAIL 6: pos=" + s6.get_result_pos() + ", expected 6");
+            failures++;
+        }
+
+        if (failures > 0) {
+            System.out.println("FAIL: " + failures + " failures");
+            System.exit(1);
+        }
+        System.out.println("PASS: lua_skipper (6 cases)");
+    }
+}

@@ -1,0 +1,329 @@
+@@target python_3
+
+# JavaScriptSyntaxSkipper -- FSM for skipping JavaScript-style comments and strings.
+# Translated from framec's native_region_scanner/javascript_skipper.frs
+#
+# Identical to TypeScript: C-style comments plus template literals `...${x}...`
+# FindLineEnd and BalancedParenEnd are template-literal-aware (inline logic).
+
+@@system JavaScriptSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: list, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos(): int {
+            return self.result_pos
+        }
+        get_success(): int {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                # Try line comment: //
+                if i + 1 < end and bs[i] == ord('/') and bs[i + 1] == ord('/'):
+                    j = i + 2
+                    while j < end and bs[j] != ord('\n'):
+                        j += 1
+                    self.result_pos = j
+                    self.success = 1
+                    return
+
+                # Try block comment: /* ... */
+                if i + 1 < end and bs[i] == ord('/') and bs[i + 1] == ord('*'):
+                    j = i + 2
+                    while j + 1 < end:
+                        if bs[j] == ord('*') and bs[j + 1] == ord('/'):
+                            self.result_pos = j + 2
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = end
+                    self.success = 1
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                # Template literal: `...${expr}...`
+                if i < end and bs[i] == ord('`'):
+                    j = i + 1
+                    brace_depth = 0
+                    while j < end:
+                        if bs[j] == ord('`') and brace_depth == 0:
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        if bs[j] == ord('\\'):
+                            j += 2
+                            continue
+                        if bs[j] == ord('$') and j + 1 < end and bs[j + 1] == ord('{'):
+                            brace_depth += 1
+                            j += 2
+                            continue
+                        if bs[j] == ord('}') and brace_depth > 0:
+                            brace_depth -= 1
+                        j += 1
+                    self.result_pos = end
+                    self.success = 1
+                    return
+
+                # Simple string: "..." or '...' with backslash escapes
+                if i < end and (bs[i] == ord('"') or bs[i] == ord("'")):
+                    q = bs[i]
+                    j = i + 1
+                    while j < end:
+                        if bs[j] == ord('\\'):
+                            j += 2
+                            continue
+                        if bs[j] == q:
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = end
+                    self.success = 1
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                end = self.scan_end
+                bs = self.bytes
+                j = self.pos
+                in_string = 0
+                in_template = 0
+                template_brace_depth = 0
+
+                while j < end:
+                    b = bs[j]
+                    if b == ord('\n'):
+                        break
+
+                    # Inside template literal
+                    if in_template != 0:
+                        if b == ord('`') and template_brace_depth == 0:
+                            in_template = 0
+                            j += 1
+                            continue
+                        if b == ord('\\'):
+                            j += 2
+                            continue
+                        if b == ord('$') and j + 1 < end and bs[j + 1] == ord('{'):
+                            template_brace_depth += 1
+                            j += 2
+                            continue
+                        if b == ord('}') and template_brace_depth > 0:
+                            template_brace_depth -= 1
+                        j += 1
+                        continue
+
+                    # Inside regular string
+                    if in_string != 0:
+                        if b == ord('\\'):
+                            j += 2
+                            continue
+                        if b == in_string:
+                            in_string = 0
+                        j += 1
+                        continue
+
+                    # Terminators
+                    if b == ord(';') or b == ord('}'):
+                        break
+                    if b == ord('/') and j + 1 < end and (bs[j + 1] == ord('/') or bs[j + 1] == ord('*')):
+                        break
+
+                    # String/template starts
+                    if b == ord("'") or b == ord('"'):
+                        in_string = b
+                        j += 1
+                        continue
+                    if b == ord('`'):
+                        in_template = 1
+                        j += 1
+                        continue
+
+                    j += 1
+
+                self.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                end = self.scan_end
+                bs = self.bytes
+                i = self.pos
+
+                if i >= end or bs[i] != ord('('):
+                    self.success = 0
+                    return
+
+                depth = 0
+                in_string = 0
+                in_template = 0
+
+                while i < end:
+                    b = bs[i]
+
+                    # Inside template literal
+                    if in_template != 0:
+                        if b == ord('`'):
+                            in_template = 0
+                        if b == ord('\\'):
+                            i += 2
+                            continue
+                        i += 1
+                        continue
+
+                    # Inside string
+                    if in_string != 0:
+                        if b == ord('\\'):
+                            i += 2
+                            continue
+                        if b == in_string:
+                            in_string = 0
+                        i += 1
+                        continue
+
+                    if b == ord("'") or b == ord('"'):
+                        in_string = b
+                        i += 1
+                    elif b == ord('`'):
+                        in_template = 1
+                        i += 1
+                    elif b == ord('('):
+                        depth += 1
+                        i += 1
+                    elif b == ord(')'):
+                        depth -= 1
+                        i += 1
+                        if depth == 0:
+                            self.result_pos = i
+                            self.success = 1
+                            return
+                    else:
+                        i += 1
+
+                self.success = 0
+            }
+        }
+
+    domain:
+        bytes: list = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+if __name__ == '__main__':
+    failures = 0
+
+    # Test 1: Skip line comment
+    s1 = @@JavaScriptSyntaxSkipperFsm()
+    inp1 = list(b"// hello\ncode")
+    s1.setup(inp1, 0, len(inp1))
+    s1.do_skip_comment()
+    if s1.get_success() != 1 or s1.get_result_pos() != 8:
+        print(f"FAIL 1: success={s1.get_success()}, pos={s1.get_result_pos()}")
+        failures += 1
+
+    # Test 2: Skip block comment
+    s2 = @@JavaScriptSyntaxSkipperFsm()
+    inp2 = list(b"/* block */code")
+    s2.setup(inp2, 0, len(inp2))
+    s2.do_skip_comment()
+    if s2.get_success() != 1 or s2.get_result_pos() != 11:
+        print(f"FAIL 2: success={s2.get_success()}, pos={s2.get_result_pos()}")
+        failures += 1
+
+    # Test 3: Skip template literal
+    s3 = @@JavaScriptSyntaxSkipperFsm()
+    inp3 = list(b'`template ${x}` rest')
+    s3.setup(inp3, 0, len(inp3))
+    s3.do_skip_string()
+    if s3.get_success() != 1 or s3.get_result_pos() != 15:
+        print(f"FAIL 3: success={s3.get_success()}, pos={s3.get_result_pos()}")
+        failures += 1
+
+    # Test 4: Skip double-quoted string
+    s4 = @@JavaScriptSyntaxSkipperFsm()
+    inp4 = list(b'"hello world" rest')
+    s4.setup(inp4, 0, len(inp4))
+    s4.do_skip_string()
+    if s4.get_success() != 1 or s4.get_result_pos() != 13:
+        print(f"FAIL 4: success={s4.get_success()}, pos={s4.get_result_pos()}")
+        failures += 1
+
+    # Test 5: Find line end (stops at newline)
+    s5 = @@JavaScriptSyntaxSkipperFsm()
+    inp5 = list(b"x + 1\nmore")
+    s5.setup(inp5, 0, len(inp5))
+    s5.do_find_line_end()
+    if s5.get_result_pos() != 5:
+        print(f"FAIL 5: pos={s5.get_result_pos()}, expected 5")
+        failures += 1
+
+    # Test 6: Not a comment
+    s6 = @@JavaScriptSyntaxSkipperFsm()
+    inp6 = list(b"x + 1")
+    s6.setup(inp6, 0, len(inp6))
+    s6.do_skip_comment()
+    if s6.get_success() != 0:
+        print(f"FAIL 6: should not be a comment")
+        failures += 1
+
+    # Test 7: Balanced parens with template literal inside
+    s7 = @@JavaScriptSyntaxSkipperFsm()
+    inp7 = list(b'(a, `t`, c) rest')
+    s7.setup(inp7, 0, len(inp7))
+    s7.do_balanced_paren_end()
+    if s7.get_success() != 1 or s7.get_result_pos() != 11:
+        print(f"FAIL 7: success={s7.get_success()}, pos={s7.get_result_pos()}")
+        failures += 1
+
+    # Test 8: Find line end (stops at // comment)
+    s8 = @@JavaScriptSyntaxSkipperFsm()
+    inp8 = list(b"x + 1 // comment")
+    s8.setup(inp8, 0, len(inp8))
+    s8.do_find_line_end()
+    if s8.get_result_pos() != 6:
+        print(f"FAIL 8: pos={s8.get_result_pos()}, expected 6")
+        failures += 1
+
+    if failures > 0:
+        print(f"FAIL: {failures} failures")
+        exit(1)
+    print("PASS: javascript_skipper (8 cases)")

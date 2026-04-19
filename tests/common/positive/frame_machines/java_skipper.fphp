@@ -1,0 +1,218 @@
+<?php
+@@target php
+
+// java_skipper -- FSM for skipping syntax constructs.
+
+@@system JavaSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: array, start: int, length: int) {
+            $this->bytes = $input_bytes;
+            $this->pos = $start;
+            $this->scan_end = $length;
+        }
+        get_result_pos(): int {
+            return $this->result_pos;
+        }
+        get_success(): int {
+            return $this->success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                $i = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                if ($i + 1 < $end && $bs[$i] === 0x2F && $bs[$i + 1] === 0x2F) {
+                    $j = $i + 2;
+                    while ($j < $end && $bs[$j] !== 0x0A) { $j++; }
+                    $this->result_pos = $j; $this->success = 1; return;
+                }
+                if ($i + 1 < $end && $bs[$i] === 0x2F && $bs[$i + 1] === 0x2A) {
+                    $j = $i + 2;
+                    while ($j + 1 < $end) {
+                        if ($bs[$j] === 0x2A && $bs[$j + 1] === 0x2F) {
+                            $this->result_pos = $j + 2; $this->success = 1; return;
+                        }
+                        $j++;
+                    }
+                    $this->result_pos = $end; $this->success = 1; return;
+                }
+                $this->success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                $i = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                if ($i + 2 < $end && $bs[$i] === 0x22 && $bs[$i + 1] === 0x22 && $bs[$i + 2] === 0x22) {
+                    $j = $i + 3;
+                    while ($j + 2 < $end) {
+                        if ($bs[$j] === 0x22 && $bs[$j + 1] === 0x22 && $bs[$j + 2] === 0x22) {
+                            $this->result_pos = $j + 3; $this->success = 1; return;
+                        }
+                        $j++;
+                    }
+                    $this->result_pos = $end; $this->success = 1; return;
+                }
+
+                if ($i < $end && ($bs[$i] === 0x22 || $bs[$i] === 0x27)) {
+                    $q = $bs[$i]; $j = $i + 1;
+                    while ($j < $end) {
+                        if ($bs[$j] === 0x5C) { $j += 2; continue; }
+                        if ($bs[$j] === $q) { $this->result_pos = $j + 1; $this->success = 1; return; }
+                        $j++;
+                    }
+                    $this->result_pos = $end; $this->success = 1; return;
+                }
+                $this->success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                $j = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                while ($j < $end) {
+                    $b = $bs[$j];
+                    if ($b === 0x0A || $b === 0x3B) { break; }
+                    if ($b === 0x2F && $j + 1 < $end && $bs[$j + 1] === 0x2F) { break; }
+                    if ($b === 0x2F && $j + 1 < $end && $bs[$j + 1] === 0x2A) { break; }
+                    $j++;
+                }
+                $this->result_pos = $j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                $i = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                if ($i >= $end || $bs[$i] !== 0x28) { $this->success = 0; return; }
+                $depth = 1; $j = $i + 1;
+                while ($j < $end && $depth > 0) {
+                    $b = $bs[$j];
+                    if ($b === 0x28) { $depth++; }
+                    elseif ($b === 0x29) { $depth--; }
+                    elseif ($b === 0x22 || $b === 0x27) {
+                        $q = $b; $j++;
+                        while ($j < $end && $bs[$j] !== $q) { if ($bs[$j] === 0x5C) { $j++; } $j++; }
+                    }
+                    $j++;
+                }
+                if ($depth === 0) { $this->result_pos = $j; $this->success = 1; }
+                else { $this->result_pos = $end; $this->success = 0; }
+            }
+        }
+
+    domain:
+        bytes = []
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+function str_to_bytes(string $s): array {
+    $bytes = [];
+    for ($i = 0; $i < strlen($s); $i++) { $bytes[] = ord($s[$i]); }
+    return $bytes;
+}
+
+$failures = 0;
+
+$s1 = new JavaSyntaxSkipperFsm();
+$inp1 = str_to_bytes("// hello\ncode");
+$s1->setup($inp1, 0, count($inp1));
+$s1->do_skip_comment();
+if ($s1->get_success() !== 1 || $s1->get_result_pos() !== 8) {
+    echo "FAIL 1: Skip line comment\n";
+    $failures++;
+}
+
+$s2 = new JavaSyntaxSkipperFsm();
+$inp2 = str_to_bytes("/* block */code");
+$s2->setup($inp2, 0, count($inp2));
+$s2->do_skip_comment();
+if ($s2->get_success() !== 1 || $s2->get_result_pos() !== 11) {
+    echo "FAIL 2: Skip block comment\n";
+    $failures++;
+}
+
+$s3 = new JavaSyntaxSkipperFsm();
+$inp3 = str_to_bytes("\"hello world\" rest");
+$s3->setup($inp3, 0, count($inp3));
+$s3->do_skip_string();
+if ($s3->get_success() !== 1 || $s3->get_result_pos() !== 13) {
+    echo "FAIL 3: Skip double-quoted string\n";
+    $failures++;
+}
+
+$s4 = new JavaSyntaxSkipperFsm();
+$inp4 = str_to_bytes("\"\"\"text block content\"\"\" rest");
+$s4->setup($inp4, 0, count($inp4));
+$s4->do_skip_string();
+if ($s4->get_success() !== 1 || $s4->get_result_pos() !== 24) {
+    echo "FAIL 4: Java text block\n";
+    $failures++;
+}
+
+$s5 = new JavaSyntaxSkipperFsm();
+$inp5 = str_to_bytes("x + 1\nmore");
+$s5->setup($inp5, 0, count($inp5));
+$s5->do_find_line_end();
+if ($s5->get_result_pos() !== 5) {
+    echo "FAIL 5: Find line end\n";
+    $failures++;
+}
+
+$s6 = new JavaSyntaxSkipperFsm();
+$inp6 = str_to_bytes("x + 1");
+$s6->setup($inp6, 0, count($inp6));
+$s6->do_skip_comment();
+if ($s6->get_success() !== 0) {
+    echo "FAIL 6: Not a comment\n";
+    $failures++;
+}
+
+$s7 = new JavaSyntaxSkipperFsm();
+$inp7 = str_to_bytes("(a, f(b), c) rest");
+$s7->setup($inp7, 0, count($inp7));
+$s7->do_balanced_paren_end();
+if ($s7->get_success() !== 1 || $s7->get_result_pos() !== 12) {
+    echo "FAIL 7: Balanced parens\n";
+    $failures++;
+}
+
+$s8 = new JavaSyntaxSkipperFsm();
+$inp8 = str_to_bytes("x + 1 // comment");
+$s8->setup($inp8, 0, count($inp8));
+$s8->do_find_line_end();
+if ($s8->get_result_pos() !== 6) {
+    echo "FAIL 8: Find line end at //\n";
+    $failures++;
+}
+
+if ($failures > 0) { echo "FAIL: {$failures} failures\n"; exit(1); }
+echo "PASS: java_skipper (8 cases)\n";

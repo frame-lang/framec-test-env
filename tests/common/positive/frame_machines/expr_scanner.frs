@@ -1,0 +1,108 @@
+@@target rust
+
+// ExprScanner — PDA for scanning assignment RHS expressions.
+
+use std::collections::HashMap;
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: Vec<u8>, start: i64, length: i64) {
+            self.bytes = input_bytes;
+            self.pos = start;
+            self.end = length;
+        }
+        get_result(): i64 {
+            return self.result_end;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                let mut i = self.pos as usize;
+                let end = self.end as usize;
+                let bytes = &self.bytes;
+                let mut depth: i32 = 0;
+                let mut in_string: Option<u8> = None;
+
+                while i < end {
+                    let b = bytes[i];
+
+                    if let Some(q) = in_string {
+                        if b == b'\\' && i + 1 < end {
+                            i += 2;
+                            continue;
+                        }
+                        if b == q {
+                            in_string = None;
+                        }
+                        i += 1;
+                        continue;
+                    }
+
+                    if b == b'"' || b == b'\'' {
+                        in_string = Some(b);
+                        i += 1;
+                        continue;
+                    }
+
+                    match b {
+                        b'(' | b'[' | b'{' => { depth += 1; }
+                        b')' | b']' | b'}' => { depth = (depth - 1).max(0); }
+                        b';' if depth == 0 => { i += 1; break; }
+                        b'\n' if depth == 0 => { break; }
+                        _ => {}
+                    }
+                    i += 1;
+                }
+
+                self.result_end = i as i64;
+            }
+        }
+
+    domain:
+        bytes: Vec<u8> = Vec::new()
+        pos: i64 = 0
+        end: i64 = 0
+        result_end: i64 = 0
+}
+
+fn main() {
+    let mut failures = 0;
+
+    let mut e1 = @@ExprScannerFsm();
+    let inp1 = b" x + 1\nfoo".to_vec();
+    let len1 = inp1.len() as i64;
+    e1.setup(inp1.clone(), 0, len1);
+    e1.do_scan();
+    let r1 = e1.get_result() as usize;
+    let expr1 = String::from_utf8_lossy(&inp1[0..r1]).to_string();
+    if expr1 != " x + 1" { println!("FAIL 1: got '{}'", expr1); failures += 1; }
+
+    let mut e2 = @@ExprScannerFsm();
+    let inp2 = b" x + 1; y = 2".to_vec();
+    let len2 = inp2.len() as i64;
+    e2.setup(inp2.clone(), 0, len2);
+    e2.do_scan();
+    let r2 = e2.get_result() as usize;
+    let expr2 = String::from_utf8_lossy(&inp2[0..r2]).to_string();
+    if expr2 != " x + 1;" { println!("FAIL 2: got '{}'", expr2); failures += 1; }
+
+    let mut e3 = @@ExprScannerFsm();
+    let inp3 = b" f(x, g(y))\nz".to_vec();
+    let len3 = inp3.len() as i64;
+    e3.setup(inp3.clone(), 0, len3);
+    e3.do_scan();
+    let r3 = e3.get_result() as usize;
+    let expr3 = String::from_utf8_lossy(&inp3[0..r3]).to_string();
+    if expr3 != " f(x, g(y))" { println!("FAIL 3: got '{}'", expr3); failures += 1; }
+
+    if failures > 0 { println!("FAIL: {} failures", failures); std::process::exit(1); }
+    println!("PASS: expr_scanner (3 cases)");
+}

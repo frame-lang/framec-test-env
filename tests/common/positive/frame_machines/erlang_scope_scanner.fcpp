@@ -1,0 +1,317 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <algorithm>
+
+// ErlangScopeScanner -- FSM for detecting fun(...) -> ... end closures.
+// Translated from framec's native_region_scanner/erlang_scope_scanner.frs
+//
+// Erlang reuses `end` to close: fun, case, if, receive, begin, try.
+// This FSM tracks a depth counter for all block-opening keywords so
+// only the `end` matching our `fun` terminates the scan.
+//
+// Skips % line comments and "..." / '...' string/atom literals.
+// Does NOT match `fun Module:Function/Arity` (function references).
+
+@@system ErlangScopeScannerFsm {
+    operations:
+        setup(input_bytes: std::vector<uint8_t>, start: int, length: int) {
+            this->bytes = input_bytes;
+            this->pos = start;
+            this->scan_end = length;
+        }
+        get_result_pos(): int {
+            return this->result_pos;
+        }
+        get_success(): int {
+            return this->success;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $CheckFun }
+        }
+
+        $CheckFun {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                if (i + 3 > end) {
+                    this->success = 0;
+                    return;
+                }
+
+                if (bs[i] != 'f' || bs[i + 1] != 'u' || bs[i + 2] != 'n') {
+                    this->success = 0;
+                    return;
+                }
+
+                int after = i + 3;
+                if (after < end && (std::isalnum(bs[after]) || bs[after] == '_')) {
+                    this->success = 0;
+                    return;
+                }
+
+                int j = after;
+                while (j < end && (bs[j] == ' ' || bs[j] == '\t' || bs[j] == '\n')) {
+                    j++;
+                }
+
+                if (j < end && bs[j] >= 'A' && bs[j] <= 'Z') {
+                    int k = j;
+                    while (k < end && (std::isalnum(bs[k]) || bs[k] == '_')) {
+                        k++;
+                    }
+                    if (k < end && bs[k] == ':') {
+                        this->success = 0;
+                        return;
+                    }
+                }
+
+                this->depth = 1;
+                this->pos = after;
+                -> $ScanBody
+            }
+        }
+
+        $ScanBody {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                while (i < end) {
+                    int b = bs[i];
+
+                    if (b == '%') {
+                        while (i < end && bs[i] != '\n') {
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    if (b == '"') {
+                        i++;
+                        while (i < end) {
+                            if (bs[i] == '\\') {
+                                i += 2;
+                                continue;
+                            }
+                            if (bs[i] == '"') {
+                                i++;
+                                break;
+                            }
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    if (b == '\'') {
+                        i++;
+                        while (i < end) {
+                            if (bs[i] == '\\') {
+                                i += 2;
+                                continue;
+                            }
+                            if (bs[i] == '\'') {
+                                i++;
+                                break;
+                            }
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    // fun
+                    if (b == 'f' && i + 3 <= end && bs[i + 1] == 'u' && bs[i + 2] == 'n') {
+                        if (i + 3 >= end || (!std::isalnum(bs[i + 3]) && bs[i + 3] != '_')) {
+                            this->depth++;
+                            i += 3;
+                            continue;
+                        }
+                    }
+
+                    // case
+                    if (b == 'c' && i + 4 <= end && bs[i + 1] == 'a' && bs[i + 2] == 's' && bs[i + 3] == 'e') {
+                        if (i + 4 >= end || (!std::isalnum(bs[i + 4]) && bs[i + 4] != '_')) {
+                            this->depth++;
+                            i += 4;
+                            continue;
+                        }
+                    }
+
+                    // if
+                    if (b == 'i' && i + 2 <= end && bs[i + 1] == 'f') {
+                        if (i + 2 >= end || (!std::isalnum(bs[i + 2]) && bs[i + 2] != '_')) {
+                            this->depth++;
+                            i += 2;
+                            continue;
+                        }
+                    }
+
+                    // receive
+                    if (b == 'r' && i + 7 <= end && bs[i + 1] == 'e' && bs[i + 2] == 'c' && bs[i + 3] == 'e' && bs[i + 4] == 'i' && bs[i + 5] == 'v' && bs[i + 6] == 'e') {
+                        if (i + 7 >= end || (!std::isalnum(bs[i + 7]) && bs[i + 7] != '_')) {
+                            this->depth++;
+                            i += 7;
+                            continue;
+                        }
+                    }
+
+                    // begin
+                    if (b == 'b' && i + 5 <= end && bs[i + 1] == 'e' && bs[i + 2] == 'g' && bs[i + 3] == 'i' && bs[i + 4] == 'n') {
+                        if (i + 5 >= end || (!std::isalnum(bs[i + 5]) && bs[i + 5] != '_')) {
+                            this->depth++;
+                            i += 5;
+                            continue;
+                        }
+                    }
+
+                    // try
+                    if (b == 't' && i + 3 <= end && bs[i + 1] == 'r' && bs[i + 2] == 'y') {
+                        if (i + 3 >= end || (!std::isalnum(bs[i + 3]) && bs[i + 3] != '_')) {
+                            this->depth++;
+                            i += 3;
+                            continue;
+                        }
+                    }
+
+                    // end
+                    if (b == 'e' && i + 3 <= end && bs[i + 1] == 'n' && bs[i + 2] == 'd') {
+                        if (i + 3 >= end || (!std::isalnum(bs[i + 3]) && bs[i + 3] != '_')) {
+                            this->depth--;
+                            if (this->depth == 0) {
+                                this->result_pos = i + 3;
+                                this->success = 1;
+                                return;
+                            }
+                            i += 3;
+                            continue;
+                        }
+                    }
+
+                    if (std::isalpha(b) || b == '_') {
+                        while (i < end && (std::isalnum(bs[i]) || bs[i] == '_')) {
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    i++;
+                }
+
+                this->success = 0;
+            }
+        }
+
+    domain:
+        bytes: std::vector<uint8_t> = {}
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 0
+        depth: int = 0
+}
+
+int main() {
+    int failures = 0;
+
+    auto to_bytes = [](const std::string& s) -> std::vector<uint8_t> {
+        return std::vector<uint8_t>(s.begin(), s.end());
+    };
+
+    // Test 1: Simple fun -> end
+    auto s1 = ErlangScopeScannerFsm();
+    auto inp1 = to_bytes("fun(X) -> X + 1 end rest");
+    s1.setup(inp1, 0, inp1.size());
+    s1.do_scan();
+    if (s1.get_success() != 1 || s1.get_result_pos() != 19) {
+        printf("FAIL 1: success=%d, pos=%d\n", s1.get_success(), s1.get_result_pos());
+        failures++;
+    }
+
+    // Test 2: Nested fun -> case ... end end
+    auto s2 = ErlangScopeScannerFsm();
+    auto inp2 = to_bytes("fun(X) -> case X of 1 -> ok end end rest");
+    s2.setup(inp2, 0, inp2.size());
+    s2.do_scan();
+    if (s2.get_success() != 1 || s2.get_result_pos() != 35) {
+        printf("FAIL 2: success=%d, pos=%d\n", s2.get_success(), s2.get_result_pos());
+        failures++;
+    }
+
+    // Test 3: Not a fun keyword (function)
+    auto s3 = ErlangScopeScannerFsm();
+    auto inp3 = to_bytes("function() -> ok end");
+    s3.setup(inp3, 0, inp3.size());
+    s3.do_scan();
+    if (s3.get_success() != 0) {
+        printf("FAIL 3: should not match 'function'\n");
+        failures++;
+    }
+
+    // Test 4: fun Module:Function/Arity (function reference, not closure)
+    auto s4 = ErlangScopeScannerFsm();
+    auto inp4 = to_bytes("fun io:format/2");
+    s4.setup(inp4, 0, inp4.size());
+    s4.do_scan();
+    if (s4.get_success() != 0) {
+        printf("FAIL 4: should not match function reference\n");
+        failures++;
+    }
+
+    // Test 5: Nested if ... end inside fun
+    auto s5 = ErlangScopeScannerFsm();
+    auto inp5 = to_bytes("fun() -> if true -> ok end end rest");
+    s5.setup(inp5, 0, inp5.size());
+    s5.do_scan();
+    if (s5.get_success() != 1 || s5.get_result_pos() != 30) {
+        printf("FAIL 5: success=%d, pos=%d\n", s5.get_success(), s5.get_result_pos());
+        failures++;
+    }
+
+    // Test 6: String inside fun body (should skip)
+    auto s6 = ErlangScopeScannerFsm();
+    auto inp6 = to_bytes("fun() -> \"end\" end rest");
+    s6.setup(inp6, 0, inp6.size());
+    s6.do_scan();
+    if (s6.get_success() != 1 || s6.get_result_pos() != 18) {
+        printf("FAIL 6: success=%d, pos=%d\n", s6.get_success(), s6.get_result_pos());
+        failures++;
+    }
+
+    // Test 7: Comment inside fun body (should skip)
+    auto s7 = ErlangScopeScannerFsm();
+    auto inp7 = to_bytes("fun() -> % end\nok end rest");
+    s7.setup(inp7, 0, inp7.size());
+    s7.do_scan();
+    if (s7.get_success() != 1 || s7.get_result_pos() != 21) {
+        printf("FAIL 7: success=%d, pos=%d\n", s7.get_success(), s7.get_result_pos());
+        failures++;
+    }
+
+    // Test 8: Unmatched fun (no end)
+    auto s8 = ErlangScopeScannerFsm();
+    auto inp8 = to_bytes("fun() -> X + 1");
+    s8.setup(inp8, 0, inp8.size());
+    s8.do_scan();
+    if (s8.get_success() != 0) {
+        printf("FAIL 8: should fail with no matching end\n");
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: %d failures\n", failures);
+        return 1;
+    }
+    printf("PASS: erlang_scope_scanner (8 cases)\n");
+    return 0;
+}

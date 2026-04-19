@@ -1,0 +1,260 @@
+@@target dart
+
+import 'dart:io';
+
+// ErlangScopeScanner -- FSM for detecting fun(...) -> ... end closures.
+// Translated from framec's native_region_scanner/erlang_scope_scanner.frs
+//
+// Erlang reuses `end` to close: fun, case, if, receive, begin, try.
+// This FSM tracks a depth counter for all block-opening keywords so
+// only the `end` matching our `fun` terminates the scan.
+//
+// Skips % line comments and "..." / '...' string/atom literals.
+// Does NOT match `fun Module:Function/Arity` (function references).
+
+@@system ErlangScopeScannerFsm {
+    operations:
+        setup(input_bytes: List<int>, start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $CheckFun }
+        }
+
+        $CheckFun {
+            $>() {
+                var i = this.pos;
+                var end = this.scan_end;
+                var bs = this.bytes;
+
+                // Must start with `fun` keyword
+                if (i + 3 > end) { this.success = 0; return; }
+                if (bs[i] != 0x66 || bs[i + 1] != 0x75 || bs[i + 2] != 0x6E) { this.success = 0; return; }
+
+                // Check word boundary (not part of `function` etc.)
+                var after = i + 3;
+                if (after < end && (_isAlnumEss(bs[after]) || bs[after] == 0x5F)) { this.success = 0; return; }
+
+                // Skip whitespace after `fun`
+                var j = after;
+                while (j < end && (bs[j] == 0x20 || bs[j] == 0x09 || bs[j] == 0x0A)) { j++; }
+
+                // Check for Module:Function/Arity pattern (function reference, not closure)
+                if (j < end && bs[j] >= 0x41 && bs[j] <= 0x5A) {
+                    var k = j;
+                    while (k < end && (_isAlnumEss(bs[k]) || bs[k] == 0x5F)) { k++; }
+                    if (k < end && bs[k] == 0x3A) { this.success = 0; return; }
+                }
+
+                // It's a closure: fun(...) -> ... end
+                this.depth = 1;
+                this.pos = after;
+                -> $ScanBody
+            }
+        }
+
+        $ScanBody {
+            $>() {
+                var i = this.pos;
+                var end = this.scan_end;
+                var bs = this.bytes;
+
+                while (i < end) {
+                    var b = bs[i];
+
+                    // Skip % line comments
+                    if (b == 0x25) {
+                        while (i < end && bs[i] != 0x0A) { i++; }
+                        continue;
+                    }
+
+                    // Skip "..." strings
+                    if (b == 0x22) {
+                        i++;
+                        while (i < end) {
+                            if (bs[i] == 0x5C) { i += 2; continue; }
+                            if (bs[i] == 0x22) { i++; break; }
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    // Skip '...' quoted atoms
+                    if (b == 0x27) {
+                        i++;
+                        while (i < end) {
+                            if (bs[i] == 0x5C) { i += 2; continue; }
+                            if (bs[i] == 0x27) { i++; break; }
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    // Check for block-opening keywords (increase depth)
+
+                    // fun
+                    if (b == 0x66 && i + 3 <= end && bs[i + 1] == 0x75 && bs[i + 2] == 0x6E) {
+                        if (i + 3 >= end || (!_isAlnumEss(bs[i + 3]) && bs[i + 3] != 0x5F)) { this.depth++; i += 3; continue; }
+                    }
+                    // case
+                    if (b == 0x63 && i + 4 <= end && bs[i + 1] == 0x61 && bs[i + 2] == 0x73 && bs[i + 3] == 0x65) {
+                        if (i + 4 >= end || (!_isAlnumEss(bs[i + 4]) && bs[i + 4] != 0x5F)) { this.depth++; i += 4; continue; }
+                    }
+                    // if
+                    if (b == 0x69 && i + 2 <= end && bs[i + 1] == 0x66) {
+                        if (i + 2 >= end || (!_isAlnumEss(bs[i + 2]) && bs[i + 2] != 0x5F)) { this.depth++; i += 2; continue; }
+                    }
+                    // receive
+                    if (b == 0x72 && i + 7 <= end && bs[i + 1] == 0x65 && bs[i + 2] == 0x63 && bs[i + 3] == 0x65 && bs[i + 4] == 0x69 && bs[i + 5] == 0x76 && bs[i + 6] == 0x65) {
+                        if (i + 7 >= end || (!_isAlnumEss(bs[i + 7]) && bs[i + 7] != 0x5F)) { this.depth++; i += 7; continue; }
+                    }
+                    // begin
+                    if (b == 0x62 && i + 5 <= end && bs[i + 1] == 0x65 && bs[i + 2] == 0x67 && bs[i + 3] == 0x69 && bs[i + 4] == 0x6E) {
+                        if (i + 5 >= end || (!_isAlnumEss(bs[i + 5]) && bs[i + 5] != 0x5F)) { this.depth++; i += 5; continue; }
+                    }
+                    // try
+                    if (b == 0x74 && i + 3 <= end && bs[i + 1] == 0x72 && bs[i + 2] == 0x79) {
+                        if (i + 3 >= end || (!_isAlnumEss(bs[i + 3]) && bs[i + 3] != 0x5F)) { this.depth++; i += 3; continue; }
+                    }
+
+                    // Check for `end` keyword (decrease depth)
+                    if (b == 0x65 && i + 3 <= end && bs[i + 1] == 0x6E && bs[i + 2] == 0x64) {
+                        if (i + 3 >= end || (!_isAlnumEss(bs[i + 3]) && bs[i + 3] != 0x5F)) {
+                            this.depth--;
+                            if (this.depth == 0) { this.result_pos = i + 3; this.success = 1; return; }
+                            i += 3; continue;
+                        }
+                    }
+
+                    // Skip identifiers (avoid false keyword matches mid-word)
+                    if (_isAlphaEss(b) || b == 0x5F) {
+                        while (i < end && (_isAlnumEss(bs[i]) || bs[i] == 0x5F)) { i++; }
+                        continue;
+                    }
+                    i++;
+                }
+
+                // Ran out of bytes without finding matching `end`
+                this.success = 0;
+            }
+        }
+
+    domain:
+        bytes: List<int> = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 0
+        depth: int = 0
+}
+
+bool _isAlnumEss(int b) {
+    return (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A);
+}
+
+bool _isAlphaEss(int b) {
+    return (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A);
+}
+
+void main() {
+    var failures = 0;
+
+    // Test 1: Simple fun -> end
+    final s1 = @@ErlangScopeScannerFsm();
+    final inp1 = "fun(X) -> X + 1 end rest".codeUnits;
+    s1.setup(inp1, 0, inp1.length);
+    s1.do_scan();
+    if (s1.get_success() != 1 || s1.get_result_pos() != 19) {
+        print("FAIL 1: success=\${s1.get_success()}, pos=\${s1.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 2: Nested fun -> case ... end end
+    final s2 = @@ErlangScopeScannerFsm();
+    final inp2 = "fun(X) -> case X of 1 -> ok end end rest".codeUnits;
+    s2.setup(inp2, 0, inp2.length);
+    s2.do_scan();
+    if (s2.get_success() != 1 || s2.get_result_pos() != 35) {
+        print("FAIL 2: success=\${s2.get_success()}, pos=\${s2.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 3: Not a fun keyword (function)
+    final s3 = @@ErlangScopeScannerFsm();
+    final inp3 = "function() -> ok end".codeUnits;
+    s3.setup(inp3, 0, inp3.length);
+    s3.do_scan();
+    if (s3.get_success() != 0) {
+        print("FAIL 3: should not match 'function'");
+        failures++;
+    }
+
+    // Test 4: fun Module:Function/Arity (function reference, not closure)
+    final s4 = @@ErlangScopeScannerFsm();
+    final inp4 = "fun io:format/2".codeUnits;
+    s4.setup(inp4, 0, inp4.length);
+    s4.do_scan();
+    if (s4.get_success() != 0) {
+        print("FAIL 4: should not match function reference");
+        failures++;
+    }
+
+    // Test 5: Nested if ... end inside fun
+    final s5 = @@ErlangScopeScannerFsm();
+    final inp5 = "fun() -> if true -> ok end end rest".codeUnits;
+    s5.setup(inp5, 0, inp5.length);
+    s5.do_scan();
+    if (s5.get_success() != 1 || s5.get_result_pos() != 30) {
+        print("FAIL 5: success=\${s5.get_success()}, pos=\${s5.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 6: String inside fun body (should skip)
+    final s6 = @@ErlangScopeScannerFsm();
+    final inp6 = 'fun() -> "end" end rest'.codeUnits;
+    s6.setup(inp6, 0, inp6.length);
+    s6.do_scan();
+    if (s6.get_success() != 1 || s6.get_result_pos() != 18) {
+        print("FAIL 6: success=\${s6.get_success()}, pos=\${s6.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 7: Comment inside fun body (should skip)
+    final s7 = @@ErlangScopeScannerFsm();
+    final inp7 = "fun() -> % end\nok end rest".codeUnits;
+    s7.setup(inp7, 0, inp7.length);
+    s7.do_scan();
+    if (s7.get_success() != 1 || s7.get_result_pos() != 21) {
+        print("FAIL 7: success=\${s7.get_success()}, pos=\${s7.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 8: Unmatched fun (no end)
+    final s8 = @@ErlangScopeScannerFsm();
+    final inp8 = "fun() -> X + 1".codeUnits;
+    s8.setup(inp8, 0, inp8.length);
+    s8.do_scan();
+    if (s8.get_success() != 0) {
+        print("FAIL 8: should fail with no matching end");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: \$failures failures");
+        exit(1);
+    }
+    print("PASS: erlang_scope_scanner (8 cases)");
+}

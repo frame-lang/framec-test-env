@@ -1,0 +1,244 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+// StateVarParser — FSM for parsing $.varName and $.varName = expr
+// Translated from framec's native_region_scanner/state_var_parser.frs
+//
+// Uses hierarchical composition: $ScanExpr creates an ExprScannerFsm
+// sub-machine when it detects an assignment.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: ByteArray, start: Int, length: Int) {
+            this.bytes = input_bytes
+            this.pos = start
+            this.end = length
+        }
+        get_result(): Int {
+            return this.result_end
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                var i = this.pos
+                val end = this.end
+                val bs = this.bytes
+                var depth = 0
+                var inString: Int = -1
+
+                while (i < end) {
+                    val b = bs[i].toInt() and 0xFF
+
+                    if (inString != -1) {
+                        if (b == '\\'.code && i + 1 < end) {
+                            i += 2
+                            continue
+                        }
+                        if (b == inString) {
+                            inString = -1
+                        }
+                        i++
+                        continue
+                    }
+
+                    if (b == '"'.code || b == '\''.code) {
+                        inString = b
+                        i++
+                        continue
+                    }
+
+                    if (b == '('.code || b == '['.code || b == '{'.code) {
+                        depth++
+                    } else if (b == ')'.code || b == ']'.code || b == '}'.code) {
+                        depth = maxOf(depth - 1, 0)
+                    } else if (b == ';'.code && depth == 0) {
+                        i++
+                        break
+                    } else if (b == '\n'.code && depth == 0) {
+                        break
+                    }
+
+                    i++
+                }
+
+                this.result_end = i
+            }
+        }
+
+    domain:
+        bytes: ByteArray = ByteArray(0)
+        pos: Int = 0
+        end: Int = 0
+        result_end: Int = 0
+}
+
+@@system StateVarParserFsm {
+    operations:
+        setup(input_bytes: ByteArray, start: Int, length: Int) {
+            this.bytes = input_bytes
+            this.pos = start
+            this.parse_end = length
+        }
+        get_result_end(): Int {
+            return this.result_end
+        }
+        get_is_assignment(): Boolean {
+            return this.is_assignment
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $ScanIdent }
+        }
+
+        $ScanIdent {
+            $>() {
+                // Skip "$." prefix and scan identifier
+                var i = this.pos + 2
+                val end = this.parse_end
+                val bs = this.bytes
+
+                while (i < end) {
+                    val c = bs[i].toInt() and 0xFF
+                    if ((c in 0x30..0x39) || (c in 0x41..0x5A) || (c in 0x61..0x7A) || c == 0x5F) {
+                        i++
+                    } else {
+                        break
+                    }
+                }
+
+                this.ident_end = i
+                -> $CheckAssign
+            }
+        }
+
+        $CheckAssign {
+            $>() {
+                // Lookahead: skip whitespace, check for = (but not == or => or =<)
+                var j = this.ident_end
+                val end = this.parse_end
+                val bs = this.bytes
+
+                while (j < end && (bs[j].toInt() == ' '.code || bs[j].toInt() == '\t'.code)) {
+                    j++
+                }
+
+                if (j < end && (bs[j].toInt() and 0xFF) == '='.code && (j + 1 >= end || ((bs[j + 1].toInt() and 0xFF) != '='.code && (bs[j + 1].toInt() and 0xFF) != '<'.code && (bs[j + 1].toInt() and 0xFF) != '>'.code))) {
+                    // Assignment detected
+                    j++
+                    this.pos = j
+                    this.is_assignment = true
+                    -> $ScanExpr
+                } else {
+                    // Read-only access
+                    this.result_end = this.ident_end
+                    this.is_assignment = false
+                    -> $Done
+                }
+            }
+        }
+
+        $ScanExpr {
+            $>() {
+                // Create ExprScanner sub-machine
+                val expr = @@ExprScannerFsm()
+                expr.setup(this.bytes, this.pos, this.parse_end)
+                expr.do_scan()
+                this.result_end = expr.get_result() as Int
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+            }
+        }
+
+    domain:
+        bytes: ByteArray = ByteArray(0)
+        pos: Int = 0
+        parse_end: Int = 0
+        ident_end: Int = 0
+        result_end: Int = 0
+        is_assignment: Boolean = false
+}
+
+fun main() {
+    var failures = 0
+
+    // Test 1: Read-only access $.count
+    val p1 = @@StateVarParserFsm()
+    val inp1 = "$.count + 1".toByteArray()
+    p1.setup(inp1, 0, inp1.size)
+    p1.do_parse()
+    if (p1.get_is_assignment() as Boolean) {
+        println("FAIL 1: should not be assignment")
+        failures++
+    }
+    val r1 = p1.get_result_end() as Int
+    val name1 = String(inp1, 2, r1 - 2)
+    if (name1 != "count") {
+        println("FAIL 1: name='$name1', expected 'count'")
+        failures++
+    }
+
+    // Test 2: Assignment $.total = x + 1;\n
+    val p2 = @@StateVarParserFsm()
+    val inp2 = "$.total = x + 1;\nmore".toByteArray()
+    p2.setup(inp2, 0, inp2.size)
+    p2.do_parse()
+    if (!(p2.get_is_assignment() as Boolean)) {
+        println("FAIL 2: should be assignment")
+        failures++
+    }
+    val r2 = p2.get_result_end() as Int
+    val expr2 = String(inp2, 0, r2)
+    if ("x + 1;" !in expr2) {
+        println("FAIL 2: expr='$expr2'")
+        failures++
+    }
+
+    // Test 3: Not assignment $.x == 5 (== is comparison, not assignment)
+    val p3 = @@StateVarParserFsm()
+    val inp3 = "$.x == 5".toByteArray()
+    p3.setup(inp3, 0, inp3.size)
+    p3.do_parse()
+    if (p3.get_is_assignment() as Boolean) {
+        println("FAIL 3: == should not be treated as assignment")
+        failures++
+    }
+
+    // Test 4: Assignment with nested parens $.val = f(a, b)\n
+    val p4 = @@StateVarParserFsm()
+    val inp4 = "$.val = f(a, b)\nrest".toByteArray()
+    p4.setup(inp4, 0, inp4.size)
+    p4.do_parse()
+    if (!(p4.get_is_assignment() as Boolean)) {
+        println("FAIL 4: should be assignment")
+        failures++
+    }
+    val r4 = p4.get_result_end() as Int
+    val expr4 = String(inp4, 0, r4)
+    if ("f(a, b)" !in expr4) {
+        println("FAIL 4: expr='$expr4'")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: $failures failures")
+        exitProcess(1)
+    }
+    println("PASS: state_var_parser (4 cases)")
+}

@@ -1,0 +1,221 @@
+@@target javascript
+
+// StateVarParser — FSM for parsing $.varName and $.varName = expr
+// Translated from framec's native_region_scanner/state_var_parser.frs
+//
+// Uses hierarchical composition: $ScanExpr creates an ExprScannerFsm
+// sub-machine when it detects an assignment.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.end = length;
+        }
+        get_result() {
+            return this.result_end;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                let i = this.pos;
+                const end = this.end;
+                const bs = this.bytes;
+                let depth = 0;
+                let in_string = null;
+
+                while (i < end) {
+                    const b = bs[i];
+
+                    if (in_string !== null) {
+                        if (b === 0x5C && i + 1 < end) { i += 2; continue; }
+                        if (b === in_string) { in_string = null; }
+                        i += 1; continue;
+                    }
+
+                    if (b === 0x22 || b === 0x27) { in_string = b; i += 1; continue; }
+
+                    if (b === 0x28 || b === 0x5B || b === 0x7B) { depth += 1; }
+                    else if (b === 0x29 || b === 0x5D || b === 0x7D) { depth = Math.max(depth - 1, 0); }
+                    else if (b === 0x3B && depth === 0) { i += 1; break; }
+                    else if (b === 0x0A && depth === 0) { break; }
+
+                    i += 1;
+                }
+
+                this.result_end = i;
+            }
+        }
+
+    domain:
+        bytes = []
+        pos = 0
+        end = 0
+        result_end = 0
+}
+
+@@system StateVarParserFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.parse_end = length;
+        }
+        get_result_end() {
+            return this.result_end;
+        }
+        get_is_assignment() {
+            return this.is_assignment;
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $ScanIdent }
+        }
+
+        $ScanIdent {
+            $>() {
+                // Skip "$." prefix and scan identifier
+                let i = this.pos + 2;
+                const end = this.parse_end;
+                const bs = this.bytes;
+
+                while (i < end) {
+                    const c = bs[i];
+                    if ((c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) || c === 0x5F) {
+                        i += 1;
+                    } else {
+                        break;
+                    }
+                }
+
+                this.ident_end = i;
+                -> $CheckAssign
+            }
+        }
+
+        $CheckAssign {
+            $>() {
+                // Lookahead: skip whitespace, check for = (but not == or => or =<)
+                let j = this.ident_end;
+                const end = this.parse_end;
+                const bs = this.bytes;
+
+                while (j < end && (bs[j] === 0x20 || bs[j] === 0x09)) {
+                    j += 1;
+                }
+
+                if (j < end && bs[j] === 0x3D && (j + 1 >= end || (bs[j + 1] !== 0x3D && bs[j + 1] !== 0x3C && bs[j + 1] !== 0x3E))) {
+                    // Assignment detected
+                    j += 1;
+                    this.pos = j;
+                    this.is_assignment = true;
+                    -> $ScanExpr
+                } else {
+                    // Read-only access
+                    this.result_end = this.ident_end;
+                    this.is_assignment = false;
+                    -> $Done
+                }
+            }
+        }
+
+        $ScanExpr {
+            $>() {
+                // Create ExprScanner sub-machine
+                const expr = @@ExprScannerFsm();
+                expr.setup(this.bytes, this.pos, this.parse_end);
+                expr.do_scan();
+                this.result_end = expr.get_result();
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+            }
+        }
+
+    domain:
+        bytes = []
+        pos = 0
+        parse_end = 0
+        ident_end = 0
+        result_end = 0
+        is_assignment = false
+}
+
+const enc = s => Array.from(Buffer.from(s));
+const dec = (bs, s, e) => Buffer.from(bs.slice(s, e)).toString();
+
+let failures = 0;
+
+// Test 1: Read-only access $.count
+const p1 = @@StateVarParserFsm();
+const inp1 = enc("$.count + 1");
+p1.setup(inp1, 0, inp1.length);
+p1.do_parse();
+if (p1.get_is_assignment()) {
+    console.log("FAIL 1: should not be assignment");
+    failures++;
+}
+const name1 = dec(inp1, 2, p1.get_result_end());
+if (name1 !== "count") {
+    console.log("FAIL 1: name='" + name1 + "', expected 'count'");
+    failures++;
+}
+
+// Test 2: Assignment $.total = x + 1;\n
+const p2 = @@StateVarParserFsm();
+const inp2 = enc("$.total = x + 1;\nmore");
+p2.setup(inp2, 0, inp2.length);
+p2.do_parse();
+if (!p2.get_is_assignment()) {
+    console.log("FAIL 2: should be assignment");
+    failures++;
+}
+const expr2 = dec(inp2, 0, p2.get_result_end());
+if (expr2.indexOf("x + 1;") === -1) {
+    console.log("FAIL 2: expr='" + expr2 + "'");
+    failures++;
+}
+
+// Test 3: Not assignment $.x == 5 (== is comparison, not assignment)
+const p3 = @@StateVarParserFsm();
+const inp3 = enc("$.x == 5");
+p3.setup(inp3, 0, inp3.length);
+p3.do_parse();
+if (p3.get_is_assignment()) {
+    console.log("FAIL 3: == should not be treated as assignment");
+    failures++;
+}
+
+// Test 4: Assignment with nested parens $.val = f(a, b)\n
+const p4 = @@StateVarParserFsm();
+const inp4 = enc("$.val = f(a, b)\nrest");
+p4.setup(inp4, 0, inp4.length);
+p4.do_parse();
+if (!p4.get_is_assignment()) {
+    console.log("FAIL 4: should be assignment");
+    failures++;
+}
+const expr4 = dec(inp4, 0, p4.get_result_end());
+if (expr4.indexOf("f(a, b)") === -1) {
+    console.log("FAIL 4: expr='" + expr4 + "'");
+    failures++;
+}
+
+if (failures > 0) { console.log("FAIL: " + failures + " failures"); process.exit(1); }
+console.log("PASS: state_var_parser (4 cases)");

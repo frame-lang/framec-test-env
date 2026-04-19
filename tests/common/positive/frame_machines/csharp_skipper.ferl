@@ -1,0 +1,363 @@
+@@target erlang
+
+%% CSharpSyntaxSkipper -- FSM for skipping C# comments and strings.
+%% Translated from framec's native_region_scanner/csharp_skipper.frs
+%%
+%% Handles: // line comments, /* */ block comments, # preprocessor directives,
+%% "..." simple strings, @"..." verbatim strings, $"..." interpolated strings,
+%% $"""...""" raw strings, C-like line endings, balanced parens.
+
+@@system CSharpSyntaxSkipperFsm {
+    interface:
+        setup(input_bytes: binary, start: int, length: int)
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+        get_result_pos(): int
+        get_success(): int
+
+    machine:
+        $Init {
+            setup(input_bytes: binary, start: int, length: int) {
+                self.bytes = input_bytes
+                self.pos = start
+                self.scan_end = length
+            }
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipComment {
+            $>() {
+                {Pos, Suc} = cs_skip_comment_scan(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.result_pos = Pos
+                self.success = Suc
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipString {
+            $>() {
+                {Pos, Suc} = cs_skip_string_scan(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.result_pos = Pos
+                self.success = Suc
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $FindLineEnd {
+            $>() {
+                self.result_pos = cs_find_line_end_scan(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                {Pos, Suc} = cs_balanced_paren_scan(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.result_pos = Pos
+                self.success = Suc
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+    domain:
+        bytes = <<>>
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+%% --- skip_comment helpers ---
+cs_skip_comment_scan(Bs, I, End) when I < End ->
+    B0 = binary:at(Bs, I),
+    if
+        B0 =:= $# ->
+            Pos = cs_skip_to_newline(Bs, I + 1, End),
+            {Pos, 1};
+        true ->
+            cs_skip_comment_slash(Bs, I, End)
+    end;
+cs_skip_comment_scan(_Bs, _I, _End) ->
+    {0, 0}.
+
+cs_skip_comment_slash(Bs, I, End) when I + 1 < End ->
+    B0 = binary:at(Bs, I),
+    B1 = binary:at(Bs, I + 1),
+    if
+        B0 =:= $/ andalso B1 =:= $/ ->
+            Pos = cs_skip_to_newline(Bs, I + 2, End),
+            {Pos, 1};
+        B0 =:= $/ andalso B1 =:= $* ->
+            cs_skip_block_comment(Bs, I + 2, End);
+        true ->
+            {0, 0}
+    end;
+cs_skip_comment_slash(_Bs, _I, _End) ->
+    {0, 0}.
+
+cs_skip_to_newline(Bs, J, End) when J < End ->
+    case binary:at(Bs, J) of
+        $\n -> J;
+        _ -> cs_skip_to_newline(Bs, J + 1, End)
+    end;
+cs_skip_to_newline(_Bs, J, _End) ->
+    J.
+
+cs_skip_block_comment(Bs, J, End) when J + 1 < End ->
+    case {binary:at(Bs, J), binary:at(Bs, J + 1)} of
+        {$*, $/} -> {J + 2, 1};
+        _ -> cs_skip_block_comment(Bs, J + 1, End)
+    end;
+cs_skip_block_comment(_Bs, _J, End) ->
+    {End, 1}.
+
+%% --- skip_string helpers ---
+cs_skip_string_scan(_Bs, I, End) when I >= End ->
+    {0, 0};
+cs_skip_string_scan(Bs, I, End) ->
+    B0 = binary:at(Bs, I),
+    if
+        B0 =:= $@ andalso I + 1 < End ->
+            case binary:at(Bs, I + 1) of
+                $" -> cs_skip_verbatim(Bs, I + 2, End);
+                _ -> {0, 0}
+            end;
+        B0 =:= $$ ->
+            cs_skip_interpolated(Bs, I + 1, End);
+        B0 =:= $" orelse B0 =:= $' ->
+            cs_skip_simple_str(Bs, I + 1, End, B0);
+        true ->
+            {0, 0}
+    end.
+
+cs_skip_verbatim(Bs, J, End) when J < End ->
+    case binary:at(Bs, J) of
+        $" ->
+            if
+                J + 1 < End ->
+                    case binary:at(Bs, J + 1) of
+                        $" -> cs_skip_verbatim(Bs, J + 2, End);
+                        _ -> {J + 1, 1}
+                    end;
+                true ->
+                    {J + 1, 1}
+            end;
+        _ ->
+            cs_skip_verbatim(Bs, J + 1, End)
+    end;
+cs_skip_verbatim(_Bs, _J, End) ->
+    {End, 1}.
+
+cs_skip_interpolated(Bs, J, End) when J < End andalso binary:at(Bs, J) =:= $$ ->
+    cs_skip_interpolated(Bs, J + 1, End);
+cs_skip_interpolated(Bs, J, End) ->
+    J2 = if J < End andalso binary:at(Bs, J) =:= $@ -> J + 1; true -> J end,
+    {J3, Quotes} = cs_count_quotes(Bs, J2, End, 0),
+    if
+        Quotes =:= 0 -> {0, 0};
+        Quotes >= 3 -> cs_skip_raw_string(Bs, J3, End, Quotes);
+        true -> cs_skip_interp_normal(Bs, J3, End)
+    end.
+
+cs_count_quotes(Bs, J, End, N) when J < End ->
+    case binary:at(Bs, J) of
+        $" -> cs_count_quotes(Bs, J + 1, End, N + 1);
+        _ -> {J, N}
+    end;
+cs_count_quotes(_Bs, J, _End, N) ->
+    {J, N}.
+
+cs_skip_raw_string(Bs, J, End, Needed) when J < End ->
+    case binary:at(Bs, J) of
+        $" ->
+            {P, Q} = cs_count_quotes(Bs, J, End, 0),
+            if
+                Q >= Needed -> {P, 1};
+                true -> cs_skip_raw_string(Bs, P, End, Needed)
+            end;
+        _ ->
+            cs_skip_raw_string(Bs, J + 1, End, Needed)
+    end;
+cs_skip_raw_string(_Bs, _J, End, _Needed) ->
+    {End, 1}.
+
+cs_skip_interp_normal(Bs, J, End) when J < End ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\\ -> cs_skip_interp_normal(Bs, J + 2, End);
+        B =:= $" -> {J + 1, 1};
+        true -> cs_skip_interp_normal(Bs, J + 1, End)
+    end;
+cs_skip_interp_normal(_Bs, _J, End) ->
+    {End, 1}.
+
+cs_skip_simple_str(Bs, J, End, Q) when J < End ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\\ -> cs_skip_simple_str(Bs, J + 2, End, Q);
+        B =:= Q -> {J + 1, 1};
+        true -> cs_skip_simple_str(Bs, J + 1, End, Q)
+    end;
+cs_skip_simple_str(_Bs, _J, End, _Q) ->
+    {End, 1}.
+
+%% --- find_line_end helpers ---
+cs_find_line_end_scan(Bs, J, End) when J < End ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\n orelse B =:= $; -> J;
+        B =:= $# -> J;
+        B =:= $/ andalso J + 1 < End ->
+            B1 = binary:at(Bs, J + 1),
+            if
+                B1 =:= $/ orelse B1 =:= $* -> J;
+                true -> cs_find_line_end_scan(Bs, J + 1, End)
+            end;
+        true ->
+            cs_find_line_end_scan(Bs, J + 1, End)
+    end;
+cs_find_line_end_scan(_Bs, J, _End) ->
+    J.
+
+%% --- balanced_paren helpers ---
+cs_balanced_paren_scan(Bs, I, End) when I < End ->
+    case binary:at(Bs, I) of
+        $( -> cs_balanced_paren_loop(Bs, I + 1, End, 1);
+        _ -> {0, 0}
+    end;
+cs_balanced_paren_scan(_Bs, _I, _End) ->
+    {0, 0}.
+
+cs_balanced_paren_loop(_Bs, J, _End, 0) ->
+    {J, 1};
+cs_balanced_paren_loop(Bs, J, End, Depth) when J < End andalso Depth > 0 ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $( ->
+            cs_balanced_paren_loop(Bs, J + 1, End, Depth + 1);
+        B =:= $) ->
+            cs_balanced_paren_loop(Bs, J + 1, End, Depth - 1);
+        B =:= $" orelse B =:= $' ->
+            J2 = cs_skip_quoted_in_paren(Bs, J + 1, End, B),
+            cs_balanced_paren_loop(Bs, J2 + 1, End, Depth);
+        true ->
+            cs_balanced_paren_loop(Bs, J + 1, End, Depth)
+    end;
+cs_balanced_paren_loop(_Bs, _J, End, _Depth) ->
+    {End, 0}.
+
+cs_skip_quoted_in_paren(Bs, J, End, Q) when J < End ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\\ ->
+            cs_skip_quoted_in_paren(Bs, J + 2, End, Q);
+        B =:= Q ->
+            J;
+        true ->
+            cs_skip_quoted_in_paren(Bs, J + 1, End, Q)
+    end;
+cs_skip_quoted_in_paren(_Bs, J, _End, _Q) ->
+    J.
+
+main() ->
+    Failures = test_all(0),
+    case Failures of
+        0 -> io:format("PASS: csharp_skipper (8 cases)~n");
+        _ -> io:format("FAIL: ~p failures~n", [Failures]), halt(1)
+    end.
+
+test_all(F0) ->
+    M = csharp_syntax_skipper_fsm,
+
+    %% Test 1: Skip // line comment
+    {ok, P1} = M:start_link(),
+    I1 = <<"// comment\ncode">>,
+    M:setup(P1, I1, 0, byte_size(I1)),
+    M:do_skip_comment(P1),
+    F1 = case {M:get_success(P1), M:get_result_pos(P1)} of
+        {1, 10} -> F0;
+        {S1, R1} -> io:format("FAIL 1: success=~p, pos=~p~n", [S1, R1]), F0 + 1
+    end,
+
+    %% Test 2: Skip /* */ block comment
+    {ok, P2} = M:start_link(),
+    I2 = <<"/* block */code">>,
+    M:setup(P2, I2, 0, byte_size(I2)),
+    M:do_skip_comment(P2),
+    F2 = case {M:get_success(P2), M:get_result_pos(P2)} of
+        {1, 11} -> F1;
+        {S2, R2} -> io:format("FAIL 2: success=~p, pos=~p~n", [S2, R2]), F1 + 1
+    end,
+
+    %% Test 3: Skip simple string "hello"
+    {ok, P3} = M:start_link(),
+    I3 = <<"\"hello\" rest">>,
+    M:setup(P3, I3, 0, byte_size(I3)),
+    M:do_skip_string(P3),
+    F3 = case {M:get_success(P3), M:get_result_pos(P3)} of
+        {1, 7} -> F2;
+        {S3, R3} -> io:format("FAIL 3: success=~p, pos=~p~n", [S3, R3]), F2 + 1
+    end,
+
+    %% Test 4: Skip verbatim string @"verbatim ""quote"""
+    {ok, P4} = M:start_link(),
+    I4 = <<"@\"verbatim \"\"quote\"\"\" rest">>,
+    M:setup(P4, I4, 0, byte_size(I4)),
+    M:do_skip_string(P4),
+    F4 = case {M:get_success(P4), M:get_result_pos(P4)} of
+        {1, 21} -> F3;
+        {S4, R4} -> io:format("FAIL 4: success=~p, pos=~p~n", [S4, R4]), F3 + 1
+    end,
+
+    %% Test 5: Skip interpolated string $"interp {x}"
+    {ok, P5} = M:start_link(),
+    I5 = <<"$\"interp {x}\" rest">>,
+    M:setup(P5, I5, 0, byte_size(I5)),
+    M:do_skip_string(P5),
+    F5 = case {M:get_success(P5), M:get_result_pos(P5)} of
+        {1, 13} -> F4;
+        {S5, R5} -> io:format("FAIL 5: success=~p, pos=~p~n", [S5, R5]), F4 + 1
+    end,
+
+    %% Test 6: Find line end (stops at // comment)
+    {ok, P6} = M:start_link(),
+    I6 = <<"x + 1 // comment">>,
+    M:setup(P6, I6, 0, byte_size(I6)),
+    M:do_find_line_end(P6),
+    F6 = case M:get_result_pos(P6) of
+        6 -> F5;
+        R6 -> io:format("FAIL 6: pos=~p, expected 6~n", [R6]), F5 + 1
+    end,
+
+    %% Test 7: Balanced parens
+    {ok, P7} = M:start_link(),
+    I7 = <<"(a, f(b)) rest">>,
+    M:setup(P7, I7, 0, byte_size(I7)),
+    M:do_balanced_paren_end(P7),
+    F7 = case {M:get_success(P7), M:get_result_pos(P7)} of
+        {1, 9} -> F6;
+        {S7, R7} -> io:format("FAIL 7: success=~p, pos=~p~n", [S7, R7]), F6 + 1
+    end,
+
+    %% Test 8: Skip # preprocessor directive
+    {ok, P8} = M:start_link(),
+    I8 = <<"#region Foo\ncode">>,
+    M:setup(P8, I8, 0, byte_size(I8)),
+    M:do_skip_comment(P8),
+    F8 = case {M:get_success(P8), M:get_result_pos(P8)} of
+        {1, 11} -> F7;
+        {S8, R8} -> io:format("FAIL 8: success=~p, pos=~p~n", [S8, R8]), F7 + 1
+    end,
+
+    F8.

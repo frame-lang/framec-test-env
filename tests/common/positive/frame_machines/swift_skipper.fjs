@@ -1,0 +1,248 @@
+@@target javascript
+
+// swift_skipper -- FSM for skipping syntax constructs.
+
+@@system SwiftSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos() {
+            return this.result_pos;
+        }
+        get_success() {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                if (i + 1 < end && bs[i] === 0x2F && bs[i + 1] === 0x2F) {
+                    let j = i + 2;
+                    while (j < end && bs[j] !== 0x0A) { j++; }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                if (i + 1 < end && bs[i] === 0x2F && bs[i + 1] === 0x2A) {
+                    let j = i + 2;
+                    let depth = 1;
+                    while (j + 1 < end && depth > 0) {
+                        if (bs[j] === 0x2F && bs[j + 1] === 0x2A) { depth++; j += 2; }
+                        else if (bs[j] === 0x2A && bs[j + 1] === 0x2F) { depth--; j += 2; }
+                        else { j++; }
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                if (i + 2 < end && bs[i] === 0x22 && bs[i + 1] === 0x22 && bs[i + 2] === 0x22) {
+                    let j = i + 3;
+                    while (j + 2 < end) {
+                        if (bs[j] === 0x22 && bs[j + 1] === 0x22 && bs[j + 2] === 0x22) {
+                            this.result_pos = j + 3; this.success = 1; return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end; this.success = 1; return;
+                }
+
+                if (i < end && (bs[i] === 0x22 || bs[i] === 0x27)) {
+                    const q = bs[i];
+                    let j = i + 1;
+                    while (j < end) {
+                        if (bs[j] === 0x5C) { j += 2; continue; }
+                        if (bs[j] === q) { this.result_pos = j + 1; this.success = 1; return; }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                let j = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                while (j < end) {
+                    const b = bs[j];
+                    if (b === 0x0A || b === 0x3B) { break; }
+                    if (b === 0x2F && j + 1 < end && bs[j + 1] === 0x2F) { break; }
+                    if (b === 0x2F && j + 1 < end && bs[j + 1] === 0x2A) { break; }
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                if (i >= end || bs[i] !== 0x28) { this.success = 0; return; }
+
+                let depth = 1;
+                let j = i + 1;
+                while (j < end && depth > 0) {
+                    const b = bs[j];
+                    if (b === 0x28) { depth++; }
+                    else if (b === 0x29) { depth--; }
+                    else if (b === 0x22 || b === 0x27) {
+                        const q = b; j++;
+                        while (j < end && bs[j] !== q) {
+                            if (bs[j] === 0x5C) { j++; }
+                            j++;
+                        }
+                    }
+                    j++;
+                }
+
+                if (depth === 0) { this.result_pos = j; this.success = 1; }
+                else { this.result_pos = end; this.success = 0; }
+            }
+        }
+
+    domain:
+        bytes = []
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+const enc = s => Array.from(Buffer.from(s));
+
+let failures = 0;
+
+// Test 1: Skip line comment
+const s1 = @@SwiftSyntaxSkipperFsm();
+const inp1 = enc("// hello\ncode");
+s1.setup(inp1, 0, inp1.length);
+s1.do_skip_comment();
+if (s1.get_success() !== 1 || s1.get_result_pos() !== 8) {
+    console.log("FAIL 1: Skip line comment");
+    failures++;
+}
+
+// Test 2: Skip block comment
+const s2 = @@SwiftSyntaxSkipperFsm();
+const inp2 = enc("/* block */code");
+s2.setup(inp2, 0, inp2.length);
+s2.do_skip_comment();
+if (s2.get_success() !== 1 || s2.get_result_pos() !== 11) {
+    console.log("FAIL 2: Skip block comment");
+    failures++;
+}
+
+// Test 3: Skip double-quoted string
+const s3 = @@SwiftSyntaxSkipperFsm();
+const inp3 = enc('"hello world" rest');
+s3.setup(inp3, 0, inp3.length);
+s3.do_skip_string();
+if (s3.get_success() !== 1 || s3.get_result_pos() !== 13) {
+    console.log("FAIL 3: Skip double-quoted string");
+    failures++;
+}
+
+// Test 4: Nested block comment
+const s4 = @@SwiftSyntaxSkipperFsm();
+const inp4 = enc("/* outer /* inner */ end */code");
+s4.setup(inp4, 0, inp4.length);
+s4.do_skip_comment();
+if (s4.get_success() !== 1 || s4.get_result_pos() !== 27) {
+    console.log("FAIL 4: Nested block comment");
+    failures++;
+}
+
+// Test 5: Multi-line string
+const s5 = @@SwiftSyntaxSkipperFsm();
+const inp5 = enc('\"\"\"multi-line\ncontent\"\"\" rest');
+s5.setup(inp5, 0, inp5.length);
+s5.do_skip_string();
+if (s5.get_success() !== 1 || s5.get_result_pos() !== 24) {
+    console.log("FAIL 5: Multi-line string");
+    failures++;
+}
+
+// Test 6: Find line end
+const s6 = @@SwiftSyntaxSkipperFsm();
+const inp6 = enc("x + 1\nmore");
+s6.setup(inp6, 0, inp6.length);
+s6.do_find_line_end();
+if (s6.get_result_pos() !== 5) {
+    console.log("FAIL 6: Find line end");
+    failures++;
+}
+
+// Test 7: Not a comment
+const s7 = @@SwiftSyntaxSkipperFsm();
+const inp7 = enc("x + 1");
+s7.setup(inp7, 0, inp7.length);
+s7.do_skip_comment();
+if (s7.get_success() !== 0) {
+    console.log("FAIL 7: Not a comment");
+    failures++;
+}
+
+// Test 8: Balanced parens
+const s8 = @@SwiftSyntaxSkipperFsm();
+const inp8 = enc("(a, f(b), c) rest");
+s8.setup(inp8, 0, inp8.length);
+s8.do_balanced_paren_end();
+if (s8.get_success() !== 1 || s8.get_result_pos() !== 12) {
+    console.log("FAIL 8: Balanced parens");
+    failures++;
+}
+
+// Test 9: Find line end at //
+const s9 = @@SwiftSyntaxSkipperFsm();
+const inp9 = enc("x + 1 // comment");
+s9.setup(inp9, 0, inp9.length);
+s9.do_find_line_end();
+if (s9.get_result_pos() !== 6) {
+    console.log("FAIL 9: Find line end at //");
+    failures++;
+}
+
+if (failures > 0) { console.log("FAIL: " + failures + " failures"); process.exit(1); }
+console.log("PASS: swift_skipper (9 cases)");

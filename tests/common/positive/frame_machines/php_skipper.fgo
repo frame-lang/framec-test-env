@@ -1,0 +1,386 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// PhpSyntaxSkipper -- FSM for skipping PHP comments and strings.
+// Translated from framec's native_region_scanner/php_skipper.frs
+//
+// Handles: // line comments, # line comments, /* */ block comments,
+// "..." and '...' strings, <<<EOT heredoc/nowdoc,
+// PHP-style line endings, balanced parens.
+
+@@system PhpSyntaxSkipperFsm {
+    operations:
+        Setup(input_bytes: []byte, start: int, length: int) {
+            s.bytes = input_bytes
+            s.pos = start
+            s.scan_end = length
+        }
+        GetResultPos(): int {
+            return s.result_pos
+        }
+        GetSuccess(): int {
+            return s.success
+        }
+
+    interface:
+        DoSkipComment()
+        DoSkipString()
+        DoFindLineEnd()
+        DoBalancedParenEnd()
+
+    machine:
+        $Init {
+            DoSkipComment() { -> $SkipComment }
+            DoSkipString() { -> $SkipString }
+            DoFindLineEnd() { -> $FindLineEnd }
+            DoBalancedParenEnd() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Line comment: //
+                if i+1 < end && bs[i] == '/' && bs[i+1] == '/' {
+                    j := i + 2
+                    for j < end && bs[j] != '\n' {
+                        j++
+                    }
+                    s.result_pos = j
+                    s.success = 1
+                    return
+                }
+
+                // Hash comment: #
+                if i < end && bs[i] == '#' {
+                    j := i + 1
+                    for j < end && bs[j] != '\n' {
+                        j++
+                    }
+                    s.result_pos = j
+                    s.success = 1
+                    return
+                }
+
+                // Block comment: /* ... */
+                if i+1 < end && bs[i] == '/' && bs[i+1] == '*' {
+                    j := i + 2
+                    for j+1 < end {
+                        if bs[j] == '*' && bs[j+1] == '/' {
+                            s.result_pos = j + 2
+                            s.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    s.result_pos = end
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Heredoc/nowdoc: <<<EOT ... EOT;
+                if i+2 < end && bs[i] == '<' && bs[i+1] == '<' && bs[i+2] == '<' {
+                    j := i + 3
+                    // Skip optional quote for nowdoc
+                    nowdoc := 0
+                    if j < end && bs[j] == '\'' {
+                        nowdoc = 1
+                        j++
+                    }
+                    // Read tag name
+                    tagStart := j
+                    for j < end && (isAlnum(bs[j]) || bs[j] == '_') {
+                        j++
+                    }
+                    tagEnd := j
+                    if nowdoc != 0 && j < end && bs[j] == '\'' {
+                        j++
+                    }
+                    tag := bs[tagStart:tagEnd]
+                    tagLen := len(tag)
+                    if tagLen > 0 {
+                        // Skip to newline
+                        for j < end && bs[j] != '\n' {
+                            j++
+                        }
+                        if j < end {
+                            j++
+                        }
+                        // Scan for closing tag at start of line
+                        for j < end {
+                            // Check if this line starts with the tag
+                            if j+tagLen <= end && string(bs[j:j+tagLen]) == string(tag) {
+                                k := j + tagLen
+                                // Optional ; and newline
+                                if k < end && bs[k] == ';' {
+                                    k++
+                                }
+                                if k >= end || bs[k] == '\n' {
+                                    if k < end && bs[k] == '\n' {
+                                        k++
+                                    }
+                                    s.result_pos = k
+                                    s.success = 1
+                                    return
+                                }
+                            }
+                            // Skip to next line
+                            for j < end && bs[j] != '\n' {
+                                j++
+                            }
+                            if j < end {
+                                j++
+                            }
+                        }
+                        s.result_pos = end
+                        s.success = 1
+                        return
+                    }
+                }
+
+                // Simple string: " or '
+                if i < end && (bs[i] == '"' || bs[i] == '\'') {
+                    q := bs[i]
+                    j := i + 1
+                    for j < end {
+                        if bs[j] == '\\' {
+                            j += 2
+                            continue
+                        }
+                        if bs[j] == q {
+                            s.result_pos = j + 1
+                            s.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    s.result_pos = end
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j := s.pos
+                end := s.scan_end
+                bs := s.bytes
+                inString := byte(0)
+
+                for j < end {
+                    b := bs[j]
+                    if b == '\n' {
+                        break
+                    }
+
+                    // Inside string
+                    if inString != 0 {
+                        if b == '\\' {
+                            j += 2
+                            continue
+                        }
+                        if b == inString {
+                            inString = 0
+                        }
+                        j++
+                        continue
+                    }
+
+                    // Terminators
+                    if b == ';' || b == '}' {
+                        break
+                    }
+                    if b == '/' && j+1 < end && (bs[j+1] == '/' || bs[j+1] == '*') {
+                        break
+                    }
+                    if b == '#' {
+                        break
+                    }
+
+                    // String starts
+                    if b == '\'' || b == '"' {
+                        inString = b
+                        j++
+                        continue
+                    }
+
+                    j++
+                }
+
+                s.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                if i >= end || bs[i] != '(' {
+                    s.success = 0
+                    return
+                }
+
+                depth := 0
+                inString := byte(0)
+
+                for i < end {
+                    b := bs[i]
+
+                    // Inside string
+                    if inString != 0 {
+                        if b == '\\' {
+                            i += 2
+                            continue
+                        }
+                        if b == inString {
+                            inString = 0
+                        }
+                        i++
+                        continue
+                    }
+
+                    if b == '\'' || b == '"' {
+                        inString = b
+                        i++
+                    } else if b == '(' {
+                        depth++
+                        i++
+                    } else if b == ')' {
+                        depth--
+                        i++
+                        if depth == 0 {
+                            s.result_pos = i
+                            s.success = 1
+                            return
+                        }
+                    } else {
+                        i++
+                    }
+                }
+
+                s.success = 0
+            }
+        }
+
+    domain:
+        bytes: []byte = nil
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+func isAlnum(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+func main() {
+	failures := 0
+
+	// Test 1: Skip // line comment
+	s1 := NewPhpSyntaxSkipperFsm()
+	inp1 := []byte("// comment\ncode")
+	s1.Setup(inp1, 0, len(inp1))
+	s1.DoSkipComment()
+	if s1.GetSuccess() != 1 || s1.GetResultPos() != 10 {
+		fmt.Printf("FAIL 1: success=%d, pos=%d\n", s1.GetSuccess(), s1.GetResultPos())
+		failures++
+	}
+
+	// Test 2: Skip # comment
+	s2 := NewPhpSyntaxSkipperFsm()
+	inp2 := []byte("# comment\ncode")
+	s2.Setup(inp2, 0, len(inp2))
+	s2.DoSkipComment()
+	if s2.GetSuccess() != 1 || s2.GetResultPos() != 9 {
+		fmt.Printf("FAIL 2: success=%d, pos=%d\n", s2.GetSuccess(), s2.GetResultPos())
+		failures++
+	}
+
+	// Test 3: Skip /* */ block comment
+	s3 := NewPhpSyntaxSkipperFsm()
+	inp3 := []byte("/* block */code")
+	s3.Setup(inp3, 0, len(inp3))
+	s3.DoSkipComment()
+	if s3.GetSuccess() != 1 || s3.GetResultPos() != 11 {
+		fmt.Printf("FAIL 3: success=%d, pos=%d\n", s3.GetSuccess(), s3.GetResultPos())
+		failures++
+	}
+
+	// Test 4: Skip double-quoted string
+	s4 := NewPhpSyntaxSkipperFsm()
+	inp4 := []byte("\"hello\" rest")
+	s4.Setup(inp4, 0, len(inp4))
+	s4.DoSkipString()
+	if s4.GetSuccess() != 1 || s4.GetResultPos() != 7 {
+		fmt.Printf("FAIL 4: success=%d, pos=%d\n", s4.GetSuccess(), s4.GetResultPos())
+		failures++
+	}
+
+	// Test 5: Skip single-quoted string
+	s5 := NewPhpSyntaxSkipperFsm()
+	inp5 := []byte("'hello' rest")
+	s5.Setup(inp5, 0, len(inp5))
+	s5.DoSkipString()
+	if s5.GetSuccess() != 1 || s5.GetResultPos() != 7 {
+		fmt.Printf("FAIL 5: success=%d, pos=%d\n", s5.GetSuccess(), s5.GetResultPos())
+		failures++
+	}
+
+	// Test 6: Skip heredoc
+	s6 := NewPhpSyntaxSkipperFsm()
+	inp6 := []byte("<<<EOT\nhello world\nEOT;\nnext")
+	s6.Setup(inp6, 0, len(inp6))
+	s6.DoSkipString()
+	if s6.GetSuccess() != 1 || s6.GetResultPos() != 24 {
+		fmt.Printf("FAIL 6: success=%d, pos=%d\n", s6.GetSuccess(), s6.GetResultPos())
+		failures++
+	}
+
+	// Test 7: Find line end (stops at ;)
+	s7 := NewPhpSyntaxSkipperFsm()
+	inp7 := []byte("$x = 1; next")
+	s7.Setup(inp7, 0, len(inp7))
+	s7.DoFindLineEnd()
+	if s7.GetResultPos() != 6 {
+		fmt.Printf("FAIL 7: pos=%d, expected 6\n", s7.GetResultPos())
+		failures++
+	}
+
+	// Test 8: Balanced parens
+	s8 := NewPhpSyntaxSkipperFsm()
+	inp8 := []byte("(a, f(b)) rest")
+	s8.Setup(inp8, 0, len(inp8))
+	s8.DoBalancedParenEnd()
+	if s8.GetSuccess() != 1 || s8.GetResultPos() != 9 {
+		fmt.Printf("FAIL 8: success=%d, pos=%d\n", s8.GetSuccess(), s8.GetResultPos())
+		failures++
+	}
+
+	if failures > 0 {
+		fmt.Printf("FAIL: %d failures\n", failures)
+		os.Exit(1)
+	}
+	fmt.Println("PASS: php_skipper (8 cases)")
+}

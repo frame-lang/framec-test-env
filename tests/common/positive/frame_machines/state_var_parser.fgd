@@ -1,0 +1,243 @@
+@@target gdscript
+extends SceneTree
+
+# StateVarParser — FSM for parsing $.varName and $.varName = expr
+# Translated from framec's native_region_scanner/state_var_parser.frs
+#
+# Uses hierarchical composition: $ScanExpr creates an ExprScannerFsm
+# sub-machine when it detects an assignment.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: Array, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.end = length
+        }
+        get_result(): int {
+            return self.result_end
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                var i = self.pos
+                var scan_end = self.end
+                var bs = self.bytes
+                var depth = 0
+                var in_string = -1
+
+                while i < scan_end:
+                    var b = bs[i]
+
+                    if in_string != -1:
+                        if b == 0x5C and i + 1 < scan_end:
+                            i += 2
+                            continue
+                        if b == in_string:
+                            in_string = -1
+                        i += 1
+                        continue
+
+                    if b == 0x22 or b == 0x27:
+                        in_string = b
+                        i += 1
+                        continue
+
+                    if b == 0x28 or b == 0x5B or b == 0x7B:
+                        depth += 1
+                    elif b == 0x29 or b == 0x5D or b == 0x7D:
+                        depth = max(depth - 1, 0)
+                    elif b == 0x3B and depth == 0:
+                        i += 1
+                        break
+                    elif b == 0x0A and depth == 0:
+                        break
+
+                    i += 1
+
+                self.result_end = i
+            }
+        }
+
+    domain:
+        bytes: Array = []
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+@@system StateVarParserFsm {
+    operations:
+        setup(input_bytes: Array, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.parse_end = length
+        }
+        get_result_end(): int {
+            return self.result_end
+        }
+        get_is_assignment(): bool {
+            return self.is_assignment
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $ScanIdent }
+        }
+
+        $ScanIdent {
+            $>() {
+                # Skip "$." prefix and scan identifier
+                var i = self.pos + 2
+                var p_end = self.parse_end
+                var bs = self.bytes
+
+                while i < p_end:
+                    var c = bs[i]
+                    if (c >= 0x30 and c <= 0x39) or (c >= 0x41 and c <= 0x5A) or (c >= 0x61 and c <= 0x7A) or c == 0x5F:
+                        i += 1
+                    else:
+                        break
+
+                self.ident_end = i
+                -> $CheckAssign
+            }
+        }
+
+        $CheckAssign {
+            $>() {
+                # Lookahead: skip whitespace, check for = (but not == or => or =<)
+                var j = self.ident_end
+                var p_end = self.parse_end
+                var bs = self.bytes
+
+                while j < p_end and (bs[j] == 0x20 or bs[j] == 0x09):
+                    j += 1
+
+                if j < p_end and bs[j] == 0x3D and (j + 1 >= p_end or (bs[j + 1] != 0x3D and bs[j + 1] != 0x3C and bs[j + 1] != 0x3E)):
+                    # Assignment detected
+                    j += 1
+                    self.pos = j
+                    self.is_assignment = true
+                    -> $ScanExpr
+                else:
+                    # Read-only access
+                    self.result_end = self.ident_end
+                    self.is_assignment = false
+                    -> $Done
+            }
+        }
+
+        $ScanExpr {
+            $>() {
+                # Create ExprScanner sub-machine
+                var expr = @@ExprScannerFsm()
+                expr.setup(self.bytes, self.pos, self.parse_end)
+                expr.do_scan()
+                self.result_end = expr.get_result()
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+                pass
+            }
+        }
+
+    domain:
+        bytes: Array = []
+        pos: int = 0
+        parse_end: int = 0
+        ident_end: int = 0
+        result_end: int = 0
+        is_assignment: bool = false
+}
+
+func str_to_bytes(s: String) -> Array:
+    var arr = []
+    var buf = s.to_utf8_buffer()
+    for i in range(buf.size()):
+        arr.append(buf[i])
+    return arr
+
+func bytes_to_str(arr: Array, start: int, end: int) -> String:
+    var buf = PackedByteArray()
+    for i in range(start, end):
+        buf.append(arr[i])
+    return buf.get_string_from_utf8()
+
+func main():
+    var failures = 0
+
+    # Test 1: Read-only access $.count
+    var p1 = @@StateVarParserFsm()
+    var inp1 = str_to_bytes("$.count + 1")
+    p1.setup(inp1, 0, inp1.size())
+    p1.do_parse()
+    if p1.get_is_assignment():
+        print("FAIL 1: should not be assignment")
+        failures += 1
+    var r1 = p1.get_result_end()
+    var name1 = bytes_to_str(inp1, 2, r1)
+    if name1 != "count":
+        print("FAIL 1: name='" + name1 + "', expected 'count'")
+        failures += 1
+
+    # Test 2: Assignment $.total = x + 1;\n
+    var p2 = @@StateVarParserFsm()
+    var inp2 = str_to_bytes("$.total = x + 1;\nmore")
+    p2.setup(inp2, 0, inp2.size())
+    p2.do_parse()
+    if not p2.get_is_assignment():
+        print("FAIL 2: should be assignment")
+        failures += 1
+    var r2 = p2.get_result_end()
+    var expr2 = bytes_to_str(inp2, 0, r2)
+    if expr2.find("x + 1;") == -1:
+        print("FAIL 2: expr='" + expr2 + "'")
+        failures += 1
+
+    # Test 3: Not assignment $.x == 5 (== is comparison, not assignment)
+    var p3 = @@StateVarParserFsm()
+    var inp3 = str_to_bytes("$.x == 5")
+    p3.setup(inp3, 0, inp3.size())
+    p3.do_parse()
+    if p3.get_is_assignment():
+        print("FAIL 3: == should not be treated as assignment")
+        failures += 1
+
+    # Test 4: Assignment with nested parens $.val = f(a, b)\n
+    var p4 = @@StateVarParserFsm()
+    var inp4 = str_to_bytes("$.val = f(a, b)\nrest")
+    p4.setup(inp4, 0, inp4.size())
+    p4.do_parse()
+    if not p4.get_is_assignment():
+        print("FAIL 4: should be assignment")
+        failures += 1
+    var r4 = p4.get_result_end()
+    var expr4 = bytes_to_str(inp4, 0, r4)
+    if expr4.find("f(a, b)") == -1:
+        print("FAIL 4: expr='" + expr4 + "'")
+        failures += 1
+
+    if failures > 0:
+        print("FAIL: " + str(failures) + " failures")
+        push_error(str(failures) + " test(s) failed")
+    else:
+        print("PASS: state_var_parser (4 cases)")
+
+func _init():
+    main()
+    quit()

@@ -1,0 +1,321 @@
+@@target c
+
+#include <string.h>
+
+// ErlangScopeScanner -- FSM for detecting fun(...) -> ... end closures.
+// Translated from framec's native_region_scanner/erlang_scope_scanner.frs
+
+@@system ErlangScopeScannerFsm {
+    operations:
+        setup(input_bytes: unsigned char*, start: int, length: int) {
+            self->bytes = input_bytes;
+            self->pos = start;
+            self->scan_end = length;
+        }
+        get_result_pos(): int {
+            return self->result_pos;
+        }
+        get_success(): int {
+            return self->success;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $CheckFun }
+        }
+
+        $CheckFun {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                // Must start with `fun` keyword
+                if (i + 3 > end) {
+                    self->success = 0;
+                    return;
+                }
+
+                if (bs[i] != 'f' || bs[i + 1] != 'u' || bs[i + 2] != 'n') {
+                    self->success = 0;
+                    return;
+                }
+
+                // Check word boundary (not part of `function` etc.)
+                int after = i + 3;
+                if (after < end && ((bs[after] >= 'a' && bs[after] <= 'z') || (bs[after] >= 'A' && bs[after] <= 'Z') || (bs[after] >= '0' && bs[after] <= '9') || bs[after] == '_')) {
+                    self->success = 0;
+                    return;
+                }
+
+                // Skip whitespace after `fun`
+                int j = after;
+                while (j < end && (bs[j] == ' ' || bs[j] == '\t' || bs[j] == '\n')) {
+                    j++;
+                }
+
+                // Check for Module:Function/Arity pattern (function reference, not closure)
+                if (j < end && bs[j] >= 'A' && bs[j] <= 'Z') {
+                    int k = j;
+                    while (k < end && ((bs[k] >= 'a' && bs[k] <= 'z') || (bs[k] >= 'A' && bs[k] <= 'Z') || (bs[k] >= '0' && bs[k] <= '9') || bs[k] == '_')) {
+                        k++;
+                    }
+                    if (k < end && bs[k] == ':') {
+                        self->success = 0;
+                        return;
+                    }
+                }
+
+                // It's a closure: fun(...) -> ... end
+                self->depth = 1;
+                self->pos = after;
+                -> $ScanBody
+            }
+        }
+
+        $ScanBody {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                while (i < end) {
+                    unsigned char b = bs[i];
+
+                    // Skip % line comments
+                    if (b == '%') {
+                        while (i < end && bs[i] != '\n') {
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    // Skip "..." strings
+                    if (b == '"') {
+                        i++;
+                        while (i < end) {
+                            if (bs[i] == '\\') {
+                                i += 2;
+                                continue;
+                            }
+                            if (bs[i] == '"') {
+                                i++;
+                                break;
+                            }
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    // Skip '...' quoted atoms
+                    if (b == '\'') {
+                        i++;
+                        while (i < end) {
+                            if (bs[i] == '\\') {
+                                i += 2;
+                                continue;
+                            }
+                            if (bs[i] == '\'') {
+                                i++;
+                                break;
+                            }
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    // fun
+                    if (b == 'f' && i + 3 <= end && bs[i + 1] == 'u' && bs[i + 2] == 'n') {
+                        if (i + 3 >= end || (!((bs[i + 3] >= 'a' && bs[i + 3] <= 'z') || (bs[i + 3] >= 'A' && bs[i + 3] <= 'Z') || (bs[i + 3] >= '0' && bs[i + 3] <= '9') || bs[i + 3] == '_'))) {
+                            self->depth++;
+                            i += 3;
+                            continue;
+                        }
+                    }
+
+                    // case
+                    if (b == 'c' && i + 4 <= end && bs[i + 1] == 'a' && bs[i + 2] == 's' && bs[i + 3] == 'e') {
+                        if (i + 4 >= end || (!((bs[i + 4] >= 'a' && bs[i + 4] <= 'z') || (bs[i + 4] >= 'A' && bs[i + 4] <= 'Z') || (bs[i + 4] >= '0' && bs[i + 4] <= '9') || bs[i + 4] == '_'))) {
+                            self->depth++;
+                            i += 4;
+                            continue;
+                        }
+                    }
+
+                    // if
+                    if (b == 'i' && i + 2 <= end && bs[i + 1] == 'f') {
+                        if (i + 2 >= end || (!((bs[i + 2] >= 'a' && bs[i + 2] <= 'z') || (bs[i + 2] >= 'A' && bs[i + 2] <= 'Z') || (bs[i + 2] >= '0' && bs[i + 2] <= '9') || bs[i + 2] == '_'))) {
+                            self->depth++;
+                            i += 2;
+                            continue;
+                        }
+                    }
+
+                    // receive
+                    if (b == 'r' && i + 7 <= end && bs[i + 1] == 'e' && bs[i + 2] == 'c' && bs[i + 3] == 'e' && bs[i + 4] == 'i' && bs[i + 5] == 'v' && bs[i + 6] == 'e') {
+                        if (i + 7 >= end || (!((bs[i + 7] >= 'a' && bs[i + 7] <= 'z') || (bs[i + 7] >= 'A' && bs[i + 7] <= 'Z') || (bs[i + 7] >= '0' && bs[i + 7] <= '9') || bs[i + 7] == '_'))) {
+                            self->depth++;
+                            i += 7;
+                            continue;
+                        }
+                    }
+
+                    // begin
+                    if (b == 'b' && i + 5 <= end && bs[i + 1] == 'e' && bs[i + 2] == 'g' && bs[i + 3] == 'i' && bs[i + 4] == 'n') {
+                        if (i + 5 >= end || (!((bs[i + 5] >= 'a' && bs[i + 5] <= 'z') || (bs[i + 5] >= 'A' && bs[i + 5] <= 'Z') || (bs[i + 5] >= '0' && bs[i + 5] <= '9') || bs[i + 5] == '_'))) {
+                            self->depth++;
+                            i += 5;
+                            continue;
+                        }
+                    }
+
+                    // try
+                    if (b == 't' && i + 3 <= end && bs[i + 1] == 'r' && bs[i + 2] == 'y') {
+                        if (i + 3 >= end || (!((bs[i + 3] >= 'a' && bs[i + 3] <= 'z') || (bs[i + 3] >= 'A' && bs[i + 3] <= 'Z') || (bs[i + 3] >= '0' && bs[i + 3] <= '9') || bs[i + 3] == '_'))) {
+                            self->depth++;
+                            i += 3;
+                            continue;
+                        }
+                    }
+
+                    // end
+                    if (b == 'e' && i + 3 <= end && bs[i + 1] == 'n' && bs[i + 2] == 'd') {
+                        if (i + 3 >= end || (!((bs[i + 3] >= 'a' && bs[i + 3] <= 'z') || (bs[i + 3] >= 'A' && bs[i + 3] <= 'Z') || (bs[i + 3] >= '0' && bs[i + 3] <= '9') || bs[i + 3] == '_'))) {
+                            self->depth--;
+                            if (self->depth == 0) {
+                                self->result_pos = i + 3;
+                                self->success = 1;
+                                return;
+                            }
+                            i += 3;
+                            continue;
+                        }
+                    }
+
+                    // Skip identifiers
+                    if ((b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || b == '_') {
+                        while (i < end && ((bs[i] >= 'a' && bs[i] <= 'z') || (bs[i] >= 'A' && bs[i] <= 'Z') || (bs[i] >= '0' && bs[i] <= '9') || bs[i] == '_')) {
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    i++;
+                }
+
+                // Ran out of bytes without finding matching `end`
+                self->success = 0;
+            }
+        }
+
+    domain:
+        bytes: unsigned char* = NULL
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 0
+        depth: int = 0
+}
+
+int main() {
+    int failures = 0;
+
+    // Test 1: Simple fun -> end
+    ErlangScopeScannerFsm* s1 = @@ErlangScopeScannerFsm();
+    unsigned char t1[] = "fun(X) -> X + 1 end rest";
+    ErlangScopeScannerFsm_setup(s1, t1, 0, sizeof(t1)-1);
+    ErlangScopeScannerFsm_do_scan(s1);
+    if (ErlangScopeScannerFsm_get_success(s1) != 1 || ErlangScopeScannerFsm_get_result_pos(s1) != 19) {
+        printf("FAIL 1: success=%d, pos=%d\n", ErlangScopeScannerFsm_get_success(s1), ErlangScopeScannerFsm_get_result_pos(s1));
+        failures++;
+    }
+
+    // Test 2: Nested fun -> case ... end end
+    ErlangScopeScannerFsm* s2 = @@ErlangScopeScannerFsm();
+    unsigned char t2[] = "fun(X) -> case X of 1 -> ok end end rest";
+    ErlangScopeScannerFsm_setup(s2, t2, 0, sizeof(t2)-1);
+    ErlangScopeScannerFsm_do_scan(s2);
+    if (ErlangScopeScannerFsm_get_success(s2) != 1 || ErlangScopeScannerFsm_get_result_pos(s2) != 35) {
+        printf("FAIL 2: success=%d, pos=%d\n", ErlangScopeScannerFsm_get_success(s2), ErlangScopeScannerFsm_get_result_pos(s2));
+        failures++;
+    }
+
+    // Test 3: Not a fun keyword (function)
+    ErlangScopeScannerFsm* s3 = @@ErlangScopeScannerFsm();
+    unsigned char t3[] = "function() -> ok end";
+    ErlangScopeScannerFsm_setup(s3, t3, 0, sizeof(t3)-1);
+    ErlangScopeScannerFsm_do_scan(s3);
+    if (ErlangScopeScannerFsm_get_success(s3) != 0) {
+        printf("FAIL 3: should not match 'function'\n");
+        failures++;
+    }
+
+    // Test 4: fun Module:Function/Arity (function reference, not closure)
+    ErlangScopeScannerFsm* s4 = @@ErlangScopeScannerFsm();
+    unsigned char t4[] = "fun io:format/2";
+    ErlangScopeScannerFsm_setup(s4, t4, 0, sizeof(t4)-1);
+    ErlangScopeScannerFsm_do_scan(s4);
+    if (ErlangScopeScannerFsm_get_success(s4) != 0) {
+        printf("FAIL 4: should not match function reference\n");
+        failures++;
+    }
+
+    // Test 5: Nested if ... end inside fun
+    ErlangScopeScannerFsm* s5 = @@ErlangScopeScannerFsm();
+    unsigned char t5[] = "fun() -> if true -> ok end end rest";
+    ErlangScopeScannerFsm_setup(s5, t5, 0, sizeof(t5)-1);
+    ErlangScopeScannerFsm_do_scan(s5);
+    if (ErlangScopeScannerFsm_get_success(s5) != 1 || ErlangScopeScannerFsm_get_result_pos(s5) != 30) {
+        printf("FAIL 5: success=%d, pos=%d\n", ErlangScopeScannerFsm_get_success(s5), ErlangScopeScannerFsm_get_result_pos(s5));
+        failures++;
+    }
+
+    // Test 6: String inside fun body (should skip)
+    ErlangScopeScannerFsm* s6 = @@ErlangScopeScannerFsm();
+    unsigned char t6[] = "fun() -> \"end\" end rest";
+    ErlangScopeScannerFsm_setup(s6, t6, 0, sizeof(t6)-1);
+    ErlangScopeScannerFsm_do_scan(s6);
+    if (ErlangScopeScannerFsm_get_success(s6) != 1 || ErlangScopeScannerFsm_get_result_pos(s6) != 18) {
+        printf("FAIL 6: success=%d, pos=%d\n", ErlangScopeScannerFsm_get_success(s6), ErlangScopeScannerFsm_get_result_pos(s6));
+        failures++;
+    }
+
+    // Test 7: Comment inside fun body (should skip)
+    ErlangScopeScannerFsm* s7 = @@ErlangScopeScannerFsm();
+    unsigned char t7[] = "fun() -> % end\nok end rest";
+    ErlangScopeScannerFsm_setup(s7, t7, 0, sizeof(t7)-1);
+    ErlangScopeScannerFsm_do_scan(s7);
+    if (ErlangScopeScannerFsm_get_success(s7) != 1 || ErlangScopeScannerFsm_get_result_pos(s7) != 21) {
+        printf("FAIL 7: success=%d, pos=%d\n", ErlangScopeScannerFsm_get_success(s7), ErlangScopeScannerFsm_get_result_pos(s7));
+        failures++;
+    }
+
+    // Test 8: Unmatched fun (no end)
+    ErlangScopeScannerFsm* s8 = @@ErlangScopeScannerFsm();
+    unsigned char t8[] = "fun() -> X + 1";
+    ErlangScopeScannerFsm_setup(s8, t8, 0, sizeof(t8)-1);
+    ErlangScopeScannerFsm_do_scan(s8);
+    if (ErlangScopeScannerFsm_get_success(s8) != 0) {
+        printf("FAIL 8: should fail with no matching end\n");
+        failures++;
+    }
+
+    ErlangScopeScannerFsm_destroy(s1);
+    ErlangScopeScannerFsm_destroy(s2);
+    ErlangScopeScannerFsm_destroy(s3);
+    ErlangScopeScannerFsm_destroy(s4);
+    ErlangScopeScannerFsm_destroy(s5);
+    ErlangScopeScannerFsm_destroy(s6);
+    ErlangScopeScannerFsm_destroy(s7);
+    ErlangScopeScannerFsm_destroy(s8);
+
+    if (failures > 0) {
+        printf("FAIL: %d failures\n", failures);
+        return 1;
+    }
+    printf("PASS: erlang_scope_scanner (8 cases)\n");
+    return 0;
+}

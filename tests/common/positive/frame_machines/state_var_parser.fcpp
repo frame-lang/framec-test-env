@@ -1,0 +1,249 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <algorithm>
+#include <cctype>
+
+// StateVarParser — FSM for parsing $.varName and $.varName = expr
+// Translated from framec's native_region_scanner/state_var_parser.frs
+//
+// Uses hierarchical composition: $ScanExpr creates an ExprScannerFsm
+// sub-machine when it detects an assignment.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: std::vector<uint8_t>, start: int, length: int) {
+            this->bytes = input_bytes;
+            this->pos = start;
+            this->end = length;
+        }
+        get_result(): int {
+            return this->result_end;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                int i = this->pos;
+                int end = this->end;
+                const std::vector<uint8_t>& bs = this->bytes;
+                int depth = 0;
+                int in_string = -1;
+
+                while (i < end) {
+                    int b = bs[i];
+
+                    if (in_string != -1) {
+                        if (b == '\\' && i + 1 < end) {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = -1;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '"' || b == '\'') {
+                        in_string = b;
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '(' || b == '[' || b == '{') {
+                        depth++;
+                    } else if (b == ')' || b == ']' || b == '}') {
+                        depth = std::max(depth - 1, 0);
+                    } else if (b == ';' && depth == 0) {
+                        i++;
+                        break;
+                    } else if (b == '\n' && depth == 0) {
+                        break;
+                    }
+
+                    i++;
+                }
+
+                this->result_end = i;
+            }
+        }
+
+    domain:
+        bytes: std::vector<uint8_t> = {}
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+@@system StateVarParserFsm {
+    operations:
+        setup(input_bytes: std::vector<uint8_t>, start: int, length: int) {
+            this->bytes = input_bytes;
+            this->pos = start;
+            this->parse_end = length;
+        }
+        get_result_end(): int {
+            return this->result_end;
+        }
+        get_is_assignment(): bool {
+            return this->is_assignment;
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $ScanIdent }
+        }
+
+        $ScanIdent {
+            $>() {
+                // Skip "$." prefix and scan identifier
+                int i = this->pos + 2;
+                int end = this->parse_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                while (i < end && (std::isalnum(bs[i]) || bs[i] == '_')) {
+                    i++;
+                }
+
+                this->ident_end = i;
+                -> $CheckAssign
+            }
+        }
+
+        $CheckAssign {
+            $>() {
+                // Lookahead: skip whitespace, check for = (but not == or => or =<)
+                int j = this->ident_end;
+                int end = this->parse_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                while (j < end && (bs[j] == ' ' || bs[j] == '\t')) {
+                    j++;
+                }
+
+                if (j < end && bs[j] == '=' && (j + 1 >= end || (bs[j + 1] != '=' && bs[j + 1] != '<' && bs[j + 1] != '>'))) {
+                    // Assignment detected
+                    j++;
+                    this->pos = j;
+                    this->is_assignment = true;
+                    -> $ScanExpr
+                } else {
+                    // Read-only access
+                    this->result_end = this->ident_end;
+                    this->is_assignment = false;
+                    -> $Done
+                }
+            }
+        }
+
+        $ScanExpr {
+            $>() {
+                // Create ExprScanner sub-machine
+                auto expr = ExprScannerFsm();
+                expr.setup(this->bytes, this->pos, this->parse_end);
+                expr.do_scan();
+                this->result_end = expr.get_result();
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+            }
+        }
+
+    domain:
+        bytes: std::vector<uint8_t> = {}
+        pos: int = 0
+        parse_end: int = 0
+        ident_end: int = 0
+        result_end: int = 0
+        is_assignment: bool = false
+}
+
+int main() {
+    int failures = 0;
+
+    auto to_bytes = [](const std::string& s) -> std::vector<uint8_t> {
+        return std::vector<uint8_t>(s.begin(), s.end());
+    };
+
+    // Test 1: Read-only access $.count
+    auto p1 = StateVarParserFsm();
+    auto inp1 = to_bytes("$.count + 1");
+    p1.setup(inp1, 0, inp1.size());
+    p1.do_parse();
+    if (p1.get_is_assignment()) {
+        printf("FAIL 1: should not be assignment\n");
+        failures++;
+    }
+    int r1 = p1.get_result_end();
+    std::string name1(inp1.begin() + 2, inp1.begin() + r1);
+    if (name1 != "count") {
+        printf("FAIL 1: name='%s', expected 'count'\n", name1.c_str());
+        failures++;
+    }
+
+    // Test 2: Assignment $.total = x + 1;\n
+    auto p2 = StateVarParserFsm();
+    auto inp2 = to_bytes("$.total = x + 1;\nmore");
+    p2.setup(inp2, 0, inp2.size());
+    p2.do_parse();
+    if (!p2.get_is_assignment()) {
+        printf("FAIL 2: should be assignment\n");
+        failures++;
+    }
+    int r2 = p2.get_result_end();
+    std::string expr2(inp2.begin(), inp2.begin() + r2);
+    if (expr2.find("x + 1;") == std::string::npos) {
+        printf("FAIL 2: expr='%s'\n", expr2.c_str());
+        failures++;
+    }
+
+    // Test 3: Not assignment $.x == 5 (== is comparison, not assignment)
+    auto p3 = StateVarParserFsm();
+    auto inp3 = to_bytes("$.x == 5");
+    p3.setup(inp3, 0, inp3.size());
+    p3.do_parse();
+    if (p3.get_is_assignment()) {
+        printf("FAIL 3: == should not be treated as assignment\n");
+        failures++;
+    }
+
+    // Test 4: Assignment with nested parens $.val = f(a, b)\n
+    auto p4 = StateVarParserFsm();
+    auto inp4 = to_bytes("$.val = f(a, b)\nrest");
+    p4.setup(inp4, 0, inp4.size());
+    p4.do_parse();
+    if (!p4.get_is_assignment()) {
+        printf("FAIL 4: should be assignment\n");
+        failures++;
+    }
+    int r4 = p4.get_result_end();
+    std::string expr4(inp4.begin(), inp4.begin() + r4);
+    if (expr4.find("f(a, b)") == std::string::npos) {
+        printf("FAIL 4: expr='%s'\n", expr4.c_str());
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: %d failures\n", failures);
+        return 1;
+    }
+    printf("PASS: state_var_parser (4 cases)\n");
+    return 0;
+}

@@ -1,0 +1,289 @@
+@@target typescript
+
+// javascript_skipper -- FSM for skipping syntax constructs.
+
+@@system JavaScriptSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: number[], start: number, length: number) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): number {
+            return this.result_pos;
+        }
+        get_success(): number {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                if (i + 1 < end && bs[i] === 0x2F && bs[i + 1] === 0x2F) {
+                    let j = i + 2;
+                    while (j < end && bs[j] !== 0x0A) { j++; }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                if (i + 1 < end && bs[i] === 0x2F && bs[i + 1] === 0x2A) {
+                    let j = i + 2;
+                    while (j + 1 < end) {
+                        if (bs[j] === 0x2A && bs[j + 1] === 0x2F) {
+                            this.result_pos = j + 2;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                if (i < end && bs[i] === 0x60) {
+                    let j = i + 1;
+                    let brace_depth = 0;
+                    while (j < end) {
+                        if (bs[j] === 0x60 && brace_depth === 0) {
+                            this.result_pos = j + 1; this.success = 1; return;
+                        }
+                        if (bs[j] === 0x5C) { j += 2; continue; }
+                        if (bs[j] === 0x24 && j + 1 < end && bs[j + 1] === 0x7B) {
+                            brace_depth++; j += 2; continue;
+                        }
+                        if (bs[j] === 0x7D && brace_depth > 0) { brace_depth--; }
+                        j++;
+                    }
+                    this.result_pos = end; this.success = 1; return;
+                }
+
+                if (i < end && (bs[i] === 0x22 || bs[i] === 0x27)) {
+                    const q = bs[i];
+                    let j = i + 1;
+                    while (j < end) {
+                        if (bs[j] === 0x5C) { j += 2; continue; }
+                        if (bs[j] === q) { this.result_pos = j + 1; this.success = 1; return; }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                let j = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                let in_string = 0;
+                let in_template = 0;
+                let template_brace_depth = 0;
+
+                while (j < end) {
+                    const b = bs[j];
+                    if (b === 0x0A) { break; }
+
+                    if (in_template !== 0) {
+                        if (b === 0x60 && template_brace_depth === 0) { in_template = 0; j++; continue; }
+                        if (b === 0x5C) { j += 2; continue; }
+                        if (b === 0x24 && j + 1 < end && bs[j + 1] === 0x7B) { template_brace_depth++; j += 2; continue; }
+                        if (b === 0x7D && template_brace_depth > 0) { template_brace_depth--; }
+                        j++; continue;
+                    }
+
+                    if (in_string !== 0) {
+                        if (b === 0x5C) { j += 2; continue; }
+                        if (b === in_string) { in_string = 0; }
+                        j++; continue;
+                    }
+
+                    if (b === 0x3B || b === 0x7D) { break; }
+                    if (b === 0x2F && j + 1 < end && (bs[j + 1] === 0x2F || bs[j + 1] === 0x2A)) { break; }
+                    if (b === 0x27 || b === 0x22) { in_string = b; j++; continue; }
+                    if (b === 0x60) { in_template = 1; j++; continue; }
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                if (i >= end || bs[i] !== 0x28) { this.success = 0; return; }
+
+                let depth = 0;
+                let in_string = 0;
+                let in_template = 0;
+
+                while (i < end) {
+                    const b = bs[i];
+
+                    if (in_template !== 0) {
+                        if (b === 0x60) { in_template = 0; }
+                        if (b === 0x5C) { i += 2; continue; }
+                        i++; continue;
+                    }
+
+                    if (in_string !== 0) {
+                        if (b === 0x5C) { i += 2; continue; }
+                        if (b === in_string) { in_string = 0; }
+                        i++; continue;
+                    }
+
+                    if (b === 0x27 || b === 0x22) { in_string = b; i++; }
+                    else if (b === 0x60) { in_template = 1; i++; }
+                    else if (b === 0x28) { depth++; i++; }
+                    else if (b === 0x29) {
+                        depth--; i++;
+                        if (depth === 0) { this.result_pos = i; this.success = 1; return; }
+                    }
+                    else { i++; }
+                }
+
+                this.success = 0;
+            }
+        }
+
+    domain:
+        bytes: number[] = []
+        pos: number = 0
+        scan_end: number = 0
+        result_pos: number = 0
+        success: number = 1
+}
+
+const enc = (s: string) => Array.from(Buffer.from(s));
+
+let failures = 0;
+
+// Test 1: Skip line comment
+const s1 = @@JavaScriptSyntaxSkipperFsm();
+const inp1 = enc("// hello\ncode");
+s1.setup(inp1, 0, inp1.length);
+s1.do_skip_comment();
+if (s1.get_success() !== 1 || s1.get_result_pos() !== 8) {
+    console.log("FAIL 1: Skip line comment");
+    failures++;
+}
+
+// Test 2: Skip block comment
+const s2 = @@JavaScriptSyntaxSkipperFsm();
+const inp2 = enc("/* block */code");
+s2.setup(inp2, 0, inp2.length);
+s2.do_skip_comment();
+if (s2.get_success() !== 1 || s2.get_result_pos() !== 11) {
+    console.log("FAIL 2: Skip block comment");
+    failures++;
+}
+
+// Test 3: Skip double-quoted string
+const s3 = @@JavaScriptSyntaxSkipperFsm();
+const inp3 = enc('"hello world" rest');
+s3.setup(inp3, 0, inp3.length);
+s3.do_skip_string();
+if (s3.get_success() !== 1 || s3.get_result_pos() !== 13) {
+    console.log("FAIL 3: Skip double-quoted string");
+    failures++;
+}
+
+// Test 4: Skip template literal
+const s4 = @@JavaScriptSyntaxSkipperFsm();
+const inp4 = enc('`template ${x}` rest');
+s4.setup(inp4, 0, inp4.length);
+s4.do_skip_string();
+if (s4.get_success() !== 1 || s4.get_result_pos() !== 15) {
+    console.log("FAIL 4: Skip template literal");
+    failures++;
+}
+
+// Test 5: Skip single-quoted string
+const s5 = @@JavaScriptSyntaxSkipperFsm();
+const inp5 = enc('"hello world" rest');
+s5.setup(inp5, 0, inp5.length);
+s5.do_skip_string();
+if (s5.get_success() !== 1 || s5.get_result_pos() !== 13) {
+    console.log("FAIL 5: Skip single-quoted string");
+    failures++;
+}
+
+// Test 6: Find line end
+const s6 = @@JavaScriptSyntaxSkipperFsm();
+const inp6 = enc("x + 1\nmore");
+s6.setup(inp6, 0, inp6.length);
+s6.do_find_line_end();
+if (s6.get_result_pos() !== 5) {
+    console.log("FAIL 6: Find line end");
+    failures++;
+}
+
+// Test 7: Not a comment
+const s7 = @@JavaScriptSyntaxSkipperFsm();
+const inp7 = enc("x + 1");
+s7.setup(inp7, 0, inp7.length);
+s7.do_skip_comment();
+if (s7.get_success() !== 0) {
+    console.log("FAIL 7: Not a comment");
+    failures++;
+}
+
+// Test 8: Balanced parens with template
+const s8 = @@JavaScriptSyntaxSkipperFsm();
+const inp8 = enc('(a, `t`, c) rest');
+s8.setup(inp8, 0, inp8.length);
+s8.do_balanced_paren_end();
+if (s8.get_success() !== 1 || s8.get_result_pos() !== 11) {
+    console.log("FAIL 8: Balanced parens with template");
+    failures++;
+}
+
+// Test 9: Find line end at //
+const s9 = @@JavaScriptSyntaxSkipperFsm();
+const inp9 = enc("x + 1 // comment");
+s9.setup(inp9, 0, inp9.length);
+s9.do_find_line_end();
+if (s9.get_result_pos() !== 6) {
+    console.log("FAIL 9: Find line end at //");
+    failures++;
+}
+
+if (failures > 0) { console.log("FAIL: " + failures + " failures"); process.exit(1); }
+console.log("PASS: javascript_skipper (8 cases)");

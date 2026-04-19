@@ -1,0 +1,263 @@
+@@target erlang
+
+%% ErlangSyntaxSkipper -- FSM for skipping Erlang comments and strings.
+%% Translated from framec's native_region_scanner/erlang_skipper.frs
+%%
+%% Handles: % line comments, "..." strings, '...' quoted atoms,
+%% Erlang-style line endings, balanced parens.
+
+@@system ErlangSyntaxSkipperFsm {
+    interface:
+        setup(input_bytes: binary, start: int, length: int)
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+        get_result_pos(): int
+        get_success(): int
+
+    machine:
+        $Init {
+            setup(input_bytes: binary, start: int, length: int) {
+                self.bytes = input_bytes
+                self.pos = start
+                self.scan_end = length
+            }
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipComment {
+            $>() {
+                {ResultPos, Success} = erl_scan_comment(Data#data.bytes, Data#data.pos, Data#data.scan_end),
+                self.result_pos = ResultPos
+                self.success = Success
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipString {
+            $>() {
+                {ResultPos, Success} = erl_scan_string(Data#data.bytes, Data#data.pos, Data#data.scan_end),
+                self.result_pos = ResultPos
+                self.success = Success
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $FindLineEnd {
+            $>() {
+                self.result_pos = erl_scan_line_end(Data#data.bytes, Data#data.pos, Data#data.scan_end, 0)
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                {ResultPos, Success} = erl_scan_balanced_paren(Data#data.bytes, Data#data.pos, Data#data.scan_end),
+                self.result_pos = ResultPos
+                self.success = Success
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+    domain:
+        bytes = <<>>
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+%% --- Skip comment helper ---
+erl_scan_comment(Bs, I, End) when I < End ->
+    case binary:at(Bs, I) of
+        $% ->
+            J = erl_scan_to_newline(Bs, I + 1, End),
+            {J, 1};
+        _ ->
+            {0, 0}
+    end;
+erl_scan_comment(_Bs, _I, _End) ->
+    {0, 0}.
+
+erl_scan_to_newline(_Bs, J, End) when J >= End -> J;
+erl_scan_to_newline(Bs, J, End) ->
+    case binary:at(Bs, J) of
+        $\n -> J;
+        _ -> erl_scan_to_newline(Bs, J + 1, End)
+    end.
+
+%% --- Skip string helper ---
+erl_scan_string(Bs, I, End) when I < End ->
+    B = binary:at(Bs, I),
+    if
+        B =:= $" ->
+            erl_scan_str_loop(Bs, I + 1, End, $");
+        B =:= $' ->
+            erl_scan_str_loop(Bs, I + 1, End, $');
+        true ->
+            {0, 0}
+    end;
+erl_scan_string(_Bs, _I, _End) ->
+    {0, 0}.
+
+erl_scan_str_loop(_Bs, J, End, _Q) when J >= End ->
+    {End, 1};
+erl_scan_str_loop(Bs, J, End, Q) ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\\ ->
+            erl_scan_str_loop(Bs, J + 2, End, Q);
+        B =:= Q ->
+            {J + 1, 1};
+        true ->
+            erl_scan_str_loop(Bs, J + 1, End, Q)
+    end.
+
+%% --- Find line end helper ---
+erl_scan_line_end(_Bs, J, End, _InStr) when J >= End -> J;
+erl_scan_line_end(Bs, J, End, InStr) ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\n ->
+            J;
+        InStr =/= 0 andalso B =:= $\\ ->
+            erl_scan_line_end(Bs, J + 2, End, InStr);
+        InStr =/= 0 andalso B =:= InStr ->
+            erl_scan_line_end(Bs, J + 1, End, 0);
+        InStr =/= 0 ->
+            erl_scan_line_end(Bs, J + 1, End, InStr);
+        B =:= $% ->
+            J;
+        B =:= $" orelse B =:= $' ->
+            erl_scan_line_end(Bs, J + 1, End, B);
+        true ->
+            erl_scan_line_end(Bs, J + 1, End, InStr)
+    end.
+
+%% --- Balanced paren end helper ---
+erl_scan_balanced_paren(_Bs, I, End) when I >= End ->
+    {0, 0};
+erl_scan_balanced_paren(Bs, I, End) ->
+    case binary:at(Bs, I) of
+        $( ->
+            erl_scan_balanced_loop(Bs, I, End, 0, 0);
+        _ ->
+            {0, 0}
+    end.
+
+erl_scan_balanced_loop(_Bs, I, End, _Depth, _InStr) when I >= End ->
+    {0, 0};
+erl_scan_balanced_loop(Bs, I, End, Depth, InStr) ->
+    B = binary:at(Bs, I),
+    if
+        InStr =/= 0 andalso B =:= $\\ ->
+            erl_scan_balanced_loop(Bs, I + 2, End, Depth, InStr);
+        InStr =/= 0 andalso B =:= InStr ->
+            erl_scan_balanced_loop(Bs, I + 1, End, Depth, 0);
+        InStr =/= 0 ->
+            erl_scan_balanced_loop(Bs, I + 1, End, Depth, InStr);
+        B =:= $' orelse B =:= $" ->
+            erl_scan_balanced_loop(Bs, I + 1, End, Depth, B);
+        B =:= $( ->
+            erl_scan_balanced_loop(Bs, I + 1, End, Depth + 1, InStr);
+        B =:= $) ->
+            NewDepth = Depth - 1,
+            case NewDepth of
+                0 -> {I + 1, 1};
+                _ -> erl_scan_balanced_loop(Bs, I + 1, End, NewDepth, InStr)
+            end;
+        true ->
+            erl_scan_balanced_loop(Bs, I + 1, End, Depth, InStr)
+    end.
+
+main() ->
+    Failures = erl_test_all(0),
+    case Failures of
+        0 -> io:format("PASS: erlang_skipper (7 cases)~n");
+        _ -> io:format("FAIL: ~p failures~n", [Failures]), halt(1)
+    end.
+
+erl_test_all(F0) ->
+    M = erlang_syntax_skipper_fsm,
+
+    %% Test 1: Skip % comment
+    {ok, P1} = M:start_link(),
+    I1 = <<"% comment\ncode">>,
+    M:setup(P1, I1, 0, byte_size(I1)),
+    M:do_skip_comment(P1),
+    F1 = case {M:get_success(P1), M:get_result_pos(P1)} of
+        {1, 9} -> F0;
+        {S1, R1} -> io:format("FAIL 1: success=~p, pos=~p~n", [S1, R1]), F0 + 1
+    end,
+
+    %% Test 2: Not a comment
+    {ok, P2} = M:start_link(),
+    I2 = <<"x + 1">>,
+    M:setup(P2, I2, 0, byte_size(I2)),
+    M:do_skip_comment(P2),
+    F2 = case M:get_success(P2) of
+        0 -> F1;
+        _ -> io:format("FAIL 2: should not be comment~n"), F1 + 1
+    end,
+
+    %% Test 3: Skip double-quoted string
+    {ok, P3} = M:start_link(),
+    I3 = <<"\"hello\" rest">>,
+    M:setup(P3, I3, 0, byte_size(I3)),
+    M:do_skip_string(P3),
+    F3 = case {M:get_success(P3), M:get_result_pos(P3)} of
+        {1, 7} -> F2;
+        {S3, R3} -> io:format("FAIL 3: success=~p, pos=~p~n", [S3, R3]), F2 + 1
+    end,
+
+    %% Test 4: Skip quoted atom
+    {ok, P4} = M:start_link(),
+    I4 = <<"'my_atom' rest">>,
+    M:setup(P4, I4, 0, byte_size(I4)),
+    M:do_skip_string(P4),
+    F4 = case {M:get_success(P4), M:get_result_pos(P4)} of
+        {1, 9} -> F3;
+        {S4, R4} -> io:format("FAIL 4: success=~p, pos=~p~n", [S4, R4]), F3 + 1
+    end,
+
+    %% Test 5: Find line end (stops at %)
+    {ok, P5} = M:start_link(),
+    I5 = <<"X + 1 % comment">>,
+    M:setup(P5, I5, 0, byte_size(I5)),
+    M:do_find_line_end(P5),
+    F5 = case M:get_result_pos(P5) of
+        6 -> F4;
+        R5 -> io:format("FAIL 5: pos=~p, expected 6~n", [R5]), F4 + 1
+    end,
+
+    %% Test 6: Balanced parens
+    {ok, P6} = M:start_link(),
+    I6 = <<"(a, f(b)) rest">>,
+    M:setup(P6, I6, 0, byte_size(I6)),
+    M:do_balanced_paren_end(P6),
+    F6 = case {M:get_success(P6), M:get_result_pos(P6)} of
+        {1, 9} -> F5;
+        {S6, R6} -> io:format("FAIL 6: success=~p, pos=~p~n", [S6, R6]), F5 + 1
+    end,
+
+    %% Test 7: String with escape
+    {ok, P7} = M:start_link(),
+    I7 = <<"\"he\\\"llo\" rest">>,
+    M:setup(P7, I7, 0, byte_size(I7)),
+    M:do_skip_string(P7),
+    F7 = case {M:get_success(P7), M:get_result_pos(P7)} of
+        {1, 9} -> F6;
+        {S7, R7} -> io:format("FAIL 7: success=~p, pos=~p~n", [S7, R7]), F6 + 1
+    end,
+
+    F7.

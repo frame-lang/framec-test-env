@@ -1,0 +1,303 @@
+@@target c
+
+#include <string.h>
+
+// ErlangSyntaxSkipper -- FSM for skipping Erlang comments and strings.
+// Translated from framec's native_region_scanner/erlang_skipper.frs
+//
+// Handles: % line comments, "..." strings, '...' quoted atoms,
+// Erlang-style line endings, balanced parens.
+
+@@system ErlangSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: unsigned char*, start: int, length: int) {
+            self->bytes = input_bytes;
+            self->pos = start;
+            self->scan_end = length;
+        }
+        get_result_pos(): int {
+            return self->result_pos;
+        }
+        get_success(): int {
+            return self->success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                // Erlang: % line comment only
+                if (i < end && bs[i] == '%') {
+                    int j = i + 1;
+                    while (j < end && bs[j] != '\n') {
+                        j++;
+                    }
+                    self->result_pos = j;
+                    self->success = 1;
+                    return;
+                }
+
+                self->success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                // Simple string: "..."
+                if (i < end && bs[i] == '"') {
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == '"') {
+                            self->result_pos = j + 1;
+                            self->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    self->result_pos = end;
+                    self->success = 1;
+                    return;
+                }
+
+                // Quoted atoms: '...'
+                if (i < end && bs[i] == '\'') {
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == '\'') {
+                            self->result_pos = j + 1;
+                            self->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    self->result_pos = end;
+                    self->success = 1;
+                    return;
+                }
+
+                self->success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+                int in_string = 0;
+
+                while (j < end) {
+                    unsigned char b = bs[j];
+                    if (b == '\n') {
+                        break;
+                    }
+
+                    // Inside string
+                    if (in_string != 0) {
+                        if (b == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = 0;
+                        }
+                        j++;
+                        continue;
+                    }
+
+                    // Terminators
+                    if (b == '%') {
+                        break;
+                    }
+
+                    // String starts
+                    if (b == '"' || b == '\'') {
+                        in_string = b;
+                        j++;
+                        continue;
+                    }
+
+                    j++;
+                }
+
+                self->result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                if (i >= end || bs[i] != '(') {
+                    self->success = 0;
+                    return;
+                }
+
+                int depth = 0;
+                int in_string = 0;
+
+                while (i < end) {
+                    unsigned char b = bs[i];
+
+                    // Inside string
+                    if (in_string != 0) {
+                        if (b == '\\') {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = 0;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '"' || b == '\'') {
+                        in_string = b;
+                        i++;
+                    } else if (b == '(') {
+                        depth++;
+                        i++;
+                    } else if (b == ')') {
+                        depth--;
+                        i++;
+                        if (depth == 0) {
+                            self->result_pos = i;
+                            self->success = 1;
+                            return;
+                        }
+                    } else {
+                        i++;
+                    }
+                }
+
+                self->success = 0;
+            }
+        }
+
+    domain:
+        bytes: unsigned char* = NULL
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+int main() {
+    int failures = 0;
+
+    // Test 1: Skip % comment
+    ErlangSyntaxSkipperFsm* s1 = @@ErlangSyntaxSkipperFsm();
+    unsigned char t1[] = "% comment\ncode";
+    ErlangSyntaxSkipperFsm_setup(s1, t1, 0, sizeof(t1)-1);
+    ErlangSyntaxSkipperFsm_do_skip_comment(s1);
+    if (ErlangSyntaxSkipperFsm_get_success(s1) != 1 || ErlangSyntaxSkipperFsm_get_result_pos(s1) != 9) {
+        printf("FAIL 1: success=%d, pos=%d\n", ErlangSyntaxSkipperFsm_get_success(s1), ErlangSyntaxSkipperFsm_get_result_pos(s1));
+        failures++;
+    }
+
+    // Test 2: Not a comment
+    ErlangSyntaxSkipperFsm* s2 = @@ErlangSyntaxSkipperFsm();
+    unsigned char t2[] = "x + 1";
+    ErlangSyntaxSkipperFsm_setup(s2, t2, 0, sizeof(t2)-1);
+    ErlangSyntaxSkipperFsm_do_skip_comment(s2);
+    if (ErlangSyntaxSkipperFsm_get_success(s2) != 0) {
+        printf("FAIL 2: should not be comment\n");
+        failures++;
+    }
+
+    // Test 3: Skip double-quoted string
+    ErlangSyntaxSkipperFsm* s3 = @@ErlangSyntaxSkipperFsm();
+    unsigned char t3[] = "\"hello\" rest";
+    ErlangSyntaxSkipperFsm_setup(s3, t3, 0, sizeof(t3)-1);
+    ErlangSyntaxSkipperFsm_do_skip_string(s3);
+    if (ErlangSyntaxSkipperFsm_get_success(s3) != 1 || ErlangSyntaxSkipperFsm_get_result_pos(s3) != 7) {
+        printf("FAIL 3: success=%d, pos=%d\n", ErlangSyntaxSkipperFsm_get_success(s3), ErlangSyntaxSkipperFsm_get_result_pos(s3));
+        failures++;
+    }
+
+    // Test 4: Skip quoted atom
+    ErlangSyntaxSkipperFsm* s4 = @@ErlangSyntaxSkipperFsm();
+    unsigned char t4[] = "'my_atom' rest";
+    ErlangSyntaxSkipperFsm_setup(s4, t4, 0, sizeof(t4)-1);
+    ErlangSyntaxSkipperFsm_do_skip_string(s4);
+    if (ErlangSyntaxSkipperFsm_get_success(s4) != 1 || ErlangSyntaxSkipperFsm_get_result_pos(s4) != 9) {
+        printf("FAIL 4: success=%d, pos=%d\n", ErlangSyntaxSkipperFsm_get_success(s4), ErlangSyntaxSkipperFsm_get_result_pos(s4));
+        failures++;
+    }
+
+    // Test 5: Find line end (stops at %)
+    ErlangSyntaxSkipperFsm* s5 = @@ErlangSyntaxSkipperFsm();
+    unsigned char t5[] = "X + 1 % comment";
+    ErlangSyntaxSkipperFsm_setup(s5, t5, 0, sizeof(t5)-1);
+    ErlangSyntaxSkipperFsm_do_find_line_end(s5);
+    if (ErlangSyntaxSkipperFsm_get_result_pos(s5) != 6) {
+        printf("FAIL 5: pos=%d, expected 6\n", ErlangSyntaxSkipperFsm_get_result_pos(s5));
+        failures++;
+    }
+
+    // Test 6: Balanced parens
+    ErlangSyntaxSkipperFsm* s6 = @@ErlangSyntaxSkipperFsm();
+    unsigned char t6[] = "(a, f(b)) rest";
+    ErlangSyntaxSkipperFsm_setup(s6, t6, 0, sizeof(t6)-1);
+    ErlangSyntaxSkipperFsm_do_balanced_paren_end(s6);
+    if (ErlangSyntaxSkipperFsm_get_success(s6) != 1 || ErlangSyntaxSkipperFsm_get_result_pos(s6) != 9) {
+        printf("FAIL 6: success=%d, pos=%d\n", ErlangSyntaxSkipperFsm_get_success(s6), ErlangSyntaxSkipperFsm_get_result_pos(s6));
+        failures++;
+    }
+
+    // Test 7: String with escape
+    ErlangSyntaxSkipperFsm* s7 = @@ErlangSyntaxSkipperFsm();
+    unsigned char t7[] = "\"he\\\"llo\" rest";
+    ErlangSyntaxSkipperFsm_setup(s7, t7, 0, sizeof(t7)-1);
+    ErlangSyntaxSkipperFsm_do_skip_string(s7);
+    if (ErlangSyntaxSkipperFsm_get_success(s7) != 1 || ErlangSyntaxSkipperFsm_get_result_pos(s7) != 9) {
+        printf("FAIL 7: success=%d, pos=%d\n", ErlangSyntaxSkipperFsm_get_success(s7), ErlangSyntaxSkipperFsm_get_result_pos(s7));
+        failures++;
+    }
+
+    ErlangSyntaxSkipperFsm_destroy(s1);
+    ErlangSyntaxSkipperFsm_destroy(s2);
+    ErlangSyntaxSkipperFsm_destroy(s3);
+    ErlangSyntaxSkipperFsm_destroy(s4);
+    ErlangSyntaxSkipperFsm_destroy(s5);
+    ErlangSyntaxSkipperFsm_destroy(s6);
+    ErlangSyntaxSkipperFsm_destroy(s7);
+
+    if (failures > 0) {
+        printf("FAIL: %d failures\n", failures);
+        return 1;
+    }
+    printf("PASS: erlang_skipper (7 cases)\n");
+    return 0;
+}

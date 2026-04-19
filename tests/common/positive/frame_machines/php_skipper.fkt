@@ -1,0 +1,378 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+// PhpSyntaxSkipper -- FSM for skipping PHP comments and strings.
+// Translated from framec's native_region_scanner/php_skipper.frs
+//
+// Handles: // line comments, # line comments, /* */ block comments,
+// "..." and '...' strings, <<<EOT heredoc/nowdoc,
+// PHP-style line endings, balanced parens.
+
+@@system PhpSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: ByteArray, start: Int, length: Int) {
+            this.bytes = input_bytes
+            this.pos = start
+            this.scan_end = length
+        }
+        get_result_pos(): Int {
+            return this.result_pos
+        }
+        get_success(): Int {
+            return this.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                // Line comment: //
+                if (i + 1 < end && (bs[i].toInt() and 0xFF) == '/'.code && (bs[i + 1].toInt() and 0xFF) == '/'.code) {
+                    var j = i + 2
+                    while (j < end && (bs[j].toInt() and 0xFF) != '\n'.code) {
+                        j++
+                    }
+                    this.result_pos = j
+                    this.success = 1
+                    return
+                }
+
+                // Hash comment: #
+                if (i < end && (bs[i].toInt() and 0xFF) == '#'.code) {
+                    var j = i + 1
+                    while (j < end && (bs[j].toInt() and 0xFF) != '\n'.code) {
+                        j++
+                    }
+                    this.result_pos = j
+                    this.success = 1
+                    return
+                }
+
+                // Block comment: /* ... */
+                if (i + 1 < end && (bs[i].toInt() and 0xFF) == '/'.code && (bs[i + 1].toInt() and 0xFF) == '*'.code) {
+                    var j = i + 2
+                    while (j + 1 < end) {
+                        if ((bs[j].toInt() and 0xFF) == '*'.code && (bs[j + 1].toInt() and 0xFF) == '/'.code) {
+                            this.result_pos = j + 2
+                            this.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    this.result_pos = end
+                    this.success = 1
+                    return
+                }
+
+                this.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                // Heredoc/nowdoc: <<<EOT ... EOT;
+                if (i + 2 < end && (bs[i].toInt() and 0xFF) == '<'.code && (bs[i + 1].toInt() and 0xFF) == '<'.code && (bs[i + 2].toInt() and 0xFF) == '<'.code) {
+                    var j = i + 3
+                    var nowdoc = 0
+                    if (j < end && (bs[j].toInt() and 0xFF) == '\''.code) {
+                        nowdoc = 1
+                        j++
+                    }
+                    val tag_start = j
+                    while (j < end && ((bs[j].toInt() and 0xFF).toChar().isLetterOrDigit() || (bs[j].toInt() and 0xFF) == '_'.code)) {
+                        j++
+                    }
+                    val tag_end_pos = j
+                    if (nowdoc == 1 && j < end && (bs[j].toInt() and 0xFF) == '\''.code) {
+                        j++
+                    }
+                    val tag_len = tag_end_pos - tag_start
+                    if (tag_len > 0) {
+                        while (j < end && (bs[j].toInt() and 0xFF) != '\n'.code) {
+                            j++
+                        }
+                        if (j < end) {
+                            j++
+                        }
+                        while (j < end) {
+                            var match = true
+                            if (j + tag_len <= end) {
+                                for (t in 0 until tag_len) {
+                                    if (bs[j + t] != bs[tag_start + t]) {
+                                        match = false
+                                        break
+                                    }
+                                }
+                            } else {
+                                match = false
+                            }
+                            if (match) {
+                                var k = j + tag_len
+                                if (k < end && (bs[k].toInt() and 0xFF) == ';'.code) {
+                                    k++
+                                }
+                                if (k >= end || (bs[k].toInt() and 0xFF) == '\n'.code) {
+                                    if (k < end && (bs[k].toInt() and 0xFF) == '\n'.code) {
+                                        k++
+                                    }
+                                    this.result_pos = k
+                                    this.success = 1
+                                    return
+                                }
+                            }
+                            while (j < end && (bs[j].toInt() and 0xFF) != '\n'.code) {
+                                j++
+                            }
+                            if (j < end) {
+                                j++
+                            }
+                        }
+                        this.result_pos = end
+                        this.success = 1
+                        return
+                    }
+                }
+
+                // Simple string: " or '
+                if (i < end && ((bs[i].toInt() and 0xFF) == '"'.code || (bs[i].toInt() and 0xFF) == '\''.code)) {
+                    val q = bs[i].toInt() and 0xFF
+                    var j = i + 1
+                    while (j < end) {
+                        if ((bs[j].toInt() and 0xFF) == '\\'.code) {
+                            j += 2
+                            continue
+                        }
+                        if ((bs[j].toInt() and 0xFF) == q) {
+                            this.result_pos = j + 1
+                            this.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    this.result_pos = end
+                    this.success = 1
+                    return
+                }
+
+                this.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                var j = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+                var in_string = 0
+
+                while (j < end) {
+                    val b = bs[j].toInt() and 0xFF
+                    if (b == '\n'.code) {
+                        break
+                    }
+
+                    if (in_string != 0) {
+                        if (b == '\\'.code) {
+                            j += 2
+                            continue
+                        }
+                        if (b == in_string) {
+                            in_string = 0
+                        }
+                        j++
+                        continue
+                    }
+
+                    if (b == ';'.code || b == '}'.code) {
+                        break
+                    }
+                    if (b == '/'.code && j + 1 < end && ((bs[j + 1].toInt() and 0xFF) == '/'.code || (bs[j + 1].toInt() and 0xFF) == '*'.code)) {
+                        break
+                    }
+                    if (b == '#'.code) {
+                        break
+                    }
+
+                    if (b == '\''.code || b == '"'.code) {
+                        in_string = b
+                        j++
+                        continue
+                    }
+
+                    j++
+                }
+
+                this.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                if (i >= end || (bs[i].toInt() and 0xFF) != '('.code) {
+                    this.success = 0
+                    return
+                }
+
+                var depth = 0
+                var in_string = 0
+
+                while (i < end) {
+                    val b = bs[i].toInt() and 0xFF
+
+                    if (in_string != 0) {
+                        if (b == '\\'.code) {
+                            i += 2
+                            continue
+                        }
+                        if (b == in_string) {
+                            in_string = 0
+                        }
+                        i++
+                        continue
+                    }
+
+                    if (b == '\''.code || b == '"'.code) {
+                        in_string = b
+                        i++
+                    } else if (b == '('.code) {
+                        depth++
+                        i++
+                    } else if (b == ')'.code) {
+                        depth--
+                        i++
+                        if (depth == 0) {
+                            this.result_pos = i
+                            this.success = 1
+                            return
+                        }
+                    } else {
+                        i++
+                    }
+                }
+
+                this.success = 0
+            }
+        }
+
+    domain:
+        bytes: ByteArray = ByteArray(0)
+        pos: Int = 0
+        scan_end: Int = 0
+        result_pos: Int = 0
+        success: Int = 1
+}
+
+fun main() {
+    var failures = 0
+
+    // Test 1: Skip // line comment
+    val s1 = @@PhpSyntaxSkipperFsm()
+    val inp1 = "// comment\ncode".toByteArray()
+    s1.setup(inp1, 0, inp1.size)
+    s1.do_skip_comment()
+    if (s1.get_success() != 1 || s1.get_result_pos() != 10) {
+        println("FAIL 1: success=${s1.get_success()}, pos=${s1.get_result_pos()}")
+        failures++
+    }
+
+    // Test 2: Skip # comment
+    val s2 = @@PhpSyntaxSkipperFsm()
+    val inp2 = "# comment\ncode".toByteArray()
+    s2.setup(inp2, 0, inp2.size)
+    s2.do_skip_comment()
+    if (s2.get_success() != 1 || s2.get_result_pos() != 9) {
+        println("FAIL 2: success=${s2.get_success()}, pos=${s2.get_result_pos()}")
+        failures++
+    }
+
+    // Test 3: Skip /* */ block comment
+    val s3 = @@PhpSyntaxSkipperFsm()
+    val inp3 = "/* block */code".toByteArray()
+    s3.setup(inp3, 0, inp3.size)
+    s3.do_skip_comment()
+    if (s3.get_success() != 1 || s3.get_result_pos() != 11) {
+        println("FAIL 3: success=${s3.get_success()}, pos=${s3.get_result_pos()}")
+        failures++
+    }
+
+    // Test 4: Skip double-quoted string
+    val s4 = @@PhpSyntaxSkipperFsm()
+    val inp4 = "\"hello\" rest".toByteArray()
+    s4.setup(inp4, 0, inp4.size)
+    s4.do_skip_string()
+    if (s4.get_success() != 1 || s4.get_result_pos() != 7) {
+        println("FAIL 4: success=${s4.get_success()}, pos=${s4.get_result_pos()}")
+        failures++
+    }
+
+    // Test 5: Skip single-quoted string
+    val s5 = @@PhpSyntaxSkipperFsm()
+    val inp5 = "'hello' rest".toByteArray()
+    s5.setup(inp5, 0, inp5.size)
+    s5.do_skip_string()
+    if (s5.get_success() != 1 || s5.get_result_pos() != 7) {
+        println("FAIL 5: success=${s5.get_success()}, pos=${s5.get_result_pos()}")
+        failures++
+    }
+
+    // Test 6: Skip heredoc
+    val s6 = @@PhpSyntaxSkipperFsm()
+    val inp6 = "<<<EOT\nhello world\nEOT;\nnext".toByteArray()
+    s6.setup(inp6, 0, inp6.size)
+    s6.do_skip_string()
+    if (s6.get_success() != 1 || s6.get_result_pos() != 24) {
+        println("FAIL 6: success=${s6.get_success()}, pos=${s6.get_result_pos()}")
+        failures++
+    }
+
+    // Test 7: Find line end (stops at ;)
+    val s7 = @@PhpSyntaxSkipperFsm()
+    val inp7 = "\$x = 1; next".toByteArray()
+    s7.setup(inp7, 0, inp7.size)
+    s7.do_find_line_end()
+    if (s7.get_result_pos() != 6) {
+        println("FAIL 7: pos=${s7.get_result_pos()}, expected 6")
+        failures++
+    }
+
+    // Test 8: Balanced parens
+    val s8 = @@PhpSyntaxSkipperFsm()
+    val inp8 = "(a, f(b)) rest".toByteArray()
+    s8.setup(inp8, 0, inp8.size)
+    s8.do_balanced_paren_end()
+    if (s8.get_success() != 1 || s8.get_result_pos() != 9) {
+        println("FAIL 8: success=${s8.get_success()}, pos=${s8.get_result_pos()}")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: $failures failures")
+        exitProcess(1)
+    }
+    println("PASS: php_skipper (8 cases)")
+}

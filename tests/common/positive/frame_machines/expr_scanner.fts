@@ -1,0 +1,123 @@
+@@target typescript
+
+// ExprScanner — PDA for scanning assignment RHS expressions.
+// Translated from framec's native_region_scanner/expr_scanner.frs
+//
+// Scans from pos (after =) to a terminator (; or \n) at depth 0,
+// respecting nested ()[]{}  and string literals with escape handling.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: number[], start: number, length: number) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.end = length;
+        }
+        get_result(): number {
+            return this.result_end;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                let i = this.pos;
+                const end = this.end;
+                const bs = this.bytes;
+                let depth = 0;
+                let in_string: number | null = null;
+
+                while (i < end) {
+                    const b = bs[i];
+
+                    if (in_string !== null) {
+                        if (b === 0x5C && i + 1 < end) { // backslash
+                            i += 2;
+                            continue;
+                        }
+                        if (b === in_string) {
+                            in_string = null;
+                        }
+                        i += 1;
+                        continue;
+                    }
+
+                    if (b === 0x22 || b === 0x27) { // " or '
+                        in_string = b;
+                        i += 1;
+                        continue;
+                    }
+
+                    if (b === 0x28 || b === 0x5B || b === 0x7B) { // ( [ {
+                        depth += 1;
+                    } else if (b === 0x29 || b === 0x5D || b === 0x7D) { // ) ] }
+                        depth = Math.max(depth - 1, 0);
+                    } else if (b === 0x3B && depth === 0) { // ;
+                        i += 1;
+                        break;
+                    } else if (b === 0x0A && depth === 0) { // \n
+                        break;
+                    }
+
+                    i += 1;
+                }
+
+                this.result_end = i;
+            }
+        }
+
+    domain:
+        bytes: number[] = []
+        pos: number = 0
+        end: number = 0
+        result_end: number = 0
+}
+
+const enc = (s: string) => Array.from(Buffer.from(s));
+const dec = (bs: number[], start: number, end: number) => Buffer.from(bs.slice(start, end)).toString();
+
+let failures = 0;
+
+// Test 1: simple expression terminated by newline
+const e1 = @@ExprScannerFsm();
+const inp1 = enc(" x + 1\nfoo");
+e1.setup(inp1, 0, inp1.length);
+e1.do_scan();
+if (dec(inp1, 0, e1.get_result()) !== " x + 1") { console.log("FAIL 1"); failures++; }
+
+// Test 2: expression with semicolon terminator
+const e2 = @@ExprScannerFsm();
+const inp2 = enc(" x + 1; y = 2");
+e2.setup(inp2, 0, inp2.length);
+e2.do_scan();
+if (dec(inp2, 0, e2.get_result()) !== " x + 1;") { console.log("FAIL 2"); failures++; }
+
+// Test 3: nested parens not treated as terminator
+const e3 = @@ExprScannerFsm();
+const inp3 = enc(" f(x, g(y))\nz");
+e3.setup(inp3, 0, inp3.length);
+e3.do_scan();
+if (dec(inp3, 0, e3.get_result()) !== " f(x, g(y))") { console.log("FAIL 3"); failures++; }
+
+// Test 4: string with escaped quote
+const e4 = @@ExprScannerFsm();
+const inp4 = enc(' "hello\\"world"\n');
+e4.setup(inp4, 0, inp4.length);
+e4.do_scan();
+if (dec(inp4, 0, e4.get_result()) !== ' "hello\\"world"') { console.log("FAIL 4"); failures++; }
+
+// Test 5: semicolon inside string (should not terminate)
+const e5 = @@ExprScannerFsm();
+const inp5 = enc(' "a;b"\n');
+e5.setup(inp5, 0, inp5.length);
+e5.do_scan();
+if (dec(inp5, 0, e5.get_result()) !== ' "a;b"') { console.log("FAIL 5"); failures++; }
+
+if (failures > 0) { console.log("FAIL: " + failures + " failures"); process.exit(1); }
+console.log("PASS: expr_scanner (5 cases)");

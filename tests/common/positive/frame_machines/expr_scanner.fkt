@@ -1,0 +1,147 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+// ExprScanner — PDA for scanning assignment RHS expressions.
+// Translated from framec's native_region_scanner/expr_scanner.frs
+//
+// Scans from pos (after =) to a terminator (; or \n) at depth 0,
+// respecting nested ()[]{}  and string literals with escape handling.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: ByteArray, start: Int, length: Int) {
+            this.bytes = input_bytes
+            this.pos = start
+            this.end = length
+        }
+        get_result(): Int {
+            return this.result_end
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                var i = this.pos
+                val end = this.end
+                val bs = this.bytes
+                var depth = 0
+                var inString: Int = -1
+
+                while (i < end) {
+                    val b = bs[i].toInt() and 0xFF
+
+                    if (inString != -1) {
+                        if (b == '\\'.code && i + 1 < end) {
+                            i += 2
+                            continue
+                        }
+                        if (b == inString) {
+                            inString = -1
+                        }
+                        i++
+                        continue
+                    }
+
+                    if (b == '"'.code || b == '\''.code) {
+                        inString = b
+                        i++
+                        continue
+                    }
+
+                    if (b == '('.code || b == '['.code || b == '{'.code) {
+                        depth++
+                    } else if (b == ')'.code || b == ']'.code || b == '}'.code) {
+                        depth = maxOf(depth - 1, 0)
+                    } else if (b == ';'.code && depth == 0) {
+                        i++
+                        break
+                    } else if (b == '\n'.code && depth == 0) {
+                        break
+                    }
+
+                    i++
+                }
+
+                this.result_end = i
+            }
+        }
+
+    domain:
+        bytes: ByteArray = ByteArray(0)
+        pos: Int = 0
+        end: Int = 0
+        result_end: Int = 0
+}
+
+fun main() {
+    var failures = 0
+
+    // Test 1: simple expression terminated by newline
+    val e1 = @@ExprScannerFsm()
+    val inp1 = " x + 1\nfoo".toByteArray()
+    e1.setup(inp1, 0, inp1.size)
+    e1.do_scan()
+    val expr1 = String(inp1, 0, e1.get_result() as Int)
+    if (expr1 != " x + 1") {
+        println("FAIL 1: got '$expr1'")
+        failures++
+    }
+
+    // Test 2: expression with semicolon terminator
+    val e2 = @@ExprScannerFsm()
+    val inp2 = " x + 1; y = 2".toByteArray()
+    e2.setup(inp2, 0, inp2.size)
+    e2.do_scan()
+    val expr2 = String(inp2, 0, e2.get_result() as Int)
+    if (expr2 != " x + 1;") {
+        println("FAIL 2: got '$expr2'")
+        failures++
+    }
+
+    // Test 3: nested parens not treated as terminator
+    val e3 = @@ExprScannerFsm()
+    val inp3 = " f(x, g(y))\nz".toByteArray()
+    e3.setup(inp3, 0, inp3.size)
+    e3.do_scan()
+    val expr3 = String(inp3, 0, e3.get_result() as Int)
+    if (expr3 != " f(x, g(y))") {
+        println("FAIL 3: got '$expr3'")
+        failures++
+    }
+
+    // Test 4: string with escaped quote
+    val e4 = @@ExprScannerFsm()
+    val inp4 = " \"hello\\\"world\"\n".toByteArray()
+    e4.setup(inp4, 0, inp4.size)
+    e4.do_scan()
+    val expr4 = String(inp4, 0, e4.get_result() as Int)
+    if (expr4 != " \"hello\\\"world\"") {
+        println("FAIL 4: got '$expr4'")
+        failures++
+    }
+
+    // Test 5: semicolon inside string (should not terminate)
+    val e5 = @@ExprScannerFsm()
+    val inp5 = " \"a;b\"\n".toByteArray()
+    e5.setup(inp5, 0, inp5.size)
+    e5.do_scan()
+    val expr5 = String(inp5, 0, e5.get_result() as Int)
+    if (expr5 != " \"a;b\"") {
+        println("FAIL 5: got '$expr5'")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: $failures failures")
+        exitProcess(1)
+    }
+    println("PASS: expr_scanner (5 cases)")
+}

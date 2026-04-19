@@ -1,0 +1,364 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// RubySyntaxSkipper -- FSM for skipping Ruby comments and strings.
+// Translated from framec's native_region_scanner/ruby_skipper.frs
+//
+// Handles: # line comments, "..." / '...' strings,
+// %Q{} / %q[] / %w() etc. percent literals,
+// Ruby-style line endings, balanced parens.
+
+@@system RubySyntaxSkipperFsm {
+    operations:
+        Setup(input_bytes: []byte, start: int, length: int) {
+            s.bytes = input_bytes
+            s.pos = start
+            s.scan_end = length
+        }
+        GetResultPos(): int {
+            return s.result_pos
+        }
+        GetSuccess(): int {
+            return s.success
+        }
+
+    interface:
+        DoSkipComment()
+        DoSkipString()
+        DoFindLineEnd()
+        DoBalancedParenEnd()
+
+    machine:
+        $Init {
+            DoSkipComment() { -> $SkipComment }
+            DoSkipString() { -> $SkipString }
+            DoFindLineEnd() { -> $FindLineEnd }
+            DoBalancedParenEnd() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Ruby: # line comment only
+                if i < end && bs[i] == '#' {
+                    j := i + 1
+                    for j < end && bs[j] != '\n' {
+                        j++
+                    }
+                    s.result_pos = j
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Percent literals: %Q{...}, %q[...], %w(...), etc.
+                if i < end && bs[i] == '%' {
+                    if i+1 < end {
+                        c1 := bs[i+1]
+                        // Check for %Q, %q, %w, %W, %i, %I, %r, %x, %s
+                        hasLetter := c1 == 'Q' || c1 == 'q' || c1 == 'w' || c1 == 'W' || c1 == 'i' || c1 == 'I' || c1 == 'r' || c1 == 'x' || c1 == 's'
+                        var opener byte
+                        var j int
+                        if hasLetter && i+2 < end {
+                            opener = bs[i+2]
+                            j = i + 3
+                        } else if !isAlnumRuby(c1) && c1 != '_' {
+                            // %{...} or %[...] or %<...> without letter
+                            opener = c1
+                            j = i + 2
+                        } else {
+                            s.success = 0
+                            return
+                        }
+
+                        // Determine closer
+                        var closer byte
+                        if opener == '{' {
+                            closer = '}'
+                        } else if opener == '[' {
+                            closer = ']'
+                        } else if opener == '(' {
+                            closer = ')'
+                        } else if opener == '<' {
+                            closer = '>'
+                        } else {
+                            // Non-paired delimiter (e.g. %Q!...!)
+                            closer = opener
+                            // Scan to matching delimiter
+                            for j < end {
+                                if bs[j] == '\\' {
+                                    j += 2
+                                    continue
+                                }
+                                if bs[j] == closer {
+                                    s.result_pos = j + 1
+                                    s.success = 1
+                                    return
+                                }
+                                j++
+                            }
+                            s.result_pos = end
+                            s.success = 1
+                            return
+                        }
+
+                        // Paired delimiter: track nesting
+                        depth := 1
+                        for j < end && depth > 0 {
+                            if bs[j] == '\\' {
+                                j += 2
+                                continue
+                            }
+                            if bs[j] == opener {
+                                depth++
+                            } else if bs[j] == closer {
+                                depth--
+                            }
+                            j++
+                        }
+                        s.result_pos = j
+                        s.success = 1
+                        return
+                    }
+                }
+
+                // Simple string: " or '
+                if i < end && (bs[i] == '"' || bs[i] == '\'') {
+                    q := bs[i]
+                    j := i + 1
+                    for j < end {
+                        if bs[j] == '\\' {
+                            j += 2
+                            continue
+                        }
+                        if bs[j] == q {
+                            s.result_pos = j + 1
+                            s.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    s.result_pos = end
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j := s.pos
+                end := s.scan_end
+                bs := s.bytes
+                inString := byte(0)
+
+                for j < end {
+                    b := bs[j]
+                    if b == '\n' {
+                        break
+                    }
+
+                    // Inside string
+                    if inString != 0 {
+                        if b == '\\' {
+                            j += 2
+                            continue
+                        }
+                        if b == inString {
+                            inString = 0
+                        }
+                        j++
+                        continue
+                    }
+
+                    // Terminators
+                    if b == '#' {
+                        break
+                    }
+
+                    // String starts
+                    if b == '\'' || b == '"' {
+                        inString = b
+                        j++
+                        continue
+                    }
+
+                    j++
+                }
+
+                s.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                if i >= end || bs[i] != '(' {
+                    s.success = 0
+                    return
+                }
+
+                depth := 0
+                inString := byte(0)
+
+                for i < end {
+                    b := bs[i]
+
+                    // Inside string
+                    if inString != 0 {
+                        if b == '\\' {
+                            i += 2
+                            continue
+                        }
+                        if b == inString {
+                            inString = 0
+                        }
+                        i++
+                        continue
+                    }
+
+                    if b == '\'' || b == '"' {
+                        inString = b
+                        i++
+                    } else if b == '(' {
+                        depth++
+                        i++
+                    } else if b == ')' {
+                        depth--
+                        i++
+                        if depth == 0 {
+                            s.result_pos = i
+                            s.success = 1
+                            return
+                        }
+                    } else {
+                        i++
+                    }
+                }
+
+                s.success = 0
+            }
+        }
+
+    domain:
+        bytes: []byte = nil
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+func isAlnumRuby(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+func main() {
+	failures := 0
+
+	// Test 1: Skip # comment
+	s1 := NewRubySyntaxSkipperFsm()
+	inp1 := []byte("# comment\ncode")
+	s1.Setup(inp1, 0, len(inp1))
+	s1.DoSkipComment()
+	if s1.GetSuccess() != 1 || s1.GetResultPos() != 9 {
+		fmt.Printf("FAIL 1: success=%d, pos=%d\n", s1.GetSuccess(), s1.GetResultPos())
+		failures++
+	}
+
+	// Test 2: Skip double-quoted string
+	s2 := NewRubySyntaxSkipperFsm()
+	inp2 := []byte("\"hello\" rest")
+	s2.Setup(inp2, 0, len(inp2))
+	s2.DoSkipString()
+	if s2.GetSuccess() != 1 || s2.GetResultPos() != 7 {
+		fmt.Printf("FAIL 2: success=%d, pos=%d\n", s2.GetSuccess(), s2.GetResultPos())
+		failures++
+	}
+
+	// Test 3: Skip single-quoted string
+	s3 := NewRubySyntaxSkipperFsm()
+	inp3 := []byte("'hello' rest")
+	s3.Setup(inp3, 0, len(inp3))
+	s3.DoSkipString()
+	if s3.GetSuccess() != 1 || s3.GetResultPos() != 7 {
+		fmt.Printf("FAIL 3: success=%d, pos=%d\n", s3.GetSuccess(), s3.GetResultPos())
+		failures++
+	}
+
+	// Test 4: Skip %Q{text}
+	s4 := NewRubySyntaxSkipperFsm()
+	inp4 := []byte("%Q{text} rest")
+	s4.Setup(inp4, 0, len(inp4))
+	s4.DoSkipString()
+	if s4.GetSuccess() != 1 || s4.GetResultPos() != 8 {
+		fmt.Printf("FAIL 4: success=%d, pos=%d\n", s4.GetSuccess(), s4.GetResultPos())
+		failures++
+	}
+
+	// Test 5: Skip %q[text]
+	s5 := NewRubySyntaxSkipperFsm()
+	inp5 := []byte("%q[text] rest")
+	s5.Setup(inp5, 0, len(inp5))
+	s5.DoSkipString()
+	if s5.GetSuccess() != 1 || s5.GetResultPos() != 8 {
+		fmt.Printf("FAIL 5: success=%d, pos=%d\n", s5.GetSuccess(), s5.GetResultPos())
+		failures++
+	}
+
+	// Test 6: Find line end (stops at #)
+	s6 := NewRubySyntaxSkipperFsm()
+	inp6 := []byte("x + 1 # comment")
+	s6.Setup(inp6, 0, len(inp6))
+	s6.DoFindLineEnd()
+	if s6.GetResultPos() != 6 {
+		fmt.Printf("FAIL 6: pos=%d, expected 6\n", s6.GetResultPos())
+		failures++
+	}
+
+	// Test 7: Balanced parens
+	s7 := NewRubySyntaxSkipperFsm()
+	inp7 := []byte("(a, f(b)) rest")
+	s7.Setup(inp7, 0, len(inp7))
+	s7.DoBalancedParenEnd()
+	if s7.GetSuccess() != 1 || s7.GetResultPos() != 9 {
+		fmt.Printf("FAIL 7: success=%d, pos=%d\n", s7.GetSuccess(), s7.GetResultPos())
+		failures++
+	}
+
+	// Test 8: Skip %Q with nested braces
+	s8 := NewRubySyntaxSkipperFsm()
+	inp8 := []byte("%Q{outer {inner} end} rest")
+	s8.Setup(inp8, 0, len(inp8))
+	s8.DoSkipString()
+	if s8.GetSuccess() != 1 || s8.GetResultPos() != 21 {
+		fmt.Printf("FAIL 8: success=%d, pos=%d\n", s8.GetSuccess(), s8.GetResultPos())
+		failures++
+	}
+
+	if failures > 0 {
+		fmt.Printf("FAIL: %d failures\n", failures)
+		os.Exit(1)
+	}
+	fmt.Println("PASS: ruby_skipper (8 cases)")
+}

@@ -1,0 +1,245 @@
+@@target dart
+
+import 'dart:io';
+
+// StateVarParser — FSM for parsing $.varName and $.varName = expr
+// Translated from framec's native_region_scanner/state_var_parser.frs
+//
+// Uses hierarchical composition: $ScanExpr creates an ExprScannerFsm
+// sub-machine when it detects an assignment.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: List<int>, start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.end = length;
+        }
+        get_result(): int {
+            return this.result_end;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                int i = this.pos;
+                int end = this.end;
+                List<int> bs = this.bytes;
+                int depth = 0;
+                int inString = -1;
+
+                while (i < end) {
+                    int b = bs[i];
+
+                    if (inString != -1) {
+                        if (b == 0x5C && i + 1 < end) {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == inString) {
+                            inString = -1;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == 0x22 || b == 0x27) {
+                        inString = b;
+                        i++;
+                        continue;
+                    }
+
+                    if (b == 0x28 || b == 0x5B || b == 0x7B) {
+                        depth++;
+                    } else if (b == 0x29 || b == 0x5D || b == 0x7D) {
+                        depth--;
+                        if (depth < 0) depth = 0;
+                    } else if (b == 0x3B && depth == 0) {
+                        i++;
+                        break;
+                    } else if (b == 0x0A && depth == 0) {
+                        break;
+                    }
+
+                    i++;
+                }
+
+                this.result_end = i;
+            }
+        }
+
+    domain:
+        bytes: List<int> = []
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+@@system StateVarParserFsm {
+    operations:
+        setup(input_bytes: List<int>, start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.parse_end = length;
+        }
+        get_result_end(): int {
+            return this.result_end;
+        }
+        get_is_assignment(): bool {
+            return this.is_assignment;
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $ScanIdent }
+        }
+
+        $ScanIdent {
+            $>() {
+                // Skip "$." prefix and scan identifier
+                int i = this.pos + 2;
+                int end = this.parse_end;
+                List<int> bs = this.bytes;
+
+                while (i < end) {
+                    int c = bs[i];
+                    if ((c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) || c == 0x5F) {
+                        i++;
+                    } else {
+                        break;
+                    }
+                }
+
+                this.ident_end = i;
+                -> $CheckAssign
+            }
+        }
+
+        $CheckAssign {
+            $>() {
+                // Lookahead: skip whitespace, check for = (but not == or => or =<)
+                int j = this.ident_end;
+                int end = this.parse_end;
+                List<int> bs = this.bytes;
+
+                while (j < end && (bs[j] == 0x20 || bs[j] == 0x09)) {
+                    j++;
+                }
+
+                if (j < end && bs[j] == 0x3D && (j + 1 >= end || (bs[j + 1] != 0x3D && bs[j + 1] != 0x3C && bs[j + 1] != 0x3E))) {
+                    // Assignment detected
+                    j++;
+                    this.pos = j;
+                    this.is_assignment = true;
+                    -> $ScanExpr
+                } else {
+                    // Read-only access
+                    this.result_end = this.ident_end;
+                    this.is_assignment = false;
+                    -> $Done
+                }
+            }
+        }
+
+        $ScanExpr {
+            $>() {
+                // Create ExprScanner sub-machine
+                final expr = @@ExprScannerFsm();
+                expr.setup(this.bytes, this.pos, this.parse_end);
+                expr.do_scan();
+                this.result_end = expr.get_result() as int;
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+            }
+        }
+
+    domain:
+        bytes: List<int> = []
+        pos: int = 0
+        parse_end: int = 0
+        ident_end: int = 0
+        result_end: int = 0
+        is_assignment: bool = false
+}
+
+void main() {
+    int failures = 0;
+
+    // Test 1: Read-only access $.count
+    final p1 = @@StateVarParserFsm();
+    final inp1 = "\$.count + 1".codeUnits;
+    p1.setup(inp1, 0, inp1.length);
+    p1.do_parse();
+    if (p1.get_is_assignment() as bool) {
+        print("FAIL 1: should not be assignment");
+        failures++;
+    }
+    final r1 = p1.get_result_end() as int;
+    final name1 = String.fromCharCodes(inp1.sublist(2, r1));
+    if (name1 != "count") {
+        print("FAIL 1: name='$name1', expected 'count'");
+        failures++;
+    }
+
+    // Test 2: Assignment $.total = x + 1;\n
+    final p2 = @@StateVarParserFsm();
+    final inp2 = "\$.total = x + 1;\nmore".codeUnits;
+    p2.setup(inp2, 0, inp2.length);
+    p2.do_parse();
+    if (!(p2.get_is_assignment() as bool)) {
+        print("FAIL 2: should be assignment");
+        failures++;
+    }
+    final r2 = p2.get_result_end() as int;
+    final expr2 = String.fromCharCodes(inp2.sublist(0, r2));
+    if (!expr2.contains("x + 1;")) {
+        print("FAIL 2: expr='$expr2'");
+        failures++;
+    }
+
+    // Test 3: Not assignment $.x == 5 (== is comparison, not assignment)
+    final p3 = @@StateVarParserFsm();
+    final inp3 = "\$.x == 5".codeUnits;
+    p3.setup(inp3, 0, inp3.length);
+    p3.do_parse();
+    if (p3.get_is_assignment() as bool) {
+        print("FAIL 3: == should not be treated as assignment");
+        failures++;
+    }
+
+    // Test 4: Assignment with nested parens $.val = f(a, b)\n
+    final p4 = @@StateVarParserFsm();
+    final inp4 = "\$.val = f(a, b)\nrest".codeUnits;
+    p4.setup(inp4, 0, inp4.length);
+    p4.do_parse();
+    if (!(p4.get_is_assignment() as bool)) {
+        print("FAIL 4: should be assignment");
+        failures++;
+    }
+    final r4 = p4.get_result_end() as int;
+    final expr4 = String.fromCharCodes(inp4.sublist(0, r4));
+    if (!expr4.contains("f(a, b)")) {
+        print("FAIL 4: expr='$expr4'");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: $failures failures");
+        exit(1);
+    }
+    print("PASS: state_var_parser (4 cases)");
+}

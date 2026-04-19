@@ -1,0 +1,315 @@
+@@target swift
+
+import Foundation
+
+// ErlangScopeScanner -- FSM for detecting fun(...) -> ... end closures.
+// Translated from framec's native_region_scanner/erlang_scope_scanner.frs
+//
+// Erlang reuses `end` to close: fun, case, if, receive, begin, try.
+// This FSM tracks a depth counter for all block-opening keywords so
+// only the `end` matching our `fun` terminates the scan.
+//
+// Skips % line comments and "..." / '...' string/atom literals.
+// Does NOT match `fun Module:Function/Arity` (function references).
+
+@@system ErlangScopeScannerFsm {
+    operations:
+        setup(input_bytes: [UInt8], start: Int, length: Int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos(): Int {
+            return self.result_pos
+        }
+        get_success(): Int {
+            return self.success
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $CheckFun }
+        }
+
+        $CheckFun {
+            $>() {
+                var i = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+
+                // Must start with `fun` keyword
+                if i + 3 > end {
+                    self.success = 0
+                    return
+                }
+
+                if bs[i] != 0x66 || bs[i + 1] != 0x75 || bs[i + 2] != 0x6E {
+                    self.success = 0
+                    return
+                }
+
+                // Check word boundary (not part of `function` etc.)
+                let after = i + 3
+                if after < end && (isAlnumEss(bs[after]) || bs[after] == 0x5F) {
+                    self.success = 0
+                    return
+                }
+
+                // Skip whitespace after `fun`
+                var j = after
+                while j < end && (bs[j] == 0x20 || bs[j] == 0x09 || bs[j] == 0x0A) {
+                    j += 1
+                }
+
+                // Check for Module:Function/Arity pattern (function reference, not closure)
+                if j < end && bs[j] >= 0x41 && bs[j] <= 0x5A {
+                    var k = j
+                    while k < end && (isAlnumEss(bs[k]) || bs[k] == 0x5F) {
+                        k += 1
+                    }
+                    if k < end && bs[k] == 0x3A {
+                        self.success = 0
+                        return
+                    }
+                }
+
+                // It's a closure: fun(...) -> ... end
+                self.depth = 1
+                self.pos = after
+                -> $ScanBody
+            }
+        }
+
+        $ScanBody {
+            $>() {
+                var i = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+
+                while i < end {
+                    let b = bs[i]
+
+                    // Skip % line comments
+                    if b == 0x25 {
+                        while i < end && bs[i] != 0x0A {
+                            i += 1
+                        }
+                        continue
+                    }
+
+                    // Skip "..." strings
+                    if b == 0x22 {
+                        i += 1
+                        while i < end {
+                            if bs[i] == 0x5C { i += 2; continue }
+                            if bs[i] == 0x22 { i += 1; break }
+                            i += 1
+                        }
+                        continue
+                    }
+
+                    // Skip '...' quoted atoms
+                    if b == 0x27 {
+                        i += 1
+                        while i < end {
+                            if bs[i] == 0x5C { i += 2; continue }
+                            if bs[i] == 0x27 { i += 1; break }
+                            i += 1
+                        }
+                        continue
+                    }
+
+                    // Check for block-opening keywords (increase depth)
+
+                    // fun
+                    if b == 0x66 && i + 3 <= end && bs[i + 1] == 0x75 && bs[i + 2] == 0x6E {
+                        if i + 3 >= end || (!isAlnumEss(bs[i + 3]) && bs[i + 3] != 0x5F) {
+                            self.depth += 1
+                            i += 3
+                            continue
+                        }
+                    }
+
+                    // case
+                    if b == 0x63 && i + 4 <= end && bs[i + 1] == 0x61 && bs[i + 2] == 0x73 && bs[i + 3] == 0x65 {
+                        if i + 4 >= end || (!isAlnumEss(bs[i + 4]) && bs[i + 4] != 0x5F) {
+                            self.depth += 1
+                            i += 4
+                            continue
+                        }
+                    }
+
+                    // if
+                    if b == 0x69 && i + 2 <= end && bs[i + 1] == 0x66 {
+                        if i + 2 >= end || (!isAlnumEss(bs[i + 2]) && bs[i + 2] != 0x5F) {
+                            self.depth += 1
+                            i += 2
+                            continue
+                        }
+                    }
+
+                    // receive
+                    if b == 0x72 && i + 7 <= end && bs[i + 1] == 0x65 && bs[i + 2] == 0x63 && bs[i + 3] == 0x65 && bs[i + 4] == 0x69 && bs[i + 5] == 0x76 && bs[i + 6] == 0x65 {
+                        if i + 7 >= end || (!isAlnumEss(bs[i + 7]) && bs[i + 7] != 0x5F) {
+                            self.depth += 1
+                            i += 7
+                            continue
+                        }
+                    }
+
+                    // begin
+                    if b == 0x62 && i + 5 <= end && bs[i + 1] == 0x65 && bs[i + 2] == 0x67 && bs[i + 3] == 0x69 && bs[i + 4] == 0x6E {
+                        if i + 5 >= end || (!isAlnumEss(bs[i + 5]) && bs[i + 5] != 0x5F) {
+                            self.depth += 1
+                            i += 5
+                            continue
+                        }
+                    }
+
+                    // try
+                    if b == 0x74 && i + 3 <= end && bs[i + 1] == 0x72 && bs[i + 2] == 0x79 {
+                        if i + 3 >= end || (!isAlnumEss(bs[i + 3]) && bs[i + 3] != 0x5F) {
+                            self.depth += 1
+                            i += 3
+                            continue
+                        }
+                    }
+
+                    // Check for `end` keyword (decrease depth)
+                    if b == 0x65 && i + 3 <= end && bs[i + 1] == 0x6E && bs[i + 2] == 0x64 {
+                        if i + 3 >= end || (!isAlnumEss(bs[i + 3]) && bs[i + 3] != 0x5F) {
+                            self.depth -= 1
+                            if self.depth == 0 {
+                                self.result_pos = i + 3
+                                self.success = 1
+                                return
+                            }
+                            i += 3
+                            continue
+                        }
+                    }
+
+                    // Skip identifiers (avoid false keyword matches mid-word)
+                    if isAlphaEss(b) || b == 0x5F {
+                        while i < end && (isAlnumEss(bs[i]) || bs[i] == 0x5F) {
+                            i += 1
+                        }
+                        continue
+                    }
+
+                    i += 1
+                }
+
+                // Ran out of bytes without finding matching `end`
+                self.success = 0
+            }
+        }
+
+    domain:
+        bytes: [UInt8] = []
+        pos: Int = 0
+        scan_end: Int = 0
+        result_pos: Int = 0
+        success: Int = 0
+        depth: Int = 0
+}
+
+func isAlnumEss(_ b: UInt8) -> Bool {
+    return (b >= 0x30 && b <= 0x39) || (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A)
+}
+
+func isAlphaEss(_ b: UInt8) -> Bool {
+    return (b >= 0x41 && b <= 0x5A) || (b >= 0x61 && b <= 0x7A)
+}
+
+// main
+    var failures = 0
+
+    // Test 1: Simple fun -> end
+    let s1 = @@ErlangScopeScannerFsm()
+    let inp1: [UInt8] = Array("fun(X) -> X + 1 end rest".utf8)
+    s1.setup(inp1, 0, inp1.count)
+    s1.do_scan()
+    if s1.get_success() != 1 || s1.get_result_pos() != 19 {
+        print("FAIL 1: success=\(s1.get_success()), pos=\(s1.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 2: Nested fun -> case ... end end
+    let s2 = @@ErlangScopeScannerFsm()
+    let inp2: [UInt8] = Array("fun(X) -> case X of 1 -> ok end end rest".utf8)
+    s2.setup(inp2, 0, inp2.count)
+    s2.do_scan()
+    if s2.get_success() != 1 || s2.get_result_pos() != 35 {
+        print("FAIL 2: success=\(s2.get_success()), pos=\(s2.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 3: Not a fun keyword (function)
+    let s3 = @@ErlangScopeScannerFsm()
+    let inp3: [UInt8] = Array("function() -> ok end".utf8)
+    s3.setup(inp3, 0, inp3.count)
+    s3.do_scan()
+    if s3.get_success() != 0 {
+        print("FAIL 3: should not match 'function'")
+        failures += 1
+    }
+
+    // Test 4: fun Module:Function/Arity (function reference, not closure)
+    let s4 = @@ErlangScopeScannerFsm()
+    let inp4: [UInt8] = Array("fun io:format/2".utf8)
+    s4.setup(inp4, 0, inp4.count)
+    s4.do_scan()
+    if s4.get_success() != 0 {
+        print("FAIL 4: should not match function reference")
+        failures += 1
+    }
+
+    // Test 5: Nested if ... end inside fun
+    let s5 = @@ErlangScopeScannerFsm()
+    let inp5: [UInt8] = Array("fun() -> if true -> ok end end rest".utf8)
+    s5.setup(inp5, 0, inp5.count)
+    s5.do_scan()
+    if s5.get_success() != 1 || s5.get_result_pos() != 30 {
+        print("FAIL 5: success=\(s5.get_success()), pos=\(s5.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 6: String inside fun body (should skip)
+    let s6 = @@ErlangScopeScannerFsm()
+    let inp6: [UInt8] = Array("fun() -> \"end\" end rest".utf8)
+    s6.setup(inp6, 0, inp6.count)
+    s6.do_scan()
+    if s6.get_success() != 1 || s6.get_result_pos() != 18 {
+        print("FAIL 6: success=\(s6.get_success()), pos=\(s6.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 7: Comment inside fun body (should skip)
+    let s7 = @@ErlangScopeScannerFsm()
+    let inp7: [UInt8] = Array("fun() -> % end\nok end rest".utf8)
+    s7.setup(inp7, 0, inp7.count)
+    s7.do_scan()
+    if s7.get_success() != 1 || s7.get_result_pos() != 21 {
+        print("FAIL 7: success=\(s7.get_success()), pos=\(s7.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 8: Unmatched fun (no end)
+    let s8 = @@ErlangScopeScannerFsm()
+    let inp8: [UInt8] = Array("fun() -> X + 1".utf8)
+    s8.setup(inp8, 0, inp8.count)
+    s8.do_scan()
+    if s8.get_success() != 0 {
+        print("FAIL 8: should fail with no matching end")
+        failures += 1
+    }
+
+    if failures > 0 {
+        print("FAIL: \(failures) failures")
+        exit(1)
+    }
+    print("PASS: erlang_scope_scanner (8 cases)")

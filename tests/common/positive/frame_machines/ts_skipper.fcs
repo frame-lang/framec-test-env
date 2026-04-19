@@ -1,0 +1,283 @@
+@@target csharp
+
+using System;
+using System.Text;
+
+// TypeScriptSyntaxSkipper — FSM for skipping TS/JS comments and strings.
+// Translated from framec's native_region_scanner/typescript_skipper.frs
+//
+// Adds template literal awareness (backtick strings with ${} interpolation)
+// on top of the C-style comment and string patterns.
+
+@@system TSSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // // line comment
+                if (i + 1 < end && bs[i] == (byte)'/' && bs[i + 1] == (byte)'/') {
+                    int j = i + 2;
+                    while (j < end && bs[j] != (byte)'\n') {
+                        j++;
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                // /* block comment */
+                if (i + 1 < end && bs[i] == (byte)'/' && bs[i + 1] == (byte)'*') {
+                    int j = i + 2;
+                    while (j + 1 < end) {
+                        if (bs[j] == (byte)'*' && bs[j + 1] == (byte)'/') {
+                            this.result_pos = j + 2;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Template literal: `...${...}...`
+                if (i < end && bs[i] == (byte)'`') {
+                    int j = i + 1;
+                    int templateDepth = 0;
+                    while (j < end) {
+                        int b = bs[j];
+                        if (b == (byte)'`' && templateDepth == 0) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        if (b == (byte)'\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (b == (byte)'$' && j + 1 < end && bs[j + 1] == (byte)'{') {
+                            templateDepth++;
+                            j += 2;
+                            continue;
+                        }
+                        if (b == (byte)'}' && templateDepth > 0) {
+                            templateDepth--;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                // Simple string: " or '
+                if (i < end && (bs[i] == (byte)'"' || bs[i] == (byte)'\'')) {
+                    int q = bs[i];
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == (byte)'\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == q) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+                bool inTemplate = false;
+                int templateDepth = 0;
+
+                while (j < end) {
+                    int b = bs[j];
+
+                    if (inTemplate) {
+                        if (b == (byte)'`' && templateDepth == 0) {
+                            inTemplate = false;
+                            j++;
+                            continue;
+                        }
+                        if (b == (byte)'\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (b == (byte)'$' && j + 1 < end && bs[j + 1] == (byte)'{') {
+                            templateDepth++;
+                            j += 2;
+                            continue;
+                        }
+                        if (b == (byte)'}' && templateDepth > 0) {
+                            templateDepth--;
+                        }
+                        j++;
+                        continue;
+                    }
+
+                    if (b == (byte)'\n' || b == (byte)';') { break; }
+                    if (b == (byte)'/' && j + 1 < end && bs[j + 1] == (byte)'/') { break; }
+                    if (b == (byte)'/' && j + 1 < end && bs[j + 1] == (byte)'*') { break; }
+                    if (b == (byte)'`') {
+                        inTemplate = true;
+                        j++;
+                        continue;
+                    }
+                    if (b == (byte)'"' || b == (byte)'\'') {
+                        int q = b;
+                        j++;
+                        while (j < end && bs[j] != q) {
+                            if (bs[j] == (byte)'\\') { j++; }
+                            j++;
+                        }
+                        if (j < end) { j++; }
+                        continue;
+                    }
+
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+class Program {
+    static void Main(string[] args) {
+        int failures = 0;
+
+        // Test 1: Skip // line comment
+        var s1 = new TSSyntaxSkipperFsm();
+        byte[] inp1 = Encoding.UTF8.GetBytes("// comment\ncode");
+        s1.setup(inp1, 0, inp1.Length);
+        s1.do_skip_comment();
+        if ((int)s1.get_success() != 1 || (int)s1.get_result_pos() != 10) {
+            Console.WriteLine("FAIL 1: success=" + s1.get_success() + ", pos=" + s1.get_result_pos());
+            failures++;
+        }
+
+        // Test 2: Skip /* block comment */
+        var s2 = new TSSyntaxSkipperFsm();
+        byte[] inp2 = Encoding.UTF8.GetBytes("/* block */code");
+        s2.setup(inp2, 0, inp2.Length);
+        s2.do_skip_comment();
+        if ((int)s2.get_success() != 1 || (int)s2.get_result_pos() != 11) {
+            Console.WriteLine("FAIL 2: success=" + s2.get_success() + ", pos=" + s2.get_result_pos());
+            failures++;
+        }
+
+        // Test 3: Skip template literal
+        var s3 = new TSSyntaxSkipperFsm();
+        byte[] inp3 = Encoding.UTF8.GetBytes("`hello ${name} world`rest");
+        s3.setup(inp3, 0, inp3.Length);
+        s3.do_skip_string();
+        if ((int)s3.get_success() != 1 || (int)s3.get_result_pos() != 21) {
+            Console.WriteLine("FAIL 3: success=" + s3.get_success() + ", pos=" + s3.get_result_pos());
+            failures++;
+        }
+
+        // Test 4: Skip simple double-quoted string
+        var s4 = new TSSyntaxSkipperFsm();
+        byte[] inp4 = Encoding.UTF8.GetBytes("\"hello\" rest");
+        s4.setup(inp4, 0, inp4.Length);
+        s4.do_skip_string();
+        if ((int)s4.get_success() != 1 || (int)s4.get_result_pos() != 7) {
+            Console.WriteLine("FAIL 4: success=" + s4.get_success() + ", pos=" + s4.get_result_pos());
+            failures++;
+        }
+
+        // Test 5: Skip template with nested ${}
+        var s5 = new TSSyntaxSkipperFsm();
+        byte[] inp5 = Encoding.UTF8.GetBytes("`${a + ${b}}`rest");
+        s5.setup(inp5, 0, inp5.Length);
+        s5.do_skip_string();
+        if ((int)s5.get_success() != 1) {
+            Console.WriteLine("FAIL 5: success=" + s5.get_success());
+            failures++;
+        }
+
+        // Test 6: Find line end skips over template literals
+        var s6 = new TSSyntaxSkipperFsm();
+        byte[] inp6 = Encoding.UTF8.GetBytes("x = `hello`;\nnext");
+        s6.setup(inp6, 0, inp6.Length);
+        s6.do_find_line_end();
+        if ((int)s6.get_result_pos() != 11) {
+            Console.WriteLine("FAIL 6: pos=" + s6.get_result_pos() + ", expected 11 (at ;)");
+            failures++;
+        }
+
+        // Test 7: Not a string
+        var s7 = new TSSyntaxSkipperFsm();
+        byte[] inp7 = Encoding.UTF8.GetBytes("x + 1");
+        s7.setup(inp7, 0, inp7.Length);
+        s7.do_skip_string();
+        if ((int)s7.get_success() != 0) {
+            Console.WriteLine("FAIL 7: should not be string");
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine("FAIL: " + failures + " failures");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: ts_skipper (7 cases)");
+    }
+}

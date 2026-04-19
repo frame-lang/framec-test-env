@@ -1,0 +1,290 @@
+@@target erlang
+
+%% RustSyntaxSkipper — FSM for skipping Rust comments and strings.
+%% Translated from framec's native_region_scanner/rust_skipper.frs
+%%
+%% Handles: // line comments, /* nested block comments */,
+%% raw strings (r#"..."#), char literals vs lifetime annotations,
+%% simple strings.
+
+@@system RustSyntaxSkipperFsm {
+    interface:
+        setup(input_bytes: binary, start: int, length: int)
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        get_result_pos(): int
+        get_success(): int
+
+    machine:
+        $Init {
+            setup(input_bytes: binary, start: int, length: int) {
+                self.bytes = input_bytes
+                self.pos = start
+                self.scan_end = length
+            }
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipComment {
+            $>() {
+                {ResultPos, Success} = scan_comment(Data#data.bytes, Data#data.pos, Data#data.scan_end),
+                self.result_pos = ResultPos
+                self.success = Success
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipString {
+            $>() {
+                {ResultPos, Success} = scan_string(Data#data.bytes, Data#data.pos, Data#data.scan_end),
+                self.result_pos = ResultPos
+                self.success = Success
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $FindLineEnd {
+            $>() {
+                self.result_pos = scan_line_end(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+    domain:
+        bytes = <<>>
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+%% --- Skip comment helper ---
+scan_comment(Bs, I, End) when I + 1 < End ->
+    case {binary:at(Bs, I), binary:at(Bs, I + 1)} of
+        {$/, $/} ->
+            %% // line comment
+            J = scan_to_newline(Bs, I + 2, End),
+            {J, 1};
+        {$/, $*} ->
+            %% /* nested block comment */
+            J = scan_nested_block(Bs, I + 2, End, 1),
+            {J, 1};
+        _ ->
+            {0, 0}
+    end;
+scan_comment(_Bs, _I, _End) ->
+    {0, 0}.
+
+scan_to_newline(_Bs, J, End) when J >= End -> J;
+scan_to_newline(Bs, J, End) ->
+    case binary:at(Bs, J) of
+        $\n -> J;
+        _ -> scan_to_newline(Bs, J + 1, End)
+    end.
+
+scan_nested_block(_Bs, J, End, _Depth) when J + 1 >= End -> J;
+scan_nested_block(_Bs, J, _End, 0) -> J;
+scan_nested_block(Bs, J, End, Depth) ->
+    C0 = binary:at(Bs, J),
+    C1 = binary:at(Bs, J + 1),
+    if
+        C0 =:= $/ andalso C1 =:= $* ->
+            scan_nested_block(Bs, J + 2, End, Depth + 1);
+        C0 =:= $* andalso C1 =:= $/ ->
+            scan_nested_block(Bs, J + 2, End, Depth - 1);
+        true ->
+            scan_nested_block(Bs, J + 1, End, Depth)
+    end.
+
+%% --- Skip string helper ---
+scan_string(Bs, I, End) when I < End ->
+    C = binary:at(Bs, I),
+    if
+        C =:= $r ->
+            scan_raw_string(Bs, I + 1, End, 0);
+        C =:= $" ->
+            scan_dq_string(Bs, I + 1, End);
+        C =:= $' ->
+            scan_char_literal(Bs, I, End);
+        true ->
+            {0, 0}
+    end;
+scan_string(_Bs, _I, _End) ->
+    {0, 0}.
+
+%% Raw string: r#"..."# — count leading #s, then find matching close
+scan_raw_string(Bs, J, End, HashCount) when J < End ->
+    case binary:at(Bs, J) of
+        $# ->
+            scan_raw_string(Bs, J + 1, End, HashCount + 1);
+        $" ->
+            scan_raw_string_body(Bs, J + 1, End, HashCount);
+        _ ->
+            {0, 0}
+    end;
+scan_raw_string(_Bs, _J, _End, _HashCount) ->
+    {0, 0}.
+
+scan_raw_string_body(_Bs, J, End, _HashCount) when J >= End -> {End, 1};
+scan_raw_string_body(Bs, J, End, HashCount) ->
+    case binary:at(Bs, J) of
+        $" ->
+            case check_hashes(Bs, J + 1, End, HashCount, 0) of
+                true ->
+                    {J + 1 + HashCount, 1};
+                false ->
+                    scan_raw_string_body(Bs, J + 1, End, HashCount)
+            end;
+        _ ->
+            scan_raw_string_body(Bs, J + 1, End, HashCount)
+    end.
+
+check_hashes(_Bs, _J, _End, HashCount, K) when K >= HashCount -> true;
+check_hashes(_Bs, J, End, _HashCount, _K) when J >= End -> false;
+check_hashes(Bs, J, End, HashCount, K) ->
+    case binary:at(Bs, J) of
+        $# -> check_hashes(Bs, J + 1, End, HashCount, K + 1);
+        _ -> false
+    end.
+
+%% Double-quoted string
+scan_dq_string(_Bs, J, End) when J >= End -> {End, 1};
+scan_dq_string(Bs, J, End) ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\\ ->
+            scan_dq_string(Bs, J + 2, End);
+        B =:= $" ->
+            {J + 1, 1};
+        true ->
+            scan_dq_string(Bs, J + 1, End)
+    end.
+
+%% Char literal: 'x' or '\n' (NOT lifetime 'a)
+scan_char_literal(Bs, I, End) when I + 2 < End ->
+    C1 = binary:at(Bs, I + 1),
+    if
+        C1 =:= $\\ andalso I + 3 < End ->
+            case binary:at(Bs, I + 3) of
+                $' -> {I + 4, 1};
+                _ -> {0, 0}
+            end;
+        true ->
+            case I + 2 < End of
+                true ->
+                    case binary:at(Bs, I + 2) of
+                        $' -> {I + 3, 1};
+                        _ -> {0, 0}
+                    end;
+                false ->
+                    {0, 0}
+            end
+    end;
+scan_char_literal(_Bs, _I, _End) ->
+    {0, 0}.
+
+%% --- Find line end helper ---
+scan_line_end(_Bs, J, End) when J >= End -> J;
+scan_line_end(Bs, J, End) ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\n orelse B =:= $; -> J;
+        B =:= $/ andalso J + 1 < End ->
+            C1 = binary:at(Bs, J + 1),
+            if
+                C1 =:= $/ -> J;
+                C1 =:= $* -> J;
+                true -> scan_line_end(Bs, J + 1, End)
+            end;
+        true -> scan_line_end(Bs, J + 1, End)
+    end.
+
+main() ->
+    Failures = test_all(0),
+    case Failures of
+        0 -> io:format("PASS: rust_skipper (7 cases)~n");
+        _ -> io:format("FAIL: ~p failures~n", [Failures]), halt(1)
+    end.
+
+test_all(F0) ->
+    M = rust_syntax_skipper_fsm,
+
+    %% Test 1: Skip // comment
+    {ok, P1} = M:start_link(),
+    I1 = <<"// comment\ncode">>,
+    M:setup(P1, I1, 0, byte_size(I1)),
+    M:do_skip_comment(P1),
+    F1 = case {M:get_success(P1), M:get_result_pos(P1)} of
+        {1, 10} -> F0;
+        {S1, R1} -> io:format("FAIL 1: success=~p, pos=~p~n", [S1, R1]), F0 + 1
+    end,
+
+    %% Test 2: Skip nested /* /* */ */ block comment
+    {ok, P2} = M:start_link(),
+    I2 = <<"/* outer /* inner */ */code">>,
+    M:setup(P2, I2, 0, byte_size(I2)),
+    M:do_skip_comment(P2),
+    F2 = case {M:get_success(P2), M:get_result_pos(P2)} of
+        {1, 23} -> F1;
+        {S2, R2} -> io:format("FAIL 2: success=~p, pos=~p~n", [S2, R2]), F1 + 1
+    end,
+
+    %% Test 3: Skip raw string r#"hello"#
+    {ok, P3} = M:start_link(),
+    I3 = <<"r#\"hello\"#rest">>,
+    M:setup(P3, I3, 0, byte_size(I3)),
+    M:do_skip_string(P3),
+    F3 = case {M:get_success(P3), M:get_result_pos(P3)} of
+        {1, 10} -> F2;
+        {S3, R3} -> io:format("FAIL 3: success=~p, pos=~p~n", [S3, R3]), F2 + 1
+    end,
+
+    %% Test 4: Skip double-quoted string
+    {ok, P4} = M:start_link(),
+    I4 = <<"\"hello\" rest">>,
+    M:setup(P4, I4, 0, byte_size(I4)),
+    M:do_skip_string(P4),
+    F4 = case {M:get_success(P4), M:get_result_pos(P4)} of
+        {1, 7} -> F3;
+        {S4, R4} -> io:format("FAIL 4: success=~p, pos=~p~n", [S4, R4]), F3 + 1
+    end,
+
+    %% Test 5: Char literal 'x' — IS a string
+    {ok, P5} = M:start_link(),
+    I5 = <<"'x' rest">>,
+    M:setup(P5, I5, 0, byte_size(I5)),
+    M:do_skip_string(P5),
+    F5 = case {M:get_success(P5), M:get_result_pos(P5)} of
+        {1, 3} -> F4;
+        {S5, R5} -> io:format("FAIL 5: success=~p, pos=~p~n", [S5, R5]), F4 + 1
+    end,
+
+    %% Test 6: Lifetime 'a — NOT a string
+    {ok, P6} = M:start_link(),
+    I6 = <<"'a rest">>,
+    M:setup(P6, I6, 0, byte_size(I6)),
+    M:do_skip_string(P6),
+    F6 = case M:get_success(P6) of
+        0 -> F5;
+        _ -> io:format("FAIL 6: lifetime should not be a string~n"), F5 + 1
+    end,
+
+    %% Test 7: Escape char '\n'
+    {ok, P7} = M:start_link(),
+    I7 = <<"'\\n' rest">>,
+    M:setup(P7, I7, 0, byte_size(I7)),
+    M:do_skip_string(P7),
+    F7 = case {M:get_success(P7), M:get_result_pos(P7)} of
+        {1, 4} -> F6;
+        {S7, R7} -> io:format("FAIL 7: success=~p, pos=~p~n", [S7, R7]), F6 + 1
+    end,
+
+    F7.

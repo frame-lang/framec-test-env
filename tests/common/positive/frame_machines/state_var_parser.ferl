@@ -1,0 +1,189 @@
+@@target erlang
+@@skip -- Erlang requires one module per file; multi-system tested via other targets
+
+%% StateVarParser — FSM for parsing $.varName and $.varName = expr
+%% Translated from framec's native_region_scanner/state_var_parser.frs
+%%
+%% Uses hierarchical composition: $ScanExpr creates an ExprScannerFsm
+%% sub-machine when it detects an assignment.
+
+@@system ExprScannerFsm {
+    interface:
+        setup(input_bytes: binary, start: int, length: int)
+        do_scan()
+        get_result(): int
+
+    machine:
+        $Init {
+            setup(input_bytes: binary, start: int, length: int) {
+                self.bytes = input_bytes
+                self.pos = start
+                self.scan_end = length
+            }
+            do_scan() { -> $Scanning }
+            get_result(): int { @@:(self.result_end) }
+        }
+
+        $Scanning {
+            $>() {
+                self.result_end = expr_scan_loop(Data#data.bytes, Data#data.pos, Data#data.scan_end, 0, -1)
+            }
+            get_result(): int { @@:(self.result_end) }
+        }
+
+    domain:
+        bytes = <<>>
+        pos = 0
+        scan_end = 0
+        result_end = 0
+}
+
+@@system StateVarParserFsm {
+    interface:
+        setup(input_bytes: binary, start: int, length: int)
+        do_parse()
+        get_result_end(): int
+        get_is_assignment(): bool
+
+    machine:
+        $Init {
+            setup(input_bytes: binary, start: int, length: int) {
+                self.bytes = input_bytes
+                self.pos = start
+                self.parse_end = length
+            }
+            do_parse() { -> $ScanIdent }
+            get_result_end(): int { @@:(self.result_end) }
+            get_is_assignment(): bool { @@:(self.is_assignment) }
+        }
+
+        $ScanIdent {
+            $>() {
+                %% Skip "$." prefix and scan identifier
+                I = scan_ident_loop(Data#data.bytes, Data#data.pos + 2, Data#data.parse_end),
+                self.ident_end = I
+                -> $CheckAssign
+            }
+            get_result_end(): int { @@:(self.result_end) }
+            get_is_assignment(): bool { @@:(self.is_assignment) }
+        }
+
+        $CheckAssign {
+            $>() {
+                %% Lookahead: skip whitespace, check for = (but not == or => or =<)
+                J = skip_ws(Data#data.bytes, Data#data.ident_end, Data#data.parse_end),
+                case check_assign(Data#data.bytes, J, Data#data.parse_end) of
+                    {true, J2} ->
+                        self.pos = J2,
+                        self.is_assignment = true,
+                        -> $ScanExpr;
+                    false ->
+                        self.result_end = Data#data.ident_end,
+                        self.is_assignment = false,
+                        -> $Done
+                end
+            }
+            get_result_end(): int { @@:(self.result_end) }
+            get_is_assignment(): bool { @@:(self.is_assignment) }
+        }
+
+        $ScanExpr {
+            $>() {
+                %% Create ExprScanner sub-machine
+                {ok, ExprPid} = expr_scanner_fsm:start_link(),
+                expr_scanner_fsm:setup(ExprPid, Data#data.bytes, Data#data.pos, Data#data.parse_end),
+                expr_scanner_fsm:do_scan(ExprPid),
+                ResultEnd = expr_scanner_fsm:get_result(ExprPid),
+                self.result_end = ResultEnd
+                -> $Done
+            }
+            get_result_end(): int { @@:(self.result_end) }
+            get_is_assignment(): bool { @@:(self.is_assignment) }
+        }
+
+        $Done {
+            $>() {
+            }
+            get_result_end(): int { @@:(self.result_end) }
+            get_is_assignment(): bool { @@:(self.is_assignment) }
+        }
+
+    domain:
+        bytes = <<>>
+        pos = 0
+        parse_end = 0
+        ident_end = 0
+        result_end = 0
+        is_assignment = false
+}
+
+expr_scan_loop(Bs, I, End, _Depth, _InString) when I >= End ->
+    I;
+expr_scan_loop(Bs, I, End, Depth, InString) when InString >= 0 ->
+    B = binary:at(Bs, I),
+    if
+        B =:= $\\ andalso I + 1 < End ->
+            expr_scan_loop(Bs, I + 2, End, Depth, InString);
+        B =:= InString ->
+            expr_scan_loop(Bs, I + 1, End, Depth, -1);
+        true ->
+            expr_scan_loop(Bs, I + 1, End, Depth, InString)
+    end;
+expr_scan_loop(Bs, I, End, Depth, _InString) ->
+    B = binary:at(Bs, I),
+    if
+        B =:= $" orelse B =:= $' ->
+            expr_scan_loop(Bs, I + 1, End, Depth, B);
+        B =:= $( orelse B =:= $[ orelse B =:= ${ ->
+            expr_scan_loop(Bs, I + 1, End, Depth + 1, -1);
+        B =:= $) orelse B =:= $] orelse B =:= $} ->
+            expr_scan_loop(Bs, I + 1, End, max(Depth - 1, 0), -1);
+        B =:= $; andalso Depth =:= 0 ->
+            I + 1;
+        B =:= $\n andalso Depth =:= 0 ->
+            I;
+        true ->
+            expr_scan_loop(Bs, I + 1, End, Depth, -1)
+    end.
+
+scan_ident_loop(Bs, I, End) when I >= End ->
+    I;
+scan_ident_loop(Bs, I, End) ->
+    B = binary:at(Bs, I),
+    IsAlnum = (B >= $a andalso B =< $z) orelse (B >= $A andalso B =< $Z) orelse (B >= $0 andalso B =< $9) orelse B =:= $_,
+    case IsAlnum of
+        true -> scan_ident_loop(Bs, I + 1, End);
+        false -> I
+    end.
+
+skip_ws(Bs, J, End) when J >= End ->
+    J;
+skip_ws(Bs, J, End) ->
+    B = binary:at(Bs, J),
+    case B of
+        $\s -> skip_ws(Bs, J + 1, End);
+        $\t -> skip_ws(Bs, J + 1, End);
+        _ -> J
+    end.
+
+check_assign(_Bs, J, End) when J >= End ->
+    false;
+check_assign(Bs, J, End) ->
+    B = binary:at(Bs, J),
+    case B of
+        $= ->
+            Next = J + 1,
+            if
+                Next >= End ->
+                    {true, Next};
+                true ->
+                    B2 = binary:at(Bs, Next),
+                    case B2 of
+                        $= -> false;
+                        $< -> false;
+                        $> -> false;
+                        _ -> {true, Next}
+                    end
+            end;
+        _ -> false
+    end.

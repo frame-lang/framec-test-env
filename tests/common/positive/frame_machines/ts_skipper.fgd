@@ -1,0 +1,263 @@
+@@target gdscript
+extends SceneTree
+
+# TypeScriptSyntaxSkipper — FSM for skipping TS/JS comments and strings.
+# Translated from framec's native_region_scanner/typescript_skipper.frs
+#
+# Adds template literal awareness (backtick strings with ${} interpolation)
+# on top of the C-style comment and string patterns.
+
+@@system TSSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: Array, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos(): int {
+            return self.result_pos
+        }
+        get_success(): int {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                var i = self.pos
+                var scan_end = self.scan_end
+                var bs = self.bytes
+
+                # // line comment
+                if i + 1 < scan_end and bs[i] == 0x2F and bs[i + 1] == 0x2F:
+                    var j = i + 2
+                    while j < scan_end and bs[j] != 0x0A:
+                        j += 1
+                    self.result_pos = j
+                    self.success = 1
+                    return
+
+                # /* block comment */
+                if i + 1 < scan_end and bs[i] == 0x2F and bs[i + 1] == 0x2A:
+                    var j = i + 2
+                    while j + 1 < scan_end:
+                        if bs[j] == 0x2A and bs[j + 1] == 0x2F:
+                            self.result_pos = j + 2
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                var i = self.pos
+                var scan_end = self.scan_end
+                var bs = self.bytes
+
+                # Template literal: `...${...}...`
+                if i < scan_end and bs[i] == 0x60:
+                    var j = i + 1
+                    var template_depth = 0
+                    while j < scan_end:
+                        var b = bs[j]
+                        if b == 0x60 and template_depth == 0:
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        if b == 0x5C:
+                            j += 2
+                            continue
+                        if b == 0x24 and j + 1 < scan_end and bs[j + 1] == 0x7B:
+                            template_depth += 1
+                            j += 2
+                            continue
+                        if b == 0x7D and template_depth > 0:
+                            template_depth -= 1
+                        j += 1
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+
+                # Simple string: " or '
+                if i < scan_end and (bs[i] == 0x22 or bs[i] == 0x27):
+                    var q = bs[i]
+                    var j = i + 1
+                    while j < scan_end:
+                        if bs[j] == 0x5C:
+                            j += 2
+                            continue
+                        if bs[j] == q:
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                var j = self.pos
+                var scan_end = self.scan_end
+                var bs = self.bytes
+                var in_template = false
+                var template_depth = 0
+
+                while j < scan_end:
+                    var b = bs[j]
+
+                    if in_template:
+                        if b == 0x60 and template_depth == 0:
+                            in_template = false
+                            j += 1
+                            continue
+                        if b == 0x5C:
+                            j += 2
+                            continue
+                        if b == 0x24 and j + 1 < scan_end and bs[j + 1] == 0x7B:
+                            template_depth += 1
+                            j += 2
+                            continue
+                        if b == 0x7D and template_depth > 0:
+                            template_depth -= 1
+                        j += 1
+                        continue
+
+                    if b == 0x0A or b == 0x3B:
+                        break
+                    if b == 0x2F and j + 1 < scan_end and bs[j + 1] == 0x2F:
+                        break
+                    if b == 0x2F and j + 1 < scan_end and bs[j + 1] == 0x2A:
+                        break
+                    if b == 0x60:
+                        in_template = true
+                        j += 1
+                        continue
+                    if b == 0x22 or b == 0x27:
+                        var q = b
+                        j += 1
+                        while j < scan_end and bs[j] != q:
+                            if bs[j] == 0x5C:
+                                j += 1
+                            j += 1
+                        if j < scan_end:
+                            j += 1
+                        continue
+
+                    j += 1
+
+                self.result_pos = j
+            }
+        }
+
+    domain:
+        bytes: Array = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+func str_to_bytes(s: String) -> Array:
+    var arr = []
+    var buf = s.to_utf8_buffer()
+    for i in range(buf.size()):
+        arr.append(buf[i])
+    return arr
+
+func main():
+    var failures = 0
+
+    # Test 1: Skip // line comment
+    var s1 = @@TSSyntaxSkipperFsm()
+    var inp1 = str_to_bytes("// comment\ncode")
+    s1.setup(inp1, 0, inp1.size())
+    s1.do_skip_comment()
+    if s1.get_success() != 1 or s1.get_result_pos() != 10:
+        print("FAIL 1: success=" + str(s1.get_success()) + ", pos=" + str(s1.get_result_pos()))
+        failures += 1
+
+    # Test 2: Skip /* block comment */
+    var s2 = @@TSSyntaxSkipperFsm()
+    var inp2 = str_to_bytes("/* block */code")
+    s2.setup(inp2, 0, inp2.size())
+    s2.do_skip_comment()
+    if s2.get_success() != 1 or s2.get_result_pos() != 11:
+        print("FAIL 2: success=" + str(s2.get_success()) + ", pos=" + str(s2.get_result_pos()))
+        failures += 1
+
+    # Test 3: Skip template literal
+    var s3 = @@TSSyntaxSkipperFsm()
+    var inp3 = str_to_bytes("`hello ${name} world`rest")
+    s3.setup(inp3, 0, inp3.size())
+    s3.do_skip_string()
+    if s3.get_success() != 1 or s3.get_result_pos() != 21:
+        print("FAIL 3: success=" + str(s3.get_success()) + ", pos=" + str(s3.get_result_pos()))
+        failures += 1
+
+    # Test 4: Skip simple double-quoted string
+    var s4 = @@TSSyntaxSkipperFsm()
+    var inp4 = str_to_bytes("\"hello\" rest")
+    s4.setup(inp4, 0, inp4.size())
+    s4.do_skip_string()
+    if s4.get_success() != 1 or s4.get_result_pos() != 7:
+        print("FAIL 4: success=" + str(s4.get_success()) + ", pos=" + str(s4.get_result_pos()))
+        failures += 1
+
+    # Test 5: Skip template with nested ${}
+    var s5 = @@TSSyntaxSkipperFsm()
+    var inp5 = str_to_bytes("`${a + ${b}}`rest")
+    s5.setup(inp5, 0, inp5.size())
+    s5.do_skip_string()
+    if s5.get_success() != 1:
+        print("FAIL 5: success=" + str(s5.get_success()))
+        failures += 1
+
+    # Test 6: Find line end skips over template literals
+    var s6 = @@TSSyntaxSkipperFsm()
+    var inp6 = str_to_bytes("x = `hello`;\nnext")
+    s6.setup(inp6, 0, inp6.size())
+    s6.do_find_line_end()
+    if s6.get_result_pos() != 11:
+        print("FAIL 6: pos=" + str(s6.get_result_pos()) + ", expected 11 (at ;)")
+        failures += 1
+
+    # Test 7: Not a string
+    var s7 = @@TSSyntaxSkipperFsm()
+    var inp7 = str_to_bytes("x + 1")
+    s7.setup(inp7, 0, inp7.size())
+    s7.do_skip_string()
+    if s7.get_success() != 0:
+        print("FAIL 7: should not be string")
+        failures += 1
+
+    if failures > 0:
+        print("FAIL: " + str(failures) + " failures")
+        push_error(str(failures) + " test(s) failed")
+    else:
+        print("PASS: ts_skipper (7 cases)")
+
+func _init():
+    main()
+    quit()

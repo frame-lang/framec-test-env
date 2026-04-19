@@ -1,0 +1,222 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// LuaSyntaxSkipper — FSM for skipping Lua comments and strings.
+// Translated from framec's native_region_scanner/lua_skipper.frs
+//
+// Handles: -- line comments, --[[ block comments ]], [[ long strings ]],
+// simple strings, Lua-style line endings.
+
+@@system LuaSyntaxSkipperFsm {
+    operations:
+        Setup(input_bytes: []byte, start: int, length: int) {
+            s.bytes = input_bytes
+            s.pos = start
+            s.scan_end = length
+        }
+        GetResultPos(): int {
+            return s.result_pos
+        }
+        GetSuccess(): int {
+            return s.success
+        }
+
+    interface:
+        DoSkipComment()
+        DoSkipString()
+        DoFindLineEnd()
+
+    machine:
+        $Init {
+            DoSkipComment() { -> $SkipComment }
+            DoSkipString() { -> $SkipString }
+            DoFindLineEnd() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Lua line comment: --
+                if i+1 < end && bs[i] == '-' && bs[i+1] == '-' {
+                    // Check for block comment: --[[ ... ]]
+                    if i+3 < end && bs[i+2] == '[' && bs[i+3] == '[' {
+                        j := i + 4
+                        for j+1 < end {
+                            if bs[j] == ']' && bs[j+1] == ']' {
+                                s.result_pos = j + 2
+                                s.success = 1
+                                return
+                            }
+                            j++
+                        }
+                        s.result_pos = end
+                        s.success = 1
+                        return
+                    }
+                    // Line comment
+                    j := i + 2
+                    for j < end && bs[j] != '\n' {
+                        j++
+                    }
+                    s.result_pos = j
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Long string: [[ ... ]]
+                if i+1 < end && bs[i] == '[' && bs[i+1] == '[' {
+                    j := i + 2
+                    for j+1 < end {
+                        if bs[j] == ']' && bs[j+1] == ']' {
+                            s.result_pos = j + 2
+                            s.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    s.result_pos = end
+                    s.success = 1
+                    return
+                }
+
+                // Simple string: " or '
+                if i < end && (bs[i] == '"' || bs[i] == '\'') {
+                    q := bs[i]
+                    j := i + 1
+                    for j < end {
+                        if bs[j] == '\\' {
+                            j += 2
+                            continue
+                        }
+                        if bs[j] == q {
+                            s.result_pos = j + 1
+                            s.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    s.result_pos = end
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                for j < end {
+                    b := bs[j]
+                    if b == '\n' {
+                        break
+                    }
+                    // Stop at -- comment
+                    if b == '-' && j+1 < end && bs[j+1] == '-' {
+                        break
+                    }
+                    j++
+                }
+
+                s.result_pos = j
+            }
+        }
+
+    domain:
+        bytes: []byte = nil
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+func main() {
+	failures := 0
+
+	// Test 1: Skip -- line comment
+	s1 := NewLuaSyntaxSkipperFsm()
+	inp1 := []byte("-- comment\ncode")
+	s1.Setup(inp1, 0, len(inp1))
+	s1.DoSkipComment()
+	if s1.GetSuccess() != 1 || s1.GetResultPos() != 10 {
+		fmt.Printf("FAIL 1: success=%d, pos=%d\n", s1.GetSuccess(), s1.GetResultPos())
+		failures++
+	}
+
+	// Test 2: Skip --[[ block comment ]]
+	s2 := NewLuaSyntaxSkipperFsm()
+	inp2 := []byte("--[[ block ]]code")
+	s2.Setup(inp2, 0, len(inp2))
+	s2.DoSkipComment()
+	if s2.GetSuccess() != 1 || s2.GetResultPos() != 13 {
+		fmt.Printf("FAIL 2: success=%d, pos=%d\n", s2.GetSuccess(), s2.GetResultPos())
+		failures++
+	}
+
+	// Test 3: Not a comment
+	s3 := NewLuaSyntaxSkipperFsm()
+	inp3 := []byte("x + 1")
+	s3.Setup(inp3, 0, len(inp3))
+	s3.DoSkipComment()
+	if s3.GetSuccess() != 0 {
+		fmt.Println("FAIL 3: should not be comment")
+		failures++
+	}
+
+	// Test 4: Skip [[ long string ]]
+	s4 := NewLuaSyntaxSkipperFsm()
+	inp4 := []byte("[[hello world]]rest")
+	s4.Setup(inp4, 0, len(inp4))
+	s4.DoSkipString()
+	if s4.GetSuccess() != 1 || s4.GetResultPos() != 15 {
+		fmt.Printf("FAIL 4: success=%d, pos=%d\n", s4.GetSuccess(), s4.GetResultPos())
+		failures++
+	}
+
+	// Test 5: Skip simple string
+	s5 := NewLuaSyntaxSkipperFsm()
+	inp5 := []byte("\"hello\" rest")
+	s5.Setup(inp5, 0, len(inp5))
+	s5.DoSkipString()
+	if s5.GetSuccess() != 1 || s5.GetResultPos() != 7 {
+		fmt.Printf("FAIL 5: success=%d, pos=%d\n", s5.GetSuccess(), s5.GetResultPos())
+		failures++
+	}
+
+	// Test 6: Find line end stops at --
+	s6 := NewLuaSyntaxSkipperFsm()
+	inp6 := []byte("x + 1 -- comment")
+	s6.Setup(inp6, 0, len(inp6))
+	s6.DoFindLineEnd()
+	if s6.GetResultPos() != 6 {
+		fmt.Printf("FAIL 6: pos=%d, expected 6\n", s6.GetResultPos())
+		failures++
+	}
+
+	if failures > 0 {
+		fmt.Printf("FAIL: %d failures\n", failures)
+		os.Exit(1)
+	}
+	fmt.Println("PASS: lua_skipper (6 cases)")
+}

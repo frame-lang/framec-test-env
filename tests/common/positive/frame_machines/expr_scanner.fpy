@@ -1,0 +1,134 @@
+@@target python_3
+
+# ExprScanner — PDA for scanning assignment RHS expressions.
+# Translated from framec's native_region_scanner/expr_scanner.frs
+#
+# Scans from pos (after =) to a terminator (; or \n) at depth 0,
+# respecting nested ()[]{}  and string literals with escape handling.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: list, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.end = length
+        }
+        get_result(): int {
+            return self.result_end
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                i = self.pos
+                end = self.end
+                bs = self.bytes
+                depth = 0
+                in_string = None
+
+                while i < end:
+                    b = bs[i]
+
+                    # Handle string literals
+                    if in_string is not None:
+                        if b == ord('\\') and i + 1 < end:
+                            i += 2
+                            continue
+                        if b == in_string:
+                            in_string = None
+                        i += 1
+                        continue
+
+                    # Enter string literal
+                    if b == ord('"') or b == ord("'"):
+                        in_string = b
+                        i += 1
+                        continue
+
+                    # Track nesting depth
+                    if b == ord('(') or b == ord('[') or b == ord('{'):
+                        depth += 1
+                    elif b == ord(')') or b == ord(']') or b == ord('}'):
+                        depth = max(depth - 1, 0)
+                    elif b == ord(';') and depth == 0:
+                        i += 1
+                        break
+                    elif b == ord('\n') and depth == 0:
+                        break
+
+                    i += 1
+
+                self.result_end = i
+            }
+        }
+
+    domain:
+        bytes: list = []
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+if __name__ == '__main__':
+    failures = 0
+
+    # Test 1: simple expression terminated by newline
+    e = @@ExprScannerFsm()
+    e.setup(list(b" x + 1\nfoo"), 0, len(b" x + 1\nfoo"))
+    e.do_scan()
+    expr = bytes(list(b" x + 1\nfoo")[0:e.get_result()]).decode()
+    if expr != " x + 1":
+        print(f"FAIL 1: got '{expr}'")
+        failures += 1
+
+    # Test 2: expression with semicolon terminator
+    e2 = @@ExprScannerFsm()
+    inp2 = list(b" x + 1; y = 2")
+    e2.setup(inp2, 0, len(inp2))
+    e2.do_scan()
+    expr2 = bytes(inp2[0:e2.get_result()]).decode()
+    if expr2 != " x + 1;":
+        print(f"FAIL 2: got '{expr2}'")
+        failures += 1
+
+    # Test 3: nested parens
+    e3 = @@ExprScannerFsm()
+    inp3 = list(b" f(x, g(y))\nz")
+    e3.setup(inp3, 0, len(inp3))
+    e3.do_scan()
+    expr3 = bytes(inp3[0:e3.get_result()]).decode()
+    if expr3 != " f(x, g(y))":
+        print(f"FAIL 3: got '{expr3}'")
+        failures += 1
+
+    # Test 4: string with escaped quote
+    e4 = @@ExprScannerFsm()
+    inp4 = list(b' "hello\\"world"\n')
+    e4.setup(inp4, 0, len(inp4))
+    e4.do_scan()
+    expr4 = bytes(inp4[0:e4.get_result()]).decode()
+    if expr4 != ' "hello\\"world"':
+        print(f"FAIL 4: got '{expr4}'")
+        failures += 1
+
+    # Test 5: semicolon inside string (should not terminate)
+    e5 = @@ExprScannerFsm()
+    inp5 = list(b' "a;b"\n')
+    e5.setup(inp5, 0, len(inp5))
+    e5.do_scan()
+    expr5 = bytes(inp5[0:e5.get_result()]).decode()
+    if expr5 != ' "a;b"':
+        print(f"FAIL 5: got '{expr5}'")
+        failures += 1
+
+    if failures > 0:
+        print(f"FAIL: {failures} failures")
+        exit(1)
+    print("PASS: expr_scanner (5 cases)")

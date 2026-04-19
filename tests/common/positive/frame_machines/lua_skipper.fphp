@@ -1,0 +1,221 @@
+<?php
+@@target php
+
+// LuaSyntaxSkipper — FSM for skipping Lua comments and strings.
+// Translated from framec's native_region_scanner/lua_skipper.frs
+//
+// Handles: -- line comments, --[[ block comments ]], [[ long strings ]],
+// simple strings, Lua-style line endings.
+
+@@system LuaSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: array, start: int, length: int) {
+            $this->bytes = $input_bytes;
+            $this->pos = $start;
+            $this->scan_end = $length;
+        }
+        get_result_pos(): int {
+            return $this->result_pos;
+        }
+        get_success(): int {
+            return $this->success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                $i = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                // Lua line comment: --
+                if ($i + 1 < $end && $bs[$i] === 0x2D && $bs[$i + 1] === 0x2D) {
+                    // Check for block comment: --[[ ... ]]
+                    if ($i + 3 < $end && $bs[$i + 2] === 0x5B && $bs[$i + 3] === 0x5B) {
+                        $j = $i + 4;
+                        while ($j + 1 < $end) {
+                            if ($bs[$j] === 0x5D && $bs[$j + 1] === 0x5D) {
+                                $this->result_pos = $j + 2;
+                                $this->success = 1;
+                                return;
+                            }
+                            $j++;
+                        }
+                        $this->result_pos = $end;
+                        $this->success = 1;
+                        return;
+                    }
+                    // Line comment
+                    $j = $i + 2;
+                    while ($j < $end && $bs[$j] !== 0x0A) {
+                        $j++;
+                    }
+                    $this->result_pos = $j;
+                    $this->success = 1;
+                    return;
+                }
+
+                $this->success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                $i = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                // Long string: [[ ... ]]
+                if ($i + 1 < $end && $bs[$i] === 0x5B && $bs[$i + 1] === 0x5B) {
+                    $j = $i + 2;
+                    while ($j + 1 < $end) {
+                        if ($bs[$j] === 0x5D && $bs[$j + 1] === 0x5D) {
+                            $this->result_pos = $j + 2;
+                            $this->success = 1;
+                            return;
+                        }
+                        $j++;
+                    }
+                    $this->result_pos = $end;
+                    $this->success = 1;
+                    return;
+                }
+
+                // Simple string: " or '
+                if ($i < $end && ($bs[$i] === 0x22 || $bs[$i] === 0x27)) {
+                    $q = $bs[$i];
+                    $j = $i + 1;
+                    while ($j < $end) {
+                        if ($bs[$j] === 0x5C) {
+                            $j += 2;
+                            continue;
+                        }
+                        if ($bs[$j] === $q) {
+                            $this->result_pos = $j + 1;
+                            $this->success = 1;
+                            return;
+                        }
+                        $j++;
+                    }
+                    $this->result_pos = $end;
+                    $this->success = 1;
+                    return;
+                }
+
+                $this->success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                $j = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                while ($j < $end) {
+                    $b = $bs[$j];
+                    if ($b === 0x0A) {
+                        break;
+                    }
+                    // Stop at -- comment
+                    if ($b === 0x2D && $j + 1 < $end && $bs[$j + 1] === 0x2D) {
+                        break;
+                    }
+                    $j++;
+                }
+
+                $this->result_pos = $j;
+            }
+        }
+
+    domain:
+        bytes = []
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+function str_to_bytes(string $s): array {
+    $bytes = [];
+    for ($i = 0; $i < strlen($s); $i++) {
+        $bytes[] = ord($s[$i]);
+    }
+    return $bytes;
+}
+
+$failures = 0;
+
+// Test 1: Skip -- line comment
+$s1 = new LuaSyntaxSkipperFsm();
+$inp1 = str_to_bytes("-- comment\ncode");
+$s1->setup($inp1, 0, count($inp1));
+$s1->do_skip_comment();
+if ($s1->get_success() !== 1 || $s1->get_result_pos() !== 10) {
+    echo "FAIL 1: success={$s1->get_success()}, pos={$s1->get_result_pos()}\n";
+    $failures++;
+}
+
+// Test 2: Skip --[[ block comment ]]
+$s2 = new LuaSyntaxSkipperFsm();
+$inp2 = str_to_bytes("--[[ block ]]code");
+$s2->setup($inp2, 0, count($inp2));
+$s2->do_skip_comment();
+if ($s2->get_success() !== 1 || $s2->get_result_pos() !== 13) {
+    echo "FAIL 2: success={$s2->get_success()}, pos={$s2->get_result_pos()}\n";
+    $failures++;
+}
+
+// Test 3: Not a comment
+$s3 = new LuaSyntaxSkipperFsm();
+$inp3 = str_to_bytes("x + 1");
+$s3->setup($inp3, 0, count($inp3));
+$s3->do_skip_comment();
+if ($s3->get_success() !== 0) {
+    echo "FAIL 3: should not be comment\n";
+    $failures++;
+}
+
+// Test 4: Skip [[ long string ]]
+$s4 = new LuaSyntaxSkipperFsm();
+$inp4 = str_to_bytes("[[hello world]]rest");
+$s4->setup($inp4, 0, count($inp4));
+$s4->do_skip_string();
+if ($s4->get_success() !== 1 || $s4->get_result_pos() !== 15) {
+    echo "FAIL 4: success={$s4->get_success()}, pos={$s4->get_result_pos()}\n";
+    $failures++;
+}
+
+// Test 5: Skip simple string
+$s5 = new LuaSyntaxSkipperFsm();
+$inp5 = str_to_bytes("\"hello\" rest");
+$s5->setup($inp5, 0, count($inp5));
+$s5->do_skip_string();
+if ($s5->get_success() !== 1 || $s5->get_result_pos() !== 7) {
+    echo "FAIL 5: success={$s5->get_success()}, pos={$s5->get_result_pos()}\n";
+    $failures++;
+}
+
+// Test 6: Find line end stops at --
+$s6 = new LuaSyntaxSkipperFsm();
+$inp6 = str_to_bytes("x + 1 -- comment");
+$s6->setup($inp6, 0, count($inp6));
+$s6->do_find_line_end();
+if ($s6->get_result_pos() !== 6) {
+    echo "FAIL 6: pos={$s6->get_result_pos()}, expected 6\n";
+    $failures++;
+}
+
+if ($failures > 0) { echo "FAIL: {$failures} failures\n"; exit(1); }
+echo "PASS: lua_skipper (6 cases)\n";

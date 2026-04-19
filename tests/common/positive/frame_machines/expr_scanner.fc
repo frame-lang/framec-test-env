@@ -1,0 +1,170 @@
+@@target c
+
+#include <string.h>
+
+// ExprScanner — PDA for scanning assignment RHS expressions.
+// Translated from framec's native_region_scanner/expr_scanner.frs
+//
+// Scans from pos (after =) to a terminator (; or \n) at depth 0,
+// respecting nested ()[]{}  and string literals with escape handling.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: unsigned char*, start: int, length: int) {
+            self->bytes = input_bytes;
+            self->pos = start;
+            self->end = length;
+        }
+        get_result(): int {
+            return self->result_end;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                int i = self->pos;
+                int end = self->end;
+                unsigned char* bs = self->bytes;
+                int depth = 0;
+                char in_string = 0;
+
+                while (i < end) {
+                    char b = bs[i];
+
+                    if (in_string != 0) {
+                        if (b == '\\' && i + 1 < end) {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = 0;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '"' || b == '\'') {
+                        in_string = b;
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '(' || b == '[' || b == '{') {
+                        depth++;
+                    } else if (b == ')' || b == ']' || b == '}') {
+                        depth--;
+                        if (depth < 0) depth = 0;
+                    } else if (b == ';' && depth == 0) {
+                        i++;
+                        break;
+                    } else if (b == '\n' && depth == 0) {
+                        break;
+                    }
+
+                    i++;
+                }
+
+                self->result_end = i;
+            }
+        }
+
+    domain:
+        bytes: unsigned char* = NULL
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+int main() {
+    int failures = 0;
+
+    // Test 1: simple expression terminated by newline
+    ExprScannerFsm* e1 = @@ExprScannerFsm();
+    unsigned char t1[] = " x + 1\nfoo";
+    ExprScannerFsm_setup(e1, t1, 0, strlen((char*)t1));
+    ExprScannerFsm_do_scan(e1);
+    int r1 = ExprScannerFsm_get_result(e1);
+    char buf1[256];
+    memcpy(buf1, t1, r1);
+    buf1[r1] = '\0';
+    if (strcmp(buf1, " x + 1") != 0) {
+        printf("FAIL 1: got '%s'\n", buf1);
+        failures++;
+    }
+
+    // Test 2: expression with semicolon terminator
+    ExprScannerFsm* e2 = @@ExprScannerFsm();
+    unsigned char t2[] = " x + 1; y = 2";
+    ExprScannerFsm_setup(e2, t2, 0, strlen((char*)t2));
+    ExprScannerFsm_do_scan(e2);
+    int r2 = ExprScannerFsm_get_result(e2);
+    char buf2[256];
+    memcpy(buf2, t2, r2);
+    buf2[r2] = '\0';
+    if (strcmp(buf2, " x + 1;") != 0) {
+        printf("FAIL 2: got '%s'\n", buf2);
+        failures++;
+    }
+
+    // Test 3: nested parens not treated as terminator
+    ExprScannerFsm* e3 = @@ExprScannerFsm();
+    unsigned char t3[] = " f(x, g(y))\nz";
+    ExprScannerFsm_setup(e3, t3, 0, strlen((char*)t3));
+    ExprScannerFsm_do_scan(e3);
+    int r3 = ExprScannerFsm_get_result(e3);
+    char buf3[256];
+    memcpy(buf3, t3, r3);
+    buf3[r3] = '\0';
+    if (strcmp(buf3, " f(x, g(y))") != 0) {
+        printf("FAIL 3: got '%s'\n", buf3);
+        failures++;
+    }
+
+    // Test 4: string with escaped quote
+    ExprScannerFsm* e4 = @@ExprScannerFsm();
+    unsigned char t4[] = " \"hello\\\"world\"\n";
+    ExprScannerFsm_setup(e4, t4, 0, strlen((char*)t4));
+    ExprScannerFsm_do_scan(e4);
+    int r4 = ExprScannerFsm_get_result(e4);
+    char buf4[256];
+    memcpy(buf4, t4, r4);
+    buf4[r4] = '\0';
+    if (strcmp(buf4, " \"hello\\\"world\"") != 0) {
+        printf("FAIL 4: got '%s'\n", buf4);
+        failures++;
+    }
+
+    // Test 5: semicolon inside string (should not terminate)
+    ExprScannerFsm* e5 = @@ExprScannerFsm();
+    unsigned char t5[] = " \"a;b\"\n";
+    ExprScannerFsm_setup(e5, t5, 0, strlen((char*)t5));
+    ExprScannerFsm_do_scan(e5);
+    int r5 = ExprScannerFsm_get_result(e5);
+    char buf5[256];
+    memcpy(buf5, t5, r5);
+    buf5[r5] = '\0';
+    if (strcmp(buf5, " \"a;b\"") != 0) {
+        printf("FAIL 5: got '%s'\n", buf5);
+        failures++;
+    }
+
+    ExprScannerFsm_destroy(e1);
+    ExprScannerFsm_destroy(e2);
+    ExprScannerFsm_destroy(e3);
+    ExprScannerFsm_destroy(e4);
+    ExprScannerFsm_destroy(e5);
+
+    if (failures > 0) {
+        printf("FAIL: %d failures\n", failures);
+        return 1;
+    }
+    printf("PASS: expr_scanner (5 cases)\n");
+    return 0;
+}

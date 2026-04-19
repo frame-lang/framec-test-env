@@ -1,0 +1,356 @@
+@@target swift
+
+import Foundation
+
+// RubySyntaxSkipper -- FSM for skipping Ruby comments and strings.
+// Translated from framec's native_region_scanner/ruby_skipper.frs
+//
+// Handles: # line comments, "..." / '...' strings,
+// %Q{} / %q[] / %w() etc. percent literals,
+// Ruby-style line endings, balanced parens.
+
+@@system RubySyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: [UInt8], start: Int, length: Int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos(): Int {
+            return self.result_pos
+        }
+        get_success(): Int {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                var i = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+
+                // Ruby: # line comment only
+                if i < end && bs[i] == 0x23 {
+                    var j = i + 1
+                    while j < end && bs[j] != 0x0A {
+                        j += 1
+                    }
+                    self.result_pos = j
+                    self.success = 1
+                    return
+                }
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                var i = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+
+                // Percent literals: %Q{...}, %q[...], %w(...), etc.
+                if i < end && bs[i] == 0x25 {
+                    if i + 1 < end {
+                        let c1 = bs[i + 1]
+                        // Check for %Q, %q, %w, %W, %i, %I, %r, %x, %s
+                        let has_letter = (c1 == UInt8(ascii: "Q") || c1 == UInt8(ascii: "q") || c1 == UInt8(ascii: "w") || c1 == UInt8(ascii: "W") || c1 == UInt8(ascii: "i") || c1 == UInt8(ascii: "I") || c1 == UInt8(ascii: "r") || c1 == UInt8(ascii: "x") || c1 == UInt8(ascii: "s"))
+                        var opener: UInt8 = 0
+                        var j = 0
+                        if has_letter && i + 2 < end {
+                            opener = bs[i + 2]
+                            j = i + 3
+                        } else if !has_letter && !(c1 >= UInt8(ascii: "a") && c1 <= UInt8(ascii: "z")) && !(c1 >= UInt8(ascii: "A") && c1 <= UInt8(ascii: "Z")) && !(c1 >= UInt8(ascii: "0") && c1 <= UInt8(ascii: "9")) && c1 != UInt8(ascii: "_") {
+                            // %{...} or %[...] or %<...> without letter
+                            opener = c1
+                            j = i + 2
+                        } else {
+                            self.success = 0
+                            return
+                        }
+
+                        // Determine closer
+                        var closer: UInt8 = 0
+                        if opener == 0x7B {
+                            closer = 0x7D
+                        } else if opener == 0x5B {
+                            closer = 0x5D
+                        } else if opener == 0x28 {
+                            closer = 0x29
+                        } else if opener == 0x3C {
+                            closer = 0x3E
+                        } else {
+                            // Non-paired delimiter (e.g. %Q!...!)
+                            closer = opener
+                            // Scan to matching delimiter
+                            while j < end {
+                                if bs[j] == 0x5C {
+                                    j += 2
+                                    continue
+                                }
+                                if bs[j] == closer {
+                                    self.result_pos = j + 1
+                                    self.success = 1
+                                    return
+                                }
+                                j += 1
+                            }
+                            self.result_pos = end
+                            self.success = 1
+                            return
+                        }
+
+                        // Paired delimiter: track nesting
+                        var depth = 1
+                        while j < end && depth > 0 {
+                            if bs[j] == 0x5C {
+                                j += 2
+                                continue
+                            }
+                            if bs[j] == opener {
+                                depth += 1
+                            } else if bs[j] == closer {
+                                depth -= 1
+                            }
+                            j += 1
+                        }
+                        self.result_pos = j
+                        self.success = 1
+                        return
+                    }
+                }
+
+                // Simple string: " or '
+                if i < end && (bs[i] == 0x22 || bs[i] == 0x27) {
+                    let q = bs[i]
+                    var j = i + 1
+                    while j < end {
+                        if bs[j] == 0x5C {
+                            j += 2
+                            continue
+                        }
+                        if bs[j] == q {
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        }
+                        j += 1
+                    }
+                    self.result_pos = end
+                    self.success = 1
+                    return
+                }
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                var j = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+                var in_string: UInt8 = 0
+
+                while j < end {
+                    let b = bs[j]
+                    if b == 0x0A {
+                        break
+                    }
+
+                    // Inside string
+                    if in_string != 0 {
+                        if b == 0x5C {
+                            j += 2
+                            continue
+                        }
+                        if b == in_string {
+                            in_string = 0
+                        }
+                        j += 1
+                        continue
+                    }
+
+                    // Terminators
+                    if b == 0x23 {
+                        break
+                    }
+
+                    // String starts
+                    if b == 0x27 || b == 0x22 {
+                        in_string = b
+                        j += 1
+                        continue
+                    }
+
+                    j += 1
+                }
+
+                self.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                var i = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+
+                if i >= end || bs[i] != 0x28 {
+                    self.success = 0
+                    return
+                }
+
+                var depth = 0
+                var in_string: UInt8 = 0
+
+                while i < end {
+                    let b = bs[i]
+
+                    // Inside string
+                    if in_string != 0 {
+                        if b == 0x5C {
+                            i += 2
+                            continue
+                        }
+                        if b == in_string {
+                            in_string = 0
+                        }
+                        i += 1
+                        continue
+                    }
+
+                    if b == 0x27 || b == 0x22 {
+                        in_string = b
+                        i += 1
+                    } else if b == 0x28 {
+                        depth += 1
+                        i += 1
+                    } else if b == 0x29 {
+                        depth -= 1
+                        i += 1
+                        if depth == 0 {
+                            self.result_pos = i
+                            self.success = 1
+                            return
+                        }
+                    } else {
+                        i += 1
+                    }
+                }
+
+                self.success = 0
+            }
+        }
+
+    domain:
+        bytes: [UInt8] = []
+        pos: Int = 0
+        scan_end: Int = 0
+        result_pos: Int = 0
+        success: Int = 1
+}
+
+// main
+    var failures = 0
+
+    // Test 1: Skip # comment
+    let s1 = @@RubySyntaxSkipperFsm()
+    let inp1: [UInt8] = Array("# comment\ncode".utf8)
+    s1.setup(inp1, 0, inp1.count)
+    s1.do_skip_comment()
+    if s1.get_success() != 1 || s1.get_result_pos() != 9 {
+        print("FAIL 1: success=\(s1.get_success()), pos=\(s1.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 2: Skip double-quoted string
+    let s2 = @@RubySyntaxSkipperFsm()
+    let inp2: [UInt8] = Array("\"hello\" rest".utf8)
+    s2.setup(inp2, 0, inp2.count)
+    s2.do_skip_string()
+    if s2.get_success() != 1 || s2.get_result_pos() != 7 {
+        print("FAIL 2: success=\(s2.get_success()), pos=\(s2.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 3: Skip single-quoted string
+    let s3 = @@RubySyntaxSkipperFsm()
+    let inp3: [UInt8] = Array("'hello' rest".utf8)
+    s3.setup(inp3, 0, inp3.count)
+    s3.do_skip_string()
+    if s3.get_success() != 1 || s3.get_result_pos() != 7 {
+        print("FAIL 3: success=\(s3.get_success()), pos=\(s3.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 4: Skip %Q{text}
+    let s4 = @@RubySyntaxSkipperFsm()
+    let inp4: [UInt8] = Array("%Q{text} rest".utf8)
+    s4.setup(inp4, 0, inp4.count)
+    s4.do_skip_string()
+    if s4.get_success() != 1 || s4.get_result_pos() != 8 {
+        print("FAIL 4: success=\(s4.get_success()), pos=\(s4.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 5: Skip %q[text]
+    let s5 = @@RubySyntaxSkipperFsm()
+    let inp5: [UInt8] = Array("%q[text] rest".utf8)
+    s5.setup(inp5, 0, inp5.count)
+    s5.do_skip_string()
+    if s5.get_success() != 1 || s5.get_result_pos() != 8 {
+        print("FAIL 5: success=\(s5.get_success()), pos=\(s5.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 6: Find line end (stops at #)
+    let s6 = @@RubySyntaxSkipperFsm()
+    let inp6: [UInt8] = Array("x + 1 # comment".utf8)
+    s6.setup(inp6, 0, inp6.count)
+    s6.do_find_line_end()
+    if s6.get_result_pos() != 6 {
+        print("FAIL 6: pos=\(s6.get_result_pos()), expected 6")
+        failures += 1
+    }
+
+    // Test 7: Balanced parens
+    let s7 = @@RubySyntaxSkipperFsm()
+    let inp7: [UInt8] = Array("(a, f(b)) rest".utf8)
+    s7.setup(inp7, 0, inp7.count)
+    s7.do_balanced_paren_end()
+    if s7.get_success() != 1 || s7.get_result_pos() != 9 {
+        print("FAIL 7: success=\(s7.get_success()), pos=\(s7.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 8: Skip %Q with nested braces
+    let s8 = @@RubySyntaxSkipperFsm()
+    let inp8: [UInt8] = Array("%Q{outer {inner} end} rest".utf8)
+    s8.setup(inp8, 0, inp8.count)
+    s8.do_skip_string()
+    if s8.get_success() != 1 || s8.get_result_pos() != 21 {
+        print("FAIL 8: success=\(s8.get_success()), pos=\(s8.get_result_pos())")
+        failures += 1
+    }
+
+    if failures > 0 {
+        print("FAIL: \(failures) failures")
+        exit(1)
+    }
+    print("PASS: ruby_skipper (8 cases)")

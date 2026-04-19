@@ -1,0 +1,269 @@
+@@target java
+
+// CSyntaxSkipper -- FSM for skipping C-style comments and strings.
+// Translated from framec's native_region_scanner/c_skipper.frs
+//
+// Demonstrates the skipper pattern: dispatch on entry point, scan
+// to find the end of the construct, report result via domain vars.
+
+@@system CSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.end;
+                byte[] bs = this.bytes;
+
+                // Try line comment: //
+                if (i + 1 < end && (bs[i] & 0xFF) == '/' && (bs[i + 1] & 0xFF) == '/') {
+                    int j = i + 2;
+                    while (j < end && (bs[j] & 0xFF) != '\n') {
+                        j++;
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                // Try block comment: /* ... */
+                if (i + 1 < end && (bs[i] & 0xFF) == '/' && (bs[i + 1] & 0xFF) == '*') {
+                    int j = i + 2;
+                    while (j + 1 < end) {
+                        if ((bs[j] & 0xFF) == '*' && (bs[j + 1] & 0xFF) == '/') {
+                            this.result_pos = j + 2;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.end;
+                byte[] bs = this.bytes;
+
+                if (i < end && ((bs[i] & 0xFF) == '"' || (bs[i] & 0xFF) == '\'')) {
+                    int q = bs[i] & 0xFF;
+                    int j = i + 1;
+                    while (j < end) {
+                        if ((bs[j] & 0xFF) == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if ((bs[j] & 0xFF) == q) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.end;
+                byte[] bs = this.bytes;
+
+                while (j < end) {
+                    int b = bs[j] & 0xFF;
+                    if (b == '\n' || b == ';') {
+                        break;
+                    }
+                    if (b == '/' && j + 1 < end && (bs[j + 1] & 0xFF) == '/') {
+                        break;
+                    }
+                    if (b == '/' && j + 1 < end && (bs[j + 1] & 0xFF) == '*') {
+                        break;
+                    }
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this.pos;
+                int end = this.end;
+                byte[] bs = this.bytes;
+
+                if (i >= end || (bs[i] & 0xFF) != '(') {
+                    this.success = 0;
+                    return;
+                }
+
+                int depth = 1;
+                int j = i + 1;
+                while (j < end && depth > 0) {
+                    int b = bs[j] & 0xFF;
+                    if (b == '(') {
+                        depth++;
+                    } else if (b == ')') {
+                        depth--;
+                    } else if (b == '"' || b == '\'') {
+                        int q = b;
+                        j++;
+                        while (j < end && (bs[j] & 0xFF) != q) {
+                            if ((bs[j] & 0xFF) == '\\') {
+                                j++;
+                            }
+                            j++;
+                        }
+                        // j is at closing quote
+                    }
+                    j++;
+                }
+
+                if (depth == 0) {
+                    this.result_pos = j;
+                    this.success = 1;
+                } else {
+                    this.result_pos = end;
+                    this.success = 0;
+                }
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+class Main {
+    public static void main(String[] args) {
+        int failures = 0;
+
+        // Test 1: Skip line comment
+        CSyntaxSkipperFsm s1 = @@CSyntaxSkipperFsm();
+        byte[] inp1 = "// hello\ncode".getBytes();
+        s1.setup(inp1, 0, inp1.length);
+        s1.do_skip_comment();
+        if (s1.get_success() != 1 || s1.get_result_pos() != 8) {
+            System.out.println("FAIL 1: success=" + s1.get_success() + ", pos=" + s1.get_result_pos());
+            failures++;
+        }
+
+        // Test 2: Skip block comment
+        CSyntaxSkipperFsm s2 = @@CSyntaxSkipperFsm();
+        byte[] inp2 = "/* block */code".getBytes();
+        s2.setup(inp2, 0, inp2.length);
+        s2.do_skip_comment();
+        if (s2.get_success() != 1 || s2.get_result_pos() != 11) {
+            System.out.println("FAIL 2: success=" + s2.get_success() + ", pos=" + s2.get_result_pos());
+            failures++;
+        }
+
+        // Test 3: Not a comment
+        CSyntaxSkipperFsm s3 = @@CSyntaxSkipperFsm();
+        byte[] inp3 = "x + 1".getBytes();
+        s3.setup(inp3, 0, inp3.length);
+        s3.do_skip_comment();
+        if (s3.get_success() != 0) {
+            System.out.println("FAIL 3: should not be a comment");
+            failures++;
+        }
+
+        // Test 4: Skip double-quoted string
+        CSyntaxSkipperFsm s4 = @@CSyntaxSkipperFsm();
+        byte[] inp4 = "\"hello world\" rest".getBytes();
+        s4.setup(inp4, 0, inp4.length);
+        s4.do_skip_string();
+        if (s4.get_success() != 1 || s4.get_result_pos() != 13) {
+            System.out.println("FAIL 4: success=" + s4.get_success() + ", pos=" + s4.get_result_pos());
+            failures++;
+        }
+
+        // Test 5: Skip string with escaped quote
+        CSyntaxSkipperFsm s5 = @@CSyntaxSkipperFsm();
+        byte[] inp5 = "\"he\\\"llo\" rest".getBytes();
+        s5.setup(inp5, 0, inp5.length);
+        s5.do_skip_string();
+        if (s5.get_success() != 1 || s5.get_result_pos() != 9) {
+            System.out.println("FAIL 5: success=" + s5.get_success() + ", pos=" + s5.get_result_pos());
+            failures++;
+        }
+
+        // Test 6: Find line end (stops at newline)
+        CSyntaxSkipperFsm s6 = @@CSyntaxSkipperFsm();
+        byte[] inp6 = "x + 1\nmore".getBytes();
+        s6.setup(inp6, 0, inp6.length);
+        s6.do_find_line_end();
+        if (s6.get_result_pos() != 5) {
+            System.out.println("FAIL 6: pos=" + s6.get_result_pos() + ", expected 5");
+            failures++;
+        }
+
+        // Test 7: Find line end (stops at // comment)
+        CSyntaxSkipperFsm s7 = @@CSyntaxSkipperFsm();
+        byte[] inp7 = "x + 1 // comment".getBytes();
+        s7.setup(inp7, 0, inp7.length);
+        s7.do_find_line_end();
+        if (s7.get_result_pos() != 6) {
+            System.out.println("FAIL 7: pos=" + s7.get_result_pos() + ", expected 6");
+            failures++;
+        }
+
+        // Test 8: Balanced parens
+        CSyntaxSkipperFsm s8 = @@CSyntaxSkipperFsm();
+        byte[] inp8 = "(a, f(b), c) rest".getBytes();
+        s8.setup(inp8, 0, inp8.length);
+        s8.do_balanced_paren_end();
+        if (s8.get_success() != 1 || s8.get_result_pos() != 12) {
+            System.out.println("FAIL 8: success=" + s8.get_success() + ", pos=" + s8.get_result_pos());
+            failures++;
+        }
+
+        if (failures > 0) {
+            System.out.println("FAIL: " + failures + " failures");
+            System.exit(1);
+        }
+        System.out.println("PASS: c_skipper (8 cases)");
+    }
+}

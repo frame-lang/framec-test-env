@@ -1,0 +1,326 @@
+@@target python_3
+
+# PhpSyntaxSkipper -- FSM for skipping PHP comments and strings.
+# Translated from framec's native_region_scanner/php_skipper.frs
+#
+# Handles: // line comments, # line comments, /* */ block comments,
+# "..." and '...' strings, <<<EOT heredoc/nowdoc,
+# PHP-style line endings, balanced parens.
+
+@@system PhpSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: list, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos(): int {
+            return self.result_pos
+        }
+        get_success(): int {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                # Line comment: //
+                if i + 1 < end and bs[i] == ord('/') and bs[i + 1] == ord('/'):
+                    j = i + 2
+                    while j < end and bs[j] != ord('\n'):
+                        j += 1
+                    self.result_pos = j
+                    self.success = 1
+                    return
+
+                # Hash comment: #
+                if i < end and bs[i] == ord('#'):
+                    j = i + 1
+                    while j < end and bs[j] != ord('\n'):
+                        j += 1
+                    self.result_pos = j
+                    self.success = 1
+                    return
+
+                # Block comment: /* ... */
+                if i + 1 < end and bs[i] == ord('/') and bs[i + 1] == ord('*'):
+                    j = i + 2
+                    while j + 1 < end:
+                        if bs[j] == ord('*') and bs[j + 1] == ord('/'):
+                            self.result_pos = j + 2
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = end
+                    self.success = 1
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                # Heredoc/nowdoc: <<<EOT ... EOT;
+                if i + 2 < end and bs[i] == ord('<') and bs[i + 1] == ord('<') and bs[i + 2] == ord('<'):
+                    j = i + 3
+                    # Skip optional quote for nowdoc
+                    nowdoc = 0
+                    if j < end and bs[j] == ord("'"):
+                        nowdoc = 1
+                        j += 1
+                    # Read tag name
+                    tag_start = j
+                    while j < end and (chr(bs[j]).isalnum() or bs[j] == ord('_')):
+                        j += 1
+                    tag_end = j
+                    if nowdoc and j < end and bs[j] == ord("'"):
+                        j += 1
+                    tag = bs[tag_start:tag_end]
+                    tag_len = len(tag)
+                    if tag_len > 0:
+                        # Skip to newline
+                        while j < end and bs[j] != ord('\n'):
+                            j += 1
+                        if j < end:
+                            j += 1
+                        # Scan for closing tag at start of line
+                        while j < end:
+                            # Check if this line starts with the tag
+                            if j + tag_len <= end and bs[j:j + tag_len] == tag:
+                                k = j + tag_len
+                                # Optional ; and newline
+                                if k < end and bs[k] == ord(';'):
+                                    k += 1
+                                if k >= end or bs[k] == ord('\n'):
+                                    if k < end and bs[k] == ord('\n'):
+                                        k += 1
+                                    self.result_pos = k
+                                    self.success = 1
+                                    return
+                            # Skip to next line
+                            while j < end and bs[j] != ord('\n'):
+                                j += 1
+                            if j < end:
+                                j += 1
+                        self.result_pos = end
+                        self.success = 1
+                        return
+
+                # Simple string: " or '
+                if i < end and (bs[i] == ord('"') or bs[i] == ord("'")):
+                    q = bs[i]
+                    j = i + 1
+                    while j < end:
+                        if bs[j] == ord('\\'):
+                            j += 2
+                            continue
+                        if bs[j] == q:
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = end
+                    self.success = 1
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j = self.pos
+                end = self.scan_end
+                bs = self.bytes
+                in_string = 0
+
+                while j < end:
+                    b = bs[j]
+                    if b == ord('\n'):
+                        break
+
+                    # Inside string
+                    if in_string != 0:
+                        if b == ord('\\'):
+                            j += 2
+                            continue
+                        if b == in_string:
+                            in_string = 0
+                        j += 1
+                        continue
+
+                    # Terminators
+                    if b == ord(';') or b == ord('}'):
+                        break
+                    if b == ord('/') and j + 1 < end and (bs[j + 1] == ord('/') or bs[j + 1] == ord('*')):
+                        break
+                    if b == ord('#'):
+                        break
+
+                    # String starts
+                    if b == ord("'") or b == ord('"'):
+                        in_string = b
+                        j += 1
+                        continue
+
+                    j += 1
+
+                self.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                if i >= end or bs[i] != ord('('):
+                    self.success = 0
+                    return
+
+                depth = 0
+                in_string = 0
+
+                while i < end:
+                    b = bs[i]
+
+                    # Inside string
+                    if in_string != 0:
+                        if b == ord('\\'):
+                            i += 2
+                            continue
+                        if b == in_string:
+                            in_string = 0
+                        i += 1
+                        continue
+
+                    if b == ord("'") or b == ord('"'):
+                        in_string = b
+                        i += 1
+                    elif b == ord('('):
+                        depth += 1
+                        i += 1
+                    elif b == ord(')'):
+                        depth -= 1
+                        i += 1
+                        if depth == 0:
+                            self.result_pos = i
+                            self.success = 1
+                            return
+                    else:
+                        i += 1
+
+                self.success = 0
+            }
+        }
+
+    domain:
+        bytes: list = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+if __name__ == '__main__':
+    failures = 0
+
+    # Test 1: Skip // line comment
+    s1 = @@PhpSyntaxSkipperFsm()
+    inp1 = list(b"// comment\ncode")
+    s1.setup(inp1, 0, len(inp1))
+    s1.do_skip_comment()
+    if s1.get_success() != 1 or s1.get_result_pos() != 10:
+        print(f"FAIL 1: success={s1.get_success()}, pos={s1.get_result_pos()}")
+        failures += 1
+
+    # Test 2: Skip # comment
+    s2 = @@PhpSyntaxSkipperFsm()
+    inp2 = list(b"# comment\ncode")
+    s2.setup(inp2, 0, len(inp2))
+    s2.do_skip_comment()
+    if s2.get_success() != 1 or s2.get_result_pos() != 9:
+        print(f"FAIL 2: success={s2.get_success()}, pos={s2.get_result_pos()}")
+        failures += 1
+
+    # Test 3: Skip /* */ block comment
+    s3 = @@PhpSyntaxSkipperFsm()
+    inp3 = list(b"/* block */code")
+    s3.setup(inp3, 0, len(inp3))
+    s3.do_skip_comment()
+    if s3.get_success() != 1 or s3.get_result_pos() != 11:
+        print(f"FAIL 3: success={s3.get_success()}, pos={s3.get_result_pos()}")
+        failures += 1
+
+    # Test 4: Skip double-quoted string
+    s4 = @@PhpSyntaxSkipperFsm()
+    inp4 = list(b'"hello" rest')
+    s4.setup(inp4, 0, len(inp4))
+    s4.do_skip_string()
+    if s4.get_success() != 1 or s4.get_result_pos() != 7:
+        print(f"FAIL 4: success={s4.get_success()}, pos={s4.get_result_pos()}")
+        failures += 1
+
+    # Test 5: Skip single-quoted string
+    s5 = @@PhpSyntaxSkipperFsm()
+    inp5 = list(b"'hello' rest")
+    s5.setup(inp5, 0, len(inp5))
+    s5.do_skip_string()
+    if s5.get_success() != 1 or s5.get_result_pos() != 7:
+        print(f"FAIL 5: success={s5.get_success()}, pos={s5.get_result_pos()}")
+        failures += 1
+
+    # Test 6: Skip heredoc
+    s6 = @@PhpSyntaxSkipperFsm()
+    inp6 = list(b"<<<EOT\nhello world\nEOT;\nnext")
+    s6.setup(inp6, 0, len(inp6))
+    s6.do_skip_string()
+    if s6.get_success() != 1 or s6.get_result_pos() != 24:
+        print(f"FAIL 6: success={s6.get_success()}, pos={s6.get_result_pos()}")
+        failures += 1
+
+    # Test 7: Find line end (stops at ;)
+    s7 = @@PhpSyntaxSkipperFsm()
+    inp7 = list(b"$x = 1; next")
+    s7.setup(inp7, 0, len(inp7))
+    s7.do_find_line_end()
+    if s7.get_result_pos() != 6:
+        print(f"FAIL 7: pos={s7.get_result_pos()}, expected 6")
+        failures += 1
+
+    # Test 8: Balanced parens
+    s8 = @@PhpSyntaxSkipperFsm()
+    inp8 = list(b"(a, f(b)) rest")
+    s8.setup(inp8, 0, len(inp8))
+    s8.do_balanced_paren_end()
+    if s8.get_success() != 1 or s8.get_result_pos() != 9:
+        print(f"FAIL 8: success={s8.get_success()}, pos={s8.get_result_pos()}")
+        failures += 1
+
+    if failures > 0:
+        print(f"FAIL: {failures} failures")
+        exit(1)
+    print("PASS: php_skipper (8 cases)")

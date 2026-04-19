@@ -1,0 +1,277 @@
+@@target erlang
+
+%% TSSyntaxSkipper — FSM for skipping TS/JS comments and strings.
+%% Translated from framec's native_region_scanner/typescript_skipper.frs
+%%
+%% Adds template literal awareness (backtick strings with ${} interpolation)
+%% on top of the C-style comment and string patterns.
+
+@@system TSSyntaxSkipperFsm {
+    interface:
+        setup(input_bytes: binary, start: int, length: int)
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        get_result_pos(): int
+        get_success(): int
+
+    machine:
+        $Init {
+            setup(input_bytes: binary, start: int, length: int) {
+                self.bytes = input_bytes
+                self.pos = start
+                self.scan_end = length
+            }
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipComment {
+            $>() {
+                {ResultPos, Success} = scan_comment(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.result_pos = ResultPos
+                self.success = Success
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipString {
+            $>() {
+                {ResultPos, Success} = scan_string(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.result_pos = ResultPos
+                self.success = Success
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $FindLineEnd {
+            $>() {
+                self.result_pos = scan_find_line_end(Data#data.bytes, Data#data.pos, Data#data.scan_end, false, 0)
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+    domain:
+        bytes = <<>>
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+%% --- scan_comment helpers ---
+scan_comment(Bs, I, End) when I + 1 < End ->
+    B0 = binary:at(Bs, I),
+    B1 = binary:at(Bs, I + 1),
+    if
+        B0 =:= $/ andalso B1 =:= $/ ->
+            Pos = scan_line_comment(Bs, I + 2, End),
+            {Pos, 1};
+        B0 =:= $/ andalso B1 =:= $* ->
+            scan_block_comment(Bs, I + 2, End);
+        true ->
+            {0, 0}
+    end;
+scan_comment(_Bs, _I, _End) ->
+    {0, 0}.
+
+scan_line_comment(Bs, J, End) when J < End ->
+    case binary:at(Bs, J) of
+        $\n -> J;
+        _ -> scan_line_comment(Bs, J + 1, End)
+    end;
+scan_line_comment(_Bs, J, _End) ->
+    J.
+
+scan_block_comment(Bs, J, End) when J + 1 < End ->
+    case {binary:at(Bs, J), binary:at(Bs, J + 1)} of
+        {$*, $/} -> {J + 2, 1};
+        _ -> scan_block_comment(Bs, J + 1, End)
+    end;
+scan_block_comment(_Bs, _J, End) ->
+    {End, 1}.
+
+%% --- scan_string helpers ---
+scan_string(Bs, I, End) when I < End ->
+    B = binary:at(Bs, I),
+    if
+        B =:= $` ->
+            scan_template_literal(Bs, I + 1, End, 0);
+        B =:= $" orelse B =:= $' ->
+            scan_simple_string(Bs, I + 1, End, B);
+        true ->
+            {0, 0}
+    end;
+scan_string(_Bs, _I, _End) ->
+    {0, 0}.
+
+scan_template_literal(_Bs, J, End, _Depth) when J >= End ->
+    {End, 1};
+scan_template_literal(Bs, J, End, Depth) ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $` andalso Depth =:= 0 ->
+            {J + 1, 1};
+        B =:= $\\ ->
+            scan_template_literal(Bs, J + 2, End, Depth);
+        B =:= $$ andalso J + 1 < End ->
+            case binary:at(Bs, J + 1) of
+                ${ -> scan_template_literal(Bs, J + 2, End, Depth + 1);
+                _ -> scan_template_literal(Bs, J + 1, End, Depth)
+            end;
+        B =:= $} andalso Depth > 0 ->
+            scan_template_literal(Bs, J + 1, End, Depth - 1);
+        true ->
+            scan_template_literal(Bs, J + 1, End, Depth)
+    end.
+
+scan_simple_string(_Bs, J, End, _Q) when J >= End ->
+    {End, 1};
+scan_simple_string(Bs, J, End, Q) ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\\ ->
+            scan_simple_string(Bs, J + 2, End, Q);
+        B =:= Q ->
+            {J + 1, 1};
+        true ->
+            scan_simple_string(Bs, J + 1, End, Q)
+    end.
+
+%% --- scan_find_line_end helpers ---
+scan_find_line_end(_Bs, J, End, _InTpl, _TplDepth) when J >= End -> J;
+scan_find_line_end(Bs, J, End, true, TplDepth) ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $` andalso TplDepth =:= 0 ->
+            scan_find_line_end(Bs, J + 1, End, false, 0);
+        B =:= $\\ ->
+            scan_find_line_end(Bs, J + 2, End, true, TplDepth);
+        B =:= $$ andalso J + 1 < End ->
+            case binary:at(Bs, J + 1) of
+                ${ -> scan_find_line_end(Bs, J + 2, End, true, TplDepth + 1);
+                _ -> scan_find_line_end(Bs, J + 1, End, true, TplDepth)
+            end;
+        B =:= $} andalso TplDepth > 0 ->
+            scan_find_line_end(Bs, J + 1, End, true, TplDepth - 1);
+        true ->
+            scan_find_line_end(Bs, J + 1, End, true, TplDepth)
+    end;
+scan_find_line_end(Bs, J, End, false, _TplDepth) ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\n orelse B =:= $; -> J;
+        B =:= $/ andalso J + 1 < End ->
+            B1 = binary:at(Bs, J + 1),
+            if
+                B1 =:= $/ orelse B1 =:= $* -> J;
+                true -> scan_find_line_end(Bs, J + 1, End, false, 0)
+            end;
+        B =:= $` ->
+            scan_find_line_end(Bs, J + 1, End, true, 0);
+        B =:= $" orelse B =:= $' ->
+            J2 = scan_skip_str_in_line(Bs, J + 1, End, B),
+            scan_find_line_end(Bs, J2, End, false, 0);
+        true ->
+            scan_find_line_end(Bs, J + 1, End, false, 0)
+    end.
+
+scan_skip_str_in_line(_Bs, J, End, _Q) when J >= End -> End;
+scan_skip_str_in_line(Bs, J, End, Q) ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\\ ->
+            scan_skip_str_in_line(Bs, J + 2, End, Q);
+        B =:= Q ->
+            J + 1;
+        true ->
+            scan_skip_str_in_line(Bs, J + 1, End, Q)
+    end.
+
+main() ->
+    Failures = test_all(0),
+    case Failures of
+        0 -> io:format("PASS: ts_skipper (7 cases)~n");
+        _ -> io:format("FAIL: ~p failures~n", [Failures]), halt(1)
+    end.
+
+test_all(F0) ->
+    M = t_s_syntax_skipper_fsm,
+
+    %% Test 1: Skip // line comment
+    {ok, P1} = M:start_link(),
+    I1 = <<"// comment\ncode">>,
+    M:setup(P1, I1, 0, byte_size(I1)),
+    M:do_skip_comment(P1),
+    F1 = case {M:get_success(P1), M:get_result_pos(P1)} of
+        {1, 10} -> F0;
+        {S1, R1} -> io:format("FAIL 1: success=~p, pos=~p~n", [S1, R1]), F0 + 1
+    end,
+
+    %% Test 2: Skip /* block comment */
+    {ok, P2} = M:start_link(),
+    I2 = <<"/* block */code">>,
+    M:setup(P2, I2, 0, byte_size(I2)),
+    M:do_skip_comment(P2),
+    F2 = case {M:get_success(P2), M:get_result_pos(P2)} of
+        {1, 11} -> F1;
+        {S2, R2} -> io:format("FAIL 2: success=~p, pos=~p~n", [S2, R2]), F1 + 1
+    end,
+
+    %% Test 3: Skip template literal
+    {ok, P3} = M:start_link(),
+    I3 = <<"`hello ${name} world`rest">>,
+    M:setup(P3, I3, 0, byte_size(I3)),
+    M:do_skip_string(P3),
+    F3 = case {M:get_success(P3), M:get_result_pos(P3)} of
+        {1, 21} -> F2;
+        {S3, R3} -> io:format("FAIL 3: success=~p, pos=~p~n", [S3, R3]), F2 + 1
+    end,
+
+    %% Test 4: Skip simple double-quoted string
+    {ok, P4} = M:start_link(),
+    I4 = <<"\"hello\" rest">>,
+    M:setup(P4, I4, 0, byte_size(I4)),
+    M:do_skip_string(P4),
+    F4 = case {M:get_success(P4), M:get_result_pos(P4)} of
+        {1, 7} -> F3;
+        {S4, R4} -> io:format("FAIL 4: success=~p, pos=~p~n", [S4, R4]), F3 + 1
+    end,
+
+    %% Test 5: Skip template with nested ${}
+    {ok, P5} = M:start_link(),
+    I5 = <<"`${a + ${b}}`rest">>,
+    M:setup(P5, I5, 0, byte_size(I5)),
+    M:do_skip_string(P5),
+    F5 = case M:get_success(P5) of
+        1 -> F4;
+        S5 -> io:format("FAIL 5: success=~p~n", [S5]), F4 + 1
+    end,
+
+    %% Test 6: Find line end skips over template literals
+    {ok, P6} = M:start_link(),
+    I6 = <<"x = `hello`;\nnext">>,
+    M:setup(P6, I6, 0, byte_size(I6)),
+    M:do_find_line_end(P6),
+    F6 = case M:get_result_pos(P6) of
+        11 -> F5;
+        R6 -> io:format("FAIL 6: pos=~p, expected 11 (at ;)~n", [R6]), F5 + 1
+    end,
+
+    %% Test 7: Not a string
+    {ok, P7} = M:start_link(),
+    I7 = <<"x + 1">>,
+    M:setup(P7, I7, 0, byte_size(I7)),
+    M:do_skip_string(P7),
+    F7 = case M:get_success(P7) of
+        0 -> F6;
+        _ -> io:format("FAIL 7: should not be string~n"), F6 + 1
+    end,
+
+    F7.

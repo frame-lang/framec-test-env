@@ -1,0 +1,290 @@
+@@target c
+
+#include <string.h>
+
+// TypeScriptSyntaxSkipper — FSM for skipping TS/JS comments and strings.
+// Translated from framec's native_region_scanner/typescript_skipper.frs
+//
+// Adds template literal awareness (backtick strings with ${} interpolation)
+// on top of the C-style comment and string patterns.
+
+@@system TSSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: unsigned char*, start: int, length: int) {
+            self->bytes = input_bytes;
+            self->pos = start;
+            self->scan_end = length;
+        }
+        get_result_pos(): int {
+            return self->result_pos;
+        }
+        get_success(): int {
+            return self->success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                // // line comment
+                if (i + 1 < end && bs[i] == '/' && bs[i + 1] == '/') {
+                    int j = i + 2;
+                    while (j < end && bs[j] != '\n') {
+                        j++;
+                    }
+                    self->result_pos = j;
+                    self->success = 1;
+                    return;
+                }
+
+                // /* block comment */
+                if (i + 1 < end && bs[i] == '/' && bs[i + 1] == '*') {
+                    int j = i + 2;
+                    while (j + 1 < end) {
+                        if (bs[j] == '*' && bs[j + 1] == '/') {
+                            self->result_pos = j + 2;
+                            self->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    self->result_pos = end;
+                    self->success = 1;
+                    return;
+                }
+
+                self->success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                // Template literal: `...${...}...`
+                if (i < end && bs[i] == '`') {
+                    int j = i + 1;
+                    int template_depth = 0;
+                    while (j < end) {
+                        char b = bs[j];
+                        if (b == '`' && template_depth == 0) {
+                            self->result_pos = j + 1;
+                            self->success = 1;
+                            return;
+                        }
+                        if (b == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (b == '$' && j + 1 < end && bs[j + 1] == '{') {
+                            template_depth++;
+                            j += 2;
+                            continue;
+                        }
+                        if (b == '}' && template_depth > 0) {
+                            template_depth--;
+                        }
+                        j++;
+                    }
+                    self->result_pos = end;
+                    self->success = 1;
+                    return;
+                }
+
+                // Simple string: " or '
+                if (i < end && (bs[i] == '"' || bs[i] == '\'')) {
+                    char q = bs[i];
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == q) {
+                            self->result_pos = j + 1;
+                            self->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    self->result_pos = end;
+                    self->success = 1;
+                    return;
+                }
+
+                self->success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+                int in_template = 0;
+                int template_depth = 0;
+
+                while (j < end) {
+                    char b = bs[j];
+
+                    if (in_template) {
+                        if (b == '`' && template_depth == 0) {
+                            in_template = 0;
+                            j++;
+                            continue;
+                        }
+                        if (b == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (b == '$' && j + 1 < end && bs[j + 1] == '{') {
+                            template_depth++;
+                            j += 2;
+                            continue;
+                        }
+                        if (b == '}' && template_depth > 0) {
+                            template_depth--;
+                        }
+                        j++;
+                        continue;
+                    }
+
+                    if (b == '\n') { break; }
+                    if (b == ';') { break; }
+                    if (b == '/' && j + 1 < end && bs[j + 1] == '/') { break; }
+                    if (b == '/' && j + 1 < end && bs[j + 1] == '*') { break; }
+                    if (b == '`') {
+                        in_template = 1;
+                        j++;
+                        continue;
+                    }
+                    if (b == '"' || b == '\'') {
+                        char q = b;
+                        j++;
+                        while (j < end && bs[j] != q) {
+                            if (bs[j] == '\\') { j++; }
+                            j++;
+                        }
+                        if (j < end) { j++; }
+                        continue;
+                    }
+
+                    j++;
+                }
+
+                self->result_pos = j;
+            }
+        }
+
+    domain:
+        bytes: unsigned char* = NULL
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+int main() {
+    int failures = 0;
+
+    // Test 1: Skip // line comment
+    TSSyntaxSkipperFsm* s1 = @@TSSyntaxSkipperFsm();
+    unsigned char t1[] = "// comment\ncode";
+    TSSyntaxSkipperFsm_setup(s1, t1, 0, strlen((char*)t1));
+    TSSyntaxSkipperFsm_do_skip_comment(s1);
+    if (TSSyntaxSkipperFsm_get_success(s1) != 1 || TSSyntaxSkipperFsm_get_result_pos(s1) != 10) {
+        printf("FAIL 1: success=%d, pos=%d\n", TSSyntaxSkipperFsm_get_success(s1), TSSyntaxSkipperFsm_get_result_pos(s1));
+        failures++;
+    }
+
+    // Test 2: Skip /* block comment */
+    TSSyntaxSkipperFsm* s2 = @@TSSyntaxSkipperFsm();
+    unsigned char t2[] = "/* block */code";
+    TSSyntaxSkipperFsm_setup(s2, t2, 0, strlen((char*)t2));
+    TSSyntaxSkipperFsm_do_skip_comment(s2);
+    if (TSSyntaxSkipperFsm_get_success(s2) != 1 || TSSyntaxSkipperFsm_get_result_pos(s2) != 11) {
+        printf("FAIL 2: success=%d, pos=%d\n", TSSyntaxSkipperFsm_get_success(s2), TSSyntaxSkipperFsm_get_result_pos(s2));
+        failures++;
+    }
+
+    // Test 3: Skip template literal
+    TSSyntaxSkipperFsm* s3 = @@TSSyntaxSkipperFsm();
+    unsigned char t3[] = "`hello ${name} world`rest";
+    TSSyntaxSkipperFsm_setup(s3, t3, 0, strlen((char*)t3));
+    TSSyntaxSkipperFsm_do_skip_string(s3);
+    if (TSSyntaxSkipperFsm_get_success(s3) != 1 || TSSyntaxSkipperFsm_get_result_pos(s3) != 21) {
+        printf("FAIL 3: success=%d, pos=%d\n", TSSyntaxSkipperFsm_get_success(s3), TSSyntaxSkipperFsm_get_result_pos(s3));
+        failures++;
+    }
+
+    // Test 4: Skip simple double-quoted string
+    TSSyntaxSkipperFsm* s4 = @@TSSyntaxSkipperFsm();
+    unsigned char t4[] = "\"hello\" rest";
+    TSSyntaxSkipperFsm_setup(s4, t4, 0, strlen((char*)t4));
+    TSSyntaxSkipperFsm_do_skip_string(s4);
+    if (TSSyntaxSkipperFsm_get_success(s4) != 1 || TSSyntaxSkipperFsm_get_result_pos(s4) != 7) {
+        printf("FAIL 4: success=%d, pos=%d\n", TSSyntaxSkipperFsm_get_success(s4), TSSyntaxSkipperFsm_get_result_pos(s4));
+        failures++;
+    }
+
+    // Test 5: Skip template with nested ${}
+    TSSyntaxSkipperFsm* s5 = @@TSSyntaxSkipperFsm();
+    unsigned char t5[] = "`${a + ${b}}`rest";
+    TSSyntaxSkipperFsm_setup(s5, t5, 0, strlen((char*)t5));
+    TSSyntaxSkipperFsm_do_skip_string(s5);
+    if (TSSyntaxSkipperFsm_get_success(s5) != 1) {
+        printf("FAIL 5: success=%d\n", TSSyntaxSkipperFsm_get_success(s5));
+        failures++;
+    }
+
+    // Test 6: Find line end skips over template literals
+    TSSyntaxSkipperFsm* s6 = @@TSSyntaxSkipperFsm();
+    unsigned char t6[] = "x = `hello`;\nnext";
+    TSSyntaxSkipperFsm_setup(s6, t6, 0, strlen((char*)t6));
+    TSSyntaxSkipperFsm_do_find_line_end(s6);
+    if (TSSyntaxSkipperFsm_get_result_pos(s6) != 11) {
+        printf("FAIL 6: pos=%d, expected 11 (at ;)\n", TSSyntaxSkipperFsm_get_result_pos(s6));
+        failures++;
+    }
+
+    // Test 7: Not a string
+    TSSyntaxSkipperFsm* s7 = @@TSSyntaxSkipperFsm();
+    unsigned char t7[] = "x + 1";
+    TSSyntaxSkipperFsm_setup(s7, t7, 0, strlen((char*)t7));
+    TSSyntaxSkipperFsm_do_skip_string(s7);
+    if (TSSyntaxSkipperFsm_get_success(s7) != 0) {
+        printf("FAIL 7: should not be string\n");
+        failures++;
+    }
+
+    TSSyntaxSkipperFsm_destroy(s1);
+    TSSyntaxSkipperFsm_destroy(s2);
+    TSSyntaxSkipperFsm_destroy(s3);
+    TSSyntaxSkipperFsm_destroy(s4);
+    TSSyntaxSkipperFsm_destroy(s5);
+    TSSyntaxSkipperFsm_destroy(s6);
+    TSSyntaxSkipperFsm_destroy(s7);
+
+    if (failures > 0) {
+        printf("FAIL: %d failures\n", failures);
+        return 1;
+    }
+    printf("PASS: ts_skipper (7 cases)\n");
+    return 0;
+}

@@ -1,0 +1,234 @@
+@@target dart
+
+import 'dart:io';
+
+// kotlin_skipper -- FSM for skipping syntax constructs.
+
+@@system KotlinSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: List<int>, start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                if (i + 1 < end && bs[i] == 0x2F && bs[i + 1] == 0x2F) {
+                    let j = i + 2;
+                    while (j < end && bs[j] != 0x0A) { j++; }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                if (i + 1 < end && bs[i] == 0x2F && bs[i + 1] == 0x2A) {
+                    let j = i + 2;
+                    while (j + 1 < end) {
+                        if (bs[j] == 0x2A && bs[j + 1] == 0x2F) {
+                            this.result_pos = j + 2;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                if (i + 2 < end && bs[i] == 0x22 && bs[i + 1] == 0x22 && bs[i + 2] == 0x22) {
+                    let j = i + 3;
+                    while (j + 2 < end) {
+                        if (bs[j] == 0x22 && bs[j + 1] == 0x22 && bs[j + 2] == 0x22) {
+                            this.result_pos = j + 3; this.success = 1; return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end; this.success = 1; return;
+                }
+
+                if (i < end && (bs[i] == 0x22 || bs[i] == 0x27)) {
+                    const q = bs[i];
+                    let j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == 0x5C) { j += 2; continue; }
+                        if (bs[j] == q) { this.result_pos = j + 1; this.success = 1; return; }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                while (j < end) {
+                    const b = bs[j];
+                    if (b == 0x0A || b == 0x3B) { break; }
+                    if (b == 0x2F && j + 1 < end && bs[j + 1] == 0x2F) { break; }
+                    if (b == 0x2F && j + 1 < end && bs[j + 1] == 0x2A) { break; }
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                if (i >= end || bs[i] != 0x28) { this.success = 0; return; }
+
+                let depth = 1;
+                let j = i + 1;
+                while (j < end && depth > 0) {
+                    const b = bs[j];
+                    if (b == 0x28) { depth++; }
+                    else if (b == 0x29) { depth--; }
+                    else if (b == 0x22 || b == 0x27) {
+                        const q = b; j++;
+                        while (j < end && bs[j] != q) {
+                            if (bs[j] == 0x5C) { j++; }
+                            j++;
+                        }
+                    }
+                    j++;
+                }
+
+                if (depth == 0) { this.result_pos = j; this.success = 1; }
+                else { this.result_pos = end; this.success = 0; }
+            }
+        }
+
+    domain:
+        bytes: List<int> = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+void main() {
+    int failures = 0;
+
+    final s1 = @@KotlinSyntaxSkipperFsm();
+    final inp1 = "// hello\ncode".codeUnits;
+    s1.setup(inp1, 0, inp1.length);
+    s1.do_skip_comment();
+    if (s1.get_success() != 1 || s1.get_result_pos() != 8) {
+        print("FAIL 1: Skip line comment");
+        failures++;
+    }
+
+    final s2 = @@KotlinSyntaxSkipperFsm();
+    final inp2 = "/* block */code".codeUnits;
+    s2.setup(inp2, 0, inp2.length);
+    s2.do_skip_comment();
+    if (s2.get_success() != 1 || s2.get_result_pos() != 11) {
+        print("FAIL 2: Skip block comment");
+        failures++;
+    }
+
+    final s3 = @@KotlinSyntaxSkipperFsm();
+    final inp3 = '"hello world" rest'.codeUnits;
+    s3.setup(inp3, 0, inp3.length);
+    s3.do_skip_string();
+    if (s3.get_success() != 1 || s3.get_result_pos() != 13) {
+        print("FAIL 3: Skip double-quoted string");
+        failures++;
+    }
+
+    final s4 = @@KotlinSyntaxSkipperFsm();
+    final inp4 = '\"\"\"raw string content\"\"\" rest'.codeUnits;
+    s4.setup(inp4, 0, inp4.length);
+    s4.do_skip_string();
+    if (s4.get_success() != 1 || s4.get_result_pos() != 24) {
+        print("FAIL 4: Kotlin raw string");
+        failures++;
+    }
+
+    final s5 = @@KotlinSyntaxSkipperFsm();
+    final inp5 = "x + 1\nmore".codeUnits;
+    s5.setup(inp5, 0, inp5.length);
+    s5.do_find_line_end();
+    if (s5.get_result_pos() != 5) {
+        print("FAIL 5: Find line end");
+        failures++;
+    }
+
+    final s6 = @@KotlinSyntaxSkipperFsm();
+    final inp6 = "x + 1".codeUnits;
+    s6.setup(inp6, 0, inp6.length);
+    s6.do_skip_comment();
+    if (s6.get_success() != 0) {
+        print("FAIL 6: Not a comment");
+        failures++;
+    }
+
+    final s7 = @@KotlinSyntaxSkipperFsm();
+    final inp7 = "(a, f(b), c) rest".codeUnits;
+    s7.setup(inp7, 0, inp7.length);
+    s7.do_balanced_paren_end();
+    if (s7.get_success() != 1 || s7.get_result_pos() != 12) {
+        print("FAIL 7: Balanced parens");
+        failures++;
+    }
+
+    final s8 = @@KotlinSyntaxSkipperFsm();
+    final inp8 = "x + 1 // comment".codeUnits;
+    s8.setup(inp8, 0, inp8.length);
+    s8.do_find_line_end();
+    if (s8.get_result_pos() != 6) {
+        print("FAIL 8: Find line end at //");
+        failures++;
+    }
+
+    if (failures > 0) { print("FAIL: \$failures failures"); exit(1); }
+    print("PASS: kotlin_skipper (8 cases)");
+}

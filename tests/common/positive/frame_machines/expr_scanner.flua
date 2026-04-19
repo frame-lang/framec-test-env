@@ -1,0 +1,163 @@
+@@target lua
+
+-- ExprScanner — PDA for scanning assignment RHS expressions.
+-- Translated from framec's native_region_scanner/expr_scanner.frs
+--
+-- Scans from pos (after =) to a terminator (; or \n) at depth 0,
+-- respecting nested ()[]{}  and string literals with escape handling.
+--
+-- NOTE: Lua is 1-indexed, but the scanner uses 0-indexed positions
+-- internally and adjusts when accessing the byte table.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result() {
+            return self.result_end
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+                depth = 0
+                in_string = -1
+
+                while i < scan_end do
+                    b = bs[i + 1]
+
+                    if in_string ~= -1 then
+                        if b == 0x5C and i + 1 < scan_end then
+                            i = i + 2
+                            goto continue_loop
+                        end
+                        if b == in_string then
+                            in_string = -1
+                        end
+                        i = i + 1
+                        goto continue_loop
+                    end
+
+                    if b == 0x22 or b == 0x27 then
+                        in_string = b
+                        i = i + 1
+                        goto continue_loop
+                    end
+
+                    if b == 0x28 or b == 0x5B or b == 0x7B then
+                        depth = depth + 1
+                    elseif b == 0x29 or b == 0x5D or b == 0x7D then
+                        depth = math.max(depth - 1, 0)
+                    elseif b == 0x3B and depth == 0 then
+                        i = i + 1
+                        break
+                    elseif b == 0x0A and depth == 0 then
+                        break
+                    end
+
+                    i = i + 1
+                    ::continue_loop::
+                end
+
+                self.result_end = i
+            }
+        }
+
+    domain:
+        bytes = {}
+        pos: int = 0
+        scan_end: int = 0
+        result_scan_end: int = 0
+}
+
+local function str_to_bytes(s)
+    local t = {}
+    for i = 1, #s do
+        t[i] = string.byte(s, i)
+    end
+    return t
+end
+
+local function bytes_to_str(t, start_idx, end_idx)
+    local chars = {}
+    for i = start_idx + 1, end_idx do
+        chars[#chars + 1] = string.char(t[i])
+    end
+    return table.concat(chars)
+end
+
+local failures = 0
+
+-- Test 1: simple expression terminated by newline
+local e1 = ExprScannerFsm.new()
+local inp1 = str_to_bytes(" x + 1\nfoo")
+e1:setup(inp1, 0, #inp1)
+e1:do_scan()
+local expr1 = bytes_to_str(inp1, 0, e1:get_result())
+if expr1 ~= " x + 1" then
+    print("FAIL 1: got '" .. expr1 .. "'")
+    failures = failures + 1
+end
+
+-- Test 2: expression with semicolon terminator
+local e2 = ExprScannerFsm.new()
+local inp2 = str_to_bytes(" x + 1; y = 2")
+e2:setup(inp2, 0, #inp2)
+e2:do_scan()
+local expr2 = bytes_to_str(inp2, 0, e2:get_result())
+if expr2 ~= " x + 1;" then
+    print("FAIL 2: got '" .. expr2 .. "'")
+    failures = failures + 1
+end
+
+-- Test 3: nested parens not treated as terminator
+local e3 = ExprScannerFsm.new()
+local inp3 = str_to_bytes(" f(x, g(y))\nz")
+e3:setup(inp3, 0, #inp3)
+e3:do_scan()
+local expr3 = bytes_to_str(inp3, 0, e3:get_result())
+if expr3 ~= " f(x, g(y))" then
+    print("FAIL 3: got '" .. expr3 .. "'")
+    failures = failures + 1
+end
+
+-- Test 4: string with escaped quote
+local e4 = ExprScannerFsm.new()
+local inp4 = str_to_bytes(' "hello\\"world"\n')
+e4:setup(inp4, 0, #inp4)
+e4:do_scan()
+local expr4 = bytes_to_str(inp4, 0, e4:get_result())
+if expr4 ~= ' "hello\\"world"' then
+    print("FAIL 4: got '" .. expr4 .. "'")
+    failures = failures + 1
+end
+
+-- Test 5: semicolon inside string (should not terminate)
+local e5 = ExprScannerFsm.new()
+local inp5 = str_to_bytes(' "a;b"\n')
+e5:setup(inp5, 0, #inp5)
+e5:do_scan()
+local expr5 = bytes_to_str(inp5, 0, e5:get_result())
+if expr5 ~= ' "a;b"' then
+    print("FAIL 5: got '" .. expr5 .. "'")
+    failures = failures + 1
+end
+
+if failures > 0 then
+    print("FAIL: " .. failures .. " failures")
+    os.exit(1)
+end
+print("PASS: expr_scanner (5 cases)")

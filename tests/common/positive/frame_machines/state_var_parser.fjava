@@ -1,0 +1,237 @@
+@@target java
+@@skip -- Java requires one public class per file; multi-system tested via other targets
+
+// StateVarParser — FSM for parsing $.varName and $.varName = expr
+// Translated from framec's native_region_scanner/state_var_parser.frs
+//
+// Uses hierarchical composition: $ScanExpr creates an ExprScannerFsm
+// sub-machine when it detects an assignment.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.end = length;
+        }
+        get_result(): int {
+            return this.result_end;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                int i = this.pos;
+                int end = this.end;
+                byte[] bs = this.bytes;
+                int depth = 0;
+                int inString = -1;
+
+                while (i < end) {
+                    int b = bs[i] & 0xFF;
+
+                    if (inString != -1) {
+                        if (b == '\\' && i + 1 < end) {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == inString) {
+                            inString = -1;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '"' || b == '\'') {
+                        inString = b;
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '(' || b == '[' || b == '{') {
+                        depth++;
+                    } else if (b == ')' || b == ']' || b == '}') {
+                        depth = Math.max(depth - 1, 0);
+                    } else if (b == ';' && depth == 0) {
+                        i++;
+                        break;
+                    } else if (b == '\n' && depth == 0) {
+                        break;
+                    }
+
+                    i++;
+                }
+
+                this.result_end = i;
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+@@system StateVarParserFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.parse_end = length;
+        }
+        get_result_end(): int {
+            return this.result_end;
+        }
+        get_is_assignment(): boolean {
+            return this.is_assignment;
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $ScanIdent }
+        }
+
+        $ScanIdent {
+            $>() {
+                // Skip "$." prefix and scan identifier
+                int i = this.pos + 2;
+                int end = this.parse_end;
+                byte[] bs = this.bytes;
+
+                while (i < end && (Character.isLetterOrDigit((char)(bs[i] & 0xFF)) || bs[i] == '_')) {
+                    i++;
+                }
+
+                this.ident_end = i;
+                -> $CheckAssign
+            }
+        }
+
+        $CheckAssign {
+            $>() {
+                // Lookahead: skip whitespace, check for = (but not == or => or =<)
+                int j = this.ident_end;
+                int end = this.parse_end;
+                byte[] bs = this.bytes;
+
+                while (j < end && (bs[j] == ' ' || bs[j] == '\t')) {
+                    j++;
+                }
+
+                if (j < end && bs[j] == '=' && (j + 1 >= end || (bs[j + 1] != '=' && bs[j + 1] != '<' && bs[j + 1] != '>'))) {
+                    // Assignment detected
+                    j++;
+                    this.pos = j;
+                    this.is_assignment = true;
+                    -> $ScanExpr
+                } else {
+                    // Read-only access
+                    this.result_end = this.ident_end;
+                    this.is_assignment = false;
+                    -> $Done
+                }
+            }
+        }
+
+        $ScanExpr {
+            $>() {
+                // Create ExprScanner sub-machine
+                ExprScannerFsm expr = @@ExprScannerFsm();
+                expr.setup(this.bytes, this.pos, this.parse_end);
+                expr.do_scan();
+                this.result_end = (int) expr.get_result();
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        parse_end: int = 0
+        ident_end: int = 0
+        result_end: int = 0
+        is_assignment: boolean = false
+}
+
+class Main {
+    public static void main(String[] args) {
+        int failures = 0;
+
+        // Test 1: Read-only access $.count
+        StateVarParserFsm p1 = @@StateVarParserFsm();
+        byte[] inp1 = "$.count + 1".getBytes();
+        p1.setup(inp1, 0, inp1.length);
+        p1.do_parse();
+        if (p1.get_is_assignment()) {
+            System.out.println("FAIL 1: should not be assignment");
+            failures++;
+        }
+        String name1 = new String(inp1, 2, (int) p1.get_result_end() - 2);
+        if (!name1.equals("count")) {
+            System.out.println("FAIL 1: name='" + name1 + "', expected 'count'");
+            failures++;
+        }
+
+        // Test 2: Assignment $.total = x + 1;\n
+        StateVarParserFsm p2 = @@StateVarParserFsm();
+        byte[] inp2 = "$.total = x + 1;\nmore".getBytes();
+        p2.setup(inp2, 0, inp2.length);
+        p2.do_parse();
+        if (!p2.get_is_assignment()) {
+            System.out.println("FAIL 2: should be assignment");
+            failures++;
+        }
+        String expr2 = new String(inp2, 0, (int) p2.get_result_end());
+        if (expr2.indexOf("x + 1;") == -1) {
+            System.out.println("FAIL 2: expr='" + expr2 + "'");
+            failures++;
+        }
+
+        // Test 3: Not assignment $.x == 5 (== is comparison, not assignment)
+        StateVarParserFsm p3 = @@StateVarParserFsm();
+        byte[] inp3 = "$.x == 5".getBytes();
+        p3.setup(inp3, 0, inp3.length);
+        p3.do_parse();
+        if (p3.get_is_assignment()) {
+            System.out.println("FAIL 3: == should not be treated as assignment");
+            failures++;
+        }
+
+        // Test 4: Assignment with nested parens $.val = f(a, b)\n
+        StateVarParserFsm p4 = @@StateVarParserFsm();
+        byte[] inp4 = "$.val = f(a, b)\nrest".getBytes();
+        p4.setup(inp4, 0, inp4.length);
+        p4.do_parse();
+        if (!p4.get_is_assignment()) {
+            System.out.println("FAIL 4: should be assignment");
+            failures++;
+        }
+        String expr4 = new String(inp4, 0, (int) p4.get_result_end());
+        if (expr4.indexOf("f(a, b)") == -1) {
+            System.out.println("FAIL 4: expr='" + expr4 + "'");
+            failures++;
+        }
+
+        if (failures > 0) {
+            System.out.println("FAIL: " + failures + " failures");
+            System.exit(1);
+        }
+        System.out.println("PASS: state_var_parser (4 cases)");
+    }
+}

@@ -1,0 +1,357 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+// RubySyntaxSkipper -- FSM for skipping Ruby comments and strings.
+// Translated from framec's native_region_scanner/ruby_skipper.frs
+//
+// Handles: # line comments, "..." / '...' strings,
+// %Q{} / %q[] / %w() etc. percent literals,
+// Ruby-style line endings, balanced parens.
+
+@@system RubySyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: ByteArray, start: Int, length: Int) {
+            this.bytes = input_bytes
+            this.pos = start
+            this.scan_end = length
+        }
+        get_result_pos(): Int {
+            return this.result_pos
+        }
+        get_success(): Int {
+            return this.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                // Ruby: # line comment only
+                if (i < end && (bs[i].toInt() and 0xFF) == '#'.code) {
+                    var j = i + 1
+                    while (j < end && (bs[j].toInt() and 0xFF) != '\n'.code) {
+                        j++
+                    }
+                    this.result_pos = j
+                    this.success = 1
+                    return
+                }
+
+                this.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                // Percent literals: %Q{...}, %q[...], %w(...), etc.
+                if (i < end && (bs[i].toInt() and 0xFF) == '%'.code) {
+                    if (i + 1 < end) {
+                        val c1 = bs[i + 1].toInt() and 0xFF
+                        // Check for %Q, %q, %w, %W, %i, %I, %r, %x, %s
+                        val has_letter = (c1 == 'Q'.code || c1 == 'q'.code || c1 == 'w'.code || c1 == 'W'.code || c1 == 'i'.code || c1 == 'I'.code || c1 == 'r'.code || c1 == 'x'.code || c1 == 's'.code)
+                        var opener = 0
+                        var j = 0
+                        if (has_letter && i + 2 < end) {
+                            opener = bs[i + 2].toInt() and 0xFF
+                            j = i + 3
+                        } else if (!has_letter && !c1.toChar().isLetterOrDigit() && c1 != '_'.code) {
+                            // %{...} or %[...] or %<...> without letter
+                            opener = c1
+                            j = i + 2
+                        } else {
+                            this.success = 0
+                            return
+                        }
+
+                        // Determine closer
+                        var closer = 0
+                        if (opener == '{'.code) {
+                            closer = '}'.code
+                        } else if (opener == '['.code) {
+                            closer = ']'.code
+                        } else if (opener == '('.code) {
+                            closer = ')'.code
+                        } else if (opener == '<'.code) {
+                            closer = '>'.code
+                        } else {
+                            // Non-paired delimiter (e.g. %Q!...!)
+                            closer = opener
+                            // Scan to matching delimiter
+                            while (j < end) {
+                                if ((bs[j].toInt() and 0xFF) == '\\'.code) {
+                                    j += 2
+                                    continue
+                                }
+                                if ((bs[j].toInt() and 0xFF) == closer) {
+                                    this.result_pos = j + 1
+                                    this.success = 1
+                                    return
+                                }
+                                j++
+                            }
+                            this.result_pos = end
+                            this.success = 1
+                            return
+                        }
+
+                        // Paired delimiter: track nesting
+                        var depth = 1
+                        while (j < end && depth > 0) {
+                            if ((bs[j].toInt() and 0xFF) == '\\'.code) {
+                                j += 2
+                                continue
+                            }
+                            if ((bs[j].toInt() and 0xFF) == opener) {
+                                depth++
+                            } else if ((bs[j].toInt() and 0xFF) == closer) {
+                                depth--
+                            }
+                            j++
+                        }
+                        this.result_pos = j
+                        this.success = 1
+                        return
+                    }
+                }
+
+                // Simple string: " or '
+                if (i < end && ((bs[i].toInt() and 0xFF) == '"'.code || (bs[i].toInt() and 0xFF) == '\''.code)) {
+                    val q = bs[i].toInt() and 0xFF
+                    var j = i + 1
+                    while (j < end) {
+                        if ((bs[j].toInt() and 0xFF) == '\\'.code) {
+                            j += 2
+                            continue
+                        }
+                        if ((bs[j].toInt() and 0xFF) == q) {
+                            this.result_pos = j + 1
+                            this.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    this.result_pos = end
+                    this.success = 1
+                    return
+                }
+
+                this.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                var j = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+                var in_string = 0
+
+                while (j < end) {
+                    val b = bs[j].toInt() and 0xFF
+                    if (b == '\n'.code) {
+                        break
+                    }
+
+                    // Inside string
+                    if (in_string != 0) {
+                        if (b == '\\'.code) {
+                            j += 2
+                            continue
+                        }
+                        if (b == in_string) {
+                            in_string = 0
+                        }
+                        j++
+                        continue
+                    }
+
+                    // Terminators
+                    if (b == '#'.code) {
+                        break
+                    }
+
+                    // String starts
+                    if (b == '\''.code || b == '"'.code) {
+                        in_string = b
+                        j++
+                        continue
+                    }
+
+                    j++
+                }
+
+                this.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                if (i >= end || (bs[i].toInt() and 0xFF) != '('.code) {
+                    this.success = 0
+                    return
+                }
+
+                var depth = 0
+                var in_string = 0
+
+                while (i < end) {
+                    val b = bs[i].toInt() and 0xFF
+
+                    // Inside string
+                    if (in_string != 0) {
+                        if (b == '\\'.code) {
+                            i += 2
+                            continue
+                        }
+                        if (b == in_string) {
+                            in_string = 0
+                        }
+                        i++
+                        continue
+                    }
+
+                    if (b == '\''.code || b == '"'.code) {
+                        in_string = b
+                        i++
+                    } else if (b == '('.code) {
+                        depth++
+                        i++
+                    } else if (b == ')'.code) {
+                        depth--
+                        i++
+                        if (depth == 0) {
+                            this.result_pos = i
+                            this.success = 1
+                            return
+                        }
+                    } else {
+                        i++
+                    }
+                }
+
+                this.success = 0
+            }
+        }
+
+    domain:
+        bytes: ByteArray = ByteArray(0)
+        pos: Int = 0
+        scan_end: Int = 0
+        result_pos: Int = 0
+        success: Int = 1
+}
+
+fun main() {
+    var failures = 0
+
+    // Test 1: Skip # comment
+    val s1 = @@RubySyntaxSkipperFsm()
+    val inp1 = "# comment\ncode".toByteArray()
+    s1.setup(inp1, 0, inp1.size)
+    s1.do_skip_comment()
+    if (s1.get_success() != 1 || s1.get_result_pos() != 9) {
+        println("FAIL 1: success=${s1.get_success()}, pos=${s1.get_result_pos()}")
+        failures++
+    }
+
+    // Test 2: Skip double-quoted string
+    val s2 = @@RubySyntaxSkipperFsm()
+    val inp2 = "\"hello\" rest".toByteArray()
+    s2.setup(inp2, 0, inp2.size)
+    s2.do_skip_string()
+    if (s2.get_success() != 1 || s2.get_result_pos() != 7) {
+        println("FAIL 2: success=${s2.get_success()}, pos=${s2.get_result_pos()}")
+        failures++
+    }
+
+    // Test 3: Skip single-quoted string
+    val s3 = @@RubySyntaxSkipperFsm()
+    val inp3 = "'hello' rest".toByteArray()
+    s3.setup(inp3, 0, inp3.size)
+    s3.do_skip_string()
+    if (s3.get_success() != 1 || s3.get_result_pos() != 7) {
+        println("FAIL 3: success=${s3.get_success()}, pos=${s3.get_result_pos()}")
+        failures++
+    }
+
+    // Test 4: Skip %Q{text}
+    val s4 = @@RubySyntaxSkipperFsm()
+    val inp4 = "%Q{text} rest".toByteArray()
+    s4.setup(inp4, 0, inp4.size)
+    s4.do_skip_string()
+    if (s4.get_success() != 1 || s4.get_result_pos() != 8) {
+        println("FAIL 4: success=${s4.get_success()}, pos=${s4.get_result_pos()}")
+        failures++
+    }
+
+    // Test 5: Skip %q[text]
+    val s5 = @@RubySyntaxSkipperFsm()
+    val inp5 = "%q[text] rest".toByteArray()
+    s5.setup(inp5, 0, inp5.size)
+    s5.do_skip_string()
+    if (s5.get_success() != 1 || s5.get_result_pos() != 8) {
+        println("FAIL 5: success=${s5.get_success()}, pos=${s5.get_result_pos()}")
+        failures++
+    }
+
+    // Test 6: Find line end (stops at #)
+    val s6 = @@RubySyntaxSkipperFsm()
+    val inp6 = "x + 1 # comment".toByteArray()
+    s6.setup(inp6, 0, inp6.size)
+    s6.do_find_line_end()
+    if (s6.get_result_pos() != 6) {
+        println("FAIL 6: pos=${s6.get_result_pos()}, expected 6")
+        failures++
+    }
+
+    // Test 7: Balanced parens
+    val s7 = @@RubySyntaxSkipperFsm()
+    val inp7 = "(a, f(b)) rest".toByteArray()
+    s7.setup(inp7, 0, inp7.size)
+    s7.do_balanced_paren_end()
+    if (s7.get_success() != 1 || s7.get_result_pos() != 9) {
+        println("FAIL 7: success=${s7.get_success()}, pos=${s7.get_result_pos()}")
+        failures++
+    }
+
+    // Test 8: Skip %Q with nested braces
+    val s8 = @@RubySyntaxSkipperFsm()
+    val inp8 = "%Q{outer {inner} end} rest".toByteArray()
+    s8.setup(inp8, 0, inp8.size)
+    s8.do_skip_string()
+    if (s8.get_success() != 1 || s8.get_result_pos() != 21) {
+        println("FAIL 8: success=${s8.get_success()}, pos=${s8.get_result_pos()}")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: $failures failures")
+        exitProcess(1)
+    }
+    println("PASS: ruby_skipper (8 cases)")
+}

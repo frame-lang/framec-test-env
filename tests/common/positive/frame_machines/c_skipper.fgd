@@ -1,0 +1,251 @@
+@@target gdscript
+extends SceneTree
+
+# CSyntaxSkipper -- FSM for skipping C-style comments and strings.
+# Translated from framec's native_region_scanner/c_skipper.frs
+#
+# Demonstrates the skipper pattern: dispatch on entry point, scan
+# to find the end of the construct, report result via domain vars.
+
+@@system CSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: Array, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.end = length
+        }
+        get_result_pos(): int {
+            return self.result_pos
+        }
+        get_success(): int {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                var i = self.pos
+                var scan_end = self.end
+                var bs = self.bytes
+
+                # Try line comment: //
+                if i + 1 < scan_end and bs[i] == 0x2F and bs[i + 1] == 0x2F:
+                    var j = i + 2
+                    while j < scan_end and bs[j] != 0x0A:
+                        j += 1
+                    self.result_pos = j
+                    self.success = 1
+                    return
+
+                # Try block comment: /* ... */
+                if i + 1 < scan_end and bs[i] == 0x2F and bs[i + 1] == 0x2A:
+                    var j = i + 2
+                    while j + 1 < scan_end:
+                        if bs[j] == 0x2A and bs[j + 1] == 0x2F:
+                            self.result_pos = j + 2
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                var i = self.pos
+                var scan_end = self.end
+                var bs = self.bytes
+
+                if i < scan_end and (bs[i] == 0x22 or bs[i] == 0x27):
+                    var q = bs[i]
+                    var j = i + 1
+                    while j < scan_end:
+                        if bs[j] == 0x5C:
+                            j += 2
+                            continue
+                        if bs[j] == q:
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                var j = self.pos
+                var scan_end = self.end
+                var bs = self.bytes
+
+                while j < scan_end:
+                    var b = bs[j]
+                    if b == 0x0A or b == 0x3B:
+                        break
+                    if b == 0x2F and j + 1 < scan_end and bs[j + 1] == 0x2F:
+                        break
+                    if b == 0x2F and j + 1 < scan_end and bs[j + 1] == 0x2A:
+                        break
+                    j += 1
+
+                self.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                var i = self.pos
+                var scan_end = self.end
+                var bs = self.bytes
+
+                if i >= scan_end or bs[i] != 0x28:
+                    self.success = 0
+                    return
+
+                var depth = 1
+                var j = i + 1
+                while j < scan_end and depth > 0:
+                    var b = bs[j]
+                    if b == 0x28:
+                        depth += 1
+                    elif b == 0x29:
+                        depth -= 1
+                    elif b == 0x22 or b == 0x27:
+                        var q = b
+                        j += 1
+                        while j < scan_end and bs[j] != q:
+                            if bs[j] == 0x5C:
+                                j += 1
+                            j += 1
+                        # j is at closing quote
+                    j += 1
+
+                if depth == 0:
+                    self.result_pos = j
+                    self.success = 1
+                else:
+                    self.result_pos = scan_end
+                    self.success = 0
+            }
+        }
+
+    domain:
+        bytes: Array = []
+        pos: int = 0
+        end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+func str_to_bytes(s: String) -> Array:
+    var arr = []
+    var buf = s.to_utf8_buffer()
+    for i in range(buf.size()):
+        arr.append(buf[i])
+    return arr
+
+func main():
+    var failures = 0
+
+    # Test 1: Skip line comment
+    var s1 = @@CSyntaxSkipperFsm()
+    var inp1 = str_to_bytes("// hello\ncode")
+    s1.setup(inp1, 0, inp1.size())
+    s1.do_skip_comment()
+    if s1.get_success() != 1 or s1.get_result_pos() != 8:
+        print("FAIL 1: success=" + str(s1.get_success()) + ", pos=" + str(s1.get_result_pos()))
+        failures += 1
+
+    # Test 2: Skip block comment
+    var s2 = @@CSyntaxSkipperFsm()
+    var inp2 = str_to_bytes("/* block */code")
+    s2.setup(inp2, 0, inp2.size())
+    s2.do_skip_comment()
+    if s2.get_success() != 1 or s2.get_result_pos() != 11:
+        print("FAIL 2: success=" + str(s2.get_success()) + ", pos=" + str(s2.get_result_pos()))
+        failures += 1
+
+    # Test 3: Not a comment
+    var s3 = @@CSyntaxSkipperFsm()
+    var inp3 = str_to_bytes("x + 1")
+    s3.setup(inp3, 0, inp3.size())
+    s3.do_skip_comment()
+    if s3.get_success() != 0:
+        print("FAIL 3: should not be a comment")
+        failures += 1
+
+    # Test 4: Skip double-quoted string
+    var s4 = @@CSyntaxSkipperFsm()
+    var inp4 = str_to_bytes("\"hello world\" rest")
+    s4.setup(inp4, 0, inp4.size())
+    s4.do_skip_string()
+    if s4.get_success() != 1 or s4.get_result_pos() != 13:
+        print("FAIL 4: success=" + str(s4.get_success()) + ", pos=" + str(s4.get_result_pos()))
+        failures += 1
+
+    # Test 5: Skip string with escaped quote
+    var s5 = @@CSyntaxSkipperFsm()
+    var inp5 = str_to_bytes("\"he\\\"llo\" rest")
+    s5.setup(inp5, 0, inp5.size())
+    s5.do_skip_string()
+    if s5.get_success() != 1 or s5.get_result_pos() != 9:
+        print("FAIL 5: success=" + str(s5.get_success()) + ", pos=" + str(s5.get_result_pos()))
+        failures += 1
+
+    # Test 6: Find line end (stops at newline)
+    var s6 = @@CSyntaxSkipperFsm()
+    var inp6 = str_to_bytes("x + 1\nmore")
+    s6.setup(inp6, 0, inp6.size())
+    s6.do_find_line_end()
+    if s6.get_result_pos() != 5:
+        print("FAIL 6: pos=" + str(s6.get_result_pos()) + ", expected 5")
+        failures += 1
+
+    # Test 7: Find line end (stops at // comment)
+    var s7 = @@CSyntaxSkipperFsm()
+    var inp7 = str_to_bytes("x + 1 // comment")
+    s7.setup(inp7, 0, inp7.size())
+    s7.do_find_line_end()
+    if s7.get_result_pos() != 6:
+        print("FAIL 7: pos=" + str(s7.get_result_pos()) + ", expected 6")
+        failures += 1
+
+    # Test 8: Balanced parens
+    var s8 = @@CSyntaxSkipperFsm()
+    var inp8 = str_to_bytes("(a, f(b), c) rest")
+    s8.setup(inp8, 0, inp8.size())
+    s8.do_balanced_paren_end()
+    if s8.get_success() != 1 or s8.get_result_pos() != 12:
+        print("FAIL 8: success=" + str(s8.get_success()) + ", pos=" + str(s8.get_result_pos()))
+        failures += 1
+
+    if failures > 0:
+        print("FAIL: " + str(failures) + " failures")
+        push_error(str(failures) + " test(s) failed")
+    else:
+        print("PASS: c_skipper (8 cases)")
+
+func _init():
+    main()
+    quit()

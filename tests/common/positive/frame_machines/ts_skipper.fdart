@@ -1,0 +1,280 @@
+@@target dart
+
+import 'dart:io';
+
+// TypeScriptSyntaxSkipper — FSM for skipping TS/JS comments and strings.
+// Translated from framec's native_region_scanner/typescript_skipper.frs
+//
+// Adds template literal awareness (backtick strings with ${} interpolation)
+// on top of the C-style comment and string patterns.
+
+@@system TSSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: List<int>, start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                // // line comment
+                if (i + 1 < end && bs[i] == 0x2F && bs[i + 1] == 0x2F) {
+                    int j = i + 2;
+                    while (j < end && bs[j] != 0x0A) {
+                        j++;
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                // /* block comment */
+                if (i + 1 < end && bs[i] == 0x2F && bs[i + 1] == 0x2A) {
+                    int j = i + 2;
+                    while (j + 1 < end) {
+                        if (bs[j] == 0x2A && bs[j + 1] == 0x2F) {
+                            this.result_pos = j + 2;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                // Template literal: `...${...}...`
+                if (i < end && bs[i] == 0x60) {
+                    int j = i + 1;
+                    int templateDepth = 0;
+                    while (j < end) {
+                        int b = bs[j];
+                        if (b == 0x60 && templateDepth == 0) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        if (b == 0x5C) {
+                            j += 2;
+                            continue;
+                        }
+                        if (b == 0x24 && j + 1 < end && bs[j + 1] == 0x7B) {
+                            templateDepth++;
+                            j += 2;
+                            continue;
+                        }
+                        if (b == 0x7D && templateDepth > 0) {
+                            templateDepth--;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                // Simple string: " or '
+                if (i < end && (bs[i] == 0x22 || bs[i] == 0x27)) {
+                    int q = bs[i];
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == 0x5C) {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == q) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+                bool inTemplate = false;
+                int templateDepth = 0;
+
+                while (j < end) {
+                    int b = bs[j];
+
+                    if (inTemplate) {
+                        if (b == 0x60 && templateDepth == 0) {
+                            inTemplate = false;
+                            j++;
+                            continue;
+                        }
+                        if (b == 0x5C) {
+                            j += 2;
+                            continue;
+                        }
+                        if (b == 0x24 && j + 1 < end && bs[j + 1] == 0x7B) {
+                            templateDepth++;
+                            j += 2;
+                            continue;
+                        }
+                        if (b == 0x7D && templateDepth > 0) {
+                            templateDepth--;
+                        }
+                        j++;
+                        continue;
+                    }
+
+                    if (b == 0x0A || b == 0x3B) { break; }
+                    if (b == 0x2F && j + 1 < end && bs[j + 1] == 0x2F) { break; }
+                    if (b == 0x2F && j + 1 < end && bs[j + 1] == 0x2A) { break; }
+                    if (b == 0x60) {
+                        inTemplate = true;
+                        j++;
+                        continue;
+                    }
+                    if (b == 0x22 || b == 0x27) {
+                        int q = b;
+                        j++;
+                        while (j < end && bs[j] != q) {
+                            if (bs[j] == 0x5C) { j++; }
+                            j++;
+                        }
+                        if (j < end) { j++; }
+                        continue;
+                    }
+
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+    domain:
+        bytes: List<int> = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+void main() {
+    int failures = 0;
+
+    // Test 1: Skip // line comment
+    final s1 = @@TSSyntaxSkipperFsm();
+    final inp1 = "// comment\ncode".codeUnits;
+    s1.setup(inp1, 0, inp1.length);
+    s1.do_skip_comment();
+    if (s1.get_success() != 1 || s1.get_result_pos() != 10) {
+        print("FAIL 1: success=\${s1.get_success()}, pos=\${s1.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 2: Skip /* block comment */
+    final s2 = @@TSSyntaxSkipperFsm();
+    final inp2 = "/* block */code".codeUnits;
+    s2.setup(inp2, 0, inp2.length);
+    s2.do_skip_comment();
+    if (s2.get_success() != 1 || s2.get_result_pos() != 11) {
+        print("FAIL 2: success=\${s2.get_success()}, pos=\${s2.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 3: Skip template literal
+    final s3 = @@TSSyntaxSkipperFsm();
+    final inp3 = "`hello \${name} world`rest".codeUnits;
+    s3.setup(inp3, 0, inp3.length);
+    s3.do_skip_string();
+    if (s3.get_success() != 1 || s3.get_result_pos() != 21) {
+        print("FAIL 3: success=\${s3.get_success()}, pos=\${s3.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 4: Skip simple double-quoted string
+    final s4 = @@TSSyntaxSkipperFsm();
+    final inp4 = '"hello" rest'.codeUnits;
+    s4.setup(inp4, 0, inp4.length);
+    s4.do_skip_string();
+    if (s4.get_success() != 1 || s4.get_result_pos() != 7) {
+        print("FAIL 4: success=\${s4.get_success()}, pos=\${s4.get_result_pos()}");
+        failures++;
+    }
+
+    // Test 5: Skip template with nested ${}
+    final s5 = @@TSSyntaxSkipperFsm();
+    final inp5 = "`\${a + \${b}}`rest".codeUnits;
+    s5.setup(inp5, 0, inp5.length);
+    s5.do_skip_string();
+    if (s5.get_success() != 1) {
+        print("FAIL 5: success=\${s5.get_success()}");
+        failures++;
+    }
+
+    // Test 6: Find line end skips over template literals
+    final s6 = @@TSSyntaxSkipperFsm();
+    final inp6 = "x = `hello`;\nnext".codeUnits;
+    s6.setup(inp6, 0, inp6.length);
+    s6.do_find_line_end();
+    if (s6.get_result_pos() != 11) {
+        print("FAIL 6: pos=\${s6.get_result_pos()}, expected 11 (at ;)");
+        failures++;
+    }
+
+    // Test 7: Not a string
+    final s7 = @@TSSyntaxSkipperFsm();
+    final inp7 = "x + 1".codeUnits;
+    s7.setup(inp7, 0, inp7.length);
+    s7.do_skip_string();
+    if (s7.get_success() != 0) {
+        print("FAIL 7: should not be string");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: \$failures failures");
+        exit(1);
+    }
+    print("PASS: ts_skipper (7 cases)");
+}

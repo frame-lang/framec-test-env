@@ -1,0 +1,151 @@
+@@target gdscript
+extends SceneTree
+
+# ExprScanner — PDA for scanning assignment RHS expressions.
+# Translated from framec's native_region_scanner/expr_scanner.frs
+#
+# Scans from pos (after =) to a terminator (; or \n) at depth 0,
+# respecting nested ()[]{}  and string literals with escape handling.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: Array, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.end = length
+        }
+        get_result(): int {
+            return self.result_end
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                var i = self.pos
+                var scan_end = self.end
+                var bs = self.bytes
+                var depth = 0
+                var in_string = -1
+
+                while i < scan_end:
+                    var b = bs[i]
+
+                    if in_string != -1:
+                        if b == 0x5C and i + 1 < scan_end:
+                            i += 2
+                            continue
+                        if b == in_string:
+                            in_string = -1
+                        i += 1
+                        continue
+
+                    if b == 0x22 or b == 0x27:
+                        in_string = b
+                        i += 1
+                        continue
+
+                    if b == 0x28 or b == 0x5B or b == 0x7B:
+                        depth += 1
+                    elif b == 0x29 or b == 0x5D or b == 0x7D:
+                        depth = max(depth - 1, 0)
+                    elif b == 0x3B and depth == 0:
+                        i += 1
+                        break
+                    elif b == 0x0A and depth == 0:
+                        break
+
+                    i += 1
+
+                self.result_end = i
+            }
+        }
+
+    domain:
+        bytes: Array = []
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+func str_to_bytes(s: String) -> Array:
+    var arr = []
+    var buf = s.to_utf8_buffer()
+    for i in range(buf.size()):
+        arr.append(buf[i])
+    return arr
+
+func bytes_to_str(arr: Array, start: int, end: int) -> String:
+    var buf = PackedByteArray()
+    for i in range(start, end):
+        buf.append(arr[i])
+    return buf.get_string_from_utf8()
+
+func main():
+    var failures = 0
+
+    # Test 1: simple expression terminated by newline
+    var e1 = @@ExprScannerFsm()
+    var inp1 = str_to_bytes(" x + 1\nfoo")
+    e1.setup(inp1, 0, inp1.size())
+    e1.do_scan()
+    var expr1 = bytes_to_str(inp1, 0, e1.get_result())
+    if expr1 != " x + 1":
+        print("FAIL 1: got '" + expr1 + "'")
+        failures += 1
+
+    # Test 2: expression with semicolon terminator
+    var e2 = @@ExprScannerFsm()
+    var inp2 = str_to_bytes(" x + 1; y = 2")
+    e2.setup(inp2, 0, inp2.size())
+    e2.do_scan()
+    var expr2 = bytes_to_str(inp2, 0, e2.get_result())
+    if expr2 != " x + 1;":
+        print("FAIL 2: got '" + expr2 + "'")
+        failures += 1
+
+    # Test 3: nested parens not treated as terminator
+    var e3 = @@ExprScannerFsm()
+    var inp3 = str_to_bytes(" f(x, g(y))\nz")
+    e3.setup(inp3, 0, inp3.size())
+    e3.do_scan()
+    var expr3 = bytes_to_str(inp3, 0, e3.get_result())
+    if expr3 != " f(x, g(y))":
+        print("FAIL 3: got '" + expr3 + "'")
+        failures += 1
+
+    # Test 4: string with escaped quote
+    var e4 = @@ExprScannerFsm()
+    var inp4 = str_to_bytes(" \"hello\\\"world\"\n")
+    e4.setup(inp4, 0, inp4.size())
+    e4.do_scan()
+    var expr4 = bytes_to_str(inp4, 0, e4.get_result())
+    if expr4 != " \"hello\\\"world\"":
+        print("FAIL 4: got '" + expr4 + "'")
+        failures += 1
+
+    # Test 5: semicolon inside string (should not terminate)
+    var e5 = @@ExprScannerFsm()
+    var inp5 = str_to_bytes(" \"a;b\"\n")
+    e5.setup(inp5, 0, inp5.size())
+    e5.do_scan()
+    var expr5 = bytes_to_str(inp5, 0, e5.get_result())
+    if expr5 != " \"a;b\"":
+        print("FAIL 5: got '" + expr5 + "'")
+        failures += 1
+
+    if failures > 0:
+        print("FAIL: " + str(failures) + " failures")
+        push_error(str(failures) + " test(s) failed")
+    else:
+        print("PASS: expr_scanner (5 cases)")
+
+func _init():
+    main()
+    quit()

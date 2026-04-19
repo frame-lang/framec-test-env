@@ -1,0 +1,579 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+// ContextParser -- FSM for parsing @@ context constructs.
+// Translated from framec's native_region_scanner/context_parser.frs
+//
+// Parses:
+//   @@:return [= expr]     kind=2 (ContextReturn)
+//   @@:event               kind=3 (ContextEvent)
+//   @@:data.key [= expr]   kind=4 (ContextData) or kind=5 (ContextDataAssign)
+//   @@:params.key           kind=6 (ContextParams)
+//   @@SystemName()          kind=7 (TaggedInstantiation)
+//   @@:(expr)               kind=8 (ContextReturnExpr)
+//   @@:return(expr)         kind=9 (ReturnCall)
+//   @@:self.method()        kind=10 (ContextSelfCall)
+//   @@:self                 kind=11 (ContextSelf)
+//   @@:system.state         kind=12 (ContextSystemState)
+//   other                   has_result=0
+
+@@system ContextParserFsm {
+    operations:
+        setup(input_bytes: ByteArray, start: Int, length: Int) {
+            this.bytes = input_bytes
+            this.pos = start
+            this.scan_end = length
+        }
+        setup_with_paren_end(input_bytes: ByteArray, start: Int, length: Int, p_end: Int) {
+            this.bytes = input_bytes
+            this.pos = start
+            this.scan_end = length
+            this.paren_end = p_end
+        }
+        get_result_end(): Int {
+            return this.result_end
+        }
+        get_result_kind(): Int {
+            return this.result_kind
+        }
+        get_has_result(): Int {
+            return this.has_result
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $Dispatching }
+        }
+
+        $Dispatching {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                if (i >= end) {
+                    this.has_result = 0
+                    -> $Done
+                }
+
+                val b = bs[i].toInt() and 0xFF
+
+                if (b == ':'.code) {
+                    this.pos = i + 1
+                    -> $DispatchColon
+                } else if (b >= 'A'.code && b <= 'Z'.code) {
+                    // @@SystemName -- pos stays at start of name
+                    -> $ParseInstantiation
+                } else {
+                    this.result_end = i
+                    this.has_result = 0
+                    -> $Done
+                }
+            }
+        }
+
+        $DispatchColon {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                // Check for @@:return
+                if (i + 5 < end) {
+                    val tag = String(bs, i, 6)
+                    if (tag == "return") {
+                        this.pos = i + 6
+                        -> $ParseReturn
+                    }
+                }
+
+                // Check for @@:event
+                if (i + 4 < end) {
+                    val tag = String(bs, i, 5)
+                    if (tag == "event") {
+                        this.result_end = i + 5
+                        this.result_kind = 3
+                        this.has_result = 1
+                        -> $Done
+                    }
+                }
+
+                // Check for @@:data
+                if (i + 3 < end) {
+                    val tag = String(bs, i, 4)
+                    if (tag == "data") {
+                        this.pos = i + 4
+                        -> $ParseData
+                    }
+                }
+
+                // Check for @@:params
+                if (i + 5 < end) {
+                    val tag = String(bs, i, 6)
+                    if (tag == "params") {
+                        this.pos = i + 6
+                        -> $ParseParams
+                    }
+                }
+
+                // Check for @@:self
+                if (i + 3 < end) {
+                    val tag = String(bs, i, 4)
+                    if (tag == "self") {
+                        this.pos = i + 4
+                        -> $ParseSelf
+                    }
+                }
+
+                // Check for @@:system
+                if (i + 5 < end) {
+                    val tag = String(bs, i, 6)
+                    if (tag == "system") {
+                        this.pos = i + 6
+                        -> $ParseSystem
+                    }
+                }
+
+                // Check for @@:(expr)
+                if (i < end && (bs[i].toInt() and 0xFF) == '('.code) {
+                    this.pos = i
+                    -> $ParseContextReturnExpr
+                }
+
+                // Unknown
+                this.result_end = i
+                this.has_result = 0
+                -> $Done
+            }
+        }
+
+        $ParseReturn {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                // Skip whitespace
+                while (i < end && ((bs[i].toInt() and 0xFF) == ' '.code || (bs[i].toInt() and 0xFF) == '\t'.code)) {
+                    i++
+                }
+
+                if (i < end && (bs[i].toInt() and 0xFF) == '('.code) {
+                    // @@:return(expr) -- scan balanced parens
+                    var depth = 1
+                    i++
+                    while (i < end && depth > 0) {
+                        if ((bs[i].toInt() and 0xFF) == '('.code) {
+                            depth++
+                        }
+                        if ((bs[i].toInt() and 0xFF) == ')'.code) {
+                            depth--
+                        }
+                        if (depth > 0) {
+                            i++
+                        }
+                    }
+                    if (depth == 0) {
+                        i++
+                    }
+                    this.result_end = i
+                    this.result_kind = 9
+                    this.has_result = 1
+                    -> $Done
+                } else if (i < end && (bs[i].toInt() and 0xFF) == '='.code && (i + 1 >= end || (bs[i + 1].toInt() and 0xFF) != '='.code)) {
+                    // @@:return = <expr> -- scan expression
+                    i++
+                    // Skip whitespace after =
+                    while (i < end && ((bs[i].toInt() and 0xFF) == ' '.code || (bs[i].toInt() and 0xFF) == '\t'.code)) {
+                        i++
+                    }
+                    // Scan to end of expression (newline or ;)
+                    while (i < end && (bs[i].toInt() and 0xFF) != '\n'.code && (bs[i].toInt() and 0xFF) != ';'.code) {
+                        i++
+                    }
+                    this.result_end = i
+                    this.result_kind = 2
+                    this.has_result = 1
+                    -> $Done
+                } else {
+                    // @@:return (bare read)
+                    this.result_end = i
+                    this.result_kind = 2
+                    this.has_result = 1
+                    -> $Done
+                }
+            }
+        }
+
+        $ParseContextReturnExpr {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                if (i < end && (bs[i].toInt() and 0xFF) == '('.code) {
+                    var depth = 1
+                    i++
+                    while (i < end && depth > 0) {
+                        val b = bs[i].toInt() and 0xFF
+                        if (b == '('.code) {
+                            depth++
+                        } else if (b == ')'.code) {
+                            depth--
+                        } else if (b == '"'.code || b == '\''.code) {
+                            val q = b
+                            i++
+                            while (i < end) {
+                                if ((bs[i].toInt() and 0xFF) == '\\'.code && i + 1 < end) {
+                                    i += 2
+                                    continue
+                                }
+                                if ((bs[i].toInt() and 0xFF) == q) {
+                                    break
+                                }
+                                i++
+                            }
+                        }
+                        i++
+                    }
+                }
+
+                this.result_end = i
+                this.result_kind = 8
+                this.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseData {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                // Scan .key
+                if (i < end && (bs[i].toInt() and 0xFF) == '.'.code) {
+                    i++
+                    while (i < end && ((bs[i].toInt() and 0xFF).toChar().isLetterOrDigit() || (bs[i].toInt() and 0xFF) == '_'.code)) {
+                        i++
+                    }
+                }
+
+                // Check for assignment
+                var j = i
+                while (j < end && ((bs[j].toInt() and 0xFF) == ' '.code || (bs[j].toInt() and 0xFF) == '\t'.code)) {
+                    j++
+                }
+
+                if (j < end && (bs[j].toInt() and 0xFF) == '='.code && (j + 1 >= end || (bs[j + 1].toInt() and 0xFF) != '='.code)) {
+                    // @@:data.key = expr
+                    j++
+                    while (j < end && ((bs[j].toInt() and 0xFF) == ' '.code || (bs[j].toInt() and 0xFF) == '\t'.code)) {
+                        j++
+                    }
+                    while (j < end && (bs[j].toInt() and 0xFF) != '\n'.code && (bs[j].toInt() and 0xFF) != ';'.code) {
+                        j++
+                    }
+                    this.result_end = j
+                    this.result_kind = 5
+                } else {
+                    this.result_end = i
+                    this.result_kind = 4
+                }
+
+                this.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseParams {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                if (i < end && (bs[i].toInt() and 0xFF) == '.'.code) {
+                    i++
+                    while (i < end && ((bs[i].toInt() and 0xFF).toChar().isLetterOrDigit() || (bs[i].toInt() and 0xFF) == '_'.code)) {
+                        i++
+                    }
+                }
+
+                this.result_end = i
+                this.result_kind = 6
+                this.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseSelf {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                if (i < end && (bs[i].toInt() and 0xFF) == '.'.code) {
+                    i++
+                    // Scan identifier
+                    while (i < end && ((bs[i].toInt() and 0xFF).toChar().isLetterOrDigit() || (bs[i].toInt() and 0xFF) == '_'.code)) {
+                        i++
+                    }
+                    if (i < end && (bs[i].toInt() and 0xFF) == '('.code) {
+                        // @@:self.method(args) -- scan balanced parens
+                        var depth = 1
+                        i++
+                        while (i < end && depth > 0) {
+                            if ((bs[i].toInt() and 0xFF) == '('.code) {
+                                depth++
+                            }
+                            if ((bs[i].toInt() and 0xFF) == ')'.code) {
+                                depth--
+                            }
+                            if ((bs[i].toInt() and 0xFF) == '"'.code || (bs[i].toInt() and 0xFF) == '\''.code) {
+                                val q = bs[i].toInt() and 0xFF
+                                i++
+                                while (i < end) {
+                                    if ((bs[i].toInt() and 0xFF) == '\\'.code && i + 1 < end) {
+                                        i += 2
+                                        continue
+                                    }
+                                    if ((bs[i].toInt() and 0xFF) == q) {
+                                        break
+                                    }
+                                    i++
+                                }
+                            }
+                            if (depth > 0) {
+                                i++
+                            }
+                        }
+                        if (depth == 0) {
+                            i++
+                        }
+                        this.result_end = i
+                        this.result_kind = 10
+                        this.has_result = 1
+                    } else {
+                        // @@:self.property
+                        this.result_end = i
+                        this.result_kind = 11
+                        this.has_result = 1
+                    }
+                } else {
+                    // bare @@:self
+                    this.result_end = i
+                    this.result_kind = 11
+                    this.has_result = 1
+                }
+
+                -> $Done
+            }
+        }
+
+        $ParseSystem {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                if (i + 5 < end) {
+                    val tag = String(bs, i, 6)
+                    if (tag == ".state") {
+                        val after = i + 6
+                        if (after >= end || (!(after.toChar().isLetterOrDigit() || (bs[after].toInt() and 0xFF).toChar().isLetterOrDigit()) && (bs[after].toInt() and 0xFF) != '_'.code)) {
+                            this.result_end = i + 6
+                            this.result_kind = 12
+                            this.has_result = 1
+                            -> $Done
+                        }
+                    }
+                }
+
+                // Bare @@:system or unknown variant
+                this.result_end = i
+                this.result_kind = 13
+                this.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseInstantiation {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                // Scan identifier
+                while (i < end && ((bs[i].toInt() and 0xFF).toChar().isLetterOrDigit() || (bs[i].toInt() and 0xFF) == '_'.code)) {
+                    i++
+                }
+
+                // Must be followed by (
+                if (i < end && (bs[i].toInt() and 0xFF) == '('.code) {
+                    if (this.paren_end > 0) {
+                        i = this.paren_end
+                        this.result_end = i
+                        this.result_kind = 7
+                        this.has_result = 1
+                    } else {
+                        this.result_end = i
+                        this.has_result = 0
+                    }
+                } else {
+                    this.result_end = i
+                    this.has_result = 0
+                }
+
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+                // Terminal state -- results are in domain vars
+            }
+        }
+
+    domain:
+        bytes: ByteArray = ByteArray(0)
+        pos: Int = 0
+        scan_end: Int = 0
+        result_end: Int = 0
+        result_kind: Int = 0
+        has_result: Int = 0
+        paren_end: Int = 0
+}
+
+fun main() {
+    var failures = 0
+
+    // Test 1: @@:return (bare read)
+    val p1 = @@ContextParserFsm()
+    val inp1 = ":return".toByteArray()
+    p1.setup(inp1, 0, inp1.size)
+    p1.do_parse()
+    if (p1.get_has_result() != 1 || p1.get_result_kind() != 2) {
+        println("FAIL 1: has_result=${p1.get_has_result()}, kind=${p1.get_result_kind()}")
+        failures++
+    }
+
+    // Test 2: @@:event
+    val p2 = @@ContextParserFsm()
+    val inp2 = ":event".toByteArray()
+    p2.setup(inp2, 0, inp2.size)
+    p2.do_parse()
+    if (p2.get_has_result() != 1 || p2.get_result_kind() != 3) {
+        println("FAIL 2: has_result=${p2.get_has_result()}, kind=${p2.get_result_kind()}")
+        failures++
+    }
+
+    // Test 3: @@:data.key
+    val p3 = @@ContextParserFsm()
+    val inp3 = ":data.name rest".toByteArray()
+    p3.setup(inp3, 0, inp3.size)
+    p3.do_parse()
+    if (p3.get_has_result() != 1 || p3.get_result_kind() != 4) {
+        println("FAIL 3: has_result=${p3.get_has_result()}, kind=${p3.get_result_kind()}")
+        failures++
+    }
+
+    // Test 4: @@:data.key = expr
+    val p4 = @@ContextParserFsm()
+    val inp4 = ":data.key = value\n".toByteArray()
+    p4.setup(inp4, 0, inp4.size)
+    p4.do_parse()
+    if (p4.get_has_result() != 1 || p4.get_result_kind() != 5) {
+        println("FAIL 4: has_result=${p4.get_has_result()}, kind=${p4.get_result_kind()}")
+        failures++
+    }
+
+    // Test 5: @@:params.key
+    val p5 = @@ContextParserFsm()
+    val inp5 = ":params.name rest".toByteArray()
+    p5.setup(inp5, 0, inp5.size)
+    p5.do_parse()
+    if (p5.get_has_result() != 1 || p5.get_result_kind() != 6) {
+        println("FAIL 5: has_result=${p5.get_has_result()}, kind=${p5.get_result_kind()}")
+        failures++
+    }
+
+    // Test 6: @@:(expr)
+    val p6 = @@ContextParserFsm()
+    val inp6 = ":(x + 1) rest".toByteArray()
+    p6.setup(inp6, 0, inp6.size)
+    p6.do_parse()
+    if (p6.get_has_result() != 1 || p6.get_result_kind() != 8) {
+        println("FAIL 6: has_result=${p6.get_has_result()}, kind=${p6.get_result_kind()}")
+        failures++
+    }
+
+    // Test 7: @@:return(expr)
+    val p7 = @@ContextParserFsm()
+    val inp7 = ":return(42) rest".toByteArray()
+    p7.setup(inp7, 0, inp7.size)
+    p7.do_parse()
+    if (p7.get_has_result() != 1 || p7.get_result_kind() != 9) {
+        println("FAIL 7: has_result=${p7.get_has_result()}, kind=${p7.get_result_kind()}")
+        failures++
+    }
+
+    // Test 8: @@:self (bare)
+    val p8 = @@ContextParserFsm()
+    val inp8 = ":self rest".toByteArray()
+    p8.setup(inp8, 0, inp8.size)
+    p8.do_parse()
+    if (p8.get_has_result() != 1 || p8.get_result_kind() != 11) {
+        println("FAIL 8: has_result=${p8.get_has_result()}, kind=${p8.get_result_kind()}")
+        failures++
+    }
+
+    // Test 9: @@:self.method(args)
+    val p9 = @@ContextParserFsm()
+    val inp9 = ":self.doWork(x) rest".toByteArray()
+    p9.setup(inp9, 0, inp9.size)
+    p9.do_parse()
+    if (p9.get_has_result() != 1 || p9.get_result_kind() != 10) {
+        println("FAIL 9: has_result=${p9.get_has_result()}, kind=${p9.get_result_kind()}")
+        failures++
+    }
+
+    // Test 10: @@:system.state
+    val p10 = @@ContextParserFsm()
+    val inp10 = ":system.state rest".toByteArray()
+    p10.setup(inp10, 0, inp10.size)
+    p10.do_parse()
+    if (p10.get_has_result() != 1 || p10.get_result_kind() != 12) {
+        println("FAIL 10: has_result=${p10.get_has_result()}, kind=${p10.get_result_kind()}")
+        failures++
+    }
+
+    // Test 11: @@SystemName() with paren_end
+    val p11 = @@ContextParserFsm()
+    val inp11 = "MySystem() rest".toByteArray()
+    p11.setup_with_paren_end(inp11, 0, inp11.size, 10)
+    p11.do_parse()
+    if (p11.get_has_result() != 1 || p11.get_result_kind() != 7) {
+        println("FAIL 11: has_result=${p11.get_has_result()}, kind=${p11.get_result_kind()}")
+        failures++
+    }
+
+    // Test 12: No match (lowercase, not a keyword)
+    val p12 = @@ContextParserFsm()
+    val inp12 = "xyz".toByteArray()
+    p12.setup(inp12, 0, inp12.size)
+    p12.do_parse()
+    if (p12.get_has_result() != 0) {
+        println("FAIL 12: should not match, has_result=${p12.get_has_result()}")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: $failures failures")
+        exitProcess(1)
+    }
+    println("PASS: context_parser (12 cases)")
+}

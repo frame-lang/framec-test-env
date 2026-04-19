@@ -1,0 +1,270 @@
+@@target csharp
+
+using System;
+using System.Text;
+
+// RustSyntaxSkipper — FSM for skipping Rust comments and strings.
+// Translated from framec's native_region_scanner/rust_skipper.frs
+//
+// Handles: // line comments, /* nested block comments */,
+// raw strings (r#"..."#), char literals vs lifetime annotations,
+// simple strings.
+
+@@system RustSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // // line comment
+                if (i + 1 < end && bs[i] == '/' && bs[i + 1] == '/') {
+                    int j = i + 2;
+                    while (j < end && bs[j] != '\n') {
+                        j++;
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                // /* nested block comment */ — Rust allows nesting
+                if (i + 1 < end && bs[i] == '/' && bs[i + 1] == '*') {
+                    int j = i + 2;
+                    int depth = 1;
+                    while (j + 1 < end && depth > 0) {
+                        if (bs[j] == '/' && bs[j + 1] == '*') {
+                            depth++;
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == '*' && bs[j + 1] == '/') {
+                            depth--;
+                            j += 2;
+                            continue;
+                        }
+                        j++;
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Raw string: r#"..."# (count leading #s)
+                if (i < end && bs[i] == 'r') {
+                    int j = i + 1;
+                    int hash_count = 0;
+                    while (j < end && bs[j] == '#') {
+                        hash_count++;
+                        j++;
+                    }
+                    if (j < end && bs[j] == '"') {
+                        j++;
+                        while (j < end) {
+                            if (bs[j] == '"') {
+                                int k = 0;
+                                while (k < hash_count && j + 1 + k < end && bs[j + 1 + k] == '#') {
+                                    k++;
+                                }
+                                if (k == hash_count) {
+                                    this.result_pos = j + 1 + hash_count;
+                                    this.success = 1;
+                                    return;
+                                }
+                            }
+                            j++;
+                        }
+                        this.result_pos = end;
+                        this.success = 1;
+                        return;
+                    }
+                }
+
+                // Double-quoted string
+                if (i < end && bs[i] == '"') {
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == '"') {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                // Char literal: 'x' or '\n' (NOT lifetime 'a)
+                if (i < end && bs[i] == '\'') {
+                    if (i + 2 < end && bs[i + 1] == '\\' && i + 3 < end && bs[i + 3] == '\'') {
+                        this.result_pos = i + 4;
+                        this.success = 1;
+                        return;
+                    }
+                    if (i + 2 < end && bs[i + 2] == '\'') {
+                        this.result_pos = i + 3;
+                        this.success = 1;
+                        return;
+                    }
+                    this.success = 0;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                while (j < end) {
+                    int b = bs[j];
+                    if (b == '\n' || b == ';') {
+                        break;
+                    }
+                    if (b == '/' && j + 1 < end && bs[j + 1] == '/') {
+                        break;
+                    }
+                    if (b == '/' && j + 1 < end && bs[j + 1] == '*') {
+                        break;
+                    }
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+class Program {
+    static void Main(string[] args) {
+        int failures = 0;
+
+        // Test 1: Skip // comment
+        var s1 = new RustSyntaxSkipperFsm();
+        byte[] inp1 = Encoding.UTF8.GetBytes("// comment\ncode");
+        s1.setup(inp1, 0, inp1.Length);
+        s1.do_skip_comment();
+        if (s1.get_success() != 1 || s1.get_result_pos() != 10) {
+            Console.WriteLine("FAIL 1: success=" + s1.get_success() + ", pos=" + s1.get_result_pos());
+            failures++;
+        }
+
+        // Test 2: Skip nested /* /* */ */ block comment
+        var s2 = new RustSyntaxSkipperFsm();
+        byte[] inp2 = Encoding.UTF8.GetBytes("/* outer /* inner */ */code");
+        s2.setup(inp2, 0, inp2.Length);
+        s2.do_skip_comment();
+        if (s2.get_success() != 1 || s2.get_result_pos() != 23) {
+            Console.WriteLine("FAIL 2: success=" + s2.get_success() + ", pos=" + s2.get_result_pos());
+            failures++;
+        }
+
+        // Test 3: Skip raw string r#"hello"#
+        var s3 = new RustSyntaxSkipperFsm();
+        byte[] inp3 = Encoding.UTF8.GetBytes("r#\"hello\"#rest");
+        s3.setup(inp3, 0, inp3.Length);
+        s3.do_skip_string();
+        if (s3.get_success() != 1 || s3.get_result_pos() != 10) {
+            Console.WriteLine("FAIL 3: success=" + s3.get_success() + ", pos=" + s3.get_result_pos());
+            failures++;
+        }
+
+        // Test 4: Skip double-quoted string
+        var s4 = new RustSyntaxSkipperFsm();
+        byte[] inp4 = Encoding.UTF8.GetBytes("\"hello\" rest");
+        s4.setup(inp4, 0, inp4.Length);
+        s4.do_skip_string();
+        if (s4.get_success() != 1 || s4.get_result_pos() != 7) {
+            Console.WriteLine("FAIL 4: success=" + s4.get_success() + ", pos=" + s4.get_result_pos());
+            failures++;
+        }
+
+        // Test 5: Char literal 'x' — IS a string
+        var s5 = new RustSyntaxSkipperFsm();
+        byte[] inp5 = Encoding.UTF8.GetBytes("'x' rest");
+        s5.setup(inp5, 0, inp5.Length);
+        s5.do_skip_string();
+        if (s5.get_success() != 1 || s5.get_result_pos() != 3) {
+            Console.WriteLine("FAIL 5: success=" + s5.get_success() + ", pos=" + s5.get_result_pos());
+            failures++;
+        }
+
+        // Test 6: Lifetime 'a — NOT a string
+        var s6 = new RustSyntaxSkipperFsm();
+        byte[] inp6 = Encoding.UTF8.GetBytes("'a rest");
+        s6.setup(inp6, 0, inp6.Length);
+        s6.do_skip_string();
+        if (s6.get_success() != 0) {
+            Console.WriteLine("FAIL 6: lifetime should not be a string");
+            failures++;
+        }
+
+        // Test 7: Escape char '\n'
+        var s7 = new RustSyntaxSkipperFsm();
+        byte[] inp7 = Encoding.UTF8.GetBytes("'\\n' rest");
+        s7.setup(inp7, 0, inp7.Length);
+        s7.do_skip_string();
+        if (s7.get_success() != 1 || s7.get_result_pos() != 4) {
+            Console.WriteLine("FAIL 7: success=" + s7.get_success() + ", pos=" + s7.get_result_pos());
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine("FAIL: " + failures + " failures");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: rust_skipper (7 cases)");
+    }
+}

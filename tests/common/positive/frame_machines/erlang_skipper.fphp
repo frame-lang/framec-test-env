@@ -1,0 +1,292 @@
+<?php
+@@target php
+
+// ErlangSyntaxSkipper -- FSM for skipping Erlang comments and strings.
+// Translated from framec's native_region_scanner/erlang_skipper.frs
+//
+// Handles: % line comments, "..." strings, '...' quoted atoms,
+// Erlang-style line endings, balanced parens.
+
+@@system ErlangSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: array, start: int, length: int) {
+            $this->bytes = $input_bytes;
+            $this->pos = $start;
+            $this->scan_end = $length;
+        }
+        get_result_pos(): int {
+            return $this->result_pos;
+        }
+        get_success(): int {
+            return $this->success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                $i = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                // Erlang: % line comment only
+                if ($i < $end && $bs[$i] === 0x25) {
+                    $j = $i + 1;
+                    while ($j < $end && $bs[$j] !== 0x0A) {
+                        $j++;
+                    }
+                    $this->result_pos = $j;
+                    $this->success = 1;
+                    return;
+                }
+
+                $this->success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                $i = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                // Simple string: "..."
+                if ($i < $end && $bs[$i] === 0x22) {
+                    $j = $i + 1;
+                    while ($j < $end) {
+                        if ($bs[$j] === 0x5C) {
+                            $j += 2;
+                            continue;
+                        }
+                        if ($bs[$j] === 0x22) {
+                            $this->result_pos = $j + 1;
+                            $this->success = 1;
+                            return;
+                        }
+                        $j++;
+                    }
+                    $this->result_pos = $end;
+                    $this->success = 1;
+                    return;
+                }
+
+                // Quoted atoms: '...'
+                if ($i < $end && $bs[$i] === 0x27) {
+                    $j = $i + 1;
+                    while ($j < $end) {
+                        if ($bs[$j] === 0x5C) {
+                            $j += 2;
+                            continue;
+                        }
+                        if ($bs[$j] === 0x27) {
+                            $this->result_pos = $j + 1;
+                            $this->success = 1;
+                            return;
+                        }
+                        $j++;
+                    }
+                    $this->result_pos = $end;
+                    $this->success = 1;
+                    return;
+                }
+
+                $this->success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                $j = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+                $in_string = 0;
+
+                while ($j < $end) {
+                    $b = $bs[$j];
+                    if ($b === 0x0A) {
+                        break;
+                    }
+
+                    // Inside string
+                    if ($in_string !== 0) {
+                        if ($b === 0x5C) {
+                            $j += 2;
+                            continue;
+                        }
+                        if ($b === $in_string) {
+                            $in_string = 0;
+                        }
+                        $j++;
+                        continue;
+                    }
+
+                    // Terminators
+                    if ($b === 0x25) {
+                        break;
+                    }
+
+                    // String starts
+                    if ($b === 0x22 || $b === 0x27) {
+                        $in_string = $b;
+                        $j++;
+                        continue;
+                    }
+
+                    $j++;
+                }
+
+                $this->result_pos = $j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                $i = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                if ($i >= $end || $bs[$i] !== 0x28) {
+                    $this->success = 0;
+                    return;
+                }
+
+                $depth = 0;
+                $in_string = 0;
+
+                while ($i < $end) {
+                    $b = $bs[$i];
+
+                    // Inside string
+                    if ($in_string !== 0) {
+                        if ($b === 0x5C) {
+                            $i += 2;
+                            continue;
+                        }
+                        if ($b === $in_string) {
+                            $in_string = 0;
+                        }
+                        $i++;
+                        continue;
+                    }
+
+                    if ($b === 0x22 || $b === 0x27) {
+                        $in_string = $b;
+                        $i++;
+                    } elseif ($b === 0x28) {
+                        $depth++;
+                        $i++;
+                    } elseif ($b === 0x29) {
+                        $depth--;
+                        $i++;
+                        if ($depth === 0) {
+                            $this->result_pos = $i;
+                            $this->success = 1;
+                            return;
+                        }
+                    } else {
+                        $i++;
+                    }
+                }
+
+                $this->success = 0;
+            }
+        }
+
+    domain:
+        bytes = []
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+function str_to_bytes(string $s): array {
+    return array_values(unpack('C*', $s));
+}
+
+$failures = 0;
+
+// Test 1: Skip % comment
+$s1 = new ErlangSyntaxSkipperFsm();
+$inp1 = str_to_bytes("% comment\ncode");
+$s1->setup($inp1, 0, count($inp1));
+$s1->do_skip_comment();
+if ($s1->get_success() !== 1 || $s1->get_result_pos() !== 9) {
+    echo 'FAIL 1: success=' . $s1->get_success() . ', pos=' . $s1->get_result_pos() . "\n";
+    $failures++;
+}
+
+// Test 2: Not a comment
+$s2 = new ErlangSyntaxSkipperFsm();
+$inp2 = str_to_bytes("x + 1");
+$s2->setup($inp2, 0, count($inp2));
+$s2->do_skip_comment();
+if ($s2->get_success() !== 0) {
+    echo "FAIL 2: should not be comment\n";
+    $failures++;
+}
+
+// Test 3: Skip double-quoted string
+$s3 = new ErlangSyntaxSkipperFsm();
+$inp3 = str_to_bytes("\"hello\" rest");
+$s3->setup($inp3, 0, count($inp3));
+$s3->do_skip_string();
+if ($s3->get_success() !== 1 || $s3->get_result_pos() !== 7) {
+    echo 'FAIL 3: success=' . $s3->get_success() . ', pos=' . $s3->get_result_pos() . "\n";
+    $failures++;
+}
+
+// Test 4: Skip quoted atom
+$s4 = new ErlangSyntaxSkipperFsm();
+$inp4 = str_to_bytes("'my_atom' rest");
+$s4->setup($inp4, 0, count($inp4));
+$s4->do_skip_string();
+if ($s4->get_success() !== 1 || $s4->get_result_pos() !== 9) {
+    echo 'FAIL 4: success=' . $s4->get_success() . ', pos=' . $s4->get_result_pos() . "\n";
+    $failures++;
+}
+
+// Test 5: Find line end (stops at %)
+$s5 = new ErlangSyntaxSkipperFsm();
+$inp5 = str_to_bytes("X + 1 % comment");
+$s5->setup($inp5, 0, count($inp5));
+$s5->do_find_line_end();
+if ($s5->get_result_pos() !== 6) {
+    echo 'FAIL 5: pos=' . $s5->get_result_pos() . ", expected 6\n";
+    $failures++;
+}
+
+// Test 6: Balanced parens
+$s6 = new ErlangSyntaxSkipperFsm();
+$inp6 = str_to_bytes("(a, f(b)) rest");
+$s6->setup($inp6, 0, count($inp6));
+$s6->do_balanced_paren_end();
+if ($s6->get_success() !== 1 || $s6->get_result_pos() !== 9) {
+    echo 'FAIL 6: success=' . $s6->get_success() . ', pos=' . $s6->get_result_pos() . "\n";
+    $failures++;
+}
+
+// Test 7: String with escape
+$s7 = new ErlangSyntaxSkipperFsm();
+$inp7 = str_to_bytes("\"he\\\"llo\" rest");
+$s7->setup($inp7, 0, count($inp7));
+$s7->do_skip_string();
+if ($s7->get_success() !== 1 || $s7->get_result_pos() !== 9) {
+    echo 'FAIL 7: success=' . $s7->get_success() . ', pos=' . $s7->get_result_pos() . "\n";
+    $failures++;
+}
+
+if ($failures > 0) { echo "FAIL: $failures failures\n"; exit(1); }
+echo "PASS: erlang_skipper (7 cases)\n";

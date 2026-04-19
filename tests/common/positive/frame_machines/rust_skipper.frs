@@ -1,0 +1,277 @@
+@@target rust
+
+// RustSyntaxSkipper — FSM for skipping Rust comments and strings.
+// Translated from framec's native_region_scanner/rust_skipper.frs
+//
+// Handles: // line comments, /* nested block comments */,
+// raw strings (r#"..."#), char literals vs lifetime annotations,
+// simple strings.
+
+@@system RustSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: Vec<u8>, start: i64, length: i64) {
+            self.bytes = input_bytes;
+            self.pos = start;
+            self.scan_end = length;
+        }
+        get_result_pos(): i64 {
+            return self.result_pos;
+        }
+        get_success(): i64 {
+            return self.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                let i = self.pos as usize;
+                let end = self.scan_end as usize;
+                let bs = &self.bytes;
+
+                // // line comment
+                if i + 1 < end && bs[i] == b'/' && bs[i + 1] == b'/' {
+                    let mut j = i + 2;
+                    while j < end && bs[j] != b'\n' {
+                        j += 1;
+                    }
+                    self.result_pos = j as i64;
+                    self.success = 1;
+                    return;
+                }
+
+                // /* nested block comment */ — Rust allows nesting
+                if i + 1 < end && bs[i] == b'/' && bs[i + 1] == b'*' {
+                    let mut j = i + 2;
+                    let mut depth: i32 = 1;
+                    while j + 1 < end && depth > 0 {
+                        if bs[j] == b'/' && bs[j + 1] == b'*' {
+                            depth += 1;
+                            j += 2;
+                            continue;
+                        }
+                        if bs[j] == b'*' && bs[j + 1] == b'/' {
+                            depth -= 1;
+                            j += 2;
+                            continue;
+                        }
+                        j += 1;
+                    }
+                    self.result_pos = j as i64;
+                    self.success = 1;
+                    return;
+                }
+
+                self.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                let i = self.pos as usize;
+                let end = self.scan_end as usize;
+                let bs = &self.bytes;
+
+                // Raw string: r#"..."# (count leading #s)
+                if i < end && bs[i] == b'r' {
+                    let mut j = i + 1;
+                    let mut hash_count: usize = 0;
+                    while j < end && bs[j] == b'#' {
+                        hash_count += 1;
+                        j += 1;
+                    }
+                    if j < end && bs[j] == b'"' {
+                        j += 1;
+                        // Scan for closing "###
+                        while j < end {
+                            if bs[j] == b'"' {
+                                // Check for matching hash count
+                                let mut k: usize = 0;
+                                while k < hash_count && j + 1 + k < end && bs[j + 1 + k] == b'#' {
+                                    k += 1;
+                                }
+                                if k == hash_count {
+                                    self.result_pos = (j + 1 + hash_count) as i64;
+                                    self.success = 1;
+                                    return;
+                                }
+                            }
+                            j += 1;
+                        }
+                        self.result_pos = end as i64;
+                        self.success = 1;
+                        return;
+                    }
+                }
+
+                // Double-quoted string
+                if i < end && bs[i] == b'"' {
+                    let mut j = i + 1;
+                    while j < end {
+                        if bs[j] == b'\\' {
+                            j += 2;
+                            continue;
+                        }
+                        if bs[j] == b'"' {
+                            self.result_pos = (j + 1) as i64;
+                            self.success = 1;
+                            return;
+                        }
+                        j += 1;
+                    }
+                    self.result_pos = end as i64;
+                    self.success = 1;
+                    return;
+                }
+
+                // Char literal: 'x' or '\n' (NOT lifetime 'a)
+                if i < end && bs[i] == b'\'' {
+                    if i + 2 < end && bs[i + 1] == b'\\' && i + 3 < end && bs[i + 3] == b'\'' {
+                        // Escape char: '\n'
+                        self.result_pos = (i + 4) as i64;
+                        self.success = 1;
+                        return;
+                    }
+                    if i + 2 < end && bs[i + 2] == b'\'' {
+                        // Simple char: 'x'
+                        self.result_pos = (i + 3) as i64;
+                        self.success = 1;
+                        return;
+                    }
+                    // Lifetime annotation — not a string
+                    self.success = 0;
+                    return;
+                }
+
+                self.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                let mut j = self.pos as usize;
+                let end = self.scan_end as usize;
+                let bs = &self.bytes;
+
+                while j < end {
+                    let b = bs[j];
+                    if b == b'\n' || b == b';' {
+                        break;
+                    }
+                    if b == b'/' && j + 1 < end && bs[j + 1] == b'/' {
+                        break;
+                    }
+                    if b == b'/' && j + 1 < end && bs[j + 1] == b'*' {
+                        break;
+                    }
+                    j += 1;
+                }
+
+                self.result_pos = j as i64;
+            }
+        }
+
+    domain:
+        bytes: Vec<u8> = Vec::new()
+        pos: i64 = 0
+        scan_end: i64 = 0
+        result_pos: i64 = 0
+        success: i64 = 1
+}
+
+fn main() {
+    let mut failures = 0;
+
+    // Test 1: Skip // comment
+    let mut s1 = @@RustSyntaxSkipperFsm();
+    let inp1 = b"// comment\ncode".to_vec();
+    let len1 = inp1.len() as i64;
+    s1.setup(inp1, 0, len1);
+    s1.do_skip_comment();
+    if s1.get_success() != 1 || s1.get_result_pos() != 10 {
+        println!("FAIL 1: success={}, pos={}", s1.get_success(), s1.get_result_pos());
+        failures += 1;
+    }
+
+    // Test 2: Skip nested /* /* */ */ block comment
+    let mut s2 = @@RustSyntaxSkipperFsm();
+    let inp2 = b"/* outer /* inner */ */code".to_vec();
+    let len2 = inp2.len() as i64;
+    s2.setup(inp2, 0, len2);
+    s2.do_skip_comment();
+    if s2.get_success() != 1 || s2.get_result_pos() != 23 {
+        println!("FAIL 2: success={}, pos={}", s2.get_success(), s2.get_result_pos());
+        failures += 1;
+    }
+
+    // Test 3: Skip raw string r#"hello"#
+    let mut s3 = @@RustSyntaxSkipperFsm();
+    let inp3 = b"r#\"hello\"#rest".to_vec();
+    let len3 = inp3.len() as i64;
+    s3.setup(inp3, 0, len3);
+    s3.do_skip_string();
+    if s3.get_success() != 1 || s3.get_result_pos() != 10 {
+        println!("FAIL 3: success={}, pos={}", s3.get_success(), s3.get_result_pos());
+        failures += 1;
+    }
+
+    // Test 4: Skip double-quoted string
+    let mut s4 = @@RustSyntaxSkipperFsm();
+    let inp4 = b"\"hello\" rest".to_vec();
+    let len4 = inp4.len() as i64;
+    s4.setup(inp4, 0, len4);
+    s4.do_skip_string();
+    if s4.get_success() != 1 || s4.get_result_pos() != 7 {
+        println!("FAIL 4: success={}, pos={}", s4.get_success(), s4.get_result_pos());
+        failures += 1;
+    }
+
+    // Test 5: Char literal 'x' — IS a string
+    let mut s5 = @@RustSyntaxSkipperFsm();
+    let inp5 = b"'x' rest".to_vec();
+    let len5 = inp5.len() as i64;
+    s5.setup(inp5, 0, len5);
+    s5.do_skip_string();
+    if s5.get_success() != 1 || s5.get_result_pos() != 3 {
+        println!("FAIL 5: success={}, pos={}", s5.get_success(), s5.get_result_pos());
+        failures += 1;
+    }
+
+    // Test 6: Lifetime 'a — NOT a string
+    let mut s6 = @@RustSyntaxSkipperFsm();
+    let inp6 = b"'a rest".to_vec();
+    let len6 = inp6.len() as i64;
+    s6.setup(inp6, 0, len6);
+    s6.do_skip_string();
+    if s6.get_success() != 0 {
+        println!("FAIL 6: lifetime should not be a string");
+        failures += 1;
+    }
+
+    // Test 7: Escape char '\n'
+    let mut s7 = @@RustSyntaxSkipperFsm();
+    let inp7 = b"'\\n' rest".to_vec();
+    let len7 = inp7.len() as i64;
+    s7.setup(inp7, 0, len7);
+    s7.do_skip_string();
+    if s7.get_success() != 1 || s7.get_result_pos() != 4 {
+        println!("FAIL 7: success={}, pos={}", s7.get_success(), s7.get_result_pos());
+        failures += 1;
+    }
+
+    if failures > 0 {
+        println!("FAIL: {} failures", failures);
+        std::process::exit(1);
+    }
+    println!("PASS: rust_skipper (7 cases)");
+}

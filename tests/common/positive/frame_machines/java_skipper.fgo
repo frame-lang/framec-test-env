@@ -1,0 +1,234 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// java_skipper -- FSM for skipping syntax constructs.
+
+@@system JavaSyntaxSkipperFsm {
+    operations:
+        Setup(input_bytes: []byte, start: int, length: int) {
+            s.bytes = input_bytes
+            s.pos = start
+            s.scanEnd = length
+        }
+        GetResultPos(): int {
+            return s.resultPos
+        }
+        GetSuccess(): int {
+            return s.success
+        }
+
+    interface:
+        DoSkipComment()
+        DoSkipString()
+        DoFindLineEnd()
+        DoBalancedParenEnd()
+
+    machine:
+        $Init {
+            DoSkipComment() { -> $SkipComment }
+            DoSkipString() { -> $SkipString }
+            DoFindLineEnd() { -> $FindLineEnd }
+            DoBalancedParenEnd() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i := s.pos
+                end := s.scanEnd
+                bs := s.bytes
+
+                if i+1 < end && bs[i] == '/' && bs[i+1] == '/' {
+                    j := i + 2
+                    for j < end && bs[j] != '\n' { j++ }
+                    s.resultPos = j
+                    s.success = 1
+                    return
+                }
+
+                if i+1 < end && bs[i] == '/' && bs[i+1] == '*' {
+                    j := i + 2
+                    for j+1 < end {
+                        if bs[j] == '*' && bs[j+1] == '/' {
+                            s.resultPos = j + 2
+                            s.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    s.resultPos = end
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i := s.pos
+                end := s.scanEnd
+                bs := s.bytes
+
+                if i+2 < end && bs[i] == '"' && bs[i+1] == '"' && bs[i+2] == '"' {
+                    j := i + 3
+                    for j+2 < end {
+                        if bs[j] == '"' && bs[j+1] == '"' && bs[j+2] == '"' {
+                            s.resultPos = j + 3; s.success = 1; return
+                        }
+                        j++
+                    }
+                    s.resultPos = end; s.success = 1; return
+                }
+
+                if i < end && (bs[i] == '"' || bs[i] == '\'') {
+                    q := bs[i]
+                    j := i + 1
+                    for j < end {
+                        if bs[j] == '\\' { j += 2; continue }
+                        if bs[j] == q { s.resultPos = j + 1; s.success = 1; return }
+                        j++
+                    }
+                    s.resultPos = end
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j := s.pos
+                end := s.scanEnd
+                bs := s.bytes
+
+                for j < end {
+                    b := bs[j]
+                    if b == '\n' || b == ';' { break }
+                    if b == '/' && j+1 < end && bs[j+1] == '/' { break }
+                    if b == '/' && j+1 < end && bs[j+1] == '*' { break }
+                    j++
+                }
+
+                s.resultPos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                i := s.pos
+                end := s.scanEnd
+                bs := s.bytes
+
+                if i >= end || bs[i] != '(' { s.success = 0; return }
+
+                depth := 1
+                j := i + 1
+                for j < end && depth > 0 {
+                    b := bs[j]
+                    if b == '(' { depth++ } else if b == ')' { depth-- } else if b == '"' || b == '\'' {
+                        q := b; j++
+                        for j < end && bs[j] != q {
+                            if bs[j] == '\\' { j++ }
+                            j++
+                        }
+                    }
+                    j++
+                }
+
+                if depth == 0 { s.resultPos = j; s.success = 1 } else { s.resultPos = end; s.success = 0 }
+            }
+        }
+
+    domain:
+        bytes: []byte = nil
+        pos: int = 0
+        scanEnd: int = 0
+        resultPos: int = 0
+        success: int = 1
+}
+
+func main() {
+	failures := 0
+
+	s1 := NewJavaSyntaxSkipperFsm()
+	inp1 := []byte("// hello\ncode")
+	s1.Setup(inp1, 0, len(inp1))
+	s1.DoSkipComment()
+	if s1.GetSuccess() != 1 || s1.GetResultPos() != 8 {
+		fmt.Println("FAIL 1: Skip line comment")
+		failures++
+	}
+
+	s2 := NewJavaSyntaxSkipperFsm()
+	inp2 := []byte("/* block */code")
+	s2.Setup(inp2, 0, len(inp2))
+	s2.DoSkipComment()
+	if s2.GetSuccess() != 1 || s2.GetResultPos() != 11 {
+		fmt.Println("FAIL 2: Skip block comment")
+		failures++
+	}
+
+	s3 := NewJavaSyntaxSkipperFsm()
+	inp3 := []byte("\"hello world\" rest")
+	s3.Setup(inp3, 0, len(inp3))
+	s3.DoSkipString()
+	if s3.GetSuccess() != 1 || s3.GetResultPos() != 13 {
+		fmt.Println("FAIL 3: Skip double-quoted string")
+		failures++
+	}
+
+	s4 := NewJavaSyntaxSkipperFsm()
+	inp4 := []byte("\"\"\"text block content\"\"\" rest")
+	s4.Setup(inp4, 0, len(inp4))
+	s4.DoSkipString()
+	if s4.GetSuccess() != 1 || s4.GetResultPos() != 24 {
+		fmt.Println("FAIL 4: Java text block")
+		failures++
+	}
+
+	s5 := NewJavaSyntaxSkipperFsm()
+	inp5 := []byte("x + 1\nmore")
+	s5.Setup(inp5, 0, len(inp5))
+	s5.DoFindLineEnd()
+	if s5.GetResultPos() != 5 {
+		fmt.Println("FAIL 5: Find line end")
+		failures++
+	}
+
+	s6 := NewJavaSyntaxSkipperFsm()
+	inp6 := []byte("x + 1")
+	s6.Setup(inp6, 0, len(inp6))
+	s6.DoSkipComment()
+	if s6.GetSuccess() != 0 {
+		fmt.Println("FAIL 6: Not a comment")
+		failures++
+	}
+
+	s7 := NewJavaSyntaxSkipperFsm()
+	inp7 := []byte("(a, f(b), c) rest")
+	s7.Setup(inp7, 0, len(inp7))
+	s7.DoBalancedParenEnd()
+	if s7.GetSuccess() != 1 || s7.GetResultPos() != 12 {
+		fmt.Println("FAIL 7: Balanced parens")
+		failures++
+	}
+
+	s8 := NewJavaSyntaxSkipperFsm()
+	inp8 := []byte("x + 1 // comment")
+	s8.Setup(inp8, 0, len(inp8))
+	s8.DoFindLineEnd()
+	if s8.GetResultPos() != 6 {
+		fmt.Println("FAIL 8: Find line end at //")
+		failures++
+	}
+
+	if failures > 0 { fmt.Printf("FAIL: %d failures\n", failures); os.Exit(1) }
+	fmt.Println("PASS: java_skipper (8 cases)")
+}

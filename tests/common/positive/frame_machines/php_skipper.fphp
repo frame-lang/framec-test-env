@@ -1,0 +1,377 @@
+<?php
+@@target php
+
+// PhpSyntaxSkipper -- FSM for skipping PHP comments and strings.
+// Translated from framec's native_region_scanner/php_skipper.frs
+//
+// Handles: // line comments, # line comments, /* */ block comments,
+// "..." and '...' strings, <<<EOT heredoc/nowdoc,
+// PHP-style line endings, balanced parens.
+
+@@system PhpSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: array, start: int, length: int) {
+            $this->bytes = $input_bytes;
+            $this->pos = $start;
+            $this->scan_end = $length;
+        }
+        get_result_pos(): int {
+            return $this->result_pos;
+        }
+        get_success(): int {
+            return $this->success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                $i = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                // Line comment: //
+                if ($i + 1 < $end && $bs[$i] === 0x2F && $bs[$i + 1] === 0x2F) {
+                    $j = $i + 2;
+                    while ($j < $end && $bs[$j] !== 0x0A) {
+                        $j++;
+                    }
+                    $this->result_pos = $j;
+                    $this->success = 1;
+                    return;
+                }
+
+                // Hash comment: #
+                if ($i < $end && $bs[$i] === 0x23) {
+                    $j = $i + 1;
+                    while ($j < $end && $bs[$j] !== 0x0A) {
+                        $j++;
+                    }
+                    $this->result_pos = $j;
+                    $this->success = 1;
+                    return;
+                }
+
+                // Block comment: /* ... */
+                if ($i + 1 < $end && $bs[$i] === 0x2F && $bs[$i + 1] === 0x2A) {
+                    $j = $i + 2;
+                    while ($j + 1 < $end) {
+                        if ($bs[$j] === 0x2A && $bs[$j + 1] === 0x2F) {
+                            $this->result_pos = $j + 2;
+                            $this->success = 1;
+                            return;
+                        }
+                        $j++;
+                    }
+                    $this->result_pos = $end;
+                    $this->success = 1;
+                    return;
+                }
+
+                $this->success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                $i = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                // Heredoc/nowdoc: <<<EOT ... EOT;
+                if ($i + 2 < $end && $bs[$i] === 0x3C && $bs[$i + 1] === 0x3C && $bs[$i + 2] === 0x3C) {
+                    $j = $i + 3;
+                    // Skip optional quote for nowdoc
+                    $nowdoc = 0;
+                    if ($j < $end && $bs[$j] === 0x27) {
+                        $nowdoc = 1;
+                        $j++;
+                    }
+                    // Read tag name
+                    $tag_start = $j;
+                    while ($j < $end && (($bs[$j] >= 0x61 && $bs[$j] <= 0x7A) || ($bs[$j] >= 0x41 && $bs[$j] <= 0x5A) || ($bs[$j] >= 0x30 && $bs[$j] <= 0x39) || $bs[$j] === 0x5F)) {
+                        $j++;
+                    }
+                    $tag_end = $j;
+                    if ($nowdoc && $j < $end && $bs[$j] === 0x27) {
+                        $j++;
+                    }
+                    $tag = array_slice($bs, $tag_start, $tag_end - $tag_start);
+                    $tag_len = count($tag);
+                    if ($tag_len > 0) {
+                        // Skip to newline
+                        while ($j < $end && $bs[$j] !== 0x0A) {
+                            $j++;
+                        }
+                        if ($j < $end) {
+                            $j++;
+                        }
+                        // Scan for closing tag at start of line
+                        while ($j < $end) {
+                            // Check if this line starts with the tag
+                            if ($j + $tag_len <= $end && array_slice($bs, $j, $tag_len) === $tag) {
+                                $k = $j + $tag_len;
+                                // Optional ; and newline
+                                if ($k < $end && $bs[$k] === 0x3B) {
+                                    $k++;
+                                }
+                                if ($k >= $end || $bs[$k] === 0x0A) {
+                                    if ($k < $end && $bs[$k] === 0x0A) {
+                                        $k++;
+                                    }
+                                    $this->result_pos = $k;
+                                    $this->success = 1;
+                                    return;
+                                }
+                            }
+                            // Skip to next line
+                            while ($j < $end && $bs[$j] !== 0x0A) {
+                                $j++;
+                            }
+                            if ($j < $end) {
+                                $j++;
+                            }
+                        }
+                        $this->result_pos = $end;
+                        $this->success = 1;
+                        return;
+                    }
+                }
+
+                // Simple string: " or '
+                if ($i < $end && ($bs[$i] === 0x22 || $bs[$i] === 0x27)) {
+                    $q = $bs[$i];
+                    $j = $i + 1;
+                    while ($j < $end) {
+                        if ($bs[$j] === 0x5C) {
+                            $j += 2;
+                            continue;
+                        }
+                        if ($bs[$j] === $q) {
+                            $this->result_pos = $j + 1;
+                            $this->success = 1;
+                            return;
+                        }
+                        $j++;
+                    }
+                    $this->result_pos = $end;
+                    $this->success = 1;
+                    return;
+                }
+
+                $this->success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                $j = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+                $in_string = 0;
+
+                while ($j < $end) {
+                    $b = $bs[$j];
+                    if ($b === 0x0A) {
+                        break;
+                    }
+
+                    // Inside string
+                    if ($in_string !== 0) {
+                        if ($b === 0x5C) {
+                            $j += 2;
+                            continue;
+                        }
+                        if ($b === $in_string) {
+                            $in_string = 0;
+                        }
+                        $j++;
+                        continue;
+                    }
+
+                    // Terminators
+                    if ($b === 0x3B || $b === 0x7D) {
+                        break;
+                    }
+                    if ($b === 0x2F && $j + 1 < $end && ($bs[$j + 1] === 0x2F || $bs[$j + 1] === 0x2A)) {
+                        break;
+                    }
+                    if ($b === 0x23) {
+                        break;
+                    }
+
+                    // String starts
+                    if ($b === 0x27 || $b === 0x22) {
+                        $in_string = $b;
+                        $j++;
+                        continue;
+                    }
+
+                    $j++;
+                }
+
+                $this->result_pos = $j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                $i = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                if ($i >= $end || $bs[$i] !== 0x28) {
+                    $this->success = 0;
+                    return;
+                }
+
+                $depth = 0;
+                $in_string = 0;
+
+                while ($i < $end) {
+                    $b = $bs[$i];
+
+                    // Inside string
+                    if ($in_string !== 0) {
+                        if ($b === 0x5C) {
+                            $i += 2;
+                            continue;
+                        }
+                        if ($b === $in_string) {
+                            $in_string = 0;
+                        }
+                        $i++;
+                        continue;
+                    }
+
+                    if ($b === 0x27 || $b === 0x22) {
+                        $in_string = $b;
+                        $i++;
+                    } elseif ($b === 0x28) {
+                        $depth++;
+                        $i++;
+                    } elseif ($b === 0x29) {
+                        $depth--;
+                        $i++;
+                        if ($depth === 0) {
+                            $this->result_pos = $i;
+                            $this->success = 1;
+                            return;
+                        }
+                    } else {
+                        $i++;
+                    }
+                }
+
+                $this->success = 0;
+            }
+        }
+
+    domain:
+        bytes = []
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+function str_to_bytes(string $s): array {
+    return array_values(unpack('C*', $s));
+}
+
+$failures = 0;
+
+// Test 1: Skip // line comment
+$s1 = new PhpSyntaxSkipperFsm();
+$inp1 = str_to_bytes("// comment\ncode");
+$s1->setup($inp1, 0, count($inp1));
+$s1->do_skip_comment();
+if ($s1->get_success() !== 1 || $s1->get_result_pos() !== 10) {
+    echo 'FAIL 1: success=' . $s1->get_success() . ', pos=' . $s1->get_result_pos() . "\n";
+    $failures++;
+}
+
+// Test 2: Skip # comment
+$s2 = new PhpSyntaxSkipperFsm();
+$inp2 = str_to_bytes("# comment\ncode");
+$s2->setup($inp2, 0, count($inp2));
+$s2->do_skip_comment();
+if ($s2->get_success() !== 1 || $s2->get_result_pos() !== 9) {
+    echo 'FAIL 2: success=' . $s2->get_success() . ', pos=' . $s2->get_result_pos() . "\n";
+    $failures++;
+}
+
+// Test 3: Skip /* */ block comment
+$s3 = new PhpSyntaxSkipperFsm();
+$inp3 = str_to_bytes("/* block */code");
+$s3->setup($inp3, 0, count($inp3));
+$s3->do_skip_comment();
+if ($s3->get_success() !== 1 || $s3->get_result_pos() !== 11) {
+    echo 'FAIL 3: success=' . $s3->get_success() . ', pos=' . $s3->get_result_pos() . "\n";
+    $failures++;
+}
+
+// Test 4: Skip double-quoted string
+$s4 = new PhpSyntaxSkipperFsm();
+$inp4 = str_to_bytes("\"hello\" rest");
+$s4->setup($inp4, 0, count($inp4));
+$s4->do_skip_string();
+if ($s4->get_success() !== 1 || $s4->get_result_pos() !== 7) {
+    echo 'FAIL 4: success=' . $s4->get_success() . ', pos=' . $s4->get_result_pos() . "\n";
+    $failures++;
+}
+
+// Test 5: Skip single-quoted string
+$s5 = new PhpSyntaxSkipperFsm();
+$inp5 = str_to_bytes("'hello' rest");
+$s5->setup($inp5, 0, count($inp5));
+$s5->do_skip_string();
+if ($s5->get_success() !== 1 || $s5->get_result_pos() !== 7) {
+    echo 'FAIL 5: success=' . $s5->get_success() . ', pos=' . $s5->get_result_pos() . "\n";
+    $failures++;
+}
+
+// Test 6: Skip heredoc
+$s6 = new PhpSyntaxSkipperFsm();
+$inp6 = str_to_bytes("<<<EOT\nhello world\nEOT;\nnext");
+$s6->setup($inp6, 0, count($inp6));
+$s6->do_skip_string();
+if ($s6->get_success() !== 1 || $s6->get_result_pos() !== 24) {
+    echo 'FAIL 6: success=' . $s6->get_success() . ', pos=' . $s6->get_result_pos() . "\n";
+    $failures++;
+}
+
+// Test 7: Find line end (stops at ;)
+$s7 = new PhpSyntaxSkipperFsm();
+$inp7 = str_to_bytes('$x = 1; next');
+$s7->setup($inp7, 0, count($inp7));
+$s7->do_find_line_end();
+if ($s7->get_result_pos() !== 6) {
+    echo 'FAIL 7: pos=' . $s7->get_result_pos() . ", expected 6\n";
+    $failures++;
+}
+
+// Test 8: Balanced parens
+$s8 = new PhpSyntaxSkipperFsm();
+$inp8 = str_to_bytes("(a, f(b)) rest");
+$s8->setup($inp8, 0, count($inp8));
+$s8->do_balanced_paren_end();
+if ($s8->get_success() !== 1 || $s8->get_result_pos() !== 9) {
+    echo 'FAIL 8: success=' . $s8->get_success() . ', pos=' . $s8->get_result_pos() . "\n";
+    $failures++;
+}
+
+if ($failures > 0) { echo "FAIL: $failures failures\n"; exit(1); }
+echo "PASS: php_skipper (8 cases)\n";

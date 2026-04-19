@@ -1,0 +1,195 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+// swift_skipper -- FSM for skipping syntax constructs.
+
+@@system SwiftSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: ByteArray, start: Int, length: Int) {
+            this.bytes = input_bytes
+            this.pos = start
+            this.scan_end = length
+        }
+        get_result_pos(): Int {
+            return this.result_pos
+        }
+        get_success(): Int {
+            return this.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                if (i + 1 < end && (bs[i].toInt() and 0xFF) == '/'.code && (bs[i + 1].toInt() and 0xFF) == '/'.code) {
+                    var j = i + 2
+                    while (j < end && (bs[j].toInt() and 0xFF) != '\n'.code) { j++ }
+                    this.result_pos = j; this.success = 1; return
+                }
+                if (i + 1 < end && (bs[i].toInt() and 0xFF) == '/'.code && (bs[i + 1].toInt() and 0xFF) == '*'.code) {
+                    var j = i + 2; var depth = 1
+                    while (j + 1 < end && depth > 0) {
+                        if ((bs[j].toInt() and 0xFF) == '/'.code && (bs[j + 1].toInt() and 0xFF) == '*'.code) { depth++; j += 2 }
+                        else if ((bs[j].toInt() and 0xFF) == '*'.code && (bs[j + 1].toInt() and 0xFF) == '/'.code) { depth--; j += 2 }
+                        else { j++ }
+                    }
+                    this.result_pos = j; this.success = 1; return
+                }
+                this.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                if (i + 2 < end && (bs[i].toInt() and 0xFF) == '"'.code && (bs[i + 1].toInt() and 0xFF) == '"'.code && (bs[i + 2].toInt() and 0xFF) == '"'.code) {
+                    var j = i + 3
+                    while (j + 2 < end) {
+                        if ((bs[j].toInt() and 0xFF) == '"'.code && (bs[j + 1].toInt() and 0xFF) == '"'.code && (bs[j + 2].toInt() and 0xFF) == '"'.code) {
+                            this.result_pos = j + 3; this.success = 1; return
+                        }
+                        j++
+                    }
+                    this.result_pos = end; this.success = 1; return
+                }
+
+                if (i < end && ((bs[i].toInt() and 0xFF) == '"'.code || (bs[i].toInt() and 0xFF) == '\''.code)) {
+                    val q = (bs[i].toInt() and 0xFF)
+                    var j = i + 1
+                    while (j < end) {
+                        if ((bs[j].toInt() and 0xFF) == '\\'.code) { j += 2; continue }
+                        if ((bs[j].toInt() and 0xFF) == q) { this.result_pos = j + 1; this.success = 1; return }
+                        j++
+                    }
+                    this.result_pos = end; this.success = 1; return
+                }
+                this.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                var j = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                while (j < end) {
+                    val b = (bs[j].toInt() and 0xFF)
+                    if (b == '\n'.code || b == ';'.code) { break }
+                    if (b == '/'.code && j + 1 < end && (bs[j + 1].toInt() and 0xFF) == '/'.code) { break }
+                    if (b == '/'.code && j + 1 < end && (bs[j + 1].toInt() and 0xFF) == '*'.code) { break }
+                    j++
+                }
+                this.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                if (i >= end || (bs[i].toInt() and 0xFF) != '('.code) { this.success = 0; return }
+                var depth = 1; var j = i + 1
+                while (j < end && depth > 0) {
+                    val b = (bs[j].toInt() and 0xFF)
+                    if (b == '('.code) { depth++ } else if (b == ')'.code) { depth-- } else if (b == '"'.code || b == '\''.code) {
+                        val q = b; j++
+                        while (j < end && (bs[j].toInt() and 0xFF) != q) { if ((bs[j].toInt() and 0xFF) == '\\'.code) { j++ }; j++ }
+                    }
+                    j++
+                }
+                if (depth == 0) { this.result_pos = j; this.success = 1 }
+                else { this.result_pos = end; this.success = 0 }
+            }
+        }
+
+    domain:
+        bytes: ByteArray = ByteArray(0)
+        pos: Int = 0
+        scan_end: Int = 0
+        result_pos: Int = 0
+        success: Int = 1
+}
+
+fun main() {
+    var failures = 0
+
+    val s1 = @@SwiftSyntaxSkipperFsm()
+    val inp1 = "// hello\ncode".toByteArray()
+    s1.setup(inp1, 0, inp1.size)
+    s1.do_skip_comment()
+    if (s1.get_success() != 1 || s1.get_result_pos() != 8) { println("FAIL 1: Skip line comment"); failures++ }
+
+    val s2 = @@SwiftSyntaxSkipperFsm()
+    val inp2 = "/* block */code".toByteArray()
+    s2.setup(inp2, 0, inp2.size)
+    s2.do_skip_comment()
+    if (s2.get_success() != 1 || s2.get_result_pos() != 11) { println("FAIL 2: Skip block comment"); failures++ }
+
+    val s3 = @@SwiftSyntaxSkipperFsm()
+    val inp3 = "\"hello world\" rest".toByteArray()
+    s3.setup(inp3, 0, inp3.size)
+    s3.do_skip_string()
+    if (s3.get_success() != 1 || s3.get_result_pos() != 13) { println("FAIL 3: Skip double-quoted string"); failures++ }
+
+    val s4 = @@SwiftSyntaxSkipperFsm()
+    val inp4 = "/* outer /* inner */ end */code".toByteArray()
+    s4.setup(inp4, 0, inp4.size)
+    s4.do_skip_comment()
+    if (s4.get_success() != 1 || s4.get_result_pos() != 27) { println("FAIL 4: Nested block comment"); failures++ }
+
+    val s5 = @@SwiftSyntaxSkipperFsm()
+    val inp5 = "\"\"\"multi-line\ncontent\"\"\" rest".toByteArray()
+    s5.setup(inp5, 0, inp5.size)
+    s5.do_skip_string()
+    if (s5.get_success() != 1 || s5.get_result_pos() != 24) { println("FAIL 5: Multi-line string"); failures++ }
+
+    val s6 = @@SwiftSyntaxSkipperFsm()
+    val inp6 = "x + 1\nmore".toByteArray()
+    s6.setup(inp6, 0, inp6.size)
+    s6.do_find_line_end()
+    if (s6.get_result_pos() != 5) { println("FAIL 6: Find line end"); failures++ }
+
+    val s7 = @@SwiftSyntaxSkipperFsm()
+    val inp7 = "x + 1".toByteArray()
+    s7.setup(inp7, 0, inp7.size)
+    s7.do_skip_comment()
+    if (s7.get_success() != 0) { println("FAIL 7: Not a comment"); failures++ }
+
+    val s8 = @@SwiftSyntaxSkipperFsm()
+    val inp8 = "(a, f(b), c) rest".toByteArray()
+    s8.setup(inp8, 0, inp8.size)
+    s8.do_balanced_paren_end()
+    if (s8.get_success() != 1 || s8.get_result_pos() != 12) { println("FAIL 8: Balanced parens"); failures++ }
+
+    val s9 = @@SwiftSyntaxSkipperFsm()
+    val inp9 = "x + 1 // comment".toByteArray()
+    s9.setup(inp9, 0, inp9.size)
+    s9.do_find_line_end()
+    if (s9.get_result_pos() != 6) { println("FAIL 9: Find line end at //"); failures++ }
+
+    if (failures > 0) { println("FAIL: $failures failures"); exitProcess(1) }
+    println("PASS: swift_skipper (9 cases)")
+}

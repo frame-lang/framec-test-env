@@ -1,0 +1,268 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+// RustSyntaxSkipper — FSM for skipping Rust comments and strings.
+// Translated from framec's native_region_scanner/rust_skipper.frs
+//
+// Handles: // line comments, /* nested block comments */,
+// raw strings (r#"..."#), char literals vs lifetime annotations,
+// simple strings.
+
+@@system RustSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: ByteArray, start: Int, length: Int) {
+            this.bytes = input_bytes
+            this.pos = start
+            this.scan_end = length
+        }
+        get_result_pos(): Int {
+            return this.result_pos
+        }
+        get_success(): Int {
+            return this.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                // // line comment
+                if (i + 1 < end && (bs[i].toInt() and 0xFF) == '/'.code && (bs[i + 1].toInt() and 0xFF) == '/'.code) {
+                    var j = i + 2
+                    while (j < end && (bs[j].toInt() and 0xFF) != '\n'.code) {
+                        j++
+                    }
+                    this.result_pos = j
+                    this.success = 1
+                    return
+                }
+
+                // /* nested block comment */ — Rust allows nesting
+                if (i + 1 < end && (bs[i].toInt() and 0xFF) == '/'.code && (bs[i + 1].toInt() and 0xFF) == '*'.code) {
+                    var j = i + 2
+                    var depth = 1
+                    while (j + 1 < end && depth > 0) {
+                        if ((bs[j].toInt() and 0xFF) == '/'.code && (bs[j + 1].toInt() and 0xFF) == '*'.code) {
+                            depth++
+                            j += 2
+                            continue
+                        }
+                        if ((bs[j].toInt() and 0xFF) == '*'.code && (bs[j + 1].toInt() and 0xFF) == '/'.code) {
+                            depth--
+                            j += 2
+                            continue
+                        }
+                        j++
+                    }
+                    this.result_pos = j
+                    this.success = 1
+                    return
+                }
+
+                this.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                // Raw string: r#"..."# (count leading #s)
+                if (i < end && (bs[i].toInt() and 0xFF) == 'r'.code) {
+                    var j = i + 1
+                    var hash_count = 0
+                    while (j < end && (bs[j].toInt() and 0xFF) == '#'.code) {
+                        hash_count++
+                        j++
+                    }
+                    if (j < end && (bs[j].toInt() and 0xFF) == '"'.code) {
+                        j++
+                        // Scan for closing "###
+                        while (j < end) {
+                            if ((bs[j].toInt() and 0xFF) == '"'.code) {
+                                var k = 0
+                                while (k < hash_count && j + 1 + k < end && (bs[j + 1 + k].toInt() and 0xFF) == '#'.code) {
+                                    k++
+                                }
+                                if (k == hash_count) {
+                                    this.result_pos = j + 1 + hash_count
+                                    this.success = 1
+                                    return
+                                }
+                            }
+                            j++
+                        }
+                        this.result_pos = end
+                        this.success = 1
+                        return
+                    }
+                }
+
+                // Double-quoted string
+                if (i < end && (bs[i].toInt() and 0xFF) == '"'.code) {
+                    var j = i + 1
+                    while (j < end) {
+                        if ((bs[j].toInt() and 0xFF) == '\\'.code) {
+                            j += 2
+                            continue
+                        }
+                        if ((bs[j].toInt() and 0xFF) == '"'.code) {
+                            this.result_pos = j + 1
+                            this.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    this.result_pos = end
+                    this.success = 1
+                    return
+                }
+
+                // Char literal: 'x' or '\n' (NOT lifetime 'a)
+                if (i < end && (bs[i].toInt() and 0xFF) == '\''.code) {
+                    if (i + 2 < end && (bs[i + 1].toInt() and 0xFF) == '\\'.code && i + 3 < end && (bs[i + 3].toInt() and 0xFF) == '\''.code) {
+                        this.result_pos = i + 4
+                        this.success = 1
+                        return
+                    }
+                    if (i + 2 < end && (bs[i + 2].toInt() and 0xFF) == '\''.code) {
+                        this.result_pos = i + 3
+                        this.success = 1
+                        return
+                    }
+                    this.success = 0
+                    return
+                }
+
+                this.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                var j = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                while (j < end) {
+                    val b = bs[j].toInt() and 0xFF
+                    if (b == '\n'.code || b == ';'.code) {
+                        break
+                    }
+                    if (b == '/'.code && j + 1 < end && (bs[j + 1].toInt() and 0xFF) == '/'.code) {
+                        break
+                    }
+                    if (b == '/'.code && j + 1 < end && (bs[j + 1].toInt() and 0xFF) == '*'.code) {
+                        break
+                    }
+                    j++
+                }
+
+                this.result_pos = j
+            }
+        }
+
+    domain:
+        bytes: ByteArray = ByteArray(0)
+        pos: Int = 0
+        scan_end: Int = 0
+        result_pos: Int = 0
+        success: Int = 1
+}
+
+fun main() {
+    var failures = 0
+
+    // Test 1: Skip // comment
+    val s1 = @@RustSyntaxSkipperFsm()
+    val inp1 = "// comment\ncode".toByteArray()
+    s1.setup(inp1, 0, inp1.size)
+    s1.do_skip_comment()
+    if (s1.get_success() != 1 || s1.get_result_pos() != 10) {
+        println("FAIL 1: success=${s1.get_success()}, pos=${s1.get_result_pos()}")
+        failures++
+    }
+
+    // Test 2: Skip nested /* /* */ */ block comment
+    val s2 = @@RustSyntaxSkipperFsm()
+    val inp2 = "/* outer /* inner */ */code".toByteArray()
+    s2.setup(inp2, 0, inp2.size)
+    s2.do_skip_comment()
+    if (s2.get_success() != 1 || s2.get_result_pos() != 23) {
+        println("FAIL 2: success=${s2.get_success()}, pos=${s2.get_result_pos()}")
+        failures++
+    }
+
+    // Test 3: Skip raw string r#"hello"#
+    val s3 = @@RustSyntaxSkipperFsm()
+    val inp3 = "r#\"hello\"#rest".toByteArray()
+    s3.setup(inp3, 0, inp3.size)
+    s3.do_skip_string()
+    if (s3.get_success() != 1 || s3.get_result_pos() != 10) {
+        println("FAIL 3: success=${s3.get_success()}, pos=${s3.get_result_pos()}")
+        failures++
+    }
+
+    // Test 4: Skip double-quoted string
+    val s4 = @@RustSyntaxSkipperFsm()
+    val inp4 = "\"hello\" rest".toByteArray()
+    s4.setup(inp4, 0, inp4.size)
+    s4.do_skip_string()
+    if (s4.get_success() != 1 || s4.get_result_pos() != 7) {
+        println("FAIL 4: success=${s4.get_success()}, pos=${s4.get_result_pos()}")
+        failures++
+    }
+
+    // Test 5: Char literal 'x' — IS a string
+    val s5 = @@RustSyntaxSkipperFsm()
+    val inp5 = "'x' rest".toByteArray()
+    s5.setup(inp5, 0, inp5.size)
+    s5.do_skip_string()
+    if (s5.get_success() != 1 || s5.get_result_pos() != 3) {
+        println("FAIL 5: success=${s5.get_success()}, pos=${s5.get_result_pos()}")
+        failures++
+    }
+
+    // Test 6: Lifetime 'a — NOT a string
+    val s6 = @@RustSyntaxSkipperFsm()
+    val inp6 = "'a rest".toByteArray()
+    s6.setup(inp6, 0, inp6.size)
+    s6.do_skip_string()
+    if (s6.get_success() != 0) {
+        println("FAIL 6: lifetime should not be a string")
+        failures++
+    }
+
+    // Test 7: Escape char '\n'
+    val s7 = @@RustSyntaxSkipperFsm()
+    val inp7 = "'\\n' rest".toByteArray()
+    s7.setup(inp7, 0, inp7.size)
+    s7.do_skip_string()
+    if (s7.get_success() != 1 || s7.get_result_pos() != 4) {
+        println("FAIL 7: success=${s7.get_success()}, pos=${s7.get_result_pos()}")
+        failures++
+    }
+
+    if (failures > 0) {
+        println("FAIL: $failures failures")
+        exitProcess(1)
+    }
+    println("PASS: rust_skipper (7 cases)")
+}

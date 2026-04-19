@@ -1,0 +1,289 @@
+@@target swift
+
+import Foundation
+
+// TypeScriptSyntaxSkipper — FSM for skipping TS/JS comments and strings.
+// Translated from framec's native_region_scanner/typescript_skipper.frs
+//
+// Adds template literal awareness (backtick strings with ${} interpolation)
+// on top of the C-style comment and string patterns.
+
+@@system TSSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: [UInt8], start: Int, length: Int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos(): Int {
+            return self.result_pos
+        }
+        get_success(): Int {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                var i = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+
+                // // line comment
+                if i + 1 < end && bs[i] == UInt8(ascii: "/") && bs[i + 1] == UInt8(ascii: "/") {
+                    var j = i + 2
+                    while j < end && bs[j] != 0x0A {
+                        j += 1
+                    }
+                    self.result_pos = j
+                    self.success = 1
+                    return
+                }
+
+                // /* block comment */
+                if i + 1 < end && bs[i] == UInt8(ascii: "/") && bs[i + 1] == UInt8(ascii: "*") {
+                    var j = i + 2
+                    while j + 1 < end {
+                        if bs[j] == UInt8(ascii: "*") && bs[j + 1] == UInt8(ascii: "/") {
+                            self.result_pos = j + 2
+                            self.success = 1
+                            return
+                        }
+                        j += 1
+                    }
+                    self.result_pos = end
+                    self.success = 1
+                    return
+                }
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                var i = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+
+                // Template literal: `...${...}...`
+                if i < end && bs[i] == UInt8(ascii: "`") {
+                    var j = i + 1
+                    var templateDepth = 0
+                    while j < end {
+                        let b = bs[j]
+                        if b == UInt8(ascii: "`") && templateDepth == 0 {
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        }
+                        if b == UInt8(ascii: "\\") {
+                            j += 2
+                            continue
+                        }
+                        if b == UInt8(ascii: "$") && j + 1 < end && bs[j + 1] == UInt8(ascii: "{") {
+                            templateDepth += 1
+                            j += 2
+                            continue
+                        }
+                        if b == UInt8(ascii: "}") && templateDepth > 0 {
+                            templateDepth -= 1
+                        }
+                        j += 1
+                    }
+                    self.result_pos = end
+                    self.success = 1
+                    return
+                }
+
+                // Simple string: " or '
+                if i < end && (bs[i] == UInt8(ascii: "\"") || bs[i] == UInt8(ascii: "'")) {
+                    let q = bs[i]
+                    var j = i + 1
+                    while j < end {
+                        if bs[j] == UInt8(ascii: "\\") {
+                            j += 2
+                            continue
+                        }
+                        if bs[j] == q {
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        }
+                        j += 1
+                    }
+                    self.result_pos = end
+                    self.success = 1
+                    return
+                }
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                var j = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+                var inTemplate = false
+                var templateDepth = 0
+
+                while j < end {
+                    let b = bs[j]
+
+                    if inTemplate {
+                        if b == UInt8(ascii: "`") && templateDepth == 0 {
+                            inTemplate = false
+                            j += 1
+                            continue
+                        }
+                        if b == UInt8(ascii: "\\") {
+                            j += 2
+                            continue
+                        }
+                        if b == UInt8(ascii: "$") && j + 1 < end && bs[j + 1] == UInt8(ascii: "{") {
+                            templateDepth += 1
+                            j += 2
+                            continue
+                        }
+                        if b == UInt8(ascii: "}") && templateDepth > 0 {
+                            templateDepth -= 1
+                        }
+                        j += 1
+                        continue
+                    }
+
+                    if b == 0x0A || b == UInt8(ascii: ";") {
+                        break
+                    }
+                    if b == UInt8(ascii: "/") && j + 1 < end && bs[j + 1] == UInt8(ascii: "/") {
+                        break
+                    }
+                    if b == UInt8(ascii: "/") && j + 1 < end && bs[j + 1] == UInt8(ascii: "*") {
+                        break
+                    }
+                    if b == UInt8(ascii: "`") {
+                        inTemplate = true
+                        j += 1
+                        continue
+                    }
+                    if b == UInt8(ascii: "\"") || b == UInt8(ascii: "'") {
+                        let q = b
+                        j += 1
+                        while j < end && bs[j] != q {
+                            if bs[j] == UInt8(ascii: "\\") {
+                                j += 1
+                            }
+                            j += 1
+                        }
+                        if j < end {
+                            j += 1
+                        }
+                        continue
+                    }
+
+                    j += 1
+                }
+
+                self.result_pos = j
+            }
+        }
+
+    domain:
+        bytes: [UInt8] = []
+        pos: Int = 0
+        scan_end: Int = 0
+        result_pos: Int = 0
+        success: Int = 1
+}
+
+// main
+    var failures = 0
+
+    // Test 1: Skip // line comment
+    let s1 = @@TSSyntaxSkipperFsm()
+    let inp1: [UInt8] = Array("// comment\ncode".utf8)
+    s1.setup(inp1, 0, inp1.count)
+    s1.do_skip_comment()
+    if s1.get_success() as! Int != 1 || s1.get_result_pos() as! Int != 10 {
+        print("FAIL 1: success=\(s1.get_success())), pos=\(s1.get_result_pos()))")
+        failures += 1
+    }
+
+    // Test 2: Skip /* block comment */
+    let s2 = @@TSSyntaxSkipperFsm()
+    let inp2: [UInt8] = Array("/* block */code".utf8)
+    s2.setup(inp2, 0, inp2.count)
+    s2.do_skip_comment()
+    if s2.get_success() as! Int != 1 || s2.get_result_pos() as! Int != 11 {
+        print("FAIL 2: success=\(s2.get_success())), pos=\(s2.get_result_pos()))")
+        failures += 1
+    }
+
+    // Test 3: Skip template literal
+    let s3 = @@TSSyntaxSkipperFsm()
+    let inp3: [UInt8] = Array("`hello ${name} world`rest".utf8)
+    s3.setup(inp3, 0, inp3.count)
+    s3.do_skip_string()
+    if s3.get_success() as! Int != 1 || s3.get_result_pos() as! Int != 21 {
+        print("FAIL 3: success=\(s3.get_success())), pos=\(s3.get_result_pos()))")
+        failures += 1
+    }
+
+    // Test 4: Skip simple double-quoted string
+    let s4 = @@TSSyntaxSkipperFsm()
+    let inp4: [UInt8] = Array("\"hello\" rest".utf8)
+    s4.setup(inp4, 0, inp4.count)
+    s4.do_skip_string()
+    if s4.get_success() as! Int != 1 || s4.get_result_pos() as! Int != 7 {
+        print("FAIL 4: success=\(s4.get_success())), pos=\(s4.get_result_pos()))")
+        failures += 1
+    }
+
+    // Test 5: Skip template with nested ${}
+    let s5 = @@TSSyntaxSkipperFsm()
+    let inp5: [UInt8] = Array("`${a + ${b}}`rest".utf8)
+    s5.setup(inp5, 0, inp5.count)
+    s5.do_skip_string()
+    if s5.get_success() as! Int != 1 {
+        print("FAIL 5: success=\(s5.get_success()))")
+        failures += 1
+    }
+
+    // Test 6: Find line end skips over template literals
+    let s6 = @@TSSyntaxSkipperFsm()
+    let inp6: [UInt8] = Array("x = `hello`;\nnext".utf8)
+    s6.setup(inp6, 0, inp6.count)
+    s6.do_find_line_end()
+    if s6.get_result_pos() as! Int != 11 {
+        print("FAIL 6: pos=\(s6.get_result_pos())), expected 11 (at ;)")
+        failures += 1
+    }
+
+    // Test 7: Not a string
+    let s7 = @@TSSyntaxSkipperFsm()
+    let inp7: [UInt8] = Array("x + 1".utf8)
+    s7.setup(inp7, 0, inp7.count)
+    s7.do_skip_string()
+    if s7.get_success() as! Int != 0 {
+        print("FAIL 7: should not be string")
+        failures += 1
+    }
+
+    if failures > 0 {
+        print("FAIL: \(failures) failures")
+        exit(1)
+    }
+    print("PASS: ts_skipper (7 cases)")

@@ -1,0 +1,142 @@
+<?php
+@@target php
+
+// ExprScanner — PDA for scanning assignment RHS expressions.
+// Translated from framec's native_region_scanner/expr_scanner.frs
+//
+// Scans from pos (after =) to a terminator (; or \n) at depth 0,
+// respecting nested ()[]{}  and string literals with escape handling.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: array, start: int, length: int) {
+            $this->bytes = $input_bytes;
+            $this->pos = $start;
+            $this->end = $length;
+        }
+        get_result(): int {
+            return $this->result_end;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                $i = $this->pos;
+                $end = $this->end;
+                $bs = $this->bytes;
+                $depth = 0;
+                $in_string = -1;
+
+                while ($i < $end) {
+                    $b = $bs[$i];
+
+                    if ($in_string !== -1) {
+                        if ($b === 0x5C && $i + 1 < $end) {
+                            $i += 2;
+                            continue;
+                        }
+                        if ($b === $in_string) {
+                            $in_string = -1;
+                        }
+                        $i++;
+                        continue;
+                    }
+
+                    if ($b === 0x22 || $b === 0x27) {
+                        $in_string = $b;
+                        $i++;
+                        continue;
+                    }
+
+                    if ($b === 0x28 || $b === 0x5B || $b === 0x7B) {
+                        $depth++;
+                    } elseif ($b === 0x29 || $b === 0x5D || $b === 0x7D) {
+                        $depth = max($depth - 1, 0);
+                    } elseif ($b === 0x3B && $depth === 0) {
+                        $i++;
+                        break;
+                    } elseif ($b === 0x0A && $depth === 0) {
+                        break;
+                    }
+
+                    $i++;
+                }
+
+                $this->result_end = $i;
+            }
+        }
+
+    domain:
+        bytes = []
+        pos = 0
+        end = 0
+        result_end = 0
+}
+
+function str_to_bytes(string $s): array {
+    $bytes = [];
+    for ($i = 0; $i < strlen($s); $i++) {
+        $bytes[] = ord($s[$i]);
+    }
+    return $bytes;
+}
+
+function bytes_to_str(array $bytes, int $start, int $end): string {
+    $s = '';
+    for ($i = $start; $i < $end; $i++) {
+        $s .= chr($bytes[$i]);
+    }
+    return $s;
+}
+
+$failures = 0;
+
+// Test 1: simple expression terminated by newline
+$e1 = new ExprScannerFsm();
+$inp1 = str_to_bytes(" x + 1\nfoo");
+$e1->setup($inp1, 0, count($inp1));
+$e1->do_scan();
+$expr1 = bytes_to_str($inp1, 0, $e1->get_result());
+if ($expr1 !== " x + 1") { echo "FAIL 1: got '{$expr1}'\n"; $failures++; }
+
+// Test 2: expression with semicolon terminator
+$e2 = new ExprScannerFsm();
+$inp2 = str_to_bytes(" x + 1; y = 2");
+$e2->setup($inp2, 0, count($inp2));
+$e2->do_scan();
+$expr2 = bytes_to_str($inp2, 0, $e2->get_result());
+if ($expr2 !== " x + 1;") { echo "FAIL 2: got '{$expr2}'\n"; $failures++; }
+
+// Test 3: nested parens not treated as terminator
+$e3 = new ExprScannerFsm();
+$inp3 = str_to_bytes(" f(x, g(y))\nz");
+$e3->setup($inp3, 0, count($inp3));
+$e3->do_scan();
+$expr3 = bytes_to_str($inp3, 0, $e3->get_result());
+if ($expr3 !== " f(x, g(y))") { echo "FAIL 3: got '{$expr3}'\n"; $failures++; }
+
+// Test 4: string with escaped quote
+$e4 = new ExprScannerFsm();
+$inp4 = str_to_bytes(" \"hello\\\"world\"\n");
+$e4->setup($inp4, 0, count($inp4));
+$e4->do_scan();
+$expr4 = bytes_to_str($inp4, 0, $e4->get_result());
+if ($expr4 !== " \"hello\\\"world\"") { echo "FAIL 4: got '{$expr4}'\n"; $failures++; }
+
+// Test 5: semicolon inside string (should not terminate)
+$e5 = new ExprScannerFsm();
+$inp5 = str_to_bytes(" \"a;b\"\n");
+$e5->setup($inp5, 0, count($inp5));
+$e5->do_scan();
+$expr5 = bytes_to_str($inp5, 0, $e5->get_result());
+if ($expr5 !== " \"a;b\"") { echo "FAIL 5: got '{$expr5}'\n"; $failures++; }
+
+if ($failures > 0) { echo "FAIL: {$failures} failures\n"; exit(1); }
+echo "PASS: expr_scanner (5 cases)\n";

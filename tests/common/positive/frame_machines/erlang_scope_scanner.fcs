@@ -1,0 +1,252 @@
+@@target csharp
+
+using System;
+using System.Text;
+
+// ErlangScopeScanner -- FSM for detecting fun(...) -> ... end closures.
+// Translated from framec's native_region_scanner/erlang_scope_scanner.frs
+//
+// Erlang reuses `end` to close: fun, case, if, receive, begin, try.
+// This FSM tracks a depth counter for all block-opening keywords so
+// only the `end` matching our `fun` terminates the scan.
+//
+// Skips % line comments and "..." / '...' string/atom literals.
+// Does NOT match `fun Module:Function/Arity` (function references).
+
+@@system ErlangScopeScannerFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $CheckFun }
+        }
+
+        $CheckFun {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Must start with `fun` keyword
+                if (i + 3 > end) { this.success = 0; return; }
+                if (bs[i] != (byte)'f' || bs[i+1] != (byte)'u' || bs[i+2] != (byte)'n') { this.success = 0; return; }
+
+                // Check word boundary (not part of `function` etc.)
+                int after = i + 3;
+                if (after < end && (Char.IsLetterOrDigit((char)bs[after]) || bs[after] == (byte)'_')) { this.success = 0; return; }
+
+                // Skip whitespace after `fun`
+                int j = after;
+                while (j < end && (bs[j] == (byte)' ' || bs[j] == (byte)'\t' || bs[j] == (byte)'\n')) { j++; }
+
+                // Check for Module:Function/Arity pattern (function reference, not closure)
+                if (j < end && Char.IsUpper((char)bs[j])) {
+                    int k = j;
+                    while (k < end && (Char.IsLetterOrDigit((char)bs[k]) || bs[k] == (byte)'_')) { k++; }
+                    if (k < end && bs[k] == (byte)':') { this.success = 0; return; }
+                }
+
+                // It's a closure: fun(...) -> ... end
+                this.depth = 1;
+                this.pos = after;
+                -> $ScanBody
+            }
+        }
+
+        $ScanBody {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                while (i < end) {
+                    int b = bs[i];
+
+                    // Skip % line comments
+                    if (b == (byte)'%') { while (i < end && bs[i] != (byte)'\n') { i++; } continue; }
+
+                    // Skip "..." strings
+                    if (b == (byte)'"') {
+                        i++;
+                        while (i < end) {
+                            if (bs[i] == (byte)'\\') { i += 2; continue; }
+                            if (bs[i] == (byte)'"') { i++; break; }
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    // Skip '...' quoted atoms
+                    if (b == (byte)'\'') {
+                        i++;
+                        while (i < end) {
+                            if (bs[i] == (byte)'\\') { i += 2; continue; }
+                            if (bs[i] == (byte)'\'') { i++; break; }
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    // Check for block-opening keywords (increase depth)
+
+                    // fun
+                    if (b==(byte)'f' && i+3<=end && bs[i+1]==(byte)'u' && bs[i+2]==(byte)'n') {
+                        if (i+3>=end || (!Char.IsLetterOrDigit((char)bs[i+3]) && bs[i+3]!=(byte)'_')) { this.depth++; i+=3; continue; }
+                    }
+                    // case
+                    if (b==(byte)'c' && i+4<=end && bs[i+1]==(byte)'a' && bs[i+2]==(byte)'s' && bs[i+3]==(byte)'e') {
+                        if (i+4>=end || (!Char.IsLetterOrDigit((char)bs[i+4]) && bs[i+4]!=(byte)'_')) { this.depth++; i+=4; continue; }
+                    }
+                    // if
+                    if (b==(byte)'i' && i+2<=end && bs[i+1]==(byte)'f') {
+                        if (i+2>=end || (!Char.IsLetterOrDigit((char)bs[i+2]) && bs[i+2]!=(byte)'_')) { this.depth++; i+=2; continue; }
+                    }
+                    // receive
+                    if (b==(byte)'r' && i+7<=end && bs[i+1]==(byte)'e' && bs[i+2]==(byte)'c' && bs[i+3]==(byte)'e' && bs[i+4]==(byte)'i' && bs[i+5]==(byte)'v' && bs[i+6]==(byte)'e') {
+                        if (i+7>=end || (!Char.IsLetterOrDigit((char)bs[i+7]) && bs[i+7]!=(byte)'_')) { this.depth++; i+=7; continue; }
+                    }
+                    // begin
+                    if (b==(byte)'b' && i+5<=end && bs[i+1]==(byte)'e' && bs[i+2]==(byte)'g' && bs[i+3]==(byte)'i' && bs[i+4]==(byte)'n') {
+                        if (i+5>=end || (!Char.IsLetterOrDigit((char)bs[i+5]) && bs[i+5]!=(byte)'_')) { this.depth++; i+=5; continue; }
+                    }
+                    // try
+                    if (b==(byte)'t' && i+3<=end && bs[i+1]==(byte)'r' && bs[i+2]==(byte)'y') {
+                        if (i+3>=end || (!Char.IsLetterOrDigit((char)bs[i+3]) && bs[i+3]!=(byte)'_')) { this.depth++; i+=3; continue; }
+                    }
+
+                    // Check for `end` keyword (decrease depth)
+                    if (b==(byte)'e' && i+3<=end && bs[i+1]==(byte)'n' && bs[i+2]==(byte)'d') {
+                        if (i+3>=end || (!Char.IsLetterOrDigit((char)bs[i+3]) && bs[i+3]!=(byte)'_')) {
+                            this.depth--;
+                            if (this.depth == 0) { this.result_pos = i+3; this.success = 1; return; }
+                            i+=3; continue;
+                        }
+                    }
+
+                    // Skip identifiers (avoid false keyword matches mid-word)
+                    if (Char.IsLetter((char)b) || b == (byte)'_') {
+                        while (i < end && (Char.IsLetterOrDigit((char)bs[i]) || bs[i]==(byte)'_')) { i++; }
+                        continue;
+                    }
+                    i++;
+                }
+
+                // Ran out of bytes without finding matching `end`
+                this.success = 0;
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 0
+        depth: int = 0
+}
+
+class Program {
+    static void Main(string[] args) {
+        int failures = 0;
+
+        // Test 1: Simple fun -> end
+        var s1 = new ErlangScopeScannerFsm();
+        byte[] inp1 = Encoding.UTF8.GetBytes("fun(X) -> X + 1 end rest");
+        s1.setup(inp1, 0, inp1.Length);
+        s1.do_scan();
+        if ((int)s1.get_success() != 1 || (int)s1.get_result_pos() != 19) {
+            Console.WriteLine("FAIL 1: success=" + s1.get_success() + ", pos=" + s1.get_result_pos());
+            failures++;
+        }
+
+        // Test 2: Nested fun -> case ... end end
+        var s2 = new ErlangScopeScannerFsm();
+        byte[] inp2 = Encoding.UTF8.GetBytes("fun(X) -> case X of 1 -> ok end end rest");
+        s2.setup(inp2, 0, inp2.Length);
+        s2.do_scan();
+        if ((int)s2.get_success() != 1 || (int)s2.get_result_pos() != 35) {
+            Console.WriteLine("FAIL 2: success=" + s2.get_success() + ", pos=" + s2.get_result_pos());
+            failures++;
+        }
+
+        // Test 3: Not a fun keyword (function)
+        var s3 = new ErlangScopeScannerFsm();
+        byte[] inp3 = Encoding.UTF8.GetBytes("function() -> ok end");
+        s3.setup(inp3, 0, inp3.Length);
+        s3.do_scan();
+        if ((int)s3.get_success() != 0) {
+            Console.WriteLine("FAIL 3: should not match 'function'");
+            failures++;
+        }
+
+        // Test 4: fun Module:Function/Arity (function reference, not closure)
+        var s4 = new ErlangScopeScannerFsm();
+        byte[] inp4 = Encoding.UTF8.GetBytes("fun io:format/2");
+        s4.setup(inp4, 0, inp4.Length);
+        s4.do_scan();
+        if ((int)s4.get_success() != 0) {
+            Console.WriteLine("FAIL 4: should not match function reference");
+            failures++;
+        }
+
+        // Test 5: Nested if ... end inside fun
+        var s5 = new ErlangScopeScannerFsm();
+        byte[] inp5 = Encoding.UTF8.GetBytes("fun() -> if true -> ok end end rest");
+        s5.setup(inp5, 0, inp5.Length);
+        s5.do_scan();
+        if ((int)s5.get_success() != 1 || (int)s5.get_result_pos() != 30) {
+            Console.WriteLine("FAIL 5: success=" + s5.get_success() + ", pos=" + s5.get_result_pos());
+            failures++;
+        }
+
+        // Test 6: String inside fun body (should skip)
+        var s6 = new ErlangScopeScannerFsm();
+        byte[] inp6 = Encoding.UTF8.GetBytes("fun() -> \"end\" end rest");
+        s6.setup(inp6, 0, inp6.Length);
+        s6.do_scan();
+        if ((int)s6.get_success() != 1 || (int)s6.get_result_pos() != 18) {
+            Console.WriteLine("FAIL 6: success=" + s6.get_success() + ", pos=" + s6.get_result_pos());
+            failures++;
+        }
+
+        // Test 7: Comment inside fun body (should skip)
+        var s7 = new ErlangScopeScannerFsm();
+        byte[] inp7 = Encoding.UTF8.GetBytes("fun() -> % end\nok end rest");
+        s7.setup(inp7, 0, inp7.Length);
+        s7.do_scan();
+        if ((int)s7.get_success() != 1 || (int)s7.get_result_pos() != 21) {
+            Console.WriteLine("FAIL 7: success=" + s7.get_success() + ", pos=" + s7.get_result_pos());
+            failures++;
+        }
+
+        // Test 8: Unmatched fun (no end)
+        var s8 = new ErlangScopeScannerFsm();
+        byte[] inp8 = Encoding.UTF8.GetBytes("fun() -> X + 1");
+        s8.setup(inp8, 0, inp8.Length);
+        s8.do_scan();
+        if ((int)s8.get_success() != 0) {
+            Console.WriteLine("FAIL 8: should fail with no matching end");
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine("FAIL: " + failures + " failures");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: erlang_scope_scanner (8 cases)");
+    }
+}

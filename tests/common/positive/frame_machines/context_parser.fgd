@@ -1,0 +1,535 @@
+@@target gdscript
+extends SceneTree
+
+# ContextParser -- FSM for parsing @@ context constructs.
+# Translated from framec's native_region_scanner/context_parser.frs
+#
+# Parses:
+#   @@:return [= expr]     kind=2 (ContextReturn)
+#   @@:event               kind=3 (ContextEvent)
+#   @@:data.key [= expr]   kind=4 (ContextData) or kind=5 (ContextDataAssign)
+#   @@:params.key           kind=6 (ContextParams)
+#   @@SystemName()          kind=7 (TaggedInstantiation)
+#   @@:(expr)               kind=8 (ContextReturnExpr)
+#   @@:return(expr)         kind=9 (ReturnCall)
+#   @@:self.method()        kind=10 (ContextSelfCall)
+#   @@:self                 kind=11 (ContextSelf)
+#   @@:system.state         kind=12 (ContextSystemState)
+#   other                   has_result=0
+
+@@system ContextParserFsm {
+    operations:
+        setup(input_bytes: Array, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        setup_with_paren_end(input_bytes: Array, start: int, length: int, p_end: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+            self.paren_end = p_end
+        }
+        get_result_end(): int {
+            return self.result_end
+        }
+        get_result_kind(): int {
+            return self.result_kind
+        }
+        get_has_result(): int {
+            return self.has_result
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $Dispatching }
+        }
+
+        $Dispatching {
+            $>() {
+                var i = self.pos
+                var end = self.scan_end
+                var bs = self.bytes
+
+                if i >= end:
+                    self.has_result = 0
+                    -> $Done
+
+                var b = bs[i]
+
+                if b == 0x3A:
+                    self.pos = i + 1
+                    -> $DispatchColon
+                elif b >= 0x41 and b <= 0x5A:
+                    # @@SystemName -- pos stays at start of name
+                    -> $ParseInstantiation
+                else:
+                    self.result_end = i
+                    self.has_result = 0
+                    -> $Done
+            }
+        }
+
+        $DispatchColon {
+            $>() {
+                var i = self.pos
+                var end = self.scan_end
+                var bs = self.bytes
+
+                # Check for @@:return
+                if i + 5 < end:
+                    var tag = ""
+                    for idx in range(i, i + 6):
+                        tag += String.chr(bs[idx])
+                    if tag == "return":
+                        self.pos = i + 6
+                        -> $ParseReturn
+
+                # Check for @@:event
+                if i + 4 < end:
+                    var tag = ""
+                    for idx in range(i, i + 5):
+                        tag += String.chr(bs[idx])
+                    if tag == "event":
+                        self.result_end = i + 5
+                        self.result_kind = 3
+                        self.has_result = 1
+                        -> $Done
+
+                # Check for @@:data
+                if i + 3 < end:
+                    var tag = ""
+                    for idx in range(i, i + 4):
+                        tag += String.chr(bs[idx])
+                    if tag == "data":
+                        self.pos = i + 4
+                        -> $ParseData
+
+                # Check for @@:params
+                if i + 5 < end:
+                    var tag = ""
+                    for idx in range(i, i + 6):
+                        tag += String.chr(bs[idx])
+                    if tag == "params":
+                        self.pos = i + 6
+                        -> $ParseParams
+
+                # Check for @@:self
+                if i + 3 < end:
+                    var tag = ""
+                    for idx in range(i, i + 4):
+                        tag += String.chr(bs[idx])
+                    if tag == "self":
+                        self.pos = i + 4
+                        -> $ParseSelf
+
+                # Check for @@:system
+                if i + 5 < end:
+                    var tag = ""
+                    for idx in range(i, i + 6):
+                        tag += String.chr(bs[idx])
+                    if tag == "system":
+                        self.pos = i + 6
+                        -> $ParseSystem
+
+                # Check for @@:(expr)
+                if i < end and bs[i] == 0x28:
+                    self.pos = i
+                    -> $ParseContextReturnExpr
+
+                # Unknown
+                self.result_end = i
+                self.has_result = 0
+                -> $Done
+            }
+        }
+
+        $ParseReturn {
+            $>() {
+                var i = self.pos
+                var end = self.scan_end
+                var bs = self.bytes
+
+                # Skip whitespace
+                while i < end and (bs[i] == 0x20 or bs[i] == 0x09):
+                    i += 1
+
+                if i < end and bs[i] == 0x28:
+                    # @@:return(expr) -- scan balanced parens
+                    var depth = 1
+                    i += 1
+                    while i < end and depth > 0:
+                        if bs[i] == 0x28:
+                            depth += 1
+                        if bs[i] == 0x29:
+                            depth -= 1
+                        if depth > 0:
+                            i += 1
+                    if depth == 0:
+                        i += 1
+                    self.result_end = i
+                    self.result_kind = 9
+                    self.has_result = 1
+                    -> $Done
+                elif i < end and bs[i] == 0x3D and (i + 1 >= end or bs[i + 1] != 0x3D):
+                    # @@:return = <expr> -- scan expression
+                    i += 1
+                    # Skip whitespace after =
+                    while i < end and (bs[i] == 0x20 or bs[i] == 0x09):
+                        i += 1
+                    # Scan to end of expression (newline or ;)
+                    while i < end and bs[i] != 0x0A and bs[i] != 0x3B:
+                        i += 1
+                    self.result_end = i
+                    self.result_kind = 2
+                    self.has_result = 1
+                    -> $Done
+                else:
+                    # @@:return (bare read)
+                    self.result_end = i
+                    self.result_kind = 2
+                    self.has_result = 1
+                    -> $Done
+            }
+        }
+
+        $ParseContextReturnExpr {
+            $>() {
+                var i = self.pos
+                var end = self.scan_end
+                var bs = self.bytes
+
+                if i < end and bs[i] == 0x28:
+                    var depth = 1
+                    i += 1
+                    while i < end and depth > 0:
+                        var b = bs[i]
+                        if b == 0x28:
+                            depth += 1
+                        elif b == 0x29:
+                            depth -= 1
+                        elif b == 0x22 or b == 0x27:
+                            var q = b
+                            i += 1
+                            while i < end:
+                                if bs[i] == 0x5C and i + 1 < end:
+                                    i += 2
+                                    continue
+                                if bs[i] == q:
+                                    break
+                                i += 1
+                        i += 1
+
+                self.result_end = i
+                self.result_kind = 8
+                self.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseData {
+            $>() {
+                var i = self.pos
+                var end = self.scan_end
+                var bs = self.bytes
+
+                # Scan .key
+                if i < end and bs[i] == 0x2E:
+                    i += 1
+                    while i < end and ((bs[i] >= 0x30 and bs[i] <= 0x39) or (bs[i] >= 0x41 and bs[i] <= 0x5A) or (bs[i] >= 0x61 and bs[i] <= 0x7A) or bs[i] == 0x5F):
+                        i += 1
+
+                # Check for assignment
+                var j = i
+                while j < end and (bs[j] == 0x20 or bs[j] == 0x09):
+                    j += 1
+
+                if j < end and bs[j] == 0x3D and (j + 1 >= end or bs[j + 1] != 0x3D):
+                    # @@:data.key = expr
+                    j += 1
+                    while j < end and (bs[j] == 0x20 or bs[j] == 0x09):
+                        j += 1
+                    while j < end and bs[j] != 0x0A and bs[j] != 0x3B:
+                        j += 1
+                    self.result_end = j
+                    self.result_kind = 5
+                else:
+                    self.result_end = i
+                    self.result_kind = 4
+
+                self.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseParams {
+            $>() {
+                var i = self.pos
+                var end = self.scan_end
+                var bs = self.bytes
+
+                if i < end and bs[i] == 0x2E:
+                    i += 1
+                    while i < end and ((bs[i] >= 0x30 and bs[i] <= 0x39) or (bs[i] >= 0x41 and bs[i] <= 0x5A) or (bs[i] >= 0x61 and bs[i] <= 0x7A) or bs[i] == 0x5F):
+                        i += 1
+
+                self.result_end = i
+                self.result_kind = 6
+                self.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseSelf {
+            $>() {
+                var i = self.pos
+                var end = self.scan_end
+                var bs = self.bytes
+
+                if i < end and bs[i] == 0x2E:
+                    i += 1
+                    # Scan identifier
+                    while i < end and ((bs[i] >= 0x30 and bs[i] <= 0x39) or (bs[i] >= 0x41 and bs[i] <= 0x5A) or (bs[i] >= 0x61 and bs[i] <= 0x7A) or bs[i] == 0x5F):
+                        i += 1
+                    if i < end and bs[i] == 0x28:
+                        # @@:self.method(args) -- scan balanced parens
+                        var depth = 1
+                        i += 1
+                        while i < end and depth > 0:
+                            if bs[i] == 0x28:
+                                depth += 1
+                            if bs[i] == 0x29:
+                                depth -= 1
+                            if bs[i] == 0x22 or bs[i] == 0x27:
+                                var q = bs[i]
+                                i += 1
+                                while i < end:
+                                    if bs[i] == 0x5C and i + 1 < end:
+                                        i += 2
+                                        continue
+                                    if bs[i] == q:
+                                        break
+                                    i += 1
+                            if depth > 0:
+                                i += 1
+                        if depth == 0:
+                            i += 1
+                        self.result_end = i
+                        self.result_kind = 10
+                        self.has_result = 1
+                    else:
+                        # @@:self.property
+                        self.result_end = i
+                        self.result_kind = 11
+                        self.has_result = 1
+                else:
+                    # bare @@:self
+                    self.result_end = i
+                    self.result_kind = 11
+                    self.has_result = 1
+
+                -> $Done
+            }
+        }
+
+        $ParseSystem {
+            $>() {
+                var i = self.pos
+                var end = self.scan_end
+                var bs = self.bytes
+
+                if i + 5 < end:
+                    var tag = ""
+                    for idx in range(i, i + 6):
+                        tag += String.chr(bs[idx])
+                    if tag == ".state":
+                        var after = i + 6
+                        if after >= end or (not ((bs[after] >= 0x30 and bs[after] <= 0x39) or (bs[after] >= 0x41 and bs[after] <= 0x5A) or (bs[after] >= 0x61 and bs[after] <= 0x7A)) and bs[after] != 0x5F):
+                            self.result_end = i + 6
+                            self.result_kind = 12
+                            self.has_result = 1
+                            -> $Done
+
+                # Bare @@:system or unknown variant
+                self.result_end = i
+                self.result_kind = 13
+                self.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseInstantiation {
+            $>() {
+                var i = self.pos
+                var end = self.scan_end
+                var bs = self.bytes
+
+                # Scan identifier
+                while i < end and ((bs[i] >= 0x30 and bs[i] <= 0x39) or (bs[i] >= 0x41 and bs[i] <= 0x5A) or (bs[i] >= 0x61 and bs[i] <= 0x7A) or bs[i] == 0x5F):
+                    i += 1
+
+                # Must be followed by (
+                if i < end and bs[i] == 0x28:
+                    if self.paren_end > 0:
+                        i = self.paren_end
+                        self.result_end = i
+                        self.result_kind = 7
+                        self.has_result = 1
+                    else:
+                        self.result_end = i
+                        self.has_result = 0
+                else:
+                    self.result_end = i
+                    self.has_result = 0
+
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+                # Terminal state -- results are in domain vars
+                pass
+            }
+        }
+
+    domain:
+        bytes: Array = []
+        pos: int = 0
+        scan_end: int = 0
+        result_end: int = 0
+        result_kind: int = 0
+        has_result: int = 0
+        paren_end: int = 0
+}
+
+func str_to_bytes(s: String) -> Array:
+    var arr = []
+    var buf = s.to_utf8_buffer()
+    for i in range(buf.size()):
+        arr.append(buf[i])
+    return arr
+
+func main():
+    var failures = 0
+
+    # Test 1: @@:return (bare read)
+    var p1 = @@ContextParserFsm()
+    var inp1 = str_to_bytes(":return")
+    p1.setup(inp1, 0, inp1.size())
+    p1.do_parse()
+    if p1.get_has_result() != 1 or p1.get_result_kind() != 2:
+        print("FAIL 1: has_result=" + str(p1.get_has_result()) + ", kind=" + str(p1.get_result_kind()))
+        failures += 1
+
+    # Test 2: @@:event
+    var p2 = @@ContextParserFsm()
+    var inp2 = str_to_bytes(":event")
+    p2.setup(inp2, 0, inp2.size())
+    p2.do_parse()
+    if p2.get_has_result() != 1 or p2.get_result_kind() != 3:
+        print("FAIL 2: has_result=" + str(p2.get_has_result()) + ", kind=" + str(p2.get_result_kind()))
+        failures += 1
+
+    # Test 3: @@:data.key
+    var p3 = @@ContextParserFsm()
+    var inp3 = str_to_bytes(":data.name rest")
+    p3.setup(inp3, 0, inp3.size())
+    p3.do_parse()
+    if p3.get_has_result() != 1 or p3.get_result_kind() != 4:
+        print("FAIL 3: has_result=" + str(p3.get_has_result()) + ", kind=" + str(p3.get_result_kind()))
+        failures += 1
+
+    # Test 4: @@:data.key = expr
+    var p4 = @@ContextParserFsm()
+    var inp4 = str_to_bytes(":data.key = value\n")
+    p4.setup(inp4, 0, inp4.size())
+    p4.do_parse()
+    if p4.get_has_result() != 1 or p4.get_result_kind() != 5:
+        print("FAIL 4: has_result=" + str(p4.get_has_result()) + ", kind=" + str(p4.get_result_kind()))
+        failures += 1
+
+    # Test 5: @@:params.key
+    var p5 = @@ContextParserFsm()
+    var inp5 = str_to_bytes(":params.name rest")
+    p5.setup(inp5, 0, inp5.size())
+    p5.do_parse()
+    if p5.get_has_result() != 1 or p5.get_result_kind() != 6:
+        print("FAIL 5: has_result=" + str(p5.get_has_result()) + ", kind=" + str(p5.get_result_kind()))
+        failures += 1
+
+    # Test 6: @@:(expr)
+    var p6 = @@ContextParserFsm()
+    var inp6 = str_to_bytes(":(x + 1) rest")
+    p6.setup(inp6, 0, inp6.size())
+    p6.do_parse()
+    if p6.get_has_result() != 1 or p6.get_result_kind() != 8:
+        print("FAIL 6: has_result=" + str(p6.get_has_result()) + ", kind=" + str(p6.get_result_kind()))
+        failures += 1
+
+    # Test 7: @@:return(expr)
+    var p7 = @@ContextParserFsm()
+    var inp7 = str_to_bytes(":return(42) rest")
+    p7.setup(inp7, 0, inp7.size())
+    p7.do_parse()
+    if p7.get_has_result() != 1 or p7.get_result_kind() != 9:
+        print("FAIL 7: has_result=" + str(p7.get_has_result()) + ", kind=" + str(p7.get_result_kind()))
+        failures += 1
+
+    # Test 8: @@:self (bare)
+    var p8 = @@ContextParserFsm()
+    var inp8 = str_to_bytes(":self rest")
+    p8.setup(inp8, 0, inp8.size())
+    p8.do_parse()
+    if p8.get_has_result() != 1 or p8.get_result_kind() != 11:
+        print("FAIL 8: has_result=" + str(p8.get_has_result()) + ", kind=" + str(p8.get_result_kind()))
+        failures += 1
+
+    # Test 9: @@:self.method(args)
+    var p9 = @@ContextParserFsm()
+    var inp9 = str_to_bytes(":self.doWork(x) rest")
+    p9.setup(inp9, 0, inp9.size())
+    p9.do_parse()
+    if p9.get_has_result() != 1 or p9.get_result_kind() != 10:
+        print("FAIL 9: has_result=" + str(p9.get_has_result()) + ", kind=" + str(p9.get_result_kind()))
+        failures += 1
+
+    # Test 10: @@:system.state
+    var p10 = @@ContextParserFsm()
+    var inp10 = str_to_bytes(":system.state rest")
+    p10.setup(inp10, 0, inp10.size())
+    p10.do_parse()
+    if p10.get_has_result() != 1 or p10.get_result_kind() != 12:
+        print("FAIL 10: has_result=" + str(p10.get_has_result()) + ", kind=" + str(p10.get_result_kind()))
+        failures += 1
+
+    # Test 11: @@SystemName() with paren_end
+    var p11 = @@ContextParserFsm()
+    var inp11 = str_to_bytes("MySystem() rest")
+    p11.setup_with_paren_end(inp11, 0, inp11.size(), 10)
+    p11.do_parse()
+    if p11.get_has_result() != 1 or p11.get_result_kind() != 7:
+        print("FAIL 11: has_result=" + str(p11.get_has_result()) + ", kind=" + str(p11.get_result_kind()))
+        failures += 1
+
+    # Test 12: No match (lowercase, not a keyword)
+    var p12 = @@ContextParserFsm()
+    var inp12 = str_to_bytes("xyz")
+    p12.setup(inp12, 0, inp12.size())
+    p12.do_parse()
+    if p12.get_has_result() != 0:
+        print("FAIL 12: should not match, has_result=" + str(p12.get_has_result()))
+        failures += 1
+
+    if failures > 0:
+        print("FAIL: " + str(failures) + " failures")
+        push_error(str(failures) + " test(s) failed")
+    else:
+        print("PASS: context_parser (12 cases)")
+
+func _init():
+    main()
+    quit()

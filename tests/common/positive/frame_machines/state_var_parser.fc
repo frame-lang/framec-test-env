@@ -1,0 +1,254 @@
+@@target c
+
+#include <string.h>
+#include <ctype.h>
+
+// StateVarParser — FSM for parsing $.varName and $.varName = expr
+// Translated from framec's native_region_scanner/state_var_parser.frs
+//
+// Uses hierarchical composition: $ScanExpr creates an ExprScannerFsm
+// sub-machine when it detects an assignment.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: unsigned char*, start: int, length: int) {
+            self->bytes = input_bytes;
+            self->pos = start;
+            self->end = length;
+        }
+        get_result(): int {
+            return self->result_end;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                int i = self->pos;
+                int end = self->end;
+                unsigned char* bs = self->bytes;
+                int depth = 0;
+                char in_string = 0;
+
+                while (i < end) {
+                    char b = bs[i];
+
+                    if (in_string != 0) {
+                        if (b == '\\' && i + 1 < end) {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = 0;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '"' || b == '\'') {
+                        in_string = b;
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '(' || b == '[' || b == '{') {
+                        depth++;
+                    } else if (b == ')' || b == ']' || b == '}') {
+                        depth--;
+                        if (depth < 0) depth = 0;
+                    } else if (b == ';' && depth == 0) {
+                        i++;
+                        break;
+                    } else if (b == '\n' && depth == 0) {
+                        break;
+                    }
+
+                    i++;
+                }
+
+                self->result_end = i;
+            }
+        }
+
+    domain:
+        bytes: unsigned char* = NULL
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+@@system StateVarParserFsm {
+    operations:
+        setup(input_bytes: unsigned char*, start: int, length: int) {
+            self->bytes = input_bytes;
+            self->pos = start;
+            self->parse_end = length;
+        }
+        get_result_end(): int {
+            return self->result_end;
+        }
+        get_is_assignment(): int {
+            return self->is_assignment;
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $ScanIdent }
+        }
+
+        $ScanIdent {
+            $>() {
+                // Skip "$." prefix and scan identifier
+                int i = self->pos + 2;
+                int end = self->parse_end;
+                unsigned char* bs = self->bytes;
+
+                while (i < end && (isalnum(bs[i]) || bs[i] == '_')) {
+                    i++;
+                }
+
+                self->ident_end = i;
+                -> $CheckAssign
+            }
+        }
+
+        $CheckAssign {
+            $>() {
+                // Lookahead: skip whitespace, check for = (but not == or => or =<)
+                int j = self->ident_end;
+                int end = self->parse_end;
+                unsigned char* bs = self->bytes;
+
+                while (j < end && (bs[j] == ' ' || bs[j] == '\t')) {
+                    j++;
+                }
+
+                if (j < end && bs[j] == '=' && (j + 1 >= end || (bs[j + 1] != '=' && bs[j + 1] != '<' && bs[j + 1] != '>'))) {
+                    // Assignment detected
+                    j++;
+                    self->pos = j;
+                    self->is_assignment = 1;
+                    -> $ScanExpr
+                } else {
+                    // Read-only access
+                    self->result_end = self->ident_end;
+                    self->is_assignment = 0;
+                    -> $Done
+                }
+            }
+        }
+
+        $ScanExpr {
+            $>() {
+                // Create ExprScanner sub-machine
+                ExprScannerFsm* expr = @@ExprScannerFsm();
+                ExprScannerFsm_setup(expr, self->bytes, self->pos, self->parse_end);
+                ExprScannerFsm_do_scan(expr);
+                self->result_end = ExprScannerFsm_get_result(expr);
+                ExprScannerFsm_destroy(expr);
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+            }
+        }
+
+    domain:
+        bytes: unsigned char* = NULL
+        pos: int = 0
+        parse_end: int = 0
+        ident_end: int = 0
+        result_end: int = 0
+        is_assignment: int = 0
+}
+
+int main() {
+    int failures = 0;
+
+    // Test 1: Read-only access $.count
+    StateVarParserFsm* p1 = @@StateVarParserFsm();
+    unsigned char t1[] = "$.count + 1";
+    StateVarParserFsm_setup(p1, t1, 0, strlen((char*)t1));
+    StateVarParserFsm_do_parse(p1);
+    if (StateVarParserFsm_get_is_assignment(p1)) {
+        printf("FAIL 1: should not be assignment\n");
+        failures++;
+    }
+    int r1 = StateVarParserFsm_get_result_end(p1);
+    char buf1[256];
+    memcpy(buf1, t1 + 2, r1 - 2);
+    buf1[r1 - 2] = '\0';
+    if (strcmp(buf1, "count") != 0) {
+        printf("FAIL 1: name='%s', expected 'count'\n", buf1);
+        failures++;
+    }
+
+    // Test 2: Assignment $.total = x + 1;\n
+    StateVarParserFsm* p2 = @@StateVarParserFsm();
+    unsigned char t2[] = "$.total = x + 1;\nmore";
+    StateVarParserFsm_setup(p2, t2, 0, strlen((char*)t2));
+    StateVarParserFsm_do_parse(p2);
+    if (!StateVarParserFsm_get_is_assignment(p2)) {
+        printf("FAIL 2: should be assignment\n");
+        failures++;
+    }
+    int r2 = StateVarParserFsm_get_result_end(p2);
+    char buf2[256];
+    memcpy(buf2, t2, r2);
+    buf2[r2] = '\0';
+    if (strstr(buf2, "x + 1;") == NULL) {
+        printf("FAIL 2: expr='%s'\n", buf2);
+        failures++;
+    }
+
+    // Test 3: Not assignment $.x == 5 (== is comparison, not assignment)
+    StateVarParserFsm* p3 = @@StateVarParserFsm();
+    unsigned char t3[] = "$.x == 5";
+    StateVarParserFsm_setup(p3, t3, 0, strlen((char*)t3));
+    StateVarParserFsm_do_parse(p3);
+    if (StateVarParserFsm_get_is_assignment(p3)) {
+        printf("FAIL 3: == should not be treated as assignment\n");
+        failures++;
+    }
+
+    // Test 4: Assignment with nested parens $.val = f(a, b)\n
+    StateVarParserFsm* p4 = @@StateVarParserFsm();
+    unsigned char t4[] = "$.val = f(a, b)\nrest";
+    StateVarParserFsm_setup(p4, t4, 0, strlen((char*)t4));
+    StateVarParserFsm_do_parse(p4);
+    if (!StateVarParserFsm_get_is_assignment(p4)) {
+        printf("FAIL 4: should be assignment\n");
+        failures++;
+    }
+    int r4 = StateVarParserFsm_get_result_end(p4);
+    char buf4[256];
+    memcpy(buf4, t4, r4);
+    buf4[r4] = '\0';
+    if (strstr(buf4, "f(a, b)") == NULL) {
+        printf("FAIL 4: expr='%s'\n", buf4);
+        failures++;
+    }
+
+    StateVarParserFsm_destroy(p1);
+    StateVarParserFsm_destroy(p2);
+    StateVarParserFsm_destroy(p3);
+    StateVarParserFsm_destroy(p4);
+
+    if (failures > 0) {
+        printf("FAIL: %d failures\n", failures);
+        return 1;
+    }
+    printf("PASS: state_var_parser (4 cases)\n");
+    return 0;
+}

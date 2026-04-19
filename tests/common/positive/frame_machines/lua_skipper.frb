@@ -1,0 +1,215 @@
+@@target ruby
+
+# LuaSyntaxSkipper — FSM for skipping Lua comments and strings.
+# Translated from framec's native_region_scanner/lua_skipper.frs
+#
+# Handles: -- line comments, --[[ block comments ]], [[ long strings ]],
+# simple strings, Lua-style line endings.
+
+@@system LuaSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos() {
+            return self.result_pos
+        }
+        get_success() {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i = self.pos
+                the_end = self.scan_end
+                bs = self.bytes
+
+                # Lua line comment: --
+                if i + 1 < the_end && bs[i] == 0x2D && bs[i + 1] == 0x2D
+                    # Check for block comment: --[[ ... ]]
+                    if i + 3 < the_end && bs[i + 2] == 0x5B && bs[i + 3] == 0x5B
+                        j = i + 4
+                        while j + 1 < the_end
+                            if bs[j] == 0x5D && bs[j + 1] == 0x5D
+                                self.result_pos = j + 2
+                                self.success = 1
+                                return
+                            end
+                            j += 1
+                        end
+                        self.result_pos = the_end
+                        self.success = 1
+                        return
+                    end
+                    # Line comment
+                    j = i + 2
+                    while j < the_end && bs[j] != 0x0A
+                        j += 1
+                    end
+                    self.result_pos = j
+                    self.success = 1
+                    return
+                end
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i = self.pos
+                the_end = self.scan_end
+                bs = self.bytes
+
+                # Long string: [[ ... ]]
+                if i + 1 < the_end && bs[i] == 0x5B && bs[i + 1] == 0x5B
+                    j = i + 2
+                    while j + 1 < the_end
+                        if bs[j] == 0x5D && bs[j + 1] == 0x5D
+                            self.result_pos = j + 2
+                            self.success = 1
+                            return
+                        end
+                        j += 1
+                    end
+                    self.result_pos = the_end
+                    self.success = 1
+                    return
+                end
+
+                # Simple string: " or '
+                if i < the_end && (bs[i] == 0x22 || bs[i] == 0x27)
+                    q = bs[i]
+                    j = i + 1
+                    while j < the_end
+                        if bs[j] == 0x5C
+                            j += 2
+                            next
+                        end
+                        if bs[j] == q
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        end
+                        j += 1
+                    end
+                    self.result_pos = the_end
+                    self.success = 1
+                    return
+                end
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j = self.pos
+                the_end = self.scan_end
+                bs = self.bytes
+
+                while j < the_end
+                    b = bs[j]
+                    if b == 0x0A
+                        break
+                    end
+                    # Stop at -- comment
+                    if b == 0x2D && j + 1 < the_end && bs[j + 1] == 0x2D
+                        break
+                    end
+                    j += 1
+                end
+
+                self.result_pos = j
+            }
+        }
+
+    domain:
+        bytes = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+failures = 0
+
+# Test 1: Skip -- line comment
+s1 = LuaSyntaxSkipperFsm.new
+inp1 = "-- comment\ncode".bytes
+s1.setup(inp1, 0, inp1.length)
+s1.do_skip_comment()
+if s1.get_success() != 1 || s1.get_result_pos() != 10
+    puts("FAIL 1: success=#{s1.get_success()}, pos=#{s1.get_result_pos()}")
+    failures += 1
+end
+
+# Test 2: Skip --[[ block comment ]]
+s2 = LuaSyntaxSkipperFsm.new
+inp2 = "--[[ block ]]code".bytes
+s2.setup(inp2, 0, inp2.length)
+s2.do_skip_comment()
+if s2.get_success() != 1 || s2.get_result_pos() != 13
+    puts("FAIL 2: success=#{s2.get_success()}, pos=#{s2.get_result_pos()}")
+    failures += 1
+end
+
+# Test 3: Not a comment
+s3 = LuaSyntaxSkipperFsm.new
+inp3 = "x + 1".bytes
+s3.setup(inp3, 0, inp3.length)
+s3.do_skip_comment()
+if s3.get_success() != 0
+    puts("FAIL 3: should not be comment")
+    failures += 1
+end
+
+# Test 4: Skip [[ long string ]]
+s4 = LuaSyntaxSkipperFsm.new
+inp4 = "[[hello world]]rest".bytes
+s4.setup(inp4, 0, inp4.length)
+s4.do_skip_string()
+if s4.get_success() != 1 || s4.get_result_pos() != 15
+    puts("FAIL 4: success=#{s4.get_success()}, pos=#{s4.get_result_pos()}")
+    failures += 1
+end
+
+# Test 5: Skip simple string
+s5 = LuaSyntaxSkipperFsm.new
+inp5 = "\"hello\" rest".bytes
+s5.setup(inp5, 0, inp5.length)
+s5.do_skip_string()
+if s5.get_success() != 1 || s5.get_result_pos() != 7
+    puts("FAIL 5: success=#{s5.get_success()}, pos=#{s5.get_result_pos()}")
+    failures += 1
+end
+
+# Test 6: Find line end stops at --
+s6 = LuaSyntaxSkipperFsm.new
+inp6 = "x + 1 -- comment".bytes
+s6.setup(inp6, 0, inp6.length)
+s6.do_find_line_end()
+if s6.get_result_pos() != 6
+    puts("FAIL 6: pos=#{s6.get_result_pos()}, expected 6")
+    failures += 1
+end
+
+if failures > 0
+    puts("FAIL: #{failures} failures")
+    exit(1)
+end
+puts("PASS: lua_skipper (6 cases)")

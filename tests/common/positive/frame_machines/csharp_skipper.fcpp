@@ -1,0 +1,382 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <algorithm>
+
+// CSharpSyntaxSkipper -- FSM for skipping C# comments and strings.
+// Translated from framec's native_region_scanner/csharp_skipper.frs
+//
+// Handles: // line comments, /* */ block comments, # preprocessor directives,
+// "..." simple strings, @"..." verbatim strings, $"..." interpolated strings,
+// $"""...""" raw strings, C-like line endings, balanced parens.
+
+@@system CSharpSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: std::vector<uint8_t>, start: int, length: int) {
+            this->bytes = input_bytes;
+            this->pos = start;
+            this->scan_end = length;
+        }
+        get_result_pos(): int {
+            return this->result_pos;
+        }
+        get_success(): int {
+            return this->success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                // Preprocessor directive: # ... newline
+                if (i < end && bs[i] == '#') {
+                    int j = i + 1;
+                    while (j < end && bs[j] != '\n') {
+                        j++;
+                    }
+                    this->result_pos = j;
+                    this->success = 1;
+                    return;
+                }
+
+                // Line comment: //
+                if (i + 1 < end && bs[i] == '/' && bs[i + 1] == '/') {
+                    int j = i + 2;
+                    while (j < end && bs[j] != '\n') {
+                        j++;
+                    }
+                    this->result_pos = j;
+                    this->success = 1;
+                    return;
+                }
+
+                // Block comment: /* ... */
+                if (i + 1 < end && bs[i] == '/' && bs[i + 1] == '*') {
+                    int j = i + 2;
+                    while (j + 1 < end) {
+                        if (bs[j] == '*' && bs[j + 1] == '/') {
+                            this->result_pos = j + 2;
+                            this->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this->result_pos = end;
+                    this->success = 1;
+                    return;
+                }
+
+                this->success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                if (i >= end) {
+                    this->success = 0;
+                    return;
+                }
+
+                int b0 = bs[i];
+
+                // Verbatim string @"..." (doubled quotes for escape)
+                if (b0 == '@' && i + 1 < end && bs[i + 1] == '"') {
+                    int j = i + 2;
+                    while (j < end) {
+                        if (bs[j] == '"') {
+                            if (j + 1 < end && bs[j + 1] == '"') {
+                                j += 2;
+                                continue;
+                            }
+                            this->result_pos = j + 1;
+                            this->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this->result_pos = end;
+                    this->success = 1;
+                    return;
+                }
+
+                // Interpolated string $"..." or $@"..." or raw $"""..."""
+                if (b0 == '$') {
+                    int j = i + 1;
+                    // Skip additional $
+                    while (j < end && bs[j] == '$') {
+                        j++;
+                    }
+                    // Check for @
+                    if (j < end && bs[j] == '@') {
+                        j++;
+                    }
+                    // Count opening quotes
+                    int quotes = 0;
+                    while (j < end && bs[j] == '"') {
+                        quotes++;
+                        j++;
+                    }
+                    if (quotes == 0) {
+                        this->success = 0;
+                        return;
+                    }
+                    // Raw string (3+ quotes)
+                    if (quotes >= 3) {
+                        while (j < end) {
+                            if (bs[j] == '"') {
+                                int q = 0;
+                                int p = j;
+                                while (p < end && bs[p] == '"') {
+                                    q++;
+                                    p++;
+                                }
+                                if (q >= quotes) {
+                                    this->result_pos = p;
+                                    this->success = 1;
+                                    return;
+                                }
+                                j = p;
+                                continue;
+                            }
+                            j++;
+                        }
+                        this->result_pos = end;
+                        this->success = 1;
+                        return;
+                    }
+                    // Normal interpolated string
+                    while (j < end) {
+                        if (bs[j] == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == '"') {
+                            this->result_pos = j + 1;
+                            this->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this->result_pos = end;
+                    this->success = 1;
+                    return;
+                }
+
+                // Simple string: " or '
+                if (b0 == '"' || b0 == '\'') {
+                    int q = b0;
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == q) {
+                            this->result_pos = j + 1;
+                            this->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this->result_pos = end;
+                    this->success = 1;
+                    return;
+                }
+
+                this->success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                while (j < end) {
+                    int b = bs[j];
+                    if (b == '\n' || b == ';') {
+                        break;
+                    }
+                    // Stop at // or /* comment
+                    if (b == '/' && j + 1 < end && (bs[j + 1] == '/' || bs[j + 1] == '*')) {
+                        break;
+                    }
+                    // Stop at # preprocessor
+                    if (b == '#') {
+                        break;
+                    }
+                    j++;
+                }
+
+                this->result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                if (i >= end || bs[i] != '(') {
+                    this->success = 0;
+                    return;
+                }
+
+                int depth = 1;
+                int j = i + 1;
+                while (j < end && depth > 0) {
+                    int b = bs[j];
+                    if (b == '(') {
+                        depth++;
+                    } else if (b == ')') {
+                        depth--;
+                    } else if (b == '"' || b == '\'') {
+                        int q = b;
+                        j++;
+                        while (j < end && bs[j] != q) {
+                            if (bs[j] == '\\') {
+                                j++;
+                            }
+                            j++;
+                        }
+                    }
+                    j++;
+                }
+
+                if (depth == 0) {
+                    this->result_pos = j;
+                    this->success = 1;
+                } else {
+                    this->result_pos = end;
+                    this->success = 0;
+                }
+            }
+        }
+
+    domain:
+        bytes: std::vector<uint8_t> = {}
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+int main() {
+    int failures = 0;
+
+    auto to_bytes = [](const std::string& s) -> std::vector<uint8_t> {
+        return std::vector<uint8_t>(s.begin(), s.end());
+    };
+
+    // Test 1: Skip // line comment
+    auto s1 = CSharpSyntaxSkipperFsm();
+    auto inp1 = to_bytes("// comment\ncode");
+    s1.setup(inp1, 0, inp1.size());
+    s1.do_skip_comment();
+    if (s1.get_success() != 1 || s1.get_result_pos() != 10) {
+        printf("FAIL 1: success=%d, pos=%d\n", s1.get_success(), s1.get_result_pos());
+        failures++;
+    }
+
+    // Test 2: Skip /* */ block comment
+    auto s2 = CSharpSyntaxSkipperFsm();
+    auto inp2 = to_bytes("/* block */code");
+    s2.setup(inp2, 0, inp2.size());
+    s2.do_skip_comment();
+    if (s2.get_success() != 1 || s2.get_result_pos() != 11) {
+        printf("FAIL 2: success=%d, pos=%d\n", s2.get_success(), s2.get_result_pos());
+        failures++;
+    }
+
+    // Test 3: Skip simple string "hello"
+    auto s3 = CSharpSyntaxSkipperFsm();
+    auto inp3 = to_bytes("\"hello\" rest");
+    s3.setup(inp3, 0, inp3.size());
+    s3.do_skip_string();
+    if (s3.get_success() != 1 || s3.get_result_pos() != 7) {
+        printf("FAIL 3: success=%d, pos=%d\n", s3.get_success(), s3.get_result_pos());
+        failures++;
+    }
+
+    // Test 4: Skip verbatim string @"verbatim ""quote"""
+    auto s4 = CSharpSyntaxSkipperFsm();
+    auto inp4 = to_bytes("@\"verbatim \"\"quote\"\"\" rest");
+    s4.setup(inp4, 0, inp4.size());
+    s4.do_skip_string();
+    if (s4.get_success() != 1 || s4.get_result_pos() != 21) {
+        printf("FAIL 4: success=%d, pos=%d\n", s4.get_success(), s4.get_result_pos());
+        failures++;
+    }
+
+    // Test 5: Skip interpolated string $"interp {x}"
+    auto s5 = CSharpSyntaxSkipperFsm();
+    auto inp5 = to_bytes("$\"interp {x}\" rest");
+    s5.setup(inp5, 0, inp5.size());
+    s5.do_skip_string();
+    if (s5.get_success() != 1 || s5.get_result_pos() != 13) {
+        printf("FAIL 5: success=%d, pos=%d\n", s5.get_success(), s5.get_result_pos());
+        failures++;
+    }
+
+    // Test 6: Find line end (stops at // comment)
+    auto s6 = CSharpSyntaxSkipperFsm();
+    auto inp6 = to_bytes("x + 1 // comment");
+    s6.setup(inp6, 0, inp6.size());
+    s6.do_find_line_end();
+    if (s6.get_result_pos() != 6) {
+        printf("FAIL 6: pos=%d, expected 6\n", s6.get_result_pos());
+        failures++;
+    }
+
+    // Test 7: Balanced parens
+    auto s7 = CSharpSyntaxSkipperFsm();
+    auto inp7 = to_bytes("(a, f(b)) rest");
+    s7.setup(inp7, 0, inp7.size());
+    s7.do_balanced_paren_end();
+    if (s7.get_success() != 1 || s7.get_result_pos() != 9) {
+        printf("FAIL 7: success=%d, pos=%d\n", s7.get_success(), s7.get_result_pos());
+        failures++;
+    }
+
+    // Test 8: Skip # preprocessor directive
+    auto s8 = CSharpSyntaxSkipperFsm();
+    auto inp8 = to_bytes("#region Foo\ncode");
+    s8.setup(inp8, 0, inp8.size());
+    s8.do_skip_comment();
+    if (s8.get_success() != 1 || s8.get_result_pos() != 11) {
+        printf("FAIL 8: success=%d, pos=%d\n", s8.get_success(), s8.get_result_pos());
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: %d failures\n", failures);
+        return 1;
+    }
+    printf("PASS: csharp_skipper (8 cases)\n");
+    return 0;
+}

@@ -1,0 +1,384 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <algorithm>
+
+// PhpSyntaxSkipper -- FSM for skipping PHP comments and strings.
+// Translated from framec's native_region_scanner/php_skipper.frs
+//
+// Handles: // line comments, # line comments, /* */ block comments,
+// "..." and '...' strings, <<<EOT heredoc/nowdoc,
+// PHP-style line endings, balanced parens.
+
+@@system PhpSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: std::vector<uint8_t>, start: int, length: int) {
+            this->bytes = input_bytes;
+            this->pos = start;
+            this->scan_end = length;
+        }
+        get_result_pos(): int {
+            return this->result_pos;
+        }
+        get_success(): int {
+            return this->success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                // Line comment: //
+                if (i + 1 < end && bs[i] == '/' && bs[i + 1] == '/') {
+                    int j = i + 2;
+                    while (j < end && bs[j] != '\n') {
+                        j++;
+                    }
+                    this->result_pos = j;
+                    this->success = 1;
+                    return;
+                }
+
+                // Hash comment: #
+                if (i < end && bs[i] == '#') {
+                    int j = i + 1;
+                    while (j < end && bs[j] != '\n') {
+                        j++;
+                    }
+                    this->result_pos = j;
+                    this->success = 1;
+                    return;
+                }
+
+                // Block comment: /* ... */
+                if (i + 1 < end && bs[i] == '/' && bs[i + 1] == '*') {
+                    int j = i + 2;
+                    while (j + 1 < end) {
+                        if (bs[j] == '*' && bs[j + 1] == '/') {
+                            this->result_pos = j + 2;
+                            this->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this->result_pos = end;
+                    this->success = 1;
+                    return;
+                }
+
+                this->success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                // Heredoc/nowdoc: <<<EOT ... EOT;
+                if (i + 2 < end && bs[i] == '<' && bs[i + 1] == '<' && bs[i + 2] == '<') {
+                    int j = i + 3;
+                    // Skip optional quote for nowdoc
+                    int nowdoc = 0;
+                    if (j < end && bs[j] == '\'') {
+                        nowdoc = 1;
+                        j++;
+                    }
+                    // Read tag name
+                    int tag_start = j;
+                    while (j < end && (std::isalnum(bs[j]) || bs[j] == '_')) {
+                        j++;
+                    }
+                    int tag_end = j;
+                    if (nowdoc && j < end && bs[j] == '\'') {
+                        j++;
+                    }
+                    int tag_len = tag_end - tag_start;
+                    if (tag_len > 0) {
+                        // Skip to newline
+                        while (j < end && bs[j] != '\n') {
+                            j++;
+                        }
+                        if (j < end) {
+                            j++;
+                        }
+                        // Scan for closing tag at start of line
+                        while (j < end) {
+                            if (j + tag_len <= end && std::equal(bs.begin() + tag_start, bs.begin() + tag_end, bs.begin() + j)) {
+                                int k = j + tag_len;
+                                if (k < end && bs[k] == ';') {
+                                    k++;
+                                }
+                                if (k >= end || bs[k] == '\n') {
+                                    if (k < end && bs[k] == '\n') {
+                                        k++;
+                                    }
+                                    this->result_pos = k;
+                                    this->success = 1;
+                                    return;
+                                }
+                            }
+                            while (j < end && bs[j] != '\n') {
+                                j++;
+                            }
+                            if (j < end) {
+                                j++;
+                            }
+                        }
+                        this->result_pos = end;
+                        this->success = 1;
+                        return;
+                    }
+                }
+
+                // Simple string: " or '
+                if (i < end && (bs[i] == '"' || bs[i] == '\'')) {
+                    int q = bs[i];
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == q) {
+                            this->result_pos = j + 1;
+                            this->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this->result_pos = end;
+                    this->success = 1;
+                    return;
+                }
+
+                this->success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+                int in_string = 0;
+
+                while (j < end) {
+                    int b = bs[j];
+                    if (b == '\n') {
+                        break;
+                    }
+
+                    // Inside string
+                    if (in_string != 0) {
+                        if (b == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = 0;
+                        }
+                        j++;
+                        continue;
+                    }
+
+                    // Terminators
+                    if (b == ';' || b == '}') {
+                        break;
+                    }
+                    if (b == '/' && j + 1 < end && (bs[j + 1] == '/' || bs[j + 1] == '*')) {
+                        break;
+                    }
+                    if (b == '#') {
+                        break;
+                    }
+
+                    // String starts
+                    if (b == '\'' || b == '"') {
+                        in_string = b;
+                        j++;
+                        continue;
+                    }
+
+                    j++;
+                }
+
+                this->result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                if (i >= end || bs[i] != '(') {
+                    this->success = 0;
+                    return;
+                }
+
+                int depth = 0;
+                int in_string = 0;
+
+                while (i < end) {
+                    int b = bs[i];
+
+                    // Inside string
+                    if (in_string != 0) {
+                        if (b == '\\') {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = 0;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '\'' || b == '"') {
+                        in_string = b;
+                        i++;
+                    } else if (b == '(') {
+                        depth++;
+                        i++;
+                    } else if (b == ')') {
+                        depth--;
+                        i++;
+                        if (depth == 0) {
+                            this->result_pos = i;
+                            this->success = 1;
+                            return;
+                        }
+                    } else {
+                        i++;
+                    }
+                }
+
+                this->success = 0;
+            }
+        }
+
+    domain:
+        bytes: std::vector<uint8_t> = {}
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+int main() {
+    int failures = 0;
+
+    auto to_bytes = [](const std::string& s) -> std::vector<uint8_t> {
+        return std::vector<uint8_t>(s.begin(), s.end());
+    };
+
+    // Test 1: Skip // line comment
+    auto s1 = PhpSyntaxSkipperFsm();
+    auto inp1 = to_bytes("// comment\ncode");
+    s1.setup(inp1, 0, inp1.size());
+    s1.do_skip_comment();
+    if (s1.get_success() != 1 || s1.get_result_pos() != 10) {
+        printf("FAIL 1: success=%d, pos=%d\n", s1.get_success(), s1.get_result_pos());
+        failures++;
+    }
+
+    // Test 2: Skip # comment
+    auto s2 = PhpSyntaxSkipperFsm();
+    auto inp2 = to_bytes("# comment\ncode");
+    s2.setup(inp2, 0, inp2.size());
+    s2.do_skip_comment();
+    if (s2.get_success() != 1 || s2.get_result_pos() != 9) {
+        printf("FAIL 2: success=%d, pos=%d\n", s2.get_success(), s2.get_result_pos());
+        failures++;
+    }
+
+    // Test 3: Skip /* */ block comment
+    auto s3 = PhpSyntaxSkipperFsm();
+    auto inp3 = to_bytes("/* block */code");
+    s3.setup(inp3, 0, inp3.size());
+    s3.do_skip_comment();
+    if (s3.get_success() != 1 || s3.get_result_pos() != 11) {
+        printf("FAIL 3: success=%d, pos=%d\n", s3.get_success(), s3.get_result_pos());
+        failures++;
+    }
+
+    // Test 4: Skip double-quoted string
+    auto s4 = PhpSyntaxSkipperFsm();
+    auto inp4 = to_bytes("\"hello\" rest");
+    s4.setup(inp4, 0, inp4.size());
+    s4.do_skip_string();
+    if (s4.get_success() != 1 || s4.get_result_pos() != 7) {
+        printf("FAIL 4: success=%d, pos=%d\n", s4.get_success(), s4.get_result_pos());
+        failures++;
+    }
+
+    // Test 5: Skip single-quoted string
+    auto s5 = PhpSyntaxSkipperFsm();
+    auto inp5 = to_bytes("'hello' rest");
+    s5.setup(inp5, 0, inp5.size());
+    s5.do_skip_string();
+    if (s5.get_success() != 1 || s5.get_result_pos() != 7) {
+        printf("FAIL 5: success=%d, pos=%d\n", s5.get_success(), s5.get_result_pos());
+        failures++;
+    }
+
+    // Test 6: Skip heredoc
+    auto s6 = PhpSyntaxSkipperFsm();
+    auto inp6 = to_bytes("<<<EOT\nhello world\nEOT;\nnext");
+    s6.setup(inp6, 0, inp6.size());
+    s6.do_skip_string();
+    if (s6.get_success() != 1 || s6.get_result_pos() != 24) {
+        printf("FAIL 6: success=%d, pos=%d\n", s6.get_success(), s6.get_result_pos());
+        failures++;
+    }
+
+    // Test 7: Find line end (stops at ;)
+    auto s7 = PhpSyntaxSkipperFsm();
+    auto inp7 = to_bytes("$x = 1; next");
+    s7.setup(inp7, 0, inp7.size());
+    s7.do_find_line_end();
+    if (s7.get_result_pos() != 6) {
+        printf("FAIL 7: pos=%d, expected 6\n", s7.get_result_pos());
+        failures++;
+    }
+
+    // Test 8: Balanced parens
+    auto s8 = PhpSyntaxSkipperFsm();
+    auto inp8 = to_bytes("(a, f(b)) rest");
+    s8.setup(inp8, 0, inp8.size());
+    s8.do_balanced_paren_end();
+    if (s8.get_success() != 1 || s8.get_result_pos() != 9) {
+        printf("FAIL 8: success=%d, pos=%d\n", s8.get_success(), s8.get_result_pos());
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: %d failures\n", failures);
+        return 1;
+    }
+    printf("PASS: php_skipper (8 cases)\n");
+    return 0;
+}

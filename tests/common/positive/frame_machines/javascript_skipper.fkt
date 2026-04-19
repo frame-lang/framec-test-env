@@ -1,0 +1,207 @@
+@@target kotlin
+
+import kotlin.system.exitProcess
+
+// javascript_skipper -- FSM for skipping syntax constructs.
+
+@@system JavaScriptSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: ByteArray, start: Int, length: Int) {
+            this.bytes = input_bytes
+            this.pos = start
+            this.scan_end = length
+        }
+        get_result_pos(): Int {
+            return this.result_pos
+        }
+        get_success(): Int {
+            return this.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                if (i + 1 < end && (bs[i].toInt() and 0xFF) == '/'.code && (bs[i + 1].toInt() and 0xFF) == '/'.code) {
+                    var j = i + 2
+                    while (j < end && (bs[j].toInt() and 0xFF) != '\n'.code) { j++ }
+                    this.result_pos = j; this.success = 1; return
+                }
+                if (i + 1 < end && (bs[i].toInt() and 0xFF) == '/'.code && (bs[i + 1].toInt() and 0xFF) == '*'.code) {
+                    var j = i + 2
+                    while (j + 1 < end) {
+                        if ((bs[j].toInt() and 0xFF) == '*'.code && (bs[j + 1].toInt() and 0xFF) == '/'.code) {
+                            this.result_pos = j + 2; this.success = 1; return
+                        }
+                        j++
+                    }
+                    this.result_pos = end; this.success = 1; return
+                }
+                this.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                if (i < end && (bs[i].toInt() and 0xFF) == '`'.code) {
+                    var j = i + 1; var braceDepth = 0
+                    while (j < end) {
+                        if ((bs[j].toInt() and 0xFF) == '`'.code && braceDepth == 0) { this.result_pos = j + 1; this.success = 1; return }
+                        if ((bs[j].toInt() and 0xFF) == '\\'.code) { j += 2; continue }
+                        if ((bs[j].toInt() and 0xFF) == '$'.code && j + 1 < end && (bs[j + 1].toInt() and 0xFF) == '{'.code) { braceDepth++; j += 2; continue }
+                        if ((bs[j].toInt() and 0xFF) == '}'.code && braceDepth > 0) { braceDepth-- }
+                        j++
+                    }
+                    this.result_pos = end; this.success = 1; return
+                }
+
+                if (i < end && ((bs[i].toInt() and 0xFF) == '"'.code || (bs[i].toInt() and 0xFF) == '\''.code)) {
+                    val q = (bs[i].toInt() and 0xFF)
+                    var j = i + 1
+                    while (j < end) {
+                        if ((bs[j].toInt() and 0xFF) == '\\'.code) { j += 2; continue }
+                        if ((bs[j].toInt() and 0xFF) == q) { this.result_pos = j + 1; this.success = 1; return }
+                        j++
+                    }
+                    this.result_pos = end; this.success = 1; return
+                }
+                this.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                var j = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                var inString = 0; var inTemplate = 0; var tplBraceDepth = 0
+                while (j < end) {
+                    val b = (bs[j].toInt() and 0xFF)
+                    if (b == '\n'.code) { break }
+                    if (inTemplate != 0) {
+                        if (b == '`'.code && tplBraceDepth == 0) { inTemplate = 0; j++; continue }
+                        if (b == '\\'.code) { j += 2; continue }
+                        if (b == '$'.code && j + 1 < end && (bs[j + 1].toInt() and 0xFF) == '{'.code) { tplBraceDepth++; j += 2; continue }
+                        if (b == '}'.code && tplBraceDepth > 0) { tplBraceDepth-- }
+                        j++; continue
+                    }
+                    if (inString != 0) {
+                        if (b == '\\'.code) { j += 2; continue }
+                        if (b == inString) { inString = 0 }
+                        j++; continue
+                    }
+                    if (b == ';'.code || b == '}'.code) { break }
+                    if (b == '/'.code && j + 1 < end && ((bs[j + 1].toInt() and 0xFF) == '/'.code || (bs[j + 1].toInt() and 0xFF) == '*'.code)) { break }
+                    if (b == '\''.code || b == '"'.code) { inString = b; j++; continue }
+                    if (b == '`'.code) { inTemplate = 1; j++; continue }
+                    j++
+                }
+                this.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                var i = this.pos
+                val end = this.scan_end
+                val bs = this.bytes
+
+                if (i >= end || (bs[i].toInt() and 0xFF) != '('.code) { this.success = 0; return }
+                var depth = 0; var inString = 0; var inTemplate = 0
+                while (i < end) {
+                    val b = (bs[i].toInt() and 0xFF)
+                    if (inTemplate != 0) { if (b == '`'.code) { inTemplate = 0 }; if (b == '\\'.code) { i += 2; continue }; i++; continue }
+                    if (inString != 0) { if (b == '\\'.code) { i += 2; continue }; if (b == inString) { inString = 0 }; i++; continue }
+                    if (b == '\''.code || b == '"'.code) { inString = b; i++ }
+                    else if (b == '`'.code) { inTemplate = 1; i++ }
+                    else if (b == '('.code) { depth++; i++ }
+                    else if (b == ')'.code) { depth--; i++; if (depth == 0) { this.result_pos = i; this.success = 1; return } }
+                    else { i++ }
+                }
+                this.success = 0
+            }
+        }
+
+    domain:
+        bytes: ByteArray = ByteArray(0)
+        pos: Int = 0
+        scan_end: Int = 0
+        result_pos: Int = 0
+        success: Int = 1
+}
+
+fun main() {
+    var failures = 0
+
+    val s1 = @@JavaScriptSyntaxSkipperFsm()
+    val inp1 = "// hello\ncode".toByteArray()
+    s1.setup(inp1, 0, inp1.size)
+    s1.do_skip_comment()
+    if (s1.get_success() != 1 || s1.get_result_pos() != 8) { println("FAIL 1: Skip line comment"); failures++ }
+
+    val s2 = @@JavaScriptSyntaxSkipperFsm()
+    val inp2 = "/* block */code".toByteArray()
+    s2.setup(inp2, 0, inp2.size)
+    s2.do_skip_comment()
+    if (s2.get_success() != 1 || s2.get_result_pos() != 11) { println("FAIL 2: Skip block comment"); failures++ }
+
+    val s3 = @@JavaScriptSyntaxSkipperFsm()
+    val inp3 = "\"hello world\" rest".toByteArray()
+    s3.setup(inp3, 0, inp3.size)
+    s3.do_skip_string()
+    if (s3.get_success() != 1 || s3.get_result_pos() != 13) { println("FAIL 3: Skip double-quoted string"); failures++ }
+
+    val s4 = @@JavaScriptSyntaxSkipperFsm()
+    val inp4 = "`template \${x}` rest".toByteArray()
+    s4.setup(inp4, 0, inp4.size)
+    s4.do_skip_string()
+    if (s4.get_success() != 1 || s4.get_result_pos() != 15) { println("FAIL 4: Skip template literal"); failures++ }
+
+    val s5 = @@JavaScriptSyntaxSkipperFsm()
+    val inp5 = "x + 1\nmore".toByteArray()
+    s5.setup(inp5, 0, inp5.size)
+    s5.do_find_line_end()
+    if (s5.get_result_pos() != 5) { println("FAIL 5: Find line end"); failures++ }
+
+    val s6 = @@JavaScriptSyntaxSkipperFsm()
+    val inp6 = "x + 1".toByteArray()
+    s6.setup(inp6, 0, inp6.size)
+    s6.do_skip_comment()
+    if (s6.get_success() != 0) { println("FAIL 6: Not a comment"); failures++ }
+
+    val s7 = @@JavaScriptSyntaxSkipperFsm()
+    val inp7 = "(a, `t`, c) rest".toByteArray()
+    s7.setup(inp7, 0, inp7.size)
+    s7.do_balanced_paren_end()
+    if (s7.get_success() != 1 || s7.get_result_pos() != 11) { println("FAIL 7: Balanced parens with template"); failures++ }
+
+    val s8 = @@JavaScriptSyntaxSkipperFsm()
+    val inp8 = "x + 1 // comment".toByteArray()
+    s8.setup(inp8, 0, inp8.size)
+    s8.do_find_line_end()
+    if (s8.get_result_pos() != 6) { println("FAIL 8: Find line end at //"); failures++ }
+
+    if (failures > 0) { println("FAIL: $failures failures"); exitProcess(1) }
+    println("PASS: javascript_skipper (8 cases)")
+}

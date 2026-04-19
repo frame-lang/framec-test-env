@@ -1,0 +1,223 @@
+@@target rust
+
+// LuaSyntaxSkipper — FSM for skipping Lua comments and strings.
+// Translated from framec's native_region_scanner/lua_skipper.frs
+//
+// Handles: -- line comments, --[[ block comments ]], [[ long strings ]],
+// simple strings, Lua-style line endings.
+
+@@system LuaSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: Vec<u8>, start: i64, length: i64) {
+            self.bytes = input_bytes;
+            self.pos = start;
+            self.scan_end = length;
+        }
+        get_result_pos(): i64 {
+            return self.result_pos;
+        }
+        get_success(): i64 {
+            return self.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                let i = self.pos as usize;
+                let end = self.scan_end as usize;
+                let bs = &self.bytes;
+
+                // Lua line comment: --
+                if i + 1 < end && bs[i] == b'-' && bs[i + 1] == b'-' {
+                    // Check for block comment: --[[ ... ]]
+                    if i + 3 < end && bs[i + 2] == b'[' && bs[i + 3] == b'[' {
+                        let mut j = i + 4;
+                        while j + 1 < end {
+                            if bs[j] == b']' && bs[j + 1] == b']' {
+                                self.result_pos = (j + 2) as i64;
+                                self.success = 1;
+                                return;
+                            }
+                            j += 1;
+                        }
+                        self.result_pos = end as i64;
+                        self.success = 1;
+                        return;
+                    }
+                    // Line comment
+                    let mut j = i + 2;
+                    while j < end && bs[j] != b'\n' {
+                        j += 1;
+                    }
+                    self.result_pos = j as i64;
+                    self.success = 1;
+                    return;
+                }
+
+                self.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                let i = self.pos as usize;
+                let end = self.scan_end as usize;
+                let bs = &self.bytes;
+
+                // Long string: [[ ... ]]
+                if i + 1 < end && bs[i] == b'[' && bs[i + 1] == b'[' {
+                    let mut j = i + 2;
+                    while j + 1 < end {
+                        if bs[j] == b']' && bs[j + 1] == b']' {
+                            self.result_pos = (j + 2) as i64;
+                            self.success = 1;
+                            return;
+                        }
+                        j += 1;
+                    }
+                    self.result_pos = end as i64;
+                    self.success = 1;
+                    return;
+                }
+
+                // Simple string: " or '
+                if i < end && (bs[i] == b'"' || bs[i] == b'\'') {
+                    let q = bs[i];
+                    let mut j = i + 1;
+                    while j < end {
+                        if bs[j] == b'\\' {
+                            j += 2;
+                            continue;
+                        }
+                        if bs[j] == q {
+                            self.result_pos = (j + 1) as i64;
+                            self.success = 1;
+                            return;
+                        }
+                        j += 1;
+                    }
+                    self.result_pos = end as i64;
+                    self.success = 1;
+                    return;
+                }
+
+                self.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                let mut j = self.pos as usize;
+                let end = self.scan_end as usize;
+                let bs = &self.bytes;
+
+                while j < end {
+                    let b = bs[j];
+                    if b == b'\n' {
+                        break;
+                    }
+                    // Stop at -- comment
+                    if b == b'-' && j + 1 < end && bs[j + 1] == b'-' {
+                        break;
+                    }
+                    j += 1;
+                }
+
+                self.result_pos = j as i64;
+            }
+        }
+
+    domain:
+        bytes: Vec<u8> = Vec::new()
+        pos: i64 = 0
+        scan_end: i64 = 0
+        result_pos: i64 = 0
+        success: i64 = 1
+}
+
+fn main() {
+    let mut failures = 0;
+
+    // Test 1: Skip -- line comment
+    let mut s1 = @@LuaSyntaxSkipperFsm();
+    let inp1 = b"-- comment\ncode".to_vec();
+    let len1 = inp1.len() as i64;
+    s1.setup(inp1, 0, len1);
+    s1.do_skip_comment();
+    if s1.get_success() != 1 || s1.get_result_pos() != 10 {
+        println!("FAIL 1: success={}, pos={}", s1.get_success(), s1.get_result_pos());
+        failures += 1;
+    }
+
+    // Test 2: Skip --[[ block comment ]]
+    let mut s2 = @@LuaSyntaxSkipperFsm();
+    let inp2 = b"--[[ block ]]code".to_vec();
+    let len2 = inp2.len() as i64;
+    s2.setup(inp2, 0, len2);
+    s2.do_skip_comment();
+    if s2.get_success() != 1 || s2.get_result_pos() != 13 {
+        println!("FAIL 2: success={}, pos={}", s2.get_success(), s2.get_result_pos());
+        failures += 1;
+    }
+
+    // Test 3: Not a comment
+    let mut s3 = @@LuaSyntaxSkipperFsm();
+    let inp3 = b"x + 1".to_vec();
+    let len3 = inp3.len() as i64;
+    s3.setup(inp3, 0, len3);
+    s3.do_skip_comment();
+    if s3.get_success() != 0 {
+        println!("FAIL 3: should not be comment");
+        failures += 1;
+    }
+
+    // Test 4: Skip [[ long string ]]
+    let mut s4 = @@LuaSyntaxSkipperFsm();
+    let inp4 = b"[[hello world]]rest".to_vec();
+    let len4 = inp4.len() as i64;
+    s4.setup(inp4, 0, len4);
+    s4.do_skip_string();
+    if s4.get_success() != 1 || s4.get_result_pos() != 15 {
+        println!("FAIL 4: success={}, pos={}", s4.get_success(), s4.get_result_pos());
+        failures += 1;
+    }
+
+    // Test 5: Skip simple string
+    let mut s5 = @@LuaSyntaxSkipperFsm();
+    let inp5 = b"\"hello\" rest".to_vec();
+    let len5 = inp5.len() as i64;
+    s5.setup(inp5, 0, len5);
+    s5.do_skip_string();
+    if s5.get_success() != 1 || s5.get_result_pos() != 7 {
+        println!("FAIL 5: success={}, pos={}", s5.get_success(), s5.get_result_pos());
+        failures += 1;
+    }
+
+    // Test 6: Find line end stops at --
+    let mut s6 = @@LuaSyntaxSkipperFsm();
+    let inp6 = b"x + 1 -- comment".to_vec();
+    let len6 = inp6.len() as i64;
+    s6.setup(inp6, 0, len6);
+    s6.do_find_line_end();
+    if s6.get_result_pos() != 6 {
+        println!("FAIL 6: pos={}, expected 6", s6.get_result_pos());
+        failures += 1;
+    }
+
+    if failures > 0 {
+        println!("FAIL: {} failures", failures);
+        std::process::exit(1);
+    }
+    println!("PASS: lua_skipper (6 cases)");
+}

@@ -1,0 +1,297 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// ErlangSyntaxSkipper -- FSM for skipping Erlang comments and strings.
+// Translated from framec's native_region_scanner/erlang_skipper.frs
+//
+// Handles: % line comments, "..." strings, '...' quoted atoms,
+// Erlang-style line endings, balanced parens.
+
+@@system ErlangSyntaxSkipperFsm {
+    operations:
+        Setup(input_bytes: []byte, start: int, length: int) {
+            s.bytes = input_bytes
+            s.pos = start
+            s.scan_end = length
+        }
+        GetResultPos(): int {
+            return s.result_pos
+        }
+        GetSuccess(): int {
+            return s.success
+        }
+
+    interface:
+        DoSkipComment()
+        DoSkipString()
+        DoFindLineEnd()
+        DoBalancedParenEnd()
+
+    machine:
+        $Init {
+            DoSkipComment() { -> $SkipComment }
+            DoSkipString() { -> $SkipString }
+            DoFindLineEnd() { -> $FindLineEnd }
+            DoBalancedParenEnd() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Erlang: % line comment only
+                if i < end && bs[i] == '%' {
+                    j := i + 1
+                    for j < end && bs[j] != '\n' {
+                        j++
+                    }
+                    s.result_pos = j
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Simple string: "..."
+                if i < end && bs[i] == '"' {
+                    j := i + 1
+                    for j < end {
+                        if bs[j] == '\\' {
+                            j += 2
+                            continue
+                        }
+                        if bs[j] == '"' {
+                            s.result_pos = j + 1
+                            s.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    s.result_pos = end
+                    s.success = 1
+                    return
+                }
+
+                // Quoted atoms: '...'
+                if i < end && bs[i] == '\'' {
+                    j := i + 1
+                    for j < end {
+                        if bs[j] == '\\' {
+                            j += 2
+                            continue
+                        }
+                        if bs[j] == '\'' {
+                            s.result_pos = j + 1
+                            s.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    s.result_pos = end
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j := s.pos
+                end := s.scan_end
+                bs := s.bytes
+                inString := byte(0)
+
+                for j < end {
+                    b := bs[j]
+                    if b == '\n' {
+                        break
+                    }
+
+                    // Inside string
+                    if inString != 0 {
+                        if b == '\\' {
+                            j += 2
+                            continue
+                        }
+                        if b == inString {
+                            inString = 0
+                        }
+                        j++
+                        continue
+                    }
+
+                    // Terminators
+                    if b == '%' {
+                        break
+                    }
+
+                    // String starts
+                    if b == '"' || b == '\'' {
+                        inString = b
+                        j++
+                        continue
+                    }
+
+                    j++
+                }
+
+                s.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                if i >= end || bs[i] != '(' {
+                    s.success = 0
+                    return
+                }
+
+                depth := 0
+                inString := byte(0)
+
+                for i < end {
+                    b := bs[i]
+
+                    // Inside string
+                    if inString != 0 {
+                        if b == '\\' {
+                            i += 2
+                            continue
+                        }
+                        if b == inString {
+                            inString = 0
+                        }
+                        i++
+                        continue
+                    }
+
+                    if b == '"' || b == '\'' {
+                        inString = b
+                        i++
+                    } else if b == '(' {
+                        depth++
+                        i++
+                    } else if b == ')' {
+                        depth--
+                        i++
+                        if depth == 0 {
+                            s.result_pos = i
+                            s.success = 1
+                            return
+                        }
+                    } else {
+                        i++
+                    }
+                }
+
+                s.success = 0
+            }
+        }
+
+    domain:
+        bytes: []byte = nil
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+func main() {
+	failures := 0
+
+	// Test 1: Skip % comment
+	s1 := NewErlangSyntaxSkipperFsm()
+	inp1 := []byte("% comment\ncode")
+	s1.Setup(inp1, 0, len(inp1))
+	s1.DoSkipComment()
+	if s1.GetSuccess() != 1 || s1.GetResultPos() != 9 {
+		fmt.Printf("FAIL 1: success=%d, pos=%d\n", s1.GetSuccess(), s1.GetResultPos())
+		failures++
+	}
+
+	// Test 2: Not a comment
+	s2 := NewErlangSyntaxSkipperFsm()
+	inp2 := []byte("x + 1")
+	s2.Setup(inp2, 0, len(inp2))
+	s2.DoSkipComment()
+	if s2.GetSuccess() != 0 {
+		fmt.Println("FAIL 2: should not be comment")
+		failures++
+	}
+
+	// Test 3: Skip double-quoted string
+	s3 := NewErlangSyntaxSkipperFsm()
+	inp3 := []byte("\"hello\" rest")
+	s3.Setup(inp3, 0, len(inp3))
+	s3.DoSkipString()
+	if s3.GetSuccess() != 1 || s3.GetResultPos() != 7 {
+		fmt.Printf("FAIL 3: success=%d, pos=%d\n", s3.GetSuccess(), s3.GetResultPos())
+		failures++
+	}
+
+	// Test 4: Skip quoted atom
+	s4 := NewErlangSyntaxSkipperFsm()
+	inp4 := []byte("'my_atom' rest")
+	s4.Setup(inp4, 0, len(inp4))
+	s4.DoSkipString()
+	if s4.GetSuccess() != 1 || s4.GetResultPos() != 9 {
+		fmt.Printf("FAIL 4: success=%d, pos=%d\n", s4.GetSuccess(), s4.GetResultPos())
+		failures++
+	}
+
+	// Test 5: Find line end (stops at %)
+	s5 := NewErlangSyntaxSkipperFsm()
+	inp5 := []byte("X + 1 % comment")
+	s5.Setup(inp5, 0, len(inp5))
+	s5.DoFindLineEnd()
+	if s5.GetResultPos() != 6 {
+		fmt.Printf("FAIL 5: pos=%d, expected 6\n", s5.GetResultPos())
+		failures++
+	}
+
+	// Test 6: Balanced parens
+	s6 := NewErlangSyntaxSkipperFsm()
+	inp6 := []byte("(a, f(b)) rest")
+	s6.Setup(inp6, 0, len(inp6))
+	s6.DoBalancedParenEnd()
+	if s6.GetSuccess() != 1 || s6.GetResultPos() != 9 {
+		fmt.Printf("FAIL 6: success=%d, pos=%d\n", s6.GetSuccess(), s6.GetResultPos())
+		failures++
+	}
+
+	// Test 7: String with escape
+	s7 := NewErlangSyntaxSkipperFsm()
+	inp7 := []byte("\"he\\\"llo\" rest")
+	s7.Setup(inp7, 0, len(inp7))
+	s7.DoSkipString()
+	if s7.GetSuccess() != 1 || s7.GetResultPos() != 9 {
+		fmt.Printf("FAIL 7: success=%d, pos=%d\n", s7.GetSuccess(), s7.GetResultPos())
+		failures++
+	}
+
+	if failures > 0 {
+		fmt.Printf("FAIL: %d failures\n", failures)
+		os.Exit(1)
+	}
+	fmt.Println("PASS: erlang_skipper (7 cases)")
+}

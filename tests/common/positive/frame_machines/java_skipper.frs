@@ -1,0 +1,251 @@
+@@target rust
+
+// java_skipper -- FSM for skipping syntax constructs.
+
+use std::collections::HashMap;
+
+@@system JavaSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: Vec<u8>, start: i64, length: i64) {
+            self.bytes = input_bytes;
+            self.pos = start;
+            self.scan_end = length;
+        }
+        get_result_pos(): i64 {
+            return self.result_pos;
+        }
+        get_success(): i64 {
+            return self.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                let i = self.pos as usize;
+                let end = self.scan_end as usize;
+                let bs = &self.bytes;
+
+                if i + 1 < end && bs[i] == b'/' && bs[i + 1] == b'/' {
+                    let mut j = i + 2;
+                    while j < end && bs[j] != b'\n' { j += 1; }
+                    self.result_pos = j as i64;
+                    self.success = 1;
+                    return;
+                }
+
+                if i + 1 < end && bs[i] == b'/' && bs[i + 1] == b'*' {
+                    let mut j = i + 2;
+                    while j + 1 < end {
+                        if bs[j] == b'*' && bs[j + 1] == b'/' {
+                            self.result_pos = (j + 2) as i64;
+                            self.success = 1;
+                            return;
+                        }
+                        j += 1;
+                    }
+                    self.result_pos = end as i64;
+                    self.success = 1;
+                    return;
+                }
+
+                self.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                let i = self.pos as usize;
+                let end = self.scan_end as usize;
+                let bs = &self.bytes;
+
+                if i + 2 < end && bs[i] == b'"' && bs[i + 1] == b'"' && bs[i + 2] == b'"' {
+                    let mut j = i + 3;
+                    while j + 2 < end {
+                        if bs[j] == b'"' && bs[j + 1] == b'"' && bs[j + 2] == b'"' {
+                            self.result_pos = (j + 3) as i64;
+                            self.success = 1;
+                            return;
+                        }
+                        j += 1;
+                    }
+                    self.result_pos = end as i64;
+                    self.success = 1;
+                    return;
+                }
+
+                if i < end && (bs[i] == b'"' || bs[i] == b'\'') {
+                    let q = bs[i];
+                    let mut j = i + 1;
+                    while j < end {
+                        if bs[j] == b'\\' { j += 2; continue; }
+                        if bs[j] == q {
+                            self.result_pos = (j + 1) as i64;
+                            self.success = 1;
+                            return;
+                        }
+                        j += 1;
+                    }
+                    self.result_pos = end as i64;
+                    self.success = 1;
+                    return;
+                }
+
+                self.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                let mut j = self.pos as usize;
+                let end = self.scan_end as usize;
+                let bs = &self.bytes;
+
+                while j < end {
+                    let b = bs[j];
+                    if b == b'\n' || b == b';' { break; }
+                    if b == b'/' && j + 1 < end && bs[j + 1] == b'/' { break; }
+                    if b == b'/' && j + 1 < end && bs[j + 1] == b'*' { break; }
+                    j += 1;
+                }
+
+                self.result_pos = j as i64;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                let i = self.pos as usize;
+                let end = self.scan_end as usize;
+                let bs = &self.bytes;
+
+                if i >= end || bs[i] != b'(' { self.success = 0; return; }
+
+                let mut depth: i32 = 1;
+                let mut j = i + 1;
+                while j < end && depth > 0 {
+                    let b = bs[j];
+                    if b == b'(' { depth += 1; }
+                    else if b == b')' { depth -= 1; }
+                    else if b == b'"' || b == b'\'' {
+                        let q = b;
+                        j += 1;
+                        while j < end && bs[j] != q {
+                            if bs[j] == b'\\' { j += 1; }
+                            j += 1;
+                        }
+                    }
+                    j += 1;
+                }
+
+                if depth == 0 { self.result_pos = j as i64; self.success = 1; }
+                else { self.result_pos = end as i64; self.success = 0; }
+            }
+        }
+
+    domain:
+        bytes: Vec<u8> = Vec::new()
+        pos: i64 = 0
+        scan_end: i64 = 0
+        result_pos: i64 = 0
+        success: i64 = 1
+}
+
+fn main() {
+    let mut failures = 0;
+
+    // Test 1: Skip line comment
+    let mut s1 = @@JavaSyntaxSkipperFsm();
+    let inp1 = b"// hello\ncode".to_vec();
+    s1.setup(inp1.clone(), 0, inp1.len() as i64);
+    s1.do_skip_comment();
+    if s1.get_success() != 1 || s1.get_result_pos() != 8 {
+        println!("FAIL 1: Skip line comment");
+        failures += 1;
+    }
+
+    // Test 2: Skip block comment
+    let mut s2 = @@JavaSyntaxSkipperFsm();
+    let inp2 = b"/* block */code".to_vec();
+    s2.setup(inp2.clone(), 0, inp2.len() as i64);
+    s2.do_skip_comment();
+    if s2.get_success() != 1 || s2.get_result_pos() != 11 {
+        println!("FAIL 2: Skip block comment");
+        failures += 1;
+    }
+
+    // Test 3: Skip double-quoted string
+    let mut s3 = @@JavaSyntaxSkipperFsm();
+    let inp3 = b"\"hello world\" rest".to_vec();
+    s3.setup(inp3.clone(), 0, inp3.len() as i64);
+    s3.do_skip_string();
+    if s3.get_success() != 1 || s3.get_result_pos() != 13 {
+        println!("FAIL 3: Skip double-quoted string");
+        failures += 1;
+    }
+
+    // Test 4: Triple-quoted string
+    let mut s4 = @@JavaSyntaxSkipperFsm();
+    let inp4 = b"\"\"\"text block content\"\"\" rest".to_vec();
+    s4.setup(inp4.clone(), 0, inp4.len() as i64);
+    s4.do_skip_string();
+    if s4.get_success() != 1 || s4.get_result_pos() != 24 {
+        println!("FAIL 4: Triple-quoted string");
+        failures += 1;
+    }
+
+    // Test 5: Find line end
+    let mut s5 = @@JavaSyntaxSkipperFsm();
+    let inp5 = b"x + 1\nmore".to_vec();
+    s5.setup(inp5.clone(), 0, inp5.len() as i64);
+    s5.do_find_line_end();
+    if s5.get_result_pos() != 5 {
+        println!("FAIL 5: Find line end");
+        failures += 1;
+    }
+
+    // Test 6: Not a comment
+    let mut s6 = @@JavaSyntaxSkipperFsm();
+    let inp6 = b"x + 1".to_vec();
+    s6.setup(inp6.clone(), 0, inp6.len() as i64);
+    s6.do_skip_comment();
+    if s6.get_success() != 0 {
+        println!("FAIL 6: Not a comment");
+        failures += 1;
+    }
+
+    // Test 7: Balanced parens
+    let mut s7 = @@JavaSyntaxSkipperFsm();
+    let inp7 = b"(a, f(b), c) rest".to_vec();
+    s7.setup(inp7.clone(), 0, inp7.len() as i64);
+    s7.do_balanced_paren_end();
+    if s7.get_success() != 1 || s7.get_result_pos() != 12 {
+        println!("FAIL 7: Balanced parens");
+        failures += 1;
+    }
+
+    // Test 8: Find line end at //
+    let mut s8 = @@JavaSyntaxSkipperFsm();
+    let inp8 = b"x + 1 // comment".to_vec();
+    s8.setup(inp8.clone(), 0, inp8.len() as i64);
+    s8.do_find_line_end();
+    if s8.get_result_pos() != 6 {
+        println!("FAIL 8: Find line end at //");
+        failures += 1;
+    }
+
+    if failures > 0 { println!("FAIL: {} failures", failures); std::process::exit(1); }
+    println!("PASS: java_skipper (8 cases)");
+}

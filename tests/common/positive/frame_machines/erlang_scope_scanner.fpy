@@ -1,0 +1,273 @@
+@@target python_3
+
+# ErlangScopeScanner -- FSM for detecting fun(...) -> ... end closures.
+# Translated from framec's native_region_scanner/erlang_scope_scanner.frs
+#
+# Erlang reuses `end` to close: fun, case, if, receive, begin, try.
+# This FSM tracks a depth counter for all block-opening keywords so
+# only the `end` matching our `fun` terminates the scan.
+#
+# Skips % line comments and "..." / '...' string/atom literals.
+# Does NOT match `fun Module:Function/Arity` (function references).
+
+@@system ErlangScopeScannerFsm {
+    operations:
+        setup(input_bytes: list, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos(): int {
+            return self.result_pos
+        }
+        get_success(): int {
+            return self.success
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $CheckFun }
+        }
+
+        $CheckFun {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                # Must start with `fun` keyword
+                if i + 3 > end:
+                    self.success = 0
+                    return
+
+                if bs[i] != ord('f') or bs[i + 1] != ord('u') or bs[i + 2] != ord('n'):
+                    self.success = 0
+                    return
+
+                # Check word boundary (not part of `function` etc.)
+                after = i + 3
+                if after < end and (chr(bs[after]).isalnum() or bs[after] == ord('_')):
+                    self.success = 0
+                    return
+
+                # Skip whitespace after `fun`
+                j = after
+                while j < end and (bs[j] == ord(' ') or bs[j] == ord('\t') or bs[j] == ord('\n')):
+                    j += 1
+
+                # Check for Module:Function/Arity pattern (function reference, not closure)
+                if j < end and chr(bs[j]).isupper():
+                    k = j
+                    while k < end and (chr(bs[k]).isalnum() or bs[k] == ord('_')):
+                        k += 1
+                    if k < end and bs[k] == ord(':'):
+                        self.success = 0
+                        return
+
+                # It's a closure: fun(...) -> ... end
+                self.depth = 1
+                self.pos = after
+                -> $ScanBody
+            }
+        }
+
+        $ScanBody {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                while i < end:
+                    b = bs[i]
+
+                    # Skip % line comments
+                    if b == ord('%'):
+                        while i < end and bs[i] != ord('\n'):
+                            i += 1
+                        continue
+
+                    # Skip "..." strings
+                    if b == ord('"'):
+                        i += 1
+                        while i < end:
+                            if bs[i] == ord('\\'):
+                                i += 2
+                                continue
+                            if bs[i] == ord('"'):
+                                i += 1
+                                break
+                            i += 1
+                        continue
+
+                    # Skip '...' quoted atoms
+                    if b == ord("'"):
+                        i += 1
+                        while i < end:
+                            if bs[i] == ord('\\'):
+                                i += 2
+                                continue
+                            if bs[i] == ord("'"):
+                                i += 1
+                                break
+                            i += 1
+                        continue
+
+                    # Check for block-opening keywords (increase depth)
+
+                    # fun
+                    if b == ord('f') and i + 3 <= end and bs[i + 1] == ord('u') and bs[i + 2] == ord('n'):
+                        if i + 3 >= end or (not chr(bs[i + 3]).isalnum() and bs[i + 3] != ord('_')):
+                            self.depth += 1
+                            i += 3
+                            continue
+
+                    # case
+                    if b == ord('c') and i + 4 <= end and bs[i + 1] == ord('a') and bs[i + 2] == ord('s') and bs[i + 3] == ord('e'):
+                        if i + 4 >= end or (not chr(bs[i + 4]).isalnum() and bs[i + 4] != ord('_')):
+                            self.depth += 1
+                            i += 4
+                            continue
+
+                    # if
+                    if b == ord('i') and i + 2 <= end and bs[i + 1] == ord('f'):
+                        if i + 2 >= end or (not chr(bs[i + 2]).isalnum() and bs[i + 2] != ord('_')):
+                            self.depth += 1
+                            i += 2
+                            continue
+
+                    # receive
+                    if b == ord('r') and i + 7 <= end and bs[i + 1] == ord('e') and bs[i + 2] == ord('c') and bs[i + 3] == ord('e') and bs[i + 4] == ord('i') and bs[i + 5] == ord('v') and bs[i + 6] == ord('e'):
+                        if i + 7 >= end or (not chr(bs[i + 7]).isalnum() and bs[i + 7] != ord('_')):
+                            self.depth += 1
+                            i += 7
+                            continue
+
+                    # begin
+                    if b == ord('b') and i + 5 <= end and bs[i + 1] == ord('e') and bs[i + 2] == ord('g') and bs[i + 3] == ord('i') and bs[i + 4] == ord('n'):
+                        if i + 5 >= end or (not chr(bs[i + 5]).isalnum() and bs[i + 5] != ord('_')):
+                            self.depth += 1
+                            i += 5
+                            continue
+
+                    # try
+                    if b == ord('t') and i + 3 <= end and bs[i + 1] == ord('r') and bs[i + 2] == ord('y'):
+                        if i + 3 >= end or (not chr(bs[i + 3]).isalnum() and bs[i + 3] != ord('_')):
+                            self.depth += 1
+                            i += 3
+                            continue
+
+                    # Check for `end` keyword (decrease depth)
+                    if b == ord('e') and i + 3 <= end and bs[i + 1] == ord('n') and bs[i + 2] == ord('d'):
+                        if i + 3 >= end or (not chr(bs[i + 3]).isalnum() and bs[i + 3] != ord('_')):
+                            self.depth -= 1
+                            if self.depth == 0:
+                                self.result_pos = i + 3
+                                self.success = 1
+                                return
+                            i += 3
+                            continue
+
+                    # Skip identifiers (avoid false keyword matches mid-word)
+                    if chr(b).isalpha() or b == ord('_'):
+                        while i < end and (chr(bs[i]).isalnum() or bs[i] == ord('_')):
+                            i += 1
+                        continue
+
+                    i += 1
+
+                # Ran out of bytes without finding matching `end`
+                self.success = 0
+            }
+        }
+
+    domain:
+        bytes: list = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 0
+        depth: int = 0
+}
+
+if __name__ == '__main__':
+    failures = 0
+
+    # Test 1: Simple fun -> end
+    s1 = @@ErlangScopeScannerFsm()
+    inp1 = list(b"fun(X) -> X + 1 end rest")
+    s1.setup(inp1, 0, len(inp1))
+    s1.do_scan()
+    if s1.get_success() != 1 or s1.get_result_pos() != 19:
+        print(f"FAIL 1: success={s1.get_success()}, pos={s1.get_result_pos()}")
+        failures += 1
+
+    # Test 2: Nested fun -> case ... end end
+    s2 = @@ErlangScopeScannerFsm()
+    inp2 = list(b"fun(X) -> case X of 1 -> ok end end rest")
+    s2.setup(inp2, 0, len(inp2))
+    s2.do_scan()
+    if s2.get_success() != 1 or s2.get_result_pos() != 35:
+        print(f"FAIL 2: success={s2.get_success()}, pos={s2.get_result_pos()}")
+        failures += 1
+
+    # Test 3: Not a fun keyword (function)
+    s3 = @@ErlangScopeScannerFsm()
+    inp3 = list(b"function() -> ok end")
+    s3.setup(inp3, 0, len(inp3))
+    s3.do_scan()
+    if s3.get_success() != 0:
+        print(f"FAIL 3: should not match 'function'")
+        failures += 1
+
+    # Test 4: fun Module:Function/Arity (function reference, not closure)
+    s4 = @@ErlangScopeScannerFsm()
+    inp4 = list(b"fun io:format/2")
+    s4.setup(inp4, 0, len(inp4))
+    s4.do_scan()
+    if s4.get_success() != 0:
+        print(f"FAIL 4: should not match function reference")
+        failures += 1
+
+    # Test 5: Nested if ... end inside fun
+    s5 = @@ErlangScopeScannerFsm()
+    inp5 = list(b"fun() -> if true -> ok end end rest")
+    s5.setup(inp5, 0, len(inp5))
+    s5.do_scan()
+    if s5.get_success() != 1 or s5.get_result_pos() != 30:
+        print(f"FAIL 5: success={s5.get_success()}, pos={s5.get_result_pos()}")
+        failures += 1
+
+    # Test 6: String inside fun body (should skip)
+    s6 = @@ErlangScopeScannerFsm()
+    inp6 = list(b'fun() -> "end" end rest')
+    s6.setup(inp6, 0, len(inp6))
+    s6.do_scan()
+    if s6.get_success() != 1 or s6.get_result_pos() != 18:
+        print(f"FAIL 6: success={s6.get_success()}, pos={s6.get_result_pos()}")
+        failures += 1
+
+    # Test 7: Comment inside fun body (should skip)
+    s7 = @@ErlangScopeScannerFsm()
+    inp7 = list(b"fun() -> % end\nok end rest")
+    s7.setup(inp7, 0, len(inp7))
+    s7.do_scan()
+    if s7.get_success() != 1 or s7.get_result_pos() != 21:
+        print(f"FAIL 7: success={s7.get_success()}, pos={s7.get_result_pos()}")
+        failures += 1
+
+    # Test 8: Unmatched fun (no end)
+    s8 = @@ErlangScopeScannerFsm()
+    inp8 = list(b"fun() -> X + 1")
+    s8.setup(inp8, 0, len(inp8))
+    s8.do_scan()
+    if s8.get_success() != 0:
+        print(f"FAIL 8: should fail with no matching end")
+        failures += 1
+
+    if failures > 0:
+        print(f"FAIL: {failures} failures")
+        exit(1)
+    print("PASS: erlang_scope_scanner (8 cases)")

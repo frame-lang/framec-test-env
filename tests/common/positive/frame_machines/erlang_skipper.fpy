@@ -1,0 +1,259 @@
+@@target python_3
+
+# ErlangSyntaxSkipper -- FSM for skipping Erlang comments and strings.
+# Translated from framec's native_region_scanner/erlang_skipper.frs
+#
+# Handles: % line comments, "..." strings, '...' quoted atoms,
+# Erlang-style line endings, balanced parens.
+
+@@system ErlangSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: list, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos(): int {
+            return self.result_pos
+        }
+        get_success(): int {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                # Erlang: % line comment only
+                if i < end and bs[i] == ord('%'):
+                    j = i + 1
+                    while j < end and bs[j] != ord('\n'):
+                        j += 1
+                    self.result_pos = j
+                    self.success = 1
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                # Simple string: "..."
+                if i < end and bs[i] == ord('"'):
+                    j = i + 1
+                    while j < end:
+                        if bs[j] == ord('\\'):
+                            j += 2
+                            continue
+                        if bs[j] == ord('"'):
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = end
+                    self.success = 1
+                    return
+
+                # Quoted atoms: '...'
+                if i < end and bs[i] == ord("'"):
+                    j = i + 1
+                    while j < end:
+                        if bs[j] == ord('\\'):
+                            j += 2
+                            continue
+                        if bs[j] == ord("'"):
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = end
+                    self.success = 1
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j = self.pos
+                end = self.scan_end
+                bs = self.bytes
+                in_string = 0
+
+                while j < end:
+                    b = bs[j]
+                    if b == ord('\n'):
+                        break
+
+                    # Inside string
+                    if in_string != 0:
+                        if b == ord('\\'):
+                            j += 2
+                            continue
+                        if b == in_string:
+                            in_string = 0
+                        j += 1
+                        continue
+
+                    # Terminators
+                    if b == ord('%'):
+                        break
+
+                    # String starts
+                    if b == ord('"') or b == ord("'"):
+                        in_string = b
+                        j += 1
+                        continue
+
+                    j += 1
+
+                self.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                i = self.pos
+                end = self.scan_end
+                bs = self.bytes
+
+                if i >= end or bs[i] != ord('('):
+                    self.success = 0
+                    return
+
+                depth = 0
+                in_string = 0
+
+                while i < end:
+                    b = bs[i]
+
+                    # Inside string
+                    if in_string != 0:
+                        if b == ord('\\'):
+                            i += 2
+                            continue
+                        if b == in_string:
+                            in_string = 0
+                        i += 1
+                        continue
+
+                    if b == ord('"') or b == ord("'"):
+                        in_string = b
+                        i += 1
+                    elif b == ord('('):
+                        depth += 1
+                        i += 1
+                    elif b == ord(')'):
+                        depth -= 1
+                        i += 1
+                        if depth == 0:
+                            self.result_pos = i
+                            self.success = 1
+                            return
+                    else:
+                        i += 1
+
+                self.success = 0
+            }
+        }
+
+    domain:
+        bytes: list = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+if __name__ == '__main__':
+    failures = 0
+
+    # Test 1: Skip % comment
+    s1 = @@ErlangSyntaxSkipperFsm()
+    inp1 = list(b"% comment\ncode")
+    s1.setup(inp1, 0, len(inp1))
+    s1.do_skip_comment()
+    if s1.get_success() != 1 or s1.get_result_pos() != 9:
+        print(f"FAIL 1: success={s1.get_success()}, pos={s1.get_result_pos()}")
+        failures += 1
+
+    # Test 2: Not a comment
+    s2 = @@ErlangSyntaxSkipperFsm()
+    inp2 = list(b"x + 1")
+    s2.setup(inp2, 0, len(inp2))
+    s2.do_skip_comment()
+    if s2.get_success() != 0:
+        print(f"FAIL 2: should not be comment")
+        failures += 1
+
+    # Test 3: Skip double-quoted string
+    s3 = @@ErlangSyntaxSkipperFsm()
+    inp3 = list(b'"hello" rest')
+    s3.setup(inp3, 0, len(inp3))
+    s3.do_skip_string()
+    if s3.get_success() != 1 or s3.get_result_pos() != 7:
+        print(f"FAIL 3: success={s3.get_success()}, pos={s3.get_result_pos()}")
+        failures += 1
+
+    # Test 4: Skip quoted atom
+    s4 = @@ErlangSyntaxSkipperFsm()
+    inp4 = list(b"'my_atom' rest")
+    s4.setup(inp4, 0, len(inp4))
+    s4.do_skip_string()
+    if s4.get_success() != 1 or s4.get_result_pos() != 9:
+        print(f"FAIL 4: success={s4.get_success()}, pos={s4.get_result_pos()}")
+        failures += 1
+
+    # Test 5: Find line end (stops at %)
+    s5 = @@ErlangSyntaxSkipperFsm()
+    inp5 = list(b"X + 1 % comment")
+    s5.setup(inp5, 0, len(inp5))
+    s5.do_find_line_end()
+    if s5.get_result_pos() != 6:
+        print(f"FAIL 5: pos={s5.get_result_pos()}, expected 6")
+        failures += 1
+
+    # Test 6: Balanced parens
+    s6 = @@ErlangSyntaxSkipperFsm()
+    inp6 = list(b"(a, f(b)) rest")
+    s6.setup(inp6, 0, len(inp6))
+    s6.do_balanced_paren_end()
+    if s6.get_success() != 1 or s6.get_result_pos() != 9:
+        print(f"FAIL 6: success={s6.get_success()}, pos={s6.get_result_pos()}")
+        failures += 1
+
+    # Test 7: String with escape
+    s7 = @@ErlangSyntaxSkipperFsm()
+    inp7 = list(b'"he\\"llo" rest')
+    s7.setup(inp7, 0, len(inp7))
+    s7.do_skip_string()
+    if s7.get_success() != 1 or s7.get_result_pos() != 9:
+        print(f"FAIL 7: success={s7.get_success()}, pos={s7.get_result_pos()}")
+        failures += 1
+
+    if failures > 0:
+        print(f"FAIL: {failures} failures")
+        exit(1)
+    print("PASS: erlang_skipper (7 cases)")

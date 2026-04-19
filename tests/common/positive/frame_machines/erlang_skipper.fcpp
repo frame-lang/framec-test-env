@@ -1,0 +1,303 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <algorithm>
+
+// ErlangSyntaxSkipper -- FSM for skipping Erlang comments and strings.
+// Translated from framec's native_region_scanner/erlang_skipper.frs
+//
+// Handles: % line comments, "..." strings, '...' quoted atoms,
+// Erlang-style line endings, balanced parens.
+
+@@system ErlangSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: std::vector<uint8_t>, start: int, length: int) {
+            this->bytes = input_bytes;
+            this->pos = start;
+            this->scan_end = length;
+        }
+        get_result_pos(): int {
+            return this->result_pos;
+        }
+        get_success(): int {
+            return this->success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                // Erlang: % line comment only
+                if (i < end && bs[i] == '%') {
+                    int j = i + 1;
+                    while (j < end && bs[j] != '\n') {
+                        j++;
+                    }
+                    this->result_pos = j;
+                    this->success = 1;
+                    return;
+                }
+
+                this->success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                // Simple string: "..."
+                if (i < end && bs[i] == '"') {
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == '"') {
+                            this->result_pos = j + 1;
+                            this->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this->result_pos = end;
+                    this->success = 1;
+                    return;
+                }
+
+                // Quoted atoms: '...'
+                if (i < end && bs[i] == '\'') {
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == '\'') {
+                            this->result_pos = j + 1;
+                            this->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this->result_pos = end;
+                    this->success = 1;
+                    return;
+                }
+
+                this->success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+                int in_string = 0;
+
+                while (j < end) {
+                    int b = bs[j];
+                    if (b == '\n') {
+                        break;
+                    }
+
+                    // Inside string
+                    if (in_string != 0) {
+                        if (b == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = 0;
+                        }
+                        j++;
+                        continue;
+                    }
+
+                    // Terminators
+                    if (b == '%') {
+                        break;
+                    }
+
+                    // String starts
+                    if (b == '"' || b == '\'') {
+                        in_string = b;
+                        j++;
+                        continue;
+                    }
+
+                    j++;
+                }
+
+                this->result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                if (i >= end || bs[i] != '(') {
+                    this->success = 0;
+                    return;
+                }
+
+                int depth = 0;
+                int in_string = 0;
+
+                while (i < end) {
+                    int b = bs[i];
+
+                    // Inside string
+                    if (in_string != 0) {
+                        if (b == '\\') {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = 0;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '"' || b == '\'') {
+                        in_string = b;
+                        i++;
+                    } else if (b == '(') {
+                        depth++;
+                        i++;
+                    } else if (b == ')') {
+                        depth--;
+                        i++;
+                        if (depth == 0) {
+                            this->result_pos = i;
+                            this->success = 1;
+                            return;
+                        }
+                    } else {
+                        i++;
+                    }
+                }
+
+                this->success = 0;
+            }
+        }
+
+    domain:
+        bytes: std::vector<uint8_t> = {}
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+int main() {
+    int failures = 0;
+
+    auto to_bytes = [](const std::string& s) -> std::vector<uint8_t> {
+        return std::vector<uint8_t>(s.begin(), s.end());
+    };
+
+    // Test 1: Skip % comment
+    auto s1 = ErlangSyntaxSkipperFsm();
+    auto inp1 = to_bytes("% comment\ncode");
+    s1.setup(inp1, 0, inp1.size());
+    s1.do_skip_comment();
+    if (s1.get_success() != 1 || s1.get_result_pos() != 9) {
+        printf("FAIL 1: success=%d, pos=%d\n", s1.get_success(), s1.get_result_pos());
+        failures++;
+    }
+
+    // Test 2: Not a comment
+    auto s2 = ErlangSyntaxSkipperFsm();
+    auto inp2 = to_bytes("x + 1");
+    s2.setup(inp2, 0, inp2.size());
+    s2.do_skip_comment();
+    if (s2.get_success() != 0) {
+        printf("FAIL 2: should not be comment\n");
+        failures++;
+    }
+
+    // Test 3: Skip double-quoted string
+    auto s3 = ErlangSyntaxSkipperFsm();
+    auto inp3 = to_bytes("\"hello\" rest");
+    s3.setup(inp3, 0, inp3.size());
+    s3.do_skip_string();
+    if (s3.get_success() != 1 || s3.get_result_pos() != 7) {
+        printf("FAIL 3: success=%d, pos=%d\n", s3.get_success(), s3.get_result_pos());
+        failures++;
+    }
+
+    // Test 4: Skip quoted atom
+    auto s4 = ErlangSyntaxSkipperFsm();
+    auto inp4 = to_bytes("'my_atom' rest");
+    s4.setup(inp4, 0, inp4.size());
+    s4.do_skip_string();
+    if (s4.get_success() != 1 || s4.get_result_pos() != 9) {
+        printf("FAIL 4: success=%d, pos=%d\n", s4.get_success(), s4.get_result_pos());
+        failures++;
+    }
+
+    // Test 5: Find line end (stops at %)
+    auto s5 = ErlangSyntaxSkipperFsm();
+    auto inp5 = to_bytes("X + 1 % comment");
+    s5.setup(inp5, 0, inp5.size());
+    s5.do_find_line_end();
+    if (s5.get_result_pos() != 6) {
+        printf("FAIL 5: pos=%d, expected 6\n", s5.get_result_pos());
+        failures++;
+    }
+
+    // Test 6: Balanced parens
+    auto s6 = ErlangSyntaxSkipperFsm();
+    auto inp6 = to_bytes("(a, f(b)) rest");
+    s6.setup(inp6, 0, inp6.size());
+    s6.do_balanced_paren_end();
+    if (s6.get_success() != 1 || s6.get_result_pos() != 9) {
+        printf("FAIL 6: success=%d, pos=%d\n", s6.get_success(), s6.get_result_pos());
+        failures++;
+    }
+
+    // Test 7: String with escape
+    auto s7 = ErlangSyntaxSkipperFsm();
+    auto inp7 = to_bytes("\"he\\\"llo\" rest");
+    s7.setup(inp7, 0, inp7.size());
+    s7.do_skip_string();
+    if (s7.get_success() != 1 || s7.get_result_pos() != 9) {
+        printf("FAIL 7: success=%d, pos=%d\n", s7.get_success(), s7.get_result_pos());
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: %d failures\n", failures);
+        return 1;
+    }
+    printf("PASS: erlang_skipper (7 cases)\n");
+    return 0;
+}

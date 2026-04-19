@@ -1,0 +1,264 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// PythonSyntaxSkipper — FSM for skipping Python comments and strings.
+// Translated from framec's native_region_scanner/python_skipper.frs
+//
+// Handles: # comments, triple-quoted strings, simple strings,
+// Python-style line endings, balanced parens.
+
+@@system PythonSyntaxSkipperFsm {
+    operations:
+        Setup(input_bytes: []byte, start: int, length: int) {
+            s.bytes = input_bytes
+            s.pos = start
+            s.scan_end = length
+        }
+        GetResultPos(): int {
+            return s.result_pos
+        }
+        GetSuccess(): int {
+            return s.success
+        }
+
+    interface:
+        DoSkipComment()
+        DoSkipString()
+        DoFindLineEnd()
+        DoBalancedParenEnd()
+
+    machine:
+        $Init {
+            DoSkipComment() { -> $SkipComment }
+            DoSkipString() { -> $SkipString }
+            DoFindLineEnd() { -> $FindLineEnd }
+            DoBalancedParenEnd() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Python uses # for line comments
+                if i < end && bs[i] == '#' {
+                    j := i + 1
+                    for j < end && bs[j] != '\n' {
+                        j++
+                    }
+                    s.result_pos = j
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Triple-quoted strings: """ or '''
+                if i+2 < end {
+                    if (bs[i] == '"' && bs[i+1] == '"' && bs[i+2] == '"') ||
+                       (bs[i] == '\'' && bs[i+1] == '\'' && bs[i+2] == '\'') {
+                        q := bs[i]
+                        j := i + 3
+                        for j+2 < end {
+                            if bs[j] == q && bs[j+1] == q && bs[j+2] == q {
+                                s.result_pos = j + 3
+                                s.success = 1
+                                return
+                            }
+                            j++
+                        }
+                        s.result_pos = end
+                        s.success = 1
+                        return
+                    }
+                }
+
+                // Simple strings: " or '
+                if i < end && (bs[i] == '"' || bs[i] == '\'') {
+                    q := bs[i]
+                    j := i + 1
+                    for j < end {
+                        if bs[j] == '\\' {
+                            j += 2
+                            continue
+                        }
+                        if bs[j] == q {
+                            s.result_pos = j + 1
+                            s.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    s.result_pos = end
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                for j < end {
+                    b := bs[j]
+                    if b == '\n' || b == ';' {
+                        break
+                    }
+                    // Stop at # comment
+                    if b == '#' {
+                        break
+                    }
+                    j++
+                }
+
+                s.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                if i >= end || bs[i] != '(' {
+                    s.success = 0
+                    return
+                }
+
+                depth := 1
+                j := i + 1
+                for j < end && depth > 0 {
+                    b := bs[j]
+                    if b == '(' {
+                        depth++
+                    } else if b == ')' {
+                        depth--
+                    } else if b == '"' || b == '\'' {
+                        q := b
+                        j++
+                        for j < end && bs[j] != q {
+                            if bs[j] == '\\' {
+                                j++
+                            }
+                            j++
+                        }
+                    }
+                    j++
+                }
+
+                if depth == 0 {
+                    s.result_pos = j
+                    s.success = 1
+                } else {
+                    s.result_pos = end
+                    s.success = 0
+                }
+            }
+        }
+
+    domain:
+        bytes: []byte = nil
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+func main() {
+	failures := 0
+
+	// Test 1: Skip hash comment
+	s1 := NewPythonSyntaxSkipperFsm()
+	inp1 := []byte("# comment\ncode")
+	s1.Setup(inp1, 0, len(inp1))
+	s1.DoSkipComment()
+	if s1.GetSuccess() != 1 || s1.GetResultPos() != 9 {
+		fmt.Printf("FAIL 1: success=%d, pos=%d\n", s1.GetSuccess(), s1.GetResultPos())
+		failures++
+	}
+
+	// Test 2: Not a comment
+	s2 := NewPythonSyntaxSkipperFsm()
+	inp2 := []byte("x + 1")
+	s2.Setup(inp2, 0, len(inp2))
+	s2.DoSkipComment()
+	if s2.GetSuccess() != 0 {
+		fmt.Println("FAIL 2: should not be comment")
+		failures++
+	}
+
+	// Test 3: Skip triple-quoted string
+	s3 := NewPythonSyntaxSkipperFsm()
+	inp3 := []byte("\"\"\"hello world\"\"\"rest")
+	s3.Setup(inp3, 0, len(inp3))
+	s3.DoSkipString()
+	if s3.GetSuccess() != 1 || s3.GetResultPos() != 17 {
+		fmt.Printf("FAIL 3: success=%d, pos=%d\n", s3.GetSuccess(), s3.GetResultPos())
+		failures++
+	}
+
+	// Test 4: Skip simple string
+	s4 := NewPythonSyntaxSkipperFsm()
+	inp4 := []byte("\"hello\" rest")
+	s4.Setup(inp4, 0, len(inp4))
+	s4.DoSkipString()
+	if s4.GetSuccess() != 1 || s4.GetResultPos() != 7 {
+		fmt.Printf("FAIL 4: success=%d, pos=%d\n", s4.GetSuccess(), s4.GetResultPos())
+		failures++
+	}
+
+	// Test 5: Skip string with escape
+	s5 := NewPythonSyntaxSkipperFsm()
+	inp5 := []byte("'he\\'llo' rest")
+	s5.Setup(inp5, 0, len(inp5))
+	s5.DoSkipString()
+	if s5.GetSuccess() != 1 || s5.GetResultPos() != 9 {
+		fmt.Printf("FAIL 5: success=%d, pos=%d\n", s5.GetSuccess(), s5.GetResultPos())
+		failures++
+	}
+
+	// Test 6: Find line end (stops at #)
+	s6 := NewPythonSyntaxSkipperFsm()
+	inp6 := []byte("x + 1 # comment")
+	s6.Setup(inp6, 0, len(inp6))
+	s6.DoFindLineEnd()
+	if s6.GetResultPos() != 6 {
+		fmt.Printf("FAIL 6: pos=%d, expected 6\n", s6.GetResultPos())
+		failures++
+	}
+
+	// Test 7: Balanced parens
+	s7 := NewPythonSyntaxSkipperFsm()
+	inp7 := []byte("(a, f(b)) rest")
+	s7.Setup(inp7, 0, len(inp7))
+	s7.DoBalancedParenEnd()
+	if s7.GetSuccess() != 1 || s7.GetResultPos() != 9 {
+		fmt.Printf("FAIL 7: success=%d, pos=%d\n", s7.GetSuccess(), s7.GetResultPos())
+		failures++
+	}
+
+	if failures > 0 {
+		fmt.Printf("FAIL: %d failures\n", failures)
+		os.Exit(1)
+	}
+	fmt.Println("PASS: python_skipper (7 cases)")
+}

@@ -1,0 +1,147 @@
+@@target java
+
+// ExprScanner — PDA for scanning assignment RHS expressions.
+// Translated from framec's native_region_scanner/expr_scanner.frs
+//
+// Scans from pos (after =) to a terminator (; or \n) at depth 0,
+// respecting nested ()[]{}  and string literals with escape handling.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.end = length;
+        }
+        get_result(): int {
+            return this.result_end;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                int i = this.pos;
+                int end = this.end;
+                byte[] bs = this.bytes;
+                int depth = 0;
+                int inString = -1;
+
+                while (i < end) {
+                    int b = bs[i] & 0xFF;
+
+                    if (inString != -1) {
+                        if (b == '\\' && i + 1 < end) {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == inString) {
+                            inString = -1;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '"' || b == '\'') {
+                        inString = b;
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '(' || b == '[' || b == '{') {
+                        depth++;
+                    } else if (b == ')' || b == ']' || b == '}') {
+                        depth = Math.max(depth - 1, 0);
+                    } else if (b == ';' && depth == 0) {
+                        i++;
+                        break;
+                    } else if (b == '\n' && depth == 0) {
+                        break;
+                    }
+
+                    i++;
+                }
+
+                this.result_end = i;
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+class Main {
+    public static void main(String[] args) {
+        int failures = 0;
+
+        // Test 1: simple expression terminated by newline
+        ExprScannerFsm e1 = @@ExprScannerFsm();
+        byte[] inp1 = " x + 1\nfoo".getBytes();
+        e1.setup(inp1, 0, inp1.length);
+        e1.do_scan();
+        String expr1 = new String(inp1, 0, (int) e1.get_result());
+        if (!expr1.equals(" x + 1")) {
+            System.out.println("FAIL 1: got '" + expr1 + "'");
+            failures++;
+        }
+
+        // Test 2: expression with semicolon terminator
+        ExprScannerFsm e2 = @@ExprScannerFsm();
+        byte[] inp2 = " x + 1; y = 2".getBytes();
+        e2.setup(inp2, 0, inp2.length);
+        e2.do_scan();
+        String expr2 = new String(inp2, 0, (int) e2.get_result());
+        if (!expr2.equals(" x + 1;")) {
+            System.out.println("FAIL 2: got '" + expr2 + "'");
+            failures++;
+        }
+
+        // Test 3: nested parens not treated as terminator
+        ExprScannerFsm e3 = @@ExprScannerFsm();
+        byte[] inp3 = " f(x, g(y))\nz".getBytes();
+        e3.setup(inp3, 0, inp3.length);
+        e3.do_scan();
+        String expr3 = new String(inp3, 0, (int) e3.get_result());
+        if (!expr3.equals(" f(x, g(y))")) {
+            System.out.println("FAIL 3: got '" + expr3 + "'");
+            failures++;
+        }
+
+        // Test 4: string with escaped quote
+        ExprScannerFsm e4 = @@ExprScannerFsm();
+        byte[] inp4 = " \"hello\\\"world\"\n".getBytes();
+        e4.setup(inp4, 0, inp4.length);
+        e4.do_scan();
+        String expr4 = new String(inp4, 0, (int) e4.get_result());
+        if (!expr4.equals(" \"hello\\\"world\"")) {
+            System.out.println("FAIL 4: got '" + expr4 + "'");
+            failures++;
+        }
+
+        // Test 5: semicolon inside string (should not terminate)
+        ExprScannerFsm e5 = @@ExprScannerFsm();
+        byte[] inp5 = " \"a;b\"\n".getBytes();
+        e5.setup(inp5, 0, inp5.length);
+        e5.do_scan();
+        String expr5 = new String(inp5, 0, (int) e5.get_result());
+        if (!expr5.equals(" \"a;b\"")) {
+            System.out.println("FAIL 5: got '" + expr5 + "'");
+            failures++;
+        }
+
+        if (failures > 0) {
+            System.out.println("FAIL: " + failures + " failures");
+            System.exit(1);
+        }
+        System.out.println("PASS: expr_scanner (5 cases)");
+    }
+}

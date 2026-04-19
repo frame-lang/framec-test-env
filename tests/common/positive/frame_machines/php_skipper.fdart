@@ -1,0 +1,312 @@
+@@target dart
+
+import 'dart:io';
+
+// PhpSyntaxSkipper -- FSM for skipping PHP comments and strings.
+
+@@system PhpSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: List<int>, start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                if (i + 1 < end && bs[i] == 0x2F && bs[i + 1] == 0x2F) {
+                    int j = i + 2;
+                    while (j < end && bs[j] != 0x0A) { j++; }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                if (i < end && bs[i] == 0x23) {
+                    int j = i + 1;
+                    while (j < end && bs[j] != 0x0A) { j++; }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                if (i + 1 < end && bs[i] == 0x2F && bs[i + 1] == 0x2A) {
+                    int j = i + 2;
+                    while (j + 1 < end) {
+                        if (bs[j] == 0x2A && bs[j + 1] == 0x2F) {
+                            this.result_pos = j + 2;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                // Heredoc/nowdoc
+                if (i + 2 < end && bs[i] == 0x3C && bs[i + 1] == 0x3C && bs[i + 2] == 0x3C) {
+                    int j = i + 3;
+                    int nowdoc = 0;
+                    if (j < end && bs[j] == 0x27) { nowdoc = 1; j++; }
+                    int tag_start = j;
+                    while (j < end && (String.fromCharCode(bs[j]).contains(RegExp(r'[a-zA-Z0-9_]')))) { j++; }
+                    int tag_end_pos = j;
+                    if (nowdoc == 1 && j < end && bs[j] == 0x27) { j++; }
+                    int tag_len = tag_end_pos - tag_start;
+                    if (tag_len > 0) {
+                        while (j < end && bs[j] != 0x0A) { j++; }
+                        if (j < end) { j++; }
+                        while (j < end) {
+                            var match = true;
+                            if (j + tag_len <= end) {
+                                for (int t = 0; t < tag_len; t++) {
+                                    if (bs[j + t] != bs[tag_start + t]) { match = false; break; }
+                                }
+                            } else { match = false; }
+                            if (match) {
+                                int k = j + tag_len;
+                                if (k < end && bs[k] == 0x3B) { k++; }
+                                if (k >= end || bs[k] == 0x0A) {
+                                    if (k < end && bs[k] == 0x0A) { k++; }
+                                    this.result_pos = k;
+                                    this.success = 1;
+                                    return;
+                                }
+                            }
+                            while (j < end && bs[j] != 0x0A) { j++; }
+                            if (j < end) { j++; }
+                        }
+                        this.result_pos = end;
+                        this.success = 1;
+                        return;
+                    }
+                }
+
+                if (i < end && (bs[i] == 0x22 || bs[i] == 0x27)) {
+                    int q = bs[i];
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == 0x5C) { j += 2; continue; }
+                        if (bs[j] == q) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+                int in_string = 0;
+
+                while (j < end) {
+                    int b = bs[j];
+                    if (b == 0x0A) { break; }
+
+                    if (in_string != 0) {
+                        if (b == 0x5C) { j += 2; continue; }
+                        if (b == in_string) { in_string = 0; }
+                        j++;
+                        continue;
+                    }
+
+                    if (b == 0x3B || b == 0x7D) { break; }
+                    if (b == 0x2F && j + 1 < end && (bs[j + 1] == 0x2F || bs[j + 1] == 0x2A)) { break; }
+                    if (b == 0x23) { break; }
+
+                    if (b == 0x27 || b == 0x22) {
+                        in_string = b;
+                        j++;
+                        continue;
+                    }
+
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                List<int> bs = this.bytes;
+
+                if (i >= end || bs[i] != 0x28) {
+                    this.success = 0;
+                    return;
+                }
+
+                int depth = 0;
+                int in_string = 0;
+
+                while (i < end) {
+                    int b = bs[i];
+
+                    if (in_string != 0) {
+                        if (b == 0x5C) { i += 2; continue; }
+                        if (b == in_string) { in_string = 0; }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == 0x27 || b == 0x22) {
+                        in_string = b;
+                        i++;
+                    } else if (b == 0x28) {
+                        depth++;
+                        i++;
+                    } else if (b == 0x29) {
+                        depth--;
+                        i++;
+                        if (depth == 0) {
+                            this.result_pos = i;
+                            this.success = 1;
+                            return;
+                        }
+                    } else {
+                        i++;
+                    }
+                }
+
+                this.success = 0;
+            }
+        }
+
+    domain:
+        bytes: List<int> = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+void main() {
+    var failures = 0;
+
+    final s1 = @@PhpSyntaxSkipperFsm();
+    final inp1 = "// comment\ncode".codeUnits;
+    s1.setup(inp1, 0, inp1.length);
+    s1.do_skip_comment();
+    if (s1.get_success() != 1 || s1.get_result_pos() != 10) {
+        print("FAIL 1: success=\${s1.get_success()}, pos=\${s1.get_result_pos()}");
+        failures++;
+    }
+
+    final s2 = @@PhpSyntaxSkipperFsm();
+    final inp2 = "# comment\ncode".codeUnits;
+    s2.setup(inp2, 0, inp2.length);
+    s2.do_skip_comment();
+    if (s2.get_success() != 1 || s2.get_result_pos() != 9) {
+        print("FAIL 2: success=\${s2.get_success()}, pos=\${s2.get_result_pos()}");
+        failures++;
+    }
+
+    final s3 = @@PhpSyntaxSkipperFsm();
+    final inp3 = "/* block */code".codeUnits;
+    s3.setup(inp3, 0, inp3.length);
+    s3.do_skip_comment();
+    if (s3.get_success() != 1 || s3.get_result_pos() != 11) {
+        print("FAIL 3: success=\${s3.get_success()}, pos=\${s3.get_result_pos()}");
+        failures++;
+    }
+
+    final s4 = @@PhpSyntaxSkipperFsm();
+    final inp4 = '"hello" rest'.codeUnits;
+    s4.setup(inp4, 0, inp4.length);
+    s4.do_skip_string();
+    if (s4.get_success() != 1 || s4.get_result_pos() != 7) {
+        print("FAIL 4: success=\${s4.get_success()}, pos=\${s4.get_result_pos()}");
+        failures++;
+    }
+
+    final s5 = @@PhpSyntaxSkipperFsm();
+    final inp5 = "'hello' rest".codeUnits;
+    s5.setup(inp5, 0, inp5.length);
+    s5.do_skip_string();
+    if (s5.get_success() != 1 || s5.get_result_pos() != 7) {
+        print("FAIL 5: success=\${s5.get_success()}, pos=\${s5.get_result_pos()}");
+        failures++;
+    }
+
+    final s6 = @@PhpSyntaxSkipperFsm();
+    final inp6 = "<<<EOT\nhello world\nEOT;\nnext".codeUnits;
+    s6.setup(inp6, 0, inp6.length);
+    s6.do_skip_string();
+    if (s6.get_success() != 1 || s6.get_result_pos() != 24) {
+        print("FAIL 6: success=\${s6.get_success()}, pos=\${s6.get_result_pos()}");
+        failures++;
+    }
+
+    final s7 = @@PhpSyntaxSkipperFsm();
+    final inp7 = "\$x = 1; next".codeUnits;
+    s7.setup(inp7, 0, inp7.length);
+    s7.do_find_line_end();
+    if (s7.get_result_pos() != 6) {
+        print("FAIL 7: pos=\${s7.get_result_pos()}, expected 6");
+        failures++;
+    }
+
+    final s8 = @@PhpSyntaxSkipperFsm();
+    final inp8 = "(a, f(b)) rest".codeUnits;
+    s8.setup(inp8, 0, inp8.length);
+    s8.do_balanced_paren_end();
+    if (s8.get_success() != 1 || s8.get_result_pos() != 9) {
+        print("FAIL 8: success=\${s8.get_success()}, pos=\${s8.get_result_pos()}");
+        failures++;
+    }
+
+    if (failures > 0) {
+        print("FAIL: \$failures failures");
+        exit(1);
+    }
+    print("PASS: php_skipper (8 cases)");
+}

@@ -1,0 +1,334 @@
+@@target erlang
+
+%% ErlangScopeScanner -- FSM for detecting fun(...) -> ... end closures.
+%% Translated from framec's native_region_scanner/erlang_scope_scanner.frs
+%%
+%% Erlang reuses `end` to close: fun, case, if, receive, begin, try.
+%% This FSM tracks a depth counter for all block-opening keywords so
+%% only the `end` matching our `fun` terminates the scan.
+%%
+%% Skips % line comments and "..." / '...' string/atom literals.
+%% Does NOT match `fun Module:Function/Arity` (function references).
+
+@@system ErlangScopeScannerFsm {
+    interface:
+        setup(input_bytes: binary, start: int, length: int)
+        do_scan()
+        get_result_pos(): int
+        get_success(): int
+
+    machine:
+        $Init {
+            setup(input_bytes: binary, start: int, length: int) {
+                self.bytes = input_bytes
+                self.pos = start
+                self.scan_end = length
+            }
+            do_scan() { -> $CheckFun }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $CheckFun {
+            $>() {
+                {Pos, Depth, Suc} = ess_check_fun(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.pos = Pos
+                self.depth = Depth
+                self.success = Suc
+                if Suc =:= 0:
+                    return
+                -> $ScanBody
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $ScanBody {
+            $>() {
+                {RPos, Suc} = ess_scan_body(Data#data.bytes, Data#data.pos, Data#data.scan_end, Data#data.depth)
+                self.result_pos = RPos
+                self.success = Suc
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+    domain:
+        bytes = <<>>
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 0
+        depth = 0
+}
+
+%% --- check_fun ---
+ess_check_fun(Bs, I, End) when I + 3 > End -> {I, 0, 0};
+ess_check_fun(Bs, I, End) ->
+    case {binary:at(Bs, I), binary:at(Bs, I+1), binary:at(Bs, I+2)} of
+        {$f, $u, $n} ->
+            After = I + 3,
+            case After < End andalso (ess_is_alnum(binary:at(Bs, After)) orelse binary:at(Bs, After) =:= $_) of
+                true -> {I, 0, 0};
+                false ->
+                    J = ess_skip_ws(Bs, After, End),
+                    case ess_is_fun_ref(Bs, J, End) of
+                        true -> {I, 0, 0};
+                        false -> {After, 1, 1}
+                    end
+            end;
+        _ -> {I, 0, 0}
+    end.
+
+ess_skip_ws(Bs, J, End) when J < End ->
+    B = binary:at(Bs, J),
+    if B =:= 32 orelse B =:= 9 orelse B =:= 10 -> ess_skip_ws(Bs, J + 1, End);
+       true -> J
+    end;
+ess_skip_ws(_Bs, J, _End) -> J.
+
+ess_is_fun_ref(Bs, J, End) when J < End ->
+    B = binary:at(Bs, J),
+    case B >= $A andalso B =< $Z of
+        true ->
+            K = ess_scan_ident(Bs, J, End),
+            K < End andalso binary:at(Bs, K) =:= $:;
+        false -> false
+    end;
+ess_is_fun_ref(_Bs, _J, _End) -> false.
+
+ess_scan_ident(Bs, I, End) when I < End ->
+    B = binary:at(Bs, I),
+    case ess_is_alnum(B) orelse B =:= $_ of
+        true -> ess_scan_ident(Bs, I + 1, End);
+        false -> I
+    end;
+ess_scan_ident(_Bs, I, _End) -> I.
+
+%% --- scan_body ---
+ess_scan_body(_Bs, I, End, _D) when I >= End -> {0, 0};
+ess_scan_body(Bs, I, End, D) ->
+    B = binary:at(Bs, I),
+    if
+        B =:= $% ->
+            I2 = ess_skip_line(Bs, I, End),
+            ess_scan_body(Bs, I2, End, D);
+        B =:= $" ->
+            I2 = ess_skip_dq(Bs, I + 1, End),
+            ess_scan_body(Bs, I2, End, D);
+        B =:= $' ->
+            I2 = ess_skip_sq(Bs, I + 1, End),
+            ess_scan_body(Bs, I2, End, D);
+        true ->
+            ess_scan_body_kw(Bs, I, End, D, B)
+    end.
+
+ess_scan_body_kw(Bs, I, End, D, B) ->
+    %% fun
+    case B =:= $f andalso I+3 =< End andalso binary:at(Bs,I+1) =:= $u andalso binary:at(Bs,I+2) =:= $n of
+        true ->
+            case I+3 >= End orelse (not ess_is_alnum(binary:at(Bs,I+3)) andalso binary:at(Bs,I+3) =/= $_) of
+                true -> ess_scan_body(Bs, I+3, End, D+1);
+                false -> ess_scan_body_kw2(Bs, I, End, D, B)
+            end;
+        false -> ess_scan_body_kw2(Bs, I, End, D, B)
+    end.
+
+ess_scan_body_kw2(Bs, I, End, D, B) ->
+    %% case
+    case B =:= $c andalso I+4 =< End andalso binary:at(Bs,I+1) =:= $a andalso binary:at(Bs,I+2) =:= $s andalso binary:at(Bs,I+3) =:= $e of
+        true ->
+            case I+4 >= End orelse (not ess_is_alnum(binary:at(Bs,I+4)) andalso binary:at(Bs,I+4) =/= $_) of
+                true -> ess_scan_body(Bs, I+4, End, D+1);
+                false -> ess_scan_body_kw3(Bs, I, End, D, B)
+            end;
+        false -> ess_scan_body_kw3(Bs, I, End, D, B)
+    end.
+
+ess_scan_body_kw3(Bs, I, End, D, B) ->
+    %% if
+    case B =:= $i andalso I+2 =< End andalso binary:at(Bs,I+1) =:= $f of
+        true ->
+            case I+2 >= End orelse (not ess_is_alnum(binary:at(Bs,I+2)) andalso binary:at(Bs,I+2) =/= $_) of
+                true -> ess_scan_body(Bs, I+2, End, D+1);
+                false -> ess_scan_body_kw4(Bs, I, End, D, B)
+            end;
+        false -> ess_scan_body_kw4(Bs, I, End, D, B)
+    end.
+
+ess_scan_body_kw4(Bs, I, End, D, B) ->
+    %% receive
+    case B =:= $r andalso I+7 =< End andalso binary:at(Bs,I+1) =:= $e andalso binary:at(Bs,I+2) =:= $c andalso binary:at(Bs,I+3) =:= $e andalso binary:at(Bs,I+4) =:= $i andalso binary:at(Bs,I+5) =:= $v andalso binary:at(Bs,I+6) =:= $e of
+        true ->
+            case I+7 >= End orelse (not ess_is_alnum(binary:at(Bs,I+7)) andalso binary:at(Bs,I+7) =/= $_) of
+                true -> ess_scan_body(Bs, I+7, End, D+1);
+                false -> ess_scan_body_kw5(Bs, I, End, D, B)
+            end;
+        false -> ess_scan_body_kw5(Bs, I, End, D, B)
+    end.
+
+ess_scan_body_kw5(Bs, I, End, D, B) ->
+    %% begin
+    case B =:= $b andalso I+5 =< End andalso binary:at(Bs,I+1) =:= $e andalso binary:at(Bs,I+2) =:= $g andalso binary:at(Bs,I+3) =:= $i andalso binary:at(Bs,I+4) =:= $n of
+        true ->
+            case I+5 >= End orelse (not ess_is_alnum(binary:at(Bs,I+5)) andalso binary:at(Bs,I+5) =/= $_) of
+                true -> ess_scan_body(Bs, I+5, End, D+1);
+                false -> ess_scan_body_kw6(Bs, I, End, D, B)
+            end;
+        false -> ess_scan_body_kw6(Bs, I, End, D, B)
+    end.
+
+ess_scan_body_kw6(Bs, I, End, D, B) ->
+    %% try
+    case B =:= $t andalso I+3 =< End andalso binary:at(Bs,I+1) =:= $r andalso binary:at(Bs,I+2) =:= $y of
+        true ->
+            case I+3 >= End orelse (not ess_is_alnum(binary:at(Bs,I+3)) andalso binary:at(Bs,I+3) =/= $_) of
+                true -> ess_scan_body(Bs, I+3, End, D+1);
+                false -> ess_scan_body_end(Bs, I, End, D, B)
+            end;
+        false -> ess_scan_body_end(Bs, I, End, D, B)
+    end.
+
+ess_scan_body_end(Bs, I, End, D, B) ->
+    %% end
+    case B =:= $e andalso I+3 =< End andalso binary:at(Bs,I+1) =:= $n andalso binary:at(Bs,I+2) =:= $d of
+        true ->
+            case I+3 >= End orelse (not ess_is_alnum(binary:at(Bs,I+3)) andalso binary:at(Bs,I+3) =/= $_) of
+                true ->
+                    D2 = D - 1,
+                    case D2 of
+                        0 -> {I+3, 1};
+                        _ -> ess_scan_body(Bs, I+3, End, D2)
+                    end;
+                false -> ess_scan_body_ident(Bs, I, End, D, B)
+            end;
+        false -> ess_scan_body_ident(Bs, I, End, D, B)
+    end.
+
+ess_scan_body_ident(Bs, I, End, D, B) ->
+    case ess_is_alpha(B) orelse B =:= $_ of
+        true ->
+            I2 = ess_scan_ident(Bs, I, End),
+            ess_scan_body(Bs, I2, End, D);
+        false ->
+            ess_scan_body(Bs, I + 1, End, D)
+    end.
+
+%% --- helpers ---
+ess_is_alnum(B) -> (B >= $0 andalso B =< $9) orelse (B >= $A andalso B =< $Z) orelse (B >= $a andalso B =< $z).
+ess_is_alpha(B) -> (B >= $A andalso B =< $Z) orelse (B >= $a andalso B =< $z).
+
+ess_skip_line(Bs, I, End) when I < End ->
+    case binary:at(Bs, I) of
+        $\n -> I;
+        _ -> ess_skip_line(Bs, I + 1, End)
+    end;
+ess_skip_line(_Bs, I, _End) -> I.
+
+ess_skip_dq(Bs, I, End) when I < End ->
+    B = binary:at(Bs, I),
+    if B =:= $\\ -> ess_skip_dq(Bs, I + 2, End);
+       B =:= $" -> I + 1;
+       true -> ess_skip_dq(Bs, I + 1, End)
+    end;
+ess_skip_dq(_Bs, I, _End) -> I.
+
+ess_skip_sq(Bs, I, End) when I < End ->
+    B = binary:at(Bs, I),
+    if B =:= $\\ -> ess_skip_sq(Bs, I + 2, End);
+       B =:= $' -> I + 1;
+       true -> ess_skip_sq(Bs, I + 1, End)
+    end;
+ess_skip_sq(_Bs, I, _End) -> I.
+
+main() ->
+    Failures = ess_test_all(0),
+    case Failures of
+        0 -> io:format("PASS: erlang_scope_scanner (8 cases)~n");
+        _ -> io:format("FAIL: ~p failures~n", [Failures]), halt(1)
+    end.
+
+ess_test_all(F0) ->
+    M = erlang_scope_scanner_fsm,
+
+    %% Test 1: Simple fun -> end
+    {ok, P1} = M:start_link(),
+    I1 = <<"fun(X) -> X + 1 end rest">>,
+    M:setup(P1, I1, 0, byte_size(I1)),
+    M:do_scan(P1),
+    F1 = case {M:get_success(P1), M:get_result_pos(P1)} of
+        {1, 19} -> F0;
+        {S1, R1} -> io:format("FAIL 1: success=~p, pos=~p~n", [S1, R1]), F0 + 1
+    end,
+
+    %% Test 2: Nested fun -> case ... end end
+    {ok, P2} = M:start_link(),
+    I2 = <<"fun(X) -> case X of 1 -> ok end end rest">>,
+    M:setup(P2, I2, 0, byte_size(I2)),
+    M:do_scan(P2),
+    F2 = case {M:get_success(P2), M:get_result_pos(P2)} of
+        {1, 35} -> F1;
+        {S2, R2} -> io:format("FAIL 2: success=~p, pos=~p~n", [S2, R2]), F1 + 1
+    end,
+
+    %% Test 3: Not a fun keyword (function)
+    {ok, P3} = M:start_link(),
+    I3 = <<"function() -> ok end">>,
+    M:setup(P3, I3, 0, byte_size(I3)),
+    M:do_scan(P3),
+    F3 = case M:get_success(P3) of
+        0 -> F2;
+        _ -> io:format("FAIL 3: should not match 'function'~n"), F2 + 1
+    end,
+
+    %% Test 4: fun Module:Function/Arity (function reference, not closure)
+    {ok, P4} = M:start_link(),
+    I4 = <<"fun io:format/2">>,
+    M:setup(P4, I4, 0, byte_size(I4)),
+    M:do_scan(P4),
+    F4 = case M:get_success(P4) of
+        0 -> F3;
+        _ -> io:format("FAIL 4: should not match function reference~n"), F3 + 1
+    end,
+
+    %% Test 5: Nested if ... end inside fun
+    {ok, P5} = M:start_link(),
+    I5 = <<"fun() -> if true -> ok end end rest">>,
+    M:setup(P5, I5, 0, byte_size(I5)),
+    M:do_scan(P5),
+    F5 = case {M:get_success(P5), M:get_result_pos(P5)} of
+        {1, 30} -> F4;
+        {S5, R5} -> io:format("FAIL 5: success=~p, pos=~p~n", [S5, R5]), F4 + 1
+    end,
+
+    %% Test 6: String inside fun body (should skip)
+    {ok, P6} = M:start_link(),
+    I6 = <<"fun() -> \"end\" end rest">>,
+    M:setup(P6, I6, 0, byte_size(I6)),
+    M:do_scan(P6),
+    F6 = case {M:get_success(P6), M:get_result_pos(P6)} of
+        {1, 18} -> F5;
+        {S6, R6} -> io:format("FAIL 6: success=~p, pos=~p~n", [S6, R6]), F5 + 1
+    end,
+
+    %% Test 7: Comment inside fun body (should skip)
+    {ok, P7} = M:start_link(),
+    I7 = <<"fun() -> % end\nok end rest">>,
+    M:setup(P7, I7, 0, byte_size(I7)),
+    M:do_scan(P7),
+    F7 = case {M:get_success(P7), M:get_result_pos(P7)} of
+        {1, 21} -> F6;
+        {S7, R7} -> io:format("FAIL 7: success=~p, pos=~p~n", [S7, R7]), F6 + 1
+    end,
+
+    %% Test 8: Unmatched fun (no end)
+    {ok, P8} = M:start_link(),
+    I8 = <<"fun() -> X + 1">>,
+    M:setup(P8, I8, 0, byte_size(I8)),
+    M:do_scan(P8),
+    F8 = case M:get_success(P8) of
+        0 -> F7;
+        _ -> io:format("FAIL 8: should fail with no matching end~n"), F7 + 1
+    end,
+
+    F8.

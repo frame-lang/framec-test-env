@@ -1,0 +1,312 @@
+@@target lua
+
+-- ErlangScopeScanner -- FSM for detecting fun(...) -> ... end closures.
+-- Translated from framec's native_region_scanner/erlang_scope_scanner.frs
+--
+-- NOTE: Lua is 1-indexed, but the scanner uses 0-indexed positions
+-- internally and adjusts when accessing the byte table.
+
+@@system ErlangScopeScannerFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos() {
+            return self.result_pos
+        }
+        get_success() {
+            return self.success
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $CheckFun }
+        }
+
+        $CheckFun {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                if i + 3 > scan_end then
+                    self.success = 0
+                    return
+                end
+
+                if bs[i + 1] ~= 0x66 or bs[i + 2] ~= 0x75 or bs[i + 3] ~= 0x6E then
+                    self.success = 0
+                    return
+                end
+
+                after = i + 3
+                if after < scan_end and ((bs[after + 1] >= 0x61 and bs[after + 1] <= 0x7A) or (bs[after + 1] >= 0x41 and bs[after + 1] <= 0x5A) or (bs[after + 1] >= 0x30 and bs[after + 1] <= 0x39) or bs[after + 1] == 0x5F) then
+                    self.success = 0
+                    return
+                end
+
+                j = after
+                while j < scan_end and (bs[j + 1] == 0x20 or bs[j + 1] == 0x09 or bs[j + 1] == 0x0A) do
+                    j = j + 1
+                end
+
+                if j < scan_end and bs[j + 1] >= 0x41 and bs[j + 1] <= 0x5A then
+                    k = j
+                    while k < scan_end and ((bs[k + 1] >= 0x61 and bs[k + 1] <= 0x7A) or (bs[k + 1] >= 0x41 and bs[k + 1] <= 0x5A) or (bs[k + 1] >= 0x30 and bs[k + 1] <= 0x39) or bs[k + 1] == 0x5F) do
+                        k = k + 1
+                    end
+                    if k < scan_end and bs[k + 1] == 0x3A then
+                        self.success = 0
+                        return
+                    end
+                end
+
+                self.depth = 1
+                self.pos = after
+                -> $ScanBody
+            }
+        }
+
+        $ScanBody {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                while i < scan_end do
+                    b = bs[i + 1]
+
+                    if b == 0x25 then
+                        while i < scan_end and bs[i + 1] ~= 0x0A do
+                            i = i + 1
+                        end
+                        goto continue_scan
+                    end
+
+                    if b == 0x22 then
+                        i = i + 1
+                        while i < scan_end do
+                            if bs[i + 1] == 0x5C then
+                                i = i + 2
+                                goto continue_dq
+                            end
+                            if bs[i + 1] == 0x22 then
+                                i = i + 1
+                                break
+                            end
+                            i = i + 1
+                            ::continue_dq::
+                        end
+                        goto continue_scan
+                    end
+
+                    if b == 0x27 then
+                        i = i + 1
+                        while i < scan_end do
+                            if bs[i + 1] == 0x5C then
+                                i = i + 2
+                                goto continue_sq
+                            end
+                            if bs[i + 1] == 0x27 then
+                                i = i + 1
+                                break
+                            end
+                            i = i + 1
+                            ::continue_sq::
+                        end
+                        goto continue_scan
+                    end
+
+                    -- fun
+                    if b == 0x66 and i + 3 <= scan_end and bs[i + 2] == 0x75 and bs[i + 3] == 0x6E then
+                        if i + 3 >= scan_end or not ((bs[i + 4] >= 0x61 and bs[i + 4] <= 0x7A) or (bs[i + 4] >= 0x41 and bs[i + 4] <= 0x5A) or (bs[i + 4] >= 0x30 and bs[i + 4] <= 0x39) or bs[i + 4] == 0x5F) then
+                            self.depth = self.depth + 1
+                            i = i + 3
+                            goto continue_scan
+                        end
+                    end
+
+                    -- case
+                    if b == 0x63 and i + 4 <= scan_end and bs[i + 2] == 0x61 and bs[i + 3] == 0x73 and bs[i + 4] == 0x65 then
+                        if i + 4 >= scan_end or not ((bs[i + 5] >= 0x61 and bs[i + 5] <= 0x7A) or (bs[i + 5] >= 0x41 and bs[i + 5] <= 0x5A) or (bs[i + 5] >= 0x30 and bs[i + 5] <= 0x39) or bs[i + 5] == 0x5F) then
+                            self.depth = self.depth + 1
+                            i = i + 4
+                            goto continue_scan
+                        end
+                    end
+
+                    -- if
+                    if b == 0x69 and i + 2 <= scan_end and bs[i + 2] == 0x66 then
+                        if i + 2 >= scan_end or not ((bs[i + 3] >= 0x61 and bs[i + 3] <= 0x7A) or (bs[i + 3] >= 0x41 and bs[i + 3] <= 0x5A) or (bs[i + 3] >= 0x30 and bs[i + 3] <= 0x39) or bs[i + 3] == 0x5F) then
+                            self.depth = self.depth + 1
+                            i = i + 2
+                            goto continue_scan
+                        end
+                    end
+
+                    -- receive
+                    if b == 0x72 and i + 7 <= scan_end and bs[i + 2] == 0x65 and bs[i + 3] == 0x63 and bs[i + 4] == 0x65 and bs[i + 5] == 0x69 and bs[i + 6] == 0x76 and bs[i + 7] == 0x65 then
+                        if i + 7 >= scan_end or not ((bs[i + 8] >= 0x61 and bs[i + 8] <= 0x7A) or (bs[i + 8] >= 0x41 and bs[i + 8] <= 0x5A) or (bs[i + 8] >= 0x30 and bs[i + 8] <= 0x39) or bs[i + 8] == 0x5F) then
+                            self.depth = self.depth + 1
+                            i = i + 7
+                            goto continue_scan
+                        end
+                    end
+
+                    -- begin
+                    if b == 0x62 and i + 5 <= scan_end and bs[i + 2] == 0x65 and bs[i + 3] == 0x67 and bs[i + 4] == 0x69 and bs[i + 5] == 0x6E then
+                        if i + 5 >= scan_end or not ((bs[i + 6] >= 0x61 and bs[i + 6] <= 0x7A) or (bs[i + 6] >= 0x41 and bs[i + 6] <= 0x5A) or (bs[i + 6] >= 0x30 and bs[i + 6] <= 0x39) or bs[i + 6] == 0x5F) then
+                            self.depth = self.depth + 1
+                            i = i + 5
+                            goto continue_scan
+                        end
+                    end
+
+                    -- try
+                    if b == 0x74 and i + 3 <= scan_end and bs[i + 2] == 0x72 and bs[i + 3] == 0x79 then
+                        if i + 3 >= scan_end or not ((bs[i + 4] >= 0x61 and bs[i + 4] <= 0x7A) or (bs[i + 4] >= 0x41 and bs[i + 4] <= 0x5A) or (bs[i + 4] >= 0x30 and bs[i + 4] <= 0x39) or bs[i + 4] == 0x5F) then
+                            self.depth = self.depth + 1
+                            i = i + 3
+                            goto continue_scan
+                        end
+                    end
+
+                    -- end
+                    if b == 0x65 and i + 3 <= scan_end and bs[i + 2] == 0x6E and bs[i + 3] == 0x64 then
+                        if i + 3 >= scan_end or not ((bs[i + 4] >= 0x61 and bs[i + 4] <= 0x7A) or (bs[i + 4] >= 0x41 and bs[i + 4] <= 0x5A) or (bs[i + 4] >= 0x30 and bs[i + 4] <= 0x39) or bs[i + 4] == 0x5F) then
+                            self.depth = self.depth - 1
+                            if self.depth == 0 then
+                                self.result_pos = i + 3
+                                self.success = 1
+                                return
+                            end
+                            i = i + 3
+                            goto continue_scan
+                        end
+                    end
+
+                    -- Skip identifiers
+                    if (b >= 0x61 and b <= 0x7A) or (b >= 0x41 and b <= 0x5A) or b == 0x5F then
+                        while i < scan_end and ((bs[i + 1] >= 0x61 and bs[i + 1] <= 0x7A) or (bs[i + 1] >= 0x41 and bs[i + 1] <= 0x5A) or (bs[i + 1] >= 0x30 and bs[i + 1] <= 0x39) or bs[i + 1] == 0x5F) do
+                            i = i + 1
+                        end
+                        goto continue_scan
+                    end
+
+                    i = i + 1
+                    ::continue_scan::
+                end
+
+                self.success = 0
+            }
+        }
+
+    domain:
+        bytes = {}
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 0
+        depth: int = 0
+}
+
+local function str_to_bytes(s)
+    local t = {}
+    for i = 1, #s do
+        t[i] = string.byte(s, i)
+    end
+    return t
+end
+
+local failures = 0
+
+-- Test 1: Simple fun -> end
+local s1 = ErlangScopeScannerFsm.new()
+local inp1 = str_to_bytes("fun(X) -> X + 1 end rest")
+s1:setup(inp1, 0, #inp1)
+s1:do_scan()
+if s1:get_success() ~= 1 or s1:get_result_pos() ~= 19 then
+    print("FAIL 1: success=" .. s1:get_success() .. ", pos=" .. s1:get_result_pos())
+    failures = failures + 1
+end
+
+-- Test 2: Nested fun -> case ... end end
+local s2 = ErlangScopeScannerFsm.new()
+local inp2 = str_to_bytes("fun(X) -> case X of 1 -> ok end end rest")
+s2:setup(inp2, 0, #inp2)
+s2:do_scan()
+if s2:get_success() ~= 1 or s2:get_result_pos() ~= 35 then
+    print("FAIL 2: success=" .. s2:get_success() .. ", pos=" .. s2:get_result_pos())
+    failures = failures + 1
+end
+
+-- Test 3: Not a fun keyword (function)
+local s3 = ErlangScopeScannerFsm.new()
+local inp3 = str_to_bytes("function() -> ok end")
+s3:setup(inp3, 0, #inp3)
+s3:do_scan()
+if s3:get_success() ~= 0 then
+    print("FAIL 3: should not match 'function'")
+    failures = failures + 1
+end
+
+-- Test 4: fun Module:Function/Arity (function reference, not closure)
+local s4 = ErlangScopeScannerFsm.new()
+local inp4 = str_to_bytes("fun io:format/2")
+s4:setup(inp4, 0, #inp4)
+s4:do_scan()
+if s4:get_success() ~= 0 then
+    print("FAIL 4: should not match function reference")
+    failures = failures + 1
+end
+
+-- Test 5: Nested if ... end inside fun
+local s5 = ErlangScopeScannerFsm.new()
+local inp5 = str_to_bytes("fun() -> if true -> ok end end rest")
+s5:setup(inp5, 0, #inp5)
+s5:do_scan()
+if s5:get_success() ~= 1 or s5:get_result_pos() ~= 30 then
+    print("FAIL 5: success=" .. s5:get_success() .. ", pos=" .. s5:get_result_pos())
+    failures = failures + 1
+end
+
+-- Test 6: String inside fun body (should skip)
+local s6 = ErlangScopeScannerFsm.new()
+local inp6 = str_to_bytes('fun() -> "end" end rest')
+s6:setup(inp6, 0, #inp6)
+s6:do_scan()
+if s6:get_success() ~= 1 or s6:get_result_pos() ~= 18 then
+    print("FAIL 6: success=" .. s6:get_success() .. ", pos=" .. s6:get_result_pos())
+    failures = failures + 1
+end
+
+-- Test 7: Comment inside fun body (should skip)
+local s7 = ErlangScopeScannerFsm.new()
+local inp7 = str_to_bytes("fun() -> % end\nok end rest")
+s7:setup(inp7, 0, #inp7)
+s7:do_scan()
+if s7:get_success() ~= 1 or s7:get_result_pos() ~= 21 then
+    print("FAIL 7: success=" .. s7:get_success() .. ", pos=" .. s7:get_result_pos())
+    failures = failures + 1
+end
+
+-- Test 8: Unmatched fun (no end)
+local s8 = ErlangScopeScannerFsm.new()
+local inp8 = str_to_bytes("fun() -> X + 1")
+s8:setup(inp8, 0, #inp8)
+s8:do_scan()
+if s8:get_success() ~= 0 then
+    print("FAIL 8: should fail with no matching end")
+    failures = failures + 1
+end
+
+if failures > 0 then
+    print("FAIL: " .. failures .. " failures")
+    os.exit(1)
+end
+print("PASS: erlang_scope_scanner (8 cases)")

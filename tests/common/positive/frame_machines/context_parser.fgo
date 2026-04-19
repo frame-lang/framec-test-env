@@ -1,0 +1,579 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// ContextParser -- FSM for parsing @@ context constructs.
+// Translated from framec's native_region_scanner/context_parser.frs
+//
+// Parses:
+//   @@:return [= expr]     kind=2 (ContextReturn)
+//   @@:event               kind=3 (ContextEvent)
+//   @@:data.key [= expr]   kind=4 (ContextData) or kind=5 (ContextDataAssign)
+//   @@:params.key           kind=6 (ContextParams)
+//   @@SystemName()          kind=7 (TaggedInstantiation)
+//   @@:(expr)               kind=8 (ContextReturnExpr)
+//   @@:return(expr)         kind=9 (ReturnCall)
+//   @@:self.method()        kind=10 (ContextSelfCall)
+//   @@:self                 kind=11 (ContextSelf)
+//   @@:system.state         kind=12 (ContextSystemState)
+//   other                   has_result=0
+
+@@system ContextParserFsm {
+    operations:
+        Setup(input_bytes: []byte, start: int, length: int) {
+            s.bytes = input_bytes
+            s.pos = start
+            s.scan_end = length
+        }
+        SetupWithParenEnd(input_bytes: []byte, start: int, length: int, pEnd: int) {
+            s.bytes = input_bytes
+            s.pos = start
+            s.scan_end = length
+            s.paren_end = pEnd
+        }
+        GetResultEnd(): int {
+            return s.result_end
+        }
+        GetResultKind(): int {
+            return s.result_kind
+        }
+        GetHasResult(): int {
+            return s.has_result
+        }
+
+    interface:
+        DoParse()
+
+    machine:
+        $Init {
+            DoParse() { -> $Dispatching }
+        }
+
+        $Dispatching {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                if i >= end {
+                    s.has_result = 0
+                    -> $Done
+                }
+
+                b := bs[i]
+
+                if b == ':' {
+                    s.pos = i + 1
+                    -> $DispatchColon
+                } else if b >= 'A' && b <= 'Z' {
+                    // @@SystemName -- pos stays at start of name
+                    -> $ParseInstantiation
+                } else {
+                    s.result_end = i
+                    s.has_result = 0
+                    -> $Done
+                }
+            }
+        }
+
+        $DispatchColon {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Check for @@:return
+                if i+5 < end {
+                    if string(bs[i:i+6]) == "return" {
+                        s.pos = i + 6
+                        -> $ParseReturn
+                    }
+                }
+
+                // Check for @@:event
+                if i+4 < end {
+                    if string(bs[i:i+5]) == "event" {
+                        s.result_end = i + 5
+                        s.result_kind = 3
+                        s.has_result = 1
+                        -> $Done
+                    }
+                }
+
+                // Check for @@:data
+                if i+3 < end {
+                    if string(bs[i:i+4]) == "data" {
+                        s.pos = i + 4
+                        -> $ParseData
+                    }
+                }
+
+                // Check for @@:params
+                if i+5 < end {
+                    if string(bs[i:i+6]) == "params" {
+                        s.pos = i + 6
+                        -> $ParseParams
+                    }
+                }
+
+                // Check for @@:self
+                if i+3 < end {
+                    if string(bs[i:i+4]) == "self" {
+                        s.pos = i + 4
+                        -> $ParseSelf
+                    }
+                }
+
+                // Check for @@:system
+                if i+5 < end {
+                    if string(bs[i:i+6]) == "system" {
+                        s.pos = i + 6
+                        -> $ParseSystem
+                    }
+                }
+
+                // Check for @@:(expr)
+                if i < end && bs[i] == '(' {
+                    s.pos = i
+                    -> $ParseContextReturnExpr
+                }
+
+                // Unknown
+                s.result_end = i
+                s.has_result = 0
+                -> $Done
+            }
+        }
+
+        $ParseReturn {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Skip whitespace
+                for i < end && (bs[i] == ' ' || bs[i] == '\t') {
+                    i++
+                }
+
+                if i < end && bs[i] == '(' {
+                    // @@:return(expr) -- scan balanced parens
+                    depth := 1
+                    i++
+                    for i < end && depth > 0 {
+                        if bs[i] == '(' {
+                            depth++
+                        }
+                        if bs[i] == ')' {
+                            depth--
+                        }
+                        if depth > 0 {
+                            i++
+                        }
+                    }
+                    if depth == 0 {
+                        i++
+                    }
+                    s.result_end = i
+                    s.result_kind = 9
+                    s.has_result = 1
+                    -> $Done
+                } else if i < end && bs[i] == '=' && (i+1 >= end || bs[i+1] != '=') {
+                    // @@:return = <expr> -- scan expression
+                    i++
+                    // Skip whitespace after =
+                    for i < end && (bs[i] == ' ' || bs[i] == '\t') {
+                        i++
+                    }
+                    // Scan to end of expression (newline or ;)
+                    for i < end && bs[i] != '\n' && bs[i] != ';' {
+                        i++
+                    }
+                    s.result_end = i
+                    s.result_kind = 2
+                    s.has_result = 1
+                    -> $Done
+                } else {
+                    // @@:return (bare read)
+                    s.result_end = i
+                    s.result_kind = 2
+                    s.has_result = 1
+                    -> $Done
+                }
+            }
+        }
+
+        $ParseContextReturnExpr {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                if i < end && bs[i] == '(' {
+                    depth := 1
+                    i++
+                    for i < end && depth > 0 {
+                        b := bs[i]
+                        if b == '(' {
+                            depth++
+                        } else if b == ')' {
+                            depth--
+                        } else if b == '"' || b == '\'' {
+                            q := b
+                            i++
+                            for i < end {
+                                if bs[i] == '\\' && i+1 < end {
+                                    i += 2
+                                    continue
+                                }
+                                if bs[i] == q {
+                                    break
+                                }
+                                i++
+                            }
+                        }
+                        i++
+                    }
+                }
+
+                s.result_end = i
+                s.result_kind = 8
+                s.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseData {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Scan .key
+                if i < end && bs[i] == '.' {
+                    i++
+                    for i < end && (isAlnumCtx(bs[i]) || bs[i] == '_') {
+                        i++
+                    }
+                }
+
+                // Check for assignment
+                j := i
+                for j < end && (bs[j] == ' ' || bs[j] == '\t') {
+                    j++
+                }
+
+                if j < end && bs[j] == '=' && (j+1 >= end || bs[j+1] != '=') {
+                    // @@:data.key = expr
+                    j++
+                    for j < end && (bs[j] == ' ' || bs[j] == '\t') {
+                        j++
+                    }
+                    for j < end && bs[j] != '\n' && bs[j] != ';' {
+                        j++
+                    }
+                    s.result_end = j
+                    s.result_kind = 5
+                } else {
+                    s.result_end = i
+                    s.result_kind = 4
+                }
+
+                s.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseParams {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                if i < end && bs[i] == '.' {
+                    i++
+                    for i < end && (isAlnumCtx(bs[i]) || bs[i] == '_') {
+                        i++
+                    }
+                }
+
+                s.result_end = i
+                s.result_kind = 6
+                s.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseSelf {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                if i < end && bs[i] == '.' {
+                    i++
+                    // Scan identifier
+                    for i < end && (isAlnumCtx(bs[i]) || bs[i] == '_') {
+                        i++
+                    }
+                    if i < end && bs[i] == '(' {
+                        // @@:self.method(args) -- scan balanced parens
+                        depth := 1
+                        i++
+                        for i < end && depth > 0 {
+                            if bs[i] == '(' {
+                                depth++
+                            }
+                            if bs[i] == ')' {
+                                depth--
+                            }
+                            if bs[i] == '"' || bs[i] == '\'' {
+                                q := bs[i]
+                                i++
+                                for i < end {
+                                    if bs[i] == '\\' && i+1 < end {
+                                        i += 2
+                                        continue
+                                    }
+                                    if bs[i] == q {
+                                        break
+                                    }
+                                    i++
+                                }
+                            }
+                            if depth > 0 {
+                                i++
+                            }
+                        }
+                        if depth == 0 {
+                            i++
+                        }
+                        s.result_end = i
+                        s.result_kind = 10
+                        s.has_result = 1
+                    } else {
+                        // @@:self.property
+                        s.result_end = i
+                        s.result_kind = 11
+                        s.has_result = 1
+                    }
+                } else {
+                    // bare @@:self
+                    s.result_end = i
+                    s.result_kind = 11
+                    s.has_result = 1
+                }
+
+                -> $Done
+            }
+        }
+
+        $ParseSystem {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                if i+5 < end {
+                    if string(bs[i:i+6]) == ".state" {
+                        after := i + 6
+                        if after >= end || (!isAlnumCtx(bs[after]) && bs[after] != '_') {
+                            s.result_end = i + 6
+                            s.result_kind = 12
+                            s.has_result = 1
+                            -> $Done
+                        }
+                    }
+                }
+
+                // Bare @@:system or unknown variant
+                s.result_end = i
+                s.result_kind = 13
+                s.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseInstantiation {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Scan identifier
+                for i < end && (isAlnumCtx(bs[i]) || bs[i] == '_') {
+                    i++
+                }
+
+                // Must be followed by (
+                if i < end && bs[i] == '(' {
+                    if s.paren_end > 0 {
+                        i = s.paren_end
+                        s.result_end = i
+                        s.result_kind = 7
+                        s.has_result = 1
+                    } else {
+                        s.result_end = i
+                        s.has_result = 0
+                    }
+                } else {
+                    s.result_end = i
+                    s.has_result = 0
+                }
+
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+                // Terminal state -- results are in domain vars
+            }
+        }
+
+    domain:
+        bytes: []byte = nil
+        pos: int = 0
+        scan_end: int = 0
+        result_end: int = 0
+        result_kind: int = 0
+        has_result: int = 0
+        paren_end: int = 0
+}
+
+func isAlnumCtx(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+func main() {
+	failures := 0
+
+	// Test 1: @@:return (bare read)
+	p1 := NewContextParserFsm()
+	inp1 := []byte(":return")
+	p1.Setup(inp1, 0, len(inp1))
+	p1.DoParse()
+	if p1.GetHasResult() != 1 || p1.GetResultKind() != 2 {
+		fmt.Printf("FAIL 1: has_result=%d, kind=%d\n", p1.GetHasResult(), p1.GetResultKind())
+		failures++
+	}
+
+	// Test 2: @@:event
+	p2 := NewContextParserFsm()
+	inp2 := []byte(":event")
+	p2.Setup(inp2, 0, len(inp2))
+	p2.DoParse()
+	if p2.GetHasResult() != 1 || p2.GetResultKind() != 3 {
+		fmt.Printf("FAIL 2: has_result=%d, kind=%d\n", p2.GetHasResult(), p2.GetResultKind())
+		failures++
+	}
+
+	// Test 3: @@:data.key
+	p3 := NewContextParserFsm()
+	inp3 := []byte(":data.name rest")
+	p3.Setup(inp3, 0, len(inp3))
+	p3.DoParse()
+	if p3.GetHasResult() != 1 || p3.GetResultKind() != 4 {
+		fmt.Printf("FAIL 3: has_result=%d, kind=%d\n", p3.GetHasResult(), p3.GetResultKind())
+		failures++
+	}
+
+	// Test 4: @@:data.key = expr
+	p4 := NewContextParserFsm()
+	inp4 := []byte(":data.key = value\n")
+	p4.Setup(inp4, 0, len(inp4))
+	p4.DoParse()
+	if p4.GetHasResult() != 1 || p4.GetResultKind() != 5 {
+		fmt.Printf("FAIL 4: has_result=%d, kind=%d\n", p4.GetHasResult(), p4.GetResultKind())
+		failures++
+	}
+
+	// Test 5: @@:params.key
+	p5 := NewContextParserFsm()
+	inp5 := []byte(":params.name rest")
+	p5.Setup(inp5, 0, len(inp5))
+	p5.DoParse()
+	if p5.GetHasResult() != 1 || p5.GetResultKind() != 6 {
+		fmt.Printf("FAIL 5: has_result=%d, kind=%d\n", p5.GetHasResult(), p5.GetResultKind())
+		failures++
+	}
+
+	// Test 6: @@:(expr)
+	p6 := NewContextParserFsm()
+	inp6 := []byte(":(x + 1) rest")
+	p6.Setup(inp6, 0, len(inp6))
+	p6.DoParse()
+	if p6.GetHasResult() != 1 || p6.GetResultKind() != 8 {
+		fmt.Printf("FAIL 6: has_result=%d, kind=%d\n", p6.GetHasResult(), p6.GetResultKind())
+		failures++
+	}
+
+	// Test 7: @@:return(expr)
+	p7 := NewContextParserFsm()
+	inp7 := []byte(":return(42) rest")
+	p7.Setup(inp7, 0, len(inp7))
+	p7.DoParse()
+	if p7.GetHasResult() != 1 || p7.GetResultKind() != 9 {
+		fmt.Printf("FAIL 7: has_result=%d, kind=%d\n", p7.GetHasResult(), p7.GetResultKind())
+		failures++
+	}
+
+	// Test 8: @@:self (bare)
+	p8 := NewContextParserFsm()
+	inp8 := []byte(":self rest")
+	p8.Setup(inp8, 0, len(inp8))
+	p8.DoParse()
+	if p8.GetHasResult() != 1 || p8.GetResultKind() != 11 {
+		fmt.Printf("FAIL 8: has_result=%d, kind=%d\n", p8.GetHasResult(), p8.GetResultKind())
+		failures++
+	}
+
+	// Test 9: @@:self.method(args)
+	p9 := NewContextParserFsm()
+	inp9 := []byte(":self.doWork(x) rest")
+	p9.Setup(inp9, 0, len(inp9))
+	p9.DoParse()
+	if p9.GetHasResult() != 1 || p9.GetResultKind() != 10 {
+		fmt.Printf("FAIL 9: has_result=%d, kind=%d\n", p9.GetHasResult(), p9.GetResultKind())
+		failures++
+	}
+
+	// Test 10: @@:system.state
+	p10 := NewContextParserFsm()
+	inp10 := []byte(":system.state rest")
+	p10.Setup(inp10, 0, len(inp10))
+	p10.DoParse()
+	if p10.GetHasResult() != 1 || p10.GetResultKind() != 12 {
+		fmt.Printf("FAIL 10: has_result=%d, kind=%d\n", p10.GetHasResult(), p10.GetResultKind())
+		failures++
+	}
+
+	// Test 11: @@SystemName() with paren_end
+	p11 := NewContextParserFsm()
+	inp11 := []byte("MySystem() rest")
+	p11.SetupWithParenEnd(inp11, 0, len(inp11), 10)
+	p11.DoParse()
+	if p11.GetHasResult() != 1 || p11.GetResultKind() != 7 {
+		fmt.Printf("FAIL 11: has_result=%d, kind=%d\n", p11.GetHasResult(), p11.GetResultKind())
+		failures++
+	}
+
+	// Test 12: No match (lowercase, not a keyword)
+	p12 := NewContextParserFsm()
+	inp12 := []byte("xyz")
+	p12.Setup(inp12, 0, len(inp12))
+	p12.DoParse()
+	if p12.GetHasResult() != 0 {
+		fmt.Printf("FAIL 12: should not match, has_result=%d\n", p12.GetHasResult())
+		failures++
+	}
+
+	if failures > 0 {
+		fmt.Printf("FAIL: %d failures\n", failures)
+		os.Exit(1)
+	}
+	fmt.Println("PASS: context_parser (12 cases)")
+}

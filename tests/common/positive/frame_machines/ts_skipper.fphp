@@ -1,0 +1,282 @@
+<?php
+@@target php
+
+// TypeScriptSyntaxSkipper — FSM for skipping TS/JS comments and strings.
+// Translated from framec's native_region_scanner/typescript_skipper.frs
+//
+// Adds template literal awareness (backtick strings with ${} interpolation)
+// on top of the C-style comment and string patterns.
+
+@@system TSSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: array, start: int, length: int) {
+            $this->bytes = $input_bytes;
+            $this->pos = $start;
+            $this->scan_end = $length;
+        }
+        get_result_pos(): int {
+            return $this->result_pos;
+        }
+        get_success(): int {
+            return $this->success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                $i = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                // // line comment
+                if ($i + 1 < $end && $bs[$i] === 0x2F && $bs[$i + 1] === 0x2F) {
+                    $j = $i + 2;
+                    while ($j < $end && $bs[$j] !== 0x0A) {
+                        $j++;
+                    }
+                    $this->result_pos = $j;
+                    $this->success = 1;
+                    return;
+                }
+
+                // /* block comment */
+                if ($i + 1 < $end && $bs[$i] === 0x2F && $bs[$i + 1] === 0x2A) {
+                    $j = $i + 2;
+                    while ($j + 1 < $end) {
+                        if ($bs[$j] === 0x2A && $bs[$j + 1] === 0x2F) {
+                            $this->result_pos = $j + 2;
+                            $this->success = 1;
+                            return;
+                        }
+                        $j++;
+                    }
+                    $this->result_pos = $end;
+                    $this->success = 1;
+                    return;
+                }
+
+                $this->success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                $i = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+
+                // Template literal: `...${...}...`
+                if ($i < $end && $bs[$i] === 0x60) {
+                    $j = $i + 1;
+                    $templateDepth = 0;
+                    while ($j < $end) {
+                        $b = $bs[$j];
+                        if ($b === 0x60 && $templateDepth === 0) {
+                            $this->result_pos = $j + 1;
+                            $this->success = 1;
+                            return;
+                        }
+                        if ($b === 0x5C) {
+                            $j += 2;
+                            continue;
+                        }
+                        if ($b === 0x24 && $j + 1 < $end && $bs[$j + 1] === 0x7B) {
+                            $templateDepth++;
+                            $j += 2;
+                            continue;
+                        }
+                        if ($b === 0x7D && $templateDepth > 0) {
+                            $templateDepth--;
+                        }
+                        $j++;
+                    }
+                    $this->result_pos = $end;
+                    $this->success = 1;
+                    return;
+                }
+
+                // Simple string: " or '
+                if ($i < $end && ($bs[$i] === 0x22 || $bs[$i] === 0x27)) {
+                    $q = $bs[$i];
+                    $j = $i + 1;
+                    while ($j < $end) {
+                        if ($bs[$j] === 0x5C) {
+                            $j += 2;
+                            continue;
+                        }
+                        if ($bs[$j] === $q) {
+                            $this->result_pos = $j + 1;
+                            $this->success = 1;
+                            return;
+                        }
+                        $j++;
+                    }
+                    $this->result_pos = $end;
+                    $this->success = 1;
+                    return;
+                }
+
+                $this->success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                $j = $this->pos;
+                $end = $this->scan_end;
+                $bs = $this->bytes;
+                $inTemplate = false;
+                $templateDepth = 0;
+
+                while ($j < $end) {
+                    $b = $bs[$j];
+
+                    if ($inTemplate) {
+                        if ($b === 0x60 && $templateDepth === 0) {
+                            $inTemplate = false;
+                            $j++;
+                            continue;
+                        }
+                        if ($b === 0x5C) {
+                            $j += 2;
+                            continue;
+                        }
+                        if ($b === 0x24 && $j + 1 < $end && $bs[$j + 1] === 0x7B) {
+                            $templateDepth++;
+                            $j += 2;
+                            continue;
+                        }
+                        if ($b === 0x7D && $templateDepth > 0) {
+                            $templateDepth--;
+                        }
+                        $j++;
+                        continue;
+                    }
+
+                    if ($b === 0x0A || $b === 0x3B) { break; }
+                    if ($b === 0x2F && $j + 1 < $end && $bs[$j + 1] === 0x2F) { break; }
+                    if ($b === 0x2F && $j + 1 < $end && $bs[$j + 1] === 0x2A) { break; }
+                    if ($b === 0x60) {
+                        $inTemplate = true;
+                        $j++;
+                        continue;
+                    }
+                    if ($b === 0x22 || $b === 0x27) {
+                        $q = $b;
+                        $j++;
+                        while ($j < $end && $bs[$j] !== $q) {
+                            if ($bs[$j] === 0x5C) { $j++; }
+                            $j++;
+                        }
+                        if ($j < $end) { $j++; }
+                        continue;
+                    }
+
+                    $j++;
+                }
+
+                $this->result_pos = $j;
+            }
+        }
+
+    domain:
+        bytes = []
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+function str_to_bytes(string $s): array {
+    $bytes = [];
+    for ($i = 0; $i < strlen($s); $i++) {
+        $bytes[] = ord($s[$i]);
+    }
+    return $bytes;
+}
+
+$failures = 0;
+
+// Test 1: Skip // line comment
+$s1 = new TSSyntaxSkipperFsm();
+$inp1 = str_to_bytes("// comment\ncode");
+$s1->setup($inp1, 0, count($inp1));
+$s1->do_skip_comment();
+if ($s1->get_success() !== 1 || $s1->get_result_pos() !== 10) {
+    echo "FAIL 1: success={$s1->get_success()}, pos={$s1->get_result_pos()}\n";
+    $failures++;
+}
+
+// Test 2: Skip /* block comment */
+$s2 = new TSSyntaxSkipperFsm();
+$inp2 = str_to_bytes("/* block */code");
+$s2->setup($inp2, 0, count($inp2));
+$s2->do_skip_comment();
+if ($s2->get_success() !== 1 || $s2->get_result_pos() !== 11) {
+    echo "FAIL 2: success={$s2->get_success()}, pos={$s2->get_result_pos()}\n";
+    $failures++;
+}
+
+// Test 3: Skip template literal
+$s3 = new TSSyntaxSkipperFsm();
+$inp3 = str_to_bytes("`hello \${name} world`rest");
+$s3->setup($inp3, 0, count($inp3));
+$s3->do_skip_string();
+if ($s3->get_success() !== 1 || $s3->get_result_pos() !== 21) {
+    echo "FAIL 3: success={$s3->get_success()}, pos={$s3->get_result_pos()}\n";
+    $failures++;
+}
+
+// Test 4: Skip simple double-quoted string
+$s4 = new TSSyntaxSkipperFsm();
+$inp4 = str_to_bytes("\"hello\" rest");
+$s4->setup($inp4, 0, count($inp4));
+$s4->do_skip_string();
+if ($s4->get_success() !== 1 || $s4->get_result_pos() !== 7) {
+    echo "FAIL 4: success={$s4->get_success()}, pos={$s4->get_result_pos()}\n";
+    $failures++;
+}
+
+// Test 5: Skip template with nested ${}
+$s5 = new TSSyntaxSkipperFsm();
+$inp5 = str_to_bytes("`\${a + \${b}}`rest");
+$s5->setup($inp5, 0, count($inp5));
+$s5->do_skip_string();
+if ($s5->get_success() !== 1) {
+    echo "FAIL 5: success={$s5->get_success()}\n";
+    $failures++;
+}
+
+// Test 6: Find line end skips over template literals
+$s6 = new TSSyntaxSkipperFsm();
+$inp6 = str_to_bytes("x = `hello`;\nnext");
+$s6->setup($inp6, 0, count($inp6));
+$s6->do_find_line_end();
+if ($s6->get_result_pos() !== 11) {
+    echo "FAIL 6: pos={$s6->get_result_pos()}, expected 11 (at ;)\n";
+    $failures++;
+}
+
+// Test 7: Not a string
+$s7 = new TSSyntaxSkipperFsm();
+$inp7 = str_to_bytes("x + 1");
+$s7->setup($inp7, 0, count($inp7));
+$s7->do_skip_string();
+if ($s7->get_success() !== 0) {
+    echo "FAIL 7: should not be string\n";
+    $failures++;
+}
+
+if ($failures > 0) { echo "FAIL: {$failures} failures\n"; exit(1); }
+echo "PASS: ts_skipper (7 cases)\n";

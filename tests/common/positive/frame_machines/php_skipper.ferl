@@ -1,0 +1,362 @@
+@@target erlang
+
+%% PhpSyntaxSkipper -- FSM for skipping PHP comments and strings.
+
+@@system PhpSyntaxSkipperFsm {
+    interface:
+        setup(input_bytes: binary, start: int, length: int)
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+        get_result_pos(): int
+        get_success(): int
+
+    machine:
+        $Init {
+            setup(input_bytes: binary, start: int, length: int) {
+                self.bytes = input_bytes
+                self.pos = start
+                self.scan_end = length
+            }
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipComment {
+            $>() {
+                {Pos, Suc} = php_skip_comment_scan(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.result_pos = Pos
+                self.success = Suc
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipString {
+            $>() {
+                {Pos, Suc} = php_skip_string_scan(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.result_pos = Pos
+                self.success = Suc
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $FindLineEnd {
+            $>() {
+                self.result_pos = php_find_line_end_scan(Data#data.bytes, Data#data.pos, Data#data.scan_end, 0)
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                {Pos, Suc} = php_balanced_paren_scan(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.result_pos = Pos
+                self.success = Suc
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+    domain:
+        bytes = <<>>
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+%% --- skip_comment helpers ---
+php_skip_comment_scan(Bs, I, End) when I + 1 < End ->
+    B0 = binary:at(Bs, I),
+    B1 = binary:at(Bs, I + 1),
+    if
+        B0 =:= $/ andalso B1 =:= $/ ->
+            Pos = php_skip_to_newline(Bs, I + 2, End),
+            {Pos, 1};
+        B0 =:= $# ->
+            Pos = php_skip_to_newline(Bs, I + 1, End),
+            {Pos, 1};
+        B0 =:= $/ andalso B1 =:= $* ->
+            php_skip_block_comment(Bs, I + 2, End);
+        true ->
+            {0, 0}
+    end;
+php_skip_comment_scan(Bs, I, End) when I < End ->
+    case binary:at(Bs, I) of
+        $# -> {php_skip_to_newline(Bs, I + 1, End), 1};
+        _ -> {0, 0}
+    end;
+php_skip_comment_scan(_Bs, _I, _End) ->
+    {0, 0}.
+
+php_skip_to_newline(Bs, J, End) when J < End ->
+    case binary:at(Bs, J) of
+        $\n -> J;
+        _ -> php_skip_to_newline(Bs, J + 1, End)
+    end;
+php_skip_to_newline(_Bs, J, _End) ->
+    J.
+
+php_skip_block_comment(Bs, J, End) when J + 1 < End ->
+    case {binary:at(Bs, J), binary:at(Bs, J + 1)} of
+        {$*, $/} -> {J + 2, 1};
+        _ -> php_skip_block_comment(Bs, J + 1, End)
+    end;
+php_skip_block_comment(_Bs, _J, End) ->
+    {End, 1}.
+
+%% --- skip_string helpers ---
+php_skip_string_scan(Bs, I, End) when I + 2 < End ->
+    B0 = binary:at(Bs, I),
+    B1 = binary:at(Bs, I + 1),
+    B2 = binary:at(Bs, I + 2),
+    case {B0, B1, B2} of
+        {$<, $<, $<} ->
+            php_skip_heredoc(Bs, I + 3, End);
+        _ ->
+            php_skip_simple_string(Bs, I, End)
+    end;
+php_skip_string_scan(Bs, I, End) when I < End ->
+    php_skip_simple_string(Bs, I, End);
+php_skip_string_scan(_Bs, _I, _End) ->
+    {0, 0}.
+
+php_skip_heredoc(Bs, J, End) ->
+    {J2, _Nowdoc} = case J < End andalso binary:at(Bs, J) =:= $' of
+        true -> {J + 1, 1};
+        false -> {J, 0}
+    end,
+    TagStart = J2,
+    J3 = php_scan_tag_name(Bs, J2, End),
+    TagLen = J3 - TagStart,
+    J4 = case J3 < End andalso binary:at(Bs, J3) =:= $' of
+        true -> J3 + 1;
+        false -> J3
+    end,
+    case TagLen > 0 of
+        true ->
+            Tag = binary:part(Bs, TagStart, TagLen),
+            J5 = php_skip_to_newline_inc(Bs, J4, End),
+            php_scan_heredoc_body(Bs, J5, End, Tag);
+        false ->
+            {0, 0}
+    end.
+
+php_scan_tag_name(Bs, J, End) when J < End ->
+    B = binary:at(Bs, J),
+    IsAlnum = (B >= $a andalso B =< $z) orelse (B >= $A andalso B =< $Z) orelse (B >= $0 andalso B =< $9) orelse B =:= $_,
+    case IsAlnum of
+        true -> php_scan_tag_name(Bs, J + 1, End);
+        false -> J
+    end;
+php_scan_tag_name(_Bs, J, _End) ->
+    J.
+
+php_skip_to_newline_inc(Bs, J, End) when J < End ->
+    case binary:at(Bs, J) of
+        $\n -> J + 1;
+        _ -> php_skip_to_newline_inc(Bs, J + 1, End)
+    end;
+php_skip_to_newline_inc(_Bs, J, _End) ->
+    J.
+
+php_scan_heredoc_body(Bs, J, End, Tag) when J < End ->
+    TagLen = byte_size(Tag),
+    case J + TagLen =< End andalso binary:part(Bs, J, TagLen) =:= Tag of
+        true ->
+            K0 = J + TagLen,
+            K1 = case K0 < End andalso binary:at(Bs, K0) =:= $; of true -> K0 + 1; false -> K0 end,
+            case K1 >= End orelse binary:at(Bs, K1) =:= $\n of
+                true ->
+                    K2 = case K1 < End andalso binary:at(Bs, K1) =:= $\n of true -> K1 + 1; false -> K1 end,
+                    {K2, 1};
+                false ->
+                    J2 = php_skip_to_newline_inc(Bs, J, End),
+                    php_scan_heredoc_body(Bs, J2, End, Tag)
+            end;
+        false ->
+            J2 = php_skip_to_newline_inc(Bs, J, End),
+            php_scan_heredoc_body(Bs, J2, End, Tag)
+    end;
+php_scan_heredoc_body(_Bs, _J, End, _Tag) ->
+    {End, 1}.
+
+php_skip_simple_string(Bs, I, End) when I < End ->
+    B = binary:at(Bs, I),
+    case B =:= $" orelse B =:= $' of
+        true -> php_skip_str_loop(Bs, I + 1, End, B);
+        false -> {0, 0}
+    end;
+php_skip_simple_string(_Bs, _I, _End) ->
+    {0, 0}.
+
+php_skip_str_loop(Bs, J, End, Q) when J < End ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\\ -> php_skip_str_loop(Bs, J + 2, End, Q);
+        B =:= Q -> {J + 1, 1};
+        true -> php_skip_str_loop(Bs, J + 1, End, Q)
+    end;
+php_skip_str_loop(_Bs, _J, End, _Q) ->
+    {End, 1}.
+
+%% --- find_line_end helpers ---
+php_find_line_end_scan(Bs, J, End, InStr) when J < End ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\n -> J;
+        InStr =/= 0 andalso B =:= $\\ ->
+            php_find_line_end_scan(Bs, J + 2, End, InStr);
+        InStr =/= 0 andalso B =:= InStr ->
+            php_find_line_end_scan(Bs, J + 1, End, 0);
+        InStr =/= 0 ->
+            php_find_line_end_scan(Bs, J + 1, End, InStr);
+        B =:= $; orelse B =:= $} -> J;
+        B =:= $# -> J;
+        B =:= $/ andalso J + 1 < End ->
+            B1 = binary:at(Bs, J + 1),
+            case B1 =:= $/ orelse B1 =:= $* of
+                true -> J;
+                false -> php_find_line_end_scan(Bs, J + 1, End, InStr)
+            end;
+        B =:= $' orelse B =:= $" ->
+            php_find_line_end_scan(Bs, J + 1, End, B);
+        true ->
+            php_find_line_end_scan(Bs, J + 1, End, InStr)
+    end;
+php_find_line_end_scan(_Bs, J, _End, _InStr) ->
+    J.
+
+%% --- balanced_paren helpers ---
+php_balanced_paren_scan(Bs, I, End) when I < End ->
+    case binary:at(Bs, I) of
+        $( -> php_balanced_loop(Bs, I, End, 0, 0);
+        _ -> {0, 0}
+    end;
+php_balanced_paren_scan(_Bs, _I, _End) ->
+    {0, 0}.
+
+php_balanced_loop(Bs, I, End, Depth, InStr) when I < End ->
+    B = binary:at(Bs, I),
+    if
+        InStr =/= 0 andalso B =:= $\\ ->
+            php_balanced_loop(Bs, I + 2, End, Depth, InStr);
+        InStr =/= 0 andalso B =:= InStr ->
+            php_balanced_loop(Bs, I + 1, End, Depth, 0);
+        InStr =/= 0 ->
+            php_balanced_loop(Bs, I + 1, End, Depth, InStr);
+        B =:= $' orelse B =:= $" ->
+            php_balanced_loop(Bs, I + 1, End, Depth, B);
+        B =:= $( ->
+            php_balanced_loop(Bs, I + 1, End, Depth + 1, InStr);
+        B =:= $) ->
+            NewDepth = Depth - 1,
+            case NewDepth of
+                0 -> {I + 1, 1};
+                _ -> php_balanced_loop(Bs, I + 1, End, NewDepth, InStr)
+            end;
+        true ->
+            php_balanced_loop(Bs, I + 1, End, Depth, InStr)
+    end;
+php_balanced_loop(_Bs, _I, _End, _Depth, _InStr) ->
+    {0, 0}.
+
+main() ->
+    Failures = test_all(0),
+    case Failures of
+        0 -> io:format("PASS: php_skipper (8 cases)~n");
+        _ -> io:format("FAIL: ~p failures~n", [Failures]), halt(1)
+    end.
+
+test_all(F0) ->
+    M = php_syntax_skipper_fsm,
+
+    %% Test 1: Skip // line comment
+    {ok, P1} = M:start_link(),
+    I1 = <<"// comment\ncode">>,
+    M:setup(P1, I1, 0, byte_size(I1)),
+    M:do_skip_comment(P1),
+    F1 = case {M:get_success(P1), M:get_result_pos(P1)} of
+        {1, 10} -> F0;
+        {S1, R1} -> io:format("FAIL 1: success=~p, pos=~p~n", [S1, R1]), F0 + 1
+    end,
+
+    %% Test 2: Skip # comment
+    {ok, P2} = M:start_link(),
+    I2 = <<"# comment\ncode">>,
+    M:setup(P2, I2, 0, byte_size(I2)),
+    M:do_skip_comment(P2),
+    F2 = case {M:get_success(P2), M:get_result_pos(P2)} of
+        {1, 9} -> F1;
+        {S2, R2} -> io:format("FAIL 2: success=~p, pos=~p~n", [S2, R2]), F1 + 1
+    end,
+
+    %% Test 3: Skip /* */ block comment
+    {ok, P3} = M:start_link(),
+    I3 = <<"/* block */code">>,
+    M:setup(P3, I3, 0, byte_size(I3)),
+    M:do_skip_comment(P3),
+    F3 = case {M:get_success(P3), M:get_result_pos(P3)} of
+        {1, 11} -> F2;
+        {S3, R3} -> io:format("FAIL 3: success=~p, pos=~p~n", [S3, R3]), F2 + 1
+    end,
+
+    %% Test 4: Skip double-quoted string
+    {ok, P4} = M:start_link(),
+    I4 = <<"\"hello\" rest">>,
+    M:setup(P4, I4, 0, byte_size(I4)),
+    M:do_skip_string(P4),
+    F4 = case {M:get_success(P4), M:get_result_pos(P4)} of
+        {1, 7} -> F3;
+        {S4, R4} -> io:format("FAIL 4: success=~p, pos=~p~n", [S4, R4]), F3 + 1
+    end,
+
+    %% Test 5: Skip single-quoted string
+    {ok, P5} = M:start_link(),
+    I5 = <<"'hello' rest">>,
+    M:setup(P5, I5, 0, byte_size(I5)),
+    M:do_skip_string(P5),
+    F5 = case {M:get_success(P5), M:get_result_pos(P5)} of
+        {1, 7} -> F4;
+        {S5, R5} -> io:format("FAIL 5: success=~p, pos=~p~n", [S5, R5]), F4 + 1
+    end,
+
+    %% Test 6: Skip heredoc
+    {ok, P6} = M:start_link(),
+    I6 = <<"<<<EOT\nhello world\nEOT;\nnext">>,
+    M:setup(P6, I6, 0, byte_size(I6)),
+    M:do_skip_string(P6),
+    F6 = case {M:get_success(P6), M:get_result_pos(P6)} of
+        {1, 24} -> F5;
+        {S6, R6} -> io:format("FAIL 6: success=~p, pos=~p~n", [S6, R6]), F5 + 1
+    end,
+
+    %% Test 7: Find line end (stops at ;)
+    {ok, P7} = M:start_link(),
+    I7 = <<"$x = 1; next">>,
+    M:setup(P7, I7, 0, byte_size(I7)),
+    M:do_find_line_end(P7),
+    F7 = case M:get_result_pos(P7) of
+        6 -> F6;
+        R7 -> io:format("FAIL 7: pos=~p, expected 6~n", [R7]), F6 + 1
+    end,
+
+    %% Test 8: Balanced parens
+    {ok, P8} = M:start_link(),
+    I8 = <<"(a, f(b)) rest">>,
+    M:setup(P8, I8, 0, byte_size(I8)),
+    M:do_balanced_paren_end(P8),
+    F8 = case {M:get_success(P8), M:get_result_pos(P8)} of
+        {1, 9} -> F7;
+        {S8, R8} -> io:format("FAIL 8: success=~p, pos=~p~n", [S8, R8]), F7 + 1
+    end,
+
+    F8.

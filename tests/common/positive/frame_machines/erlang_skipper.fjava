@@ -1,0 +1,294 @@
+@@target java
+
+// ErlangSyntaxSkipper -- FSM for skipping Erlang comments and strings.
+// Translated from framec's native_region_scanner/erlang_skipper.frs
+//
+// Handles: % line comments, "..." strings, '...' quoted atoms,
+// Erlang-style line endings, balanced parens.
+
+@@system ErlangSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Erlang: % line comment only
+                if (i < end && (bs[i] & 0xFF) == '%') {
+                    int j = i + 1;
+                    while (j < end && (bs[j] & 0xFF) != '\n') {
+                        j++;
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Simple string: "..."
+                if (i < end && (bs[i] & 0xFF) == '"') {
+                    int j = i + 1;
+                    while (j < end) {
+                        if ((bs[j] & 0xFF) == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if ((bs[j] & 0xFF) == '"') {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                // Quoted atoms: '...'
+                if (i < end && (bs[i] & 0xFF) == '\'') {
+                    int j = i + 1;
+                    while (j < end) {
+                        if ((bs[j] & 0xFF) == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if ((bs[j] & 0xFF) == '\'') {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+                int in_string = 0;
+
+                while (j < end) {
+                    int b = bs[j] & 0xFF;
+                    if (b == '\n') {
+                        break;
+                    }
+
+                    // Inside string
+                    if (in_string != 0) {
+                        if (b == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = 0;
+                        }
+                        j++;
+                        continue;
+                    }
+
+                    // Terminators
+                    if (b == '%') {
+                        break;
+                    }
+
+                    // String starts
+                    if (b == '"' || b == '\'') {
+                        in_string = b;
+                        j++;
+                        continue;
+                    }
+
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                if (i >= end || (bs[i] & 0xFF) != '(') {
+                    this.success = 0;
+                    return;
+                }
+
+                int depth = 0;
+                int in_string = 0;
+
+                while (i < end) {
+                    int b = bs[i] & 0xFF;
+
+                    // Inside string
+                    if (in_string != 0) {
+                        if (b == '\\') {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = 0;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '\'' || b == '"') {
+                        in_string = b;
+                        i++;
+                    } else if (b == '(') {
+                        depth++;
+                        i++;
+                    } else if (b == ')') {
+                        depth--;
+                        i++;
+                        if (depth == 0) {
+                            this.result_pos = i;
+                            this.success = 1;
+                            return;
+                        }
+                    } else {
+                        i++;
+                    }
+                }
+
+                this.success = 0;
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+class Main {
+    public static void main(String[] args) {
+        int failures = 0;
+
+        // Test 1: Skip % comment
+        ErlangSyntaxSkipperFsm s1 = @@ErlangSyntaxSkipperFsm();
+        byte[] inp1 = "% comment\ncode".getBytes();
+        s1.setup(inp1, 0, inp1.length);
+        s1.do_skip_comment();
+        if (s1.get_success() != 1 || s1.get_result_pos() != 9) {
+            System.out.println("FAIL 1: success=" + s1.get_success() + ", pos=" + s1.get_result_pos());
+            failures++;
+        }
+
+        // Test 2: Not a comment
+        ErlangSyntaxSkipperFsm s2 = @@ErlangSyntaxSkipperFsm();
+        byte[] inp2 = "x + 1".getBytes();
+        s2.setup(inp2, 0, inp2.length);
+        s2.do_skip_comment();
+        if (s2.get_success() != 0) {
+            System.out.println("FAIL 2: should not be comment");
+            failures++;
+        }
+
+        // Test 3: Skip double-quoted string
+        ErlangSyntaxSkipperFsm s3 = @@ErlangSyntaxSkipperFsm();
+        byte[] inp3 = "\"hello\" rest".getBytes();
+        s3.setup(inp3, 0, inp3.length);
+        s3.do_skip_string();
+        if (s3.get_success() != 1 || s3.get_result_pos() != 7) {
+            System.out.println("FAIL 3: success=" + s3.get_success() + ", pos=" + s3.get_result_pos());
+            failures++;
+        }
+
+        // Test 4: Skip quoted atom
+        ErlangSyntaxSkipperFsm s4 = @@ErlangSyntaxSkipperFsm();
+        byte[] inp4 = "'my_atom' rest".getBytes();
+        s4.setup(inp4, 0, inp4.length);
+        s4.do_skip_string();
+        if (s4.get_success() != 1 || s4.get_result_pos() != 9) {
+            System.out.println("FAIL 4: success=" + s4.get_success() + ", pos=" + s4.get_result_pos());
+            failures++;
+        }
+
+        // Test 5: Find line end (stops at %)
+        ErlangSyntaxSkipperFsm s5 = @@ErlangSyntaxSkipperFsm();
+        byte[] inp5 = "X + 1 % comment".getBytes();
+        s5.setup(inp5, 0, inp5.length);
+        s5.do_find_line_end();
+        if (s5.get_result_pos() != 6) {
+            System.out.println("FAIL 5: pos=" + s5.get_result_pos() + ", expected 6");
+            failures++;
+        }
+
+        // Test 6: Balanced parens
+        ErlangSyntaxSkipperFsm s6 = @@ErlangSyntaxSkipperFsm();
+        byte[] inp6 = "(a, f(b)) rest".getBytes();
+        s6.setup(inp6, 0, inp6.length);
+        s6.do_balanced_paren_end();
+        if (s6.get_success() != 1 || s6.get_result_pos() != 9) {
+            System.out.println("FAIL 6: success=" + s6.get_success() + ", pos=" + s6.get_result_pos());
+            failures++;
+        }
+
+        // Test 7: String with escape
+        ErlangSyntaxSkipperFsm s7 = @@ErlangSyntaxSkipperFsm();
+        byte[] inp7 = "\"he\\\"llo\" rest".getBytes();
+        s7.setup(inp7, 0, inp7.length);
+        s7.do_skip_string();
+        if (s7.get_success() != 1 || s7.get_result_pos() != 9) {
+            System.out.println("FAIL 7: success=" + s7.get_success() + ", pos=" + s7.get_result_pos());
+            failures++;
+        }
+
+        if (failures > 0) {
+            System.out.println("FAIL: " + failures + " failures");
+            System.exit(1);
+        }
+        System.out.println("PASS: erlang_skipper (7 cases)");
+    }
+}

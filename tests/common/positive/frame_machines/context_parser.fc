@@ -1,0 +1,573 @@
+@@target c
+
+#include <string.h>
+
+// ContextParser -- FSM for parsing @@ context constructs.
+// Translated from framec's native_region_scanner/context_parser.frs
+
+@@system ContextParserFsm {
+    operations:
+        setup(input_bytes: unsigned char*, start: int, length: int) {
+            self->bytes = input_bytes;
+            self->pos = start;
+            self->scan_end = length;
+        }
+        setup_with_paren_end(input_bytes: unsigned char*, start: int, length: int, p_end: int) {
+            self->bytes = input_bytes;
+            self->pos = start;
+            self->scan_end = length;
+            self->paren_end = p_end;
+        }
+        get_result_end(): int {
+            return self->result_end;
+        }
+        get_result_kind(): int {
+            return self->result_kind;
+        }
+        get_has_result(): int {
+            return self->has_result;
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $Dispatching }
+        }
+
+        $Dispatching {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                if (i >= end) {
+                    self->has_result = 0;
+                    -> $Done
+                }
+
+                unsigned char b = bs[i];
+
+                if (b == ':') {
+                    self->pos = i + 1;
+                    -> $DispatchColon
+                } else if (b >= 'A' && b <= 'Z') {
+                    // @@SystemName -- pos stays at start of name
+                    -> $ParseInstantiation
+                } else {
+                    self->result_end = i;
+                    self->has_result = 0;
+                    -> $Done
+                }
+            }
+        }
+
+        $DispatchColon {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                // Check for @@:return
+                if (i + 5 < end) {
+                    if (memcmp(bs + i, "return", 6) == 0) {
+                        self->pos = i + 6;
+                        -> $ParseReturn
+                    }
+                }
+
+                // Check for @@:event
+                if (i + 4 < end) {
+                    if (memcmp(bs + i, "event", 5) == 0) {
+                        self->result_end = i + 5;
+                        self->result_kind = 3;
+                        self->has_result = 1;
+                        -> $Done
+                    }
+                }
+
+                // Check for @@:data
+                if (i + 3 < end) {
+                    if (memcmp(bs + i, "data", 4) == 0) {
+                        self->pos = i + 4;
+                        -> $ParseData
+                    }
+                }
+
+                // Check for @@:params
+                if (i + 5 < end) {
+                    if (memcmp(bs + i, "params", 6) == 0) {
+                        self->pos = i + 6;
+                        -> $ParseParams
+                    }
+                }
+
+                // Check for @@:self
+                if (i + 3 < end) {
+                    if (memcmp(bs + i, "self", 4) == 0) {
+                        self->pos = i + 4;
+                        -> $ParseSelf
+                    }
+                }
+
+                // Check for @@:system
+                if (i + 5 < end) {
+                    if (memcmp(bs + i, "system", 6) == 0) {
+                        self->pos = i + 6;
+                        -> $ParseSystem
+                    }
+                }
+
+                // Check for @@:(expr)
+                if (i < end && bs[i] == '(') {
+                    self->pos = i;
+                    -> $ParseContextReturnExpr
+                }
+
+                // Unknown
+                self->result_end = i;
+                self->has_result = 0;
+                -> $Done
+            }
+        }
+
+        $ParseReturn {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                // Skip whitespace
+                while (i < end && (bs[i] == ' ' || bs[i] == '\t')) {
+                    i++;
+                }
+
+                if (i < end && bs[i] == '(') {
+                    // @@:return(expr) -- scan balanced parens
+                    int depth = 1;
+                    i++;
+                    while (i < end && depth > 0) {
+                        if (bs[i] == '(') {
+                            depth++;
+                        }
+                        if (bs[i] == ')') {
+                            depth--;
+                        }
+                        if (depth > 0) {
+                            i++;
+                        }
+                    }
+                    if (depth == 0) {
+                        i++;
+                    }
+                    self->result_end = i;
+                    self->result_kind = 9;
+                    self->has_result = 1;
+                    -> $Done
+                } else if (i < end && bs[i] == '=' && (i + 1 >= end || bs[i + 1] != '=')) {
+                    // @@:return = <expr> -- scan expression
+                    i++;
+                    // Skip whitespace after =
+                    while (i < end && (bs[i] == ' ' || bs[i] == '\t')) {
+                        i++;
+                    }
+                    // Scan to end of expression (newline or ;)
+                    while (i < end && bs[i] != '\n' && bs[i] != ';') {
+                        i++;
+                    }
+                    self->result_end = i;
+                    self->result_kind = 2;
+                    self->has_result = 1;
+                    -> $Done
+                } else {
+                    // @@:return (bare read)
+                    self->result_end = i;
+                    self->result_kind = 2;
+                    self->has_result = 1;
+                    -> $Done
+                }
+            }
+        }
+
+        $ParseContextReturnExpr {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                if (i < end && bs[i] == '(') {
+                    int depth = 1;
+                    i++;
+                    while (i < end && depth > 0) {
+                        unsigned char b = bs[i];
+                        if (b == '(') {
+                            depth++;
+                        } else if (b == ')') {
+                            depth--;
+                        } else if (b == '"' || b == '\'') {
+                            unsigned char q = b;
+                            i++;
+                            while (i < end) {
+                                if (bs[i] == '\\' && i + 1 < end) {
+                                    i += 2;
+                                    continue;
+                                }
+                                if (bs[i] == q) {
+                                    break;
+                                }
+                                i++;
+                            }
+                        }
+                        i++;
+                    }
+                }
+
+                self->result_end = i;
+                self->result_kind = 8;
+                self->has_result = 1;
+                -> $Done
+            }
+        }
+
+        $ParseData {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                // Scan .key
+                if (i < end && bs[i] == '.') {
+                    i++;
+                    while (i < end && ((bs[i] >= 'a' && bs[i] <= 'z') || (bs[i] >= 'A' && bs[i] <= 'Z') || (bs[i] >= '0' && bs[i] <= '9') || bs[i] == '_')) {
+                        i++;
+                    }
+                }
+
+                // Check for assignment
+                int j = i;
+                while (j < end && (bs[j] == ' ' || bs[j] == '\t')) {
+                    j++;
+                }
+
+                if (j < end && bs[j] == '=' && (j + 1 >= end || bs[j + 1] != '=')) {
+                    // @@:data.key = expr
+                    j++;
+                    while (j < end && (bs[j] == ' ' || bs[j] == '\t')) {
+                        j++;
+                    }
+                    while (j < end && bs[j] != '\n' && bs[j] != ';') {
+                        j++;
+                    }
+                    self->result_end = j;
+                    self->result_kind = 5;
+                } else {
+                    self->result_end = i;
+                    self->result_kind = 4;
+                }
+
+                self->has_result = 1;
+                -> $Done
+            }
+        }
+
+        $ParseParams {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                if (i < end && bs[i] == '.') {
+                    i++;
+                    while (i < end && ((bs[i] >= 'a' && bs[i] <= 'z') || (bs[i] >= 'A' && bs[i] <= 'Z') || (bs[i] >= '0' && bs[i] <= '9') || bs[i] == '_')) {
+                        i++;
+                    }
+                }
+
+                self->result_end = i;
+                self->result_kind = 6;
+                self->has_result = 1;
+                -> $Done
+            }
+        }
+
+        $ParseSelf {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                if (i < end && bs[i] == '.') {
+                    i++;
+                    // Scan identifier
+                    while (i < end && ((bs[i] >= 'a' && bs[i] <= 'z') || (bs[i] >= 'A' && bs[i] <= 'Z') || (bs[i] >= '0' && bs[i] <= '9') || bs[i] == '_')) {
+                        i++;
+                    }
+                    if (i < end && bs[i] == '(') {
+                        // @@:self.method(args) -- scan balanced parens
+                        int depth = 1;
+                        i++;
+                        while (i < end && depth > 0) {
+                            if (bs[i] == '(') {
+                                depth++;
+                            }
+                            if (bs[i] == ')') {
+                                depth--;
+                            }
+                            if (bs[i] == '"' || bs[i] == '\'') {
+                                unsigned char q = bs[i];
+                                i++;
+                                while (i < end) {
+                                    if (bs[i] == '\\' && i + 1 < end) {
+                                        i += 2;
+                                        continue;
+                                    }
+                                    if (bs[i] == q) {
+                                        break;
+                                    }
+                                    i++;
+                                }
+                            }
+                            if (depth > 0) {
+                                i++;
+                            }
+                        }
+                        if (depth == 0) {
+                            i++;
+                        }
+                        self->result_end = i;
+                        self->result_kind = 10;
+                        self->has_result = 1;
+                    } else {
+                        // @@:self.property
+                        self->result_end = i;
+                        self->result_kind = 11;
+                        self->has_result = 1;
+                    }
+                } else {
+                    // bare @@:self
+                    self->result_end = i;
+                    self->result_kind = 11;
+                    self->has_result = 1;
+                }
+
+                -> $Done
+            }
+        }
+
+        $ParseSystem {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                if (i + 5 < end) {
+                    if (memcmp(bs + i, ".state", 6) == 0) {
+                        int after = i + 6;
+                        if (after >= end || (!((bs[after] >= 'a' && bs[after] <= 'z') || (bs[after] >= 'A' && bs[after] <= 'Z') || (bs[after] >= '0' && bs[after] <= '9') || bs[after] == '_'))) {
+                            self->result_end = i + 6;
+                            self->result_kind = 12;
+                            self->has_result = 1;
+                            -> $Done
+                        }
+                    }
+                }
+
+                // Bare @@:system or unknown variant
+                self->result_end = i;
+                self->result_kind = 13;
+                self->has_result = 1;
+                -> $Done
+            }
+        }
+
+        $ParseInstantiation {
+            $>() {
+                int i = self->pos;
+                int end = self->scan_end;
+                unsigned char* bs = self->bytes;
+
+                // Scan identifier
+                while (i < end && ((bs[i] >= 'a' && bs[i] <= 'z') || (bs[i] >= 'A' && bs[i] <= 'Z') || (bs[i] >= '0' && bs[i] <= '9') || bs[i] == '_')) {
+                    i++;
+                }
+
+                // Must be followed by (
+                if (i < end && bs[i] == '(') {
+                    if (self->paren_end > 0) {
+                        i = self->paren_end;
+                        self->result_end = i;
+                        self->result_kind = 7;
+                        self->has_result = 1;
+                    } else {
+                        self->result_end = i;
+                        self->has_result = 0;
+                    }
+                } else {
+                    self->result_end = i;
+                    self->has_result = 0;
+                }
+
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+                // Terminal state -- results are in domain vars
+            }
+        }
+
+    domain:
+        bytes: unsigned char* = NULL
+        pos: int = 0
+        scan_end: int = 0
+        result_end: int = 0
+        result_kind: int = 0
+        has_result: int = 0
+        paren_end: int = 0
+}
+
+int main() {
+    int failures = 0;
+
+    // Test 1: @@:return (bare read)
+    ContextParserFsm* p1 = @@ContextParserFsm();
+    unsigned char t1[] = ":return";
+    ContextParserFsm_setup(p1, t1, 0, sizeof(t1)-1);
+    ContextParserFsm_do_parse(p1);
+    if (ContextParserFsm_get_has_result(p1) != 1 || ContextParserFsm_get_result_kind(p1) != 2) {
+        printf("FAIL 1: has_result=%d, kind=%d\n", ContextParserFsm_get_has_result(p1), ContextParserFsm_get_result_kind(p1));
+        failures++;
+    }
+
+    // Test 2: @@:event
+    ContextParserFsm* p2 = @@ContextParserFsm();
+    unsigned char t2[] = ":event";
+    ContextParserFsm_setup(p2, t2, 0, sizeof(t2)-1);
+    ContextParserFsm_do_parse(p2);
+    if (ContextParserFsm_get_has_result(p2) != 1 || ContextParserFsm_get_result_kind(p2) != 3) {
+        printf("FAIL 2: has_result=%d, kind=%d\n", ContextParserFsm_get_has_result(p2), ContextParserFsm_get_result_kind(p2));
+        failures++;
+    }
+
+    // Test 3: @@:data.key
+    ContextParserFsm* p3 = @@ContextParserFsm();
+    unsigned char t3[] = ":data.name rest";
+    ContextParserFsm_setup(p3, t3, 0, sizeof(t3)-1);
+    ContextParserFsm_do_parse(p3);
+    if (ContextParserFsm_get_has_result(p3) != 1 || ContextParserFsm_get_result_kind(p3) != 4) {
+        printf("FAIL 3: has_result=%d, kind=%d\n", ContextParserFsm_get_has_result(p3), ContextParserFsm_get_result_kind(p3));
+        failures++;
+    }
+
+    // Test 4: @@:data.key = expr
+    ContextParserFsm* p4 = @@ContextParserFsm();
+    unsigned char t4[] = ":data.key = value\n";
+    ContextParserFsm_setup(p4, t4, 0, sizeof(t4)-1);
+    ContextParserFsm_do_parse(p4);
+    if (ContextParserFsm_get_has_result(p4) != 1 || ContextParserFsm_get_result_kind(p4) != 5) {
+        printf("FAIL 4: has_result=%d, kind=%d\n", ContextParserFsm_get_has_result(p4), ContextParserFsm_get_result_kind(p4));
+        failures++;
+    }
+
+    // Test 5: @@:params.key
+    ContextParserFsm* p5 = @@ContextParserFsm();
+    unsigned char t5[] = ":params.name rest";
+    ContextParserFsm_setup(p5, t5, 0, sizeof(t5)-1);
+    ContextParserFsm_do_parse(p5);
+    if (ContextParserFsm_get_has_result(p5) != 1 || ContextParserFsm_get_result_kind(p5) != 6) {
+        printf("FAIL 5: has_result=%d, kind=%d\n", ContextParserFsm_get_has_result(p5), ContextParserFsm_get_result_kind(p5));
+        failures++;
+    }
+
+    // Test 6: @@:(expr)
+    ContextParserFsm* p6 = @@ContextParserFsm();
+    unsigned char t6[] = ":(x + 1) rest";
+    ContextParserFsm_setup(p6, t6, 0, sizeof(t6)-1);
+    ContextParserFsm_do_parse(p6);
+    if (ContextParserFsm_get_has_result(p6) != 1 || ContextParserFsm_get_result_kind(p6) != 8) {
+        printf("FAIL 6: has_result=%d, kind=%d\n", ContextParserFsm_get_has_result(p6), ContextParserFsm_get_result_kind(p6));
+        failures++;
+    }
+
+    // Test 7: @@:return(expr)
+    ContextParserFsm* p7 = @@ContextParserFsm();
+    unsigned char t7[] = ":return(42) rest";
+    ContextParserFsm_setup(p7, t7, 0, sizeof(t7)-1);
+    ContextParserFsm_do_parse(p7);
+    if (ContextParserFsm_get_has_result(p7) != 1 || ContextParserFsm_get_result_kind(p7) != 9) {
+        printf("FAIL 7: has_result=%d, kind=%d\n", ContextParserFsm_get_has_result(p7), ContextParserFsm_get_result_kind(p7));
+        failures++;
+    }
+
+    // Test 8: @@:self (bare)
+    ContextParserFsm* p8 = @@ContextParserFsm();
+    unsigned char t8[] = ":self rest";
+    ContextParserFsm_setup(p8, t8, 0, sizeof(t8)-1);
+    ContextParserFsm_do_parse(p8);
+    if (ContextParserFsm_get_has_result(p8) != 1 || ContextParserFsm_get_result_kind(p8) != 11) {
+        printf("FAIL 8: has_result=%d, kind=%d\n", ContextParserFsm_get_has_result(p8), ContextParserFsm_get_result_kind(p8));
+        failures++;
+    }
+
+    // Test 9: @@:self.method(args)
+    ContextParserFsm* p9 = @@ContextParserFsm();
+    unsigned char t9[] = ":self.doWork(x) rest";
+    ContextParserFsm_setup(p9, t9, 0, sizeof(t9)-1);
+    ContextParserFsm_do_parse(p9);
+    if (ContextParserFsm_get_has_result(p9) != 1 || ContextParserFsm_get_result_kind(p9) != 10) {
+        printf("FAIL 9: has_result=%d, kind=%d\n", ContextParserFsm_get_has_result(p9), ContextParserFsm_get_result_kind(p9));
+        failures++;
+    }
+
+    // Test 10: @@:system.state
+    ContextParserFsm* p10 = @@ContextParserFsm();
+    unsigned char t10[] = ":system.state rest";
+    ContextParserFsm_setup(p10, t10, 0, sizeof(t10)-1);
+    ContextParserFsm_do_parse(p10);
+    if (ContextParserFsm_get_has_result(p10) != 1 || ContextParserFsm_get_result_kind(p10) != 12) {
+        printf("FAIL 10: has_result=%d, kind=%d\n", ContextParserFsm_get_has_result(p10), ContextParserFsm_get_result_kind(p10));
+        failures++;
+    }
+
+    // Test 11: @@SystemName() with paren_end
+    ContextParserFsm* p11 = @@ContextParserFsm();
+    unsigned char t11[] = "MySystem() rest";
+    ContextParserFsm_setup_with_paren_end(p11, t11, 0, sizeof(t11)-1, 10);
+    ContextParserFsm_do_parse(p11);
+    if (ContextParserFsm_get_has_result(p11) != 1 || ContextParserFsm_get_result_kind(p11) != 7) {
+        printf("FAIL 11: has_result=%d, kind=%d\n", ContextParserFsm_get_has_result(p11), ContextParserFsm_get_result_kind(p11));
+        failures++;
+    }
+
+    // Test 12: No match (lowercase, not a keyword)
+    ContextParserFsm* p12 = @@ContextParserFsm();
+    unsigned char t12[] = "xyz";
+    ContextParserFsm_setup(p12, t12, 0, sizeof(t12)-1);
+    ContextParserFsm_do_parse(p12);
+    if (ContextParserFsm_get_has_result(p12) != 0) {
+        printf("FAIL 12: should not match, has_result=%d\n", ContextParserFsm_get_has_result(p12));
+        failures++;
+    }
+
+    ContextParserFsm_destroy(p1);
+    ContextParserFsm_destroy(p2);
+    ContextParserFsm_destroy(p3);
+    ContextParserFsm_destroy(p4);
+    ContextParserFsm_destroy(p5);
+    ContextParserFsm_destroy(p6);
+    ContextParserFsm_destroy(p7);
+    ContextParserFsm_destroy(p8);
+    ContextParserFsm_destroy(p9);
+    ContextParserFsm_destroy(p10);
+    ContextParserFsm_destroy(p11);
+    ContextParserFsm_destroy(p12);
+
+    if (failures > 0) {
+        printf("FAIL: %d failures\n", failures);
+        return 1;
+    }
+    printf("PASS: context_parser (12 cases)\n");
+    return 0;
+}

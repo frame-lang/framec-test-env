@@ -1,0 +1,376 @@
+@@target csharp
+
+using System;
+using System.Text;
+
+// PhpSyntaxSkipper -- FSM for skipping PHP comments and strings.
+
+@@system PhpSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Line comment: //
+                if (i + 1 < end && bs[i] == (byte)'/' && bs[i + 1] == (byte)'/') {
+                    int j = i + 2;
+                    while (j < end && bs[j] != (byte)'\n') {
+                        j++;
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                // Hash comment: #
+                if (i < end && bs[i] == (byte)'#') {
+                    int j = i + 1;
+                    while (j < end && bs[j] != (byte)'\n') {
+                        j++;
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                // Block comment: /* ... */
+                if (i + 1 < end && bs[i] == (byte)'/' && bs[i + 1] == (byte)'*') {
+                    int j = i + 2;
+                    while (j + 1 < end) {
+                        if (bs[j] == (byte)'*' && bs[j + 1] == (byte)'/') {
+                            this.result_pos = j + 2;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Heredoc/nowdoc: <<<EOT ... EOT;
+                if (i + 2 < end && bs[i] == (byte)'<' && bs[i + 1] == (byte)'<' && bs[i + 2] == (byte)'<') {
+                    int j = i + 3;
+                    int nowdoc = 0;
+                    if (j < end && bs[j] == (byte)'\'') {
+                        nowdoc = 1;
+                        j++;
+                    }
+                    int tag_start = j;
+                    while (j < end && (Char.IsLetterOrDigit((char)bs[j]) || bs[j] == (byte)'_')) {
+                        j++;
+                    }
+                    int tag_end_pos = j;
+                    if (nowdoc == 1 && j < end && bs[j] == (byte)'\'') {
+                        j++;
+                    }
+                    int tag_len = tag_end_pos - tag_start;
+                    if (tag_len > 0) {
+                        while (j < end && bs[j] != (byte)'\n') {
+                            j++;
+                        }
+                        if (j < end) {
+                            j++;
+                        }
+                        while (j < end) {
+                            bool match = true;
+                            if (j + tag_len <= end) {
+                                for (int t = 0; t < tag_len; t++) {
+                                    if (bs[j + t] != bs[tag_start + t]) {
+                                        match = false;
+                                        break;
+                                    }
+                                }
+                            } else {
+                                match = false;
+                            }
+                            if (match) {
+                                int k = j + tag_len;
+                                if (k < end && bs[k] == (byte)';') {
+                                    k++;
+                                }
+                                if (k >= end || bs[k] == (byte)'\n') {
+                                    if (k < end && bs[k] == (byte)'\n') {
+                                        k++;
+                                    }
+                                    this.result_pos = k;
+                                    this.success = 1;
+                                    return;
+                                }
+                            }
+                            while (j < end && bs[j] != (byte)'\n') {
+                                j++;
+                            }
+                            if (j < end) {
+                                j++;
+                            }
+                        }
+                        this.result_pos = end;
+                        this.success = 1;
+                        return;
+                    }
+                }
+
+                // Simple string: " or '
+                if (i < end && (bs[i] == (byte)'"' || bs[i] == (byte)'\'')) {
+                    int q = bs[i];
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == (byte)'\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == q) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+                int in_string = 0;
+
+                while (j < end) {
+                    int b = bs[j];
+                    if (b == (byte)'\n') {
+                        break;
+                    }
+
+                    if (in_string != 0) {
+                        if (b == (byte)'\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = 0;
+                        }
+                        j++;
+                        continue;
+                    }
+
+                    if (b == (byte)';' || b == (byte)'}') {
+                        break;
+                    }
+                    if (b == (byte)'/' && j + 1 < end && (bs[j + 1] == (byte)'/' || bs[j + 1] == (byte)'*')) {
+                        break;
+                    }
+                    if (b == (byte)'#') {
+                        break;
+                    }
+
+                    if (b == (byte)'\'' || b == (byte)'"') {
+                        in_string = b;
+                        j++;
+                        continue;
+                    }
+
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                if (i >= end || bs[i] != (byte)'(') {
+                    this.success = 0;
+                    return;
+                }
+
+                int depth = 0;
+                int in_string = 0;
+
+                while (i < end) {
+                    int b = bs[i];
+
+                    if (in_string != 0) {
+                        if (b == (byte)'\\') {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = 0;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == (byte)'\'' || b == (byte)'"') {
+                        in_string = b;
+                        i++;
+                    } else if (b == (byte)'(') {
+                        depth++;
+                        i++;
+                    } else if (b == (byte)')') {
+                        depth--;
+                        i++;
+                        if (depth == 0) {
+                            this.result_pos = i;
+                            this.success = 1;
+                            return;
+                        }
+                    } else {
+                        i++;
+                    }
+                }
+
+                this.success = 0;
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+class Program {
+    static void Main(string[] args) {
+        int failures = 0;
+
+        // Test 1: Skip // line comment
+        var s1 = new PhpSyntaxSkipperFsm();
+        byte[] inp1 = Encoding.UTF8.GetBytes("// comment\ncode");
+        s1.setup(inp1, 0, inp1.Length);
+        s1.do_skip_comment();
+        if ((int)s1.get_success() != 1 || (int)s1.get_result_pos() != 10) {
+            Console.WriteLine("FAIL 1: success=" + s1.get_success() + ", pos=" + s1.get_result_pos());
+            failures++;
+        }
+
+        // Test 2: Skip # comment
+        var s2 = new PhpSyntaxSkipperFsm();
+        byte[] inp2 = Encoding.UTF8.GetBytes("# comment\ncode");
+        s2.setup(inp2, 0, inp2.Length);
+        s2.do_skip_comment();
+        if ((int)s2.get_success() != 1 || (int)s2.get_result_pos() != 9) {
+            Console.WriteLine("FAIL 2: success=" + s2.get_success() + ", pos=" + s2.get_result_pos());
+            failures++;
+        }
+
+        // Test 3: Skip /* */ block comment
+        var s3 = new PhpSyntaxSkipperFsm();
+        byte[] inp3 = Encoding.UTF8.GetBytes("/* block */code");
+        s3.setup(inp3, 0, inp3.Length);
+        s3.do_skip_comment();
+        if ((int)s3.get_success() != 1 || (int)s3.get_result_pos() != 11) {
+            Console.WriteLine("FAIL 3: success=" + s3.get_success() + ", pos=" + s3.get_result_pos());
+            failures++;
+        }
+
+        // Test 4: Skip double-quoted string
+        var s4 = new PhpSyntaxSkipperFsm();
+        byte[] inp4 = Encoding.UTF8.GetBytes("\"hello\" rest");
+        s4.setup(inp4, 0, inp4.Length);
+        s4.do_skip_string();
+        if ((int)s4.get_success() != 1 || (int)s4.get_result_pos() != 7) {
+            Console.WriteLine("FAIL 4: success=" + s4.get_success() + ", pos=" + s4.get_result_pos());
+            failures++;
+        }
+
+        // Test 5: Skip single-quoted string
+        var s5 = new PhpSyntaxSkipperFsm();
+        byte[] inp5 = Encoding.UTF8.GetBytes("'hello' rest");
+        s5.setup(inp5, 0, inp5.Length);
+        s5.do_skip_string();
+        if ((int)s5.get_success() != 1 || (int)s5.get_result_pos() != 7) {
+            Console.WriteLine("FAIL 5: success=" + s5.get_success() + ", pos=" + s5.get_result_pos());
+            failures++;
+        }
+
+        // Test 6: Skip heredoc
+        var s6 = new PhpSyntaxSkipperFsm();
+        byte[] inp6 = Encoding.UTF8.GetBytes("<<<EOT\nhello world\nEOT;\nnext");
+        s6.setup(inp6, 0, inp6.Length);
+        s6.do_skip_string();
+        if ((int)s6.get_success() != 1 || (int)s6.get_result_pos() != 24) {
+            Console.WriteLine("FAIL 6: success=" + s6.get_success() + ", pos=" + s6.get_result_pos());
+            failures++;
+        }
+
+        // Test 7: Find line end (stops at ;)
+        var s7 = new PhpSyntaxSkipperFsm();
+        byte[] inp7 = Encoding.UTF8.GetBytes("$x = 1; next");
+        s7.setup(inp7, 0, inp7.Length);
+        s7.do_find_line_end();
+        if ((int)s7.get_result_pos() != 6) {
+            Console.WriteLine("FAIL 7: pos=" + s7.get_result_pos() + ", expected 6");
+            failures++;
+        }
+
+        // Test 8: Balanced parens
+        var s8 = new PhpSyntaxSkipperFsm();
+        byte[] inp8 = Encoding.UTF8.GetBytes("(a, f(b)) rest");
+        s8.setup(inp8, 0, inp8.Length);
+        s8.do_balanced_paren_end();
+        if ((int)s8.get_success() != 1 || (int)s8.get_result_pos() != 9) {
+            Console.WriteLine("FAIL 8: success=" + s8.get_success() + ", pos=" + s8.get_result_pos());
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine("FAIL: " + failures + " failures");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: php_skipper (8 cases)");
+    }
+}

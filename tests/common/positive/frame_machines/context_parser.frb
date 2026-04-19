@@ -1,0 +1,546 @@
+@@target ruby
+
+# ContextParser -- FSM for parsing @@ context constructs.
+# Translated from framec's native_region_scanner/context_parser.frs
+
+@@system ContextParserFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        setup_with_paren_end(input_bytes, start, length, p_end) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+            self.paren_end = p_end
+        }
+        get_result_end() {
+            return self.result_end
+        }
+        get_result_kind() {
+            return self.result_kind
+        }
+        get_has_result() {
+            return self.has_result
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $Dispatching }
+        }
+
+        $Dispatching {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                if i >= scan_end
+                    self.has_result = 0
+                    -> $Done
+                end
+
+                b = bs[i]
+
+                if b == 0x3A
+                    self.pos = i + 1
+                    -> $DispatchColon
+                elsif b >= 0x41 && b <= 0x5A
+                    -> $ParseInstantiation
+                else
+                    self.result_end = i
+                    self.has_result = 0
+                    -> $Done
+                end
+            }
+        }
+
+        $DispatchColon {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                # Check for @@:return
+                if i + 5 < scan_end
+                    tag = bs[i...i + 6]
+                    if tag == [0x72, 0x65, 0x74, 0x75, 0x72, 0x6E]
+                        self.pos = i + 6
+                        -> $ParseReturn
+                    end
+                end
+
+                # Check for @@:event
+                if i + 4 < scan_end
+                    tag = bs[i...i + 5]
+                    if tag == [0x65, 0x76, 0x65, 0x6E, 0x74]
+                        self.result_end = i + 5
+                        self.result_kind = 3
+                        self.has_result = 1
+                        -> $Done
+                    end
+                end
+
+                # Check for @@:data
+                if i + 3 < scan_end
+                    tag = bs[i...i + 4]
+                    if tag == [0x64, 0x61, 0x74, 0x61]
+                        self.pos = i + 4
+                        -> $ParseData
+                    end
+                end
+
+                # Check for @@:params
+                if i + 5 < scan_end
+                    tag = bs[i...i + 6]
+                    if tag == [0x70, 0x61, 0x72, 0x61, 0x6D, 0x73]
+                        self.pos = i + 6
+                        -> $ParseParams
+                    end
+                end
+
+                # Check for @@:self
+                if i + 3 < scan_end
+                    tag = bs[i...i + 4]
+                    if tag == [0x73, 0x65, 0x6C, 0x66]
+                        self.pos = i + 4
+                        -> $ParseSelf
+                    end
+                end
+
+                # Check for @@:system
+                if i + 5 < scan_end
+                    tag = bs[i...i + 6]
+                    if tag == [0x73, 0x79, 0x73, 0x74, 0x65, 0x6D]
+                        self.pos = i + 6
+                        -> $ParseSystem
+                    end
+                end
+
+                # Check for @@:(expr)
+                if i < scan_end && bs[i] == 0x28
+                    self.pos = i
+                    -> $ParseContextReturnExpr
+                end
+
+                # Unknown
+                self.result_end = i
+                self.has_result = 0
+                -> $Done
+            }
+        }
+
+        $ParseReturn {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                # Skip whitespace
+                while i < scan_end && (bs[i] == 0x20 || bs[i] == 0x09)
+                    i += 1
+                end
+
+                if i < scan_end && bs[i] == 0x28
+                    depth = 1
+                    i += 1
+                    while i < scan_end && depth > 0
+                        if bs[i] == 0x28
+                            depth += 1
+                        end
+                        if bs[i] == 0x29
+                            depth -= 1
+                        end
+                        if depth > 0
+                            i += 1
+                        end
+                    end
+                    if depth == 0
+                        i += 1
+                    end
+                    self.result_end = i
+                    self.result_kind = 9
+                    self.has_result = 1
+                    -> $Done
+                elsif i < scan_end && bs[i] == 0x3D && (i + 1 >= scan_end || bs[i + 1] != 0x3D)
+                    i += 1
+                    while i < scan_end && (bs[i] == 0x20 || bs[i] == 0x09)
+                        i += 1
+                    end
+                    while i < scan_end && bs[i] != 0x0A && bs[i] != 0x3B
+                        i += 1
+                    end
+                    self.result_end = i
+                    self.result_kind = 2
+                    self.has_result = 1
+                    -> $Done
+                else
+                    self.result_end = i
+                    self.result_kind = 2
+                    self.has_result = 1
+                    -> $Done
+                end
+            }
+        }
+
+        $ParseContextReturnExpr {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                if i < scan_end && bs[i] == 0x28
+                    depth = 1
+                    i += 1
+                    while i < scan_end && depth > 0
+                        b = bs[i]
+                        if b == 0x28
+                            depth += 1
+                        elsif b == 0x29
+                            depth -= 1
+                        elsif b == 0x22 || b == 0x27
+                            q = b
+                            i += 1
+                            while i < scan_end
+                                if bs[i] == 0x5C && i + 1 < scan_end
+                                    i += 2
+                                    next
+                                end
+                                if bs[i] == q
+                                    break
+                                end
+                                i += 1
+                            end
+                        end
+                        i += 1
+                    end
+                end
+
+                self.result_end = i
+                self.result_kind = 8
+                self.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseData {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                if i < scan_end && bs[i] == 0x2E
+                    i += 1
+                    while i < scan_end && ((bs[i] >= 0x61 && bs[i] <= 0x7A) || (bs[i] >= 0x41 && bs[i] <= 0x5A) || (bs[i] >= 0x30 && bs[i] <= 0x39) || bs[i] == 0x5F)
+                        i += 1
+                    end
+                end
+
+                j = i
+                while j < scan_end && (bs[j] == 0x20 || bs[j] == 0x09)
+                    j += 1
+                end
+
+                if j < scan_end && bs[j] == 0x3D && (j + 1 >= scan_end || bs[j + 1] != 0x3D)
+                    j += 1
+                    while j < scan_end && (bs[j] == 0x20 || bs[j] == 0x09)
+                        j += 1
+                    end
+                    while j < scan_end && bs[j] != 0x0A && bs[j] != 0x3B
+                        j += 1
+                    end
+                    self.result_end = j
+                    self.result_kind = 5
+                else
+                    self.result_end = i
+                    self.result_kind = 4
+                end
+
+                self.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseParams {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                if i < scan_end && bs[i] == 0x2E
+                    i += 1
+                    while i < scan_end && ((bs[i] >= 0x61 && bs[i] <= 0x7A) || (bs[i] >= 0x41 && bs[i] <= 0x5A) || (bs[i] >= 0x30 && bs[i] <= 0x39) || bs[i] == 0x5F)
+                        i += 1
+                    end
+                end
+
+                self.result_end = i
+                self.result_kind = 6
+                self.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseSelf {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                if i < scan_end && bs[i] == 0x2E
+                    i += 1
+                    while i < scan_end && ((bs[i] >= 0x61 && bs[i] <= 0x7A) || (bs[i] >= 0x41 && bs[i] <= 0x5A) || (bs[i] >= 0x30 && bs[i] <= 0x39) || bs[i] == 0x5F)
+                        i += 1
+                    end
+                    if i < scan_end && bs[i] == 0x28
+                        depth = 1
+                        i += 1
+                        while i < scan_end && depth > 0
+                            if bs[i] == 0x28
+                                depth += 1
+                            end
+                            if bs[i] == 0x29
+                                depth -= 1
+                            end
+                            if bs[i] == 0x22 || bs[i] == 0x27
+                                q = bs[i]
+                                i += 1
+                                while i < scan_end
+                                    if bs[i] == 0x5C && i + 1 < scan_end
+                                        i += 2
+                                        next
+                                    end
+                                    if bs[i] == q
+                                        break
+                                    end
+                                    i += 1
+                                end
+                            end
+                            if depth > 0
+                                i += 1
+                            end
+                        end
+                        if depth == 0
+                            i += 1
+                        end
+                        self.result_end = i
+                        self.result_kind = 10
+                        self.has_result = 1
+                    else
+                        self.result_end = i
+                        self.result_kind = 11
+                        self.has_result = 1
+                    end
+                else
+                    self.result_end = i
+                    self.result_kind = 11
+                    self.has_result = 1
+                end
+
+                -> $Done
+            }
+        }
+
+        $ParseSystem {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                if i + 5 < scan_end
+                    tag = bs[i...i + 6]
+                    if tag == [0x2E, 0x73, 0x74, 0x61, 0x74, 0x65]
+                        after = i + 6
+                        if after >= scan_end || (!((bs[after] >= 0x61 && bs[after] <= 0x7A) || (bs[after] >= 0x41 && bs[after] <= 0x5A) || (bs[after] >= 0x30 && bs[after] <= 0x39) || bs[after] == 0x5F))
+                            self.result_end = i + 6
+                            self.result_kind = 12
+                            self.has_result = 1
+                            -> $Done
+                        end
+                    end
+                end
+
+                self.result_end = i
+                self.result_kind = 13
+                self.has_result = 1
+                -> $Done
+            }
+        }
+
+        $ParseInstantiation {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                while i < scan_end && ((bs[i] >= 0x61 && bs[i] <= 0x7A) || (bs[i] >= 0x41 && bs[i] <= 0x5A) || (bs[i] >= 0x30 && bs[i] <= 0x39) || bs[i] == 0x5F)
+                    i += 1
+                end
+
+                if i < scan_end && bs[i] == 0x28
+                    if self.paren_end > 0
+                        i = self.paren_end
+                        self.result_end = i
+                        self.result_kind = 7
+                        self.has_result = 1
+                    else
+                        self.result_end = i
+                        self.has_result = 0
+                    end
+                else
+                    self.result_end = i
+                    self.has_result = 0
+                end
+
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+                # Terminal state
+            }
+        }
+
+    domain:
+        bytes = []
+        pos: int = 0
+        scan_end: int = 0
+        result_end: int = 0
+        result_kind: int = 0
+        has_result: int = 0
+        paren_end: int = 0
+}
+
+failures = 0
+
+# Test 1: @@:return (bare read)
+p1 = ContextParserFsm.new
+inp1 = ":return".bytes
+p1.setup(inp1, 0, inp1.length)
+p1.do_parse()
+if p1.get_has_result() != 1 || p1.get_result_kind() != 2
+    puts("FAIL 1: has_result=#{p1.get_has_result()}, kind=#{p1.get_result_kind()}")
+    failures += 1
+end
+
+# Test 2: @@:event
+p2 = ContextParserFsm.new
+inp2 = ":event".bytes
+p2.setup(inp2, 0, inp2.length)
+p2.do_parse()
+if p2.get_has_result() != 1 || p2.get_result_kind() != 3
+    puts("FAIL 2: has_result=#{p2.get_has_result()}, kind=#{p2.get_result_kind()}")
+    failures += 1
+end
+
+# Test 3: @@:data.key
+p3 = ContextParserFsm.new
+inp3 = ":data.name rest".bytes
+p3.setup(inp3, 0, inp3.length)
+p3.do_parse()
+if p3.get_has_result() != 1 || p3.get_result_kind() != 4
+    puts("FAIL 3: has_result=#{p3.get_has_result()}, kind=#{p3.get_result_kind()}")
+    failures += 1
+end
+
+# Test 4: @@:data.key = expr
+p4 = ContextParserFsm.new
+inp4 = ":data.key = value\n".bytes
+p4.setup(inp4, 0, inp4.length)
+p4.do_parse()
+if p4.get_has_result() != 1 || p4.get_result_kind() != 5
+    puts("FAIL 4: has_result=#{p4.get_has_result()}, kind=#{p4.get_result_kind()}")
+    failures += 1
+end
+
+# Test 5: @@:params.key
+p5 = ContextParserFsm.new
+inp5 = ":params.name rest".bytes
+p5.setup(inp5, 0, inp5.length)
+p5.do_parse()
+if p5.get_has_result() != 1 || p5.get_result_kind() != 6
+    puts("FAIL 5: has_result=#{p5.get_has_result()}, kind=#{p5.get_result_kind()}")
+    failures += 1
+end
+
+# Test 6: @@:(expr)
+p6 = ContextParserFsm.new
+inp6 = ":(x + 1) rest".bytes
+p6.setup(inp6, 0, inp6.length)
+p6.do_parse()
+if p6.get_has_result() != 1 || p6.get_result_kind() != 8
+    puts("FAIL 6: has_result=#{p6.get_has_result()}, kind=#{p6.get_result_kind()}")
+    failures += 1
+end
+
+# Test 7: @@:return(expr)
+p7 = ContextParserFsm.new
+inp7 = ":return(42) rest".bytes
+p7.setup(inp7, 0, inp7.length)
+p7.do_parse()
+if p7.get_has_result() != 1 || p7.get_result_kind() != 9
+    puts("FAIL 7: has_result=#{p7.get_has_result()}, kind=#{p7.get_result_kind()}")
+    failures += 1
+end
+
+# Test 8: @@:self (bare)
+p8 = ContextParserFsm.new
+inp8 = ":self rest".bytes
+p8.setup(inp8, 0, inp8.length)
+p8.do_parse()
+if p8.get_has_result() != 1 || p8.get_result_kind() != 11
+    puts("FAIL 8: has_result=#{p8.get_has_result()}, kind=#{p8.get_result_kind()}")
+    failures += 1
+end
+
+# Test 9: @@:self.method(args)
+p9 = ContextParserFsm.new
+inp9 = ":self.doWork(x) rest".bytes
+p9.setup(inp9, 0, inp9.length)
+p9.do_parse()
+if p9.get_has_result() != 1 || p9.get_result_kind() != 10
+    puts("FAIL 9: has_result=#{p9.get_has_result()}, kind=#{p9.get_result_kind()}")
+    failures += 1
+end
+
+# Test 10: @@:system.state
+p10 = ContextParserFsm.new
+inp10 = ":system.state rest".bytes
+p10.setup(inp10, 0, inp10.length)
+p10.do_parse()
+if p10.get_has_result() != 1 || p10.get_result_kind() != 12
+    puts("FAIL 10: has_result=#{p10.get_has_result()}, kind=#{p10.get_result_kind()}")
+    failures += 1
+end
+
+# Test 11: @@SystemName() with paren_end
+p11 = ContextParserFsm.new
+inp11 = "MySystem() rest".bytes
+p11.setup_with_paren_end(inp11, 0, inp11.length, 10)
+p11.do_parse()
+if p11.get_has_result() != 1 || p11.get_result_kind() != 7
+    puts("FAIL 11: has_result=#{p11.get_has_result()}, kind=#{p11.get_result_kind()}")
+    failures += 1
+end
+
+# Test 12: No match (lowercase, not a keyword)
+p12 = ContextParserFsm.new
+inp12 = "xyz".bytes
+p12.setup(inp12, 0, inp12.length)
+p12.do_parse()
+if p12.get_has_result() != 0
+    puts("FAIL 12: should not match, has_result=#{p12.get_has_result()}")
+    failures += 1
+end
+
+if failures > 0
+    puts("FAIL: #{failures} failures")
+    exit(1)
+end
+puts("PASS: context_parser (12 cases)")

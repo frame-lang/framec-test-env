@@ -1,0 +1,264 @@
+@@target csharp
+
+using System;
+using System.Text;
+
+// PythonSyntaxSkipper — FSM for skipping Python comments and strings.
+// Translated from framec's native_region_scanner/python_skipper.frs
+//
+// Handles: # comments, triple-quoted strings, simple strings,
+// Python-style line endings, balanced parens.
+
+@@system PythonSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Python uses # for line comments
+                if (i < end && bs[i] == '#') {
+                    int j = i + 1;
+                    while (j < end && bs[j] != '\n') {
+                        j++;
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Triple-quoted strings: """ or '''
+                if (i + 2 < end) {
+                    if ((bs[i] == '"' && bs[i+1] == '"' && bs[i+2] == '"') ||
+                        (bs[i] == '\'' && bs[i+1] == '\'' && bs[i+2] == '\'')) {
+                        int q = bs[i];
+                        int j = i + 3;
+                        while (j + 2 < end) {
+                            if (bs[j] == q && bs[j+1] == q && bs[j+2] == q) {
+                                this.result_pos = j + 3;
+                                this.success = 1;
+                                return;
+                            }
+                            j++;
+                        }
+                        this.result_pos = end;
+                        this.success = 1;
+                        return;
+                    }
+                }
+
+                // Simple strings: " or '
+                if (i < end && (bs[i] == '"' || bs[i] == '\'')) {
+                    int q = bs[i];
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == q) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                while (j < end) {
+                    int b = bs[j];
+                    if (b == '\n' || b == ';') {
+                        break;
+                    }
+                    // Stop at # comment
+                    if (b == '#') {
+                        break;
+                    }
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                if (i >= end || bs[i] != '(') {
+                    this.success = 0;
+                    return;
+                }
+
+                int depth = 1;
+                int j = i + 1;
+                while (j < end && depth > 0) {
+                    int b = bs[j];
+                    if (b == '(') {
+                        depth++;
+                    } else if (b == ')') {
+                        depth--;
+                    } else if (b == '"' || b == '\'') {
+                        int q = b;
+                        j++;
+                        while (j < end && bs[j] != q) {
+                            if (bs[j] == '\\') {
+                                j++;
+                            }
+                            j++;
+                        }
+                    }
+                    j++;
+                }
+
+                if (depth == 0) {
+                    this.result_pos = j;
+                    this.success = 1;
+                } else {
+                    this.result_pos = end;
+                    this.success = 0;
+                }
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+class Program {
+    static void Main(string[] args) {
+        int failures = 0;
+
+        // Test 1: Skip hash comment
+        var s1 = new PythonSyntaxSkipperFsm();
+        byte[] inp1 = Encoding.UTF8.GetBytes("# comment\ncode");
+        s1.setup(inp1, 0, inp1.Length);
+        s1.do_skip_comment();
+        if (s1.get_success() != 1 || s1.get_result_pos() != 9) {
+            Console.WriteLine("FAIL 1: success=" + s1.get_success() + ", pos=" + s1.get_result_pos());
+            failures++;
+        }
+
+        // Test 2: Not a comment
+        var s2 = new PythonSyntaxSkipperFsm();
+        byte[] inp2 = Encoding.UTF8.GetBytes("x + 1");
+        s2.setup(inp2, 0, inp2.Length);
+        s2.do_skip_comment();
+        if (s2.get_success() != 0) {
+            Console.WriteLine("FAIL 2: should not be comment");
+            failures++;
+        }
+
+        // Test 3: Skip triple-quoted string
+        var s3 = new PythonSyntaxSkipperFsm();
+        byte[] inp3 = Encoding.UTF8.GetBytes("\"\"\"hello world\"\"\"rest");
+        s3.setup(inp3, 0, inp3.Length);
+        s3.do_skip_string();
+        if (s3.get_success() != 1 || s3.get_result_pos() != 17) {
+            Console.WriteLine("FAIL 3: success=" + s3.get_success() + ", pos=" + s3.get_result_pos());
+            failures++;
+        }
+
+        // Test 4: Skip simple string
+        var s4 = new PythonSyntaxSkipperFsm();
+        byte[] inp4 = Encoding.UTF8.GetBytes("\"hello\" rest");
+        s4.setup(inp4, 0, inp4.Length);
+        s4.do_skip_string();
+        if (s4.get_success() != 1 || s4.get_result_pos() != 7) {
+            Console.WriteLine("FAIL 4: success=" + s4.get_success() + ", pos=" + s4.get_result_pos());
+            failures++;
+        }
+
+        // Test 5: Skip string with escape
+        var s5 = new PythonSyntaxSkipperFsm();
+        byte[] inp5 = Encoding.UTF8.GetBytes("'he\\'llo' rest");
+        s5.setup(inp5, 0, inp5.Length);
+        s5.do_skip_string();
+        if (s5.get_success() != 1 || s5.get_result_pos() != 9) {
+            Console.WriteLine("FAIL 5: success=" + s5.get_success() + ", pos=" + s5.get_result_pos());
+            failures++;
+        }
+
+        // Test 6: Find line end (stops at #)
+        var s6 = new PythonSyntaxSkipperFsm();
+        byte[] inp6 = Encoding.UTF8.GetBytes("x + 1 # comment");
+        s6.setup(inp6, 0, inp6.Length);
+        s6.do_find_line_end();
+        if (s6.get_result_pos() != 6) {
+            Console.WriteLine("FAIL 6: pos=" + s6.get_result_pos() + ", expected 6");
+            failures++;
+        }
+
+        // Test 7: Balanced parens
+        var s7 = new PythonSyntaxSkipperFsm();
+        byte[] inp7 = Encoding.UTF8.GetBytes("(a, f(b)) rest");
+        s7.setup(inp7, 0, inp7.Length);
+        s7.do_balanced_paren_end();
+        if (s7.get_success() != 1 || s7.get_result_pos() != 9) {
+            Console.WriteLine("FAIL 7: success=" + s7.get_success() + ", pos=" + s7.get_result_pos());
+            failures++;
+        }
+
+        if (failures > 0) {
+            Console.WriteLine("FAIL: " + failures + " failures");
+            Environment.Exit(1);
+        }
+        Console.WriteLine("PASS: python_skipper (7 cases)");
+    }
+}

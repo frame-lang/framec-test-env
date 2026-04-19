@@ -1,0 +1,228 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <algorithm>
+
+// LuaSyntaxSkipper — FSM for skipping Lua comments and strings.
+// Translated from framec's native_region_scanner/lua_skipper.frs
+//
+// Handles: -- line comments, --[[ block comments ]], [[ long strings ]],
+// simple strings, Lua-style line endings.
+
+@@system LuaSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: std::vector<uint8_t>, start: int, length: int) {
+            this->bytes = input_bytes;
+            this->pos = start;
+            this->scan_end = length;
+        }
+        get_result_pos(): int {
+            return this->result_pos;
+        }
+        get_success(): int {
+            return this->success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                // Lua line comment: --
+                if (i + 1 < end && bs[i] == '-' && bs[i + 1] == '-') {
+                    // Check for block comment: --[[ ... ]]
+                    if (i + 3 < end && bs[i + 2] == '[' && bs[i + 3] == '[') {
+                        int j = i + 4;
+                        while (j + 1 < end) {
+                            if (bs[j] == ']' && bs[j + 1] == ']') {
+                                this->result_pos = j + 2;
+                                this->success = 1;
+                                return;
+                            }
+                            j++;
+                        }
+                        this->result_pos = end;
+                        this->success = 1;
+                        return;
+                    }
+                    // Line comment
+                    int j = i + 2;
+                    while (j < end && bs[j] != '\n') {
+                        j++;
+                    }
+                    this->result_pos = j;
+                    this->success = 1;
+                    return;
+                }
+
+                this->success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                // Long string: [[ ... ]]
+                if (i + 1 < end && bs[i] == '[' && bs[i + 1] == '[') {
+                    int j = i + 2;
+                    while (j + 1 < end) {
+                        if (bs[j] == ']' && bs[j + 1] == ']') {
+                            this->result_pos = j + 2;
+                            this->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this->result_pos = end;
+                    this->success = 1;
+                    return;
+                }
+
+                // Simple string: " or '
+                if (i < end && (bs[i] == '"' || bs[i] == '\'')) {
+                    int q = bs[i];
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == '\\') {
+                            j += 2;
+                            continue;
+                        }
+                        if (bs[j] == q) {
+                            this->result_pos = j + 1;
+                            this->success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this->result_pos = end;
+                    this->success = 1;
+                    return;
+                }
+
+                this->success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this->pos;
+                int end = this->scan_end;
+                const std::vector<uint8_t>& bs = this->bytes;
+
+                while (j < end) {
+                    int b = bs[j];
+                    if (b == '\n') {
+                        break;
+                    }
+                    // Stop at -- comment
+                    if (b == '-' && j + 1 < end && bs[j + 1] == '-') {
+                        break;
+                    }
+                    j++;
+                }
+
+                this->result_pos = j;
+            }
+        }
+
+    domain:
+        bytes: std::vector<uint8_t> = {}
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+int main() {
+    int failures = 0;
+
+    auto to_bytes = [](const std::string& s) -> std::vector<uint8_t> {
+        return std::vector<uint8_t>(s.begin(), s.end());
+    };
+
+    // Test 1: Skip -- line comment
+    auto s1 = LuaSyntaxSkipperFsm();
+    auto inp1 = to_bytes("-- comment\ncode");
+    s1.setup(inp1, 0, inp1.size());
+    s1.do_skip_comment();
+    if (s1.get_success() != 1 || s1.get_result_pos() != 10) {
+        printf("FAIL 1: success=%d, pos=%d\n", s1.get_success(), s1.get_result_pos());
+        failures++;
+    }
+
+    // Test 2: Skip --[[ block comment ]]
+    auto s2 = LuaSyntaxSkipperFsm();
+    auto inp2 = to_bytes("--[[ block ]]code");
+    s2.setup(inp2, 0, inp2.size());
+    s2.do_skip_comment();
+    if (s2.get_success() != 1 || s2.get_result_pos() != 13) {
+        printf("FAIL 2: success=%d, pos=%d\n", s2.get_success(), s2.get_result_pos());
+        failures++;
+    }
+
+    // Test 3: Not a comment
+    auto s3 = LuaSyntaxSkipperFsm();
+    auto inp3 = to_bytes("x + 1");
+    s3.setup(inp3, 0, inp3.size());
+    s3.do_skip_comment();
+    if (s3.get_success() != 0) {
+        printf("FAIL 3: should not be comment\n");
+        failures++;
+    }
+
+    // Test 4: Skip [[ long string ]]
+    auto s4 = LuaSyntaxSkipperFsm();
+    auto inp4 = to_bytes("[[hello world]]rest");
+    s4.setup(inp4, 0, inp4.size());
+    s4.do_skip_string();
+    if (s4.get_success() != 1 || s4.get_result_pos() != 15) {
+        printf("FAIL 4: success=%d, pos=%d\n", s4.get_success(), s4.get_result_pos());
+        failures++;
+    }
+
+    // Test 5: Skip simple string
+    auto s5 = LuaSyntaxSkipperFsm();
+    auto inp5 = to_bytes("\"hello\" rest");
+    s5.setup(inp5, 0, inp5.size());
+    s5.do_skip_string();
+    if (s5.get_success() != 1 || s5.get_result_pos() != 7) {
+        printf("FAIL 5: success=%d, pos=%d\n", s5.get_success(), s5.get_result_pos());
+        failures++;
+    }
+
+    // Test 6: Find line end stops at --
+    auto s6 = LuaSyntaxSkipperFsm();
+    auto inp6 = to_bytes("x + 1 -- comment");
+    s6.setup(inp6, 0, inp6.size());
+    s6.do_find_line_end();
+    if (s6.get_result_pos() != 6) {
+        printf("FAIL 6: pos=%d, expected 6\n", s6.get_result_pos());
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: %d failures\n", failures);
+        return 1;
+    }
+    printf("PASS: lua_skipper (6 cases)\n");
+    return 0;
+}

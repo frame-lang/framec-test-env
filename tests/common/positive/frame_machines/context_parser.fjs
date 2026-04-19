@@ -1,0 +1,574 @@
+@@target javascript
+
+// ContextParser -- FSM for parsing @@ context constructs.
+// Translated from framec's native_region_scanner/context_parser.frs
+//
+// Parses:
+//   @@:return [= expr]     kind=2 (ContextReturn)
+//   @@:event               kind=3 (ContextEvent)
+//   @@:data.key [= expr]   kind=4 (ContextData) or kind=5 (ContextDataAssign)
+//   @@:params.key           kind=6 (ContextParams)
+//   @@SystemName()          kind=7 (TaggedInstantiation)
+//   @@:(expr)               kind=8 (ContextReturnExpr)
+//   @@:return(expr)         kind=9 (ReturnCall)
+//   @@:self.method()        kind=10 (ContextSelfCall)
+//   @@:self                 kind=11 (ContextSelf)
+//   @@:system.state         kind=12 (ContextSystemState)
+//   other                   has_result=0
+
+@@system ContextParserFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        setup_with_paren_end(input_bytes, start, length, p_end) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+            this.paren_end = p_end;
+        }
+        get_result_end() {
+            return this.result_end;
+        }
+        get_result_kind() {
+            return this.result_kind;
+        }
+        get_has_result() {
+            return this.has_result;
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $Dispatching }
+        }
+
+        $Dispatching {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                if (i >= end) {
+                    this.has_result = 0;
+                    -> $Done
+                }
+
+                const b = bs[i];
+
+                if (b === 0x3A) {
+                    this.pos = i + 1;
+                    -> $DispatchColon
+                } else if (b >= 0x41 && b <= 0x5A) {
+                    // @@SystemName -- pos stays at start of name
+                    -> $ParseInstantiation
+                } else {
+                    this.result_end = i;
+                    this.has_result = 0;
+                    -> $Done
+                }
+            }
+        }
+
+        $DispatchColon {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                // Check for @@:return
+                if (i + 5 < end) {
+                    const tag = String.fromCharCode(...bs.slice(i, i + 6));
+                    if (tag === "return") {
+                        this.pos = i + 6;
+                        -> $ParseReturn
+                    }
+                }
+
+                // Check for @@:event
+                if (i + 4 < end) {
+                    const tag = String.fromCharCode(...bs.slice(i, i + 5));
+                    if (tag === "event") {
+                        this.result_end = i + 5;
+                        this.result_kind = 3;
+                        this.has_result = 1;
+                        -> $Done
+                    }
+                }
+
+                // Check for @@:data
+                if (i + 3 < end) {
+                    const tag = String.fromCharCode(...bs.slice(i, i + 4));
+                    if (tag === "data") {
+                        this.pos = i + 4;
+                        -> $ParseData
+                    }
+                }
+
+                // Check for @@:params
+                if (i + 5 < end) {
+                    const tag = String.fromCharCode(...bs.slice(i, i + 6));
+                    if (tag === "params") {
+                        this.pos = i + 6;
+                        -> $ParseParams
+                    }
+                }
+
+                // Check for @@:self
+                if (i + 3 < end) {
+                    const tag = String.fromCharCode(...bs.slice(i, i + 4));
+                    if (tag === "self") {
+                        this.pos = i + 4;
+                        -> $ParseSelf
+                    }
+                }
+
+                // Check for @@:system
+                if (i + 5 < end) {
+                    const tag = String.fromCharCode(...bs.slice(i, i + 6));
+                    if (tag === "system") {
+                        this.pos = i + 6;
+                        -> $ParseSystem
+                    }
+                }
+
+                // Check for @@:(expr)
+                if (i < end && bs[i] === 0x28) {
+                    this.pos = i;
+                    -> $ParseContextReturnExpr
+                }
+
+                // Unknown
+                this.result_end = i;
+                this.has_result = 0;
+                -> $Done
+            }
+        }
+
+        $ParseReturn {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                // Skip whitespace
+                while (i < end && (bs[i] === 0x20 || bs[i] === 0x09)) {
+                    i++;
+                }
+
+                if (i < end && bs[i] === 0x28) {
+                    // @@:return(expr) -- scan balanced parens
+                    let depth = 1;
+                    i++;
+                    while (i < end && depth > 0) {
+                        if (bs[i] === 0x28) {
+                            depth++;
+                        }
+                        if (bs[i] === 0x29) {
+                            depth--;
+                        }
+                        if (depth > 0) {
+                            i++;
+                        }
+                    }
+                    if (depth === 0) {
+                        i++;
+                    }
+                    this.result_end = i;
+                    this.result_kind = 9;
+                    this.has_result = 1;
+                    -> $Done
+                } else if (i < end && bs[i] === 0x3D && (i + 1 >= end || bs[i + 1] !== 0x3D)) {
+                    // @@:return = <expr> -- scan expression
+                    i++;
+                    // Skip whitespace after =
+                    while (i < end && (bs[i] === 0x20 || bs[i] === 0x09)) {
+                        i++;
+                    }
+                    // Scan to end of expression (newline or ;)
+                    while (i < end && bs[i] !== 0x0A && bs[i] !== 0x3B) {
+                        i++;
+                    }
+                    this.result_end = i;
+                    this.result_kind = 2;
+                    this.has_result = 1;
+                    -> $Done
+                } else {
+                    // @@:return (bare read)
+                    this.result_end = i;
+                    this.result_kind = 2;
+                    this.has_result = 1;
+                    -> $Done
+                }
+            }
+        }
+
+        $ParseContextReturnExpr {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                if (i < end && bs[i] === 0x28) {
+                    let depth = 1;
+                    i++;
+                    while (i < end && depth > 0) {
+                        const b = bs[i];
+                        if (b === 0x28) {
+                            depth++;
+                        } else if (b === 0x29) {
+                            depth--;
+                        } else if (b === 0x22 || b === 0x27) {
+                            const q = b;
+                            i++;
+                            while (i < end) {
+                                if (bs[i] === 0x5C && i + 1 < end) {
+                                    i += 2;
+                                    continue;
+                                }
+                                if (bs[i] === q) {
+                                    break;
+                                }
+                                i++;
+                            }
+                        }
+                        i++;
+                    }
+                }
+
+                this.result_end = i;
+                this.result_kind = 8;
+                this.has_result = 1;
+                -> $Done
+            }
+        }
+
+        $ParseData {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                // Scan .key
+                if (i < end && bs[i] === 0x2E) {
+                    i++;
+                    while (i < end && ((bs[i] >= 0x30 && bs[i] <= 0x39) || (bs[i] >= 0x41 && bs[i] <= 0x5A) || (bs[i] >= 0x61 && bs[i] <= 0x7A) || bs[i] === 0x5F)) {
+                        i++;
+                    }
+                }
+
+                // Check for assignment
+                let j = i;
+                while (j < end && (bs[j] === 0x20 || bs[j] === 0x09)) {
+                    j++;
+                }
+
+                if (j < end && bs[j] === 0x3D && (j + 1 >= end || bs[j + 1] !== 0x3D)) {
+                    // @@:data.key = expr
+                    j++;
+                    while (j < end && (bs[j] === 0x20 || bs[j] === 0x09)) {
+                        j++;
+                    }
+                    while (j < end && bs[j] !== 0x0A && bs[j] !== 0x3B) {
+                        j++;
+                    }
+                    this.result_end = j;
+                    this.result_kind = 5;
+                } else {
+                    this.result_end = i;
+                    this.result_kind = 4;
+                }
+
+                this.has_result = 1;
+                -> $Done
+            }
+        }
+
+        $ParseParams {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                if (i < end && bs[i] === 0x2E) {
+                    i++;
+                    while (i < end && ((bs[i] >= 0x30 && bs[i] <= 0x39) || (bs[i] >= 0x41 && bs[i] <= 0x5A) || (bs[i] >= 0x61 && bs[i] <= 0x7A) || bs[i] === 0x5F)) {
+                        i++;
+                    }
+                }
+
+                this.result_end = i;
+                this.result_kind = 6;
+                this.has_result = 1;
+                -> $Done
+            }
+        }
+
+        $ParseSelf {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                if (i < end && bs[i] === 0x2E) {
+                    i++;
+                    // Scan identifier
+                    while (i < end && ((bs[i] >= 0x30 && bs[i] <= 0x39) || (bs[i] >= 0x41 && bs[i] <= 0x5A) || (bs[i] >= 0x61 && bs[i] <= 0x7A) || bs[i] === 0x5F)) {
+                        i++;
+                    }
+                    if (i < end && bs[i] === 0x28) {
+                        // @@:self.method(args) -- scan balanced parens
+                        let depth = 1;
+                        i++;
+                        while (i < end && depth > 0) {
+                            if (bs[i] === 0x28) {
+                                depth++;
+                            }
+                            if (bs[i] === 0x29) {
+                                depth--;
+                            }
+                            if (bs[i] === 0x22 || bs[i] === 0x27) {
+                                const q = bs[i];
+                                i++;
+                                while (i < end) {
+                                    if (bs[i] === 0x5C && i + 1 < end) {
+                                        i += 2;
+                                        continue;
+                                    }
+                                    if (bs[i] === q) {
+                                        break;
+                                    }
+                                    i++;
+                                }
+                            }
+                            if (depth > 0) {
+                                i++;
+                            }
+                        }
+                        if (depth === 0) {
+                            i++;
+                        }
+                        this.result_end = i;
+                        this.result_kind = 10;
+                        this.has_result = 1;
+                    } else {
+                        // @@:self.property
+                        this.result_end = i;
+                        this.result_kind = 11;
+                        this.has_result = 1;
+                    }
+                } else {
+                    // bare @@:self
+                    this.result_end = i;
+                    this.result_kind = 11;
+                    this.has_result = 1;
+                }
+
+                -> $Done
+            }
+        }
+
+        $ParseSystem {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                if (i + 5 < end) {
+                    const tag = String.fromCharCode(...bs.slice(i, i + 6));
+                    if (tag === ".state") {
+                        const after = i + 6;
+                        if (after >= end || (!((bs[after] >= 0x30 && bs[after] <= 0x39) || (bs[after] >= 0x41 && bs[after] <= 0x5A) || (bs[after] >= 0x61 && bs[after] <= 0x7A)) && bs[after] !== 0x5F)) {
+                            this.result_end = i + 6;
+                            this.result_kind = 12;
+                            this.has_result = 1;
+                            -> $Done
+                        }
+                    }
+                }
+
+                // Bare @@:system or unknown variant
+                this.result_end = i;
+                this.result_kind = 13;
+                this.has_result = 1;
+                -> $Done
+            }
+        }
+
+        $ParseInstantiation {
+            $>() {
+                let i = this.pos;
+                const end = this.scan_end;
+                const bs = this.bytes;
+
+                // Scan identifier
+                while (i < end && ((bs[i] >= 0x30 && bs[i] <= 0x39) || (bs[i] >= 0x41 && bs[i] <= 0x5A) || (bs[i] >= 0x61 && bs[i] <= 0x7A) || bs[i] === 0x5F)) {
+                    i++;
+                }
+
+                // Must be followed by (
+                if (i < end && bs[i] === 0x28) {
+                    if (this.paren_end > 0) {
+                        i = this.paren_end;
+                        this.result_end = i;
+                        this.result_kind = 7;
+                        this.has_result = 1;
+                    } else {
+                        this.result_end = i;
+                        this.has_result = 0;
+                    }
+                } else {
+                    this.result_end = i;
+                    this.has_result = 0;
+                }
+
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+                // Terminal state -- results are in domain vars
+            }
+        }
+
+    domain:
+        bytes = []
+        pos = 0
+        scan_end = 0
+        result_end = 0
+        result_kind = 0
+        has_result = 0
+        paren_end = 0
+}
+
+const enc = s => Array.from(Buffer.from(s));
+
+let failures = 0;
+
+// Test 1: @@:return (bare read)
+const p1 = @@ContextParserFsm();
+const inp1 = enc(":return");
+p1.setup(inp1, 0, inp1.length);
+p1.do_parse();
+if (p1.get_has_result() !== 1 || p1.get_result_kind() !== 2) {
+    console.log("FAIL 1: has_result=" + p1.get_has_result() + ", kind=" + p1.get_result_kind());
+    failures++;
+}
+
+// Test 2: @@:event
+const p2 = @@ContextParserFsm();
+const inp2 = enc(":event");
+p2.setup(inp2, 0, inp2.length);
+p2.do_parse();
+if (p2.get_has_result() !== 1 || p2.get_result_kind() !== 3) {
+    console.log("FAIL 2: has_result=" + p2.get_has_result() + ", kind=" + p2.get_result_kind());
+    failures++;
+}
+
+// Test 3: @@:data.key
+const p3 = @@ContextParserFsm();
+const inp3 = enc(":data.name rest");
+p3.setup(inp3, 0, inp3.length);
+p3.do_parse();
+if (p3.get_has_result() !== 1 || p3.get_result_kind() !== 4) {
+    console.log("FAIL 3: has_result=" + p3.get_has_result() + ", kind=" + p3.get_result_kind());
+    failures++;
+}
+
+// Test 4: @@:data.key = expr
+const p4 = @@ContextParserFsm();
+const inp4 = enc(":data.key = value\n");
+p4.setup(inp4, 0, inp4.length);
+p4.do_parse();
+if (p4.get_has_result() !== 1 || p4.get_result_kind() !== 5) {
+    console.log("FAIL 4: has_result=" + p4.get_has_result() + ", kind=" + p4.get_result_kind());
+    failures++;
+}
+
+// Test 5: @@:params.key
+const p5 = @@ContextParserFsm();
+const inp5 = enc(":params.name rest");
+p5.setup(inp5, 0, inp5.length);
+p5.do_parse();
+if (p5.get_has_result() !== 1 || p5.get_result_kind() !== 6) {
+    console.log("FAIL 5: has_result=" + p5.get_has_result() + ", kind=" + p5.get_result_kind());
+    failures++;
+}
+
+// Test 6: @@:(expr)
+const p6 = @@ContextParserFsm();
+const inp6 = enc(":(x + 1) rest");
+p6.setup(inp6, 0, inp6.length);
+p6.do_parse();
+if (p6.get_has_result() !== 1 || p6.get_result_kind() !== 8) {
+    console.log("FAIL 6: has_result=" + p6.get_has_result() + ", kind=" + p6.get_result_kind());
+    failures++;
+}
+
+// Test 7: @@:return(expr)
+const p7 = @@ContextParserFsm();
+const inp7 = enc(":return(42) rest");
+p7.setup(inp7, 0, inp7.length);
+p7.do_parse();
+if (p7.get_has_result() !== 1 || p7.get_result_kind() !== 9) {
+    console.log("FAIL 7: has_result=" + p7.get_has_result() + ", kind=" + p7.get_result_kind());
+    failures++;
+}
+
+// Test 8: @@:self (bare)
+const p8 = @@ContextParserFsm();
+const inp8 = enc(":self rest");
+p8.setup(inp8, 0, inp8.length);
+p8.do_parse();
+if (p8.get_has_result() !== 1 || p8.get_result_kind() !== 11) {
+    console.log("FAIL 8: has_result=" + p8.get_has_result() + ", kind=" + p8.get_result_kind());
+    failures++;
+}
+
+// Test 9: @@:self.method(args)
+const p9 = @@ContextParserFsm();
+const inp9 = enc(":self.doWork(x) rest");
+p9.setup(inp9, 0, inp9.length);
+p9.do_parse();
+if (p9.get_has_result() !== 1 || p9.get_result_kind() !== 10) {
+    console.log("FAIL 9: has_result=" + p9.get_has_result() + ", kind=" + p9.get_result_kind());
+    failures++;
+}
+
+// Test 10: @@:system.state
+const p10 = @@ContextParserFsm();
+const inp10 = enc(":system.state rest");
+p10.setup(inp10, 0, inp10.length);
+p10.do_parse();
+if (p10.get_has_result() !== 1 || p10.get_result_kind() !== 12) {
+    console.log("FAIL 10: has_result=" + p10.get_has_result() + ", kind=" + p10.get_result_kind());
+    failures++;
+}
+
+// Test 11: @@SystemName() with paren_end
+const p11 = @@ContextParserFsm();
+const inp11 = enc("MySystem() rest");
+p11.setup_with_paren_end(inp11, 0, inp11.length, 10);
+p11.do_parse();
+if (p11.get_has_result() !== 1 || p11.get_result_kind() !== 7) {
+    console.log("FAIL 11: has_result=" + p11.get_has_result() + ", kind=" + p11.get_result_kind());
+    failures++;
+}
+
+// Test 12: No match (lowercase, not a keyword)
+const p12 = @@ContextParserFsm();
+const inp12 = enc("xyz");
+p12.setup(inp12, 0, inp12.length);
+p12.do_parse();
+if (p12.get_has_result() !== 0) {
+    console.log("FAIL 12: should not match, has_result=" + p12.get_has_result());
+    failures++;
+}
+
+if (failures > 0) { console.log("FAIL: " + failures + " failures"); process.exit(1); }
+console.log("PASS: context_parser (12 cases)");

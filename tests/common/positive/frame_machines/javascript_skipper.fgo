@@ -1,0 +1,262 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// javascript_skipper -- FSM for skipping syntax constructs.
+
+@@system JavaScriptSyntaxSkipperFsm {
+    operations:
+        Setup(input_bytes: []byte, start: int, length: int) {
+            s.bytes = input_bytes
+            s.pos = start
+            s.scanEnd = length
+        }
+        GetResultPos(): int {
+            return s.resultPos
+        }
+        GetSuccess(): int {
+            return s.success
+        }
+
+    interface:
+        DoSkipComment()
+        DoSkipString()
+        DoFindLineEnd()
+        DoBalancedParenEnd()
+
+    machine:
+        $Init {
+            DoSkipComment() { -> $SkipComment }
+            DoSkipString() { -> $SkipString }
+            DoFindLineEnd() { -> $FindLineEnd }
+            DoBalancedParenEnd() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i := s.pos
+                end := s.scanEnd
+                bs := s.bytes
+
+                if i+1 < end && bs[i] == '/' && bs[i+1] == '/' {
+                    j := i + 2
+                    for j < end && bs[j] != '\n' { j++ }
+                    s.resultPos = j
+                    s.success = 1
+                    return
+                }
+
+                if i+1 < end && bs[i] == '/' && bs[i+1] == '*' {
+                    j := i + 2
+                    for j+1 < end {
+                        if bs[j] == '*' && bs[j+1] == '/' {
+                            s.resultPos = j + 2
+                            s.success = 1
+                            return
+                        }
+                        j++
+                    }
+                    s.resultPos = end
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i := s.pos
+                end := s.scanEnd
+                bs := s.bytes
+
+                if i < end && bs[i] == '`' {
+                    j := i + 1
+                    braceDepth := 0
+                    for j < end {
+                        if bs[j] == '`' && braceDepth == 0 { s.resultPos = j + 1; s.success = 1; return }
+                        if bs[j] == '\\' { j += 2; continue }
+                        if bs[j] == '$' && j+1 < end && bs[j+1] == '{' { braceDepth++; j += 2; continue }
+                        if bs[j] == '}' && braceDepth > 0 { braceDepth-- }
+                        j++
+                    }
+                    s.resultPos = end; s.success = 1; return
+                }
+
+                if i < end && (bs[i] == '"' || bs[i] == '\'') {
+                    q := bs[i]
+                    j := i + 1
+                    for j < end {
+                        if bs[j] == '\\' { j += 2; continue }
+                        if bs[j] == q { s.resultPos = j + 1; s.success = 1; return }
+                        j++
+                    }
+                    s.resultPos = end
+                    s.success = 1
+                    return
+                }
+
+                s.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j := s.pos
+                end := s.scanEnd
+                bs := s.bytes
+
+                inString := byte(0)
+                inTemplate := false
+                templateBraceDepth := 0
+
+                for j < end {
+                    b := bs[j]
+                    if b == '\n' { break }
+                    if inTemplate {
+                        if b == '`' && templateBraceDepth == 0 { inTemplate = false; j++; continue }
+                        if b == '\\' { j += 2; continue }
+                        if b == '$' && j+1 < end && bs[j+1] == '{' { templateBraceDepth++; j += 2; continue }
+                        if b == '}' && templateBraceDepth > 0 { templateBraceDepth-- }
+                        j++; continue
+                    }
+                    if inString != 0 {
+                        if b == '\\' { j += 2; continue }
+                        if b == inString { inString = 0 }
+                        j++; continue
+                    }
+                    if b == ';' || b == '}' { break }
+                    if b == '/' && j+1 < end && (bs[j+1] == '/' || bs[j+1] == '*') { break }
+                    if b == '\'' || b == '"' { inString = b; j++; continue }
+                    if b == '`' { inTemplate = true; j++; continue }
+                    j++
+                }
+
+                s.resultPos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                i := s.pos
+                end := s.scanEnd
+                bs := s.bytes
+
+                if i >= end || bs[i] != '(' { s.success = 0; return }
+
+                depth := 0
+                inString := byte(0)
+                inTemplate := false
+
+                for i < end {
+                    b := bs[i]
+                    if inTemplate {
+                        if b == '`' { inTemplate = false }
+                        if b == '\\' { i += 2; continue }
+                        i++; continue
+                    }
+                    if inString != 0 {
+                        if b == '\\' { i += 2; continue }
+                        if b == inString { inString = 0 }
+                        i++; continue
+                    }
+                    if b == '\'' || b == '"' { inString = b; i++ } else if b == '`' { inTemplate = true; i++ } else if b == '(' { depth++; i++ } else if b == ')' {
+                        depth--; i++
+                        if depth == 0 { s.resultPos = i; s.success = 1; return }
+                    } else { i++ }
+                }
+
+                s.success = 0
+            }
+        }
+
+    domain:
+        bytes: []byte = nil
+        pos: int = 0
+        scanEnd: int = 0
+        resultPos: int = 0
+        success: int = 1
+}
+
+func main() {
+	failures := 0
+
+	s1 := NewJavaScriptSyntaxSkipperFsm()
+	inp1 := []byte("// hello\ncode")
+	s1.Setup(inp1, 0, len(inp1))
+	s1.DoSkipComment()
+	if s1.GetSuccess() != 1 || s1.GetResultPos() != 8 {
+		fmt.Println("FAIL 1: Skip line comment")
+		failures++
+	}
+
+	s2 := NewJavaScriptSyntaxSkipperFsm()
+	inp2 := []byte("/* block */code")
+	s2.Setup(inp2, 0, len(inp2))
+	s2.DoSkipComment()
+	if s2.GetSuccess() != 1 || s2.GetResultPos() != 11 {
+		fmt.Println("FAIL 2: Skip block comment")
+		failures++
+	}
+
+	s3 := NewJavaScriptSyntaxSkipperFsm()
+	inp3 := []byte("\"hello world\" rest")
+	s3.Setup(inp3, 0, len(inp3))
+	s3.DoSkipString()
+	if s3.GetSuccess() != 1 || s3.GetResultPos() != 13 {
+		fmt.Println("FAIL 3: Skip double-quoted string")
+		failures++
+	}
+
+	s4 := NewJavaScriptSyntaxSkipperFsm()
+	inp4 := []byte("`template ${x}` rest")
+	s4.Setup(inp4, 0, len(inp4))
+	s4.DoSkipString()
+	if s4.GetSuccess() != 1 || s4.GetResultPos() != 15 {
+		fmt.Println("FAIL 4: Skip template literal")
+		failures++
+	}
+
+	s5 := NewJavaScriptSyntaxSkipperFsm()
+	inp5 := []byte("x + 1\nmore")
+	s5.Setup(inp5, 0, len(inp5))
+	s5.DoFindLineEnd()
+	if s5.GetResultPos() != 5 {
+		fmt.Println("FAIL 5: Find line end")
+		failures++
+	}
+
+	s6 := NewJavaScriptSyntaxSkipperFsm()
+	inp6 := []byte("x + 1")
+	s6.Setup(inp6, 0, len(inp6))
+	s6.DoSkipComment()
+	if s6.GetSuccess() != 0 {
+		fmt.Println("FAIL 6: Not a comment")
+		failures++
+	}
+
+	s7 := NewJavaScriptSyntaxSkipperFsm()
+	inp7 := []byte("(a, `t`, c) rest")
+	s7.Setup(inp7, 0, len(inp7))
+	s7.DoBalancedParenEnd()
+	if s7.GetSuccess() != 1 || s7.GetResultPos() != 11 {
+		fmt.Println("FAIL 7: Balanced parens with template")
+		failures++
+	}
+
+	s8 := NewJavaScriptSyntaxSkipperFsm()
+	inp8 := []byte("x + 1 // comment")
+	s8.Setup(inp8, 0, len(inp8))
+	s8.DoFindLineEnd()
+	if s8.GetResultPos() != 6 {
+		fmt.Println("FAIL 8: Find line end at //")
+		failures++
+	}
+
+	if failures > 0 { fmt.Printf("FAIL: %d failures\n", failures); os.Exit(1) }
+	fmt.Println("PASS: javascript_skipper (8 cases)")
+}

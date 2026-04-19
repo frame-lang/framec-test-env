@@ -1,0 +1,277 @@
+@@target lua
+
+-- CSyntaxSkipper -- FSM for skipping C-style comments and strings.
+-- Translated from framec's native_region_scanner/c_skipper.frs
+--
+-- Demonstrates the skipper pattern: dispatch on entry point, scan
+-- to find the end of the construct, report result via domain vars.
+--
+-- NOTE: Lua is 1-indexed, but the scanner uses 0-indexed positions
+-- internally and adjusts when accessing the byte table.
+
+@@system CSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos() {
+            return self.result_pos
+        }
+        get_success() {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                -- Try line comment: //
+                if i + 1 < scan_end and bs[i + 1] == 0x2F and bs[i + 2] == 0x2F then
+                    j = i + 2
+                    while j < scan_end and bs[j + 1] ~= 0x0A do
+                        j = j + 1
+                    end
+                    self.result_pos = j
+                    self.success = 1
+                    return
+                end
+
+                -- Try block comment: /* ... */
+                if i + 1 < scan_end and bs[i + 1] == 0x2F and bs[i + 2] == 0x2A then
+                    j = i + 2
+                    while j + 1 < scan_end do
+                        if bs[j + 1] == 0x2A and bs[j + 2] == 0x2F then
+                            self.result_pos = j + 2
+                            self.success = 1
+                            return
+                        end
+                        j = j + 1
+                    end
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+                end
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                if i < scan_end and (bs[i + 1] == 0x22 or bs[i + 1] == 0x27) then
+                    q = bs[i + 1]
+                    j = i + 1
+                    while j < scan_end do
+                        if bs[j + 1] == 0x5C then
+                            j = j + 2
+                            goto continue_skip_string
+                        end
+                        if bs[j + 1] == q then
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        end
+                        j = j + 1
+                        ::continue_skip_string::
+                    end
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+                end
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                while j < scan_end do
+                    b = bs[j + 1]
+                    if b == 0x0A or b == 0x3B then
+                        break
+                    end
+                    if b == 0x2F and j + 1 < scan_end and bs[j + 2] == 0x2F then
+                        break
+                    end
+                    if b == 0x2F and j + 1 < scan_end and bs[j + 2] == 0x2A then
+                        break
+                    end
+                    j = j + 1
+                end
+
+                self.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                if i >= scan_end or bs[i + 1] ~= 0x28 then
+                    self.success = 0
+                    return
+                end
+
+                depth = 1
+                j = i + 1
+                while j < scan_end and depth > 0 do
+                    b = bs[j + 1]
+                    if b == 0x28 then
+                        depth = depth + 1
+                    elseif b == 0x29 then
+                        depth = depth - 1
+                    elseif b == 0x22 or b == 0x27 then
+                        q = b
+                        j = j + 1
+                        while j < scan_end and bs[j + 1] ~= q do
+                            if bs[j + 1] == 0x5C then
+                                j = j + 1
+                            end
+                            j = j + 1
+                        end
+                        -- j is at closing quote
+                    end
+                    j = j + 1
+                end
+
+                if depth == 0 then
+                    self.result_pos = j
+                    self.success = 1
+                else
+                    self.result_pos = scan_end
+                    self.success = 0
+                end
+            }
+        }
+
+    domain:
+        bytes = {}
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+local function str_to_bytes(s)
+    local t = {}
+    for i = 1, #s do
+        t[i] = string.byte(s, i)
+    end
+    return t
+end
+
+local failures = 0
+
+-- Test 1: Skip line comment
+local s1 = CSyntaxSkipperFsm.new()
+local inp1 = str_to_bytes("// hello\ncode")
+s1:setup(inp1, 0, #inp1)
+s1:do_skip_comment()
+if s1:get_success() ~= 1 or s1:get_result_pos() ~= 8 then
+    print("FAIL 1: success=" .. s1:get_success() .. ", pos=" .. s1:get_result_pos())
+    failures = failures + 1
+end
+
+-- Test 2: Skip block comment
+local s2 = CSyntaxSkipperFsm.new()
+local inp2 = str_to_bytes("/* block */code")
+s2:setup(inp2, 0, #inp2)
+s2:do_skip_comment()
+if s2:get_success() ~= 1 or s2:get_result_pos() ~= 11 then
+    print("FAIL 2: success=" .. s2:get_success() .. ", pos=" .. s2:get_result_pos())
+    failures = failures + 1
+end
+
+-- Test 3: Not a comment
+local s3 = CSyntaxSkipperFsm.new()
+local inp3 = str_to_bytes("x + 1")
+s3:setup(inp3, 0, #inp3)
+s3:do_skip_comment()
+if s3:get_success() ~= 0 then
+    print("FAIL 3: should not be a comment")
+    failures = failures + 1
+end
+
+-- Test 4: Skip double-quoted string
+local s4 = CSyntaxSkipperFsm.new()
+local inp4 = str_to_bytes('"hello world" rest')
+s4:setup(inp4, 0, #inp4)
+s4:do_skip_string()
+if s4:get_success() ~= 1 or s4:get_result_pos() ~= 13 then
+    print("FAIL 4: success=" .. s4:get_success() .. ", pos=" .. s4:get_result_pos())
+    failures = failures + 1
+end
+
+-- Test 5: Skip string with escaped quote
+local s5 = CSyntaxSkipperFsm.new()
+local inp5 = str_to_bytes('"he\\"llo" rest')
+s5:setup(inp5, 0, #inp5)
+s5:do_skip_string()
+if s5:get_success() ~= 1 or s5:get_result_pos() ~= 9 then
+    print("FAIL 5: success=" .. s5:get_success() .. ", pos=" .. s5:get_result_pos())
+    failures = failures + 1
+end
+
+-- Test 6: Find line end (stops at newline)
+local s6 = CSyntaxSkipperFsm.new()
+local inp6 = str_to_bytes("x + 1\nmore")
+s6:setup(inp6, 0, #inp6)
+s6:do_find_line_end()
+if s6:get_result_pos() ~= 5 then
+    print("FAIL 6: pos=" .. s6:get_result_pos() .. ", expected 5")
+    failures = failures + 1
+end
+
+-- Test 7: Find line end (stops at // comment)
+local s7 = CSyntaxSkipperFsm.new()
+local inp7 = str_to_bytes("x + 1 // comment")
+s7:setup(inp7, 0, #inp7)
+s7:do_find_line_end()
+if s7:get_result_pos() ~= 6 then
+    print("FAIL 7: pos=" .. s7:get_result_pos() .. ", expected 6")
+    failures = failures + 1
+end
+
+-- Test 8: Balanced parens
+local s8 = CSyntaxSkipperFsm.new()
+local inp8 = str_to_bytes("(a, f(b), c) rest")
+s8:setup(inp8, 0, #inp8)
+s8:do_balanced_paren_end()
+if s8:get_success() ~= 1 or s8:get_result_pos() ~= 12 then
+    print("FAIL 8: success=" .. s8:get_success() .. ", pos=" .. s8:get_result_pos())
+    failures = failures + 1
+end
+
+if failures > 0 then
+    print("FAIL: " .. failures .. " failures")
+    os.exit(1)
+end
+print("PASS: c_skipper (8 cases)")

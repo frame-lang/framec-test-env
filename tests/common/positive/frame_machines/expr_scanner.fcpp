@@ -1,0 +1,161 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <cstdint>
+#include <algorithm>
+
+// ExprScanner — PDA for scanning assignment RHS expressions.
+// Translated from framec's native_region_scanner/expr_scanner.frs
+//
+// Scans from pos (after =) to a terminator (; or \n) at depth 0,
+// respecting nested ()[]{}  and string literals with escape handling.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: std::vector<uint8_t>, start: int, length: int) {
+            this->bytes = input_bytes;
+            this->pos = start;
+            this->end = length;
+        }
+        get_result(): int {
+            return this->result_end;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                int i = this->pos;
+                int end = this->end;
+                const std::vector<uint8_t>& bs = this->bytes;
+                int depth = 0;
+                int in_string = -1;
+
+                while (i < end) {
+                    int b = bs[i];
+
+                    if (in_string != -1) {
+                        if (b == '\\' && i + 1 < end) {
+                            i += 2;
+                            continue;
+                        }
+                        if (b == in_string) {
+                            in_string = -1;
+                        }
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '"' || b == '\'') {
+                        in_string = b;
+                        i++;
+                        continue;
+                    }
+
+                    if (b == '(' || b == '[' || b == '{') {
+                        depth++;
+                    } else if (b == ')' || b == ']' || b == '}') {
+                        depth = std::max(depth - 1, 0);
+                    } else if (b == ';' && depth == 0) {
+                        i++;
+                        break;
+                    } else if (b == '\n' && depth == 0) {
+                        break;
+                    }
+
+                    i++;
+                }
+
+                this->result_end = i;
+            }
+        }
+
+    domain:
+        bytes: std::vector<uint8_t> = {}
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+int main() {
+    int failures = 0;
+
+    auto to_bytes = [](const std::string& s) -> std::vector<uint8_t> {
+        return std::vector<uint8_t>(s.begin(), s.end());
+    };
+
+    // Test 1: simple expression terminated by newline
+    auto e1 = ExprScannerFsm();
+    auto inp1 = to_bytes(" x + 1\nfoo");
+    e1.setup(inp1, 0, inp1.size());
+    e1.do_scan();
+    int r1 = e1.get_result();
+    std::string expr1(inp1.begin(), inp1.begin() + r1);
+    if (expr1 != " x + 1") {
+        printf("FAIL 1: got '%s'\n", expr1.c_str());
+        failures++;
+    }
+
+    // Test 2: expression with semicolon terminator
+    auto e2 = ExprScannerFsm();
+    auto inp2 = to_bytes(" x + 1; y = 2");
+    e2.setup(inp2, 0, inp2.size());
+    e2.do_scan();
+    int r2 = e2.get_result();
+    std::string expr2(inp2.begin(), inp2.begin() + r2);
+    if (expr2 != " x + 1;") {
+        printf("FAIL 2: got '%s'\n", expr2.c_str());
+        failures++;
+    }
+
+    // Test 3: nested parens not treated as terminator
+    auto e3 = ExprScannerFsm();
+    auto inp3 = to_bytes(" f(x, g(y))\nz");
+    e3.setup(inp3, 0, inp3.size());
+    e3.do_scan();
+    int r3 = e3.get_result();
+    std::string expr3(inp3.begin(), inp3.begin() + r3);
+    if (expr3 != " f(x, g(y))") {
+        printf("FAIL 3: got '%s'\n", expr3.c_str());
+        failures++;
+    }
+
+    // Test 4: string with escaped quote
+    auto e4 = ExprScannerFsm();
+    auto inp4 = to_bytes(" \"hello\\\"world\"\n");
+    e4.setup(inp4, 0, inp4.size());
+    e4.do_scan();
+    int r4 = e4.get_result();
+    std::string expr4(inp4.begin(), inp4.begin() + r4);
+    if (expr4 != " \"hello\\\"world\"") {
+        printf("FAIL 4: got '%s'\n", expr4.c_str());
+        failures++;
+    }
+
+    // Test 5: semicolon inside string (should not terminate)
+    auto e5 = ExprScannerFsm();
+    auto inp5 = to_bytes(" \"a;b\"\n");
+    e5.setup(inp5, 0, inp5.size());
+    e5.do_scan();
+    int r5 = e5.get_result();
+    std::string expr5(inp5.begin(), inp5.begin() + r5);
+    if (expr5 != " \"a;b\"") {
+        printf("FAIL 5: got '%s'\n", expr5.c_str());
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: %d failures\n", failures);
+        return 1;
+    }
+    printf("PASS: expr_scanner (5 cases)\n");
+    return 0;
+}

@@ -1,0 +1,237 @@
+@@target ruby
+
+# StateVarParser — FSM for parsing $.varName and $.varName = expr
+# Translated from framec's native_region_scanner/state_var_parser.frs
+#
+# Uses hierarchical composition: $ScanExpr creates an ExprScannerFsm
+# sub-machine when it detects an assignment.
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.end = length
+        }
+        get_result() {
+            return self.result_end
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                i = self.pos
+                the_end = self.end
+                bs = self.bytes
+                depth = 0
+                in_string = nil
+
+                while i < the_end
+                    b = bs[i]
+
+                    if in_string != nil
+                        if b == 0x5C && i + 1 < the_end
+                            i += 2
+                            next
+                        end
+                        if b == in_string
+                            in_string = nil
+                        end
+                        i += 1
+                        next
+                    end
+
+                    if b == 0x22 || b == 0x27
+                        in_string = b
+                        i += 1
+                        next
+                    end
+
+                    if b == 0x28 || b == 0x5B || b == 0x7B
+                        depth += 1
+                    elsif b == 0x29 || b == 0x5D || b == 0x7D
+                        depth = [depth - 1, 0].max
+                    elsif b == 0x3B && depth == 0
+                        i += 1
+                        break
+                    elsif b == 0x0A && depth == 0
+                        break
+                    end
+
+                    i += 1
+                end
+
+                self.result_end = i
+            }
+        }
+
+    domain:
+        bytes = []
+        pos: int = 0
+        end: int = 0
+        result_end: int = 0
+}
+
+@@system StateVarParserFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.parse_end = length
+        }
+        get_result_end() {
+            return self.result_end
+        }
+        get_is_assignment() {
+            return self.is_assignment
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $ScanIdent }
+        }
+
+        $ScanIdent {
+            $>() {
+                # Skip "$." prefix and scan identifier
+                i = self.pos + 2
+                the_end = self.parse_end
+                bs = self.bytes
+
+                while i < the_end
+                    c = bs[i]
+                    if (c >= 0x30 && c <= 0x39) || (c >= 0x41 && c <= 0x5A) || (c >= 0x61 && c <= 0x7A) || c == 0x5F
+                        i += 1
+                    else
+                        break
+                    end
+                end
+
+                self.ident_end = i
+                -> $CheckAssign
+            }
+        }
+
+        $CheckAssign {
+            $>() {
+                # Lookahead: skip whitespace, check for = (but not == or => or =<)
+                j = self.ident_end
+                the_end = self.parse_end
+                bs = self.bytes
+
+                while j < the_end && (bs[j] == 0x20 || bs[j] == 0x09)
+                    j += 1
+                end
+
+                if j < the_end && bs[j] == 0x3D && (j + 1 >= the_end || (bs[j + 1] != 0x3D && bs[j + 1] != 0x3C && bs[j + 1] != 0x3E))
+                    # Assignment detected
+                    j += 1
+                    self.pos = j
+                    self.is_assignment = true
+                    -> $ScanExpr
+                else
+                    # Read-only access
+                    self.result_end = self.ident_end
+                    self.is_assignment = false
+                    -> $Done
+                end
+            }
+        }
+
+        $ScanExpr {
+            $>() {
+                # Create ExprScanner sub-machine
+                expr = ExprScannerFsm.new
+                expr.setup(self.bytes, self.pos, self.parse_end)
+                expr.do_scan()
+                self.result_end = expr.get_result()
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+            }
+        }
+
+    domain:
+        bytes = []
+        pos: int = 0
+        parse_end: int = 0
+        ident_end: int = 0
+        result_end: int = 0
+        is_assignment = false
+}
+
+failures = 0
+
+# Test 1: Read-only access $.count
+p1 = StateVarParserFsm.new
+inp1 = "$.count + 1".bytes
+p1.setup(inp1, 0, inp1.length)
+p1.do_parse()
+if p1.get_is_assignment()
+    puts("FAIL 1: should not be assignment")
+    failures += 1
+end
+name1 = inp1[2...p1.get_result_end()].pack("C*")
+if name1 != "count"
+    puts("FAIL 1: name='#{name1}', expected 'count'")
+    failures += 1
+end
+
+# Test 2: Assignment $.total = x + 1;\n
+p2 = StateVarParserFsm.new
+inp2 = "$.total = x + 1;\nmore".bytes
+p2.setup(inp2, 0, inp2.length)
+p2.do_parse()
+if !p2.get_is_assignment()
+    puts("FAIL 2: should be assignment")
+    failures += 1
+end
+expr2 = inp2[0...p2.get_result_end()].pack("C*")
+if !expr2.include?("x + 1;")
+    puts("FAIL 2: expr='#{expr2}'")
+    failures += 1
+end
+
+# Test 3: Not assignment $.x == 5 (== is comparison, not assignment)
+p3 = StateVarParserFsm.new
+inp3 = "$.x == 5".bytes
+p3.setup(inp3, 0, inp3.length)
+p3.do_parse()
+if p3.get_is_assignment()
+    puts("FAIL 3: == should not be treated as assignment")
+    failures += 1
+end
+
+# Test 4: Assignment with nested parens $.val = f(a, b)\n
+p4 = StateVarParserFsm.new
+inp4 = "$.val = f(a, b)\nrest".bytes
+p4.setup(inp4, 0, inp4.length)
+p4.do_parse()
+if !p4.get_is_assignment()
+    puts("FAIL 4: should be assignment")
+    failures += 1
+end
+expr4 = inp4[0...p4.get_result_end()].pack("C*")
+if !expr4.include?("f(a, b)")
+    puts("FAIL 4: expr='#{expr4}'")
+    failures += 1
+end
+
+if failures > 0
+    puts("FAIL: #{failures} failures")
+    exit(1)
+end
+puts("PASS: state_var_parser (4 cases)")

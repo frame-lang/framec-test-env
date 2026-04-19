@@ -1,0 +1,239 @@
+@@target rust
+
+// StateVarParser — FSM for parsing $.varName and $.varName = expr
+// Translated from framec's native_region_scanner/state_var_parser.frs
+//
+// Uses hierarchical composition: $ScanExpr creates an ExprScannerFsm
+// sub-machine when it detects an assignment.
+
+use std::collections::HashMap;
+
+@@system ExprScannerFsm {
+    operations:
+        setup(input_bytes: Vec<u8>, start: i64, length: i64) {
+            self.bytes = input_bytes;
+            self.pos = start;
+            self.end = length;
+        }
+        get_result(): i64 {
+            return self.result_end;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $Scanning }
+        }
+
+        $Scanning {
+            $>() {
+                let mut i = self.pos as usize;
+                let end = self.end as usize;
+                let bytes = &self.bytes;
+                let mut depth: i32 = 0;
+                let mut in_string: Option<u8> = None;
+
+                while i < end {
+                    let b = bytes[i];
+
+                    if let Some(q) = in_string {
+                        if b == b'\\' && i + 1 < end {
+                            i += 2;
+                            continue;
+                        }
+                        if b == q {
+                            in_string = None;
+                        }
+                        i += 1;
+                        continue;
+                    }
+
+                    if b == b'"' || b == b'\'' {
+                        in_string = Some(b);
+                        i += 1;
+                        continue;
+                    }
+
+                    match b {
+                        b'(' | b'[' | b'{' => { depth += 1; }
+                        b')' | b']' | b'}' => { depth = (depth - 1).max(0); }
+                        b';' if depth == 0 => { i += 1; break; }
+                        b'\n' if depth == 0 => { break; }
+                        _ => {}
+                    }
+                    i += 1;
+                }
+
+                self.result_end = i as i64;
+            }
+        }
+
+    domain:
+        bytes: Vec<u8> = Vec::new()
+        pos: i64 = 0
+        end: i64 = 0
+        result_end: i64 = 0
+}
+
+@@system StateVarParserFsm {
+    operations:
+        setup(input_bytes: Vec<u8>, start: i64, length: i64) {
+            self.bytes = input_bytes;
+            self.pos = start;
+            self.parse_end = length;
+        }
+        get_result_end(): i64 {
+            return self.result_end;
+        }
+        get_is_assignment(): bool {
+            return self.is_assignment;
+        }
+
+    interface:
+        do_parse()
+
+    machine:
+        $Init {
+            do_parse() { -> $ScanIdent }
+        }
+
+        $ScanIdent {
+            $>() {
+                // Skip "$." prefix and scan identifier
+                let mut i = (self.pos + 2) as usize;
+                let end = self.parse_end as usize;
+                let bs = &self.bytes;
+
+                while i < end && (bs[i].is_ascii_alphanumeric() || bs[i] == b'_') {
+                    i += 1;
+                }
+
+                self.ident_end = i as i64;
+                -> $CheckAssign
+            }
+        }
+
+        $CheckAssign {
+            $>() {
+                // Lookahead: skip whitespace, check for = (but not == or => or =<)
+                let mut j = self.ident_end as usize;
+                let end = self.parse_end as usize;
+                let bs = &self.bytes;
+
+                while j < end && (bs[j] == b' ' || bs[j] == b'\t') {
+                    j += 1;
+                }
+
+                if j < end && bs[j] == b'=' && (j + 1 >= end || (bs[j + 1] != b'=' && bs[j + 1] != b'<' && bs[j + 1] != b'>')) {
+                    // Assignment detected
+                    j += 1;
+                    self.pos = j as i64;
+                    self.is_assignment = true;
+                    -> $ScanExpr
+                } else {
+                    // Read-only access
+                    self.result_end = self.ident_end;
+                    self.is_assignment = false;
+                    -> $Done
+                }
+            }
+        }
+
+        $ScanExpr {
+            $>() {
+                // Create ExprScanner sub-machine
+                let mut expr = @@ExprScannerFsm();
+                expr.setup(self.bytes.clone(), self.pos, self.parse_end);
+                expr.do_scan();
+                self.result_end = expr.get_result();
+                -> $Done
+            }
+        }
+
+        $Done {
+            $>() {
+            }
+        }
+
+    domain:
+        bytes: Vec<u8> = Vec::new()
+        pos: i64 = 0
+        parse_end: i64 = 0
+        ident_end: i64 = 0
+        result_end: i64 = 0
+        is_assignment: bool = false
+}
+
+fn main() {
+    let mut failures = 0;
+
+    // Test 1: Read-only access $.count
+    let mut p1 = @@StateVarParserFsm();
+    let inp1 = b"$.count + 1".to_vec();
+    let len1 = inp1.len() as i64;
+    p1.setup(inp1.clone(), 0, len1);
+    p1.do_parse();
+    if p1.get_is_assignment() {
+        println!("FAIL 1: should not be assignment");
+        failures += 1;
+    }
+    let r1 = p1.get_result_end() as usize;
+    let name1 = String::from_utf8_lossy(&inp1[2..r1]).to_string();
+    if name1 != "count" {
+        println!("FAIL 1: name='{}', expected 'count'", name1);
+        failures += 1;
+    }
+
+    // Test 2: Assignment $.total = x + 1;\n
+    let mut p2 = @@StateVarParserFsm();
+    let inp2 = b"$.total = x + 1;\nmore".to_vec();
+    let len2 = inp2.len() as i64;
+    p2.setup(inp2.clone(), 0, len2);
+    p2.do_parse();
+    if !p2.get_is_assignment() {
+        println!("FAIL 2: should be assignment");
+        failures += 1;
+    }
+    let r2 = p2.get_result_end() as usize;
+    let expr2 = String::from_utf8_lossy(&inp2[0..r2]).to_string();
+    if !expr2.contains("x + 1;") {
+        println!("FAIL 2: expr='{}'", expr2);
+        failures += 1;
+    }
+
+    // Test 3: Not assignment $.x == 5 (== is comparison, not assignment)
+    let mut p3 = @@StateVarParserFsm();
+    let inp3 = b"$.x == 5".to_vec();
+    let len3 = inp3.len() as i64;
+    p3.setup(inp3.clone(), 0, len3);
+    p3.do_parse();
+    if p3.get_is_assignment() {
+        println!("FAIL 3: == should not be treated as assignment");
+        failures += 1;
+    }
+
+    // Test 4: Assignment with nested parens $.val = f(a, b)\n
+    let mut p4 = @@StateVarParserFsm();
+    let inp4 = b"$.val = f(a, b)\nrest".to_vec();
+    let len4 = inp4.len() as i64;
+    p4.setup(inp4.clone(), 0, len4);
+    p4.do_parse();
+    if !p4.get_is_assignment() {
+        println!("FAIL 4: should be assignment");
+        failures += 1;
+    }
+    let r4 = p4.get_result_end() as usize;
+    let expr4 = String::from_utf8_lossy(&inp4[0..r4]).to_string();
+    if !expr4.contains("f(a, b)") {
+        println!("FAIL 4: expr='{}'", expr4);
+        failures += 1;
+    }
+
+    if failures > 0 {
+        println!("FAIL: {} failures", failures);
+        std::process::exit(1);
+    }
+    println!("PASS: state_var_parser (4 cases)");
+}

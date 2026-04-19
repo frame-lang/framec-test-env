@@ -1,0 +1,266 @@
+@@target erlang
+
+%% java_skipper -- FSM for skipping syntax constructs.
+
+@@system JavaSyntaxSkipperFsm {
+    interface:
+        setup(input_bytes: binary, start: int, length: int)
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+        get_result_pos(): int
+        get_success(): int
+
+    machine:
+        $Init {
+            setup(input_bytes: binary, start: int, length: int) {
+                self.bytes = input_bytes
+                self.pos = start
+                self.scan_end = length
+            }
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipComment {
+            $>() {
+                {ResultPos, Success} = scan_comment_h(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.result_pos = ResultPos
+                self.success = Success
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipString {
+            $>() {
+                {ResultPos, Success} = scan_string_h(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.result_pos = ResultPos
+                self.success = Success
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $FindLineEnd {
+            $>() {
+                self.result_pos = scan_line_end_h(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                {ResultPos, Success} = scan_balanced_h(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.result_pos = ResultPos
+                self.success = Success
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+    domain:
+        bytes = <<>>
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+%% --- scan_comment helpers ---
+scan_comment_h(Bs, I, End) when I + 1 < End ->
+    B0 = binary:at(Bs, I), B1 = binary:at(Bs, I + 1),
+    if
+        B0 =:= $/ andalso B1 =:= $/ ->
+            Pos = scan_lc(Bs, I + 2, End), {Pos, 1};
+        B0 =:= $/ andalso B1 =:= $* ->
+            scan_bc(Bs, I + 2, End);
+        true -> {0, 0}
+    end;
+scan_comment_h(_Bs, _I, _End) -> {0, 0}.
+
+scan_lc(Bs, J, End) when J < End ->
+    case binary:at(Bs, J) of $\n -> J; _ -> scan_lc(Bs, J + 1, End) end;
+scan_lc(_Bs, J, _End) -> J.
+
+scan_bc(Bs, J, End) when J + 1 < End ->
+    case {binary:at(Bs, J), binary:at(Bs, J + 1)} of
+        {$*, $/} -> {J + 2, 1};
+        _ -> scan_bc(Bs, J + 1, End)
+    end;
+scan_bc(_Bs, _J, End) -> {End, 1}.
+
+%% --- scan_string helpers ---
+scan_string_h(Bs, I, End) when I + 2 < End ->
+    C0 = binary:at(Bs, I), C1 = binary:at(Bs, I + 1), C2 = binary:at(Bs, I + 2),
+    IsTriple = (C0 =:= $" andalso C1 =:= $" andalso C2 =:= $"),
+    case IsTriple of
+        true -> scan_triple_str(Bs, I + 3, End);
+        false -> scan_simple_check(Bs, I, End)
+    end;
+scan_string_h(Bs, I, End) when I < End ->
+    scan_simple_check(Bs, I, End);
+scan_string_h(_Bs, _I, _End) -> {0, 0}.
+
+scan_simple_check(Bs, I, End) ->
+    B = binary:at(Bs, I),
+    if B =:= $" orelse B =:= $' -> scan_simple_str(Bs, I + 1, End, B);
+       true -> {0, 0}
+    end.
+
+scan_triple_str(Bs, J, End) when J + 2 < End ->
+    case {binary:at(Bs, J), binary:at(Bs, J+1), binary:at(Bs, J+2)} of
+        {$", $", $"} -> {J + 3, 1};
+        _ -> scan_triple_str(Bs, J + 1, End)
+    end;
+scan_triple_str(_Bs, _J, End) -> {End, 1}.
+
+scan_simple_str(_Bs, J, End, _Q) when J >= End -> {End, 1};
+scan_simple_str(Bs, J, End, Q) ->
+    B = binary:at(Bs, J),
+    if B =:= $\\ -> scan_simple_str(Bs, J + 2, End, Q);
+       B =:= Q -> {J + 1, 1};
+       true -> scan_simple_str(Bs, J + 1, End, Q)
+    end.
+
+%% --- scan_line_end helpers ---
+scan_line_end_h(_Bs, J, End) when J >= End -> J;
+scan_line_end_h(Bs, J, End) ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\n orelse B =:= $; -> J;
+        B =:= $/ andalso J + 1 < End ->
+            B1 = binary:at(Bs, J + 1),
+            if B1 =:= $/ orelse B1 =:= $* -> J;
+               true -> scan_line_end_h(Bs, J + 1, End)
+            end;
+        true -> scan_line_end_h(Bs, J + 1, End)
+    end.
+
+%% --- scan_balanced helpers ---
+scan_balanced_h(Bs, I, End) when I < End ->
+    case binary:at(Bs, I) of
+        $( -> scan_bp_loop(Bs, I + 1, End, 1);
+        _ -> {0, 0}
+    end;
+scan_balanced_h(_Bs, _I, _End) -> {0, 0}.
+
+scan_bp_loop(_Bs, J, _End, 0) -> {J, 1};
+scan_bp_loop(Bs, J, End, Depth) when J < End andalso Depth > 0 ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $( -> scan_bp_loop(Bs, J + 1, End, Depth + 1);
+        B =:= $) -> scan_bp_loop(Bs, J + 1, End, Depth - 1);
+        B =:= $" orelse B =:= $' ->
+            J2 = scan_str_in_bp(Bs, J + 1, End, B),
+            scan_bp_loop(Bs, J2 + 1, End, Depth);
+        true -> scan_bp_loop(Bs, J + 1, End, Depth)
+    end;
+scan_bp_loop(_Bs, _J, End, _Depth) -> {End, 0}.
+
+scan_str_in_bp(_Bs, J, End, _Q) when J >= End -> End;
+scan_str_in_bp(Bs, J, End, Q) ->
+    B = binary:at(Bs, J),
+    if B =:= $\\ -> scan_str_in_bp(Bs, J + 2, End, Q);
+       B =:= Q -> J;
+       true -> scan_str_in_bp(Bs, J + 1, End, Q)
+    end.
+
+
+main() ->
+    Failures = test_all(0),
+    case Failures of
+        0 -> io:format("PASS: java_skipper (8 cases)~n");
+        _ -> io:format("FAIL: ~p failures~n", [Failures]), halt(1)
+    end.
+
+test_all(F0) ->
+    M = java_syntax_skipper_fsm,
+
+    %% Test 1: Skip line comment
+    {ok, P1} = M:start_link(),
+    I1 = <<"// hello\ncode">>,
+    M:setup(P1, I1, 0, byte_size(I1)),
+    M:do_skip_comment(P1),
+    F1 = case {M:get_success(P1), M:get_result_pos(P1)} of
+        {1, 8} -> F0;
+        _ -> io:format("FAIL 1~n"), F0 + 1
+    end,
+
+    %% Test 2: Skip block comment
+    {ok, P2} = M:start_link(),
+    I2 = <<"/* block */code">>,
+    M:setup(P2, I2, 0, byte_size(I2)),
+    M:do_skip_comment(P2),
+    F2 = case {M:get_success(P2), M:get_result_pos(P2)} of
+        {1, 11} -> F1;
+        _ -> io:format("FAIL 2~n"), F1 + 1
+    end,
+
+    %% Test 3: Skip double-quoted string
+    {ok, P3} = M:start_link(),
+    I3 = <<"\"hello world\" rest">>,
+    M:setup(P3, I3, 0, byte_size(I3)),
+    M:do_skip_string(P3),
+    F3 = case {M:get_success(P3), M:get_result_pos(P3)} of
+        {1, 13} -> F2;
+        _ -> io:format("FAIL 3~n"), F2 + 1
+    end,
+
+    %% Test 4: Java text block
+    {ok, P4} = M:start_link(),
+    I4 = <<"\"\"\"text block content\"\"\" rest">>,
+    M:setup(P4, I4, 0, byte_size(I4)),
+    M:do_skip_string(P4),
+    F4 = case {M:get_success(P4), M:get_result_pos(P4)} of
+        {1, 24} -> F3;
+        _ -> io:format("FAIL 4~n"), F3 + 1
+    end,
+
+    %% Test 5: Find line end
+    {ok, P5} = M:start_link(),
+    I5 = <<"x + 1\nmore">>,
+    M:setup(P5, I5, 0, byte_size(I5)),
+    M:do_find_line_end(P5),
+    F5 = case M:get_result_pos(P5) of
+        5 -> F4;
+        _ -> io:format("FAIL 5~n"), F4 + 1
+    end,
+
+    %% Test 6: Not a comment
+    {ok, P6} = M:start_link(),
+    I6 = <<"x + 1">>,
+    M:setup(P6, I6, 0, byte_size(I6)),
+    M:do_skip_comment(P6),
+    F6 = case M:get_success(P6) of
+        0 -> F5;
+        _ -> io:format("FAIL 6~n"), F5 + 1
+    end,
+
+    %% Test 7: Balanced parens
+    {ok, P7} = M:start_link(),
+    I7 = <<"(a, f(b), c) rest">>,
+    M:setup(P7, I7, 0, byte_size(I7)),
+    M:do_balanced_paren_end(P7),
+    F7 = case {M:get_success(P7), M:get_result_pos(P7)} of
+        {1, 12} -> F6;
+        _ -> io:format("FAIL 7~n"), F6 + 1
+    end,
+
+    %% Test 8: Find line end at //
+    {ok, P8} = M:start_link(),
+    I8 = <<"x + 1 // comment">>,
+    M:setup(P8, I8, 0, byte_size(I8)),
+    M:do_find_line_end(P8),
+    F8 = case M:get_result_pos(P8) of
+        6 -> F7;
+        _ -> io:format("FAIL 8~n"), F7 + 1
+    end,
+
+    F8.

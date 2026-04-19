@@ -1,0 +1,317 @@
+@@target rust
+
+// ErlangScopeScanner -- FSM for detecting fun(...) -> ... end closures.
+// Translated from framec's native_region_scanner/erlang_scope_scanner.frs
+//
+// Erlang reuses `end` to close: fun, case, if, receive, begin, try.
+// This FSM tracks a depth counter for all block-opening keywords so
+// only the `end` matching our `fun` terminates the scan.
+//
+// Skips % line comments and "..." / '...' string/atom literals.
+// Does NOT match `fun Module:Function/Arity` (function references).
+
+use std::collections::HashMap;
+
+@@system ErlangScopeScannerFsm {
+    operations:
+        setup(input_bytes: Vec<u8>, start: i64, length: i64) {
+            self.bytes = input_bytes;
+            self.pos = start;
+            self.scan_end = length;
+        }
+        get_result_pos(): i64 {
+            return self.result_pos;
+        }
+        get_success(): i64 {
+            return self.success;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $CheckFun }
+        }
+
+        $CheckFun {
+            $>() {
+                let i = self.pos as usize;
+                let end = self.scan_end as usize;
+                let bs = &self.bytes;
+
+                // Must start with `fun` keyword
+                if i + 3 > end {
+                    self.success = 0;
+                    return;
+                }
+
+                if bs[i] != b'f' || bs[i + 1] != b'u' || bs[i + 2] != b'n' {
+                    self.success = 0;
+                    return;
+                }
+
+                // Check word boundary (not part of `function` etc.)
+                let after = i + 3;
+                if after < end && (bs[after].is_ascii_alphanumeric() || bs[after] == b'_') {
+                    self.success = 0;
+                    return;
+                }
+
+                // Skip whitespace after `fun`
+                let mut j = after;
+                while j < end && (bs[j] == b' ' || bs[j] == b'\t' || bs[j] == b'\n') {
+                    j += 1;
+                }
+
+                // Check for Module:Function/Arity pattern (function reference, not closure)
+                if j < end && bs[j].is_ascii_uppercase() {
+                    let mut k = j;
+                    while k < end && (bs[k].is_ascii_alphanumeric() || bs[k] == b'_') {
+                        k += 1;
+                    }
+                    if k < end && bs[k] == b':' {
+                        self.success = 0;
+                        return;
+                    }
+                }
+
+                // It's a closure: fun(...) -> ... end
+                self.depth = 1;
+                self.pos = after as i64;
+                -> $ScanBody
+            }
+        }
+
+        $ScanBody {
+            $>() {
+                let mut i = self.pos as usize;
+                let end = self.scan_end as usize;
+                let bs = &self.bytes;
+
+                while i < end {
+                    let b = bs[i];
+
+                    // Skip % line comments
+                    if b == b'%' {
+                        while i < end && bs[i] != b'\n' {
+                            i += 1;
+                        }
+                        continue;
+                    }
+
+                    // Skip "..." strings
+                    if b == b'"' {
+                        i += 1;
+                        while i < end {
+                            if bs[i] == b'\\' {
+                                i += 2;
+                                continue;
+                            }
+                            if bs[i] == b'"' {
+                                i += 1;
+                                break;
+                            }
+                            i += 1;
+                        }
+                        continue;
+                    }
+
+                    // Skip '...' quoted atoms
+                    if b == b'\'' {
+                        i += 1;
+                        while i < end {
+                            if bs[i] == b'\\' {
+                                i += 2;
+                                continue;
+                            }
+                            if bs[i] == b'\'' {
+                                i += 1;
+                                break;
+                            }
+                            i += 1;
+                        }
+                        continue;
+                    }
+
+                    // Check for block-opening keywords (increase depth)
+
+                    // fun
+                    if b == b'f' && i + 3 <= end && bs[i + 1] == b'u' && bs[i + 2] == b'n' {
+                        if i + 3 >= end || (!bs[i + 3].is_ascii_alphanumeric() && bs[i + 3] != b'_') {
+                            self.depth += 1;
+                            i += 3;
+                            continue;
+                        }
+                    }
+
+                    // case
+                    if b == b'c' && i + 4 <= end && bs[i + 1] == b'a' && bs[i + 2] == b's' && bs[i + 3] == b'e' {
+                        if i + 4 >= end || (!bs[i + 4].is_ascii_alphanumeric() && bs[i + 4] != b'_') {
+                            self.depth += 1;
+                            i += 4;
+                            continue;
+                        }
+                    }
+
+                    // if
+                    if b == b'i' && i + 2 <= end && bs[i + 1] == b'f' {
+                        if i + 2 >= end || (!bs[i + 2].is_ascii_alphanumeric() && bs[i + 2] != b'_') {
+                            self.depth += 1;
+                            i += 2;
+                            continue;
+                        }
+                    }
+
+                    // receive
+                    if b == b'r' && i + 7 <= end && bs[i + 1] == b'e' && bs[i + 2] == b'c' && bs[i + 3] == b'e' && bs[i + 4] == b'i' && bs[i + 5] == b'v' && bs[i + 6] == b'e' {
+                        if i + 7 >= end || (!bs[i + 7].is_ascii_alphanumeric() && bs[i + 7] != b'_') {
+                            self.depth += 1;
+                            i += 7;
+                            continue;
+                        }
+                    }
+
+                    // begin
+                    if b == b'b' && i + 5 <= end && bs[i + 1] == b'e' && bs[i + 2] == b'g' && bs[i + 3] == b'i' && bs[i + 4] == b'n' {
+                        if i + 5 >= end || (!bs[i + 5].is_ascii_alphanumeric() && bs[i + 5] != b'_') {
+                            self.depth += 1;
+                            i += 5;
+                            continue;
+                        }
+                    }
+
+                    // try
+                    if b == b't' && i + 3 <= end && bs[i + 1] == b'r' && bs[i + 2] == b'y' {
+                        if i + 3 >= end || (!bs[i + 3].is_ascii_alphanumeric() && bs[i + 3] != b'_') {
+                            self.depth += 1;
+                            i += 3;
+                            continue;
+                        }
+                    }
+
+                    // Check for `end` keyword (decrease depth)
+                    if b == b'e' && i + 3 <= end && bs[i + 1] == b'n' && bs[i + 2] == b'd' {
+                        if i + 3 >= end || (!bs[i + 3].is_ascii_alphanumeric() && bs[i + 3] != b'_') {
+                            self.depth -= 1;
+                            if self.depth == 0 {
+                                self.result_pos = (i + 3) as i64;
+                                self.success = 1;
+                                return;
+                            }
+                            i += 3;
+                            continue;
+                        }
+                    }
+
+                    // Skip identifiers (avoid false keyword matches mid-word)
+                    if b.is_ascii_alphabetic() || b == b'_' {
+                        while i < end && (bs[i].is_ascii_alphanumeric() || bs[i] == b'_') {
+                            i += 1;
+                        }
+                        continue;
+                    }
+
+                    i += 1;
+                }
+
+                // Ran out of bytes without finding matching `end`
+                self.success = 0;
+            }
+        }
+
+    domain:
+        bytes: Vec<u8> = Vec::new()
+        pos: i64 = 0
+        scan_end: i64 = 0
+        result_pos: i64 = 0
+        success: i64 = 0
+        depth: i64 = 0
+}
+
+fn main() {
+    let mut failures = 0;
+
+    // Test 1: Simple fun -> end
+    let mut s1 = @@ErlangScopeScannerFsm();
+    let inp1 = b"fun(X) -> X + 1 end rest".to_vec();
+    s1.setup(inp1.clone(), 0, inp1.len() as i64);
+    s1.do_scan();
+    if s1.get_success() != 1 || s1.get_result_pos() != 19 {
+        println!("FAIL 1: success={}, pos={}", s1.get_success(), s1.get_result_pos());
+        failures += 1;
+    }
+
+    // Test 2: Nested fun -> case ... end end
+    let mut s2 = @@ErlangScopeScannerFsm();
+    let inp2 = b"fun(X) -> case X of 1 -> ok end end rest".to_vec();
+    s2.setup(inp2.clone(), 0, inp2.len() as i64);
+    s2.do_scan();
+    if s2.get_success() != 1 || s2.get_result_pos() != 35 {
+        println!("FAIL 2: success={}, pos={}", s2.get_success(), s2.get_result_pos());
+        failures += 1;
+    }
+
+    // Test 3: Not a fun keyword (function)
+    let mut s3 = @@ErlangScopeScannerFsm();
+    let inp3 = b"function() -> ok end".to_vec();
+    s3.setup(inp3.clone(), 0, inp3.len() as i64);
+    s3.do_scan();
+    if s3.get_success() != 0 {
+        println!("FAIL 3: should not match 'function'");
+        failures += 1;
+    }
+
+    // Test 4: fun Module:Function/Arity (function reference, not closure)
+    let mut s4 = @@ErlangScopeScannerFsm();
+    let inp4 = b"fun io:format/2".to_vec();
+    s4.setup(inp4.clone(), 0, inp4.len() as i64);
+    s4.do_scan();
+    if s4.get_success() != 0 {
+        println!("FAIL 4: should not match function reference");
+        failures += 1;
+    }
+
+    // Test 5: Nested if ... end inside fun
+    let mut s5 = @@ErlangScopeScannerFsm();
+    let inp5 = b"fun() -> if true -> ok end end rest".to_vec();
+    s5.setup(inp5.clone(), 0, inp5.len() as i64);
+    s5.do_scan();
+    if s5.get_success() != 1 || s5.get_result_pos() != 30 {
+        println!("FAIL 5: success={}, pos={}", s5.get_success(), s5.get_result_pos());
+        failures += 1;
+    }
+
+    // Test 6: String inside fun body (should skip)
+    let mut s6 = @@ErlangScopeScannerFsm();
+    let inp6 = b"fun() -> \"end\" end rest".to_vec();
+    s6.setup(inp6.clone(), 0, inp6.len() as i64);
+    s6.do_scan();
+    if s6.get_success() != 1 || s6.get_result_pos() != 18 {
+        println!("FAIL 6: success={}, pos={}", s6.get_success(), s6.get_result_pos());
+        failures += 1;
+    }
+
+    // Test 7: Comment inside fun body (should skip)
+    let mut s7 = @@ErlangScopeScannerFsm();
+    let inp7 = b"fun() -> % end\nok end rest".to_vec();
+    s7.setup(inp7.clone(), 0, inp7.len() as i64);
+    s7.do_scan();
+    if s7.get_success() != 1 || s7.get_result_pos() != 21 {
+        println!("FAIL 7: success={}, pos={}", s7.get_success(), s7.get_result_pos());
+        failures += 1;
+    }
+
+    // Test 8: Unmatched fun (no end)
+    let mut s8 = @@ErlangScopeScannerFsm();
+    let inp8 = b"fun() -> X + 1".to_vec();
+    s8.setup(inp8.clone(), 0, inp8.len() as i64);
+    s8.do_scan();
+    if s8.get_success() != 0 {
+        println!("FAIL 8: should fail with no matching end");
+        failures += 1;
+    }
+
+    if failures > 0 { println!("FAIL: {} failures", failures); std::process::exit(1); }
+    println!("PASS: erlang_scope_scanner (8 cases)");
+}

@@ -1,0 +1,260 @@
+@@target swift
+
+import Foundation
+
+// PythonSyntaxSkipper — FSM for skipping Python comments and strings.
+// Translated from framec's native_region_scanner/python_skipper.frs
+//
+// Handles: # comments, triple-quoted strings, simple strings,
+// Python-style line endings, balanced parens.
+
+@@system PythonSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: [UInt8], start: Int, length: Int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos(): Int {
+            return self.result_pos
+        }
+        get_success(): Int {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                var i = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+
+                // Python uses # for line comments
+                if i < end && bs[i] == UInt8(ascii: "#") {
+                    var j = i + 1
+                    while j < end && bs[j] != 0x0A {
+                        j += 1
+                    }
+                    self.result_pos = j
+                    self.success = 1
+                    return
+                }
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                var i = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+
+                // Triple-quoted strings: """ or '''
+                if i + 2 < end {
+                    if (bs[i] == UInt8(ascii: "\"") && bs[i+1] == UInt8(ascii: "\"") && bs[i+2] == UInt8(ascii: "\"")) ||
+                       (bs[i] == UInt8(ascii: "'") && bs[i+1] == UInt8(ascii: "'") && bs[i+2] == UInt8(ascii: "'")) {
+                        let q = bs[i]
+                        var j = i + 3
+                        while j + 2 < end {
+                            if bs[j] == q && bs[j+1] == q && bs[j+2] == q {
+                                self.result_pos = j + 3
+                                self.success = 1
+                                return
+                            }
+                            j += 1
+                        }
+                        self.result_pos = end
+                        self.success = 1
+                        return
+                    }
+                }
+
+                // Simple strings: " or '
+                if i < end && (bs[i] == UInt8(ascii: "\"") || bs[i] == UInt8(ascii: "'")) {
+                    let q = bs[i]
+                    var j = i + 1
+                    while j < end {
+                        if bs[j] == UInt8(ascii: "\\") {
+                            j += 2
+                            continue
+                        }
+                        if bs[j] == q {
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        }
+                        j += 1
+                    }
+                    self.result_pos = end
+                    self.success = 1
+                    return
+                }
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                var j = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+
+                while j < end {
+                    let b = bs[j]
+                    if b == 0x0A || b == UInt8(ascii: ";") {
+                        break
+                    }
+                    // Stop at # comment
+                    if b == UInt8(ascii: "#") {
+                        break
+                    }
+                    j += 1
+                }
+
+                self.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                var i = self.pos
+                let end = self.scan_end
+                let bs = self.bytes
+
+                if i >= end || bs[i] != UInt8(ascii: "(") {
+                    self.success = 0
+                    return
+                }
+
+                var depth = 1
+                var j = i + 1
+                while j < end && depth > 0 {
+                    let b = bs[j]
+                    if b == UInt8(ascii: "(") {
+                        depth += 1
+                    } else if b == UInt8(ascii: ")") {
+                        depth -= 1
+                    } else if b == UInt8(ascii: "\"") || b == UInt8(ascii: "'") {
+                        let q = b
+                        j += 1
+                        while j < end && bs[j] != q {
+                            if bs[j] == UInt8(ascii: "\\") {
+                                j += 1
+                            }
+                            j += 1
+                        }
+                    }
+                    j += 1
+                }
+
+                if depth == 0 {
+                    self.result_pos = j
+                    self.success = 1
+                } else {
+                    self.result_pos = end
+                    self.success = 0
+                }
+            }
+        }
+
+    domain:
+        bytes: [UInt8] = []
+        pos: Int = 0
+        scan_end: Int = 0
+        result_pos: Int = 0
+        success: Int = 1
+}
+
+// main
+    var failures = 0
+
+    // Test 1: Skip hash comment
+    let s1 = @@PythonSyntaxSkipperFsm()
+    let inp1: [UInt8] = Array("# comment\ncode".utf8)
+    s1.setup(inp1, 0, inp1.count)
+    s1.do_skip_comment()
+    if (s1.get_success() as! Int) != 1 || (s1.get_result_pos() as! Int) != 9 {
+        print("FAIL 1: success=\(s1.get_success()), pos=\(s1.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 2: Not a comment
+    let s2 = @@PythonSyntaxSkipperFsm()
+    let inp2: [UInt8] = Array("x + 1".utf8)
+    s2.setup(inp2, 0, inp2.count)
+    s2.do_skip_comment()
+    if (s2.get_success() as! Int) != 0 {
+        print("FAIL 2: should not be comment")
+        failures += 1
+    }
+
+    // Test 3: Skip triple-quoted string
+    let s3 = @@PythonSyntaxSkipperFsm()
+    let inp3: [UInt8] = Array("\"\"\"hello world\"\"\"rest".utf8)
+    s3.setup(inp3, 0, inp3.count)
+    s3.do_skip_string()
+    if (s3.get_success() as! Int) != 1 || (s3.get_result_pos() as! Int) != 17 {
+        print("FAIL 3: success=\(s3.get_success()), pos=\(s3.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 4: Skip simple string
+    let s4 = @@PythonSyntaxSkipperFsm()
+    let inp4: [UInt8] = Array("\"hello\" rest".utf8)
+    s4.setup(inp4, 0, inp4.count)
+    s4.do_skip_string()
+    if (s4.get_success() as! Int) != 1 || (s4.get_result_pos() as! Int) != 7 {
+        print("FAIL 4: success=\(s4.get_success()), pos=\(s4.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 5: Skip string with escape
+    let s5 = @@PythonSyntaxSkipperFsm()
+    let inp5: [UInt8] = Array("'he\\'llo' rest".utf8)
+    s5.setup(inp5, 0, inp5.count)
+    s5.do_skip_string()
+    if (s5.get_success() as! Int) != 1 || (s5.get_result_pos() as! Int) != 9 {
+        print("FAIL 5: success=\(s5.get_success()), pos=\(s5.get_result_pos())")
+        failures += 1
+    }
+
+    // Test 6: Find line end (stops at #)
+    let s6 = @@PythonSyntaxSkipperFsm()
+    let inp6: [UInt8] = Array("x + 1 # comment".utf8)
+    s6.setup(inp6, 0, inp6.count)
+    s6.do_find_line_end()
+    if (s6.get_result_pos() as! Int) != 6 {
+        print("FAIL 6: pos=\(s6.get_result_pos()), expected 6")
+        failures += 1
+    }
+
+    // Test 7: Balanced parens
+    let s7 = @@PythonSyntaxSkipperFsm()
+    let inp7: [UInt8] = Array("(a, f(b)) rest".utf8)
+    s7.setup(inp7, 0, inp7.count)
+    s7.do_balanced_paren_end()
+    if (s7.get_success() as! Int) != 1 || (s7.get_result_pos() as! Int) != 9 {
+        print("FAIL 7: success=\(s7.get_success()), pos=\(s7.get_result_pos())")
+        failures += 1
+    }
+
+    if failures > 0 {
+        print("FAIL: \(failures) failures")
+        exit(1)
+    }
+    print("PASS: python_skipper (7 cases)")

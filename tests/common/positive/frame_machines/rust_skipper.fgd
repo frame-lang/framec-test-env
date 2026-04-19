@@ -1,0 +1,246 @@
+@@target gdscript
+extends SceneTree
+
+# RustSyntaxSkipper — FSM for skipping Rust comments and strings.
+# Translated from framec's native_region_scanner/rust_skipper.frs
+#
+# Handles: // line comments, /* nested block comments */,
+# raw strings (r#"..."#), char literals vs lifetime annotations,
+# simple strings.
+
+@@system RustSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: Array, start: int, length: int) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos(): int {
+            return self.result_pos
+        }
+        get_success(): int {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                var i = self.pos
+                var scan_end = self.scan_end
+                var bs = self.bytes
+
+                # // line comment
+                if i + 1 < scan_end and bs[i] == 0x2F and bs[i + 1] == 0x2F:
+                    var j = i + 2
+                    while j < scan_end and bs[j] != 0x0A:
+                        j += 1
+                    self.result_pos = j
+                    self.success = 1
+                    return
+
+                # /* nested block comment */ — Rust allows nesting
+                if i + 1 < scan_end and bs[i] == 0x2F and bs[i + 1] == 0x2A:
+                    var j = i + 2
+                    var depth = 1
+                    while j + 1 < scan_end and depth > 0:
+                        if bs[j] == 0x2F and bs[j + 1] == 0x2A:
+                            depth += 1
+                            j += 2
+                            continue
+                        if bs[j] == 0x2A and bs[j + 1] == 0x2F:
+                            depth -= 1
+                            j += 2
+                            continue
+                        j += 1
+                    self.result_pos = j
+                    self.success = 1
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                var i = self.pos
+                var scan_end = self.scan_end
+                var bs = self.bytes
+
+                # Raw string: r#"..."# (count leading #s)
+                if i < scan_end and bs[i] == 0x72:
+                    var j = i + 1
+                    var hash_count = 0
+                    while j < scan_end and bs[j] == 0x23:
+                        hash_count += 1
+                        j += 1
+                    if j < scan_end and bs[j] == 0x22:
+                        j += 1
+                        # Scan for closing "###
+                        while j < scan_end:
+                            if bs[j] == 0x22:
+                                var k = 0
+                                while k < hash_count and j + 1 + k < scan_end and bs[j + 1 + k] == 0x23:
+                                    k += 1
+                                if k == hash_count:
+                                    self.result_pos = j + 1 + hash_count
+                                    self.success = 1
+                                    return
+                            j += 1
+                        self.result_pos = scan_end
+                        self.success = 1
+                        return
+
+                # Double-quoted string
+                if i < scan_end and bs[i] == 0x22:
+                    var j = i + 1
+                    while j < scan_end:
+                        if bs[j] == 0x5C:
+                            j += 2
+                            continue
+                        if bs[j] == 0x22:
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        j += 1
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+
+                # Char literal: 'x' or '\n' (NOT lifetime 'a)
+                if i < scan_end and bs[i] == 0x27:
+                    if i + 2 < scan_end and bs[i + 1] == 0x5C and i + 3 < scan_end and bs[i + 3] == 0x27:
+                        self.result_pos = i + 4
+                        self.success = 1
+                        return
+                    if i + 2 < scan_end and bs[i + 2] == 0x27:
+                        self.result_pos = i + 3
+                        self.success = 1
+                        return
+                    self.success = 0
+                    return
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                var j = self.pos
+                var scan_end = self.scan_end
+                var bs = self.bytes
+
+                while j < scan_end:
+                    var b = bs[j]
+                    if b == 0x0A or b == 0x3B:
+                        break
+                    if b == 0x2F and j + 1 < scan_end and bs[j + 1] == 0x2F:
+                        break
+                    if b == 0x2F and j + 1 < scan_end and bs[j + 1] == 0x2A:
+                        break
+                    j += 1
+
+                self.result_pos = j
+            }
+        }
+
+    domain:
+        bytes: Array = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+func str_to_bytes(s: String) -> Array:
+    var arr = []
+    var buf = s.to_utf8_buffer()
+    for i in range(buf.size()):
+        arr.append(buf[i])
+    return arr
+
+func main():
+    var failures = 0
+
+    # Test 1: Skip // comment
+    var s1 = @@RustSyntaxSkipperFsm()
+    var inp1 = str_to_bytes("// comment\ncode")
+    s1.setup(inp1, 0, inp1.size())
+    s1.do_skip_comment()
+    if s1.get_success() != 1 or s1.get_result_pos() != 10:
+        print("FAIL 1: success=" + str(s1.get_success()) + ", pos=" + str(s1.get_result_pos()))
+        failures += 1
+
+    # Test 2: Skip nested /* /* */ */ block comment
+    var s2 = @@RustSyntaxSkipperFsm()
+    var inp2 = str_to_bytes("/* outer /* inner */ */code")
+    s2.setup(inp2, 0, inp2.size())
+    s2.do_skip_comment()
+    if s2.get_success() != 1 or s2.get_result_pos() != 23:
+        print("FAIL 2: success=" + str(s2.get_success()) + ", pos=" + str(s2.get_result_pos()))
+        failures += 1
+
+    # Test 3: Skip raw string r#"hello"#
+    var s3 = @@RustSyntaxSkipperFsm()
+    var inp3 = str_to_bytes("r#\"hello\"#rest")
+    s3.setup(inp3, 0, inp3.size())
+    s3.do_skip_string()
+    if s3.get_success() != 1 or s3.get_result_pos() != 10:
+        print("FAIL 3: success=" + str(s3.get_success()) + ", pos=" + str(s3.get_result_pos()))
+        failures += 1
+
+    # Test 4: Skip double-quoted string
+    var s4 = @@RustSyntaxSkipperFsm()
+    var inp4 = str_to_bytes("\"hello\" rest")
+    s4.setup(inp4, 0, inp4.size())
+    s4.do_skip_string()
+    if s4.get_success() != 1 or s4.get_result_pos() != 7:
+        print("FAIL 4: success=" + str(s4.get_success()) + ", pos=" + str(s4.get_result_pos()))
+        failures += 1
+
+    # Test 5: Char literal 'x' — IS a string
+    var s5 = @@RustSyntaxSkipperFsm()
+    var inp5 = str_to_bytes("'x' rest")
+    s5.setup(inp5, 0, inp5.size())
+    s5.do_skip_string()
+    if s5.get_success() != 1 or s5.get_result_pos() != 3:
+        print("FAIL 5: success=" + str(s5.get_success()) + ", pos=" + str(s5.get_result_pos()))
+        failures += 1
+
+    # Test 6: Lifetime 'a — NOT a string
+    var s6 = @@RustSyntaxSkipperFsm()
+    var inp6 = str_to_bytes("'a rest")
+    s6.setup(inp6, 0, inp6.size())
+    s6.do_skip_string()
+    if s6.get_success() != 0:
+        print("FAIL 6: lifetime should not be a string")
+        failures += 1
+
+    # Test 7: Escape char '\n'
+    var s7 = @@RustSyntaxSkipperFsm()
+    var inp7 = str_to_bytes("'\\n' rest")
+    s7.setup(inp7, 0, inp7.size())
+    s7.do_skip_string()
+    if s7.get_success() != 1 or s7.get_result_pos() != 4:
+        print("FAIL 7: success=" + str(s7.get_success()) + ", pos=" + str(s7.get_result_pos()))
+        failures += 1
+
+    if failures > 0:
+        print("FAIL: " + str(failures) + " failures")
+        push_error(str(failures) + " test(s) failed")
+    else:
+        print("PASS: rust_skipper (7 cases)")
+
+func _init():
+    main()
+    quit()

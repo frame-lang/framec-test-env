@@ -1,0 +1,257 @@
+@@target csharp
+
+using System;
+using System.Text;
+
+// swift_skipper -- FSM for skipping syntax constructs.
+
+@@system SwiftSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                if (i + 1 < end && bs[i] == (byte)'/' && bs[i + 1] == (byte)'/') {
+                    int j = i + 2;
+                    while (j < end && bs[j] != (byte)'\n') { j++; }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                if (i + 1 < end && bs[i] == (byte)'/' && bs[i + 1] == (byte)'*') {
+                    int j = i + 2;
+                    int depth = 1;
+                    while (j + 1 < end && depth > 0) {
+                        if (bs[j] == (byte)'/' && bs[j + 1] == (byte)'*') { depth++; j += 2; }
+                        else if (bs[j] == (byte)'*' && bs[j + 1] == (byte)'/') { depth--; j += 2; }
+                        else { j++; }
+                    }
+                    this.result_pos = j;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $SkipString {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                // Triple-quoted string
+                if (i + 2 < end && bs[i] == (byte)'"' && bs[i + 1] == (byte)'"' && bs[i + 2] == (byte)'"') {
+                    int j = i + 3;
+                    while (j + 2 < end) {
+                        if (bs[j] == (byte)'"' && bs[j + 1] == (byte)'"' && bs[j + 2] == (byte)'"') {
+                            this.result_pos = j + 3;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                if (i < end && (bs[i] == (byte)'"' || bs[i] == (byte)'\'')) {
+                    int q = bs[i];
+                    int j = i + 1;
+                    while (j < end) {
+                        if (bs[j] == (byte)'\\') { j += 2; continue; }
+                        if (bs[j] == q) {
+                            this.result_pos = j + 1;
+                            this.success = 1;
+                            return;
+                        }
+                        j++;
+                    }
+                    this.result_pos = end;
+                    this.success = 1;
+                    return;
+                }
+
+                this.success = 0;
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                int j = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                while (j < end) {
+                    int b = bs[j];
+                    if (b == (byte)'\n' || b == (byte)';') { break; }
+                    if (b == (byte)'/' && j + 1 < end && bs[j + 1] == (byte)'/') { break; }
+                    if (b == (byte)'/' && j + 1 < end && bs[j + 1] == (byte)'*') { break; }
+                    j++;
+                }
+
+                this.result_pos = j;
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                if (i >= end || bs[i] != (byte)'(') {
+                    this.success = 0;
+                    return;
+                }
+
+                int depth = 1;
+                int j = i + 1;
+                while (j < end && depth > 0) {
+                    int b = bs[j];
+                    if (b == (byte)'(') { depth++; }
+                    else if (b == (byte)')') { depth--; }
+                    else if (b == (byte)'"' || b == (byte)'\'') {
+                        int q = b;
+                        j++;
+                        while (j < end && bs[j] != q) {
+                            if (bs[j] == (byte)'\\') { j++; }
+                            j++;
+                        }
+                    }
+                    j++;
+                }
+
+                if (depth == 0) { this.result_pos = j; this.success = 1; }
+                else { this.result_pos = end; this.success = 0; }
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+class Program {
+    static void Main(string[] args) {
+        int failures = 0;
+
+        var s1 = new SwiftSyntaxSkipperFsm();
+        byte[] inp1 = Encoding.UTF8.GetBytes("// hello\ncode");
+        s1.setup(inp1, 0, inp1.Length);
+        s1.do_skip_comment();
+        if (s1.get_success() != 1 || s1.get_result_pos() != 8) {
+            Console.WriteLine("FAIL 1: Skip line comment");
+            failures++;
+        }
+
+        var s2 = new SwiftSyntaxSkipperFsm();
+        byte[] inp2 = Encoding.UTF8.GetBytes("/* block */code");
+        s2.setup(inp2, 0, inp2.Length);
+        s2.do_skip_comment();
+        if (s2.get_success() != 1 || s2.get_result_pos() != 11) {
+            Console.WriteLine("FAIL 2: Skip block comment");
+            failures++;
+        }
+
+        var s3 = new SwiftSyntaxSkipperFsm();
+        byte[] inp3 = Encoding.UTF8.GetBytes("\"hello world\" rest");
+        s3.setup(inp3, 0, inp3.Length);
+        s3.do_skip_string();
+        if (s3.get_success() != 1 || s3.get_result_pos() != 13) {
+            Console.WriteLine("FAIL 3: Skip double-quoted string");
+            failures++;
+        }
+
+        var s4 = new SwiftSyntaxSkipperFsm();
+        byte[] inp4 = Encoding.UTF8.GetBytes("/* outer /* inner */ end */code");
+        s4.setup(inp4, 0, inp4.Length);
+        s4.do_skip_comment();
+        if (s4.get_success() != 1 || s4.get_result_pos() != 27) {
+            Console.WriteLine("FAIL 4: Nested block comment");
+            failures++;
+        }
+
+        var s5 = new SwiftSyntaxSkipperFsm();
+        byte[] inp5 = Encoding.UTF8.GetBytes("\"\"\"multi-line\ncontent\"\"\" rest");
+        s5.setup(inp5, 0, inp5.Length);
+        s5.do_skip_string();
+        if (s5.get_success() != 1 || s5.get_result_pos() != 24) {
+            Console.WriteLine("FAIL 5: Multi-line string");
+            failures++;
+        }
+
+        var s6 = new SwiftSyntaxSkipperFsm();
+        byte[] inp6 = Encoding.UTF8.GetBytes("x + 1\nmore");
+        s6.setup(inp6, 0, inp6.Length);
+        s6.do_find_line_end();
+        if (s6.get_result_pos() != 5) {
+            Console.WriteLine("FAIL 6: Find line end");
+            failures++;
+        }
+
+        var s7 = new SwiftSyntaxSkipperFsm();
+        byte[] inp7 = Encoding.UTF8.GetBytes("x + 1");
+        s7.setup(inp7, 0, inp7.Length);
+        s7.do_skip_comment();
+        if (s7.get_success() != 0) {
+            Console.WriteLine("FAIL 7: Not a comment");
+            failures++;
+        }
+
+        var s8 = new SwiftSyntaxSkipperFsm();
+        byte[] inp8 = Encoding.UTF8.GetBytes("(a, f(b), c) rest");
+        s8.setup(inp8, 0, inp8.Length);
+        s8.do_balanced_paren_end();
+        if (s8.get_success() != 1 || s8.get_result_pos() != 12) {
+            Console.WriteLine("FAIL 8: Balanced parens");
+            failures++;
+        }
+
+        var s9 = new SwiftSyntaxSkipperFsm();
+        byte[] inp9 = Encoding.UTF8.GetBytes("x + 1 // comment");
+        s9.setup(inp9, 0, inp9.Length);
+        s9.do_find_line_end();
+        if (s9.get_result_pos() != 6) {
+            Console.WriteLine("FAIL 9: Find line end at //");
+            failures++;
+        }
+
+        if (failures > 0) { Console.WriteLine("FAIL: " + failures + " failures"); Environment.Exit(1); }
+        Console.WriteLine("PASS: swift_skipper (9 cases)");
+    }
+}

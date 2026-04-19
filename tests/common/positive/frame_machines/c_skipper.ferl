@@ -1,0 +1,193 @@
+@@target erlang
+
+%% CSyntaxSkipper -- FSM for skipping C-style comments and strings.
+%% Translated from framec's native_region_scanner/c_skipper.frs
+%%
+%% Demonstrates the skipper pattern: dispatch on entry point, scan
+%% to find the end of the construct, report result via domain vars.
+
+@@system CSyntaxSkipperFsm {
+    interface:
+        setup(input_bytes: binary, start: int, length: int)
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+        get_result_pos(): int
+        get_success(): int
+
+    machine:
+        $Init {
+            setup(input_bytes: binary, start: int, length: int) {
+                self.bytes = input_bytes
+                self.pos = start
+                self.scan_end = length
+            }
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipComment {
+            $>() {
+                {Pos, Suc} = skip_comment_scan(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.result_pos = Pos
+                self.success = Suc
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $SkipString {
+            $>() {
+                {Pos, Suc} = skip_string_scan(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.result_pos = Pos
+                self.success = Suc
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $FindLineEnd {
+            $>() {
+                self.result_pos = find_line_end_scan(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                {Pos, Suc} = balanced_paren_scan(Data#data.bytes, Data#data.pos, Data#data.scan_end)
+                self.result_pos = Pos
+                self.success = Suc
+            }
+            get_result_pos(): int { @@:(self.result_pos) }
+            get_success(): int { @@:(self.success) }
+        }
+
+    domain:
+        bytes = <<>>
+        pos = 0
+        scan_end = 0
+        result_pos = 0
+        success = 1
+}
+
+%% --- skip_comment helpers ---
+skip_comment_scan(Bs, I, End) when I + 1 < End ->
+    B0 = binary:at(Bs, I),
+    B1 = binary:at(Bs, I + 1),
+    if
+        B0 =:= $/ andalso B1 =:= $/ ->
+            Pos = skip_line_comment(Bs, I + 2, End),
+            {Pos, 1};
+        B0 =:= $/ andalso B1 =:= $* ->
+            skip_block_comment(Bs, I + 2, End);
+        true ->
+            {0, 0}
+    end;
+skip_comment_scan(_Bs, _I, _End) ->
+    {0, 0}.
+
+skip_line_comment(Bs, J, End) when J < End ->
+    case binary:at(Bs, J) of
+        $\n -> J;
+        _ -> skip_line_comment(Bs, J + 1, End)
+    end;
+skip_line_comment(_Bs, J, _End) ->
+    J.
+
+skip_block_comment(Bs, J, End) when J + 1 < End ->
+    case {binary:at(Bs, J), binary:at(Bs, J + 1)} of
+        {$*, $/} -> {J + 2, 1};
+        _ -> skip_block_comment(Bs, J + 1, End)
+    end;
+skip_block_comment(_Bs, _J, End) ->
+    {End, 1}.
+
+%% --- skip_string helpers ---
+skip_string_scan(Bs, I, End) when I < End ->
+    B = binary:at(Bs, I),
+    if
+        B =:= $" orelse B =:= $' ->
+            skip_string_loop(Bs, I + 1, End, B);
+        true ->
+            {0, 0}
+    end;
+skip_string_scan(_Bs, _I, _End) ->
+    {0, 0}.
+
+skip_string_loop(Bs, J, End, Q) when J < End ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\\ ->
+            skip_string_loop(Bs, J + 2, End, Q);
+        B =:= Q ->
+            {J + 1, 1};
+        true ->
+            skip_string_loop(Bs, J + 1, End, Q)
+    end;
+skip_string_loop(_Bs, _J, End, _Q) ->
+    {End, 1}.
+
+%% --- find_line_end helpers ---
+find_line_end_scan(Bs, J, End) when J < End ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\n orelse B =:= $; ->
+            J;
+        B =:= $/ andalso J + 1 < End ->
+            B1 = binary:at(Bs, J + 1),
+            if
+                B1 =:= $/ orelse B1 =:= $* -> J;
+                true -> find_line_end_scan(Bs, J + 1, End)
+            end;
+        true ->
+            find_line_end_scan(Bs, J + 1, End)
+    end;
+find_line_end_scan(_Bs, J, _End) ->
+    J.
+
+%% --- balanced_paren helpers ---
+balanced_paren_scan(Bs, I, End) when I < End ->
+    case binary:at(Bs, I) of
+        $( -> balanced_paren_loop(Bs, I + 1, End, 1);
+        _ -> {0, 0}
+    end;
+balanced_paren_scan(_Bs, _I, _End) ->
+    {0, 0}.
+
+balanced_paren_loop(_Bs, J, _End, 0) ->
+    {J, 1};
+balanced_paren_loop(Bs, J, End, Depth) when J < End andalso Depth > 0 ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $( ->
+            balanced_paren_loop(Bs, J + 1, End, Depth + 1);
+        B =:= $) ->
+            balanced_paren_loop(Bs, J + 1, End, Depth - 1);
+        B =:= $" orelse B =:= $' ->
+            J2 = skip_quoted_in_paren(Bs, J + 1, End, B),
+            balanced_paren_loop(Bs, J2 + 1, End, Depth);
+        true ->
+            balanced_paren_loop(Bs, J + 1, End, Depth)
+    end;
+balanced_paren_loop(_Bs, _J, End, _Depth) ->
+    {End, 0}.
+
+skip_quoted_in_paren(Bs, J, End, Q) when J < End ->
+    B = binary:at(Bs, J),
+    if
+        B =:= $\\ ->
+            skip_quoted_in_paren(Bs, J + 2, End, Q);
+        B =:= Q ->
+            J;
+        true ->
+            skip_quoted_in_paren(Bs, J + 1, End, Q)
+    end;
+skip_quoted_in_paren(_Bs, J, _End, _Q) ->
+    J.

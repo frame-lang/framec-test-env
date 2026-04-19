@@ -1,0 +1,331 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+
+// ErlangScopeScanner -- FSM for detecting fun(...) -> ... end closures.
+// Translated from framec's native_region_scanner/erlang_scope_scanner.frs
+//
+// Erlang reuses `end` to close: fun, case, if, receive, begin, try.
+// This FSM tracks a depth counter for all block-opening keywords so
+// only the `end` matching our `fun` terminates the scan.
+//
+// Skips % line comments and "..." / '...' string/atom literals.
+// Does NOT match `fun Module:Function/Arity` (function references).
+
+@@system ErlangScopeScannerFsm {
+    operations:
+        Setup(input_bytes: []byte, start: int, length: int) {
+            s.bytes = input_bytes
+            s.pos = start
+            s.scan_end = length
+        }
+        GetResultPos(): int {
+            return s.result_pos
+        }
+        GetSuccess(): int {
+            return s.success
+        }
+
+    interface:
+        DoScan()
+
+    machine:
+        $Init {
+            DoScan() { -> $CheckFun }
+        }
+
+        $CheckFun {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                // Must start with `fun` keyword
+                if i+3 > end {
+                    s.success = 0
+                    return
+                }
+
+                if bs[i] != 'f' || bs[i+1] != 'u' || bs[i+2] != 'n' {
+                    s.success = 0
+                    return
+                }
+
+                // Check word boundary (not part of `function` etc.)
+                after := i + 3
+                if after < end && (isAlnumEss(bs[after]) || bs[after] == '_') {
+                    s.success = 0
+                    return
+                }
+
+                // Skip whitespace after `fun`
+                j := after
+                for j < end && (bs[j] == ' ' || bs[j] == '\t' || bs[j] == '\n') {
+                    j++
+                }
+
+                // Check for Module:Function/Arity pattern (function reference, not closure)
+                if j < end && bs[j] >= 'A' && bs[j] <= 'Z' {
+                    k := j
+                    for k < end && (isAlnumEss(bs[k]) || bs[k] == '_') {
+                        k++
+                    }
+                    if k < end && bs[k] == ':' {
+                        s.success = 0
+                        return
+                    }
+                }
+
+                // It's a closure: fun(...) -> ... end
+                s.depth = 1
+                s.pos = after
+                -> $ScanBody
+            }
+        }
+
+        $ScanBody {
+            $>() {
+                i := s.pos
+                end := s.scan_end
+                bs := s.bytes
+
+                for i < end {
+                    b := bs[i]
+
+                    // Skip % line comments
+                    if b == '%' {
+                        for i < end && bs[i] != '\n' {
+                            i++
+                        }
+                        continue
+                    }
+
+                    // Skip "..." strings
+                    if b == '"' {
+                        i++
+                        for i < end {
+                            if bs[i] == '\\' {
+                                i += 2
+                                continue
+                            }
+                            if bs[i] == '"' {
+                                i++
+                                break
+                            }
+                            i++
+                        }
+                        continue
+                    }
+
+                    // Skip '...' quoted atoms
+                    if b == '\'' {
+                        i++
+                        for i < end {
+                            if bs[i] == '\\' {
+                                i += 2
+                                continue
+                            }
+                            if bs[i] == '\'' {
+                                i++
+                                break
+                            }
+                            i++
+                        }
+                        continue
+                    }
+
+                    // Check for block-opening keywords (increase depth)
+
+                    // fun
+                    if b == 'f' && i+3 <= end && bs[i+1] == 'u' && bs[i+2] == 'n' {
+                        if i+3 >= end || (!isAlnumEss(bs[i+3]) && bs[i+3] != '_') {
+                            s.depth++
+                            i += 3
+                            continue
+                        }
+                    }
+
+                    // case
+                    if b == 'c' && i+4 <= end && bs[i+1] == 'a' && bs[i+2] == 's' && bs[i+3] == 'e' {
+                        if i+4 >= end || (!isAlnumEss(bs[i+4]) && bs[i+4] != '_') {
+                            s.depth++
+                            i += 4
+                            continue
+                        }
+                    }
+
+                    // if
+                    if b == 'i' && i+2 <= end && bs[i+1] == 'f' {
+                        if i+2 >= end || (!isAlnumEss(bs[i+2]) && bs[i+2] != '_') {
+                            s.depth++
+                            i += 2
+                            continue
+                        }
+                    }
+
+                    // receive
+                    if b == 'r' && i+7 <= end && bs[i+1] == 'e' && bs[i+2] == 'c' && bs[i+3] == 'e' && bs[i+4] == 'i' && bs[i+5] == 'v' && bs[i+6] == 'e' {
+                        if i+7 >= end || (!isAlnumEss(bs[i+7]) && bs[i+7] != '_') {
+                            s.depth++
+                            i += 7
+                            continue
+                        }
+                    }
+
+                    // begin
+                    if b == 'b' && i+5 <= end && bs[i+1] == 'e' && bs[i+2] == 'g' && bs[i+3] == 'i' && bs[i+4] == 'n' {
+                        if i+5 >= end || (!isAlnumEss(bs[i+5]) && bs[i+5] != '_') {
+                            s.depth++
+                            i += 5
+                            continue
+                        }
+                    }
+
+                    // try
+                    if b == 't' && i+3 <= end && bs[i+1] == 'r' && bs[i+2] == 'y' {
+                        if i+3 >= end || (!isAlnumEss(bs[i+3]) && bs[i+3] != '_') {
+                            s.depth++
+                            i += 3
+                            continue
+                        }
+                    }
+
+                    // Check for `end` keyword (decrease depth)
+                    if b == 'e' && i+3 <= end && bs[i+1] == 'n' && bs[i+2] == 'd' {
+                        if i+3 >= end || (!isAlnumEss(bs[i+3]) && bs[i+3] != '_') {
+                            s.depth--
+                            if s.depth == 0 {
+                                s.result_pos = i + 3
+                                s.success = 1
+                                return
+                            }
+                            i += 3
+                            continue
+                        }
+                    }
+
+                    // Skip identifiers (avoid false keyword matches mid-word)
+                    if isAlphaEss(b) || b == '_' {
+                        for i < end && (isAlnumEss(bs[i]) || bs[i] == '_') {
+                            i++
+                        }
+                        continue
+                    }
+
+                    i++
+                }
+
+                // Ran out of bytes without finding matching `end`
+                s.success = 0
+            }
+        }
+
+    domain:
+        bytes: []byte = nil
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 0
+        depth: int = 0
+}
+
+func isAlnumEss(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z') || (b >= '0' && b <= '9')
+}
+
+func isAlphaEss(b byte) bool {
+	return (b >= 'a' && b <= 'z') || (b >= 'A' && b <= 'Z')
+}
+
+func main() {
+	failures := 0
+
+	// Test 1: Simple fun -> end
+	s1 := NewErlangScopeScannerFsm()
+	inp1 := []byte("fun(X) -> X + 1 end rest")
+	s1.Setup(inp1, 0, len(inp1))
+	s1.DoScan()
+	if s1.GetSuccess() != 1 || s1.GetResultPos() != 19 {
+		fmt.Printf("FAIL 1: success=%d, pos=%d\n", s1.GetSuccess(), s1.GetResultPos())
+		failures++
+	}
+
+	// Test 2: Nested fun -> case ... end end
+	s2 := NewErlangScopeScannerFsm()
+	inp2 := []byte("fun(X) -> case X of 1 -> ok end end rest")
+	s2.Setup(inp2, 0, len(inp2))
+	s2.DoScan()
+	if s2.GetSuccess() != 1 || s2.GetResultPos() != 35 {
+		fmt.Printf("FAIL 2: success=%d, pos=%d\n", s2.GetSuccess(), s2.GetResultPos())
+		failures++
+	}
+
+	// Test 3: Not a fun keyword (function)
+	s3 := NewErlangScopeScannerFsm()
+	inp3 := []byte("function() -> ok end")
+	s3.Setup(inp3, 0, len(inp3))
+	s3.DoScan()
+	if s3.GetSuccess() != 0 {
+		fmt.Println("FAIL 3: should not match 'function'")
+		failures++
+	}
+
+	// Test 4: fun Module:Function/Arity (function reference, not closure)
+	s4 := NewErlangScopeScannerFsm()
+	inp4 := []byte("fun io:format/2")
+	s4.Setup(inp4, 0, len(inp4))
+	s4.DoScan()
+	if s4.GetSuccess() != 0 {
+		fmt.Println("FAIL 4: should not match function reference")
+		failures++
+	}
+
+	// Test 5: Nested if ... end inside fun
+	s5 := NewErlangScopeScannerFsm()
+	inp5 := []byte("fun() -> if true -> ok end end rest")
+	s5.Setup(inp5, 0, len(inp5))
+	s5.DoScan()
+	if s5.GetSuccess() != 1 || s5.GetResultPos() != 30 {
+		fmt.Printf("FAIL 5: success=%d, pos=%d\n", s5.GetSuccess(), s5.GetResultPos())
+		failures++
+	}
+
+	// Test 6: String inside fun body (should skip)
+	s6 := NewErlangScopeScannerFsm()
+	inp6 := []byte("fun() -> \"end\" end rest")
+	s6.Setup(inp6, 0, len(inp6))
+	s6.DoScan()
+	if s6.GetSuccess() != 1 || s6.GetResultPos() != 18 {
+		fmt.Printf("FAIL 6: success=%d, pos=%d\n", s6.GetSuccess(), s6.GetResultPos())
+		failures++
+	}
+
+	// Test 7: Comment inside fun body (should skip)
+	s7 := NewErlangScopeScannerFsm()
+	inp7 := []byte("fun() -> % end\nok end rest")
+	s7.Setup(inp7, 0, len(inp7))
+	s7.DoScan()
+	if s7.GetSuccess() != 1 || s7.GetResultPos() != 21 {
+		fmt.Printf("FAIL 7: success=%d, pos=%d\n", s7.GetSuccess(), s7.GetResultPos())
+		failures++
+	}
+
+	// Test 8: Unmatched fun (no end)
+	s8 := NewErlangScopeScannerFsm()
+	inp8 := []byte("fun() -> X + 1")
+	s8.Setup(inp8, 0, len(inp8))
+	s8.DoScan()
+	if s8.GetSuccess() != 0 {
+		fmt.Println("FAIL 8: should fail with no matching end")
+		failures++
+	}
+
+	if failures > 0 {
+		fmt.Printf("FAIL: %d failures\n", failures)
+		os.Exit(1)
+	}
+	fmt.Println("PASS: erlang_scope_scanner (8 cases)")
+}

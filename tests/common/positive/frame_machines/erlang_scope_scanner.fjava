@@ -1,0 +1,178 @@
+@@target java
+
+// ErlangScopeScanner -- FSM for detecting fun(...) -> ... end closures.
+// Translated from framec's native_region_scanner/erlang_scope_scanner.frs
+
+@@system ErlangScopeScannerFsm {
+    operations:
+        setup(input_bytes: byte[], start: int, length: int) {
+            this.bytes = input_bytes;
+            this.pos = start;
+            this.scan_end = length;
+        }
+        get_result_pos(): int {
+            return this.result_pos;
+        }
+        get_success(): int {
+            return this.success;
+        }
+
+    interface:
+        do_scan()
+
+    machine:
+        $Init {
+            do_scan() { -> $CheckFun }
+        }
+
+        $CheckFun {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                if (i + 3 > end) { this.success = 0; return; }
+                if ((bs[i] & 0xFF) != 'f' || (bs[i+1] & 0xFF) != 'u' || (bs[i+2] & 0xFF) != 'n') { this.success = 0; return; }
+
+                int after = i + 3;
+                if (after < end && (Character.isLetterOrDigit(bs[after] & 0xFF) || (bs[after] & 0xFF) == '_')) { this.success = 0; return; }
+
+                int j = after;
+                while (j < end && ((bs[j] & 0xFF) == ' ' || (bs[j] & 0xFF) == '\t' || (bs[j] & 0xFF) == '\n')) { j++; }
+
+                if (j < end && (bs[j] & 0xFF) >= 'A' && (bs[j] & 0xFF) <= 'Z') {
+                    int k = j;
+                    while (k < end && (Character.isLetterOrDigit(bs[k] & 0xFF) || (bs[k] & 0xFF) == '_')) { k++; }
+                    if (k < end && (bs[k] & 0xFF) == ':') { this.success = 0; return; }
+                }
+
+                this.depth = 1;
+                this.pos = after;
+                -> $ScanBody
+            }
+        }
+
+        $ScanBody {
+            $>() {
+                int i = this.pos;
+                int end = this.scan_end;
+                byte[] bs = this.bytes;
+
+                while (i < end) {
+                    int b = bs[i] & 0xFF;
+
+                    if (b == '%') { while (i < end && (bs[i] & 0xFF) != '\n') { i++; } continue; }
+
+                    if (b == '"') {
+                        i++;
+                        while (i < end) {
+                            if ((bs[i] & 0xFF) == '\\') { i += 2; continue; }
+                            if ((bs[i] & 0xFF) == '"') { i++; break; }
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    if (b == '\'') {
+                        i++;
+                        while (i < end) {
+                            if ((bs[i] & 0xFF) == '\\') { i += 2; continue; }
+                            if ((bs[i] & 0xFF) == '\'') { i++; break; }
+                            i++;
+                        }
+                        continue;
+                    }
+
+                    if (b == 'f' && i+3 <= end && (bs[i+1]&0xFF)=='u' && (bs[i+2]&0xFF)=='n') {
+                        if (i+3 >= end || (!Character.isLetterOrDigit(bs[i+3]&0xFF) && (bs[i+3]&0xFF)!='_')) { this.depth++; i+=3; continue; }
+                    }
+                    if (b == 'c' && i+4 <= end && (bs[i+1]&0xFF)=='a' && (bs[i+2]&0xFF)=='s' && (bs[i+3]&0xFF)=='e') {
+                        if (i+4 >= end || (!Character.isLetterOrDigit(bs[i+4]&0xFF) && (bs[i+4]&0xFF)!='_')) { this.depth++; i+=4; continue; }
+                    }
+                    if (b == 'i' && i+2 <= end && (bs[i+1]&0xFF)=='f') {
+                        if (i+2 >= end || (!Character.isLetterOrDigit(bs[i+2]&0xFF) && (bs[i+2]&0xFF)!='_')) { this.depth++; i+=2; continue; }
+                    }
+                    if (b == 'r' && i+7 <= end && (bs[i+1]&0xFF)=='e' && (bs[i+2]&0xFF)=='c' && (bs[i+3]&0xFF)=='e' && (bs[i+4]&0xFF)=='i' && (bs[i+5]&0xFF)=='v' && (bs[i+6]&0xFF)=='e') {
+                        if (i+7 >= end || (!Character.isLetterOrDigit(bs[i+7]&0xFF) && (bs[i+7]&0xFF)!='_')) { this.depth++; i+=7; continue; }
+                    }
+                    if (b == 'b' && i+5 <= end && (bs[i+1]&0xFF)=='e' && (bs[i+2]&0xFF)=='g' && (bs[i+3]&0xFF)=='i' && (bs[i+4]&0xFF)=='n') {
+                        if (i+5 >= end || (!Character.isLetterOrDigit(bs[i+5]&0xFF) && (bs[i+5]&0xFF)!='_')) { this.depth++; i+=5; continue; }
+                    }
+                    if (b == 't' && i+3 <= end && (bs[i+1]&0xFF)=='r' && (bs[i+2]&0xFF)=='y') {
+                        if (i+3 >= end || (!Character.isLetterOrDigit(bs[i+3]&0xFF) && (bs[i+3]&0xFF)!='_')) { this.depth++; i+=3; continue; }
+                    }
+                    if (b == 'e' && i+3 <= end && (bs[i+1]&0xFF)=='n' && (bs[i+2]&0xFF)=='d') {
+                        if (i+3 >= end || (!Character.isLetterOrDigit(bs[i+3]&0xFF) && (bs[i+3]&0xFF)!='_')) {
+                            this.depth--;
+                            if (this.depth == 0) { this.result_pos = i+3; this.success = 1; return; }
+                            i+=3; continue;
+                        }
+                    }
+
+                    if (Character.isLetter(b) || b == '_') {
+                        while (i < end && (Character.isLetterOrDigit(bs[i]&0xFF) || (bs[i]&0xFF)=='_')) { i++; }
+                        continue;
+                    }
+                    i++;
+                }
+                this.success = 0;
+            }
+        }
+
+    domain:
+        bytes: byte[] = null
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 0
+        depth: int = 0
+}
+
+class Main {
+    public static void main(String[] args) {
+        int failures = 0;
+
+        ErlangScopeScannerFsm s1 = @@ErlangScopeScannerFsm();
+        byte[] inp1 = "fun(X) -> X + 1 end rest".getBytes();
+        s1.setup(inp1, 0, inp1.length); s1.do_scan();
+        if (s1.get_success() != 1 || s1.get_result_pos() != 19) { System.out.println("FAIL 1: success=" + s1.get_success() + ", pos=" + s1.get_result_pos()); failures++; }
+
+        ErlangScopeScannerFsm s2 = @@ErlangScopeScannerFsm();
+        byte[] inp2 = "fun(X) -> case X of 1 -> ok end end rest".getBytes();
+        s2.setup(inp2, 0, inp2.length); s2.do_scan();
+        if (s2.get_success() != 1 || s2.get_result_pos() != 35) { System.out.println("FAIL 2: success=" + s2.get_success() + ", pos=" + s2.get_result_pos()); failures++; }
+
+        ErlangScopeScannerFsm s3 = @@ErlangScopeScannerFsm();
+        byte[] inp3 = "function() -> ok end".getBytes();
+        s3.setup(inp3, 0, inp3.length); s3.do_scan();
+        if (s3.get_success() != 0) { System.out.println("FAIL 3: should not match 'function'"); failures++; }
+
+        ErlangScopeScannerFsm s4 = @@ErlangScopeScannerFsm();
+        byte[] inp4 = "fun io:format/2".getBytes();
+        s4.setup(inp4, 0, inp4.length); s4.do_scan();
+        if (s4.get_success() != 0) { System.out.println("FAIL 4: should not match function reference"); failures++; }
+
+        ErlangScopeScannerFsm s5 = @@ErlangScopeScannerFsm();
+        byte[] inp5 = "fun() -> if true -> ok end end rest".getBytes();
+        s5.setup(inp5, 0, inp5.length); s5.do_scan();
+        if (s5.get_success() != 1 || s5.get_result_pos() != 30) { System.out.println("FAIL 5: success=" + s5.get_success() + ", pos=" + s5.get_result_pos()); failures++; }
+
+        ErlangScopeScannerFsm s6 = @@ErlangScopeScannerFsm();
+        byte[] inp6 = "fun() -> \"end\" end rest".getBytes();
+        s6.setup(inp6, 0, inp6.length); s6.do_scan();
+        if (s6.get_success() != 1 || s6.get_result_pos() != 18) { System.out.println("FAIL 6: success=" + s6.get_success() + ", pos=" + s6.get_result_pos()); failures++; }
+
+        ErlangScopeScannerFsm s7 = @@ErlangScopeScannerFsm();
+        byte[] inp7 = "fun() -> % end\nok end rest".getBytes();
+        s7.setup(inp7, 0, inp7.length); s7.do_scan();
+        if (s7.get_success() != 1 || s7.get_result_pos() != 21) { System.out.println("FAIL 7: success=" + s7.get_success() + ", pos=" + s7.get_result_pos()); failures++; }
+
+        ErlangScopeScannerFsm s8 = @@ErlangScopeScannerFsm();
+        byte[] inp8 = "fun() -> X + 1".getBytes();
+        s8.setup(inp8, 0, inp8.length); s8.do_scan();
+        if (s8.get_success() != 0) { System.out.println("FAIL 8: should fail with no matching end"); failures++; }
+
+        if (failures > 0) { System.out.println("FAIL: " + failures + " failures"); System.exit(1); }
+        System.out.println("PASS: erlang_scope_scanner (8 cases)");
+    }
+}

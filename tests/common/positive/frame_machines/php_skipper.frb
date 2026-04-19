@@ -1,0 +1,373 @@
+@@target ruby
+
+# PhpSyntaxSkipper -- FSM for skipping PHP comments and strings.
+# Translated from framec's native_region_scanner/php_skipper.frs
+#
+# Handles: // line comments, # line comments, /* */ block comments,
+# "..." and '...' strings, <<<EOT heredoc/nowdoc,
+# PHP-style line endings, balanced parens.
+
+@@system PhpSyntaxSkipperFsm {
+    operations:
+        setup(input_bytes, start, length) {
+            self.bytes = input_bytes
+            self.pos = start
+            self.scan_end = length
+        }
+        get_result_pos() {
+            return self.result_pos
+        }
+        get_success() {
+            return self.success
+        }
+
+    interface:
+        do_skip_comment()
+        do_skip_string()
+        do_find_line_end()
+        do_balanced_paren_end()
+
+    machine:
+        $Init {
+            do_skip_comment() { -> $SkipComment }
+            do_skip_string() { -> $SkipString }
+            do_find_line_end() { -> $FindLineEnd }
+            do_balanced_paren_end() { -> $BalancedParenEnd }
+        }
+
+        $SkipComment {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                # Line comment: //
+                if i + 1 < scan_end && bs[i] == 0x2F && bs[i + 1] == 0x2F
+                    j = i + 2
+                    while j < scan_end && bs[j] != 0x0A
+                        j += 1
+                    end
+                    self.result_pos = j
+                    self.success = 1
+                    return
+                end
+
+                # Hash comment: #
+                if i < scan_end && bs[i] == 0x23
+                    j = i + 1
+                    while j < scan_end && bs[j] != 0x0A
+                        j += 1
+                    end
+                    self.result_pos = j
+                    self.success = 1
+                    return
+                end
+
+                # Block comment: /* ... */
+                if i + 1 < scan_end && bs[i] == 0x2F && bs[i + 1] == 0x2A
+                    j = i + 2
+                    while j + 1 < scan_end
+                        if bs[j] == 0x2A && bs[j + 1] == 0x2F
+                            self.result_pos = j + 2
+                            self.success = 1
+                            return
+                        end
+                        j += 1
+                    end
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+                end
+
+                self.success = 0
+            }
+        }
+
+        $SkipString {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                # Heredoc/nowdoc: <<<EOT ... EOT;
+                if i + 2 < scan_end && bs[i] == 0x3C && bs[i + 1] == 0x3C && bs[i + 2] == 0x3C
+                    j = i + 3
+                    # Skip optional quote for nowdoc
+                    nowdoc = 0
+                    if j < scan_end && bs[j] == 0x27
+                        nowdoc = 1
+                        j += 1
+                    end
+                    # Read tag name
+                    tag_start = j
+                    while j < scan_end && ((bs[j] >= 0x61 && bs[j] <= 0x7A) || (bs[j] >= 0x41 && bs[j] <= 0x5A) || (bs[j] >= 0x30 && bs[j] <= 0x39) || bs[j] == 0x5F)
+                        j += 1
+                    end
+                    tag_end_pos = j
+                    if nowdoc == 1 && j < scan_end && bs[j] == 0x27
+                        j += 1
+                    end
+                    tag = bs[tag_start...tag_end_pos]
+                    tag_len = tag.length
+                    if tag_len > 0
+                        # Skip to newline
+                        while j < scan_end && bs[j] != 0x0A
+                            j += 1
+                        end
+                        if j < scan_end
+                            j += 1
+                        end
+                        # Scan for closing tag at start of line
+                        while j < scan_end
+                            if j + tag_len <= scan_end && bs[j...j + tag_len] == tag
+                                k = j + tag_len
+                                if k < scan_end && bs[k] == 0x3B
+                                    k += 1
+                                end
+                                if k >= scan_end || bs[k] == 0x0A
+                                    if k < scan_end && bs[k] == 0x0A
+                                        k += 1
+                                    end
+                                    self.result_pos = k
+                                    self.success = 1
+                                    return
+                                end
+                            end
+                            # Skip to next line
+                            while j < scan_end && bs[j] != 0x0A
+                                j += 1
+                            end
+                            if j < scan_end
+                                j += 1
+                            end
+                        end
+                        self.result_pos = scan_end
+                        self.success = 1
+                        return
+                    end
+                end
+
+                # Simple string: " or '
+                if i < scan_end && (bs[i] == 0x22 || bs[i] == 0x27)
+                    q = bs[i]
+                    j = i + 1
+                    while j < scan_end
+                        if bs[j] == 0x5C
+                            j += 2
+                            next
+                        end
+                        if bs[j] == q
+                            self.result_pos = j + 1
+                            self.success = 1
+                            return
+                        end
+                        j += 1
+                    end
+                    self.result_pos = scan_end
+                    self.success = 1
+                    return
+                end
+
+                self.success = 0
+            }
+        }
+
+        $FindLineEnd {
+            $>() {
+                j = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+                in_string = 0
+
+                while j < scan_end
+                    b = bs[j]
+                    if b == 0x0A
+                        break
+                    end
+
+                    # Inside string
+                    if in_string != 0
+                        if b == 0x5C
+                            j += 2
+                            next
+                        end
+                        if b == in_string
+                            in_string = 0
+                        end
+                        j += 1
+                        next
+                    end
+
+                    # Terminators
+                    if b == 0x3B || b == 0x7D
+                        break
+                    end
+                    if b == 0x2F && j + 1 < scan_end && (bs[j + 1] == 0x2F || bs[j + 1] == 0x2A)
+                        break
+                    end
+                    if b == 0x23
+                        break
+                    end
+
+                    # String starts
+                    if b == 0x27 || b == 0x22
+                        in_string = b
+                        j += 1
+                        next
+                    end
+
+                    j += 1
+                end
+
+                self.result_pos = j
+            }
+        }
+
+        $BalancedParenEnd {
+            $>() {
+                i = self.pos
+                scan_end = self.scan_end
+                bs = self.bytes
+
+                if i >= scan_end || bs[i] != 0x28
+                    self.success = 0
+                    return
+                end
+
+                depth = 0
+                in_string = 0
+
+                while i < scan_end
+                    b = bs[i]
+
+                    # Inside string
+                    if in_string != 0
+                        if b == 0x5C
+                            i += 2
+                            next
+                        end
+                        if b == in_string
+                            in_string = 0
+                        end
+                        i += 1
+                        next
+                    end
+
+                    if b == 0x27 || b == 0x22
+                        in_string = b
+                        i += 1
+                    elsif b == 0x28
+                        depth += 1
+                        i += 1
+                    elsif b == 0x29
+                        depth -= 1
+                        i += 1
+                        if depth == 0
+                            self.result_pos = i
+                            self.success = 1
+                            return
+                        end
+                    else
+                        i += 1
+                    end
+                end
+
+                self.success = 0
+            }
+        }
+
+    domain:
+        bytes = []
+        pos: int = 0
+        scan_end: int = 0
+        result_pos: int = 0
+        success: int = 1
+}
+
+failures = 0
+
+# Test 1: Skip // line comment
+s1 = PhpSyntaxSkipperFsm.new
+inp1 = "// comment\ncode".bytes
+s1.setup(inp1, 0, inp1.length)
+s1.do_skip_comment()
+if s1.get_success() != 1 || s1.get_result_pos() != 10
+    puts("FAIL 1: success=#{s1.get_success()}, pos=#{s1.get_result_pos()}")
+    failures += 1
+end
+
+# Test 2: Skip # comment
+s2 = PhpSyntaxSkipperFsm.new
+inp2 = "# comment\ncode".bytes
+s2.setup(inp2, 0, inp2.length)
+s2.do_skip_comment()
+if s2.get_success() != 1 || s2.get_result_pos() != 9
+    puts("FAIL 2: success=#{s2.get_success()}, pos=#{s2.get_result_pos()}")
+    failures += 1
+end
+
+# Test 3: Skip /* */ block comment
+s3 = PhpSyntaxSkipperFsm.new
+inp3 = "/* block */code".bytes
+s3.setup(inp3, 0, inp3.length)
+s3.do_skip_comment()
+if s3.get_success() != 1 || s3.get_result_pos() != 11
+    puts("FAIL 3: success=#{s3.get_success()}, pos=#{s3.get_result_pos()}")
+    failures += 1
+end
+
+# Test 4: Skip double-quoted string
+s4 = PhpSyntaxSkipperFsm.new
+inp4 = "\"hello\" rest".bytes
+s4.setup(inp4, 0, inp4.length)
+s4.do_skip_string()
+if s4.get_success() != 1 || s4.get_result_pos() != 7
+    puts("FAIL 4: success=#{s4.get_success()}, pos=#{s4.get_result_pos()}")
+    failures += 1
+end
+
+# Test 5: Skip single-quoted string
+s5 = PhpSyntaxSkipperFsm.new
+inp5 = "'hello' rest".bytes
+s5.setup(inp5, 0, inp5.length)
+s5.do_skip_string()
+if s5.get_success() != 1 || s5.get_result_pos() != 7
+    puts("FAIL 5: success=#{s5.get_success()}, pos=#{s5.get_result_pos()}")
+    failures += 1
+end
+
+# Test 6: Skip heredoc
+s6 = PhpSyntaxSkipperFsm.new
+inp6 = "<<<EOT\nhello world\nEOT;\nnext".bytes
+s6.setup(inp6, 0, inp6.length)
+s6.do_skip_string()
+if s6.get_success() != 1 || s6.get_result_pos() != 24
+    puts("FAIL 6: success=#{s6.get_success()}, pos=#{s6.get_result_pos()}")
+    failures += 1
+end
+
+# Test 7: Find line end (stops at ;)
+s7 = PhpSyntaxSkipperFsm.new
+inp7 = "$x = 1; next".bytes
+s7.setup(inp7, 0, inp7.length)
+s7.do_find_line_end()
+if s7.get_result_pos() != 6
+    puts("FAIL 7: pos=#{s7.get_result_pos()}, expected 6")
+    failures += 1
+end
+
+# Test 8: Balanced parens
+s8 = PhpSyntaxSkipperFsm.new
+inp8 = "(a, f(b)) rest".bytes
+s8.setup(inp8, 0, inp8.length)
+s8.do_balanced_paren_end()
+if s8.get_success() != 1 || s8.get_result_pos() != 9
+    puts("FAIL 8: success=#{s8.get_success()}, pos=#{s8.get_result_pos()}")
+    failures += 1
+end
+
+if failures > 0
+    puts("FAIL: #{failures} failures")
+    exit(1)
+end
+puts("PASS: php_skipper (8 cases)")
