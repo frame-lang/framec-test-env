@@ -97,9 +97,22 @@ if [ "$COMPILE_ONLY" = "true" ]; then
     exit $fail
 fi
 
+# Choose the available lua binary up-front rather than relying on `||`,
+# which otherwise runs the whole suite a SECOND time whenever the first
+# `lua` invocation exits non-zero (a TAP run with failures).
+# Prefer 5.4 over unversioned `lua` (which on Ubuntu resolves to 5.1 and
+# rejects `::label::` / `goto`, breaking every scanner-pattern test).
+if command -v lua5.4 >/dev/null 2>&1; then
+    LUA_BIN=lua5.4
+elif command -v lua >/dev/null 2>&1; then
+    LUA_BIN=lua
+else
+    LUA_BIN=lua5.3
+fi
+
 # Integrity check — verify dispatcher emitted test_count TAP lines.
 tap_out=$(mktemp)
-lua "$RUNNER" "$MANIFEST" 2>/dev/null || lua5.4 "$RUNNER" "$MANIFEST" | tee "$tap_out"
+"$LUA_BIN" "$RUNNER" "$MANIFEST" | tee "$tap_out"
 rc=${PIPESTATUS[0]:-$?}
 emitted=$(grep -cE "^(ok |not ok )" "$tap_out" || true)
 rm -f "$tap_out"

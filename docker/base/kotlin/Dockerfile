@@ -7,6 +7,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl unzip && \
     rm /tmp/kotlin.zip && \
     mkdir -p /tests /output /lib && \
     curl -sL "https://repo1.maven.org/maven2/org/json/json/20231013/json-20231013.jar" -o /lib/json.jar && \
+    curl -sL "https://repo1.maven.org/maven2/org/jetbrains/kotlinx/kotlinx-coroutines-core-jvm/1.8.1/kotlinx-coroutines-core-jvm-1.8.1.jar" -o /lib/kotlinx-coroutines-core-jvm.jar && \
     apt-get remove -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 ARG RUNNER_HASH
 COPY runners/runner.sh /runner.sh

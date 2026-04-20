@@ -100,38 +100,45 @@ public static class TestRunner {
 
         int code = 0;
         bool timedOut = false;
-        var task = Task.Run(() => {
-            try {
-                var type = asm.GetType(mainClass);
-                if (type == null) {
-                    writer.WriteLine($"type not found: {mainClass}");
-                    code = 1;
-                    return;
-                }
-                var mi = type.GetMethod("Main", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-                if (mi == null) {
-                    writer.WriteLine($"Main method not found on {mainClass}");
-                    code = 1;
-                    return;
-                }
-                var pars = mi.GetParameters();
-                object?[] invokeArgs =
-                    pars.Length == 0 ? Array.Empty<object?>()
-                    : new object?[] { Array.Empty<string>() };
-                var result = mi.Invoke(null, invokeArgs);
-                if (result is int ic) code = ic;
-            } catch (TargetInvocationException e) {
-                writer.WriteLine(e.InnerException?.ToString() ?? e.ToString());
-                code = 1;
-            } catch (Exception e) {
-                writer.WriteLine(e.ToString());
-                code = 1;
-            }
-        });
 
+        // Redirect BEFORE queuing the task. Task.Run schedules on the
+        // thread pool, but the test body may begin executing before the
+        // main thread reaches SetOut — causing early Console.WriteLine
+        // calls to leak to the real stdout (showing up as phantom TAP
+        // lines like "ok 1 - mealy_machine" in the outer TAP stream and
+        // breaking the integrity check).
         Console.SetOut(writer);
         Console.SetError(writer);
         try {
+            var task = Task.Run(() => {
+                try {
+                    var type = asm.GetType(mainClass);
+                    if (type == null) {
+                        writer.WriteLine($"type not found: {mainClass}");
+                        code = 1;
+                        return;
+                    }
+                    var mi = type.GetMethod("Main", BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
+                    if (mi == null) {
+                        writer.WriteLine($"Main method not found on {mainClass}");
+                        code = 1;
+                        return;
+                    }
+                    var pars = mi.GetParameters();
+                    object?[] invokeArgs =
+                        pars.Length == 0 ? Array.Empty<object?>()
+                        : new object?[] { Array.Empty<string>() };
+                    var result = mi.Invoke(null, invokeArgs);
+                    if (result is int ic) code = ic;
+                } catch (TargetInvocationException e) {
+                    writer.WriteLine(e.InnerException?.ToString() ?? e.ToString());
+                    code = 1;
+                } catch (Exception e) {
+                    writer.WriteLine(e.ToString());
+                    code = 1;
+                }
+            });
+
             if (!task.Wait(TimeSpan.FromSeconds(TIMEOUT_SEC))) {
                 timedOut = true;
                 code = 124;

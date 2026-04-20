@@ -19,7 +19,7 @@ MANIFEST="/tmp/cpp_manifest.tsv"
 COMPILE_ONLY="${COMPILE_ONLY:-false}"
 JOBS="${CPP_COMPILE_JOBS:-$(nproc 2>/dev/null || echo 4)}"
 
-target="cpp_17"
+target="cpp_23"
 ext="fcpp"
 out_ext="cpp"
 
@@ -123,7 +123,7 @@ compile_one() {
     local bin="$2"
     local name
     name=$(basename "$bin")
-    if g++ -std=c++17 -O0 -o "$bin" "$src" 2> "$STATUS_DIR/${name}.err"; then
+    if g++ -std=c++23 -O0 -o "$bin" "$src" 2> "$STATUS_DIR/${name}.err"; then
         echo 0 > "$STATUS_DIR/${name}.rc"
     else
         echo 1 > "$STATUS_DIR/${name}.rc"

@@ -87,7 +87,7 @@ case "$LANG" in
     javascript) target="javascript"; ext="fjs"; out_ext="js" ;;
     rust)       target="rust";       ext="frs"; out_ext="rs" ;;
     c)          target="c";          ext="fc";  out_ext="c" ;;
-    cpp)        target="cpp_17";     ext="fcpp"; out_ext="cpp" ;;
+    cpp)        target="cpp_23";     ext="fcpp"; out_ext="cpp" ;;
     csharp)     target="csharp";     ext="fcs"; out_ext="cs" ;;
     java)       target="java";       ext="fjava"; out_ext="java" ;;
     go)         target="go";         ext="fgo"; out_ext="go" ;;
@@ -208,7 +208,7 @@ for test_file in $tests; do
             ;;
         cpp)
             cpp_bin="$COMPILE_DIR/${test_name}"
-            if g++ -std=c++17 -o "$cpp_bin" "$out_file" 2>&1; then
+            if g++ -std=c++23 -o "$cpp_bin" "$out_file" 2>&1; then
                 run_output=$("$cpp_bin" 2>&1) || run_status=$?
             else
                 run_status=1

@@ -152,7 +152,12 @@ fi
 # Nothing to compile? All tests were skipped or transpile-error; dispatcher
 # still runs to emit TAP for the non-RUN rows.
 kt_cp=""
-[ -f /lib/json.jar ] && kt_cp="-cp /lib/json.jar"
+_libs=""
+[ -f /lib/json.jar ] && _libs="/lib/json.jar"
+[ -f /lib/kotlinx-coroutines-core-jvm.jar ] && {
+    [ -n "$_libs" ] && _libs="${_libs}:/lib/kotlinx-coroutines-core-jvm.jar" || _libs="/lib/kotlinx-coroutines-core-jvm.jar"
+}
+[ -n "$_libs" ] && kt_cp="-cp $_libs"
 
 # Batch compile with error attribution. kotlinc errors look like:
 #   tmp/kotlin_out/t15_forward_parent/forward_parent.kt:10:5: error: ...
@@ -211,6 +216,7 @@ fi
 dispatcher_cp="/opt/test_runner.jar"
 [ -f "$ALL_JAR" ] && dispatcher_cp="${ALL_JAR}:${dispatcher_cp}"
 [ -f /lib/json.jar ] && dispatcher_cp="${dispatcher_cp}:/lib/json.jar"
+[ -f /lib/kotlinx-coroutines-core-jvm.jar ] && dispatcher_cp="${dispatcher_cp}:/lib/kotlinx-coroutines-core-jvm.jar"
 
 # Integrity check — verify dispatcher emitted test_count TAP lines.
 tap_out=$(mktemp)
