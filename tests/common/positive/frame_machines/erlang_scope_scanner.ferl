@@ -35,12 +35,12 @@
                 self.pos = Pos
                 self.depth = Depth
                 self.success = Suc
-                %% If ess_check_fun succeeded, proceed to scan the body; otherwise
-                %% stay in this state (no transition). Frame's `if X: -> $State`
-                %% conditional-transition syntax maps cleanly to Erlang's
-                %% `case X of true -> transition ; false -> ok end`.
-                if Suc =/= 0:
-                    -> $ScanBody
+                %% Unconditionally transition to $ScanBody; the helper's
+                %% depth==0 clause short-circuits when ess_check_fun failed,
+                %% preserving {success=0, result_pos=0} without needing a
+                %% conditional transition here (Erlang has no direct
+                %% analogue to Python's `if X: return`).
+                -> $ScanBody
             }
             get_result_pos(): int { @@:(self.result_pos) }
             get_success(): int { @@:(self.success) }
@@ -109,6 +109,10 @@ ess_scan_ident(Bs, I, End) when I < End ->
 ess_scan_ident(_Bs, I, _End) -> I.
 
 %% --- scan_body ---
+%% Depth 0 means ess_check_fun failed (no matching fun); just propagate the
+%% failure marker without scanning. This replaces a Python-style
+%% `if Suc =:= 0: return` in $CheckFun that doesn't translate to Erlang.
+ess_scan_body(_Bs, _I, _End, 0) -> {0, 0};
 ess_scan_body(_Bs, I, End, _D) when I >= End -> {0, 0};
 ess_scan_body(Bs, I, End, D) ->
     B = binary:at(Bs, I),
