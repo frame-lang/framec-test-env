@@ -1,19 +1,137 @@
 @@target c
-@@skip -- requires multi-system (ToolRunner + Agent)
 
 #include <stdio.h>
+#include <string.h>
 
-@@system AiAgent {
+// Forward declaration — ToolRunner holds a back-pointer to Agent.
+typedef struct Agent Agent;
+
+@@system ToolRunner {
     interface:
-        dummy(): int
+        execute(tool: str): str
+        set_parent(agent: Agent*)
 
     machine:
-        $Start {
-            dummy(): int { @@:(0) }
+        $Ready {
+            set_parent(agent: Agent*) {
+                self->parent = agent;
+            }
+            execute(tool: str): str {
+                if (strcmp(tool, "read_file") == 0) {
+                    @@:return("read src/main.c")
+                }
+                if (strcmp(tool, "write_file") == 0) {
+                    @@:return("wrote src/main.c")
+                }
+                @@:("tests passed")
+            }
         }
+
+    domain:
+        parent: Agent* = NULL
+}
+
+@@system Agent {
+    interface:
+        task(description: str)
+        approve()
+        plan_ready()
+        coding_done()
+        tests_passed()
+        status(): str
+
+    machine:
+        $Idle {
+            task(description: str) {
+                self->task_desc = description;
+                -> $Planning
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $Planning => $Active {
+            $>() {
+                @@:self.plan_ready()
+            }
+            plan_ready() {
+                self->plan_len = 2;
+                -> $AwaitingApproval
+            }
+            => $^
+        }
+
+        $AwaitingApproval => $Active {
+            approve() {
+                self->step = 0;
+                -> $Coding
+            }
+            => $^
+        }
+
+        $Coding => $Active {
+            $>() {
+                if (self->step >= self->plan_len) {
+                    @@:self.coding_done();
+                    return;
+                }
+                const char* tool;
+                if (self->step == 0) {
+                    tool = "read_file";
+                } else {
+                    tool = "write_file";
+                }
+                self->tool_result = ToolRunner_execute(self->tool_runner, tool);
+                self->step = self->step + 1;
+                -> $Coding
+            }
+            coding_done() { -> $Testing }
+            => $^
+        }
+
+        $Testing => $Active {
+            $>() {
+                self->tool_result = ToolRunner_execute(self->tool_runner, "run_terminal");
+                @@:self.tests_passed()
+            }
+            tests_passed() { -> $Complete }
+            => $^
+        }
+
+        $Active {
+        }
+
+        $Complete {
+            $>() { }
+            status(): str { @@:("complete") }
+        }
+
+    domain:
+        task_desc: str = ""
+        plan_len: int = 0
+        step: int = 0
+        tool_runner: ToolRunner* = @@ToolRunner()
+        tool_result: str = ""
 }
 
 int main() {
-    printf("SKIP: ai_agent — requires multi-system (ToolRunner + Agent)\n");
+    Agent* agent = @@Agent();
+    ToolRunner_set_parent(agent->tool_runner, agent);
+
+    const char* status = Agent_status(agent);
+    if (strcmp(status, "idle") != 0) {
+        printf("FAIL: expected idle, got '%s'\n", status);
+        return 1;
+    }
+
+    Agent_task(agent, "Add validation");
+    Agent_approve(agent);
+
+    status = Agent_status(agent);
+    if (strcmp(status, "complete") != 0) {
+        printf("FAIL: expected complete, got '%s'\n", status);
+        return 1;
+    }
+
+    printf("PASS: ai_agent\n");
     return 0;
 }

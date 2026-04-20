@@ -1,9 +1,11 @@
 @@target go
-@@skip -- Go multi-system codegen not yet working
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 @@system EnemySpawner {
     interface:
@@ -18,18 +20,37 @@ import "fmt"
 @@system GameLevel {
     interface:
         Start()
+        TriggerSpawn(): string
 
     machine:
         $Loading {
             Start() { -> $Playing }
+            TriggerSpawn(): string { @@:("not_ready") }
         }
         $Playing {
+            TriggerSpawn(): string { @@:(s.spawner.Spawn()) }
         }
 
     domain:
-        spawner : EnemySpawner = @@EnemySpawner()
+        spawner: *EnemySpawner = NewEnemySpawner()
 }
 
 func main() {
-    fmt.Println("SKIP: game_level — Go multi-system codegen not yet working")
+	level := NewGameLevel()
+
+	r1 := level.TriggerSpawn()
+	if r1 != "not_ready" {
+		fmt.Printf("FAIL: pre-start expected 'not_ready', got %q\n", r1)
+		os.Exit(1)
+	}
+
+	level.Start()
+
+	r2 := level.TriggerSpawn()
+	if r2 != "enemy_spawned" {
+		fmt.Printf("FAIL: post-start expected 'enemy_spawned', got %q\n", r2)
+		os.Exit(1)
+	}
+
+	fmt.Println("PASS: game_level")
 }

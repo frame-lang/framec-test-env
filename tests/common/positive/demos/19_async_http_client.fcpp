@@ -1,24 +1,68 @@
-@@target cpp_17
-@@skip -- C++ async codegen not yet implemented in Frame
+@@target cpp_23
 
-#include <cstdio>
+#include <iostream>
+#include <string>
+#include <vector>
+#include <algorithm>
+
+// C++23 coroutines: framec emits each async interface method as
+// `FrameTask<T>` (see backends/cpp.rs — FRAME_TASK_PRELUDE). Bodies use
+// `co_return` / `co_await`. Internal dispatch chain (__kernel / __router /
+// _state_X) is also coroutinized so `co_await` threads through.
 
 @@system AsyncWorker {
     interface:
-        start()
-        get_status(): str
+        async start()
+        async process(data: str): str
+        async stop()
+        async get_status(): str
 
     machine:
         $Idle {
+            $>() { this->log.push_back("idle:ready"); }
             start() { -> $Working }
             get_status(): str { @@:(std::string("idle")) }
         }
         $Working {
+            $>() { this->log.push_back("working:entered"); }
+            <$() { this->log.push_back("working:exited"); }
+            process(data: str): str {
+                std::string result = "processed:" + data;
+                this->log.push_back(result);
+                @@:(result)
+            }
+            stop() { -> $Idle }
             get_status(): str { @@:(std::string("working")) }
         }
+
+    domain:
+        log: std::vector<std::string> = {}
+}
+
+static bool contains(const std::vector<std::string>& v, const std::string& s) {
+    return std::find(v.begin(), v.end(), s) != v.end();
 }
 
 int main() {
-    printf("SKIP: async_http_client -- C++ async codegen not yet implemented\n");
+    AsyncWorker w;
+    w.init().get();
+
+    std::string status = w.get_status().get();
+    if (status != "idle") { std::cout << "FAIL: expected idle, got " << status << std::endl; return 1; }
+    if (!contains(w.log, "idle:ready")) { std::cout << "FAIL: expected idle:ready in log" << std::endl; return 1; }
+
+    w.start().get();
+    status = w.get_status().get();
+    if (status != "working") { std::cout << "FAIL: expected working, got " << status << std::endl; return 1; }
+
+    std::string result = w.process("hello").get();
+    if (result != "processed:hello") { std::cout << "FAIL: expected processed:hello, got " << result << std::endl; return 1; }
+
+    w.stop().get();
+    status = w.get_status().get();
+    if (status != "idle") { std::cout << "FAIL: expected idle, got " << status << std::endl; return 1; }
+    if (!contains(w.log, "working:exited")) { std::cout << "FAIL: expected working:exited in log" << std::endl; return 1; }
+
+    std::cout << "PASS: async_http_client" << std::endl;
     return 0;
 }

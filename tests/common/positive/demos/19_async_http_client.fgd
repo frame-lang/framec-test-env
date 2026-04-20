@@ -1,23 +1,55 @@
 @@target gdscript
-@@skip -- GDScript async codegen not yet implemented in Frame
 
 extends SceneTree
 
 @@system AsyncWorker {
     interface:
-        start()
-        get_status(): str
+        async start()
+        async process(data: String): String
+        async stop()
+        async get_status(): String
 
     machine:
         $Idle {
+            $>() { self.log.append("idle:ready") }
             start() { -> $Working }
-            get_status(): str { @@:("idle") }
+            get_status(): String { @@:("idle") }
         }
         $Working {
-            get_status(): str { @@:("working") }
+            $>() { self.log.append("working:entered") }
+            <$() { self.log.append("working:exited") }
+            process(data: String): String {
+                var result = "processed:" + data
+                self.log.append(result)
+                @@:(result)
+            }
+            stop() { -> $Idle }
+            get_status(): String { @@:("working") }
         }
+
+    domain:
+        log = []
 }
 
 func _init():
-    print("SKIP: async_http_client -- GDScript async codegen not yet implemented")
+    var w = @@AsyncWorker()
+    await w.init()
+
+    var status = await w.get_status()
+    assert(status == "idle", "Expected idle, got: " + str(status))
+    assert("idle:ready" in w.log, "Expected idle:ready in log")
+
+    await w.start()
+    status = await w.get_status()
+    assert(status == "working", "Expected working, got: " + str(status))
+
+    var result = await w.process("hello")
+    assert(result == "processed:hello", "Expected processed:hello, got: " + str(result))
+
+    await w.stop()
+    status = await w.get_status()
+    assert(status == "idle", "Expected idle, got: " + str(status))
+    assert("working:exited" in w.log, "Expected working:exited in log")
+
+    print("PASS: async_http_client")
     quit()

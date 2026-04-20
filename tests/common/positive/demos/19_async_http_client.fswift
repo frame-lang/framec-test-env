@@ -1,19 +1,60 @@
 @@target swift
-@@skip -- Swift async codegen not yet implemented in Frame
+
+import Foundation
 
 @@system AsyncWorker {
     interface:
-        start()
-        get_status(): String
+        async start()
+        async process(data: String): String
+        async stop()
+        async get_status(): String
 
     machine:
         $Idle {
+            $>() { self.log.append("idle:ready") }
             start() { -> $Working }
             get_status(): String { @@:("idle") }
         }
         $Working {
+            $>() { self.log.append("working:entered") }
+            <$() { self.log.append("working:exited") }
+            process(data: String): String {
+                let result = "processed:" + data
+                self.log.append(result)
+                @@:(result)
+            }
+            stop() { -> $Idle }
             get_status(): String { @@:("working") }
         }
+
+    domain:
+        log: [String] = []
 }
 
-print("SKIP: async_http_client -- Swift async codegen not yet implemented")
+// Swift top-level async: wrap in a Task and semaphore to keep the program
+// alive until all awaits resolve, without requiring a @main-decorated type.
+let __sem = DispatchSemaphore(value: 0)
+Task {
+    let w = AsyncWorker()
+    await w.initAsync()
+
+    var status = await w.get_status()
+    guard status == "idle" else { fatalError("Expected idle, got \(status)") }
+    guard w.log.contains("idle:ready") else { fatalError("Expected idle:ready in log") }
+
+    await w.start()
+    status = await w.get_status()
+    guard status == "working" else { fatalError("Expected working, got \(status)") }
+
+    let result = await w.process("hello")
+    guard result == "processed:hello" else { fatalError("Expected processed:hello, got \(result)") }
+
+    await w.stop()
+    status = await w.get_status()
+    guard status == "idle" else { fatalError("Expected idle, got \(status)") }
+    guard w.log.contains("working:exited") else { fatalError("Expected working:exited in log") }
+
+    print("PASS: async_http_client")
+    __sem.signal()
+}
+__sem.wait()

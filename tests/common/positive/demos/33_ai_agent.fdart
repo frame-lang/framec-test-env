@@ -1,16 +1,128 @@
 @@target dart
-@@skip -- too complex for single-file demo
 
-@@system AiAgent {
+@@system ToolRunner {
     interface:
-        dummy(): int
+        execute(tool: String): String
+        set_parent(agent: Agent)
 
     machine:
-        $Start {
-            dummy(): int { @@:(0) }
+        $Ready {
+            set_parent(agent: Agent) {
+                this.parent = agent;
+            }
+            execute(tool: String): String {
+                if (tool == "read_file") {
+                    @@:return("read src/main.dart")
+                }
+                if (tool == "write_file") {
+                    @@:return("wrote src/main.dart")
+                }
+                @@:("tests passed")
+            }
         }
+
+    domain:
+        parent: Agent? = null
+}
+
+@@system Agent {
+    interface:
+        task(description: String)
+        approve()
+        plan_ready()
+        coding_done()
+        tests_passed()
+        status(): String
+
+    machine:
+        $Idle {
+            task(description: String) {
+                this.task_desc = description;
+                -> $Planning
+            }
+            status(): String { @@:("idle") }
+        }
+
+        $Planning => $Active {
+            $>() {
+                @@:self.plan_ready()
+            }
+            plan_ready() {
+                this.plan_len = 2;
+                -> $AwaitingApproval
+            }
+            => $^
+        }
+
+        $AwaitingApproval => $Active {
+            approve() {
+                this.step = 0;
+                -> $Coding
+            }
+            => $^
+        }
+
+        $Coding => $Active {
+            $>() {
+                if (this.step >= this.plan_len) {
+                    @@:self.coding_done();
+                    return;
+                }
+                String tool;
+                if (this.step == 0) {
+                    tool = "read_file";
+                } else {
+                    tool = "write_file";
+                }
+                this.tool_result = this.tool_runner.execute(tool);
+                this.step = this.step + 1;
+                -> $Coding
+            }
+            coding_done() { -> $Testing }
+            => $^
+        }
+
+        $Testing => $Active {
+            $>() {
+                this.tool_result = this.tool_runner.execute("run_terminal");
+                @@:self.tests_passed()
+            }
+            tests_passed() { -> $Complete }
+            => $^
+        }
+
+        $Active {
+        }
+
+        $Complete {
+            $>() { }
+            status(): String { @@:("complete") }
+        }
+
+    domain:
+        task_desc: String = ""
+        plan_len: int = 0
+        step: int = 0
+        tool_runner: ToolRunner = ToolRunner()
+        tool_result: String = ""
 }
 
 void main() {
-    print("PASS: ai_agent (skipped)");
+    final agent = Agent();
+    agent.tool_runner.set_parent(agent);
+
+    if (agent.status() != "idle") {
+        print("FAIL: expected idle, got '${agent.status()}'");
+        return;
+    }
+
+    agent.task("Add validation");
+    agent.approve();
+
+    if (agent.status() != "complete") {
+        print("FAIL: expected complete, got '${agent.status()}'");
+        return;
+    }
+
+    print("PASS: ai_agent");
 }

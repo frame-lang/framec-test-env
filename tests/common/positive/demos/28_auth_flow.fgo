@@ -1,9 +1,11 @@
 @@target go
-@@skip -- Go multi-system codegen not yet working
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
 @@system LoginManager {
     interface:
@@ -12,7 +14,10 @@ import "fmt"
     machine:
         $LoggedOut {
             Login(user: string, pass: string): string {
-                @@:("ok")
+                if user == "admin" && pass == "secret" {
+                    @@:return("authenticated")
+                }
+                @@:("denied")
             }
         }
 }
@@ -24,14 +29,28 @@ import "fmt"
     machine:
         $Unauthenticated {
             Authenticate(user: string, pass: string): string {
-                @@:("ok")
+                @@:(s.auth.Login(user, pass))
             }
         }
 
     domain:
-        auth : LoginManager = @@LoginManager()
+        auth: *LoginManager = NewLoginManager()
 }
 
 func main() {
-    fmt.Println("SKIP: auth_flow — Go multi-system codegen not yet working")
+	app := NewApp()
+
+	r1 := app.Authenticate("admin", "secret")
+	if r1 != "authenticated" {
+		fmt.Printf("FAIL: expected 'authenticated', got %q\n", r1)
+		os.Exit(1)
+	}
+
+	r2 := app.Authenticate("admin", "wrong")
+	if r2 != "denied" {
+		fmt.Printf("FAIL: expected 'denied', got %q\n", r2)
+		os.Exit(1)
+	}
+
+	fmt.Println("PASS: auth_flow")
 }

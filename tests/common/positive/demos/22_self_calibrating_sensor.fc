@@ -1,19 +1,97 @@
+@@target c
+
 // Self-Calibrating Sensor — @@:self demo (C)
-// @@skip: C does not support @@:self
+//
+// Uses int readings (not float) because the C backend routes interface
+// returns through a `void*` result slot; doubles don't round-trip safely
+// through that slot. The @@:self semantics — reentrant dispatch, return
+// propagation, transition guard — are exercised either way.
 
 #include <stdio.h>
+#include <string.h>
 
 @@system Sensor {
     interface:
+        calibrate(): str
+        reading(): int
+        trigger_shutdown()
+        attempt_post_shutdown(): str
         status(): str
 
     machine:
         $Active {
+            calibrate(): str {
+                int baseline = @@:self.reading();
+                self->offset = baseline * -1;
+                @@:("calibrated")
+            }
+
+            reading(): int {
+                @@:(self->raw_value + self->offset)
+            }
+
+            trigger_shutdown() {
+                -> $Shutdown
+            }
+
+            attempt_post_shutdown(): str {
+                self->trace = 1;
+                @@:self.trigger_shutdown();
+                self->trace = 2;
+                @@:("after")
+            }
+
             status(): str { @@:("active") }
         }
+
+        $Shutdown {
+            status(): str { @@:("shutdown") }
+        }
+
+    domain:
+        raw_value: int = 42
+        offset: int = 0
+        trace: int = 0
 }
 
 int main() {
-    printf("SKIP: self_calibrating_sensor — C does not support @@:self\n");
+    Sensor* sensor = @@Sensor();
+    int failures = 0;
+
+    int r1 = Sensor_reading(sensor);
+    if (r1 != 42) {
+        printf("FAIL: reading() expected 42, got %d\n", r1);
+        failures++;
+    }
+
+    const char* cal = Sensor_calibrate(sensor);
+    if (strcmp(cal, "calibrated") != 0) {
+        printf("FAIL: calibrate() expected 'calibrated', got '%s'\n", cal);
+        failures++;
+    }
+
+    int r2 = Sensor_reading(sensor);
+    if (r2 != 0) {
+        printf("FAIL: reading() after calibrate expected 0, got %d\n", r2);
+        failures++;
+    }
+
+    Sensor_attempt_post_shutdown(sensor);
+    if (sensor->trace != 1) {
+        printf("FAIL: trace expected 1 (guard suppressed 'after'), got %d\n", sensor->trace);
+        failures++;
+    }
+
+    const char* st = Sensor_status(sensor);
+    if (strcmp(st, "shutdown") != 0) {
+        printf("FAIL: status() expected 'shutdown', got '%s'\n", st);
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: self_calibrating_sensor (%d failures)\n", failures);
+        return 1;
+    }
+    printf("PASS: self_calibrating_sensor\n");
     return 0;
 }

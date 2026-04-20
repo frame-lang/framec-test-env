@@ -1,21 +1,55 @@
 @@target kotlin
-@@skip -- Kotlin async codegen not yet implemented in Frame
+
+import kotlinx.coroutines.runBlocking
 
 @@system AsyncWorker {
     interface:
-        start()
-        get_status(): String
+        async start()
+        async process(data: String): String
+        async stop()
+        async get_status(): String
 
     machine:
         $Idle {
+            $>() { this.log.add("idle:ready") }
             start() { -> $Working }
             get_status(): String { @@:("idle") }
         }
         $Working {
+            $>() { this.log.add("working:entered") }
+            <$() { this.log.add("working:exited") }
+            process(data: String): String {
+                val result = "processed:" + data
+                this.log.add(result)
+                @@:(result)
+            }
+            stop() { -> $Idle }
             get_status(): String { @@:("working") }
         }
+
+    domain:
+        log: MutableList<String> = mutableListOf()
 }
 
-fun main() {
-    println("SKIP: async_http_client -- Kotlin async codegen not yet implemented")
+fun main() = runBlocking {
+    val w = AsyncWorker()
+    w.init()
+
+    var status = w.get_status()
+    check(status == "idle") { "Expected idle, got $status" }
+    check(w.log.contains("idle:ready")) { "Expected idle:ready in log" }
+
+    w.start()
+    status = w.get_status()
+    check(status == "working") { "Expected working, got $status" }
+
+    val result = w.process("hello")
+    check(result == "processed:hello") { "Expected processed:hello, got $result" }
+
+    w.stop()
+    status = w.get_status()
+    check(status == "idle") { "Expected idle, got $status" }
+    check(w.log.contains("working:exited")) { "Expected working:exited in log" }
+
+    println("PASS: async_http_client")
 }

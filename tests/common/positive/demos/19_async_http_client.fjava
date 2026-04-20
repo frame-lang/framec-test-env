@@ -1,23 +1,64 @@
 @@target java
-@@skip -- Java async codegen not yet implemented in Frame
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.ExecutionException;
+
+// Java async — Frame emits `CompletableFuture<T>` return types for async
+// interface methods and wraps each result via `.completedFuture(...)`.
+// The internal dispatch chain stays synchronous (see
+// `make_java_interface_async` in system_codegen.rs) — only the public
+// interface surface is future-shaped. Callers await via `.get()`.
 
 @@system AsyncWorker {
     interface:
-        start()
-        get_status(): String
+        async start()
+        async process(data: String): String
+        async stop()
+        async get_status(): String
 
     machine:
         $Idle {
+            $>() { this.log.add("idle:ready"); }
             start() { -> $Working }
             get_status(): String { @@:("idle") }
         }
         $Working {
+            $>() { this.log.add("working:entered"); }
+            <$() { this.log.add("working:exited"); }
+            process(data: String): String {
+                String result = "processed:" + data;
+                this.log.add(result);
+                @@:(result)
+            }
+            stop() { -> $Idle }
             get_status(): String { @@:("working") }
         }
+
+    domain:
+        log: List<String> = new ArrayList<>()
 }
 
 class Main {
-    public static void main(String[] args) {
-        System.out.println("SKIP: async_http_client -- Java async codegen not yet implemented");
+    public static void main(String[] args) throws InterruptedException, ExecutionException {
+        var w = new AsyncWorker();
+
+        String status = w.get_status().get();
+        if (!"idle".equals(status)) throw new RuntimeException("Expected idle, got " + status);
+        if (!w.log.contains("idle:ready")) throw new RuntimeException("Expected idle:ready in log");
+
+        w.start().get();
+        status = w.get_status().get();
+        if (!"working".equals(status)) throw new RuntimeException("Expected working, got " + status);
+
+        String result = w.process("hello").get();
+        if (!"processed:hello".equals(result)) throw new RuntimeException("Expected processed:hello, got " + result);
+
+        w.stop().get();
+        status = w.get_status().get();
+        if (!"idle".equals(status)) throw new RuntimeException("Expected idle, got " + status);
+        if (!w.log.contains("working:exited")) throw new RuntimeException("Expected working:exited in log");
+
+        System.out.println("PASS: async_http_client");
     }
 }

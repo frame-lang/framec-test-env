@@ -1,19 +1,53 @@
 @@target c
-@@skip -- C does not support multi-system
 
 #include <stdio.h>
+#include <string.h>
 
-@@system AuthFlow {
+@@system LoginManager {
     interface:
-        dummy(): int
+        login(user: str, pass: str): str
 
     machine:
-        $Start {
-            dummy(): int { @@:(0) }
+        $LoggedOut {
+            login(user: str, pass: str): str {
+                if (strcmp(user, "admin") == 0 && strcmp(pass, "secret") == 0) {
+                    @@:return("authenticated")
+                }
+                @@:("denied")
+            }
         }
 }
 
+@@system App {
+    interface:
+        authenticate(user: str, pass: str): str
+
+    machine:
+        $Unauthenticated {
+            authenticate(user: str, pass: str): str {
+                @@:(LoginManager_login(self->auth, user, pass))
+            }
+        }
+
+    domain:
+        auth: LoginManager* = @@LoginManager()
+}
+
 int main() {
-    printf("SKIP: auth_flow — C does not support multi-system\n");
+    App* app = @@App();
+
+    const char* r1 = App_authenticate(app, "admin", "secret");
+    if (strcmp(r1, "authenticated") != 0) {
+        printf("FAIL: expected 'authenticated', got '%s'\n", r1);
+        return 1;
+    }
+
+    const char* r2 = App_authenticate(app, "admin", "wrong");
+    if (strcmp(r2, "denied") != 0) {
+        printf("FAIL: expected 'denied', got '%s'\n", r2);
+        return 1;
+    }
+
+    printf("PASS: auth_flow\n");
     return 0;
 }

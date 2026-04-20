@@ -1,20 +1,87 @@
 @@target c
-@@skip
-// Skip: C does not support @@:self (no reentrant dispatch)
+
+#include <stdio.h>
+#include <string.h>
+
+// Test: @@:self.method() — reentrant interface call with transition guard
+//
+// Validates:
+// 1. Basic self-call dispatch (calls own interface method through kernel)
+// 2. Return value propagation from self-call (int — avoids double-via-void* issue)
+// 3. Transition guard (code after self-call that transitions is suppressed)
 
 @@system SelfCallTest {
     interface:
+        get_base(): int
         calibrate(): int
+        trigger_transition()
+        check_after_transition(): int
+        status(): str
 
     machine:
         $Active {
+            get_base(): int {
+                @@:(42)
+            }
+
             calibrate(): int {
-                @@:(0)
+                int baseline = @@:self.get_base();
+                self->offset = baseline;
+                @@:(self->offset)
+            }
+
+            trigger_transition() {
+                -> $Done
+            }
+
+            check_after_transition(): int {
+                self->trace = 1;
+                @@:self.trigger_transition();
+                // This line should NOT execute — transition guard suppresses it
+                self->trace = 2;
+                @@:(self->trace)
+            }
+
+            status(): str {
+                @@:("active")
             }
         }
+
+        $Done {
+            status(): str {
+                @@:("done")
+            }
+        }
+
+    domain:
+        offset: int = 0
+        trace: int = 0
 }
 
 int main() {
-    printf("SKIP: self_call -- C does not support @@:self (no reentrant dispatch)\n");
+    // Test 1: Self-call returns correct value
+    SelfCallTest* s = @@SelfCallTest();
+    int result = SelfCallTest_calibrate(s);
+    if (result != 42) {
+        printf("FAIL: Expected 42, got %d\n", result);
+        return 1;
+    }
+
+    // Test 2: Transition guard — code after self-call that transitions is suppressed
+    SelfCallTest* s2 = @@SelfCallTest();
+    (void)SelfCallTest_check_after_transition(s2);
+    // trace should be 1 — the "trace = 2" assignment was suppressed
+    if (s2->trace != 1) {
+        printf("FAIL: Expected trace=1 (guard suppressed trace=2), got %d\n", s2->trace);
+        return 1;
+    }
+
+    // Test 3: System transitioned to $Done
+    if (strcmp(SelfCallTest_status(s2), "done") != 0) {
+        printf("FAIL: Expected 'done' after transition, got '%s'\n", SelfCallTest_status(s2));
+        return 1;
+    }
+
+    printf("PASS: self_call\n");
     return 0;
 }

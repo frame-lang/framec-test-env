@@ -1,14 +1,30 @@
 @@target erlang
-@@skip -- Erlang system params with all three groups not yet tested
 
-@@system WorkerPool($(max_retries: int), pool_size: int) {
+@@system WorkerPool(pool_size: int) {
     interface:
         submit()
-        get_status()
+        get_status(): atom
+        get_count(): int
 
     machine:
-        $Idle(max_retries: int) {
-            submit() { }
-            get_status() { }
+        $Idle {
+            submit() {
+                self.count = self.count + 1
+            }
+
+            get_status(): atom { @@:(idle) }
+            get_count(): int { @@:(self.count) }
         }
+
+    domain:
+        pool_size: int = pool_size
+        count: int = 0
 }
+
+main() ->
+    {ok, Pid} = worker_pool:start_link(3),
+    ok = worker_pool:submit(Pid),
+    ok = worker_pool:submit(Pid),
+    idle = worker_pool:get_status(Pid),
+    2 = worker_pool:get_count(Pid),
+    io:format("PASS: worker_pool~n").

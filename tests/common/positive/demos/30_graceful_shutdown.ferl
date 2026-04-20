@@ -1,12 +1,31 @@
 @@target erlang
-@@skip -- service pattern with kernel loop doesn't work for Erlang test runner
 
 @@system GracefulShutdown {
     interface:
-        dummy(): int
+        start()
+        request_stop()
+        finish()
+        status(): atom
 
     machine:
-        $Start {
-            dummy(): int { @@:(0) }
+        $Running {
+            request_stop() { -> $Draining }
+            status(): atom { @@:(running) }
+        }
+        $Draining {
+            finish() { -> $Stopped }
+            status(): atom { @@:(draining) }
+        }
+        $Stopped {
+            status(): atom { @@:(stopped) }
         }
 }
+
+main() ->
+    {ok, Pid} = graceful_shutdown:start_link(),
+    running = graceful_shutdown:status(Pid),
+    ok = graceful_shutdown:request_stop(Pid),
+    draining = graceful_shutdown:status(Pid),
+    ok = graceful_shutdown:finish(Pid),
+    stopped = graceful_shutdown:status(Pid),
+    io:format("PASS: graceful_shutdown~n").

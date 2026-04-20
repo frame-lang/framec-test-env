@@ -1,15 +1,30 @@
 @@target erlang
-@@skip
-%% Skip: Erlang @@:self not yet supported
+
+% Erlang @@:self — exercises reentrant dispatch through `frame_dispatch__`
+% (see frame_expansion.rs). The Erlang codegen for @@:self returns only the
+% value (element(2, ...)) and drops the threaded `NewData`, so transitions
+% inside a @@:self-called handler are lost. Pure-query @@:self — as used
+% here — validates the return-value propagation path; the transition-guard
+% scenarios tested in the Python/Go versions remain a known gap.
 
 @@system SelfCallTest {
     interface:
-        calibrate(): str
+        get_base(): int
+        calibrate(): int
 
     machine:
         $Active {
-            calibrate(): str {
-                @@:("skip")
+            get_base(): int { @@:(42) }
+
+            calibrate(): int {
+                Baseline = @@:self.get_base(),
+                @@:(Baseline)
             }
         }
 }
+
+main() ->
+    {ok, Pid} = self_call_test:start_link(),
+    42 = self_call_test:get_base(Pid),
+    42 = self_call_test:calibrate(Pid),
+    io:format("PASS: self_call~n").

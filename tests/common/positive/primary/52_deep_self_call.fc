@@ -1,20 +1,123 @@
 @@target c
-@@skip
-// Skip: C does not support @@:self (no reentrant dispatch)
 
-@@system DeepSelfCallTest {
+#include <stdio.h>
+#include <string.h>
+
+// Test: deep @@:self.iface() stack — transition guard propagation
+//
+// Validates:
+// 1. Full chain completes when no transition fires (all 8 phases)
+// 2. Transition at depth 3 suppresses all "after" phases
+// 3. Transition at depth 2 prevents deeper calls
+//
+// Uses a bitmask to trace which handler phases ran. Each phase sets a
+// dedicated bit, so the pattern reveals exactly where the chain stopped.
+
+@@system DeepSelfCall {
     interface:
-        dummy(): int
+        start_chain(mode: str): int
+        level_one(mode: str): int
+        level_two(mode: str): int
+        level_three(mode: str): int
+        get_trace(): int
+        reset()
 
     machine:
         $Active {
-            dummy(): int {
-                @@:(0)
+            start_chain(mode: str): int {
+                self->trace = self->trace | 0x01;    // start:before
+                @@:self.level_one(mode);
+                self->trace = self->trace | 0x02;    // start:after (guarded)
+                @@:(self->trace)
+            }
+
+            level_one(mode: str): int {
+                self->trace = self->trace | 0x04;    // L1:before
+                @@:self.level_two(mode);
+                self->trace = self->trace | 0x08;    // L1:after (guarded)
+                @@:(self->trace)
+            }
+
+            level_two(mode: str): int {
+                self->trace = self->trace | 0x10;    // L2:before
+                if (strcmp(mode, "transition_at_two") == 0) {
+                    self->trace = self->trace | 0x20; // L2:transitioning
+                    -> $Done
+                }
+                @@:self.level_three(mode);
+                self->trace = self->trace | 0x40;    // L2:after (guarded when L3 transitions)
+                @@:(self->trace)
+            }
+
+            level_three(mode: str): int {
+                self->trace = self->trace | 0x80;    // L3:before
+                if (strcmp(mode, "transition_at_three") == 0) {
+                    self->trace = self->trace | 0x100; // L3:transitioning
+                    -> $Done
+                }
+                self->trace = self->trace | 0x200;   // L3:after
+                @@:(self->trace)
+            }
+
+            get_trace(): int { @@:(self->trace) }
+
+            reset() {
+                self->trace = 0;
             }
         }
+
+        $Done {
+            get_trace(): int { @@:(self->trace) }
+
+            reset() {
+                self->trace = 0;
+                -> $Active
+            }
+        }
+
+    domain:
+        trace: int = 0
 }
 
 int main() {
-    printf("SKIP: deep_self_call -- C does not support @@:self\n");
+    int failures = 0;
+
+    // Scenario 1: No transition — full chain completes (all 8 regular bits set)
+    DeepSelfCall* s = @@DeepSelfCall();
+    DeepSelfCall_start_chain(s, "no_transition");
+    int trace = DeepSelfCall_get_trace(s);
+    int expected1 = 0x01 | 0x02 | 0x04 | 0x08 | 0x10 | 0x40 | 0x80 | 0x200;
+    if (trace != expected1) {
+        printf("FAIL scenario 1: expected 0x%x, got 0x%x\n", expected1, trace);
+        failures++;
+    }
+
+    // Scenario 2: Transition at level_three — all *:after bits suppressed
+    DeepSelfCall_reset(s);
+    DeepSelfCall_start_chain(s, "transition_at_three");
+    trace = DeepSelfCall_get_trace(s);
+    // start:before | L1:before | L2:before | L3:before | L3:transitioning
+    int expected2 = 0x01 | 0x04 | 0x10 | 0x80 | 0x100;
+    if (trace != expected2) {
+        printf("FAIL scenario 2: expected 0x%x, got 0x%x\n", expected2, trace);
+        failures++;
+    }
+
+    // Scenario 3: Transition at level_two — level_three never called
+    DeepSelfCall_reset(s);
+    DeepSelfCall_start_chain(s, "transition_at_two");
+    trace = DeepSelfCall_get_trace(s);
+    // start:before | L1:before | L2:before | L2:transitioning
+    int expected3 = 0x01 | 0x04 | 0x10 | 0x20;
+    if (trace != expected3) {
+        printf("FAIL scenario 3: expected 0x%x, got 0x%x\n", expected3, trace);
+        failures++;
+    }
+
+    if (failures > 0) {
+        printf("FAIL: deep_self_call (%d failures)\n", failures);
+        return 1;
+    }
+    printf("PASS: deep_self_call\n");
     return 0;
 }

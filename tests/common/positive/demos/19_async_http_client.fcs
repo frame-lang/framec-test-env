@@ -1,25 +1,59 @@
 @@target csharp
-@@skip -- C# async init not yet implemented in Frame
 
 using System;
+using System.Collections.Generic;
+using System.Threading.Tasks;
 
 @@system AsyncWorker {
     interface:
-        start()
-        get_status(): String
+        async start()
+        async process(data: String): String
+        async stop()
+        async get_status(): String
 
     machine:
         $Idle {
+            $>() { this.log.Add("idle:ready"); }
             start() { -> $Working }
             get_status(): String { @@:("idle") }
         }
         $Working {
+            $>() { this.log.Add("working:entered"); }
+            <$() { this.log.Add("working:exited"); }
+            process(data: String): String {
+                var result = "processed:" + data;
+                this.log.Add(result);
+                @@:(result)
+            }
+            stop() { -> $Idle }
             get_status(): String { @@:("working") }
         }
+
+    domain:
+        log: List<string> = new List<string>()
 }
 
 class Program {
-    static void Main(string[] args) {
-        Console.WriteLine("SKIP: async_http_client -- C# async init not yet implemented");
+    public static async Task Main(string[] args) {
+        var w = new AsyncWorker();
+        await w.init();
+
+        var status = await w.get_status();
+        if (status != "idle") throw new Exception("Expected idle, got " + status);
+        if (!w.log.Contains("idle:ready")) throw new Exception("Expected idle:ready in log");
+
+        await w.start();
+        status = await w.get_status();
+        if (status != "working") throw new Exception("Expected working, got " + status);
+
+        var result = await w.process("hello");
+        if (result != "processed:hello") throw new Exception("Expected processed:hello, got " + result);
+
+        await w.stop();
+        status = await w.get_status();
+        if (status != "idle") throw new Exception("Expected idle, got " + status);
+        if (!w.log.Contains("working:exited")) throw new Exception("Expected working:exited in log");
+
+        Console.WriteLine("PASS: async_http_client");
     }
 }

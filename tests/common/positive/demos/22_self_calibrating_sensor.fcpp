@@ -1,19 +1,93 @@
+@@target cpp
+
 // Self-Calibrating Sensor — @@:self demo (C++)
-// @@skip: C++ @@:self not yet supported
 
 #include <iostream>
+#include <string>
+#include <cmath>
 
 @@system Sensor {
     interface:
+        calibrate(): str
+        reading(): float
+        trigger_shutdown()
+        attempt_post_shutdown(): str
         status(): str
 
     machine:
         $Active {
-            status(): str { @@:("active") }
+            calibrate(): str {
+                double baseline = @@:self.reading();
+                offset = baseline * -1;
+                @@:(std::string("calibrated:offset=") + std::to_string(offset))
+            }
+
+            reading(): float {
+                @@:(raw_value + offset)
+            }
+
+            trigger_shutdown() {
+                -> $Shutdown
+            }
+
+            attempt_post_shutdown(): str {
+                trace = "before";
+                @@:self.trigger_shutdown();
+                trace = "after";
+                @@:(trace)
+            }
+
+            status(): str { @@:(std::string("active")) }
         }
+
+        $Shutdown {
+            status(): str { @@:(std::string("shutdown")) }
+        }
+
+    domain:
+        raw_value: double = 42.0
+        offset: double = 0.0
+        trace: std::string = ""
 }
 
 int main() {
-    std::cout << "SKIP: self_calibrating_sensor — C++ @@:self not yet supported" << std::endl;
+    Sensor sensor;
+    int failures = 0;
+
+    double r1 = sensor.reading();
+    if (std::abs(r1 - 42.0) > 1e-9) {
+        std::cout << "FAIL: reading() expected 42.0, got " << r1 << std::endl;
+        failures++;
+    }
+
+    std::string cal = sensor.calibrate();
+    if (cal.find("calibrated") == std::string::npos) {
+        std::cout << "FAIL: calibrate() expected 'calibrated', got '" << cal << "'" << std::endl;
+        failures++;
+    }
+
+    double r2 = sensor.reading();
+    if (std::abs(r2) > 1e-9) {
+        std::cout << "FAIL: reading() after calibrate expected 0.0, got " << r2 << std::endl;
+        failures++;
+    }
+
+    sensor.attempt_post_shutdown();
+    if (sensor.trace != "before") {
+        std::cout << "FAIL: trace expected 'before' (guard suppressed 'after'), got '" << sensor.trace << "'" << std::endl;
+        failures++;
+    }
+
+    std::string st = sensor.status();
+    if (st != "shutdown") {
+        std::cout << "FAIL: status() expected 'shutdown', got '" << st << "'" << std::endl;
+        failures++;
+    }
+
+    if (failures > 0) {
+        std::cout << "FAIL: self_calibrating_sensor (" << failures << " failures)" << std::endl;
+        return 1;
+    }
+    std::cout << "PASS: self_calibrating_sensor" << std::endl;
     return 0;
 }

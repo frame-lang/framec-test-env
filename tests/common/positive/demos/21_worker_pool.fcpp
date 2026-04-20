@@ -1,21 +1,63 @@
-@@target cpp
-@@skip -- C++ parameterized systems with list domain not yet supported
+@@target cpp_17
 
 #include <iostream>
+#include <string>
+#include <vector>
+#include <sstream>
 
 @@system WorkerPool($(max_retries: int), pool_size: int) {
     interface:
-        submit()
-        get_status()
+        submit(task: str)
+        get_status(): str
 
     machine:
         $Idle(max_retries: int) {
-            submit() { }
-            get_status() { }
+            submit(task: str) {
+                this->pending.push_back(task);
+                if ((int)this->pending.size() >= this->pool_size) {
+                    -> $Processing
+                }
+            }
+
+            get_status(): str {
+                std::ostringstream os;
+                os << "idle (" << this->pending.size() << "/" << this->pool_size << " pending)";
+                @@:(os.str())
+            }
         }
+
+        $Processing {
+            $>() {
+                this->pending.clear();
+            }
+
+            submit(task: str) {
+                this->pending.push_back(task);
+            }
+
+            get_status(): str {
+                @@:(std::string("processing"))
+            }
+        }
+
+    domain:
+        pool_size: int = pool_size
+        pending: std::vector<std::string> = {}
 }
 
 int main() {
-    std::cout << "SKIP: worker_pool -- C++ parameterized systems with list domain not yet supported" << std::endl;
+    WorkerPool pool(3, 3);
+    pool.submit("task_a");
+    if (pool.get_status() != "idle (1/3 pending)") {
+        std::cout << "FAIL: expected 'idle (1/3 pending)', got '" << pool.get_status() << "'" << std::endl;
+        return 1;
+    }
+    pool.submit("task_b");
+    pool.submit("task_c");
+    if (pool.get_status() != "processing") {
+        std::cout << "FAIL: expected 'processing', got '" << pool.get_status() << "'" << std::endl;
+        return 1;
+    }
+    std::cout << "PASS: worker_pool" << std::endl;
     return 0;
 }

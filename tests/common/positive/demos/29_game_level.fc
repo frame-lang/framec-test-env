@@ -1,19 +1,53 @@
 @@target c
-@@skip -- C does not support multi-system
 
 #include <stdio.h>
+#include <string.h>
 
-@@system GameLevel {
+@@system EnemySpawner {
     interface:
-        dummy(): int
+        spawn(): str
 
     machine:
-        $Start {
-            dummy(): int { @@:(0) }
+        $Ready {
+            spawn(): str { @@:("enemy_spawned") }
         }
 }
 
+@@system GameLevel {
+    interface:
+        start()
+        trigger_spawn(): str
+
+    machine:
+        $Loading {
+            start() { -> $Playing }
+            trigger_spawn(): str { @@:("not_ready") }
+        }
+        $Playing {
+            trigger_spawn(): str { @@:(EnemySpawner_spawn(self->spawner)) }
+        }
+
+    domain:
+        spawner: EnemySpawner* = @@EnemySpawner()
+}
+
 int main() {
-    printf("SKIP: game_level — C does not support multi-system\n");
+    GameLevel* level = @@GameLevel();
+
+    const char* r1 = GameLevel_trigger_spawn(level);
+    if (strcmp(r1, "not_ready") != 0) {
+        printf("FAIL: pre-start expected 'not_ready', got '%s'\n", r1);
+        return 1;
+    }
+
+    GameLevel_start(level);
+
+    const char* r2 = GameLevel_trigger_spawn(level);
+    if (strcmp(r2, "enemy_spawned") != 0) {
+        printf("FAIL: post-start expected 'enemy_spawned', got '%s'\n", r2);
+        return 1;
+    }
+
+    printf("PASS: game_level\n");
     return 0;
 }

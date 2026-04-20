@@ -1,20 +1,149 @@
 @@target go
-@@skip -- requires multi-system (ToolRunner + Agent)
 
 package main
 
-import "fmt"
+import (
+	"fmt"
+	"os"
+)
 
-@@system AiAgent {
+// AI Agent — multi-system + HSM + @@:self demo (Go).
+//
+// Simplified vs the Python version:
+//   - `result` values are bare strings instead of `{"success": ..., "data": ...}`
+//     dicts — Go would need map[string]interface{} plumbing that adds
+//     noise without exercising anything the Python version didn't.
+//   - plan steps are bare strings; `step_to_tool` returns a bare tool name.
+//
+// Still exercises the three combined features: multi-system (Agent +
+// ToolRunner), HSM ($Planning/$AwaitingApproval/$Coding/$Testing =>
+// $Active), and @@:self reentrant calls.
+
+@@system ToolRunner {
     interface:
-        Dummy(): int
+        Execute(tool: string): string
+        SetParent(agent: *Agent)
 
     machine:
-        $Start {
-            Dummy(): int { @@:(0) }
+        $Ready {
+            SetParent(agent: *Agent) {
+                s.parent = agent
+            }
+            Execute(tool: string): string {
+                var result string
+                if tool == "read_file" {
+                    result = "read src/main.go"
+                } else if tool == "write_file" {
+                    result = "wrote src/main.go"
+                } else {
+                    result = "tests passed"
+                }
+                @@:(result)
+            }
         }
+
+    domain:
+        parent: *Agent = nil
+}
+
+@@system Agent {
+    interface:
+        Task(description: string)
+        Approve()
+        PlanReady()
+        CodingDone()
+        TestsPassed()
+        Status(): string
+
+    machine:
+        $Idle {
+            Task(description: string) {
+                s.task_desc = description
+                -> $Planning
+            }
+            Status(): string { @@:("idle") }
+        }
+
+        $Planning => $Active {
+            $>() {
+                @@:self.PlanReady()
+            }
+            PlanReady() {
+                s.plan_len = 2
+                -> $AwaitingApproval
+            }
+            => $^
+        }
+
+        $AwaitingApproval => $Active {
+            Approve() {
+                s.step = 0
+                -> $Coding
+            }
+            => $^
+        }
+
+        $Coding => $Active {
+            $>() {
+                if s.step >= s.plan_len {
+                    @@:self.CodingDone()
+                    return
+                }
+                var tool string
+                if s.step == 0 {
+                    tool = "read_file"
+                } else {
+                    tool = "write_file"
+                }
+                s.tool_result = s.tool_runner.Execute(tool)
+                s.step = s.step + 1
+                -> $Coding
+            }
+            CodingDone() { -> $Testing }
+            => $^
+        }
+
+        $Testing => $Active {
+            $>() {
+                s.tool_result = s.tool_runner.Execute("run_terminal")
+                @@:self.TestsPassed()
+            }
+            TestsPassed() { -> $Complete }
+            => $^
+        }
+
+        $Active {
+        }
+
+        $Complete {
+            $>() { }
+            Status(): string { @@:("complete") }
+        }
+
+    domain:
+        task_desc: string = ""
+        plan_len: int = 0
+        step: int = 0
+        tool_runner: *ToolRunner = NewToolRunner()
+        tool_result: string = ""
 }
 
 func main() {
-    fmt.Println("SKIP: ai_agent — requires multi-system (ToolRunner + Agent)")
+	agent := NewAgent()
+	agent.tool_runner.SetParent(agent)
+
+	if agent.Status() != "idle" {
+		fmt.Printf("FAIL: expected idle, got %q\n", agent.Status())
+		os.Exit(1)
+	}
+
+	agent.Task("Add validation")
+	agent.Approve()
+
+	if agent.Status() != "complete" {
+		fmt.Printf("FAIL: expected complete, got %q\n", agent.Status())
+		os.Exit(1)
+	}
+
+	fmt.Println("PASS: ai_agent")
 }

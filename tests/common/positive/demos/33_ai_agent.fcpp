@@ -1,19 +1,130 @@
 @@target cpp_17
-@@skip -- requires multi-system (ToolRunner + Agent)
 
 #include <iostream>
+#include <memory>
+#include <string>
 
-@@system AiAgent {
+class Agent;  // fwd decl — ToolRunner holds a weak back-pointer
+
+@@system ToolRunner {
     interface:
-        dummy(): int
+        execute(tool: str): str
+        set_parent(agent: Agent*)
 
     machine:
-        $Start {
-            dummy(): int { @@:(0) }
+        $Ready {
+            set_parent(agent: Agent*) {
+                this->parent = agent;
+            }
+            execute(tool: str): str {
+                if (tool == "read_file") {
+                    { std::string r = "read src/main.cpp"; @@:return(r) }
+                }
+                if (tool == "write_file") {
+                    { std::string r = "wrote src/main.cpp"; @@:return(r) }
+                }
+                @@:(std::string("tests passed"))
+            }
         }
+
+    domain:
+        parent: Agent* = nullptr
+}
+
+@@system Agent {
+    interface:
+        task(description: str)
+        approve()
+        plan_ready()
+        coding_done()
+        tests_passed()
+        status(): str
+
+    machine:
+        $Idle {
+            task(description: str) {
+                this->task_desc = description;
+                -> $Planning
+            }
+            status(): str { @@:(std::string("idle")) }
+        }
+
+        $Planning => $Active {
+            $>() {
+                @@:self.plan_ready()
+            }
+            plan_ready() {
+                this->plan_len = 2;
+                -> $AwaitingApproval
+            }
+            => $^
+        }
+
+        $AwaitingApproval => $Active {
+            approve() {
+                this->step = 0;
+                -> $Coding
+            }
+            => $^
+        }
+
+        $Coding => $Active {
+            $>() {
+                if (this->step >= this->plan_len) {
+                    @@:self.coding_done();
+                    return;
+                }
+                std::string tool = (this->step == 0) ? std::string("read_file") : std::string("write_file");
+                this->tool_result = this->tool_runner->execute(tool);
+                this->step = this->step + 1;
+                -> $Coding
+            }
+            coding_done() { -> $Testing }
+            => $^
+        }
+
+        $Testing => $Active {
+            $>() {
+                this->tool_result = this->tool_runner->execute(std::string("run_terminal"));
+                @@:self.tests_passed()
+            }
+            tests_passed() { -> $Complete }
+            => $^
+        }
+
+        $Active {
+        }
+
+        $Complete {
+            $>() { }
+            status(): str { @@:(std::string("complete")) }
+        }
+
+    domain:
+        task_desc: std::string = ""
+        plan_len: int = 0
+        step: int = 0
+        tool_runner: std::shared_ptr<ToolRunner> = std::make_shared<ToolRunner>()
+        tool_result: std::string = ""
 }
 
 int main() {
-    std::cout << "SKIP: ai_agent — requires multi-system (ToolRunner + Agent)" << std::endl;
+    Agent agent;
+    agent.tool_runner->set_parent(&agent);
+
+    if (agent.status() != "idle") {
+        std::cout << "FAIL: expected idle, got '" << agent.status() << "'" << std::endl;
+        return 1;
+    }
+
+    agent.task("Add validation");
+    agent.approve();
+
+    if (agent.status() != "complete") {
+        std::cout << "FAIL: expected complete, got '" << agent.status() << "'" << std::endl;
+        return 1;
+    }
+
+    std::cout << "PASS: ai_agent" << std::endl;
     return 0;
 }

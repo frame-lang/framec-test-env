@@ -1,21 +1,84 @@
 @@target dart
-@@skip -- Dart async init not yet implemented in Frame
+
+import 'dart:async';
 
 @@system AsyncWorker {
     interface:
-        start()
-        get_status(): String
+        async start()
+        async process(data: String): String
+        async stop()
+        async get_status(): String
 
     machine:
         $Idle {
-            start() { -> $Working }
+            $>() {
+                this.log.add("idle:ready");
+            }
+            start() {
+                -> $Working
+            }
             get_status(): String { @@:("idle") }
         }
         $Working {
+            $>() {
+                this.log.add("working:entered");
+            }
+            <$() {
+                this.log.add("working:exited");
+            }
+            process(data: String): String {
+                final result = "processed:" + data;
+                this.log.add(result);
+                @@:(result)
+            }
+            stop() {
+                -> $Idle
+            }
             get_status(): String { @@:("working") }
         }
+
+    domain:
+        log: List<String> = []
 }
 
-void main() {
-    print("SKIP: async_http_client -- Dart async init not yet implemented");
+Future<void> main() async {
+    final w = @@AsyncWorker();
+    await w.init();
+
+    // Note: when ANY interface method is async, ALL interface methods become async
+    var status = await w.get_status();
+    if (status != "idle") {
+        print("FAIL: expected idle, got $status");
+        return;
+    }
+    if (!w.log.contains("idle:ready")) {
+        print("FAIL: expected idle:ready in log, got ${w.log}");
+        return;
+    }
+
+    await w.start();
+    status = await w.get_status();
+    if (status != "working") {
+        print("FAIL: expected working, got $status");
+        return;
+    }
+
+    final result = await w.process("hello");
+    if (result != "processed:hello") {
+        print("FAIL: expected 'processed:hello', got '$result'");
+        return;
+    }
+
+    await w.stop();
+    status = await w.get_status();
+    if (status != "idle") {
+        print("FAIL: expected idle after stop, got $status");
+        return;
+    }
+    if (!w.log.contains("working:exited")) {
+        print("FAIL: expected working:exited in log, got ${w.log}");
+        return;
+    }
+
+    print("PASS: async_http_client");
 }
