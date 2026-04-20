@@ -374,7 +374,7 @@ $State {
 
 ```frame
 $State(multiplier: int) {
-    $.value: int = 10 * self._compartment.state_args["multiplier"]
+    $.value: int = 10 * self._compartment.state_args[0]
 }
 ```
 
@@ -396,7 +396,7 @@ $Start {
     go() { -> $Child(42) }
 }
 $Child(val: int) => $Parent {
-    getVal(): int { return self._compartment.state_args["val"] }
+    getVal(): int { return self._compartment.state_args[0] }
 }
 ```
 
@@ -416,7 +416,7 @@ $Child => $Parent {
     goToParent() { -> $Parent(100) }
 }
 $Parent(val: int) {
-    getVal(): int { return self._compartment.state_args["val"] }
+    getVal(): int { return self._compartment.state_args[0] }
 }
 ```
 
@@ -452,7 +452,7 @@ $Parent(p: int) {
 
 ```frame
 $State(val: int = 50) {
-    getVal(): int { return self._compartment.state_args.get("val", 50) }
+    getVal(): int { return self._compartment.state_args[0] if len(self._compartment.state_args) > 0 else 50 }
 }
 ```
 
