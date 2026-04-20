@@ -1,0 +1,117 @@
+#!/bin/bash
+# Batched JavaScript test runner. One node process dynamic-imports each
+# test module.
+
+set -uo pipefail
+
+# Source-hash cache for framec: skips re-transpile when source
+# + framec version haven't changed since last run.
+. /framec_cached.sh
+
+OUTPUT="/output"
+COMPILE_DIR="/tmp/js_out"
+MANIFEST="/tmp/js_manifest.tsv"
+RUNNER="/opt/TestRunner.mjs"
+COMPILE_ONLY="${COMPILE_ONLY:-false}"
+
+target="javascript"
+ext="fjs"
+out_ext="js"
+
+mkdir -p "$OUTPUT"
+rm -rf "$COMPILE_DIR" "$MANIFEST" 2>/dev/null
+mkdir -p "$COMPILE_DIR"
+: > "$MANIFEST"
+
+tests=$(find /tests/common/positive -name "*.$ext" 2>/dev/null | sort)
+lang_tests=$(find /tests/javascript -name "*.$ext" 2>/dev/null | sort)
+if [ -n "$lang_tests" ]; then
+    tests="$tests
+$lang_tests"
+fi
+
+test_count=$(echo "$tests" | grep -c . || echo 0)
+if [ "$test_count" -eq 0 ]; then
+    echo "TAP version 14"
+    echo "1..0 # SKIP no javascript tests found"
+    exit 0
+fi
+
+echo "TAP version 14"
+echo "1..$test_count"
+
+test_num=0
+
+for test_file in $tests; do
+    test_num=$((test_num + 1))
+    test_name=$(basename "$test_file" ".$ext")
+
+    if head -10 "$test_file" 2>/dev/null | grep -qE "@@skip|@skip"; then
+        printf '%s\tSKIP\t%s\n' "$test_num" "$test_name" >> "$MANIFEST"
+        continue
+    fi
+
+    sanitized=$(printf '%s' "$test_name" | sed 's/[^A-Za-z0-9_]/_/g')
+    # Prefix with test_num so duplicate basenames (e.g. two
+    # forward_parent tests in different categories) get unique ids.
+    sanitized="t${test_num}_${sanitized}"
+    test_src_dir="$COMPILE_DIR/${sanitized}"
+    mkdir -p "$test_src_dir"
+
+    if ! framec_cached "$target" "$test_src_dir" "$test_file" /tmp/compile_err; then
+        if echo "$test_file" | grep -q "transpile-error"; then
+            printf '%s\tTRANSPILE_ERROR_OK\t%s\n' "$test_num" "$test_name" >> "$MANIFEST"
+        else
+            err_line=$(head -5 /tmp/compile_err 2>/dev/null | tr '\n' '\\' | sed 's/\\$//' | sed 's/\\/\\n/g')
+            printf '%s\tTRANSPILE_FAIL\t%s\t\t%s\n' "$test_num" "$test_name" "$err_line" >> "$MANIFEST"
+        fi
+        continue
+    fi
+
+    js_src=$(ls "$test_src_dir"/*.js 2>/dev/null | head -1)
+    if [ -z "$js_src" ]; then
+        printf '%s\tNO_OUTPUT\t%s\n' "$test_num" "$test_name" >> "$MANIFEST"
+        continue
+    fi
+
+    # Node treats .mjs as ESM by default. The existing per-test runner
+    # (runner.sh:119-122) renames .js → .mjs to get ESM semantics; mirror
+    # that so imported modules can use `import` without a package.json.
+    mjs_path="${js_src%.js}.mjs"
+    mv "$js_src" "$mjs_path"
+
+    if [ "$COMPILE_ONLY" = "true" ]; then
+        printf '%s\tCOMPILE_ONLY\t%s\n' "$test_num" "$test_name" >> "$MANIFEST"
+        continue
+    fi
+
+    printf '%s\tRUN\t%s\t%s\n' "$test_num" "$test_name" "$mjs_path" >> "$MANIFEST"
+done
+
+if [ "$COMPILE_ONLY" = "true" ]; then
+    pass=0; fail=0; skip=0
+    while IFS=$'\t' read -r num status name rest; do
+        case "$status" in
+            SKIP)                   echo "ok $num - $name # SKIP";                              skip=$((skip+1)) ;;
+            TRANSPILE_ERROR_OK)     echo "ok $num - $name # correctly rejected by transpiler";  pass=$((pass+1)) ;;
+            TRANSPILE_FAIL)         echo "not ok $num - $name # transpile failed";              fail=$((fail+1)) ;;
+            NO_OUTPUT)              echo "not ok $num - $name # no output file";                fail=$((fail+1)) ;;
+            COMPILE_ONLY|RUN)       echo "ok $num - $name # transpiled";                        pass=$((pass+1)) ;;
+        esac
+    done < "$MANIFEST"
+    echo ""
+    echo "# javascript: $pass passed, $fail failed, $skip skipped"
+    exit $fail
+fi
+
+# Integrity check — verify dispatcher emitted test_count TAP lines.
+tap_out=$(mktemp)
+node "$RUNNER" "$MANIFEST" | tee "$tap_out"
+rc=${PIPESTATUS[0]:-$?}
+emitted=$(grep -cE "^(ok |not ok )" "$tap_out" || true)
+rm -f "$tap_out"
+if [ "$emitted" -ne "$test_count" ]; then
+    echo "not ok $((test_count + 1)) - __harness_integrity__ # expected $test_count TAP lines, got $emitted"
+    [ "$rc" = "0" ] && rc=1
+fi
+exit $rc

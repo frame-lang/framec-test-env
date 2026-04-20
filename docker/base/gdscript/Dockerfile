@@ -18,6 +18,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget unzip ca-c
 
 ARG RUNNER_HASH
 COPY runners/runner.sh /runner.sh
-RUN chmod +x /runner.sh
+COPY runners/framec_cached.sh /framec_cached.sh
+COPY runners/gdscript_batch.sh /gdscript_batch.sh
+RUN chmod +x /runner.sh /gdscript_batch.sh /framec_cached.sh
 ENTRYPOINT ["/runner.sh"]
 CMD ["gdscript"]

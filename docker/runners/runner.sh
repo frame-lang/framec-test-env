@@ -13,6 +13,73 @@ COMPILE_DIR="/tmp/out"
 COMPILE_ONLY="${COMPILE_ONLY:-false}"
 mkdir -p "$OUTPUT" "$COMPILE_DIR"
 
+# Kotlin uses a batched runner: one kotlinc + one java for the whole run,
+# vs. ~2N JVM cold starts in the per-test path below. See kotlin_batch.sh.
+if [ "$LANG" = "kotlin" ] && [ -x /kotlin_batch.sh ]; then
+    exec /kotlin_batch.sh
+fi
+# Java: same pattern — one javac + one JVM dispatching tests reflectively.
+if [ "$LANG" = "java" ] && [ -x /java_batch.sh ]; then
+    exec /java_batch.sh
+fi
+# C#: one dotnet build + one dotnet exec dispatching tests reflectively.
+if [ "$LANG" = "csharp" ] && [ -x /csharp_batch.sh ]; then
+    exec /csharp_batch.sh
+fi
+# TypeScript: one tsx process, dynamic import() per test.
+if [ "$LANG" = "typescript" ] && [ -x /typescript_batch.sh ]; then
+    exec /typescript_batch.sh
+fi
+# Rust: one cargo build produces all test bins, then iterate execs.
+if [ "$LANG" = "rust" ] && [ -x /rust_batch.sh ]; then
+    exec /rust_batch.sh
+fi
+# C++: parallel g++ per test (amortises g++ cold start via xargs -P),
+# then iterate execs.
+if [ "$LANG" = "cpp" ] && [ -x /cpp_batch.sh ]; then
+    exec /cpp_batch.sh
+fi
+# Swift: parallel swiftc per test, then iterate execs.
+if [ "$LANG" = "swift" ] && [ -x /swift_batch.sh ]; then
+    exec /swift_batch.sh
+fi
+# Dart: parallel `dart compile kernel` to .dill, then `dart <dill>` per test.
+if [ "$LANG" = "dart" ] && [ -x /dart_batch.sh ]; then
+    exec /dart_batch.sh
+fi
+# Go: parallel `go build` per test, then iterate execs.
+if [ "$LANG" = "go" ] && [ -x /go_batch.sh ]; then
+    exec /go_batch.sh
+fi
+# Erlang: serial transpile+erlc+escript-gen, then parallel escript exec.
+if [ "$LANG" = "erlang" ] && [ -x /erlang_batch.sh ]; then
+    exec /erlang_batch.sh
+fi
+# GDScript: serial transpile, then parallel godot --script execs.
+if [ "$LANG" = "gdscript" ] && [ -x /gdscript_batch.sh ]; then
+    exec /gdscript_batch.sh
+fi
+# Python: one python3 process imports each test as a module.
+if [ "$LANG" = "python" ] && [ -x /python_batch.sh ]; then
+    exec /python_batch.sh
+fi
+# JavaScript: one node process dynamic-imports each .mjs.
+if [ "$LANG" = "javascript" ] && [ -x /javascript_batch.sh ]; then
+    exec /javascript_batch.sh
+fi
+# Ruby: one ruby process `load`s each test.
+if [ "$LANG" = "ruby" ] && [ -x /ruby_batch.sh ]; then
+    exec /ruby_batch.sh
+fi
+# PHP: one php process `require`s each test inside a function scope.
+if [ "$LANG" = "php" ] && [ -x /php_batch.sh ]; then
+    exec /php_batch.sh
+fi
+# Lua: one lua process loads each test.
+if [ "$LANG" = "lua" ] && [ -x /lua_batch.sh ]; then
+    exec /lua_batch.sh
+fi
+
 # Language configuration
 case "$LANG" in
     python)     target="python_3";  ext="fpy"; out_ext="py" ;;

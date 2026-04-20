@@ -67,7 +67,7 @@ framec: $(STAMP_DIR)/framec-native
 # --- Container images ---
 
 define LANG_BUILD_RULE
-$(STAMP_DIR)/image-$(1): base/$(1)/Dockerfile $(RUNNER) | $(STAMP_DIR)
+$(STAMP_DIR)/image-$(1): base/$(1)/Dockerfile $(RUNNER) runners/framec_cached.sh | $(STAMP_DIR)
 	@echo "=== Building $(1) container ==="
 	@FRAMEC_BIN=/dev/null $(COMPOSE) build \
 		--build-arg RUNNER_HASH=$(RUNNER_HASH) $(1)
@@ -77,6 +77,26 @@ build-$(1): $(STAMP_DIR)/image-$(1)
 endef
 
 $(foreach lang,$(LANGS),$(eval $(call LANG_BUILD_RULE,$(lang))))
+
+# Kotlin's image bakes in TestRunner.jar + kotlin_batch.sh — rebuild when
+# either changes. The kotlin rule from LANG_BUILD_RULE is double-colon
+# here so we augment, not override, its prerequisites.
+$(STAMP_DIR)/image-kotlin: runners/kotlin_batch.sh runners/TestRunner.kt
+$(STAMP_DIR)/image-java: runners/java_batch.sh runners/TestRunner.java
+$(STAMP_DIR)/image-csharp: runners/csharp_batch.sh runners/TestRunner.cs runners/TestRunner.csproj
+$(STAMP_DIR)/image-typescript: runners/typescript_batch.sh runners/TestRunner.ts
+$(STAMP_DIR)/image-rust: runners/rust_batch.sh
+$(STAMP_DIR)/image-cpp: runners/cpp_batch.sh
+$(STAMP_DIR)/image-swift: runners/swift_batch.sh
+$(STAMP_DIR)/image-dart: runners/dart_batch.sh
+$(STAMP_DIR)/image-go: runners/go_batch.sh
+$(STAMP_DIR)/image-erlang: runners/erlang_batch.sh
+$(STAMP_DIR)/image-gdscript: runners/gdscript_batch.sh
+$(STAMP_DIR)/image-python: runners/python_batch.sh runners/TestRunner.py
+$(STAMP_DIR)/image-javascript: runners/javascript_batch.sh runners/TestRunner.mjs
+$(STAMP_DIR)/image-ruby: runners/ruby_batch.sh runners/TestRunner.rb
+$(STAMP_DIR)/image-php: runners/php_batch.sh runners/TestRunner.php
+$(STAMP_DIR)/image-lua: runners/lua_batch.sh runners/TestRunner.lua
 
 build: $(foreach lang,$(LANGS),$(STAMP_DIR)/image-$(lang))
 	@echo "=== All images built ==="

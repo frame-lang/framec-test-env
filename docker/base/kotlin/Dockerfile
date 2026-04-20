@@ -10,6 +10,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends curl unzip && \
     apt-get remove -y curl && apt-get autoremove -y && rm -rf /var/lib/apt/lists/*
 ARG RUNNER_HASH
 COPY runners/runner.sh /runner.sh
-RUN chmod +x /runner.sh
+COPY runners/framec_cached.sh /framec_cached.sh
+COPY runners/kotlin_batch.sh /kotlin_batch.sh
+COPY runners/TestRunner.kt /tmp/TestRunner.kt
+RUN chmod +x /runner.sh /kotlin_batch.sh /framec_cached.sh && \
+    kotlinc /tmp/TestRunner.kt -include-runtime -d /opt/test_runner.jar && \
+    rm /tmp/TestRunner.kt
 ENTRYPOINT ["/runner.sh"]
 CMD ["kotlin"]
