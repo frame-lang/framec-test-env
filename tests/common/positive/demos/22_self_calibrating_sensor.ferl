@@ -1,18 +1,90 @@
-%% Self-Calibrating Sensor — @@:self demo (Erlang)
-%% @@skip: Erlang @@:self not yet supported
+@@target erlang
 
--module(self_calibrating_sensor).
--export([main/0]).
+%% Self-Calibrating Sensor — @@:self demo (Erlang)
+%%
+%% Exercises the two guarantees Erlang's @@:self codegen now provides:
+%%   1. NewData threading — changes a called handler makes to `Data`
+%%      (record updates, state transitions) are visible to the caller.
+%%   2. Transition guard — if the called handler transitions the system
+%%      to a new state, the rest of the caller's body is suppressed and
+%%      the caller returns `{next_state, NewState, ..., ...}` rather than
+%%      continuing into work that belongs to the old state.
+%%
+%% Both are enforced at compile time by the Erlang backend wrapping any
+%% `= frame_dispatch__(...)` site in a `case ...#data.frame_current_state
+%% of OrigState -> rest; _ -> next_state end` expression.
+%%
+%% Verification is by pattern-match — if transition-guard fails, the
+%% subsequent `self.trace = 2` would execute, the `{1 = self.trace,...}`
+%% pattern in `assert_trace` would fail, and the escript would crash.
 
 @@system Sensor {
+    %% Interface order matters — the Erlang test runner calls each
+    %% method in declaration order. attempt_post_shutdown must run FIRST
+    %% (while we're still in $Active) so the @@:self.trigger_shutdown()
+    %% dispatch fires the transition we're guarding against. assert_trace
+    %% runs after the transition, in $Shutdown, and verifies the guard
+    %% suppressed the post-dispatch assignments.
     interface:
-        status(): str
+        attempt_post_shutdown()
+        reading(): int
+        calibrate(): int
+        trigger_shutdown()
+        assert_trace()
+        status(): atom
 
     machine:
         $Active {
-            status(): str { @@:("active") }
-        }
-}
+            reading(): int {
+                @@:(42)
+            }
 
-main() ->
-    io:format("SKIP: self_calibrating_sensor — Erlang @@:self not yet supported~n").
+            calibrate(): int {
+                Baseline = @@:self.reading(),
+                self.offset = Baseline,
+                @@:(Baseline)
+            }
+
+            trigger_shutdown() {
+                -> $Shutdown
+            }
+
+            attempt_post_shutdown() {
+                self.trace = 1,
+                @@:self.trigger_shutdown(),
+                %% Everything below is guarded — if trigger_shutdown
+                %% transitions to $Shutdown (it does), this line and
+                %% the assignment after it MUST be suppressed.
+                self.trace = 2,
+                self.post_guard = 99
+            }
+
+            assert_trace() {
+                %% In $Active, runner calls this BEFORE attempt_post_shutdown,
+                %% so trace is still 0 — fine.
+                ok
+            }
+
+            status(): atom { @@:(active) }
+        }
+
+        $Shutdown {
+            %% After attempt_post_shutdown transitioned, we're here. The
+            %% runner will now invoke assert_trace (and anything else
+            %% remaining from the interface) in this state.
+            assert_trace() {
+                %% The transition-guard MUST have suppressed `trace = 2`
+                %% and `post_guard = 99`. If it didn't, these pattern
+                %% matches fail and the test crashes.
+                1 = Data#data.trace,
+                0 = Data#data.post_guard
+            }
+
+            status(): atom { @@:(shutdown) }
+        }
+
+    domain:
+        offset: int = 0
+        trace: int = 0
+        post_guard: int = 0
+}
