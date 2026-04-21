@@ -1,0 +1,260 @@
+#!/usr/bin/env bash
+#
+# Runs fuzz cases (from gen.py) through framec and then the target
+# language's parser/compiler. The goal is to surface framec codegen bugs,
+# so we do syntax+semantic checks without linking/running (fast feedback).
+#
+# Per case we write one row to logs/summary.tsv with columns:
+#   lang  case  stage  result  error_head
+# where stage is "transpile" or "compile" and result is PASS, FAIL, or
+# SKIP_NO_TOOLCHAIN.
+#
+# Usage:
+#   ./run.sh                         # all languages
+#   ./run.sh python_3 rust           # a subset
+#   TRANSPILE_ONLY=1 ./run.sh        # skip compile step
+#
+# Environment:
+#   FRAMEC  path to framec binary (default: ../../framepiler/target/release/framec)
+
+set -o pipefail
+
+SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
+FRAMEC=${FRAMEC:-$(cd "$SCRIPT_DIR/../../framepiler" 2>/dev/null && pwd)/target/release/framec}
+if [ ! -x "$FRAMEC" ]; then
+    FRAMEC=/Users/marktruluck/projects/framepiler/target/release/framec
+fi
+
+CASES_DIR=$SCRIPT_DIR/cases
+OUT_DIR=$SCRIPT_DIR/out
+LOG_DIR=$SCRIPT_DIR/logs
+mkdir -p "$OUT_DIR" "$LOG_DIR"
+
+TRANSPILE_ONLY=${TRANSPILE_ONLY:-0}
+
+LANGS=${@:-"python_3 typescript javascript rust c cpp_23 csharp java go php kotlin swift ruby erlang lua dart gdscript"}
+
+summary_file=$LOG_DIR/summary.tsv
+: > "$summary_file"
+printf "lang\tcase\tstage\tresult\terror\n" >> "$summary_file"
+
+lang_to_ext() {
+    case "$1" in
+        python_3)   echo fpy ;;
+        typescript) echo fts ;;
+        javascript) echo fjs ;;
+        rust)       echo frs ;;
+        c)          echo fc ;;
+        cpp_23)     echo fcpp ;;
+        csharp)     echo fcs ;;
+        java)       echo fjava ;;
+        go)         echo fgo ;;
+        php)        echo fphp ;;
+        kotlin)     echo fkt ;;
+        swift)      echo fswift ;;
+        ruby)       echo frb ;;
+        erlang)     echo ferl ;;
+        lua)        echo flua ;;
+        dart)       echo fdart ;;
+        gdscript)   echo fgd ;;
+    esac
+}
+
+# Compile/parse-check per language. 0 = pass, 1 = fail, 77 = skip (no tool).
+compile_check() {
+    local lang=$1
+    local genfile=$2
+    local out=$3
+    local errlog=$4
+
+    case "$lang" in
+        python_3)
+            python3 -c "import ast; ast.parse(open('$genfile').read())" > "$errlog" 2>&1
+            ;;
+
+        gdscript)
+            # GDScript needs Godot. Skip if not available.
+            if command -v godot >/dev/null 2>&1; then
+                godot --headless --check-only --script "$genfile" > "$errlog" 2>&1
+            else
+                echo "no godot" > "$errlog"; return 77
+            fi
+            ;;
+
+        typescript)
+            if command -v tsc >/dev/null 2>&1; then
+                tsc --noEmit --skipLibCheck --target es2020 --module es2020 \
+                    --strict false --noImplicitAny false --allowJs \
+                    "$genfile" > "$errlog" 2>&1
+            else
+                echo "no tsc" > "$errlog"; return 77
+            fi
+            ;;
+
+        javascript)
+            local mjs="${genfile%.js}.mjs"
+            cp "$genfile" "$mjs"
+            node --check "$mjs" 2>"$errlog"
+            ;;
+
+        rust)
+            rustc --edition 2021 --crate-type=lib -o "$out/lib.rlib" \
+                  "$genfile" 2>"$errlog"
+            ;;
+
+        c)
+            gcc -c -o /dev/null "$genfile" 2>"$errlog"
+            ;;
+
+        cpp_23)
+            g++ -std=c++2a -c -o /dev/null "$genfile" 2>"$errlog"
+            ;;
+
+        csharp)
+            if ! command -v dotnet >/dev/null 2>&1; then
+                echo "no dotnet" > "$errlog"; return 77
+            fi
+            # Reuse a single classlib probe across all cases — `dotnet build`
+            # is ~20 sec cold-start and ~0.3 sec warm; creating one probe per
+            # case would be a lifetime.
+            local pdir="$OUT_DIR/_csharp_probe"
+            if [ ! -f "$pdir/fuzz_probe.csproj" ]; then
+                mkdir -p "$pdir"
+                (cd "$pdir" && dotnet new classlib -o . --force >/dev/null 2>&1) \
+                    || { echo "dotnet new failed" > "$errlog"; return 1; }
+                rm -f "$pdir/Class1.cs"
+                # Warm the build cache once.
+                dotnet build "$pdir" --nologo -v q > /dev/null 2>&1 || true
+            fi
+            cp "$genfile" "$pdir/Fuzz.cs"
+            dotnet build "$pdir" --nologo -v q --no-restore > "$errlog" 2>&1
+            rm -f "$pdir/Fuzz.cs"
+            ;;
+
+        java)
+            local cls_dir="$out/cls"
+            mkdir -p "$cls_dir"
+            javac -d "$cls_dir" "$genfile" 2>"$errlog"
+            ;;
+
+        go)
+            local gdir="$out/gomod"
+            mkdir -p "$gdir"
+            [ -f "$gdir/go.mod" ] || (cd "$gdir" && go mod init fuzz >/dev/null 2>&1)
+            cp "$genfile" "$gdir/main.go"
+            (cd "$gdir" && go vet .) > "$errlog" 2>&1
+            ;;
+
+        php)
+            php -l "$genfile" > "$errlog" 2>&1
+            ;;
+
+        kotlin)
+            if ! command -v kotlinc >/dev/null 2>&1; then
+                echo "no kotlinc" > "$errlog"; return 77
+            fi
+            kotlinc -d "$out/classes" "$genfile" > "$errlog" 2>&1
+            ;;
+
+        swift)
+            swiftc -parse "$genfile" 2>"$errlog"
+            ;;
+
+        ruby)
+            ruby -c "$genfile" > "$errlog" 2>&1
+            ;;
+
+        erlang)
+            local mod
+            mod=$(grep -m1 '^-module(' "$genfile" | sed 's/-module(\(.*\))\./\1/')
+            if [ -z "$mod" ]; then
+                echo "no -module directive" > "$errlog"; return 1
+            fi
+            local target_erl="$out/${mod}.erl"
+            cp "$genfile" "$target_erl"
+            (cd "$out" && erlc "$target_erl") 2>"$errlog"
+            ;;
+
+        lua)
+            luac -p "$genfile" 2>"$errlog"
+            ;;
+
+        dart)
+            dart analyze "$genfile" > "$errlog" 2>&1
+            if grep -q "^ *error" "$errlog"; then return 1; fi
+            return 0
+            ;;
+
+        *)
+            echo "unknown lang: $lang" > "$errlog"; return 1
+            ;;
+    esac
+}
+
+run_case() {
+    local lang=$1
+    local case_file=$2
+    local case_id=$(basename "$case_file" | sed 's/\.f[a-z]*$//')
+    local out="$OUT_DIR/$lang/$case_id"
+    rm -rf "$out" 2>/dev/null
+    mkdir -p "$out"
+    local errlog="$LOG_DIR/$lang-$case_id.err"
+
+    if ! "$FRAMEC" compile -l "$lang" -o "$out" "$case_file" > "$errlog" 2>&1; then
+        local err=$(head -3 "$errlog" | grep -v frame_runtime | tr '\n' '|' | head -c 220)
+        printf "%s\t%s\ttranspile\tFAIL\t%s\n" "$lang" "$case_id" "$err" >> "$summary_file"
+        return 1
+    fi
+    local genfile
+    genfile=$(ls "$out"/*.* 2>/dev/null | grep -v '\.log$\|\.err$' | head -1)
+    if [ -z "$genfile" ]; then
+        printf "%s\t%s\ttranspile\tNO_OUTPUT\t\n" "$lang" "$case_id" >> "$summary_file"
+        return 1
+    fi
+
+    if [ "$TRANSPILE_ONLY" = "1" ]; then
+        printf "%s\t%s\ttranspile\tPASS\t\n" "$lang" "$case_id" >> "$summary_file"
+        return 0
+    fi
+
+    compile_check "$lang" "$genfile" "$out" "$errlog"
+    local rc=$?
+    if [ $rc -eq 77 ]; then
+        printf "%s\t%s\tcompile\tSKIP_NO_TOOLCHAIN\t\n" "$lang" "$case_id" >> "$summary_file"
+        return 0
+    fi
+    if [ $rc -ne 0 ]; then
+        local err=$(head -3 "$errlog" | tr '\n' '|' | head -c 220)
+        printf "%s\t%s\tcompile\tFAIL\t%s\n" "$lang" "$case_id" "$err" >> "$summary_file"
+        return 1
+    fi
+    printf "%s\t%s\tok\tPASS\t\n" "$lang" "$case_id" >> "$summary_file"
+    return 0
+}
+
+for lang in $LANGS; do
+    ext=$(lang_to_ext "$lang")
+    if [ -z "$ext" ]; then
+        echo "skip unknown: $lang"
+        continue
+    fi
+    cases=$(ls "$CASES_DIR/$lang"/case_*.$ext 2>/dev/null | sort)
+    total=$(echo "$cases" | grep -c . || echo 0)
+    if [ "$total" -eq 0 ]; then
+        echo "$lang: no cases in $CASES_DIR/$lang (run gen.py first)"
+        continue
+    fi
+    echo "=== $lang ($total cases) ==="
+    for case_file in $cases; do
+        run_case "$lang" "$case_file" >/dev/null
+    done
+    pass=$(awk -v L="$lang" -F'\t' '$1==L && $4=="PASS"{n++} END{print n+0}' "$summary_file")
+    fail=$(awk -v L="$lang" -F'\t' '$1==L && $4=="FAIL"{n++} END{print n+0}' "$summary_file")
+    skip=$(awk -v L="$lang" -F'\t' '$1==L && $4 ~ /SKIP/{n++} END{print n+0}' "$summary_file")
+    echo "$lang: $pass pass / $fail fail / $skip skip"
+done
+
+echo ""
+echo "=== Failure summary (stage × lang) ==="
+awk -F'\t' 'NR>1 && $4=="FAIL" {print $1"  "$3}' "$summary_file" \
+    | sort | uniq -c | sort -rn | head -20
