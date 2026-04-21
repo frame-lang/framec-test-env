@@ -1,0 +1,218 @@
+@@target kotlin
+
+// Wi-Fi Station Management -- IEEE 802.11 station state machine.
+
+@@system WifiStation {
+    interface:
+        scan_done(bssid: String, ssid: String)
+        auth_response(success: Boolean)
+        assoc_response(success: Boolean, aid: Int)
+        eapol_key_msg(msg_num: Int)
+        deauth(reason: String)
+        disassoc(reason: String)
+        disconnect()
+        status(): String
+        key_step(): Int
+
+    machine:
+        $Disconnected {
+            scan_done(bssid: String, ssid: String) {
+                this.bssid = bssid
+                this.ssid = ssid
+                -> $Authenticating
+            }
+            status(): String { @@:("disconnected") }
+            key_step(): Int { @@:(0) }
+        }
+
+        $Authenticating => $Associated {
+            $>() {
+                this.send_auth_request()
+            }
+
+            auth_response(success: Boolean) {
+                if (success) {
+                    -> $Associating
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): String { @@:("authenticating") }
+            key_step(): Int { @@:(0) }
+            => $^
+        }
+
+        $Associating => $Associated {
+            $>() {
+                this.send_assoc_request()
+            }
+
+            assoc_response(success: Boolean, aid: Int) {
+                if (success) {
+                    this.aid = aid
+                    -> $KeyNegotiation
+                } else {
+                    -> $Disconnected
+                }
+            }
+            disassoc(reason: String) {
+                -> $Authenticating
+            }
+            status(): String { @@:("associating") }
+            key_step(): Int { @@:(0) }
+            => $^
+        }
+
+        $KeyNegotiation => $Associated {
+            $.step: Int = 0
+
+            eapol_key_msg(msg_num: Int) {
+                $.step = msg_num
+                if (msg_num == 4) {
+                    -> $Connected
+                }
+            }
+            disassoc(reason: String) {
+                -> $Authenticating
+            }
+            status(): String { @@:("key negotiation") }
+            key_step(): Int { @@:($.step) }
+            => $^
+        }
+
+        $Associated {
+            deauth(reason: String) {
+                -> $Disconnected
+            }
+            disconnect() {
+                this.send_deauth()
+                -> $Disconnected
+            }
+        }
+
+        $Connected {
+            disassoc(reason: String) {
+                -> $Authenticating
+            }
+            deauth(reason: String) {
+                -> $Disconnected
+            }
+            disconnect() {
+                this.send_deauth()
+                -> $Disconnected
+            }
+            status(): String { @@:("connected") }
+            key_step(): Int { @@:(4) }
+        }
+
+    actions:
+        send_auth_request() {}
+        send_assoc_request() {}
+        send_deauth() {}
+
+    domain:
+        bssid: String = ""
+        ssid: String = ""
+        aid: Int = 0
+}
+
+
+fun check_str(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label -- expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun check_int(label: String, actual: Int, expected: Int) {
+    if (actual != expected) {
+        println("FAIL: $label -- expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun test_happy_connect() {
+    val sta = WifiStation()
+    check_str("initial disconnected", sta.status() as String, "disconnected")
+    sta.scan_done("AA:BB:CC:DD:EE:FF", "MyNet")
+    check_str("authenticating", sta.status() as String, "authenticating")
+    sta.auth_response(true)
+    check_str("associating", sta.status() as String, "associating")
+    sta.assoc_response(true, 1)
+    check_str("key negotiation", sta.status() as String, "key negotiation")
+    sta.eapol_key_msg(1)
+    check_int("step 1", sta.key_step() as Int, 1)
+    sta.eapol_key_msg(2)
+    check_int("step 2", sta.key_step() as Int, 2)
+    sta.eapol_key_msg(3)
+    check_int("step 3", sta.key_step() as Int, 3)
+    sta.eapol_key_msg(4)
+    check_str("connected", sta.status() as String, "connected")
+    println("PASS: happy connect through 4-way handshake")
+}
+
+fun test_auth_rejection() {
+    val sta = WifiStation()
+    sta.scan_done("aa", "net")
+    sta.auth_response(false)
+    check_str("auth rejected -> disconnected", sta.status() as String, "disconnected")
+    println("PASS: auth rejection returns to disconnected")
+}
+
+fun test_deauth_from_keynegotiation_via_hsm() {
+    val sta = WifiStation()
+    sta.scan_done("aa", "net")
+    sta.auth_response(true)
+    sta.assoc_response(true, 5)
+    sta.eapol_key_msg(2)
+    check_str("in key negotiation", sta.status() as String, "key negotiation")
+    sta.deauth("AP restart")
+    check_str("deauth forwarded via HSM -> disconnected", sta.status() as String, "disconnected")
+    println("PASS: deauth forwards via HSM parent from key negotiation")
+}
+
+fun test_disassoc_drops_to_authenticating() {
+    val sta = WifiStation()
+    sta.scan_done("aa", "net")
+    sta.auth_response(true)
+    sta.assoc_response(true, 7)
+    sta.eapol_key_msg(2)
+    sta.disassoc("reason")
+    check_str("disassoc -> authenticating", sta.status() as String, "authenticating")
+    sta.assoc_response(true, 7)
+    check_int("step resets on reentry", sta.key_step() as Int, 0)
+    println("PASS: disassoc drops to authenticating (state var resets)")
+}
+
+fun test_deauth_from_connected() {
+    val sta = WifiStation()
+    sta.scan_done("aa", "net")
+    sta.auth_response(true)
+    sta.assoc_response(true, 3)
+    sta.eapol_key_msg(4)
+    check_str("connected", sta.status() as String, "connected")
+    sta.deauth("inactivity")
+    check_str("deauth from connected", sta.status() as String, "disconnected")
+    println("PASS: deauth from connected returns to disconnected")
+}
+
+fun test_disconnect_from_connected() {
+    val sta = WifiStation()
+    sta.scan_done("aa", "net")
+    sta.auth_response(true)
+    sta.assoc_response(true, 3)
+    sta.eapol_key_msg(4)
+    sta.disconnect()
+    check_str("disconnect from connected", sta.status() as String, "disconnected")
+    println("PASS: explicit disconnect from connected")
+}
+
+fun main() {
+    test_happy_connect()
+    test_auth_rejection()
+    test_deauth_from_keynegotiation_via_hsm()
+    test_disassoc_drops_to_authenticating()
+    test_deauth_from_connected()
+    test_disconnect_from_connected()
+    println("PASS: all Wi-Fi station tests passed")
+}

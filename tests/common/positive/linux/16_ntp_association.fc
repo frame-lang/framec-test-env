@@ -1,0 +1,210 @@
+@@target c
+
+// NTP Client Association -- RFC 5905.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system NtpAssociation {
+    operations:
+        get_offset(): int { return self->last_offset; }
+        is_reachable(): bool { return self->reach_register > 0; }
+
+    interface:
+        poll_tick()
+        response_received(offset_ms: int, delay_ms: int)
+        poll_timeout()
+        status(): str
+        poll_interval(): int
+        reach(): int
+
+    machine:
+        $Unsynced {
+            $>() {
+                self->poll_interval_v = self->min_poll;
+            }
+
+            poll_tick() {
+            }
+            response_received(offset_ms: int, delay_ms: int) {
+                NtpAssociation_shift_reach_register(self, 1);
+                self->last_offset = offset_ms;
+                self->last_delay = delay_ms;
+                self->good_responses = self->good_responses + 1;
+                if (self->good_responses >= self->sync_threshold) {
+                    -> $Synced
+                }
+            }
+            poll_timeout() {
+                NtpAssociation_shift_reach_register(self, 0);
+            }
+            status(): str { @@:("unsynced") }
+            poll_interval(): int { @@:(self->poll_interval_v) }
+            reach(): int { @@:(self->reach_register) }
+        }
+
+        $Synced {
+            poll_tick() {
+            }
+            response_received(offset_ms: int, delay_ms: int) {
+                NtpAssociation_shift_reach_register(self, 1);
+                self->last_offset = offset_ms;
+                self->last_delay = delay_ms;
+                if (self->poll_interval_v < self->max_poll) {
+                    self->poll_interval_v = self->poll_interval_v * 2;
+                }
+            }
+            poll_timeout() {
+                NtpAssociation_shift_reach_register(self, 0);
+                self->consecutive_timeouts = self->consecutive_timeouts + 1;
+                if (self->consecutive_timeouts >= 3) {
+                    self->consecutive_timeouts = 0;
+                    self->good_responses = 0;
+                    -> $Unsynced
+                }
+                if (self->poll_interval_v > self->min_poll) {
+                    self->poll_interval_v = self->poll_interval_v >> 1;
+                }
+            }
+            status(): str { @@:("synced") }
+            poll_interval(): int { @@:(self->poll_interval_v) }
+            reach(): int { @@:(self->reach_register) }
+        }
+
+    actions:
+        shift_reach_register(bit: int) {
+            self->reach_register = ((self->reach_register << 1) | bit) & 0xFF;
+            if (bit != 0) {
+                self->consecutive_timeouts = 0;
+            }
+        }
+
+    domain:
+        poll_interval_v: int = 64
+        min_poll: int = 64
+        max_poll: int = 1024
+        reach_register: int = 0
+        last_offset: int = 0
+        last_delay: int = 0
+        good_responses: int = 0
+        sync_threshold: int = 3
+        consecutive_timeouts: int = 0
+}
+
+
+void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void check_int(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s -- expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void check_bool(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s -- expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void test_builds_to_sync(void) {
+    NtpAssociation* ntp = @@NtpAssociation();
+    check_str("initial unsynced", (const char*)NtpAssociation_status(ntp), "unsynced");
+    NtpAssociation_poll_tick(ntp);
+    NtpAssociation_response_received(ntp, 12, 3);
+    NtpAssociation_poll_tick(ntp);
+    NtpAssociation_response_received(ntp, 11, 2);
+    check_str("not yet synced (2 good)", (const char*)NtpAssociation_status(ntp), "unsynced");
+    NtpAssociation_poll_tick(ntp);
+    NtpAssociation_response_received(ntp, 12, 3);
+    check_str("synced after 3 good responses", (const char*)NtpAssociation_status(ntp), "synced");
+    printf("PASS: sync threshold reached after 3 good responses\n");
+    NtpAssociation_destroy(ntp);
+}
+
+void test_poll_interval_backs_off(void) {
+    NtpAssociation* ntp = @@NtpAssociation();
+    NtpAssociation_poll_tick(ntp); NtpAssociation_response_received(ntp, 10, 2);
+    NtpAssociation_poll_tick(ntp); NtpAssociation_response_received(ntp, 10, 2);
+    NtpAssociation_poll_tick(ntp); NtpAssociation_response_received(ntp, 10, 2);
+    check_str("synced", (const char*)NtpAssociation_status(ntp), "synced");
+    check_int("interval at min (64)", NtpAssociation_poll_interval(ntp), 64);
+    NtpAssociation_poll_tick(ntp); NtpAssociation_response_received(ntp, 10, 2);
+    check_int("128 after 1 good in synced", NtpAssociation_poll_interval(ntp), 128);
+    NtpAssociation_poll_tick(ntp); NtpAssociation_response_received(ntp, 10, 2);
+    check_int("256 after 2 good", NtpAssociation_poll_interval(ntp), 256);
+    printf("PASS: poll interval doubles on success in synced\n");
+    NtpAssociation_destroy(ntp);
+}
+
+void test_timeout_shrinks_interval(void) {
+    NtpAssociation* ntp = @@NtpAssociation();
+    NtpAssociation_poll_tick(ntp); NtpAssociation_response_received(ntp, 10, 2);
+    NtpAssociation_poll_tick(ntp); NtpAssociation_response_received(ntp, 10, 2);
+    NtpAssociation_poll_tick(ntp); NtpAssociation_response_received(ntp, 10, 2);
+    NtpAssociation_poll_tick(ntp); NtpAssociation_response_received(ntp, 10, 2);
+    check_int("interval 128", NtpAssociation_poll_interval(ntp), 128);
+    NtpAssociation_poll_tick(ntp); NtpAssociation_poll_timeout(ntp);
+    check_int("timeout halves -> 64", NtpAssociation_poll_interval(ntp), 64);
+    printf("PASS: timeout halves poll interval in synced\n");
+    NtpAssociation_destroy(ntp);
+}
+
+void test_three_timeouts_drops_to_unsync(void) {
+    NtpAssociation* ntp = @@NtpAssociation();
+    NtpAssociation_poll_tick(ntp); NtpAssociation_response_received(ntp, 10, 2);
+    NtpAssociation_poll_tick(ntp); NtpAssociation_response_received(ntp, 10, 2);
+    NtpAssociation_poll_tick(ntp); NtpAssociation_response_received(ntp, 10, 2);
+    check_str("synced", (const char*)NtpAssociation_status(ntp), "synced");
+    NtpAssociation_poll_tick(ntp); NtpAssociation_poll_timeout(ntp);
+    NtpAssociation_poll_tick(ntp); NtpAssociation_poll_timeout(ntp);
+    check_str("still synced after 2 timeouts", (const char*)NtpAssociation_status(ntp), "synced");
+    NtpAssociation_poll_tick(ntp); NtpAssociation_poll_timeout(ntp);
+    check_str("3rd timeout drops to unsync", (const char*)NtpAssociation_status(ntp), "unsynced");
+    printf("PASS: three consecutive timeouts drop to unsync\n");
+    NtpAssociation_destroy(ntp);
+}
+
+void test_reach_register_shifts(void) {
+    NtpAssociation* ntp = @@NtpAssociation();
+    check_int("reach starts 0", NtpAssociation_reach(ntp), 0);
+    NtpAssociation_poll_tick(ntp);
+    NtpAssociation_response_received(ntp, 10, 2);
+    check_int("reach 0b00000001 = 1", NtpAssociation_reach(ntp), 1);
+    NtpAssociation_poll_tick(ntp);
+    NtpAssociation_response_received(ntp, 10, 2);
+    check_int("reach 0b00000011 = 3", NtpAssociation_reach(ntp), 3);
+    NtpAssociation_poll_tick(ntp);
+    NtpAssociation_poll_timeout(ntp);
+    check_int("reach 0b00000110 = 6", NtpAssociation_reach(ntp), 6);
+    printf("PASS: reach register shifts correctly\n");
+    NtpAssociation_destroy(ntp);
+}
+
+void test_is_reachable_operation(void) {
+    NtpAssociation* ntp = @@NtpAssociation();
+    check_bool("initial not reachable", NtpAssociation_is_reachable(ntp), 0);
+    NtpAssociation_poll_tick(ntp);
+    NtpAssociation_response_received(ntp, 10, 2);
+    check_bool("after good response reachable", NtpAssociation_is_reachable(ntp), 1);
+    printf("PASS: is_reachable() operation query\n");
+    NtpAssociation_destroy(ntp);
+}
+
+int main(void) {
+    test_builds_to_sync();
+    test_poll_interval_backs_off();
+    test_timeout_shrinks_interval();
+    test_three_timeouts_drops_to_unsync();
+    test_reach_register_shifts();
+    test_is_reachable_operation();
+    printf("PASS: all NTP association tests passed\n");
+    return 0;
+}

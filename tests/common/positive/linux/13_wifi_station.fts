@@ -1,0 +1,214 @@
+@@target typescript
+
+// Wi-Fi Station Management -- IEEE 802.11 station state machine.
+// HSM: $Authenticating, $Associating, $KeyNegotiation are children of
+// $Associated (which handles deauth()). Each child's trailing `=> $^`
+// forwards unhandled events up. disassoc drops to $Authenticating;
+// deauth resets to $Disconnected. State variable $.step in $KeyNegotiation
+// resets on re-entry (unlike push$/pop$ which preserves state vars).
+
+@@system WifiStation {
+    interface:
+        scan_done(bssid: string, ssid: string)
+        auth_response(success: boolean)
+        assoc_response(success: boolean, aid: number)
+        eapol_key_msg(msg_num: number)
+        deauth(reason: string)
+        disassoc(reason: string)
+        disconnect()
+        status(): string
+        key_step(): number
+
+    machine:
+        $Disconnected {
+            scan_done(bssid: string, ssid: string) {
+                this.bssid = bssid;
+                this.ssid = ssid;
+                -> $Authenticating
+            }
+            status(): string { @@:("disconnected") }
+            key_step(): number { @@:(0) }
+        }
+
+        $Authenticating => $Associated {
+            $>() {
+                this.send_auth_request();
+            }
+
+            auth_response(success: boolean) {
+                if (success) {
+                    -> $Associating
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): string { @@:("authenticating") }
+            key_step(): number { @@:(0) }
+            => $^
+        }
+
+        $Associating => $Associated {
+            $>() {
+                this.send_assoc_request();
+            }
+
+            assoc_response(success: boolean, aid: number) {
+                if (success) {
+                    this.aid = aid;
+                    -> $KeyNegotiation
+                } else {
+                    -> $Disconnected
+                }
+            }
+            disassoc(reason: string) {
+                -> $Authenticating
+            }
+            status(): string { @@:("associating") }
+            key_step(): number { @@:(0) }
+            => $^
+        }
+
+        $KeyNegotiation => $Associated {
+            $.step: number = 0
+
+            eapol_key_msg(msg_num: number) {
+                $.step = msg_num;
+                if (msg_num === 4) {
+                    -> $Connected
+                }
+            }
+            disassoc(reason: string) {
+                -> $Authenticating
+            }
+            status(): string { @@:("key negotiation") }
+            key_step(): number { @@:($.step) }
+            => $^
+        }
+
+        $Associated {
+            deauth(reason: string) {
+                -> $Disconnected
+            }
+            disconnect() {
+                this.send_deauth();
+                -> $Disconnected
+            }
+        }
+
+        $Connected {
+            disassoc(reason: string) {
+                -> $Authenticating
+            }
+            deauth(reason: string) {
+                -> $Disconnected
+            }
+            disconnect() {
+                this.send_deauth();
+                -> $Disconnected
+            }
+            status(): string { @@:("connected") }
+            key_step(): number { @@:(4) }
+        }
+
+    actions:
+        send_auth_request() {}
+        send_assoc_request() {}
+        send_deauth() {}
+
+    domain:
+        bssid: string = ""
+        ssid: string = ""
+        aid: number = 0
+}
+
+
+function check(label: string, actual: any, expected: any): void {
+    if (actual !== expected) {
+        console.log(`FAIL: ${label} -- expected '${expected}', got '${actual}'`);
+        throw new Error(`assertion failed: ${label}`);
+    }
+}
+
+function test_happy_connect(): void {
+    const sta = @@WifiStation();
+    check("initial disconnected", sta.status(), "disconnected");
+    sta.scan_done("AA:BB:CC:DD:EE:FF", "MyNet");
+    check("authenticating", sta.status(), "authenticating");
+    sta.auth_response(true);
+    check("associating", sta.status(), "associating");
+    sta.assoc_response(true, 1);
+    check("key negotiation", sta.status(), "key negotiation");
+    sta.eapol_key_msg(1);
+    check("step 1", sta.key_step(), 1);
+    sta.eapol_key_msg(2);
+    check("step 2", sta.key_step(), 2);
+    sta.eapol_key_msg(3);
+    check("step 3", sta.key_step(), 3);
+    sta.eapol_key_msg(4);
+    check("connected", sta.status(), "connected");
+    console.log("PASS: happy connect through 4-way handshake");
+}
+
+function test_auth_rejection(): void {
+    const sta = @@WifiStation();
+    sta.scan_done("aa", "net");
+    sta.auth_response(false);
+    check("auth rejected -> disconnected", sta.status(), "disconnected");
+    console.log("PASS: auth rejection returns to disconnected");
+}
+
+function test_deauth_from_keynegotiation_via_hsm(): void {
+    const sta = @@WifiStation();
+    sta.scan_done("aa", "net");
+    sta.auth_response(true);
+    sta.assoc_response(true, 5);
+    sta.eapol_key_msg(2);
+    check("in key negotiation", sta.status(), "key negotiation");
+    sta.deauth("AP restart");
+    check("deauth forwarded via HSM -> disconnected", sta.status(), "disconnected");
+    console.log("PASS: deauth forwards via HSM parent from key negotiation");
+}
+
+function test_disassoc_drops_to_authenticating(): void {
+    const sta = @@WifiStation();
+    sta.scan_done("aa", "net");
+    sta.auth_response(true);
+    sta.assoc_response(true, 7);
+    sta.eapol_key_msg(2);
+    sta.disassoc("reason");
+    check("disassoc -> authenticating", sta.status(), "authenticating");
+    sta.assoc_response(true, 7);
+    check("step resets on reentry", sta.key_step(), 0);
+    console.log("PASS: disassoc drops to authenticating (state var resets)");
+}
+
+function test_deauth_from_connected(): void {
+    const sta = @@WifiStation();
+    sta.scan_done("aa", "net");
+    sta.auth_response(true);
+    sta.assoc_response(true, 3);
+    sta.eapol_key_msg(4);
+    check("connected", sta.status(), "connected");
+    sta.deauth("inactivity");
+    check("deauth from connected", sta.status(), "disconnected");
+    console.log("PASS: deauth from connected returns to disconnected");
+}
+
+function test_disconnect_from_connected(): void {
+    const sta = @@WifiStation();
+    sta.scan_done("aa", "net");
+    sta.auth_response(true);
+    sta.assoc_response(true, 3);
+    sta.eapol_key_msg(4);
+    sta.disconnect();
+    check("disconnect from connected", sta.status(), "disconnected");
+    console.log("PASS: explicit disconnect from connected");
+}
+
+test_happy_connect();
+test_auth_rejection();
+test_deauth_from_keynegotiation_via_hsm();
+test_disassoc_drops_to_authenticating();
+test_deauth_from_connected();
+test_disconnect_from_connected();
+console.log("PASS: all Wi-Fi station tests passed");

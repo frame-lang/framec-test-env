@@ -1,0 +1,198 @@
+@@target go
+
+// TLS Handshake (server side) — RFC 5246 Section 7.3.
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system TlsServerHandshake {
+    interface:
+        ClientHello(version: string, cipher: string)
+        ClientKeyExchange(key_data: string)
+        ClientChangeCipherSpec()
+        ClientFinished(verify: string)
+        Alert(level: string, desc: string)
+        Status(): string
+
+    machine:
+        $Idle {
+            ClientHello(version: string, cipher: string) {
+                s.client_version = version
+                if cipher == "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256" {
+                    s.selected_cipher = cipher
+                    -> $ServerHello
+                } else {
+                    if cipher == "TLS_RSA_WITH_AES_128_CBC_SHA" {
+                        s.selected_cipher = cipher
+                        -> $ServerHello
+                    } else {
+                        s.send_alert()
+                        -> $Closed
+                    }
+                }
+            }
+            Status(): string { @@:("idle") }
+        }
+
+        $ServerHello => $Handshaking {
+            $>() {
+                s.send_server_hello()
+                s.send_certificate()
+                s.send_server_hello_done()
+                -> $AwaitClientKeyExchange
+            }
+            Status(): string { @@:("server hello") }
+            => $^
+        }
+
+        $AwaitClientKeyExchange => $Handshaking {
+            ClientKeyExchange(key_data: string) {
+                s.premaster = key_data
+                s.derive_keys()
+                -> $AwaitChangeCipherSpec
+            }
+            Status(): string { @@:("await key exchange") }
+            => $^
+        }
+
+        $AwaitChangeCipherSpec => $Handshaking {
+            ClientChangeCipherSpec() {
+                s.client_encrypted = true
+                -> $AwaitClientFinished
+            }
+            Status(): string { @@:("await change cipher spec") }
+            => $^
+        }
+
+        $AwaitClientFinished => $Handshaking {
+            ClientFinished(verify: string) {
+                if verify == "valid" {
+                    s.send_change_cipher_spec()
+                    s.send_finished()
+                    -> $Established
+                } else {
+                    s.send_alert()
+                    -> $Closed
+                }
+            }
+            Status(): string { @@:("await client finished") }
+            => $^
+        }
+
+        $Handshaking {
+            Alert(level: string, desc: string) {
+                if level == "fatal" {
+                    -> $Closed
+                }
+            }
+        }
+
+        $Established {
+            Alert(level: string, desc: string) {
+                if level == "fatal" {
+                    -> $Closed
+                }
+            }
+            Status(): string { @@:("established") }
+        }
+
+        $Closed {
+            Status(): string { @@:("closed") }
+        }
+
+    actions:
+        send_server_hello() {}
+        send_certificate() {}
+        send_server_hello_done() {}
+        derive_keys() {}
+        send_change_cipher_spec() {}
+        send_finished() {}
+        send_alert() {}
+
+    domain:
+        client_version: string = ""
+        selected_cipher: string = ""
+        premaster: string = ""
+        client_encrypted: bool = false
+}
+
+
+func check(label, actual, expected string) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func test_happy_handshake() {
+	tls := NewTlsServerHandshake()
+	check("initial idle", tls.Status(), "idle")
+	tls.ClientHello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+	check("after ClientHello -> through ServerHello to await", tls.Status(), "await key exchange")
+	tls.ClientKeyExchange("premaster_data")
+	check("after key exchange", tls.Status(), "await change cipher spec")
+	tls.ClientChangeCipherSpec()
+	check("after CCS", tls.Status(), "await client finished")
+	tls.ClientFinished("valid")
+	check("established", tls.Status(), "established")
+	fmt.Println("PASS: happy TLS handshake")
+}
+
+func test_unsupported_cipher_closes() {
+	tls := NewTlsServerHandshake()
+	tls.ClientHello("TLS 1.2", "TLS_NULL_WITH_NULL_NULL")
+	check("no matching cipher -> closed", tls.Status(), "closed")
+	fmt.Println("PASS: unsupported cipher closes handshake")
+}
+
+func test_fatal_alert_during_handshake() {
+	tls := NewTlsServerHandshake()
+	tls.ClientHello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+	tls.Alert("fatal", "unexpected_message")
+	check("fatal alert -> closed (via HSM parent)", tls.Status(), "closed")
+	fmt.Println("PASS: fatal alert forwards via HSM parent to $Closed")
+}
+
+func test_warning_alert_ignored() {
+	tls := NewTlsServerHandshake()
+	tls.ClientHello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+	tls.Alert("warning", "close_notify_soon")
+	check("warning alert doesn't close", tls.Status(), "await key exchange")
+	fmt.Println("PASS: warning alert doesn't close handshake")
+}
+
+func test_invalid_finished_closes() {
+	tls := NewTlsServerHandshake()
+	tls.ClientHello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+	tls.ClientKeyExchange("bogus")
+	tls.ClientChangeCipherSpec()
+	tls.ClientFinished("invalid")
+	check("bad verify -> closed", tls.Status(), "closed")
+	fmt.Println("PASS: invalid client_finished closes")
+}
+
+func test_fatal_alert_in_established() {
+	tls := NewTlsServerHandshake()
+	tls.ClientHello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+	tls.ClientKeyExchange("pm")
+	tls.ClientChangeCipherSpec()
+	tls.ClientFinished("valid")
+	check("established", tls.Status(), "established")
+	tls.Alert("fatal", "bad_record_mac")
+	check("fatal in $Established -> closed", tls.Status(), "closed")
+	fmt.Println("PASS: fatal alert in established closes")
+}
+
+func main() {
+	test_happy_handshake()
+	test_unsupported_cipher_closes()
+	test_fatal_alert_during_handshake()
+	test_warning_alert_ignored()
+	test_invalid_finished_closes()
+	test_fatal_alert_in_established()
+	fmt.Println("PASS: all TLS handshake tests passed")
+}

@@ -1,0 +1,157 @@
+@@target python_3
+
+# Block I/O Request — kernel blk-mq layer semantics.
+# Request moves through Idle -> Queued -> InFlight -> (Done|Error) with
+# retry-on-failure and timeout-retry loops. Enter/exit handlers manage
+# the timeout timer; attempts counter is a domain variable so it survives
+# the InFlight -> Queued -> InFlight retry cycle.
+
+@@system BlockRequest {
+    interface:
+        submit(sector: int, size: int): str
+        dispatch(): str
+        complete(success: bool): str
+        timeout(): str
+        status(): str
+
+    machine:
+        $Idle {
+            submit(sector: int, size: int): str {
+                self.sector = sector
+                self.size = size
+                self.attempts = 0
+                @@:("queued")
+                -> $Queued
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $Queued {
+            dispatch(): str {
+                @@:("dispatched")
+                -> $InFlight
+            }
+            status(): str { @@:("queued") }
+        }
+
+        $InFlight {
+            $>() {
+                self.attempts = self.attempts + 1
+                self.start_timeout()
+            }
+            <$() {
+                self.cancel_timeout()
+            }
+
+            complete(success: bool): str {
+                if success:
+                    @@:("done")
+                    -> $Done
+                else:
+                    if self.attempts < self.max_retries:
+                        @@:("requeued")
+                        -> $Queued
+                    else:
+                        @@:("io error")
+                        -> $Error
+            }
+            timeout(): str {
+                if self.attempts < self.max_retries:
+                    @@:("timeout, retrying")
+                    -> $Queued
+                else:
+                    @@:("timeout, giving up")
+                    -> $Error
+            }
+            status(): str { @@:("in-flight") }
+        }
+
+        $Done {
+            status(): str { @@:("done") }
+        }
+
+        $Error {
+            status(): str { @@:("error") }
+        }
+
+    actions:
+        start_timeout() { pass }
+        cancel_timeout() { pass }
+
+    domain:
+        sector: int = 0
+        size: int = 0
+        attempts: int = 0
+        max_retries: int = 3
+        timeout_ms: int = 30000
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} — expected {expected!r}, got {actual!r}")
+        raise SystemExit(1)
+
+def test_happy_path():
+    req = @@BlockRequest()
+    check("initial idle",   req.status(),           "idle")
+    check("submit",         req.submit(1024, 8),    "queued")
+    check("dispatch",       req.dispatch(),         "dispatched")
+    check("complete ok",    req.complete(True),     "done")
+    check("terminal done",  req.status(),           "done")
+    print("PASS: happy path")
+
+def test_timeout_retry_then_complete():
+    req = @@BlockRequest()
+    req.submit(2048, 4)
+    req.dispatch()
+    check("first timeout -> retry",
+          req.timeout(), "timeout, retrying")
+    check("back to queued after timeout",
+          req.status(), "queued")
+    req.dispatch()
+    check("complete after retry", req.complete(True), "done")
+    print("PASS: timeout then retry success")
+
+def test_failure_requeue_then_success():
+    req = @@BlockRequest()
+    req.submit(4096, 2)
+    req.dispatch()
+    check("complete(false) -> requeued", req.complete(False), "requeued")
+    req.dispatch()
+    check("complete(true) -> done", req.complete(True), "done")
+    print("PASS: failure requeue then success")
+
+def test_retry_exhaustion():
+    req = @@BlockRequest()
+    req.submit(8192, 1)
+    # Try max_retries times, each failing
+    req.dispatch()                                    # attempt 1
+    check("req 1 failure requeued", req.complete(False), "requeued")
+    req.dispatch()                                    # attempt 2
+    check("req 2 failure requeued", req.complete(False), "requeued")
+    req.dispatch()                                    # attempt 3
+    # attempts == 3 == max_retries → else branch fires: io error
+    check("req 3 failure -> io error", req.complete(False), "io error")
+    check("terminal error state", req.status(), "error")
+    print("PASS: retry exhaustion -> error")
+
+def test_timeout_exhaustion():
+    req = @@BlockRequest()
+    req.submit(16384, 1)
+    req.dispatch()                                    # attempt 1
+    check("to 1 retry", req.timeout(), "timeout, retrying")
+    req.dispatch()                                    # attempt 2
+    check("to 2 retry", req.timeout(), "timeout, retrying")
+    req.dispatch()                                    # attempt 3
+    check("to 3 giving up", req.timeout(), "timeout, giving up")
+    check("error terminal", req.status(), "error")
+    print("PASS: timeout exhaustion -> error")
+
+if __name__ == '__main__':
+    test_happy_path()
+    test_timeout_retry_then_complete()
+    test_failure_requeue_then_success()
+    test_retry_exhaustion()
+    test_timeout_exhaustion()
+    print("PASS: all block I/O request tests passed")

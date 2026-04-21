@@ -1,0 +1,202 @@
+@@target go
+
+// Filesystem Freeze — VFS fs/super.c semantics. 3-level HSM:
+//   $Active => $Readable => $Mounted
+//   $Frozen => $Readable => $Mounted
+// $Mounted provides read/sync/unmount for all mounted sub-states.
+// $Active adds write/freeze. $Frozen overrides write to block and adds thaw.
+// $Freezing is transient, bypasses $Readable (state in flux during flush).
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system Filesystem {
+    interface:
+        mount(device: string): string
+        unmount(): string
+        freeze(): string
+        thaw(): string
+        write(data: string): string
+        read(): string
+        sync(): string
+        status(): string
+        ReadCount(): int
+        WriteCount(): int
+
+    machine:
+        $Unmounted {
+            mount(device: string): string {
+                s.device = device
+                @@:("mounted")
+                -> $Active
+            }
+            status(): string { @@:("unmounted") }
+            ReadCount(): int { @@:(s.reads) }
+            WriteCount(): int { @@:(s.writes) }
+        }
+
+        $Active => $Readable {
+            write(data: string): string {
+                s.writes = s.writes + 1
+                @@:("wrote")
+            }
+            freeze(): string {
+                @@:("freezing")
+                -> $Freezing
+            }
+            status(): string { @@:("active") }
+            => $^
+        }
+
+        $Freezing => $Mounted {
+            $>() {
+                s.flush_pending_writes()
+                -> $Frozen
+            }
+            status(): string { @@:("freezing") }
+            => $^
+        }
+
+        $Frozen => $Readable {
+            write(data: string): string {
+                @@:("BLOCKED")
+            }
+            thaw(): string {
+                @@:("thawed")
+                -> $Active
+            }
+            status(): string { @@:("frozen") }
+            => $^
+        }
+
+        $Readable => $Mounted {
+            => $^
+        }
+
+        $Mounted {
+            read(): string {
+                s.reads = s.reads + 1
+                @@:("read")
+            }
+            sync(): string {
+                @@:("synced")
+            }
+            unmount(): string {
+                @@:("unmounting")
+                -> $Unmounting
+            }
+            ReadCount(): int { @@:(s.reads) }
+            WriteCount(): int { @@:(s.writes) }
+        }
+
+        $Unmounting {
+            $>() {
+                s.flush_pending_writes()
+                s.release_resources()
+                -> $Unmounted
+            }
+        }
+
+    actions:
+        flush_pending_writes() {}
+        release_resources() {}
+
+    domain:
+        device: string = ""
+        writes: int = 0
+        reads: int = 0
+}
+
+
+func check_str(label, actual, expected string) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func check_int(label string, actual, expected int) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s — expected %d, got %d\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func test_mount_write_read() {
+	fs := NewFilesystem()
+	check_str("initial unmounted", fs.Status(), "unmounted")
+	check_str("mount", fs.Mount("/dev/sda1"), "mounted")
+	check_str("active state", fs.Status(), "active")
+	check_str("write 1", fs.Write("hello"), "wrote")
+	check_str("read 1", fs.Read(), "read")
+	check_str("sync via HSM", fs.Sync(), "synced")
+	check_int("read count incremented", fs.ReadCount(), 1)
+	check_int("write count incremented", fs.WriteCount(), 1)
+	fmt.Println("PASS: mount + write + read + sync")
+}
+
+func test_freeze_blocks_writes_allows_reads() {
+	fs := NewFilesystem()
+	fs.Mount("/dev/sda1")
+	fs.Write("before freeze")
+	fs.Freeze()
+	check_str("in frozen state", fs.Status(), "frozen")
+	check_str("write blocked", fs.Write("nope"), "BLOCKED")
+	check_str("read still works", fs.Read(), "read")
+	check_int("read count 1", fs.ReadCount(), 1)
+	check_int("write count unchanged", fs.WriteCount(), 1)
+	fmt.Println("PASS: freeze blocks writes, allows reads (3-level HSM)")
+}
+
+func test_thaw_restores_write() {
+	fs := NewFilesystem()
+	fs.Mount("/dev/sda1")
+	fs.Freeze()
+	check_str("thaw", fs.Thaw(), "thawed")
+	check_str("back to active", fs.Status(), "active")
+	check_str("write works again", fs.Write("post-thaw"), "wrote")
+	fmt.Println("PASS: thaw restores write capability")
+}
+
+func test_unmount_forwards_via_hsm() {
+	fs := NewFilesystem()
+	fs.Mount("/dev/sda1")
+	check_str("unmount from Active", fs.Unmount(), "unmounting")
+	check_str("eventually unmounted", fs.Status(), "unmounted")
+	fmt.Println("PASS: unmount forwards from Active via $Readable to $Mounted")
+}
+
+func test_freeze_impossible_when_unmounted() {
+	fs := NewFilesystem()
+	// Go returns zero-value "" when no handler exists.
+	check_str("freeze unmounted = no-op (no handler)", fs.Freeze(), "")
+	check_str("still unmounted", fs.Status(), "unmounted")
+	fmt.Println("PASS: freeze on unmounted fs is no-op")
+}
+
+func test_ReadCount_accumulates_across_states() {
+	fs := NewFilesystem()
+	fs.Mount("/dev/sda1")
+	fs.Read()
+	fs.Read()
+	fs.Freeze()
+	fs.Read()
+	fs.Thaw()
+	fs.Read()
+	check_int("reads across Active/Frozen/Active", fs.ReadCount(), 4)
+	fmt.Println("PASS: read count spans states (domain var)")
+}
+
+func main() {
+	test_mount_write_read()
+	test_freeze_blocks_writes_allows_reads()
+	test_thaw_restores_write()
+	test_unmount_forwards_via_hsm()
+	test_freeze_impossible_when_unmounted()
+	test_ReadCount_accumulates_across_states()
+	fmt.Println("PASS: all filesystem freeze tests passed")
+}

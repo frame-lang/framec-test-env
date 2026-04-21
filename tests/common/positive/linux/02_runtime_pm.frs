@@ -1,0 +1,168 @@
+@@target rust
+
+// Runtime Power Management — kernel drivers/base/power/runtime.c semantics.
+// Device transitions through Active/Idle/Suspending/Suspended/Resuming
+// driven by usage count (get/put) and autosuspend timers (enter/exit).
+
+@@system RuntimePM {
+    interface:
+        get(): String
+        put(): String
+        autosuspend_expired(): String
+        resume_complete(): String
+        suspend_complete(success: bool): String
+        status(): String
+
+    machine:
+        $Active {
+            $>() {
+                self.cancel_timer();
+            }
+
+            get(): String {
+                self.usage_count = self.usage_count + 1;
+                @@:(format!("get: usage={}", self.usage_count))
+            }
+            put(): String {
+                self.usage_count = self.usage_count - 1;
+                @@:(format!("put: usage={}", self.usage_count))
+                if self.usage_count <= 0 {
+                    -> $Idle
+                }
+            }
+            status(): String { @@:("active".to_string()) }
+        }
+
+        $Idle {
+            $>() {
+                self.start_autosuspend_timer();
+            }
+            <$() {
+                self.cancel_timer();
+            }
+
+            get(): String {
+                self.usage_count = self.usage_count + 1;
+                @@:(format!("get: usage={}", self.usage_count))
+                -> $Active
+            }
+            autosuspend_expired(): String {
+                @@:("suspending".to_string())
+                -> $Suspending
+            }
+            status(): String { @@:("idle".to_string()) }
+        }
+
+        $Suspending {
+            $>() {
+                self.call_suspend_callback();
+            }
+
+            suspend_complete(success: bool): String {
+                if success {
+                    @@:("suspended".to_string())
+                    -> $Suspended
+                } else {
+                    @@:("suspend failed".to_string())
+                    -> $Active
+                }
+            }
+            get(): String {
+                self.usage_count = self.usage_count + 1;
+                @@:("resume requested during suspend".to_string())
+                -> $Resuming
+            }
+            status(): String { @@:("suspending".to_string()) }
+        }
+
+        $Suspended {
+            get(): String {
+                self.usage_count = self.usage_count + 1;
+                @@:("waking".to_string())
+                -> $Resuming
+            }
+            status(): String { @@:("suspended".to_string()) }
+        }
+
+        $Resuming {
+            $>() {
+                self.call_resume_callback();
+            }
+
+            resume_complete(): String {
+                @@:("resumed".to_string())
+                -> $Active
+            }
+            status(): String { @@:("resuming".to_string()) }
+        }
+
+    actions:
+        start_autosuspend_timer() {}
+        cancel_timer() {}
+        call_suspend_callback() {}
+        call_resume_callback() {}
+
+    domain:
+        usage_count: i32 = 1
+        autosuspend_delay_ms: i32 = 500
+}
+
+
+fn check(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} — expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn test_happy_idle_suspend_resume() {
+    let mut dev = @@RuntimePM();
+    check("initial active", &dev.status(), "active");
+    check("put drops to 0", &dev.put(), "put: usage=0");
+    check("idle after drain", &dev.status(), "idle");
+    check("autosuspend fires", &dev.autosuspend_expired(), "suspending");
+    check("suspend_complete true", &dev.suspend_complete(true), "suspended");
+    check("get wakes", &dev.get(), "waking");
+    check("resuming status", &dev.status(), "resuming");
+    check("resume_complete", &dev.resume_complete(), "resumed");
+    check("back to active", &dev.status(), "active");
+    println!("PASS: happy path (active -> idle -> suspended -> resumed)");
+}
+
+fn test_suspend_failure_returns_to_active() {
+    let mut dev = @@RuntimePM();
+    dev.put();
+    dev.autosuspend_expired();
+    check("suspend failed", &dev.suspend_complete(false), "suspend failed");
+    check("reverted to active", &dev.status(), "active");
+    println!("PASS: suspend failure -> active");
+}
+
+fn test_get_during_suspending_redirects_to_resuming() {
+    let mut dev = @@RuntimePM();
+    dev.put();
+    dev.autosuspend_expired();
+    check("suspending state", &dev.status(), "suspending");
+    check("get during suspend", &dev.get(), "resume requested during suspend");
+    check("redirected to resuming", &dev.status(), "resuming");
+    println!("PASS: get during suspending redirects to resuming");
+}
+
+fn test_usage_count_mgmt() {
+    let mut dev = @@RuntimePM();
+    check("get +1", &dev.get(), "get: usage=2");
+    check("get +1 again", &dev.get(), "get: usage=3");
+    check("put -1", &dev.put(), "put: usage=2");
+    check("put -1", &dev.put(), "put: usage=1");
+    check("put to 0 -> idle", &dev.put(), "put: usage=0");
+    check("idle", &dev.status(), "idle");
+    println!("PASS: usage count tracking");
+}
+
+fn main() {
+    test_happy_idle_suspend_resume();
+    test_suspend_failure_returns_to_active();
+    test_get_during_suspending_redirects_to_resuming();
+    test_usage_count_mgmt();
+    println!("PASS: all runtime PM tests passed");
+}

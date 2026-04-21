@@ -1,0 +1,166 @@
+@@target kotlin
+
+// Runtime Power Management — kernel drivers/base/power/runtime.c semantics.
+
+@@system RuntimePM {
+    interface:
+        get(): String
+        put(): String
+        autosuspend_expired(): String
+        resume_complete(): String
+        suspend_complete(success: Boolean): String
+        status(): String
+
+    machine:
+        $Active {
+            $>() {
+                this.cancel_timer()
+            }
+
+            get(): String {
+                this.usage_count = this.usage_count + 1
+                @@:("get: usage=" + this.usage_count)
+            }
+            put(): String {
+                this.usage_count = this.usage_count - 1
+                @@:("put: usage=" + this.usage_count)
+                if (this.usage_count <= 0) {
+                    -> $Idle
+                }
+            }
+            status(): String { @@:("active") }
+        }
+
+        $Idle {
+            $>() {
+                this.start_autosuspend_timer()
+            }
+            <$() {
+                this.cancel_timer()
+            }
+
+            get(): String {
+                this.usage_count = this.usage_count + 1
+                @@:("get: usage=" + this.usage_count)
+                -> $Active
+            }
+            autosuspend_expired(): String {
+                @@:("suspending")
+                -> $Suspending
+            }
+            status(): String { @@:("idle") }
+        }
+
+        $Suspending {
+            $>() {
+                this.call_suspend_callback()
+            }
+
+            suspend_complete(success: Boolean): String {
+                if (success) {
+                    @@:("suspended")
+                    -> $Suspended
+                } else {
+                    @@:("suspend failed")
+                    -> $Active
+                }
+            }
+            get(): String {
+                this.usage_count = this.usage_count + 1
+                @@:("resume requested during suspend")
+                -> $Resuming
+            }
+            status(): String { @@:("suspending") }
+        }
+
+        $Suspended {
+            get(): String {
+                this.usage_count = this.usage_count + 1
+                @@:("waking")
+                -> $Resuming
+            }
+            status(): String { @@:("suspended") }
+        }
+
+        $Resuming {
+            $>() {
+                this.call_resume_callback()
+            }
+
+            resume_complete(): String {
+                @@:("resumed")
+                -> $Active
+            }
+            status(): String { @@:("resuming") }
+        }
+
+    actions:
+        start_autosuspend_timer() {}
+        cancel_timer() {}
+        call_suspend_callback() {}
+        call_resume_callback() {}
+
+    domain:
+        usage_count: Int = 1
+        autosuspend_delay_ms: Int = 500
+}
+
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label — expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun test_happy_idle_suspend_resume() {
+    val dev = RuntimePM()
+    check("initial active", dev.status() as String, "active")
+    check("put drops to 0", dev.put() as String, "put: usage=0")
+    check("idle after drain", dev.status() as String, "idle")
+    check("autosuspend fires", dev.autosuspend_expired() as String, "suspending")
+    check("suspend_complete true", dev.suspend_complete(true) as String, "suspended")
+    check("get wakes", dev.get() as String, "waking")
+    check("resuming status", dev.status() as String, "resuming")
+    check("resume_complete", dev.resume_complete() as String, "resumed")
+    check("back to active", dev.status() as String, "active")
+    println("PASS: happy path (active -> idle -> suspended -> resumed)")
+}
+
+fun test_suspend_failure_returns_to_active() {
+    val dev = RuntimePM()
+    dev.put()
+    dev.autosuspend_expired()
+    check("suspend failed", dev.suspend_complete(false) as String, "suspend failed")
+    check("reverted to active", dev.status() as String, "active")
+    println("PASS: suspend failure -> active")
+}
+
+fun test_get_during_suspending_redirects_to_resuming() {
+    val dev = RuntimePM()
+    dev.put()
+    dev.autosuspend_expired()
+    check("suspending state", dev.status() as String, "suspending")
+    check("get during suspend", dev.get() as String, "resume requested during suspend")
+    check("redirected to resuming", dev.status() as String, "resuming")
+    println("PASS: get during suspending redirects to resuming")
+}
+
+fun test_usage_count_mgmt() {
+    val dev = RuntimePM()
+    check("get +1", dev.get() as String, "get: usage=2")
+    check("get +1 again", dev.get() as String, "get: usage=3")
+    check("put -1", dev.put() as String, "put: usage=2")
+    check("put -1", dev.put() as String, "put: usage=1")
+    check("put to 0 -> idle", dev.put() as String, "put: usage=0")
+    check("idle", dev.status() as String, "idle")
+    println("PASS: usage count tracking")
+}
+
+fun main() {
+    test_happy_idle_suspend_resume()
+    test_suspend_failure_returns_to_active()
+    test_get_during_suspending_redirects_to_resuming()
+    test_usage_count_mgmt()
+    println("PASS: all runtime PM tests passed")
+}

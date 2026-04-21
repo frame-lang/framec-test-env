@@ -1,0 +1,220 @@
+@@target swift
+
+// Process Lifecycle — Linux task states (kernel/sched/core.c semantics)
+// Three-level HSM with explicit upward forwarding as per-state signal policy.
+
+import Foundation
+
+@@system TaskLifecycle {
+    interface:
+        fork(): String
+        schedule(): String
+        block_on_io(): String
+        io_complete(): String
+        block_uninterruptible(): String
+        send_signal(sig: String): String
+        wait_by_parent(): String
+        status(): String
+
+    machine:
+        $New {
+            fork(): String {
+                self.pid = self.next_pid()
+                @@:("forked")
+                -> $Ready
+            }
+            status(): String { @@:("new") }
+        }
+
+        $Ready => $Alive {
+            schedule(): String {
+                @@:("running")
+                -> $Running
+            }
+            status(): String { @@:("ready") }
+            => $^
+        }
+
+        $Running => $Alive {
+            schedule(): String {
+                @@:("preempted")
+                -> $Ready
+            }
+            block_on_io(): String {
+                @@:("blocked")
+                -> $Interruptible
+            }
+            block_uninterruptible(): String {
+                @@:("blocked (D)")
+                -> $Uninterruptible
+            }
+            status(): String { @@:("running") }
+            => $^
+        }
+
+        $Interruptible => $Blocked {
+            io_complete(): String {
+                @@:("woke")
+                -> $Ready
+            }
+            send_signal(sig: String): String {
+                if sig == "SIGKILL" || sig == "SIGTERM" || sig == "SIGSTOP" {
+                    => $^
+                } else {
+                    @@:("interrupted")
+                    -> $Ready
+                }
+            }
+            status(): String { @@:("interruptible") }
+            => $^
+        }
+
+        $Uninterruptible => $Blocked {
+            io_complete(): String {
+                @@:("woke")
+                -> $Ready
+            }
+            send_signal(sig: String): String {
+                if sig == "SIGKILL" {
+                    => $^
+                } else {
+                    @@:("signal held pending (D-state)")
+                }
+            }
+            status(): String { @@:("uninterruptible") }
+            => $^
+        }
+
+        $Blocked => $Alive {
+            status(): String { @@:("blocked") }
+            => $^
+        }
+
+        $Alive {
+            send_signal(sig: String): String {
+                if sig == "SIGKILL" || sig == "SIGTERM" {
+                    @@:("exiting")
+                    -> $Zombie
+                } else if sig == "SIGSTOP" {
+                    @@:("stopped")
+                    -> $Stopped
+                } else {
+                    @@:("signal delivered")
+                }
+            }
+        }
+
+        $Stopped {
+            send_signal(sig: String): String {
+                if sig == "SIGCONT" {
+                    @@:("continued")
+                    -> $Ready
+                } else if sig == "SIGKILL" {
+                    @@:("killed while stopped")
+                    -> $Zombie
+                } else {
+                    @@:("signal ignored")
+                }
+            }
+            status(): String { @@:("stopped") }
+        }
+
+        $Zombie {
+            wait_by_parent(): String {
+                @@:("reaped")
+                -> $Dead
+            }
+            status(): String { @@:("zombie") }
+        }
+
+        $Dead {
+            status(): String { @@:("dead") }
+        }
+
+    actions:
+        next_pid(): Int {
+            self.pid_counter = self.pid_counter + 1
+            return self.pid_counter
+        }
+
+    domain:
+        pid: Int = 0
+        pid_counter: Int = 100
+}
+
+
+func check(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) — expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+
+func test_happy_path() {
+    var t = @@TaskLifecycle()
+    check("initial status", t.status() as! String, "new")
+    check("fork",           t.fork()   as! String, "forked")
+    check("after fork",     t.status() as! String, "ready")
+    check("schedule",       t.schedule() as! String, "running")
+    check("after schedule", t.status() as! String, "running")
+    check("preempt",        t.schedule() as! String, "preempted")
+    check("after preempt",  t.status() as! String, "ready")
+    print("PASS: happy path")
+}
+
+func test_interruptible_wake_by_signal() {
+    var t = @@TaskLifecycle()
+    _ = t.fork()
+    _ = t.schedule()
+    check("block_on_io", t.block_on_io() as! String, "blocked")
+    check("interruptible status", t.status() as! String, "interruptible")
+    check("SIGUSR1 wakes interruptible",
+          t.send_signal("SIGUSR1") as! String, "interrupted")
+    check("woke to ready", t.status() as! String, "ready")
+    print("PASS: interruptible wake by signal")
+}
+
+func test_uninterruptible_holds_signal() {
+    var t = @@TaskLifecycle()
+    _ = t.fork()
+    _ = t.schedule()
+    check("block_uninterruptible",
+          t.block_uninterruptible() as! String, "blocked (D)")
+    check("D state", t.status() as! String, "uninterruptible")
+    check("SIGUSR1 held pending in D",
+          t.send_signal("SIGUSR1") as! String, "signal held pending (D-state)")
+    check("still in D", t.status() as! String, "uninterruptible")
+    print("PASS: uninterruptible holds non-fatal signal")
+}
+
+func test_sigkill_reaches_d_state() {
+    var t = @@TaskLifecycle()
+    _ = t.fork()
+    _ = t.schedule()
+    _ = t.block_uninterruptible()
+    check("SIGKILL forwarded from D through $Alive",
+          t.send_signal("SIGKILL") as! String, "exiting")
+    check("now zombie", t.status() as! String, "zombie")
+    check("reap", t.wait_by_parent() as! String, "reaped")
+    check("dead", t.status() as! String, "dead")
+    print("PASS: SIGKILL reaches D state via $Alive forwarding")
+}
+
+func test_sigstop_sigcont() {
+    var t = @@TaskLifecycle()
+    _ = t.fork()
+    _ = t.schedule()
+    check("SIGSTOP from running",
+          t.send_signal("SIGSTOP") as! String, "stopped")
+    check("stopped status", t.status() as! String, "stopped")
+    check("SIGCONT resumes", t.send_signal("SIGCONT") as! String, "continued")
+    check("back to ready", t.status() as! String, "ready")
+    print("PASS: SIGSTOP/SIGCONT")
+}
+
+test_happy_path()
+test_interruptible_wake_by_signal()
+test_uninterruptible_holds_signal()
+test_sigkill_reaches_d_state()
+test_sigstop_sigcont()
+print("PASS: all process lifecycle tests passed")

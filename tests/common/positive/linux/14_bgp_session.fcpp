@@ -1,0 +1,249 @@
+@@target cpp_17
+
+// BGP Finite State Machine -- RFC 4271 Section 8 direct transcription.
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <cstdlib>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system BgpSession {
+    interface:
+        manual_start()
+        manual_stop()
+        tcp_connection_confirmed()
+        tcp_connection_fails()
+        open_received(asn: int, hold_time: int)
+        keepalive_received()
+        notification_received(code: int, subcode: int)
+        hold_timer_expired()
+        keepalive_timer_expired()
+        connect_retry_timer_expired()
+        status(): str
+
+    machine:
+        $Idle {
+            manual_start() {
+                this->connect_retry_count = 0;
+                this->start_connect_retry_timer();
+                this->initiate_tcp_connection();
+                -> $Connect
+            }
+            status(): str { @@:(std::string("idle")) }
+        }
+
+        $Connect {
+            tcp_connection_confirmed() {
+                this->cancel_connect_retry_timer();
+                this->send_open();
+                -> $OpenSent
+            }
+            tcp_connection_fails() {
+                -> $Active
+            }
+            connect_retry_timer_expired() {
+                this->initiate_tcp_connection();
+                this->start_connect_retry_timer();
+            }
+            manual_stop() {
+                -> $Idle
+            }
+            status(): str { @@:(std::string("connect")) }
+        }
+
+        $Active {
+            tcp_connection_confirmed() {
+                this->cancel_connect_retry_timer();
+                this->send_open();
+                -> $OpenSent
+            }
+            connect_retry_timer_expired() {
+                this->connect_retry_count = this->connect_retry_count + 1;
+                this->initiate_tcp_connection();
+                this->start_connect_retry_timer();
+                -> $Connect
+            }
+            manual_stop() {
+                -> $Idle
+            }
+            status(): str { @@:(std::string("active")) }
+        }
+
+        $OpenSent {
+            open_received(asn: int, hold_time: int) {
+                this->peer_asn = asn;
+                this->negotiated_hold = hold_time;
+                this->cancel_hold_timer();
+                this->send_keepalive();
+                -> $OpenConfirm
+            }
+            tcp_connection_fails() {
+                this->cancel_hold_timer();
+                -> $Active
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                this->send_notification();
+                -> $Idle
+            }
+            manual_stop() {
+                this->send_notification();
+                -> $Idle
+            }
+            status(): str { @@:(std::string("open sent")) }
+        }
+
+        $OpenConfirm {
+            keepalive_received() {
+                -> $Established
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                this->send_notification();
+                -> $Idle
+            }
+            keepalive_timer_expired() {
+                this->send_keepalive();
+            }
+            manual_stop() {
+                this->send_notification();
+                -> $Idle
+            }
+            status(): str { @@:(std::string("open confirm")) }
+        }
+
+        $Established {
+            keepalive_received() {
+                this->reset_hold_timer();
+            }
+            keepalive_timer_expired() {
+                this->send_keepalive();
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                this->send_notification();
+                -> $Idle
+            }
+            manual_stop() {
+                this->send_notification();
+                -> $Idle
+            }
+            status(): str { @@:(std::string("established")) }
+        }
+
+    actions:
+        initiate_tcp_connection()   {}
+        send_open()                 {}
+        send_keepalive()            {}
+        send_notification()         {}
+        start_connect_retry_timer() {}
+        cancel_connect_retry_timer(){}
+        cancel_hold_timer()         {}
+        reset_hold_timer()          {}
+
+    domain:
+        local_asn: int = 65001
+        peer_asn: int = 0
+        negotiated_hold: int = 0
+        connect_retry_count: int = 0
+}
+
+
+void check(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " -- expected '" << expected << "', got '" << actual << "'" << std::endl;
+        std::exit(1);
+    }
+}
+
+void test_full_session_establishment() {
+    auto bgp = @@BgpSession();
+    check("initial idle", std::any_cast<std::string>(bgp.status()), "idle");
+    bgp.manual_start();
+    check("connect", std::any_cast<std::string>(bgp.status()), "connect");
+    bgp.tcp_connection_confirmed();
+    check("open sent", std::any_cast<std::string>(bgp.status()), "open sent");
+    bgp.open_received(65002, 60);
+    check("open confirm", std::any_cast<std::string>(bgp.status()), "open confirm");
+    bgp.keepalive_received();
+    check("established", std::any_cast<std::string>(bgp.status()), "established");
+    std::cout << "PASS: full BGP session establishment" << std::endl;
+}
+
+void test_persist_across_restart() {
+    auto bgp = @@BgpSession();
+    bgp.manual_start();
+    bgp.tcp_connection_confirmed();
+    bgp.open_received(65002, 60);
+    bgp.keepalive_received();
+    check("established", std::any_cast<std::string>(bgp.status()), "established");
+    auto snap = bgp.save_state();
+    auto bgp2 = BgpSession::restore_state(snap);
+    check("established survived restart", std::any_cast<std::string>(bgp2.status()), "established");
+    bgp2.keepalive_timer_expired();
+    bgp2.keepalive_received();
+    check("still established", std::any_cast<std::string>(bgp2.status()), "established");
+    std::cout << "PASS: @@persist -- BGP session survives daemon restart" << std::endl;
+}
+
+void test_hold_timer_teardown() {
+    auto bgp = @@BgpSession();
+    bgp.manual_start();
+    bgp.tcp_connection_confirmed();
+    bgp.open_received(65002, 60);
+    bgp.keepalive_received();
+    bgp.hold_timer_expired();
+    check("hold expiry tears down", std::any_cast<std::string>(bgp.status()), "idle");
+    std::cout << "PASS: hold timer expiry returns to idle" << std::endl;
+}
+
+void test_tcp_failure_goes_active() {
+    auto bgp = @@BgpSession();
+    bgp.manual_start();
+    bgp.tcp_connection_fails();
+    check("active after TCP fail", std::any_cast<std::string>(bgp.status()), "active");
+    bgp.connect_retry_timer_expired();
+    check("retry transitions back to connect", std::any_cast<std::string>(bgp.status()), "connect");
+    std::cout << "PASS: TCP failure path Active -> Connect" << std::endl;
+}
+
+void test_notification_in_established_teardown() {
+    auto bgp = @@BgpSession();
+    bgp.manual_start();
+    bgp.tcp_connection_confirmed();
+    bgp.open_received(65002, 60);
+    bgp.keepalive_received();
+    bgp.notification_received(6, 0);
+    check("notification tears down", std::any_cast<std::string>(bgp.status()), "idle");
+    std::cout << "PASS: notification in Established -> idle" << std::endl;
+}
+
+void test_manual_stop_from_established() {
+    auto bgp = @@BgpSession();
+    bgp.manual_start();
+    bgp.tcp_connection_confirmed();
+    bgp.open_received(65002, 60);
+    bgp.keepalive_received();
+    bgp.manual_stop();
+    check("manual stop", std::any_cast<std::string>(bgp.status()), "idle");
+    std::cout << "PASS: manual_stop from established" << std::endl;
+}
+
+int main() {
+    test_full_session_establishment();
+    test_persist_across_restart();
+    test_hold_timer_teardown();
+    test_tcp_failure_goes_active();
+    test_notification_in_established_teardown();
+    test_manual_stop_from_established();
+    std::cout << "PASS: all BGP session tests passed" << std::endl;
+    return 0;
+}

@@ -1,0 +1,234 @@
+@@target cpp_17
+
+// TCP Connection -- RFC 793 Figure 6 FSM with @@persist for TIME_WAIT.
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <cstdlib>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system TcpConnection {
+    interface:
+        passive_open()
+        active_open()
+        recv_syn()
+        recv_syn_ack()
+        recv_ack()
+        recv_fin()
+        app_close()
+        app_send(bytes_n: int)
+        timeout_2msl()
+        abort()
+        state_name(): str
+
+    machine:
+        $Closed {
+            passive_open() { -> $Listen }
+            active_open() {
+                this->send_syn();
+                -> $SynSent
+            }
+            state_name(): str { @@:(std::string("CLOSED")) }
+        }
+
+        $Listen {
+            recv_syn() {
+                this->send_syn_ack();
+                -> $SynReceived
+            }
+            app_close() { -> $Closed }
+            state_name(): str { @@:(std::string("LISTEN")) }
+        }
+
+        $SynSent {
+            recv_syn_ack() {
+                this->send_ack();
+                -> $Established
+            }
+            recv_syn() {
+                this->send_syn_ack();
+                -> $SynReceived
+            }
+            app_close() { -> $Closed }
+            state_name(): str { @@:(std::string("SYN_SENT")) }
+        }
+
+        $SynReceived {
+            recv_ack() { -> $Established }
+            app_close() {
+                this->send_fin();
+                -> $FinWait1
+            }
+            state_name(): str { @@:(std::string("SYN_RECEIVED")) }
+        }
+
+        $Established {
+            app_send(bytes_n: int) {
+                this->bytes_sent = this->bytes_sent + bytes_n;
+            }
+            app_close() {
+                this->send_fin();
+                -> $FinWait1
+            }
+            recv_fin() {
+                this->send_ack();
+                -> $CloseWait
+            }
+            abort() {
+                this->send_rst();
+                -> $Closed
+            }
+            state_name(): str { @@:(std::string("ESTABLISHED")) }
+        }
+
+        $FinWait1 {
+            recv_ack() { -> $FinWait2 }
+            recv_fin() {
+                this->send_ack();
+                -> $Closing
+            }
+            state_name(): str { @@:(std::string("FIN_WAIT_1")) }
+        }
+
+        $FinWait2 {
+            recv_fin() {
+                this->send_ack();
+                -> $TimeWait
+            }
+            state_name(): str { @@:(std::string("FIN_WAIT_2")) }
+        }
+
+        $Closing {
+            recv_ack() { -> $TimeWait }
+            state_name(): str { @@:(std::string("CLOSING")) }
+        }
+
+        $TimeWait {
+            $>() {
+                this->start_2msl_timer();
+            }
+            timeout_2msl() { -> $Closed }
+            state_name(): str { @@:(std::string("TIME_WAIT")) }
+        }
+
+        $CloseWait {
+            app_close() {
+                this->send_fin();
+                -> $LastAck
+            }
+            state_name(): str { @@:(std::string("CLOSE_WAIT")) }
+        }
+
+        $LastAck {
+            recv_ack() { -> $Closed }
+            state_name(): str { @@:(std::string("LAST_ACK")) }
+        }
+
+    actions:
+        send_syn()         {}
+        send_syn_ack()     {}
+        send_ack()         {}
+        send_fin()         {}
+        send_rst()         {}
+        start_2msl_timer() {}
+
+    domain:
+        local_port: int = 0
+        remote_port: int = 0
+        bytes_sent: int = 0
+}
+
+
+void check(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " -- expected '" << expected << "', got '" << actual << "'" << std::endl;
+        std::exit(1);
+    }
+}
+
+void test_active_open_full_cycle() {
+    auto c = @@TcpConnection();
+    check("initial CLOSED", std::any_cast<std::string>(c.state_name()), "CLOSED");
+    c.active_open();
+    check("SYN_SENT", std::any_cast<std::string>(c.state_name()), "SYN_SENT");
+    c.recv_syn_ack();
+    check("ESTABLISHED", std::any_cast<std::string>(c.state_name()), "ESTABLISHED");
+    c.app_send(1024);
+    c.app_close();
+    check("FIN_WAIT_1", std::any_cast<std::string>(c.state_name()), "FIN_WAIT_1");
+    c.recv_ack();
+    check("FIN_WAIT_2", std::any_cast<std::string>(c.state_name()), "FIN_WAIT_2");
+    c.recv_fin();
+    check("TIME_WAIT", std::any_cast<std::string>(c.state_name()), "TIME_WAIT");
+    c.timeout_2msl();
+    check("back to CLOSED", std::any_cast<std::string>(c.state_name()), "CLOSED");
+    std::cout << "PASS: active open, full cycle to TIME_WAIT" << std::endl;
+}
+
+void test_passive_open_full_cycle() {
+    auto c = @@TcpConnection();
+    c.passive_open();
+    check("LISTEN", std::any_cast<std::string>(c.state_name()), "LISTEN");
+    c.recv_syn();
+    check("SYN_RECEIVED", std::any_cast<std::string>(c.state_name()), "SYN_RECEIVED");
+    c.recv_ack();
+    check("ESTABLISHED", std::any_cast<std::string>(c.state_name()), "ESTABLISHED");
+    c.recv_fin();
+    check("CLOSE_WAIT", std::any_cast<std::string>(c.state_name()), "CLOSE_WAIT");
+    c.app_close();
+    check("LAST_ACK", std::any_cast<std::string>(c.state_name()), "LAST_ACK");
+    c.recv_ack();
+    check("CLOSED", std::any_cast<std::string>(c.state_name()), "CLOSED");
+    std::cout << "PASS: passive open, peer-initiated close" << std::endl;
+}
+
+void test_simultaneous_close() {
+    auto c = @@TcpConnection();
+    c.active_open();
+    c.recv_syn_ack();
+    c.app_close();
+    check("in FIN_WAIT_1", std::any_cast<std::string>(c.state_name()), "FIN_WAIT_1");
+    c.recv_fin();
+    check("CLOSING (simultaneous)", std::any_cast<std::string>(c.state_name()), "CLOSING");
+    c.recv_ack();
+    check("TIME_WAIT after CLOSING ACK", std::any_cast<std::string>(c.state_name()), "TIME_WAIT");
+    std::cout << "PASS: simultaneous close -> CLOSING -> TIME_WAIT" << std::endl;
+}
+
+void test_abort_from_established() {
+    auto c = @@TcpConnection();
+    c.active_open();
+    c.recv_syn_ack();
+    c.abort();
+    check("RST drops to CLOSED", std::any_cast<std::string>(c.state_name()), "CLOSED");
+    std::cout << "PASS: abort sends RST and returns to CLOSED" << std::endl;
+}
+
+void test_persist_across_restart() {
+    auto c = @@TcpConnection();
+    c.active_open();
+    c.recv_syn_ack();
+    c.app_send(2048);
+    c.app_close();
+    c.recv_ack();
+    c.recv_fin();
+    check("TIME_WAIT before persist", std::any_cast<std::string>(c.state_name()), "TIME_WAIT");
+    auto snap = c.save_state();
+    auto c2 = TcpConnection::restore_state(snap);
+    check("TIME_WAIT restored", std::any_cast<std::string>(c2.state_name()), "TIME_WAIT");
+    c2.timeout_2msl();
+    check("CLOSED after 2MSL", std::any_cast<std::string>(c2.state_name()), "CLOSED");
+    std::cout << "PASS: @@persist survives simulated restart in TIME_WAIT" << std::endl;
+}
+
+int main() {
+    test_active_open_full_cycle();
+    test_passive_open_full_cycle();
+    test_simultaneous_close();
+    test_abort_from_established();
+    test_persist_across_restart();
+    std::cout << "PASS: all TCP connection tests passed" << std::endl;
+    return 0;
+}

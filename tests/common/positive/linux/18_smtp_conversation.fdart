@@ -1,0 +1,331 @@
+@@target dart
+
+// SMTP Conversation -- RFC 5321 client state machine.
+
+import 'dart:io';
+
+@@system SmtpClient {
+    interface:
+        tcp_connected()
+        greeting_received(code: int)
+        ehlo_response(code: int, supports_starttls: bool)
+        starttls()
+        starttls_response(code: int)
+        tls_handshake_complete()
+        mail_from(sender: String)
+        mail_response(code: int)
+        rcpt_to(recipient: String)
+        rcpt_response(code: int)
+        data()
+        data_response(code: int)
+        data_body(body: String)
+        data_final_response(code: int)
+        quit()
+        quit_response(code: int)
+        status(): String
+        recipient_count(): int
+        tls_on(): bool
+
+    machine:
+        $Disconnected {
+            tcp_connected() { -> $AwaitGreeting }
+            status(): String { @@:("disconnected") }
+            recipient_count(): int { @@:(this.rcpt_count) }
+            tls_on(): bool { @@:(this.tls_active) }
+        }
+
+        $AwaitGreeting => $Connected {
+            greeting_received(code: int) {
+                if (code == 220) {
+                    this.send_ehlo();
+                    -> $AwaitEhlo
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): String { @@:("await greeting") }
+            => $^
+        }
+
+        $AwaitEhlo => $Connected {
+            ehlo_response(code: int, supports_starttls: bool) {
+                if (code == 250) {
+                    this.server_supports_starttls = supports_starttls;
+                    -> $Ready
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): String { @@:("await ehlo") }
+            => $^
+        }
+
+        $Ready => $Connected {
+            starttls() {
+                if (this.server_supports_starttls) {
+                    if (this.tls_active == false) {
+                        this.send_starttls();
+                        -> $AwaitStartTlsResponse
+                    }
+                }
+            }
+            mail_from(sender: String) {
+                this.sender = sender;
+                this.send_mail_from();
+                -> $AwaitMailResponse
+            }
+            quit() {
+                this.send_quit();
+                -> $AwaitQuitResponse
+            }
+            status(): String { @@:("ready") }
+            => $^
+        }
+
+        $AwaitStartTlsResponse => $Connected {
+            starttls_response(code: int) {
+                if (code == 220) {
+                    -> $TlsHandshake
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): String { @@:("await starttls response") }
+            => $^
+        }
+
+        $TlsHandshake => $Connected {
+            tls_handshake_complete() {
+                this.tls_active = true;
+                this.send_ehlo();
+                -> $AwaitEhlo
+            }
+            status(): String { @@:("tls handshake") }
+            => $^
+        }
+
+        $AwaitMailResponse => $Connected {
+            mail_response(code: int) {
+                if (code == 250) {
+                    -> $AwaitRcpt
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): String { @@:("await mail response") }
+            => $^
+        }
+
+        $AwaitRcpt => $Connected {
+            rcpt_to(recipient: String) {
+                this.rcpt_count = this.rcpt_count + 1;
+                this.send_rcpt_to();
+                -> $AwaitRcptResponse
+            }
+            data() {
+                if (this.rcpt_count > 0) {
+                    this.send_data();
+                    -> $AwaitDataResponse
+                }
+            }
+            status(): String { @@:("await rcpt") }
+            => $^
+        }
+
+        $AwaitRcptResponse => $Connected {
+            rcpt_response(code: int) {
+                -> $AwaitRcpt
+            }
+            status(): String { @@:("await rcpt response") }
+            => $^
+        }
+
+        $AwaitDataResponse => $Connected {
+            data_response(code: int) {
+                if (code == 354) {
+                    -> $SendingBody
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): String { @@:("await data response") }
+            => $^
+        }
+
+        $SendingBody => $Connected {
+            data_body(body: String) {
+                this.send_body();
+                this.send_body_terminator();
+                -> $AwaitFinalResponse
+            }
+            status(): String { @@:("sending body") }
+            => $^
+        }
+
+        $AwaitFinalResponse => $Connected {
+            data_final_response(code: int) {
+                this.rcpt_count = 0;
+                -> $Ready
+            }
+            status(): String { @@:("await final response") }
+            => $^
+        }
+
+        $AwaitQuitResponse => $Connected {
+            quit_response(code: int) {
+                -> $Disconnected
+            }
+            status(): String { @@:("await quit response") }
+            => $^
+        }
+
+        $Connected {
+            recipient_count(): int { @@:(this.rcpt_count) }
+            tls_on(): bool { @@:(this.tls_active) }
+        }
+
+    actions:
+        send_ehlo()             {}
+        send_starttls()         {}
+        send_mail_from()        {}
+        send_rcpt_to()          {}
+        send_data()             {}
+        send_body()             {}
+        send_body_terminator()  {}
+        send_quit()             {}
+
+    domain:
+        server_supports_starttls: bool = false
+        tls_active: bool = false
+        sender: String = ""
+        rcpt_count: int = 0
+}
+
+
+void check_str(String label, String actual, String expected) {
+    if (actual != expected) {
+        print("FAIL: $label -- expected '$expected', got '$actual'");
+        exit(1);
+    }
+}
+
+void check_int(String label, int actual, int expected) {
+    if (actual != expected) {
+        print("FAIL: $label -- expected $expected, got $actual");
+        exit(1);
+    }
+}
+
+void check_bool(String label, bool actual, bool expected) {
+    if (actual != expected) {
+        print("FAIL: $label -- expected $expected, got $actual");
+        exit(1);
+    }
+}
+
+void test_basic_exchange_no_tls() {
+    final smtp = @@SmtpClient();
+    check_str("initial disconnected", smtp.status() as String, "disconnected");
+    smtp.tcp_connected();
+    check_str("await greeting", smtp.status() as String, "await greeting");
+    smtp.greeting_received(220);
+    check_str("await ehlo", smtp.status() as String, "await ehlo");
+    smtp.ehlo_response(250, false);
+    check_str("ready", smtp.status() as String, "ready");
+    check_bool("tls off", smtp.tls_on() as bool, false);
+    print("PASS: basic TCP connect + EHLO");
+}
+
+void test_starttls_upgrade() {
+    final smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, true);
+    smtp.starttls();
+    check_str("await starttls response", smtp.status() as String, "await starttls response");
+    smtp.starttls_response(220);
+    check_str("tls handshake", smtp.status() as String, "tls handshake");
+    smtp.tls_handshake_complete();
+    check_str("await ehlo after TLS", smtp.status() as String, "await ehlo");
+    smtp.ehlo_response(250, true);
+    check_str("back to ready", smtp.status() as String, "ready");
+    check_bool("tls on", smtp.tls_on() as bool, true);
+    print("PASS: STARTTLS upgrade cycles through \$AwaitEhlo");
+}
+
+void test_send_message_three_recipients() {
+    final smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, false);
+    smtp.mail_from("alice@example.com");
+    check_str("await mail", smtp.status() as String, "await mail response");
+    smtp.mail_response(250);
+    smtp.rcpt_to("bob@example.com");
+    smtp.rcpt_response(250);
+    smtp.rcpt_to("carol@example.com");
+    smtp.rcpt_response(250);
+    smtp.rcpt_to("dan@example.com");
+    smtp.rcpt_response(250);
+    check_int("3 recipients", smtp.recipient_count() as int, 3);
+    smtp.data();
+    check_str("await data response", smtp.status() as String, "await data response");
+    smtp.data_response(354);
+    smtp.data_body("Subject: hi\r\n\r\nhello");
+    smtp.data_final_response(250);
+    check_str("ready again", smtp.status() as String, "ready");
+    check_int("recipient count reset", smtp.recipient_count() as int, 0);
+    print("PASS: send message with three recipients");
+}
+
+void test_quit() {
+    final smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, false);
+    smtp.quit();
+    smtp.quit_response(221);
+    check_str("disconnected after QUIT", smtp.status() as String, "disconnected");
+    print("PASS: clean QUIT shutdown");
+}
+
+void test_greeting_reject() {
+    final smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(500);
+    check_str("bad greeting -> disconnected", smtp.status() as String, "disconnected");
+    print("PASS: bad greeting drops connection");
+}
+
+void test_starttls_refused_if_not_supported() {
+    final smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, false);
+    smtp.starttls();
+    check_str("still ready (starttls refused)", smtp.status() as String, "ready");
+    check_bool("tls still off", smtp.tls_on() as bool, false);
+    print("PASS: starttls no-op when server doesn't support it");
+}
+
+void test_mail_rejection_returns_to_ready() {
+    final smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, false);
+    smtp.mail_from("bad@user");
+    smtp.mail_response(550);
+    check_str("mail rejected -> ready", smtp.status() as String, "ready");
+    print("PASS: mail rejection returns to ready");
+}
+
+void main() {
+    test_basic_exchange_no_tls();
+    test_starttls_upgrade();
+    test_send_message_three_recipients();
+    test_quit();
+    test_greeting_reject();
+    test_starttls_refused_if_not_supported();
+    test_mail_rejection_returns_to_ready();
+    print("PASS: all SMTP conversation tests passed");
+}

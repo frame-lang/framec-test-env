@@ -1,0 +1,125 @@
+@@target javascript
+
+// OOM Killer — kernel mm/oom_kill.c semantics.
+
+@@system OomKiller {
+    interface:
+        oom_detected(gfp_flags: number): string
+        victim_exited(pid: number, freed_kb: number): string
+        oom_detected_again(gfp_flags: number): string
+        status(): string
+
+    machine:
+        $Normal {
+            oom_detected(gfp_flags: number): string {
+                @@:("selecting victim")
+                -> $Selecting
+            }
+            status(): string { @@:("normal") }
+        }
+
+        $Selecting {
+            $>() {
+                this.victim_pid = this.select_victim();
+                if (this.victim_pid < 0) {
+                    -> $Panic
+                } else {
+                    -> $Killing
+                }
+            }
+            status(): string { @@:("selecting") }
+        }
+
+        $Killing {
+            $>() {
+                this.send_sigkill(this.victim_pid);
+                this.start_reaper_timer();
+            }
+            <$() {
+                this.cancel_reaper_timer();
+            }
+
+            victim_exited(pid: number, freed_kb: number): string {
+                if (pid === this.victim_pid) {
+                    this.total_freed_kb = this.total_freed_kb + freed_kb;
+                    @@:("reclaimed")
+                    -> $Normal
+                } else {
+                    @@:("wrong pid, still waiting")
+                }
+            }
+
+            status(): string { @@:("killing") }
+        }
+
+        $Panic {
+            status(): string { @@:("panic") }
+        }
+
+    actions:
+        select_victim() {
+            this.victim_score = 850;
+            return 4242;
+        }
+        send_sigkill(pid) {}
+        start_reaper_timer() {}
+        cancel_reaper_timer() {}
+
+    domain:
+        victim_pid = -1
+        victim_score = 0
+        total_freed_kb = 0
+}
+
+
+function check(label, actual, expected) {
+    if (actual !== expected) {
+        console.log(`FAIL: ${label} — expected '${expected}', got '${actual}'`);
+        throw new Error(`assertion failed: ${label}`);
+    }
+}
+
+function test_normal_oom_flow() {
+    const oom = @@OomKiller();
+    check("initial normal", oom.status(), "normal");
+    check("oom_detected -> selecting", oom.oom_detected(0), "selecting victim");
+    check("arrived in killing", oom.status(), "killing");
+    check("victim exits", oom.victim_exited(4242, 51200), "reclaimed");
+    check("back to normal", oom.status(), "normal");
+    console.log("PASS: normal OOM flow");
+}
+
+function test_concurrent_oom_silently_dropped() {
+    const oom = @@OomKiller();
+    oom.oom_detected(0);
+    check("in killing", oom.status(), "killing");
+    oom.oom_detected_again(0);
+    check("still killing (event dropped)", oom.status(), "killing");
+    oom.victim_exited(4242, 8192);
+    check("back to normal after reclaim", oom.status(), "normal");
+    console.log("PASS: concurrent OOM events dropped in $Killing (safety)");
+}
+
+function test_wrong_pid_exit_ignored() {
+    const oom = @@OomKiller();
+    oom.oom_detected(0);
+    check("waiting for victim", oom.victim_exited(9999, 1024), "wrong pid, still waiting");
+    check("still killing", oom.status(), "killing");
+    oom.victim_exited(4242, 2048);
+    check("correct pid -> normal", oom.status(), "normal");
+    console.log("PASS: wrong-pid exit ignored in $Killing");
+}
+
+function test_oom_detected_ignored_in_selecting() {
+    const oom = @@OomKiller();
+    check("first oom", oom.oom_detected(0), "selecting victim");
+    oom.oom_detected(0);
+    check("second oom dropped", oom.status(), "killing");
+    console.log("PASS: oom_detected ignored while killing");
+}
+
+test_normal_oom_flow();
+test_concurrent_oom_silently_dropped();
+test_wrong_pid_exit_ignored();
+test_oom_detected_ignored_in_selecting();
+console.log("PASS: all OOM killer tests passed");

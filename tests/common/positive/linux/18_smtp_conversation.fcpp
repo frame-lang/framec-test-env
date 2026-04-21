@@ -1,0 +1,335 @@
+@@target cpp_17
+
+// SMTP Conversation -- RFC 5321 client state machine.
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <cstdlib>
+
+@@system SmtpClient {
+    interface:
+        tcp_connected()
+        greeting_received(code: int)
+        ehlo_response(code: int, supports_starttls: bool)
+        starttls()
+        starttls_response(code: int)
+        tls_handshake_complete()
+        mail_from(sender: std::string)
+        mail_response(code: int)
+        rcpt_to(recipient: std::string)
+        rcpt_response(code: int)
+        data()
+        data_response(code: int)
+        data_body(body: std::string)
+        data_final_response(code: int)
+        quit()
+        quit_response(code: int)
+        status(): std::string
+        recipient_count(): int
+        tls_on(): bool
+
+    machine:
+        $Disconnected {
+            tcp_connected() { -> $AwaitGreeting }
+            status(): std::string { @@:(std::string("disconnected")) }
+            recipient_count(): int { @@:(this->rcpt_count) }
+            tls_on(): bool { @@:(this->tls_active) }
+        }
+
+        $AwaitGreeting => $Connected {
+            greeting_received(code: int) {
+                if (code == 220) {
+                    this->send_ehlo();
+                    -> $AwaitEhlo
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): std::string { @@:(std::string("await greeting")) }
+            => $^
+        }
+
+        $AwaitEhlo => $Connected {
+            ehlo_response(code: int, supports_starttls: bool) {
+                if (code == 250) {
+                    this->server_supports_starttls = supports_starttls;
+                    -> $Ready
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): std::string { @@:(std::string("await ehlo")) }
+            => $^
+        }
+
+        $Ready => $Connected {
+            starttls() {
+                if (this->server_supports_starttls) {
+                    if (this->tls_active == false) {
+                        this->send_starttls();
+                        -> $AwaitStartTlsResponse
+                    }
+                }
+            }
+            mail_from(sender: std::string) {
+                this->sender = sender;
+                this->send_mail_from();
+                -> $AwaitMailResponse
+            }
+            quit() {
+                this->send_quit();
+                -> $AwaitQuitResponse
+            }
+            status(): std::string { @@:(std::string("ready")) }
+            => $^
+        }
+
+        $AwaitStartTlsResponse => $Connected {
+            starttls_response(code: int) {
+                if (code == 220) {
+                    -> $TlsHandshake
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): std::string { @@:(std::string("await starttls response")) }
+            => $^
+        }
+
+        $TlsHandshake => $Connected {
+            tls_handshake_complete() {
+                this->tls_active = true;
+                this->send_ehlo();
+                -> $AwaitEhlo
+            }
+            status(): std::string { @@:(std::string("tls handshake")) }
+            => $^
+        }
+
+        $AwaitMailResponse => $Connected {
+            mail_response(code: int) {
+                if (code == 250) {
+                    -> $AwaitRcpt
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): std::string { @@:(std::string("await mail response")) }
+            => $^
+        }
+
+        $AwaitRcpt => $Connected {
+            rcpt_to(recipient: std::string) {
+                this->rcpt_count = this->rcpt_count + 1;
+                this->send_rcpt_to();
+                -> $AwaitRcptResponse
+            }
+            data() {
+                if (this->rcpt_count > 0) {
+                    this->send_data();
+                    -> $AwaitDataResponse
+                }
+            }
+            status(): std::string { @@:(std::string("await rcpt")) }
+            => $^
+        }
+
+        $AwaitRcptResponse => $Connected {
+            rcpt_response(code: int) {
+                -> $AwaitRcpt
+            }
+            status(): std::string { @@:(std::string("await rcpt response")) }
+            => $^
+        }
+
+        $AwaitDataResponse => $Connected {
+            data_response(code: int) {
+                if (code == 354) {
+                    -> $SendingBody
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): std::string { @@:(std::string("await data response")) }
+            => $^
+        }
+
+        $SendingBody => $Connected {
+            data_body(body: std::string) {
+                this->send_body();
+                this->send_body_terminator();
+                -> $AwaitFinalResponse
+            }
+            status(): std::string { @@:(std::string("sending body")) }
+            => $^
+        }
+
+        $AwaitFinalResponse => $Connected {
+            data_final_response(code: int) {
+                this->rcpt_count = 0;
+                -> $Ready
+            }
+            status(): std::string { @@:(std::string("await final response")) }
+            => $^
+        }
+
+        $AwaitQuitResponse => $Connected {
+            quit_response(code: int) {
+                -> $Disconnected
+            }
+            status(): std::string { @@:(std::string("await quit response")) }
+            => $^
+        }
+
+        $Connected {
+            recipient_count(): int { @@:(this->rcpt_count) }
+            tls_on(): bool { @@:(this->tls_active) }
+        }
+
+    actions:
+        send_ehlo()             {}
+        send_starttls()         {}
+        send_mail_from()        {}
+        send_rcpt_to()          {}
+        send_data()             {}
+        send_body()             {}
+        send_body_terminator()  {}
+        send_quit()             {}
+
+    domain:
+        server_supports_starttls: bool = false
+        tls_active: bool = false
+        sender: std::string = std::string("")
+        rcpt_count: int = 0
+}
+
+
+void check_str(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " -- expected '" << expected << "', got '" << actual << "'" << std::endl;
+        std::exit(1);
+    }
+}
+
+void check_int(const std::string& label, int actual, int expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " -- expected " << expected << ", got " << actual << std::endl;
+        std::exit(1);
+    }
+}
+
+void check_bool(const std::string& label, bool actual, bool expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " -- expected " << expected << ", got " << actual << std::endl;
+        std::exit(1);
+    }
+}
+
+void test_basic_exchange_no_tls() {
+    auto smtp = @@SmtpClient();
+    check_str("initial disconnected", std::any_cast<std::string>(smtp.status()), "disconnected");
+    smtp.tcp_connected();
+    check_str("await greeting", std::any_cast<std::string>(smtp.status()), "await greeting");
+    smtp.greeting_received(220);
+    check_str("await ehlo", std::any_cast<std::string>(smtp.status()), "await ehlo");
+    smtp.ehlo_response(250, false);
+    check_str("ready", std::any_cast<std::string>(smtp.status()), "ready");
+    check_bool("tls off", std::any_cast<bool>(smtp.tls_on()), false);
+    std::cout << "PASS: basic TCP connect + EHLO" << std::endl;
+}
+
+void test_starttls_upgrade() {
+    auto smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, true);
+    smtp.starttls();
+    check_str("await starttls response", std::any_cast<std::string>(smtp.status()), "await starttls response");
+    smtp.starttls_response(220);
+    check_str("tls handshake", std::any_cast<std::string>(smtp.status()), "tls handshake");
+    smtp.tls_handshake_complete();
+    check_str("await ehlo after TLS", std::any_cast<std::string>(smtp.status()), "await ehlo");
+    smtp.ehlo_response(250, true);
+    check_str("back to ready", std::any_cast<std::string>(smtp.status()), "ready");
+    check_bool("tls on", std::any_cast<bool>(smtp.tls_on()), true);
+    std::cout << "PASS: STARTTLS upgrade cycles through $AwaitEhlo" << std::endl;
+}
+
+void test_send_message_three_recipients() {
+    auto smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, false);
+    smtp.mail_from(std::string("alice@example.com"));
+    check_str("await mail", std::any_cast<std::string>(smtp.status()), "await mail response");
+    smtp.mail_response(250);
+    smtp.rcpt_to(std::string("bob@example.com"));
+    smtp.rcpt_response(250);
+    smtp.rcpt_to(std::string("carol@example.com"));
+    smtp.rcpt_response(250);
+    smtp.rcpt_to(std::string("dan@example.com"));
+    smtp.rcpt_response(250);
+    check_int("3 recipients", std::any_cast<int>(smtp.recipient_count()), 3);
+    smtp.data();
+    check_str("await data response", std::any_cast<std::string>(smtp.status()), "await data response");
+    smtp.data_response(354);
+    smtp.data_body(std::string("Subject: hi\r\n\r\nhello"));
+    smtp.data_final_response(250);
+    check_str("ready again", std::any_cast<std::string>(smtp.status()), "ready");
+    check_int("recipient count reset", std::any_cast<int>(smtp.recipient_count()), 0);
+    std::cout << "PASS: send message with three recipients" << std::endl;
+}
+
+void test_quit() {
+    auto smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, false);
+    smtp.quit();
+    smtp.quit_response(221);
+    check_str("disconnected after QUIT", std::any_cast<std::string>(smtp.status()), "disconnected");
+    std::cout << "PASS: clean QUIT shutdown" << std::endl;
+}
+
+void test_greeting_reject() {
+    auto smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(500);
+    check_str("bad greeting -> disconnected", std::any_cast<std::string>(smtp.status()), "disconnected");
+    std::cout << "PASS: bad greeting drops connection" << std::endl;
+}
+
+void test_starttls_refused_if_not_supported() {
+    auto smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, false);
+    smtp.starttls();
+    check_str("still ready (starttls refused)", std::any_cast<std::string>(smtp.status()), "ready");
+    check_bool("tls still off", std::any_cast<bool>(smtp.tls_on()), false);
+    std::cout << "PASS: starttls no-op when server doesn't support it" << std::endl;
+}
+
+void test_mail_rejection_returns_to_ready() {
+    auto smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, false);
+    smtp.mail_from(std::string("bad@user"));
+    smtp.mail_response(550);
+    check_str("mail rejected -> ready", std::any_cast<std::string>(smtp.status()), "ready");
+    std::cout << "PASS: mail rejection returns to ready" << std::endl;
+}
+
+int main() {
+    test_basic_exchange_no_tls();
+    test_starttls_upgrade();
+    test_send_message_three_recipients();
+    test_quit();
+    test_greeting_reject();
+    test_starttls_refused_if_not_supported();
+    test_mail_rejection_returns_to_ready();
+    std::cout << "PASS: all SMTP conversation tests passed" << std::endl;
+    return 0;
+}

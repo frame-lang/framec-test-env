@@ -1,0 +1,152 @@
+@@target erlang
+
+% USB Device Enumeration — multi-stage pipeline with compensation (saga).
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in erlang_batch.sh exercises every exported function and checks clean exit.
+
+@@system UsbEnumerator {
+    interface:
+        plug_in(port: int)
+        reset_done(success: bool)
+        address_set(success: bool, addr: int)
+        descriptors_read(success: bool, product: str)
+        driver_bound(success: bool)
+        unplug()
+        status(): str
+
+    machine:
+        $Detached {
+            plug_in(port: int) {
+                self.port = port,
+                self.reset_attempts = 0
+                -> $Resetting
+            }
+            status(): str { @@:("detached") }
+        }
+
+        $Resetting => $Enumerating {
+            $>() {
+                self.reset_attempts = self.reset_attempts + 1,
+                self.issue_port_reset()
+            }
+
+            reset_done(success: bool) {
+                if success {
+                    -> $Addressing
+                } else {
+                    if self.reset_attempts < self.max_reset_attempts {
+                        -> $Resetting
+                    } else {
+                        -> $Failed
+                    }
+                }
+            }
+            status(): str { @@:("resetting") }
+            => $^
+        }
+
+        $Addressing => $Enumerating {
+            $>() {
+                self.assign_address()
+            }
+
+            address_set(success: bool, addr: int) {
+                if success {
+                    self.address = addr
+                    -> $ReadingDescriptors
+                } else {
+                    -> $UndoReset
+                }
+            }
+            status(): str { @@:("addressing") }
+            => $^
+        }
+
+        $ReadingDescriptors => $Enumerating {
+            $>() {
+                self.read_descriptors()
+            }
+
+            descriptors_read(success: bool, product: str) {
+                if success {
+                    self.product = product
+                    -> $BindingDriver
+                } else {
+                    -> $UndoAddress
+                }
+            }
+            status(): str { @@:("reading descriptors") }
+            => $^
+        }
+
+        $BindingDriver => $Enumerating {
+            $>() {
+                self.bind_driver()
+            }
+
+            driver_bound(success: bool) {
+                if success {
+                    -> $Configured
+                } else {
+                    -> $UndoAddress
+                }
+            }
+            status(): str { @@:("binding driver") }
+            => $^
+        }
+
+        $Enumerating {
+            unplug() {
+                -> $Detached
+            }
+        }
+
+        $UndoAddress {
+            $>() {
+                self.release_address(),
+                -> $UndoReset
+            }
+        }
+
+        $UndoReset {
+            $>() {
+                self.disable_port(),
+                -> $Failed
+            }
+        }
+
+        $Configured {
+            unplug() {
+                self.unbind_driver(),
+                self.release_address(),
+                self.disable_port(),
+                -> $Detached
+            }
+            status(): str { @@:("configured") }
+        }
+
+        $Failed {
+            plug_in(port: int) {
+                self.port = port,
+                self.reset_attempts = 0
+                -> $Resetting
+            }
+            status(): str { @@:("failed") }
+        }
+
+    actions:
+        issue_port_reset() {}
+        assign_address() {}
+        read_descriptors() {}
+        bind_driver() {}
+        release_address() {}
+        disable_port() {}
+        unbind_driver() {}
+
+    domain:
+        port = 0
+        address = 0
+        product = ""
+        reset_attempts = 0
+        max_reset_attempts = 3
+}

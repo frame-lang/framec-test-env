@@ -1,0 +1,148 @@
+@@target python_3
+
+# Signal Handler Stack — textbook push$/pop$ use case.
+# Modeled after do_signal/setup_frame/sys_sigreturn in the Linux kernel.
+# When a signal arrives, push the current compartment, enter $SignalHandler
+# with the signal name as an enter arg. -> pop$ on handler return restores.
+#
+# State variables are preserved across pop$ (unlike -> $State which resets).
+# Nested signals re-push, building a stack that mirrors real signal frames.
+
+@@system SignalContext {
+    interface:
+        enter_user_code()
+        signal_arrives(sig: str)
+        handler_returns()
+        current_mode(): str
+        depth(): int
+        current_signum(): str
+
+    machine:
+        $Kernel {
+            enter_user_code() {
+                -> $UserMode
+            }
+            current_mode(): str { @@:("kernel") }
+            depth(): int { @@:(self.nesting) }
+            current_signum(): str { @@:("") }
+        }
+
+        $UserMode {
+            $.saved_regs: str = ""
+
+            $>() {
+                $.saved_regs = self.snapshot_registers()
+            }
+
+            signal_arrives(sig: str) {
+                self.nesting = self.nesting + 1
+                push$
+                -> (sig) $SignalHandler
+            }
+            current_mode(): str { @@:("user") }
+            depth(): int { @@:(self.nesting) }
+            current_signum(): str { @@:("") }
+        }
+
+        $SignalHandler {
+            $.signum: str = ""
+
+            $>(sig: str) {
+                $.signum = sig
+            }
+
+            signal_arrives(sig: str) {
+                self.nesting = self.nesting + 1
+                push$
+                -> (sig) $SignalHandler
+            }
+
+            handler_returns() {
+                self.nesting = self.nesting - 1
+                -> pop$
+            }
+
+            current_mode(): str { @@:("handler") }
+            depth(): int { @@:(self.nesting) }
+            current_signum(): str { @@:($.signum) }
+        }
+
+    actions:
+        snapshot_registers() {
+            return "regs_snapshot"
+        }
+
+    domain:
+        nesting: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} — expected {expected!r}, got {actual!r}")
+        raise SystemExit(1)
+
+def test_enter_user_mode():
+    cpu = @@SignalContext()
+    check("initial kernel", cpu.current_mode(), "kernel")
+    cpu.enter_user_code()
+    check("in user mode", cpu.current_mode(), "user")
+    check("depth 0", cpu.depth(), 0)
+    print("PASS: enter user mode")
+
+def test_single_signal_handler():
+    cpu = @@SignalContext()
+    cpu.enter_user_code()
+    cpu.signal_arrives("SIGUSR1")
+    check("in handler", cpu.current_mode(), "handler")
+    check("signum SIGUSR1", cpu.current_signum(), "SIGUSR1")
+    check("depth 1", cpu.depth(), 1)
+    cpu.handler_returns()
+    check("back to user", cpu.current_mode(), "user")
+    check("depth 0", cpu.depth(), 0)
+    print("PASS: single signal handler + return")
+
+def test_nested_signals():
+    cpu = @@SignalContext()
+    cpu.enter_user_code()
+    cpu.signal_arrives("SIGUSR1")
+    check("outer handler signum", cpu.current_signum(), "SIGUSR1")
+    cpu.signal_arrives("SIGALRM")
+    check("inner handler signum", cpu.current_signum(), "SIGALRM")
+    check("nested depth 2", cpu.depth(), 2)
+    cpu.handler_returns()
+    check("popped to outer handler",
+          cpu.current_mode(), "handler")
+    check("outer signum preserved across pop",
+          cpu.current_signum(), "SIGUSR1")
+    check("depth 1", cpu.depth(), 1)
+    cpu.handler_returns()
+    check("back to user", cpu.current_mode(), "user")
+    check("depth 0", cpu.depth(), 0)
+    print("PASS: nested signals (push$/pop$ preserves state vars)")
+
+def test_deeply_nested_signals():
+    cpu = @@SignalContext()
+    cpu.enter_user_code()
+    cpu.signal_arrives("SIG1")
+    cpu.signal_arrives("SIG2")
+    cpu.signal_arrives("SIG3")
+    cpu.signal_arrives("SIG4")
+    check("depth 4", cpu.depth(), 4)
+    check("top signum", cpu.current_signum(), "SIG4")
+    cpu.handler_returns()
+    check("after pop 1: SIG3", cpu.current_signum(), "SIG3")
+    cpu.handler_returns()
+    check("after pop 2: SIG2", cpu.current_signum(), "SIG2")
+    cpu.handler_returns()
+    check("after pop 3: SIG1", cpu.current_signum(), "SIG1")
+    cpu.handler_returns()
+    check("back to user", cpu.current_mode(), "user")
+    print("PASS: 4-deep nested signal stack")
+
+if __name__ == '__main__':
+    test_enter_user_mode()
+    test_single_signal_handler()
+    test_nested_signals()
+    test_deeply_nested_signals()
+    print("PASS: all signal handler stack tests passed")

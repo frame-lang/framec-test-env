@@ -1,0 +1,341 @@
+@@target c
+
+// SMTP Conversation -- RFC 5321 client state machine.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system SmtpClient {
+    interface:
+        tcp_connected()
+        greeting_received(code: int)
+        ehlo_response(code: int, supports_starttls: bool)
+        starttls()
+        starttls_response(code: int)
+        tls_handshake_complete()
+        mail_from(sender: str)
+        mail_response(code: int)
+        rcpt_to(recipient: str)
+        rcpt_response(code: int)
+        data()
+        data_response(code: int)
+        data_body(body: str)
+        data_final_response(code: int)
+        quit()
+        quit_response(code: int)
+        status(): str
+        recipient_count(): int
+        tls_on(): bool
+
+    machine:
+        $Disconnected {
+            tcp_connected() { -> $AwaitGreeting }
+            status(): str { @@:("disconnected") }
+            recipient_count(): int { @@:(self->rcpt_count) }
+            tls_on(): bool { @@:(self->tls_active) }
+        }
+
+        $AwaitGreeting => $Connected {
+            greeting_received(code: int) {
+                if (code == 220) {
+                    SmtpClient_send_ehlo(self);
+                    -> $AwaitEhlo
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): str { @@:("await greeting") }
+            => $^
+        }
+
+        $AwaitEhlo => $Connected {
+            ehlo_response(code: int, supports_starttls: bool) {
+                if (code == 250) {
+                    self->server_supports_starttls = supports_starttls;
+                    -> $Ready
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): str { @@:("await ehlo") }
+            => $^
+        }
+
+        $Ready => $Connected {
+            starttls() {
+                if (self->server_supports_starttls) {
+                    if (self->tls_active == 0) {
+                        SmtpClient_send_starttls(self);
+                        -> $AwaitStartTlsResponse
+                    }
+                }
+            }
+            mail_from(sender: str) {
+                self->sender = sender;
+                SmtpClient_send_mail_from(self);
+                -> $AwaitMailResponse
+            }
+            quit() {
+                SmtpClient_send_quit(self);
+                -> $AwaitQuitResponse
+            }
+            status(): str { @@:("ready") }
+            => $^
+        }
+
+        $AwaitStartTlsResponse => $Connected {
+            starttls_response(code: int) {
+                if (code == 220) {
+                    -> $TlsHandshake
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): str { @@:("await starttls response") }
+            => $^
+        }
+
+        $TlsHandshake => $Connected {
+            tls_handshake_complete() {
+                self->tls_active = 1;
+                SmtpClient_send_ehlo(self);
+                -> $AwaitEhlo
+            }
+            status(): str { @@:("tls handshake") }
+            => $^
+        }
+
+        $AwaitMailResponse => $Connected {
+            mail_response(code: int) {
+                if (code == 250) {
+                    -> $AwaitRcpt
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): str { @@:("await mail response") }
+            => $^
+        }
+
+        $AwaitRcpt => $Connected {
+            rcpt_to(recipient: str) {
+                self->rcpt_count = self->rcpt_count + 1;
+                SmtpClient_send_rcpt_to(self);
+                -> $AwaitRcptResponse
+            }
+            data() {
+                if (self->rcpt_count > 0) {
+                    SmtpClient_send_data(self);
+                    -> $AwaitDataResponse
+                }
+            }
+            status(): str { @@:("await rcpt") }
+            => $^
+        }
+
+        $AwaitRcptResponse => $Connected {
+            rcpt_response(code: int) {
+                -> $AwaitRcpt
+            }
+            status(): str { @@:("await rcpt response") }
+            => $^
+        }
+
+        $AwaitDataResponse => $Connected {
+            data_response(code: int) {
+                if (code == 354) {
+                    -> $SendingBody
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): str { @@:("await data response") }
+            => $^
+        }
+
+        $SendingBody => $Connected {
+            data_body(body: str) {
+                SmtpClient_send_body(self);
+                SmtpClient_send_body_terminator(self);
+                -> $AwaitFinalResponse
+            }
+            status(): str { @@:("sending body") }
+            => $^
+        }
+
+        $AwaitFinalResponse => $Connected {
+            data_final_response(code: int) {
+                self->rcpt_count = 0;
+                -> $Ready
+            }
+            status(): str { @@:("await final response") }
+            => $^
+        }
+
+        $AwaitQuitResponse => $Connected {
+            quit_response(code: int) {
+                -> $Disconnected
+            }
+            status(): str { @@:("await quit response") }
+            => $^
+        }
+
+        $Connected {
+            recipient_count(): int { @@:(self->rcpt_count) }
+            tls_on(): bool { @@:(self->tls_active) }
+        }
+
+    actions:
+        send_ehlo()             {}
+        send_starttls()         {}
+        send_mail_from()        {}
+        send_rcpt_to()          {}
+        send_data()             {}
+        send_body()             {}
+        send_body_terminator()  {}
+        send_quit()             {}
+
+    domain:
+        server_supports_starttls: bool = 0
+        tls_active: bool = 0
+        sender: str = ""
+        rcpt_count: int = 0
+}
+
+
+void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void check_int(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s -- expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void check_bool(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s -- expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void test_basic_exchange_no_tls(void) {
+    SmtpClient* smtp = @@SmtpClient();
+    check_str("initial disconnected", (const char*)SmtpClient_status(smtp), "disconnected");
+    SmtpClient_tcp_connected(smtp);
+    check_str("await greeting", (const char*)SmtpClient_status(smtp), "await greeting");
+    SmtpClient_greeting_received(smtp, 220);
+    check_str("await ehlo", (const char*)SmtpClient_status(smtp), "await ehlo");
+    SmtpClient_ehlo_response(smtp, 250, 0);
+    check_str("ready", (const char*)SmtpClient_status(smtp), "ready");
+    check_bool("tls off", SmtpClient_tls_on(smtp), 0);
+    printf("PASS: basic TCP connect + EHLO\n");
+    SmtpClient_destroy(smtp);
+}
+
+void test_starttls_upgrade(void) {
+    SmtpClient* smtp = @@SmtpClient();
+    SmtpClient_tcp_connected(smtp);
+    SmtpClient_greeting_received(smtp, 220);
+    SmtpClient_ehlo_response(smtp, 250, 1);
+    SmtpClient_starttls(smtp);
+    check_str("await starttls response", (const char*)SmtpClient_status(smtp), "await starttls response");
+    SmtpClient_starttls_response(smtp, 220);
+    check_str("tls handshake", (const char*)SmtpClient_status(smtp), "tls handshake");
+    SmtpClient_tls_handshake_complete(smtp);
+    check_str("await ehlo after TLS", (const char*)SmtpClient_status(smtp), "await ehlo");
+    SmtpClient_ehlo_response(smtp, 250, 1);
+    check_str("back to ready", (const char*)SmtpClient_status(smtp), "ready");
+    check_bool("tls on", SmtpClient_tls_on(smtp), 1);
+    printf("PASS: STARTTLS upgrade cycles through $AwaitEhlo\n");
+    SmtpClient_destroy(smtp);
+}
+
+void test_send_message_three_recipients(void) {
+    SmtpClient* smtp = @@SmtpClient();
+    SmtpClient_tcp_connected(smtp);
+    SmtpClient_greeting_received(smtp, 220);
+    SmtpClient_ehlo_response(smtp, 250, 0);
+    SmtpClient_mail_from(smtp, "alice@example.com");
+    check_str("await mail", (const char*)SmtpClient_status(smtp), "await mail response");
+    SmtpClient_mail_response(smtp, 250);
+    SmtpClient_rcpt_to(smtp, "bob@example.com");
+    SmtpClient_rcpt_response(smtp, 250);
+    SmtpClient_rcpt_to(smtp, "carol@example.com");
+    SmtpClient_rcpt_response(smtp, 250);
+    SmtpClient_rcpt_to(smtp, "dan@example.com");
+    SmtpClient_rcpt_response(smtp, 250);
+    check_int("3 recipients", SmtpClient_recipient_count(smtp), 3);
+    SmtpClient_data(smtp);
+    check_str("await data response", (const char*)SmtpClient_status(smtp), "await data response");
+    SmtpClient_data_response(smtp, 354);
+    SmtpClient_data_body(smtp, "Subject: hi\r\n\r\nhello");
+    SmtpClient_data_final_response(smtp, 250);
+    check_str("ready again", (const char*)SmtpClient_status(smtp), "ready");
+    check_int("recipient count reset", SmtpClient_recipient_count(smtp), 0);
+    printf("PASS: send message with three recipients\n");
+    SmtpClient_destroy(smtp);
+}
+
+void test_quit(void) {
+    SmtpClient* smtp = @@SmtpClient();
+    SmtpClient_tcp_connected(smtp);
+    SmtpClient_greeting_received(smtp, 220);
+    SmtpClient_ehlo_response(smtp, 250, 0);
+    SmtpClient_quit(smtp);
+    SmtpClient_quit_response(smtp, 221);
+    check_str("disconnected after QUIT", (const char*)SmtpClient_status(smtp), "disconnected");
+    printf("PASS: clean QUIT shutdown\n");
+    SmtpClient_destroy(smtp);
+}
+
+void test_greeting_reject(void) {
+    SmtpClient* smtp = @@SmtpClient();
+    SmtpClient_tcp_connected(smtp);
+    SmtpClient_greeting_received(smtp, 500);
+    check_str("bad greeting -> disconnected", (const char*)SmtpClient_status(smtp), "disconnected");
+    printf("PASS: bad greeting drops connection\n");
+    SmtpClient_destroy(smtp);
+}
+
+void test_starttls_refused_if_not_supported(void) {
+    SmtpClient* smtp = @@SmtpClient();
+    SmtpClient_tcp_connected(smtp);
+    SmtpClient_greeting_received(smtp, 220);
+    SmtpClient_ehlo_response(smtp, 250, 0);
+    SmtpClient_starttls(smtp);
+    check_str("still ready (starttls refused)", (const char*)SmtpClient_status(smtp), "ready");
+    check_bool("tls still off", SmtpClient_tls_on(smtp), 0);
+    printf("PASS: starttls no-op when server doesn't support it\n");
+    SmtpClient_destroy(smtp);
+}
+
+void test_mail_rejection_returns_to_ready(void) {
+    SmtpClient* smtp = @@SmtpClient();
+    SmtpClient_tcp_connected(smtp);
+    SmtpClient_greeting_received(smtp, 220);
+    SmtpClient_ehlo_response(smtp, 250, 0);
+    SmtpClient_mail_from(smtp, "bad@user");
+    SmtpClient_mail_response(smtp, 550);
+    check_str("mail rejected -> ready", (const char*)SmtpClient_status(smtp), "ready");
+    printf("PASS: mail rejection returns to ready\n");
+    SmtpClient_destroy(smtp);
+}
+
+int main(void) {
+    test_basic_exchange_no_tls();
+    test_starttls_upgrade();
+    test_send_message_three_recipients();
+    test_quit();
+    test_greeting_reject();
+    test_starttls_refused_if_not_supported();
+    test_mail_rejection_returns_to_ready();
+    printf("PASS: all SMTP conversation tests passed\n");
+    return 0;
+}

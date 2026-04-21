@@ -1,0 +1,153 @@
+@@target erlang
+
+% BGP Finite State Machine -- RFC 4271 Section 8 direct transcription.
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in runner exercises every exported function and checks clean exit.
+
+@@persist
+@@system BgpSession {
+    interface:
+        manual_start()
+        manual_stop()
+        tcp_connection_confirmed()
+        tcp_connection_fails()
+        open_received(asn: int, hold_time: int)
+        keepalive_received()
+        notification_received(code: int, subcode: int)
+        hold_timer_expired()
+        keepalive_timer_expired()
+        connect_retry_timer_expired()
+        status(): str
+
+    machine:
+        $Idle {
+            manual_start() {
+                self.connect_retry_count = 0,
+                self.start_connect_retry_timer(),
+                self.initiate_tcp_connection(),
+                -> $Connect
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $Connect {
+            tcp_connection_confirmed() {
+                self.cancel_connect_retry_timer(),
+                self.send_open(),
+                -> $OpenSent
+            }
+            tcp_connection_fails() {
+                -> $Active
+            }
+            connect_retry_timer_expired() {
+                self.initiate_tcp_connection(),
+                self.start_connect_retry_timer()
+            }
+            manual_stop() {
+                -> $Idle
+            }
+            status(): str { @@:("connect") }
+        }
+
+        $Active {
+            tcp_connection_confirmed() {
+                self.cancel_connect_retry_timer(),
+                self.send_open(),
+                -> $OpenSent
+            }
+            connect_retry_timer_expired() {
+                self.connect_retry_count = self.connect_retry_count + 1,
+                self.initiate_tcp_connection(),
+                self.start_connect_retry_timer(),
+                -> $Connect
+            }
+            manual_stop() {
+                -> $Idle
+            }
+            status(): str { @@:("active") }
+        }
+
+        $OpenSent {
+            open_received(asn: int, hold_time: int) {
+                self.peer_asn = asn,
+                self.negotiated_hold = hold_time,
+                self.cancel_hold_timer(),
+                self.send_keepalive(),
+                -> $OpenConfirm
+            }
+            tcp_connection_fails() {
+                self.cancel_hold_timer(),
+                -> $Active
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                self.send_notification(),
+                -> $Idle
+            }
+            manual_stop() {
+                self.send_notification(),
+                -> $Idle
+            }
+            status(): str { @@:("open sent") }
+        }
+
+        $OpenConfirm {
+            keepalive_received() {
+                -> $Established
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                self.send_notification(),
+                -> $Idle
+            }
+            keepalive_timer_expired() {
+                self.send_keepalive()
+            }
+            manual_stop() {
+                self.send_notification(),
+                -> $Idle
+            }
+            status(): str { @@:("open confirm") }
+        }
+
+        $Established {
+            keepalive_received() {
+                self.reset_hold_timer()
+            }
+            keepalive_timer_expired() {
+                self.send_keepalive()
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                self.send_notification(),
+                -> $Idle
+            }
+            manual_stop() {
+                self.send_notification(),
+                -> $Idle
+            }
+            status(): str { @@:("established") }
+        }
+
+    actions:
+        initiate_tcp_connection()   {}
+        send_open()                 {}
+        send_keepalive()            {}
+        send_notification()         {}
+        start_connect_retry_timer() {}
+        cancel_connect_retry_timer(){}
+        cancel_hold_timer()         {}
+        reset_hold_timer()          {}
+
+    domain:
+        local_asn = 65001
+        peer_asn = 0
+        negotiated_hold = 0
+        connect_retry_count = 0
+}

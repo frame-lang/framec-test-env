@@ -1,0 +1,199 @@
+@@target kotlin
+
+// NTP Client Association -- RFC 5905.
+
+@@system NtpAssociation {
+    operations:
+        get_offset(): Int { return this.last_offset }
+        is_reachable(): Boolean { return this.reach_register > 0 }
+
+    interface:
+        poll_tick()
+        response_received(offset_ms: Int, delay_ms: Int)
+        poll_timeout()
+        status(): String
+        poll_interval(): Int
+        reach(): Int
+
+    machine:
+        $Unsynced {
+            $>() {
+                this.poll_interval_v = this.min_poll
+            }
+
+            poll_tick() {
+            }
+            response_received(offset_ms: Int, delay_ms: Int) {
+                this.shift_reach_register(1)
+                this.last_offset = offset_ms
+                this.last_delay = delay_ms
+                this.good_responses = this.good_responses + 1
+                if (this.good_responses >= this.sync_threshold) {
+                    -> $Synced
+                }
+            }
+            poll_timeout() {
+                this.shift_reach_register(0)
+            }
+            status(): String { @@:("unsynced") }
+            poll_interval(): Int { @@:(this.poll_interval_v) }
+            reach(): Int { @@:(this.reach_register) }
+        }
+
+        $Synced {
+            poll_tick() {
+            }
+            response_received(offset_ms: Int, delay_ms: Int) {
+                this.shift_reach_register(1)
+                this.last_offset = offset_ms
+                this.last_delay = delay_ms
+                if (this.poll_interval_v < this.max_poll) {
+                    this.poll_interval_v = this.poll_interval_v * 2
+                }
+            }
+            poll_timeout() {
+                this.shift_reach_register(0)
+                this.consecutive_timeouts = this.consecutive_timeouts + 1
+                if (this.consecutive_timeouts >= 3) {
+                    this.consecutive_timeouts = 0
+                    this.good_responses = 0
+                    -> $Unsynced
+                }
+                if (this.poll_interval_v > this.min_poll) {
+                    this.poll_interval_v = this.poll_interval_v shr 1
+                }
+            }
+            status(): String { @@:("synced") }
+            poll_interval(): Int { @@:(this.poll_interval_v) }
+            reach(): Int { @@:(this.reach_register) }
+        }
+
+    actions:
+        shift_reach_register(bit: Int) {
+            this.reach_register = ((this.reach_register shl 1) or bit) and 0xFF
+            if (bit != 0) {
+                this.consecutive_timeouts = 0
+            }
+        }
+
+    domain:
+        poll_interval_v: Int = 64
+        min_poll: Int = 64
+        max_poll: Int = 1024
+        reach_register: Int = 0
+        last_offset: Int = 0
+        last_delay: Int = 0
+        good_responses: Int = 0
+        sync_threshold: Int = 3
+        consecutive_timeouts: Int = 0
+}
+
+
+fun check_str(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label -- expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun check_int(label: String, actual: Int, expected: Int) {
+    if (actual != expected) {
+        println("FAIL: $label -- expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun check_bool(label: String, actual: Boolean, expected: Boolean) {
+    if (actual != expected) {
+        println("FAIL: $label -- expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun test_builds_to_sync() {
+    val ntp = NtpAssociation()
+    check_str("initial unsynced", ntp.status() as String, "unsynced")
+    ntp.poll_tick()
+    ntp.response_received(12, 3)
+    ntp.poll_tick()
+    ntp.response_received(11, 2)
+    check_str("not yet synced (2 good)", ntp.status() as String, "unsynced")
+    ntp.poll_tick()
+    ntp.response_received(12, 3)
+    check_str("synced after 3 good responses", ntp.status() as String, "synced")
+    println("PASS: sync threshold reached after 3 good responses")
+}
+
+fun test_poll_interval_backs_off() {
+    val ntp = NtpAssociation()
+    ntp.poll_tick(); ntp.response_received(10, 2)
+    ntp.poll_tick(); ntp.response_received(10, 2)
+    ntp.poll_tick(); ntp.response_received(10, 2)
+    check_str("synced", ntp.status() as String, "synced")
+    check_int("interval at min (64)", ntp.poll_interval() as Int, 64)
+    ntp.poll_tick(); ntp.response_received(10, 2)
+    check_int("128 after 1 good in synced", ntp.poll_interval() as Int, 128)
+    ntp.poll_tick(); ntp.response_received(10, 2)
+    check_int("256 after 2 good", ntp.poll_interval() as Int, 256)
+    println("PASS: poll interval doubles on success in synced")
+}
+
+fun test_timeout_shrinks_interval() {
+    val ntp = NtpAssociation()
+    ntp.poll_tick(); ntp.response_received(10, 2)
+    ntp.poll_tick(); ntp.response_received(10, 2)
+    ntp.poll_tick(); ntp.response_received(10, 2)
+    ntp.poll_tick(); ntp.response_received(10, 2)
+    check_int("interval 128", ntp.poll_interval() as Int, 128)
+    ntp.poll_tick(); ntp.poll_timeout()
+    check_int("timeout halves -> 64", ntp.poll_interval() as Int, 64)
+    println("PASS: timeout halves poll interval in synced")
+}
+
+fun test_three_timeouts_drops_to_unsync() {
+    val ntp = NtpAssociation()
+    ntp.poll_tick(); ntp.response_received(10, 2)
+    ntp.poll_tick(); ntp.response_received(10, 2)
+    ntp.poll_tick(); ntp.response_received(10, 2)
+    check_str("synced", ntp.status() as String, "synced")
+    ntp.poll_tick(); ntp.poll_timeout()
+    ntp.poll_tick(); ntp.poll_timeout()
+    check_str("still synced after 2 timeouts", ntp.status() as String, "synced")
+    ntp.poll_tick(); ntp.poll_timeout()
+    check_str("3rd timeout drops to unsync", ntp.status() as String, "unsynced")
+    println("PASS: three consecutive timeouts drop to unsync")
+}
+
+fun test_reach_register_shifts() {
+    val ntp = NtpAssociation()
+    check_int("reach starts 0", ntp.reach() as Int, 0)
+    ntp.poll_tick()
+    ntp.response_received(10, 2)
+    check_int("reach 0b00000001 = 1", ntp.reach() as Int, 1)
+    ntp.poll_tick()
+    ntp.response_received(10, 2)
+    check_int("reach 0b00000011 = 3", ntp.reach() as Int, 3)
+    ntp.poll_tick()
+    ntp.poll_timeout()
+    check_int("reach 0b00000110 = 6", ntp.reach() as Int, 6)
+    println("PASS: reach register shifts correctly")
+}
+
+fun test_is_reachable_operation() {
+    val ntp = NtpAssociation()
+    check_bool("initial not reachable", ntp.is_reachable() as Boolean, false)
+    ntp.poll_tick()
+    ntp.response_received(10, 2)
+    check_bool("after good response reachable", ntp.is_reachable() as Boolean, true)
+    println("PASS: is_reachable() operation query")
+}
+
+fun main() {
+    test_builds_to_sync()
+    test_poll_interval_backs_off()
+    test_timeout_shrinks_interval()
+    test_three_timeouts_drops_to_unsync()
+    test_reach_register_shifts()
+    test_is_reachable_operation()
+    println("PASS: all NTP association tests passed")
+}

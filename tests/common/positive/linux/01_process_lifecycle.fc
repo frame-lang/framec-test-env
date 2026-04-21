@@ -1,0 +1,227 @@
+@@target c
+
+// Process Lifecycle — Linux task states (kernel/sched/core.c semantics)
+// Three-level HSM with explicit upward forwarding as per-state signal policy.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system TaskLifecycle {
+    interface:
+        fork(): str
+        schedule(): str
+        block_on_io(): str
+        io_complete(): str
+        block_uninterruptible(): str
+        send_signal(sig: str): str
+        wait_by_parent(): str
+        status(): str
+
+    machine:
+        $New {
+            fork(): str {
+                self->pid = TaskLifecycle_next_pid(self);
+                @@:("forked")
+                -> $Ready
+            }
+            status(): str { @@:("new") }
+        }
+
+        $Ready => $Alive {
+            schedule(): str {
+                @@:("running")
+                -> $Running
+            }
+            status(): str { @@:("ready") }
+            => $^
+        }
+
+        $Running => $Alive {
+            schedule(): str {
+                @@:("preempted")
+                -> $Ready
+            }
+            block_on_io(): str {
+                @@:("blocked")
+                -> $Interruptible
+            }
+            block_uninterruptible(): str {
+                @@:("blocked (D)")
+                -> $Uninterruptible
+            }
+            status(): str { @@:("running") }
+            => $^
+        }
+
+        $Interruptible => $Blocked {
+            io_complete(): str {
+                @@:("woke")
+                -> $Ready
+            }
+            send_signal(sig: str): str {
+                if (strcmp(sig, "SIGKILL") == 0 || strcmp(sig, "SIGTERM") == 0 || strcmp(sig, "SIGSTOP") == 0) {
+                    => $^
+                } else {
+                    @@:("interrupted")
+                    -> $Ready
+                }
+            }
+            status(): str { @@:("interruptible") }
+            => $^
+        }
+
+        $Uninterruptible => $Blocked {
+            io_complete(): str {
+                @@:("woke")
+                -> $Ready
+            }
+            // send_signal NOT handled here — all signals forward via => $^
+            // through $Blocked to $Alive. Non-fatal signals hit the "ignored"
+            // branch there, matching the kernel's D-state behavior.
+            // SIGKILL still gets through, matching TASK_KILLABLE.
+            status(): str { @@:("uninterruptible") }
+            => $^
+        }
+
+        $Blocked => $Alive {
+            status(): str { @@:("blocked") }
+            => $^
+        }
+
+        $Alive {
+            send_signal(sig: str): str {
+                if (strcmp(sig, "SIGKILL") == 0 || strcmp(sig, "SIGTERM") == 0) {
+                    @@:("exiting")
+                    -> $Zombie
+                } else if (strcmp(sig, "SIGSTOP") == 0) {
+                    @@:("stopped")
+                    -> $Stopped
+                } else {
+                    @@:("signal ignored")
+                }
+            }
+        }
+
+        $Stopped {
+            send_signal(sig: str): str {
+                if (strcmp(sig, "SIGCONT") == 0) {
+                    @@:("continued")
+                    -> $Ready
+                } else if (strcmp(sig, "SIGKILL") == 0) {
+                    @@:("killed while stopped")
+                    -> $Zombie
+                } else {
+                    @@:("signal ignored")
+                }
+            }
+            status(): str { @@:("stopped") }
+        }
+
+        $Zombie {
+            wait_by_parent(): str {
+                @@:("reaped")
+                -> $Dead
+            }
+            status(): str { @@:("zombie") }
+        }
+
+        $Dead {
+            status(): str { @@:("dead") }
+        }
+
+    actions:
+        next_pid(): int {
+            self->pid_counter = self->pid_counter + 1;
+            return self->pid_counter;
+        }
+
+    domain:
+        pid: int = 0
+        pid_counter: int = 100
+}
+
+
+void check(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void test_happy_path(void) {
+    TaskLifecycle* t = @@TaskLifecycle();
+    check("initial status", (const char*)TaskLifecycle_status(t), "new");
+    check("fork",           (const char*)TaskLifecycle_fork(t),   "forked");
+    check("after fork",     (const char*)TaskLifecycle_status(t), "ready");
+    check("schedule",       (const char*)TaskLifecycle_schedule(t), "running");
+    check("after schedule", (const char*)TaskLifecycle_status(t), "running");
+    check("preempt",        (const char*)TaskLifecycle_schedule(t), "preempted");
+    check("after preempt",  (const char*)TaskLifecycle_status(t), "ready");
+    printf("PASS: happy path\n");
+    TaskLifecycle_destroy(t);
+}
+
+void test_interruptible_wake_by_signal(void) {
+    TaskLifecycle* t = @@TaskLifecycle();
+    TaskLifecycle_fork(t);
+    TaskLifecycle_schedule(t);
+    check("block_on_io", (const char*)TaskLifecycle_block_on_io(t), "blocked");
+    check("interruptible status", (const char*)TaskLifecycle_status(t), "interruptible");
+    check("SIGUSR1 wakes interruptible",
+          (const char*)TaskLifecycle_send_signal(t, "SIGUSR1"), "interrupted");
+    check("woke to ready", (const char*)TaskLifecycle_status(t), "ready");
+    printf("PASS: interruptible wake by signal\n");
+    TaskLifecycle_destroy(t);
+}
+
+void test_uninterruptible_holds_signal(void) {
+    TaskLifecycle* t = @@TaskLifecycle();
+    TaskLifecycle_fork(t);
+    TaskLifecycle_schedule(t);
+    check("block_uninterruptible",
+          (const char*)TaskLifecycle_block_uninterruptible(t), "blocked (D)");
+    check("D state", (const char*)TaskLifecycle_status(t), "uninterruptible");
+    check("SIGUSR1 ignored in D (forwarded to $Alive)",
+          (const char*)TaskLifecycle_send_signal(t, "SIGUSR1"), "signal ignored");
+    check("still in D", (const char*)TaskLifecycle_status(t), "uninterruptible");
+    printf("PASS: uninterruptible ignores non-fatal signal via $Alive\n");
+    TaskLifecycle_destroy(t);
+}
+
+void test_sigkill_reaches_d_state(void) {
+    TaskLifecycle* t = @@TaskLifecycle();
+    TaskLifecycle_fork(t);
+    TaskLifecycle_schedule(t);
+    TaskLifecycle_block_uninterruptible(t);
+    check("SIGKILL forwarded from D through $Alive",
+          (const char*)TaskLifecycle_send_signal(t, "SIGKILL"), "exiting");
+    check("now zombie", (const char*)TaskLifecycle_status(t), "zombie");
+    check("reap", (const char*)TaskLifecycle_wait_by_parent(t), "reaped");
+    check("dead", (const char*)TaskLifecycle_status(t), "dead");
+    printf("PASS: SIGKILL reaches D state via $Alive forwarding\n");
+    TaskLifecycle_destroy(t);
+}
+
+void test_sigstop_sigcont(void) {
+    TaskLifecycle* t = @@TaskLifecycle();
+    TaskLifecycle_fork(t);
+    TaskLifecycle_schedule(t);
+    check("SIGSTOP from running",
+          (const char*)TaskLifecycle_send_signal(t, "SIGSTOP"), "stopped");
+    check("stopped status", (const char*)TaskLifecycle_status(t), "stopped");
+    check("SIGCONT resumes", (const char*)TaskLifecycle_send_signal(t, "SIGCONT"), "continued");
+    check("back to ready", (const char*)TaskLifecycle_status(t), "ready");
+    printf("PASS: SIGSTOP/SIGCONT\n");
+    TaskLifecycle_destroy(t);
+}
+
+int main(void) {
+    test_happy_path();
+    test_interruptible_wake_by_signal();
+    test_uninterruptible_holds_signal();
+    test_sigkill_reaches_d_state();
+    test_sigstop_sigcont();
+    printf("PASS: all process lifecycle tests passed\n");
+    return 0;
+}

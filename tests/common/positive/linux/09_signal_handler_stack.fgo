@@ -1,0 +1,161 @@
+@@target go
+
+// Signal Handler Stack — textbook push$/pop$ use case.
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system SignalContext {
+    interface:
+        enter_user_code()
+        signal_arrives(sig: string)
+        handler_returns()
+        current_mode(): string
+        depth(): int
+        current_signum(): string
+
+    machine:
+        $Kernel {
+            enter_user_code() {
+                -> $UserMode
+            }
+            current_mode(): string { @@:("kernel") }
+            depth(): int { @@:(s.nesting) }
+            current_signum(): string { @@:("") }
+        }
+
+        $UserMode {
+            $.saved_regs: string = ""
+
+            $>() {
+                $.saved_regs = s.snapshot_registers()
+            }
+
+            signal_arrives(sig: string) {
+                s.nesting = s.nesting + 1
+                push$
+                -> (sig) $SignalHandler
+            }
+            current_mode(): string { @@:("user") }
+            depth(): int { @@:(s.nesting) }
+            current_signum(): string { @@:("") }
+        }
+
+        $SignalHandler {
+            $.signum: string = ""
+
+            $>(sig: string) {
+                $.signum = sig
+            }
+
+            signal_arrives(sig: string) {
+                s.nesting = s.nesting + 1
+                push$
+                -> (sig) $SignalHandler
+            }
+
+            handler_returns() {
+                s.nesting = s.nesting - 1
+                -> pop$
+            }
+
+            current_mode(): string { @@:("handler") }
+            depth(): int { @@:(s.nesting) }
+            current_signum(): string { @@:($.signum) }
+        }
+
+    actions:
+        snapshot_registers(): string {
+            return "regs_snapshot"
+        }
+
+    domain:
+        nesting: int = 0
+}
+
+
+func check_str(label, actual, expected string) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func check_int(label string, actual, expected int) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s -- expected %d, got %d\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func test_enter_user_mode() {
+	cpu := NewSignalContext()
+	check_str("initial kernel", cpu.Current_mode(), "kernel")
+	cpu.Enter_user_code()
+	check_str("in user mode", cpu.Current_mode(), "user")
+	check_int("depth 0", cpu.Depth(), 0)
+	fmt.Println("PASS: enter user mode")
+}
+
+func test_single_signal_handler() {
+	cpu := NewSignalContext()
+	cpu.Enter_user_code()
+	cpu.Signal_arrives("SIGUSR1")
+	check_str("in handler", cpu.Current_mode(), "handler")
+	check_str("signum SIGUSR1", cpu.Current_signum(), "SIGUSR1")
+	check_int("depth 1", cpu.Depth(), 1)
+	cpu.Handler_returns()
+	check_str("back to user", cpu.Current_mode(), "user")
+	check_int("depth 0", cpu.Depth(), 0)
+	fmt.Println("PASS: single signal handler + return")
+}
+
+func test_nested_signals() {
+	cpu := NewSignalContext()
+	cpu.Enter_user_code()
+	cpu.Signal_arrives("SIGUSR1")
+	check_str("outer handler signum", cpu.Current_signum(), "SIGUSR1")
+	cpu.Signal_arrives("SIGALRM")
+	check_str("inner handler signum", cpu.Current_signum(), "SIGALRM")
+	check_int("nested depth 2", cpu.Depth(), 2)
+	cpu.Handler_returns()
+	check_str("popped to outer handler", cpu.Current_mode(), "handler")
+	check_str("outer signum preserved across pop", cpu.Current_signum(), "SIGUSR1")
+	check_int("depth 1", cpu.Depth(), 1)
+	cpu.Handler_returns()
+	check_str("back to user", cpu.Current_mode(), "user")
+	check_int("depth 0", cpu.Depth(), 0)
+	fmt.Println("PASS: nested signals (push$/pop$ preserves state vars)")
+}
+
+func test_deeply_nested_signals() {
+	cpu := NewSignalContext()
+	cpu.Enter_user_code()
+	cpu.Signal_arrives("SIG1")
+	cpu.Signal_arrives("SIG2")
+	cpu.Signal_arrives("SIG3")
+	cpu.Signal_arrives("SIG4")
+	check_int("depth 4", cpu.Depth(), 4)
+	check_str("top signum", cpu.Current_signum(), "SIG4")
+	cpu.Handler_returns()
+	check_str("after pop 1: SIG3", cpu.Current_signum(), "SIG3")
+	cpu.Handler_returns()
+	check_str("after pop 2: SIG2", cpu.Current_signum(), "SIG2")
+	cpu.Handler_returns()
+	check_str("after pop 3: SIG1", cpu.Current_signum(), "SIG1")
+	cpu.Handler_returns()
+	check_str("back to user", cpu.Current_mode(), "user")
+	fmt.Println("PASS: 4-deep nested signal stack")
+}
+
+func main() {
+	test_enter_user_mode()
+	test_single_signal_handler()
+	test_nested_signals()
+	test_deeply_nested_signals()
+	fmt.Println("PASS: all signal handler stack tests passed")
+}

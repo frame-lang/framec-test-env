@@ -1,0 +1,206 @@
+@@target go
+
+// NTP Client Association -- RFC 5905.
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system NtpAssociation {
+    operations:
+        GetOffset(): int { return s.last_offset }
+        IsReachable(): bool { return s.reach_register > 0 }
+
+    interface:
+        PollTick()
+        ResponseReceived(offset_ms: int, delay_ms: int)
+        PollTimeout()
+        Status(): string
+        PollInterval(): int
+        Reach(): int
+
+    machine:
+        $Unsynced {
+            $>() {
+                s.poll_interval_v = s.min_poll
+            }
+
+            PollTick() {
+            }
+            ResponseReceived(offset_ms: int, delay_ms: int) {
+                s.shift_reach_register(1)
+                s.last_offset = offset_ms
+                s.last_delay = delay_ms
+                s.good_responses = s.good_responses + 1
+                if s.good_responses >= s.sync_threshold {
+                    -> $Synced
+                }
+            }
+            PollTimeout() {
+                s.shift_reach_register(0)
+            }
+            Status(): string { @@:("unsynced") }
+            PollInterval(): int { @@:(s.poll_interval_v) }
+            Reach(): int { @@:(s.reach_register) }
+        }
+
+        $Synced {
+            PollTick() {
+            }
+            ResponseReceived(offset_ms: int, delay_ms: int) {
+                s.shift_reach_register(1)
+                s.last_offset = offset_ms
+                s.last_delay = delay_ms
+                if s.poll_interval_v < s.max_poll {
+                    s.poll_interval_v = s.poll_interval_v * 2
+                }
+            }
+            PollTimeout() {
+                s.shift_reach_register(0)
+                s.consecutive_timeouts = s.consecutive_timeouts + 1
+                if s.consecutive_timeouts >= 3 {
+                    s.consecutive_timeouts = 0
+                    s.good_responses = 0
+                    -> $Unsynced
+                }
+                if s.poll_interval_v > s.min_poll {
+                    s.poll_interval_v = s.poll_interval_v >> 1
+                }
+            }
+            Status(): string { @@:("synced") }
+            PollInterval(): int { @@:(s.poll_interval_v) }
+            Reach(): int { @@:(s.reach_register) }
+        }
+
+    actions:
+        shift_reach_register(bit: int) {
+            s.reach_register = ((s.reach_register << 1) | bit) & 0xFF
+            if bit != 0 {
+                s.consecutive_timeouts = 0
+            }
+        }
+
+    domain:
+        poll_interval_v: int = 64
+        min_poll: int = 64
+        max_poll: int = 1024
+        reach_register: int = 0
+        last_offset: int = 0
+        last_delay: int = 0
+        good_responses: int = 0
+        sync_threshold: int = 3
+        consecutive_timeouts: int = 0
+}
+
+
+func check_str(label, actual, expected string) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func check_int(label string, actual, expected int) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s -- expected %d, got %d\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func check_bool(label string, actual, expected bool) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s -- expected %t, got %t\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func test_builds_to_sync() {
+	ntp := NewNtpAssociation()
+	check_str("initial unsynced", ntp.Status(), "unsynced")
+	ntp.PollTick()
+	ntp.ResponseReceived(12, 3)
+	ntp.PollTick()
+	ntp.ResponseReceived(11, 2)
+	check_str("not yet synced (2 good)", ntp.Status(), "unsynced")
+	ntp.PollTick()
+	ntp.ResponseReceived(12, 3)
+	check_str("synced after 3 good responses", ntp.Status(), "synced")
+	fmt.Println("PASS: sync threshold reached after 3 good responses")
+}
+
+func test_poll_interval_backs_off() {
+	ntp := NewNtpAssociation()
+	ntp.PollTick(); ntp.ResponseReceived(10, 2)
+	ntp.PollTick(); ntp.ResponseReceived(10, 2)
+	ntp.PollTick(); ntp.ResponseReceived(10, 2)
+	check_str("synced", ntp.Status(), "synced")
+	check_int("interval at min (64)", ntp.PollInterval(), 64)
+	ntp.PollTick(); ntp.ResponseReceived(10, 2)
+	check_int("128 after 1 good in synced", ntp.PollInterval(), 128)
+	ntp.PollTick(); ntp.ResponseReceived(10, 2)
+	check_int("256 after 2 good", ntp.PollInterval(), 256)
+	fmt.Println("PASS: poll interval doubles on success in synced")
+}
+
+func test_timeout_shrinks_interval() {
+	ntp := NewNtpAssociation()
+	ntp.PollTick(); ntp.ResponseReceived(10, 2)
+	ntp.PollTick(); ntp.ResponseReceived(10, 2)
+	ntp.PollTick(); ntp.ResponseReceived(10, 2)
+	ntp.PollTick(); ntp.ResponseReceived(10, 2)
+	check_int("interval 128", ntp.PollInterval(), 128)
+	ntp.PollTick(); ntp.PollTimeout()
+	check_int("timeout halves -> 64", ntp.PollInterval(), 64)
+	fmt.Println("PASS: timeout halves poll interval in synced")
+}
+
+func test_three_timeouts_drops_to_unsync() {
+	ntp := NewNtpAssociation()
+	ntp.PollTick(); ntp.ResponseReceived(10, 2)
+	ntp.PollTick(); ntp.ResponseReceived(10, 2)
+	ntp.PollTick(); ntp.ResponseReceived(10, 2)
+	check_str("synced", ntp.Status(), "synced")
+	ntp.PollTick(); ntp.PollTimeout()
+	ntp.PollTick(); ntp.PollTimeout()
+	check_str("still synced after 2 timeouts", ntp.Status(), "synced")
+	ntp.PollTick(); ntp.PollTimeout()
+	check_str("3rd timeout drops to unsync", ntp.Status(), "unsynced")
+	fmt.Println("PASS: three consecutive timeouts drop to unsync")
+}
+
+func test_reach_register_shifts() {
+	ntp := NewNtpAssociation()
+	check_int("reach starts 0", ntp.Reach(), 0)
+	ntp.PollTick()
+	ntp.ResponseReceived(10, 2)
+	check_int("reach 0b00000001 = 1", ntp.Reach(), 1)
+	ntp.PollTick()
+	ntp.ResponseReceived(10, 2)
+	check_int("reach 0b00000011 = 3", ntp.Reach(), 3)
+	ntp.PollTick()
+	ntp.PollTimeout()
+	check_int("reach 0b00000110 = 6", ntp.Reach(), 6)
+	fmt.Println("PASS: reach register shifts correctly")
+}
+
+func test_is_reachable_operation() {
+	ntp := NewNtpAssociation()
+	check_bool("initial not reachable", ntp.IsReachable(), false)
+	ntp.PollTick()
+	ntp.ResponseReceived(10, 2)
+	check_bool("after good response reachable", ntp.IsReachable(), true)
+	fmt.Println("PASS: is_reachable() operation query")
+}
+
+func main() {
+	test_builds_to_sync()
+	test_poll_interval_backs_off()
+	test_timeout_shrinks_interval()
+	test_three_timeouts_drops_to_unsync()
+	test_reach_register_shifts()
+	test_is_reachable_operation()
+	fmt.Println("PASS: all NTP association tests passed")
+}

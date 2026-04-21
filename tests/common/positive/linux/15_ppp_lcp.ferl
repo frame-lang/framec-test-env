@@ -1,0 +1,243 @@
+@@target erlang
+
+% PPP Link Control Protocol -- RFC 1661 Section 4 state table direct transcription.
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in erlang_batch.sh exercises every exported function and checks clean exit.
+
+@@system PppLcp {
+    interface:
+        up()
+        down()
+        open()
+        close()
+        receive_configure_request(acceptable: bool)
+        receive_configure_ack()
+        receive_configure_nak()
+        receive_terminate_request()
+        receive_terminate_ack()
+        timeout_positive()
+        timeout_negative()
+        status(): str
+
+    machine:
+        $Initial {
+            up() { -> $Closed }
+            open() { -> $Starting }
+            status(): str { @@:("initial") }
+        }
+
+        $Starting {
+            up() {
+                self.init_restart_count(),
+                self.send_configure_request(),
+                -> $ReqSent
+            }
+            close() { -> $Initial }
+            status(): str { @@:("starting") }
+        }
+
+        $Closed {
+            open() {
+                self.init_restart_count(),
+                self.send_configure_request(),
+                -> $ReqSent
+            }
+            down() { -> $Initial }
+            receive_configure_request(acceptable: bool) {
+                self.send_terminate_ack()
+            }
+            status(): str { @@:("closed") }
+        }
+
+        $Stopped {
+            open() { -> $Stopped }
+            down() { -> $Starting }
+            receive_configure_request(acceptable: bool) {
+                self.init_restart_count(),
+                if acceptable {
+                    self.send_configure_ack(),
+                    self.send_configure_request(),
+                    -> $AckSent
+                } else {
+                    self.send_configure_nak(),
+                    self.send_configure_request(),
+                    -> $ReqSent
+                }
+            }
+            status(): str { @@:("stopped") }
+        }
+
+        $Closing {
+            timeout_positive() {
+                self.send_terminate_request()
+            }
+            timeout_negative() {
+                -> $Closed
+            }
+            receive_terminate_ack() {
+                -> $Closed
+            }
+            down() { -> $Initial }
+            status(): str { @@:("closing") }
+        }
+
+        $Stopping {
+            timeout_positive() {
+                self.send_terminate_request()
+            }
+            timeout_negative() {
+                -> $Stopped
+            }
+            receive_terminate_ack() {
+                -> $Stopped
+            }
+            down() { -> $Starting }
+            status(): str { @@:("stopping") }
+        }
+
+        $ReqSent {
+            timeout_positive() {
+                self.send_configure_request()
+            }
+            timeout_negative() {
+                -> $Stopped
+            }
+            receive_configure_request(acceptable: bool) {
+                if acceptable {
+                    self.send_configure_ack(),
+                    -> $AckSent
+                } else {
+                    self.send_configure_nak()
+                }
+            }
+            receive_configure_ack() {
+                self.init_restart_count(),
+                -> $AckRcvd
+            }
+            receive_configure_nak() {
+                self.init_restart_count(),
+                self.send_configure_request()
+            }
+            receive_terminate_request() {
+                self.send_terminate_ack(),
+                -> $ReqSent
+            }
+            close() {
+                self.init_restart_count(),
+                self.send_terminate_request(),
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): str { @@:("req-sent") }
+        }
+
+        $AckRcvd {
+            receive_configure_request(acceptable: bool) {
+                if acceptable {
+                    self.send_configure_ack(),
+                    self.tlu(),
+                    -> $Opened
+                } else {
+                    self.send_configure_nak()
+                }
+            }
+            timeout_positive() {
+                self.send_configure_request(),
+                -> $ReqSent
+            }
+            timeout_negative() { -> $Stopped }
+            receive_configure_ack() {
+                self.send_configure_request(),
+                -> $ReqSent
+            }
+            close() {
+                self.init_restart_count(),
+                self.send_terminate_request(),
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): str { @@:("ack-rcvd") }
+        }
+
+        $AckSent {
+            receive_configure_ack() {
+                self.init_restart_count(),
+                self.tlu(),
+                -> $Opened
+            }
+            timeout_positive() {
+                self.send_configure_request()
+            }
+            timeout_negative() { -> $Stopped }
+            receive_configure_request(acceptable: bool) {
+                if acceptable {
+                    self.send_configure_ack()
+                } else {
+                    self.send_configure_nak(),
+                    -> $ReqSent
+                }
+            }
+            receive_configure_nak() {
+                self.init_restart_count(),
+                self.send_configure_request(),
+                -> $ReqSent
+            }
+            close() {
+                self.init_restart_count(),
+                self.send_terminate_request(),
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): str { @@:("ack-sent") }
+        }
+
+        $Opened {
+            <$() {
+                self.tld()
+            }
+
+            receive_configure_request(acceptable: bool) {
+                self.send_configure_request(),
+                if acceptable {
+                    self.send_configure_ack(),
+                    -> $AckSent
+                } else {
+                    self.send_configure_nak(),
+                    -> $ReqSent
+                }
+            }
+            receive_terminate_request() {
+                self.send_terminate_ack(),
+                self.zero_restart_count(),
+                -> $Stopping
+            }
+            close() {
+                self.init_restart_count(),
+                self.send_terminate_request(),
+                -> $Closing
+            }
+            down() {
+                -> $Starting
+            }
+            status(): str { @@:("opened") }
+        }
+
+    actions:
+        send_configure_request() {}
+        send_configure_ack()     {}
+        send_configure_nak()     {}
+        send_terminate_request() {}
+        send_terminate_ack()     {}
+        init_restart_count() {
+            self.restart_count = self.max_restart
+        }
+        zero_restart_count() {
+            self.restart_count = 0
+        }
+        tlu() {}
+        tld() {}
+
+    domain:
+        restart_count = 0
+        max_restart = 10
+}

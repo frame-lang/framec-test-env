@@ -1,0 +1,234 @@
+@@target dart
+
+// HTTP/1.1 Connection -- keep-alive lifecycle with HSM for cross-cutting errors.
+
+import 'dart:io';
+
+@@system HttpConnection {
+    interface:
+        connect(host: String, port: int)
+        send_request(method: String, path: String)
+        headers_received(status_code: int, keep_alive: bool, content_length: int)
+        body_chunk_received(chunk: String)
+        body_complete()
+        keep_alive_timeout()
+        connection_error(reason: String)
+        close()
+        status(): String
+        request_count(): int
+
+    machine:
+        $Disconnected {
+            connect(host: String, port: int) {
+                this.host = host;
+                this.port = port;
+                -> $Connecting
+            }
+            status(): String { @@:("disconnected") }
+            request_count(): int { @@:(this.requests) }
+        }
+
+        $Connecting {
+            $>() {
+                this.tcp_connect();
+                -> $Idle
+            }
+        }
+
+        $Idle => $Open {
+            $>() {
+                this.start_keep_alive_timer();
+            }
+            <$() {
+                this.cancel_keep_alive_timer();
+            }
+
+            send_request(method: String, path: String) {
+                this.current_method = method;
+                this.current_path = path;
+                this.emit_request();
+                -> $AwaitingResponse
+            }
+            keep_alive_timeout() {
+                -> $Closing
+            }
+            status(): String { @@:("idle") }
+            request_count(): int { @@:(this.requests) }
+            => $^
+        }
+
+        $AwaitingResponse => $Open {
+            headers_received(status_code: int, keep_alive: bool, content_length: int) {
+                this.response_status = status_code;
+                this.ka = keep_alive;
+                this.content_length = content_length;
+                if (content_length == 0) {
+                    -> $ResponseComplete
+                } else {
+                    -> $ReceivingBody
+                }
+            }
+            status(): String { @@:("awaiting response") }
+            request_count(): int { @@:(this.requests) }
+            => $^
+        }
+
+        $ReceivingBody => $Open {
+            body_chunk_received(chunk: String) {
+                this.bytes_received = this.bytes_received + this.content_length;
+            }
+            body_complete() {
+                -> $ResponseComplete
+            }
+            status(): String { @@:("receiving body") }
+            request_count(): int { @@:(this.requests) }
+            => $^
+        }
+
+        $ResponseComplete => $Open {
+            $>() {
+                this.requests = this.requests + 1;
+                if (this.ka) {
+                    -> $Idle
+                } else {
+                    -> $Closing
+                }
+            }
+            => $^
+        }
+
+        $Open {
+            connection_error(reason: String) {
+                -> $Disconnected
+            }
+            close() {
+                -> $Closing
+            }
+        }
+
+        $Closing {
+            $>() {
+                this.tcp_close();
+                -> $Disconnected
+            }
+        }
+
+    actions:
+        tcp_connect() {}
+        tcp_close() {}
+        emit_request() {}
+        start_keep_alive_timer() {}
+        cancel_keep_alive_timer() {}
+
+    domain:
+        host: String = ""
+        port: int = 80
+        current_method: String = ""
+        current_path: String = ""
+        response_status: int = 0
+        content_length: int = 0
+        bytes_received: int = 0
+        ka: bool = true
+        requests: int = 0
+}
+
+
+void check_str(String label, String actual, String expected) {
+    if (actual != expected) {
+        print("FAIL: $label -- expected '$expected', got '$actual'");
+        exit(1);
+    }
+}
+
+void check_int(String label, int actual, int expected) {
+    if (actual != expected) {
+        print("FAIL: $label -- expected $expected, got $actual");
+        exit(1);
+    }
+}
+
+void test_first_request_keepalive() {
+    final conn = @@HttpConnection();
+    check_str("disconnected", conn.status() as String, "disconnected");
+    conn.connect("example.com", 80);
+    check_str("idle after connect", conn.status() as String, "idle");
+    conn.send_request("GET", "/index.html");
+    check_str("awaiting response", conn.status() as String, "awaiting response");
+    conn.headers_received(200, true, 5);
+    check_str("receiving body", conn.status() as String, "receiving body");
+    conn.body_complete();
+    check_str("back to idle (keep-alive)", conn.status() as String, "idle");
+    check_int("request count 1", conn.request_count() as int, 1);
+    print("PASS: first request, keep-alive cycles back to idle");
+}
+
+void test_empty_body_skips_receiving() {
+    final conn = @@HttpConnection();
+    conn.connect("example.com", 80);
+    conn.send_request("GET", "/about");
+    conn.headers_received(200, true, 0);
+    check_str("idle after empty body", conn.status() as String, "idle");
+    print("PASS: empty body skips ReceivingBody");
+}
+
+void test_connection_close_header() {
+    final conn = @@HttpConnection();
+    conn.connect("example.com", 80);
+    conn.send_request("POST", "/api");
+    conn.headers_received(201, false, 0);
+    check_str("disconnected after Connection: close", conn.status() as String, "disconnected");
+    print("PASS: Connection: close response path");
+}
+
+void test_keep_alive_timeout() {
+    final conn = @@HttpConnection();
+    conn.connect("example.com", 80);
+    check_str("idle", conn.status() as String, "idle");
+    conn.keep_alive_timeout();
+    check_str("disconnected after timeout", conn.status() as String, "disconnected");
+    print("PASS: keep-alive timeout tears down connection");
+}
+
+void test_connection_error_during_receive() {
+    final conn = @@HttpConnection();
+    conn.connect("example.com", 80);
+    conn.send_request("GET", "/large");
+    conn.headers_received(200, true, 1000);
+    check_str("receiving body", conn.status() as String, "receiving body");
+    conn.connection_error("peer reset");
+    check_str("disconnected after error", conn.status() as String, "disconnected");
+    print("PASS: connection_error from receiving body forwards via HSM");
+}
+
+void test_explicit_close_during_idle() {
+    final conn = @@HttpConnection();
+    conn.connect("example.com", 80);
+    conn.close();
+    check_str("close from idle", conn.status() as String, "disconnected");
+    print("PASS: explicit close from idle via HSM parent");
+}
+
+void test_multiple_request_reuse() {
+    final conn = @@HttpConnection();
+    conn.connect("example.com", 80);
+    conn.send_request("GET", "/one");
+    conn.headers_received(200, true, 0);
+    conn.send_request("GET", "/two");
+    conn.headers_received(200, true, 0);
+    conn.send_request("GET", "/three");
+    conn.headers_received(200, true, 0);
+    check_int("3 requests on same connection", conn.request_count() as int, 3);
+    check_str("still idle", conn.status() as String, "idle");
+    print("PASS: connection reused across multiple requests");
+}
+
+void main() {
+    test_first_request_keepalive();
+    test_empty_body_skips_receiving();
+    test_connection_close_header();
+    test_keep_alive_timeout();
+    test_connection_error_during_receive();
+    test_explicit_close_during_idle();
+    test_multiple_request_reuse();
+    print("PASS: all HTTP connection tests passed");
+}

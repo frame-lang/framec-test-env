@@ -1,0 +1,78 @@
+@@target erlang
+
+% OOM Killer — kernel mm/oom_kill.c semantics. Safety-critical: while $Killing,
+% concurrent oom_detected_again() events are silently dropped because no handler
+% exists for them in that state. This is safety by structural absence --
+% no oom_lock needed, no flag check, just "no dispatch path."
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in erlang_batch.sh exercises every exported function and checks clean exit.
+
+@@system OomKiller {
+    interface:
+        oom_detected(gfp_flags: int): str
+        victim_exited(pid: int, freed_kb: int): str
+        oom_detected_again(gfp_flags: int): str
+        status(): str
+
+    machine:
+        $Normal {
+            oom_detected(gfp_flags: int): str {
+                @@:("selecting victim")
+                -> $Selecting
+            }
+            status(): str { @@:("normal") }
+        }
+
+        $Selecting {
+            $>() {
+                self.select_victim(),
+                if self.victim_pid < 0 {
+                    -> $Panic
+                } else {
+                    -> $Killing
+                }
+            }
+            status(): str { @@:("selecting") }
+        }
+
+        $Killing {
+            $>() {
+                self.send_sigkill(),
+                self.start_reaper_timer()
+            }
+            <$() {
+                self.cancel_reaper_timer()
+            }
+
+            victim_exited(pid: int, freed_kb: int): str {
+                if pid == self.victim_pid {
+                    self.total_freed_kb = self.total_freed_kb + freed_kb,
+                    @@:("reclaimed")
+                    -> $Normal
+                } else {
+                    @@:("wrong pid, still waiting")
+                }
+            }
+
+            % oom_detected_again NOT handled -- structural safety property.
+            status(): str { @@:("killing") }
+        }
+
+        $Panic {
+            status(): str { @@:("panic") }
+        }
+
+    actions:
+        select_victim() {
+            self.victim_score = 850,
+            self.victim_pid = 4242
+        }
+        send_sigkill() {}
+        start_reaper_timer() {}
+        cancel_reaper_timer() {}
+
+    domain:
+        victim_pid = -1
+        victim_score = 0
+        total_freed_kb = 0
+}

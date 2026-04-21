@@ -1,0 +1,151 @@
+@@target typescript
+
+// Signal Handler Stack — textbook push$/pop$ use case.
+// Modeled after do_signal/setup_frame/sys_sigreturn in the Linux kernel.
+// When a signal arrives, push the current compartment, enter $SignalHandler
+// with the signal name as an enter arg. -> pop$ on handler return restores.
+//
+// State variables are preserved across pop$ (unlike -> $State which resets).
+// Nested signals re-push, building a stack that mirrors real signal frames.
+
+@@system SignalContext {
+    interface:
+        enter_user_code()
+        signal_arrives(sig: string)
+        handler_returns()
+        current_mode(): string
+        depth(): number
+        current_signum(): string
+
+    machine:
+        $Kernel {
+            enter_user_code() {
+                -> $UserMode
+            }
+            current_mode(): string { @@:("kernel") }
+            depth(): number { @@:(this.nesting) }
+            current_signum(): string { @@:("") }
+        }
+
+        $UserMode {
+            $.saved_regs: string = ""
+
+            $>() {
+                $.saved_regs = this.snapshot_registers();
+            }
+
+            signal_arrives(sig: string) {
+                this.nesting = this.nesting + 1;
+                push$
+                -> (sig) $SignalHandler
+            }
+            current_mode(): string { @@:("user") }
+            depth(): number { @@:(this.nesting) }
+            current_signum(): string { @@:("") }
+        }
+
+        $SignalHandler {
+            $.signum: string = ""
+
+            $>(sig: string) {
+                $.signum = sig;
+            }
+
+            signal_arrives(sig: string) {
+                this.nesting = this.nesting + 1;
+                push$
+                -> (sig) $SignalHandler
+            }
+
+            handler_returns() {
+                this.nesting = this.nesting - 1;
+                -> pop$
+            }
+
+            current_mode(): string { @@:("handler") }
+            depth(): number { @@:(this.nesting) }
+            current_signum(): string { @@:($.signum) }
+        }
+
+    actions:
+        snapshot_registers(): string {
+            return "regs_snapshot";
+        }
+
+    domain:
+        nesting: number = 0
+}
+
+
+function check(label: string, actual: any, expected: any): void {
+    if (actual !== expected) {
+        console.log(`FAIL: ${label} -- expected '${expected}', got '${actual}'`);
+        throw new Error(`assertion failed: ${label}`);
+    }
+}
+
+function test_enter_user_mode(): void {
+    const cpu = @@SignalContext();
+    check("initial kernel", cpu.current_mode(), "kernel");
+    cpu.enter_user_code();
+    check("in user mode", cpu.current_mode(), "user");
+    check("depth 0", cpu.depth(), 0);
+    console.log("PASS: enter user mode");
+}
+
+function test_single_signal_handler(): void {
+    const cpu = @@SignalContext();
+    cpu.enter_user_code();
+    cpu.signal_arrives("SIGUSR1");
+    check("in handler", cpu.current_mode(), "handler");
+    check("signum SIGUSR1", cpu.current_signum(), "SIGUSR1");
+    check("depth 1", cpu.depth(), 1);
+    cpu.handler_returns();
+    check("back to user", cpu.current_mode(), "user");
+    check("depth 0", cpu.depth(), 0);
+    console.log("PASS: single signal handler + return");
+}
+
+function test_nested_signals(): void {
+    const cpu = @@SignalContext();
+    cpu.enter_user_code();
+    cpu.signal_arrives("SIGUSR1");
+    check("outer handler signum", cpu.current_signum(), "SIGUSR1");
+    cpu.signal_arrives("SIGALRM");
+    check("inner handler signum", cpu.current_signum(), "SIGALRM");
+    check("nested depth 2", cpu.depth(), 2);
+    cpu.handler_returns();
+    check("popped to outer handler", cpu.current_mode(), "handler");
+    check("outer signum preserved across pop", cpu.current_signum(), "SIGUSR1");
+    check("depth 1", cpu.depth(), 1);
+    cpu.handler_returns();
+    check("back to user", cpu.current_mode(), "user");
+    check("depth 0", cpu.depth(), 0);
+    console.log("PASS: nested signals (push$/pop$ preserves state vars)");
+}
+
+function test_deeply_nested_signals(): void {
+    const cpu = @@SignalContext();
+    cpu.enter_user_code();
+    cpu.signal_arrives("SIG1");
+    cpu.signal_arrives("SIG2");
+    cpu.signal_arrives("SIG3");
+    cpu.signal_arrives("SIG4");
+    check("depth 4", cpu.depth(), 4);
+    check("top signum", cpu.current_signum(), "SIG4");
+    cpu.handler_returns();
+    check("after pop 1: SIG3", cpu.current_signum(), "SIG3");
+    cpu.handler_returns();
+    check("after pop 2: SIG2", cpu.current_signum(), "SIG2");
+    cpu.handler_returns();
+    check("after pop 3: SIG1", cpu.current_signum(), "SIG1");
+    cpu.handler_returns();
+    check("back to user", cpu.current_mode(), "user");
+    console.log("PASS: 4-deep nested signal stack");
+}
+
+test_enter_user_mode();
+test_single_signal_handler();
+test_nested_signals();
+test_deeply_nested_signals();
+console.log("PASS: all signal handler stack tests passed");

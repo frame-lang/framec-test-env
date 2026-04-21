@@ -1,0 +1,342 @@
+@@target cpp_17
+
+// PPP Link Control Protocol -- RFC 1661 Section 4 state table direct transcription.
+
+#include <iostream>
+#include <string>
+#include <cstdlib>
+
+@@system PppLcp {
+    interface:
+        up()
+        down()
+        open()
+        close()
+        receive_configure_request(acceptable: bool)
+        receive_configure_ack()
+        receive_configure_nak()
+        receive_terminate_request()
+        receive_terminate_ack()
+        timeout_positive()
+        timeout_negative()
+        status(): str
+
+    machine:
+        $Initial {
+            up() { -> $Closed }
+            open() { -> $Starting }
+            status(): str { @@:(std::string("initial")) }
+        }
+
+        $Starting {
+            up() {
+                this->init_restart_count();
+                this->send_configure_request();
+                -> $ReqSent
+            }
+            close() { -> $Initial }
+            status(): str { @@:(std::string("starting")) }
+        }
+
+        $Closed {
+            open() {
+                this->init_restart_count();
+                this->send_configure_request();
+                -> $ReqSent
+            }
+            down() { -> $Initial }
+            receive_configure_request(acceptable: bool) {
+                this->send_terminate_ack();
+            }
+            status(): str { @@:(std::string("closed")) }
+        }
+
+        $Stopped {
+            open() { -> $Stopped }
+            down() { -> $Starting }
+            receive_configure_request(acceptable: bool) {
+                this->init_restart_count();
+                if (acceptable) {
+                    this->send_configure_ack();
+                    this->send_configure_request();
+                    -> $AckSent
+                } else {
+                    this->send_configure_nak();
+                    this->send_configure_request();
+                    -> $ReqSent
+                }
+            }
+            status(): str { @@:(std::string("stopped")) }
+        }
+
+        $Closing {
+            timeout_positive() {
+                this->send_terminate_request();
+            }
+            timeout_negative() {
+                -> $Closed
+            }
+            receive_terminate_ack() {
+                -> $Closed
+            }
+            down() { -> $Initial }
+            status(): str { @@:(std::string("closing")) }
+        }
+
+        $Stopping {
+            timeout_positive() {
+                this->send_terminate_request();
+            }
+            timeout_negative() {
+                -> $Stopped
+            }
+            receive_terminate_ack() {
+                -> $Stopped
+            }
+            down() { -> $Starting }
+            status(): str { @@:(std::string("stopping")) }
+        }
+
+        $ReqSent {
+            timeout_positive() {
+                this->send_configure_request();
+            }
+            timeout_negative() {
+                -> $Stopped
+            }
+            receive_configure_request(acceptable: bool) {
+                if (acceptable) {
+                    this->send_configure_ack();
+                    -> $AckSent
+                } else {
+                    this->send_configure_nak();
+                }
+            }
+            receive_configure_ack() {
+                this->init_restart_count();
+                -> $AckRcvd
+            }
+            receive_configure_nak() {
+                this->init_restart_count();
+                this->send_configure_request();
+            }
+            receive_terminate_request() {
+                this->send_terminate_ack();
+                -> $ReqSent
+            }
+            close() {
+                this->init_restart_count();
+                this->send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): str { @@:(std::string("req-sent")) }
+        }
+
+        $AckRcvd {
+            receive_configure_request(acceptable: bool) {
+                if (acceptable) {
+                    this->send_configure_ack();
+                    this->tlu();
+                    -> $Opened
+                } else {
+                    this->send_configure_nak();
+                }
+            }
+            timeout_positive() {
+                this->send_configure_request();
+                -> $ReqSent
+            }
+            timeout_negative() { -> $Stopped }
+            receive_configure_ack() {
+                this->send_configure_request();
+                -> $ReqSent
+            }
+            close() {
+                this->init_restart_count();
+                this->send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): str { @@:(std::string("ack-rcvd")) }
+        }
+
+        $AckSent {
+            receive_configure_ack() {
+                this->init_restart_count();
+                this->tlu();
+                -> $Opened
+            }
+            timeout_positive() {
+                this->send_configure_request();
+            }
+            timeout_negative() { -> $Stopped }
+            receive_configure_request(acceptable: bool) {
+                if (acceptable) {
+                    this->send_configure_ack();
+                } else {
+                    this->send_configure_nak();
+                    -> $ReqSent
+                }
+            }
+            receive_configure_nak() {
+                this->init_restart_count();
+                this->send_configure_request();
+                -> $ReqSent
+            }
+            close() {
+                this->init_restart_count();
+                this->send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): str { @@:(std::string("ack-sent")) }
+        }
+
+        $Opened {
+            <$() {
+                this->tld();
+            }
+
+            receive_configure_request(acceptable: bool) {
+                this->send_configure_request();
+                if (acceptable) {
+                    this->send_configure_ack();
+                    -> $AckSent
+                } else {
+                    this->send_configure_nak();
+                    -> $ReqSent
+                }
+            }
+            receive_terminate_request() {
+                this->send_terminate_ack();
+                this->zero_restart_count();
+                -> $Stopping
+            }
+            close() {
+                this->init_restart_count();
+                this->send_terminate_request();
+                -> $Closing
+            }
+            down() {
+                -> $Starting
+            }
+            status(): str { @@:(std::string("opened")) }
+        }
+
+    actions:
+        send_configure_request() {}
+        send_configure_ack()     {}
+        send_configure_nak()     {}
+        send_terminate_request() {}
+        send_terminate_ack()     {}
+        init_restart_count() {
+            this->restart_count = this->max_restart;
+        }
+        zero_restart_count() {
+            this->restart_count = 0;
+        }
+        tlu() {}
+        tld() {}
+
+    domain:
+        restart_count: int = 0
+        max_restart: int = 10
+}
+
+
+void check(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " -- expected '" << expected << "', got '" << actual << "'" << std::endl;
+        std::exit(1);
+    }
+}
+
+void test_normal_open() {
+    auto ppp = @@PppLcp();
+    check("initial", std::any_cast<std::string>(ppp.status()), "initial");
+    ppp.open();
+    check("starting", std::any_cast<std::string>(ppp.status()), "starting");
+    ppp.up();
+    check("req-sent", std::any_cast<std::string>(ppp.status()), "req-sent");
+    ppp.receive_configure_ack();
+    check("ack-rcvd", std::any_cast<std::string>(ppp.status()), "ack-rcvd");
+    ppp.receive_configure_request(true);
+    check("opened", std::any_cast<std::string>(ppp.status()), "opened");
+    std::cout << "PASS: normal open sequence" << std::endl;
+}
+
+void test_peer_renegotiation() {
+    auto ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    check("opened first time", std::any_cast<std::string>(ppp.status()), "opened");
+    ppp.receive_configure_request(true);
+    check("renegotiation -> AckSent", std::any_cast<std::string>(ppp.status()), "ack-sent");
+    ppp.receive_configure_ack();
+    check("back to opened", std::any_cast<std::string>(ppp.status()), "opened");
+    std::cout << "PASS: peer-initiated renegotiation from opened" << std::endl;
+}
+
+void test_clean_shutdown() {
+    auto ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.close();
+    check("closing", std::any_cast<std::string>(ppp.status()), "closing");
+    ppp.receive_terminate_ack();
+    check("closed", std::any_cast<std::string>(ppp.status()), "closed");
+    std::cout << "PASS: clean shutdown via close()" << std::endl;
+}
+
+void test_peer_terminate() {
+    auto ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.receive_terminate_request();
+    check("stopping on peer-terminate", std::any_cast<std::string>(ppp.status()), "stopping");
+    ppp.receive_terminate_ack();
+    check("stopped", std::any_cast<std::string>(ppp.status()), "stopped");
+    std::cout << "PASS: peer-initiated terminate" << std::endl;
+}
+
+void test_timeout_negative_from_closing() {
+    auto ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.close();
+    check("closing", std::any_cast<std::string>(ppp.status()), "closing");
+    ppp.timeout_negative();
+    check("closing exhausts to closed", std::any_cast<std::string>(ppp.status()), "closed");
+    std::cout << "PASS: timeout_negative in closing -> closed" << std::endl;
+}
+
+void test_down_from_opened() {
+    auto ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.down();
+    check("down from opened -> starting", std::any_cast<std::string>(ppp.status()), "starting");
+    std::cout << "PASS: down from opened" << std::endl;
+}
+
+int main() {
+    test_normal_open();
+    test_peer_renegotiation();
+    test_clean_shutdown();
+    test_peer_terminate();
+    test_timeout_negative_from_closing();
+    test_down_from_opened();
+    std::cout << "PASS: all PPP LCP tests passed" << std::endl;
+    return 0;
+}

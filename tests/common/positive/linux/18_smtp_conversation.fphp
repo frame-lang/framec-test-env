@@ -1,0 +1,317 @@
+@@target php
+
+<?php
+
+// SMTP Conversation -- RFC 5321 client state machine.
+
+@@system SmtpClient {
+    interface:
+        tcp_connected()
+        greeting_received(code: int)
+        ehlo_response(code: int, supports_starttls: bool)
+        starttls()
+        starttls_response(code: int)
+        tls_handshake_complete()
+        mail_from(sender: str)
+        mail_response(code: int)
+        rcpt_to(recipient: str)
+        rcpt_response(code: int)
+        data()
+        data_response(code: int)
+        data_body(body: str)
+        data_final_response(code: int)
+        quit()
+        quit_response(code: int)
+        status(): str
+        recipient_count(): int
+        tls_on(): bool
+
+    machine:
+        $Disconnected {
+            tcp_connected() { -> $AwaitGreeting }
+            status(): str { @@:("disconnected") }
+            recipient_count(): int { @@:($this->rcpt_count) }
+            tls_on(): bool { @@:($this->tls_active) }
+        }
+
+        $AwaitGreeting => $Connected {
+            greeting_received(code: int) {
+                if ($code === 220) {
+                    $this->send_ehlo();
+                    -> $AwaitEhlo
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): str { @@:("await greeting") }
+            => $^
+        }
+
+        $AwaitEhlo => $Connected {
+            ehlo_response(code: int, supports_starttls: bool) {
+                if ($code === 250) {
+                    $this->server_supports_starttls = $supports_starttls;
+                    -> $Ready
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): str { @@:("await ehlo") }
+            => $^
+        }
+
+        $Ready => $Connected {
+            starttls() {
+                if ($this->server_supports_starttls) {
+                    if ($this->tls_active === false) {
+                        $this->send_starttls();
+                        -> $AwaitStartTlsResponse
+                    }
+                }
+            }
+            mail_from(sender: str) {
+                $this->sender = $sender;
+                $this->send_mail_from();
+                -> $AwaitMailResponse
+            }
+            quit() {
+                $this->send_quit();
+                -> $AwaitQuitResponse
+            }
+            status(): str { @@:("ready") }
+            => $^
+        }
+
+        $AwaitStartTlsResponse => $Connected {
+            starttls_response(code: int) {
+                if ($code === 220) {
+                    -> $TlsHandshake
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): str { @@:("await starttls response") }
+            => $^
+        }
+
+        $TlsHandshake => $Connected {
+            tls_handshake_complete() {
+                $this->tls_active = true;
+                $this->send_ehlo();
+                -> $AwaitEhlo
+            }
+            status(): str { @@:("tls handshake") }
+            => $^
+        }
+
+        $AwaitMailResponse => $Connected {
+            mail_response(code: int) {
+                if ($code === 250) {
+                    -> $AwaitRcpt
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): str { @@:("await mail response") }
+            => $^
+        }
+
+        $AwaitRcpt => $Connected {
+            rcpt_to(recipient: str) {
+                $this->rcpt_count = $this->rcpt_count + 1;
+                $this->send_rcpt_to();
+                -> $AwaitRcptResponse
+            }
+            data() {
+                if ($this->rcpt_count > 0) {
+                    $this->send_data();
+                    -> $AwaitDataResponse
+                }
+            }
+            status(): str { @@:("await rcpt") }
+            => $^
+        }
+
+        $AwaitRcptResponse => $Connected {
+            rcpt_response(code: int) {
+                -> $AwaitRcpt
+            }
+            status(): str { @@:("await rcpt response") }
+            => $^
+        }
+
+        $AwaitDataResponse => $Connected {
+            data_response(code: int) {
+                if ($code === 354) {
+                    -> $SendingBody
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): str { @@:("await data response") }
+            => $^
+        }
+
+        $SendingBody => $Connected {
+            data_body(body: str) {
+                $this->send_body();
+                $this->send_body_terminator();
+                -> $AwaitFinalResponse
+            }
+            status(): str { @@:("sending body") }
+            => $^
+        }
+
+        $AwaitFinalResponse => $Connected {
+            data_final_response(code: int) {
+                $this->rcpt_count = 0;
+                -> $Ready
+            }
+            status(): str { @@:("await final response") }
+            => $^
+        }
+
+        $AwaitQuitResponse => $Connected {
+            quit_response(code: int) {
+                -> $Disconnected
+            }
+            status(): str { @@:("await quit response") }
+            => $^
+        }
+
+        $Connected {
+            recipient_count(): int { @@:($this->rcpt_count) }
+            tls_on(): bool { @@:($this->tls_active) }
+        }
+
+    actions:
+        send_ehlo()             {}
+        send_starttls()         {}
+        send_mail_from()        {}
+        send_rcpt_to()          {}
+        send_data()             {}
+        send_body()             {}
+        send_body_terminator()  {}
+        send_quit()             {}
+
+    domain:
+        server_supports_starttls = false
+        tls_active = false
+        sender = ""
+        rcpt_count = 0
+}
+
+
+function check_value($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        $a = var_export($actual, true);
+        $e = var_export($expected, true);
+        echo "FAIL: $label -- expected $e, got $a\n";
+        exit(1);
+    }
+}
+
+function test_basic_exchange_no_tls() {
+    $smtp = @@SmtpClient();
+    check_value("initial disconnected", $smtp->status(), "disconnected");
+    $smtp->tcp_connected();
+    check_value("await greeting", $smtp->status(), "await greeting");
+    $smtp->greeting_received(220);
+    check_value("await ehlo", $smtp->status(), "await ehlo");
+    $smtp->ehlo_response(250, false);
+    check_value("ready", $smtp->status(), "ready");
+    check_value("tls off", $smtp->tls_on(), false);
+    echo "PASS: basic TCP connect + EHLO\n";
+}
+
+function test_starttls_upgrade() {
+    $smtp = @@SmtpClient();
+    $smtp->tcp_connected();
+    $smtp->greeting_received(220);
+    $smtp->ehlo_response(250, true);
+    $smtp->starttls();
+    check_value("await starttls response", $smtp->status(), "await starttls response");
+    $smtp->starttls_response(220);
+    check_value("tls handshake", $smtp->status(), "tls handshake");
+    $smtp->tls_handshake_complete();
+    check_value("await ehlo after TLS", $smtp->status(), "await ehlo");
+    $smtp->ehlo_response(250, true);
+    check_value("back to ready", $smtp->status(), "ready");
+    check_value("tls on", $smtp->tls_on(), true);
+    echo "PASS: STARTTLS upgrade cycles through \$AwaitEhlo\n";
+}
+
+function test_send_message_three_recipients() {
+    $smtp = @@SmtpClient();
+    $smtp->tcp_connected();
+    $smtp->greeting_received(220);
+    $smtp->ehlo_response(250, false);
+    $smtp->mail_from("alice@example.com");
+    check_value("await mail", $smtp->status(), "await mail response");
+    $smtp->mail_response(250);
+    $smtp->rcpt_to("bob@example.com");
+    $smtp->rcpt_response(250);
+    $smtp->rcpt_to("carol@example.com");
+    $smtp->rcpt_response(250);
+    $smtp->rcpt_to("dan@example.com");
+    $smtp->rcpt_response(250);
+    check_value("3 recipients", $smtp->recipient_count(), 3);
+    $smtp->data();
+    check_value("await data response", $smtp->status(), "await data response");
+    $smtp->data_response(354);
+    $smtp->data_body("Subject: hi\r\n\r\nhello");
+    $smtp->data_final_response(250);
+    check_value("ready again", $smtp->status(), "ready");
+    check_value("recipient count reset", $smtp->recipient_count(), 0);
+    echo "PASS: send message with three recipients\n";
+}
+
+function test_quit() {
+    $smtp = @@SmtpClient();
+    $smtp->tcp_connected();
+    $smtp->greeting_received(220);
+    $smtp->ehlo_response(250, false);
+    $smtp->quit();
+    $smtp->quit_response(221);
+    check_value("disconnected after QUIT", $smtp->status(), "disconnected");
+    echo "PASS: clean QUIT shutdown\n";
+}
+
+function test_greeting_reject() {
+    $smtp = @@SmtpClient();
+    $smtp->tcp_connected();
+    $smtp->greeting_received(500);
+    check_value("bad greeting -> disconnected", $smtp->status(), "disconnected");
+    echo "PASS: bad greeting drops connection\n";
+}
+
+function test_starttls_refused_if_not_supported() {
+    $smtp = @@SmtpClient();
+    $smtp->tcp_connected();
+    $smtp->greeting_received(220);
+    $smtp->ehlo_response(250, false);
+    $smtp->starttls();
+    check_value("still ready (starttls refused)", $smtp->status(), "ready");
+    check_value("tls still off", $smtp->tls_on(), false);
+    echo "PASS: starttls no-op when server doesn't support it\n";
+}
+
+function test_mail_rejection_returns_to_ready() {
+    $smtp = @@SmtpClient();
+    $smtp->tcp_connected();
+    $smtp->greeting_received(220);
+    $smtp->ehlo_response(250, false);
+    $smtp->mail_from("bad@user");
+    $smtp->mail_response(550);
+    check_value("mail rejected -> ready", $smtp->status(), "ready");
+    echo "PASS: mail rejection returns to ready\n";
+}
+
+test_basic_exchange_no_tls();
+test_starttls_upgrade();
+test_send_message_three_recipients();
+test_quit();
+test_greeting_reject();
+test_starttls_refused_if_not_supported();
+test_mail_rejection_returns_to_ready();
+echo "PASS: all SMTP conversation tests passed\n";

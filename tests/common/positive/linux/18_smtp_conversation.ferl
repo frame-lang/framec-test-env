@@ -1,0 +1,200 @@
+@@target erlang
+
+% SMTP Conversation -- RFC 5321 client state machine.
+
+@@system SmtpClient {
+    interface:
+        tcp_connected()
+        greeting_received(code: int)
+        ehlo_response(code: int, supports_starttls: bool)
+        starttls()
+        starttls_response(code: int)
+        tls_handshake_complete()
+        mail_from(sender: str)
+        mail_response(code: int)
+        rcpt_to(recipient: str)
+        rcpt_response(code: int)
+        data()
+        data_response(code: int)
+        data_body(body: str)
+        data_final_response(code: int)
+        quit()
+        quit_response(code: int)
+        status(): str
+        recipient_count(): int
+        tls_on(): bool
+
+    machine:
+        $Disconnected {
+            tcp_connected() { -> $AwaitGreeting }
+            status(): str { @@:("disconnected") }
+            recipient_count(): int { @@:(self.rcpt_count) }
+            tls_on(): bool { @@:(self.tls_active) }
+        }
+
+        $AwaitGreeting => $Connected {
+            greeting_received(code: int) {
+                if code == 220 {
+                    self.send_ehlo()
+                    -> $AwaitEhlo
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): str { @@:("await greeting") }
+            => $^
+        }
+
+        $AwaitEhlo => $Connected {
+            ehlo_response(code: int, supports_starttls: bool) {
+                if code == 250 {
+                    self.server_supports_starttls = supports_starttls
+                    -> $Ready
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): str { @@:("await ehlo") }
+            => $^
+        }
+
+        $Ready => $Connected {
+            starttls() {
+                if self.server_supports_starttls {
+                    if self.tls_active == false {
+                        self.send_starttls()
+                        -> $AwaitStartTlsResponse
+                    }
+                }
+            }
+            mail_from(sender: str) {
+                self.sender = sender
+                self.send_mail_from()
+                -> $AwaitMailResponse
+            }
+            quit() {
+                self.send_quit()
+                -> $AwaitQuitResponse
+            }
+            status(): str { @@:("ready") }
+            => $^
+        }
+
+        $AwaitStartTlsResponse => $Connected {
+            starttls_response(code: int) {
+                if code == 220 {
+                    -> $TlsHandshake
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): str { @@:("await starttls response") }
+            => $^
+        }
+
+        $TlsHandshake => $Connected {
+            tls_handshake_complete() {
+                self.tls_active = true
+                self.send_ehlo()
+                -> $AwaitEhlo
+            }
+            status(): str { @@:("tls handshake") }
+            => $^
+        }
+
+        $AwaitMailResponse => $Connected {
+            mail_response(code: int) {
+                if code == 250 {
+                    -> $AwaitRcpt
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): str { @@:("await mail response") }
+            => $^
+        }
+
+        $AwaitRcpt => $Connected {
+            rcpt_to(recipient: str) {
+                self.rcpt_count = self.rcpt_count + 1
+                self.send_rcpt_to()
+                -> $AwaitRcptResponse
+            }
+            data() {
+                if self.rcpt_count > 0 {
+                    self.send_data()
+                    -> $AwaitDataResponse
+                }
+            }
+            status(): str { @@:("await rcpt") }
+            => $^
+        }
+
+        $AwaitRcptResponse => $Connected {
+            rcpt_response(code: int) {
+                -> $AwaitRcpt
+            }
+            status(): str { @@:("await rcpt response") }
+            => $^
+        }
+
+        $AwaitDataResponse => $Connected {
+            data_response(code: int) {
+                if code == 354 {
+                    -> $SendingBody
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): str { @@:("await data response") }
+            => $^
+        }
+
+        $SendingBody => $Connected {
+            data_body(body: str) {
+                self.send_body()
+                self.send_body_terminator()
+                -> $AwaitFinalResponse
+            }
+            status(): str { @@:("sending body") }
+            => $^
+        }
+
+        $AwaitFinalResponse => $Connected {
+            data_final_response(code: int) {
+                self.rcpt_count = 0
+                -> $Ready
+            }
+            status(): str { @@:("await final response") }
+            => $^
+        }
+
+        $AwaitQuitResponse => $Connected {
+            quit_response(code: int) {
+                -> $Disconnected
+            }
+            status(): str { @@:("await quit response") }
+            => $^
+        }
+
+        $Connected {
+            recipient_count(): int { @@:(self.rcpt_count) }
+            tls_on(): bool { @@:(self.tls_active) }
+        }
+
+    actions:
+        send_ehlo()             {}
+        send_starttls()         {}
+        send_mail_from()        {}
+        send_rcpt_to()          {}
+        send_data()             {}
+        send_body()             {}
+        send_body_terminator()  {}
+        send_quit()             {}
+
+    domain:
+        server_supports_starttls = false
+        tls_active = false
+        sender = ""
+        rcpt_count = 0
+}

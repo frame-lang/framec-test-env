@@ -1,0 +1,223 @@
+@@target javascript
+
+// HTTP/1.1 Connection -- keep-alive lifecycle with HSM for cross-cutting errors.
+
+@@system HttpConnection {
+    interface:
+        connect(host: string, port: number)
+        send_request(method: string, path: string)
+        headers_received(status_code: number, keep_alive: boolean, content_length: number)
+        body_chunk_received(chunk: string)
+        body_complete()
+        keep_alive_timeout()
+        connection_error(reason: string)
+        close()
+        status(): string
+        request_count(): number
+
+    machine:
+        $Disconnected {
+            connect(host: string, port: number) {
+                this.host = host;
+                this.port = port;
+                -> $Connecting
+            }
+            status(): string { @@:("disconnected") }
+            request_count(): number { @@:(this.requests) }
+        }
+
+        $Connecting {
+            $>() {
+                this.tcp_connect();
+                -> $Idle
+            }
+        }
+
+        $Idle => $Open {
+            $>() {
+                this.start_keep_alive_timer();
+            }
+            <$() {
+                this.cancel_keep_alive_timer();
+            }
+
+            send_request(method: string, path: string) {
+                this.current_method = method;
+                this.current_path = path;
+                this.emit_request();
+                -> $AwaitingResponse
+            }
+            keep_alive_timeout() {
+                -> $Closing
+            }
+            status(): string { @@:("idle") }
+            request_count(): number { @@:(this.requests) }
+            => $^
+        }
+
+        $AwaitingResponse => $Open {
+            headers_received(status_code: number, keep_alive: boolean, content_length: number) {
+                this.response_status = status_code;
+                this.ka = keep_alive;
+                this.content_length = content_length;
+                if (content_length === 0) {
+                    -> $ResponseComplete
+                } else {
+                    -> $ReceivingBody
+                }
+            }
+            status(): string { @@:("awaiting response") }
+            request_count(): number { @@:(this.requests) }
+            => $^
+        }
+
+        $ReceivingBody => $Open {
+            body_chunk_received(chunk: string) {
+                this.bytes_received = this.bytes_received + this.content_length;
+            }
+            body_complete() {
+                -> $ResponseComplete
+            }
+            status(): string { @@:("receiving body") }
+            request_count(): number { @@:(this.requests) }
+            => $^
+        }
+
+        $ResponseComplete => $Open {
+            $>() {
+                this.requests = this.requests + 1;
+                if (this.ka) {
+                    -> $Idle
+                } else {
+                    -> $Closing
+                }
+            }
+            => $^
+        }
+
+        $Open {
+            connection_error(reason: string) {
+                -> $Disconnected
+            }
+            close() {
+                -> $Closing
+            }
+        }
+
+        $Closing {
+            $>() {
+                this.tcp_close();
+                -> $Disconnected
+            }
+        }
+
+    actions:
+        tcp_connect() {}
+        tcp_close() {}
+        emit_request() {}
+        start_keep_alive_timer() {}
+        cancel_keep_alive_timer() {}
+
+    domain:
+        host = ""
+        port = 80
+        current_method = ""
+        current_path = ""
+        response_status = 0
+        content_length = 0
+        bytes_received = 0
+        ka = true
+        requests = 0
+}
+
+
+function check(label, actual, expected) {
+    if (actual !== expected) {
+        console.log(`FAIL: ${label} -- expected '${expected}', got '${actual}'`);
+        throw new Error(`assertion failed: ${label}`);
+    }
+}
+
+function test_first_request_keepalive() {
+    const conn = @@HttpConnection();
+    check("disconnected", conn.status(), "disconnected");
+    conn.connect("example.com", 80);
+    check("idle after connect", conn.status(), "idle");
+    conn.send_request("GET", "/index.html");
+    check("awaiting response", conn.status(), "awaiting response");
+    conn.headers_received(200, true, 5);
+    check("receiving body", conn.status(), "receiving body");
+    conn.body_complete();
+    check("back to idle (keep-alive)", conn.status(), "idle");
+    check("request count 1", conn.request_count(), 1);
+    console.log("PASS: first request, keep-alive cycles back to idle");
+}
+
+function test_empty_body_skips_receiving() {
+    const conn = @@HttpConnection();
+    conn.connect("example.com", 80);
+    conn.send_request("GET", "/about");
+    conn.headers_received(200, true, 0);
+    check("idle after empty body", conn.status(), "idle");
+    console.log("PASS: empty body skips ReceivingBody");
+}
+
+function test_connection_close_header() {
+    const conn = @@HttpConnection();
+    conn.connect("example.com", 80);
+    conn.send_request("POST", "/api");
+    conn.headers_received(201, false, 0);
+    check("disconnected after Connection: close", conn.status(), "disconnected");
+    console.log("PASS: Connection: close response path");
+}
+
+function test_keep_alive_timeout() {
+    const conn = @@HttpConnection();
+    conn.connect("example.com", 80);
+    check("idle", conn.status(), "idle");
+    conn.keep_alive_timeout();
+    check("disconnected after timeout", conn.status(), "disconnected");
+    console.log("PASS: keep-alive timeout tears down connection");
+}
+
+function test_connection_error_during_receive() {
+    const conn = @@HttpConnection();
+    conn.connect("example.com", 80);
+    conn.send_request("GET", "/large");
+    conn.headers_received(200, true, 1000);
+    check("receiving body", conn.status(), "receiving body");
+    conn.connection_error("peer reset");
+    check("disconnected after error", conn.status(), "disconnected");
+    console.log("PASS: connection_error from receiving body forwards via HSM");
+}
+
+function test_explicit_close_during_idle() {
+    const conn = @@HttpConnection();
+    conn.connect("example.com", 80);
+    conn.close();
+    check("close from idle", conn.status(), "disconnected");
+    console.log("PASS: explicit close from idle via HSM parent");
+}
+
+function test_multiple_request_reuse() {
+    const conn = @@HttpConnection();
+    conn.connect("example.com", 80);
+    conn.send_request("GET", "/one");
+    conn.headers_received(200, true, 0);
+    conn.send_request("GET", "/two");
+    conn.headers_received(200, true, 0);
+    conn.send_request("GET", "/three");
+    conn.headers_received(200, true, 0);
+    check("3 requests on same connection", conn.request_count(), 3);
+    check("still idle", conn.status(), "idle");
+    console.log("PASS: connection reused across multiple requests");
+}
+
+test_first_request_keepalive();
+test_empty_body_skips_receiving();
+test_connection_close_header();
+test_keep_alive_timeout();
+test_connection_error_during_receive();
+test_explicit_close_during_idle();
+test_multiple_request_reuse();
+console.log("PASS: all HTTP connection tests passed");

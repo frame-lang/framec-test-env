@@ -1,0 +1,313 @@
+@@target javascript
+
+// SMTP Conversation -- RFC 5321 client state machine.
+
+@@system SmtpClient {
+    interface:
+        tcp_connected()
+        greeting_received(code: number)
+        ehlo_response(code: number, supports_starttls: boolean)
+        starttls()
+        starttls_response(code: number)
+        tls_handshake_complete()
+        mail_from(sender: string)
+        mail_response(code: number)
+        rcpt_to(recipient: string)
+        rcpt_response(code: number)
+        data()
+        data_response(code: number)
+        data_body(body: string)
+        data_final_response(code: number)
+        quit()
+        quit_response(code: number)
+        status(): string
+        recipient_count(): number
+        tls_on(): boolean
+
+    machine:
+        $Disconnected {
+            tcp_connected() { -> $AwaitGreeting }
+            status(): string { @@:("disconnected") }
+            recipient_count(): number { @@:(this.rcpt_count) }
+            tls_on(): boolean { @@:(this.tls_active) }
+        }
+
+        $AwaitGreeting => $Connected {
+            greeting_received(code: number) {
+                if (code === 220) {
+                    this.send_ehlo();
+                    -> $AwaitEhlo
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): string { @@:("await greeting") }
+            => $^
+        }
+
+        $AwaitEhlo => $Connected {
+            ehlo_response(code: number, supports_starttls: boolean) {
+                if (code === 250) {
+                    this.server_supports_starttls = supports_starttls;
+                    -> $Ready
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): string { @@:("await ehlo") }
+            => $^
+        }
+
+        $Ready => $Connected {
+            starttls() {
+                if (this.server_supports_starttls) {
+                    if (this.tls_active === false) {
+                        this.send_starttls();
+                        -> $AwaitStartTlsResponse
+                    }
+                }
+            }
+            mail_from(sender: string) {
+                this.sender = sender;
+                this.send_mail_from();
+                -> $AwaitMailResponse
+            }
+            quit() {
+                this.send_quit();
+                -> $AwaitQuitResponse
+            }
+            status(): string { @@:("ready") }
+            => $^
+        }
+
+        $AwaitStartTlsResponse => $Connected {
+            starttls_response(code: number) {
+                if (code === 220) {
+                    -> $TlsHandshake
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): string { @@:("await starttls response") }
+            => $^
+        }
+
+        $TlsHandshake => $Connected {
+            tls_handshake_complete() {
+                this.tls_active = true;
+                this.send_ehlo();
+                -> $AwaitEhlo
+            }
+            status(): string { @@:("tls handshake") }
+            => $^
+        }
+
+        $AwaitMailResponse => $Connected {
+            mail_response(code: number) {
+                if (code === 250) {
+                    -> $AwaitRcpt
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): string { @@:("await mail response") }
+            => $^
+        }
+
+        $AwaitRcpt => $Connected {
+            rcpt_to(recipient: string) {
+                this.rcpt_count = this.rcpt_count + 1;
+                this.send_rcpt_to();
+                -> $AwaitRcptResponse
+            }
+            data() {
+                if (this.rcpt_count > 0) {
+                    this.send_data();
+                    -> $AwaitDataResponse
+                }
+            }
+            status(): string { @@:("await rcpt") }
+            => $^
+        }
+
+        $AwaitRcptResponse => $Connected {
+            rcpt_response(code: number) {
+                -> $AwaitRcpt
+            }
+            status(): string { @@:("await rcpt response") }
+            => $^
+        }
+
+        $AwaitDataResponse => $Connected {
+            data_response(code: number) {
+                if (code === 354) {
+                    -> $SendingBody
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): string { @@:("await data response") }
+            => $^
+        }
+
+        $SendingBody => $Connected {
+            data_body(body: string) {
+                this.send_body();
+                this.send_body_terminator();
+                -> $AwaitFinalResponse
+            }
+            status(): string { @@:("sending body") }
+            => $^
+        }
+
+        $AwaitFinalResponse => $Connected {
+            data_final_response(code: number) {
+                this.rcpt_count = 0;
+                -> $Ready
+            }
+            status(): string { @@:("await final response") }
+            => $^
+        }
+
+        $AwaitQuitResponse => $Connected {
+            quit_response(code: number) {
+                -> $Disconnected
+            }
+            status(): string { @@:("await quit response") }
+            => $^
+        }
+
+        $Connected {
+            recipient_count(): number { @@:(this.rcpt_count) }
+            tls_on(): boolean { @@:(this.tls_active) }
+        }
+
+    actions:
+        send_ehlo()             {}
+        send_starttls()         {}
+        send_mail_from()        {}
+        send_rcpt_to()          {}
+        send_data()             {}
+        send_body()             {}
+        send_body_terminator()  {}
+        send_quit()             {}
+
+    domain:
+        server_supports_starttls = false
+        tls_active = false
+        sender = ""
+        rcpt_count = 0
+}
+
+
+function check(label, actual, expected) {
+    if (actual !== expected) {
+        console.log(`FAIL: ${label} -- expected '${expected}', got '${actual}'`);
+        throw new Error(`assertion failed: ${label}`);
+    }
+}
+
+function test_basic_exchange_no_tls() {
+    const smtp = @@SmtpClient();
+    check("initial disconnected", smtp.status(), "disconnected");
+    smtp.tcp_connected();
+    check("await greeting", smtp.status(), "await greeting");
+    smtp.greeting_received(220);
+    check("await ehlo", smtp.status(), "await ehlo");
+    smtp.ehlo_response(250, false);
+    check("ready", smtp.status(), "ready");
+    check("tls off", smtp.tls_on(), false);
+    console.log("PASS: basic TCP connect + EHLO");
+}
+
+function test_starttls_upgrade() {
+    const smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, true);
+    smtp.starttls();
+    check("await starttls response", smtp.status(), "await starttls response");
+    smtp.starttls_response(220);
+    check("tls handshake", smtp.status(), "tls handshake");
+    smtp.tls_handshake_complete();
+    check("await ehlo after TLS", smtp.status(), "await ehlo");
+    smtp.ehlo_response(250, true);
+    check("back to ready", smtp.status(), "ready");
+    check("tls on", smtp.tls_on(), true);
+    console.log("PASS: STARTTLS upgrade cycles through $AwaitEhlo");
+}
+
+function test_send_message_three_recipients() {
+    const smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, false);
+    smtp.mail_from("alice@example.com");
+    check("await mail", smtp.status(), "await mail response");
+    smtp.mail_response(250);
+    smtp.rcpt_to("bob@example.com");
+    smtp.rcpt_response(250);
+    smtp.rcpt_to("carol@example.com");
+    smtp.rcpt_response(250);
+    smtp.rcpt_to("dan@example.com");
+    smtp.rcpt_response(250);
+    check("3 recipients", smtp.recipient_count(), 3);
+    smtp.data();
+    check("await data response", smtp.status(), "await data response");
+    smtp.data_response(354);
+    smtp.data_body("Subject: hi\r\n\r\nhello");
+    smtp.data_final_response(250);
+    check("ready again", smtp.status(), "ready");
+    check("recipient count reset", smtp.recipient_count(), 0);
+    console.log("PASS: send message with three recipients");
+}
+
+function test_quit() {
+    const smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, false);
+    smtp.quit();
+    smtp.quit_response(221);
+    check("disconnected after QUIT", smtp.status(), "disconnected");
+    console.log("PASS: clean QUIT shutdown");
+}
+
+function test_greeting_reject() {
+    const smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(500);
+    check("bad greeting -> disconnected", smtp.status(), "disconnected");
+    console.log("PASS: bad greeting drops connection");
+}
+
+function test_starttls_refused_if_not_supported() {
+    const smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, false);
+    smtp.starttls();
+    check("still ready (starttls refused)", smtp.status(), "ready");
+    check("tls still off", smtp.tls_on(), false);
+    console.log("PASS: starttls no-op when server doesn't support it");
+}
+
+function test_mail_rejection_returns_to_ready() {
+    const smtp = @@SmtpClient();
+    smtp.tcp_connected();
+    smtp.greeting_received(220);
+    smtp.ehlo_response(250, false);
+    smtp.mail_from("bad@user");
+    smtp.mail_response(550);
+    check("mail rejected -> ready", smtp.status(), "ready");
+    console.log("PASS: mail rejection returns to ready");
+}
+
+test_basic_exchange_no_tls();
+test_starttls_upgrade();
+test_send_message_three_recipients();
+test_quit();
+test_greeting_reject();
+test_starttls_refused_if_not_supported();
+test_mail_rejection_returns_to_ready();
+console.log("PASS: all SMTP conversation tests passed");

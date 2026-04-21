@@ -1,0 +1,220 @@
+@@target php
+
+<?php
+
+// Process Lifecycle — Linux task states (kernel/sched/core.c semantics)
+// Three-level HSM with explicit upward forwarding as per-state signal policy.
+
+@@system TaskLifecycle {
+    interface:
+        fork(): str
+        schedule(): str
+        block_on_io(): str
+        io_complete(): str
+        block_uninterruptible(): str
+        send_signal(sig: str): str
+        wait_by_parent(): str
+        status(): str
+
+    machine:
+        $New {
+            fork(): str {
+                $this->pid = $this->next_pid();
+                @@:("forked")
+                -> $Ready
+            }
+            status(): str { @@:("new") }
+        }
+
+        $Ready => $Alive {
+            schedule(): str {
+                @@:("running")
+                -> $Running
+            }
+            status(): str { @@:("ready") }
+            => $^
+        }
+
+        $Running => $Alive {
+            schedule(): str {
+                @@:("preempted")
+                -> $Ready
+            }
+            block_on_io(): str {
+                @@:("blocked")
+                -> $Interruptible
+            }
+            block_uninterruptible(): str {
+                @@:("blocked (D)")
+                -> $Uninterruptible
+            }
+            status(): str { @@:("running") }
+            => $^
+        }
+
+        $Interruptible => $Blocked {
+            io_complete(): str {
+                @@:("woke")
+                -> $Ready
+            }
+            send_signal(sig: str): str {
+                if ($sig === "SIGKILL" || $sig === "SIGTERM" || $sig === "SIGSTOP") {
+                    => $^
+                } else {
+                    @@:("interrupted")
+                    -> $Ready
+                }
+            }
+            status(): str { @@:("interruptible") }
+            => $^
+        }
+
+        $Uninterruptible => $Blocked {
+            io_complete(): str {
+                @@:("woke")
+                -> $Ready
+            }
+            send_signal(sig: str): str {
+                if ($sig === "SIGKILL") {
+                    => $^
+                } else {
+                    @@:("signal held pending (D-state)")
+                }
+            }
+            status(): str { @@:("uninterruptible") }
+            => $^
+        }
+
+        $Blocked => $Alive {
+            status(): str { @@:("blocked") }
+            => $^
+        }
+
+        $Alive {
+            send_signal(sig: str): str {
+                if ($sig === "SIGKILL" || $sig === "SIGTERM") {
+                    @@:("exiting")
+                    -> $Zombie
+                } else if ($sig === "SIGSTOP") {
+                    @@:("stopped")
+                    -> $Stopped
+                } else {
+                    @@:("signal delivered")
+                }
+            }
+        }
+
+        $Stopped {
+            send_signal(sig: str): str {
+                if ($sig === "SIGCONT") {
+                    @@:("continued")
+                    -> $Ready
+                } else if ($sig === "SIGKILL") {
+                    @@:("killed while stopped")
+                    -> $Zombie
+                } else {
+                    @@:("signal ignored")
+                }
+            }
+            status(): str { @@:("stopped") }
+        }
+
+        $Zombie {
+            wait_by_parent(): str {
+                @@:("reaped")
+                -> $Dead
+            }
+            status(): str { @@:("zombie") }
+        }
+
+        $Dead {
+            status(): str { @@:("dead") }
+        }
+
+    actions:
+        next_pid() {
+            $this->pid_counter = $this->pid_counter + 1;
+            return $this->pid_counter;
+        }
+
+    domain:
+        pid = 0
+        pid_counter = 100
+}
+
+
+function check_value($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label — expected '$expected', got '$actual'\n";
+        exit(1);
+    }
+}
+
+function test_happy_path() {
+    $t = @@TaskLifecycle();
+    check_value("initial status", $t->status(), "new");
+    check_value("fork",           $t->fork(),   "forked");
+    check_value("after fork",     $t->status(), "ready");
+    check_value("schedule",       $t->schedule(), "running");
+    check_value("after schedule", $t->status(), "running");
+    check_value("preempt",        $t->schedule(), "preempted");
+    check_value("after preempt",  $t->status(), "ready");
+    echo "PASS: happy path\n";
+}
+
+function test_interruptible_wake_by_signal() {
+    $t = @@TaskLifecycle();
+    $t->fork();
+    $t->schedule();
+    check_value("block_on_io", $t->block_on_io(), "blocked");
+    check_value("interruptible status", $t->status(), "interruptible");
+    check_value("SIGUSR1 wakes interruptible",
+          $t->send_signal("SIGUSR1"), "interrupted");
+    check_value("woke to ready", $t->status(), "ready");
+    echo "PASS: interruptible wake by signal\n";
+}
+
+function test_uninterruptible_holds_signal() {
+    $t = @@TaskLifecycle();
+    $t->fork();
+    $t->schedule();
+    check_value("block_uninterruptible",
+          $t->block_uninterruptible(), "blocked (D)");
+    check_value("D state", $t->status(), "uninterruptible");
+    check_value("SIGUSR1 held pending in D",
+          $t->send_signal("SIGUSR1"), "signal held pending (D-state)");
+    check_value("still in D", $t->status(), "uninterruptible");
+    echo "PASS: uninterruptible holds non-fatal signal\n";
+}
+
+function test_sigkill_reaches_d_state() {
+    $t = @@TaskLifecycle();
+    $t->fork();
+    $t->schedule();
+    $t->block_uninterruptible();
+    check_value("SIGKILL forwarded from D through \$Alive",
+          $t->send_signal("SIGKILL"), "exiting");
+    check_value("now zombie", $t->status(), "zombie");
+    check_value("reap", $t->wait_by_parent(), "reaped");
+    check_value("dead", $t->status(), "dead");
+    echo "PASS: SIGKILL reaches D state via \$Alive forwarding\n";
+}
+
+function test_sigstop_sigcont() {
+    $t = @@TaskLifecycle();
+    $t->fork();
+    $t->schedule();
+    check_value("SIGSTOP from running",
+          $t->send_signal("SIGSTOP"), "stopped");
+    check_value("stopped status", $t->status(), "stopped");
+    check_value("SIGCONT resumes", $t->send_signal("SIGCONT"), "continued");
+    check_value("back to ready", $t->status(), "ready");
+    echo "PASS: SIGSTOP/SIGCONT\n";
+}
+
+test_happy_path();
+test_interruptible_wake_by_signal();
+test_uninterruptible_holds_signal();
+test_sigkill_reaches_d_state();
+test_sigstop_sigcont();
+echo "PASS: all process lifecycle tests passed\n";

@@ -1,0 +1,238 @@
+@@target kotlin
+
+// USB Device Enumeration — multi-stage pipeline with compensation (saga).
+
+@@system UsbEnumerator {
+    interface:
+        plug_in(port: Int)
+        reset_done(success: Boolean)
+        address_set(success: Boolean, addr: Int)
+        descriptors_read(success: Boolean, product: String)
+        driver_bound(success: Boolean)
+        unplug()
+        status(): String
+
+    machine:
+        $Detached {
+            plug_in(port: Int) {
+                this.port = port
+                this.reset_attempts = 0
+                -> $Resetting
+            }
+            status(): String { @@:("detached") }
+        }
+
+        $Resetting => $Enumerating {
+            $>() {
+                this.reset_attempts = this.reset_attempts + 1
+                this.issue_port_reset(this.port)
+            }
+
+            reset_done(success: Boolean) {
+                if (success) {
+                    -> $Addressing
+                } else {
+                    if (this.reset_attempts < this.max_reset_attempts) {
+                        -> $Resetting
+                    } else {
+                        -> $Failed
+                    }
+                }
+            }
+            status(): String { @@:("resetting") }
+            => $^
+        }
+
+        $Addressing => $Enumerating {
+            $>() {
+                this.assign_address()
+            }
+
+            address_set(success: Boolean, addr: Int) {
+                if (success) {
+                    this.address = addr
+                    -> $ReadingDescriptors
+                } else {
+                    -> $UndoReset
+                }
+            }
+            status(): String { @@:("addressing") }
+            => $^
+        }
+
+        $ReadingDescriptors => $Enumerating {
+            $>() {
+                this.read_descriptors(this.address)
+            }
+
+            descriptors_read(success: Boolean, product: String) {
+                if (success) {
+                    this.product = product
+                    -> $BindingDriver
+                } else {
+                    -> $UndoAddress
+                }
+            }
+            status(): String { @@:("reading descriptors") }
+            => $^
+        }
+
+        $BindingDriver => $Enumerating {
+            $>() {
+                this.bind_driver(this.product)
+            }
+
+            driver_bound(success: Boolean) {
+                if (success) {
+                    -> $Configured
+                } else {
+                    -> $UndoAddress
+                }
+            }
+            status(): String { @@:("binding driver") }
+            => $^
+        }
+
+        $Enumerating {
+            unplug() {
+                -> $Detached
+            }
+        }
+
+        $UndoAddress {
+            $>() {
+                this.release_address(this.address)
+                -> $UndoReset
+            }
+        }
+
+        $UndoReset {
+            $>() {
+                this.disable_port(this.port)
+                -> $Failed
+            }
+        }
+
+        $Configured {
+            unplug() {
+                this.unbind_driver()
+                this.release_address(this.address)
+                this.disable_port(this.port)
+                -> $Detached
+            }
+            status(): String { @@:("configured") }
+        }
+
+        $Failed {
+            plug_in(port: Int) {
+                this.port = port
+                this.reset_attempts = 0
+                -> $Resetting
+            }
+            status(): String { @@:("failed") }
+        }
+
+    actions:
+        issue_port_reset(port: Int) {}
+        assign_address() {}
+        read_descriptors(addr: Int) {}
+        bind_driver(product: String) {}
+        release_address(addr: Int) {}
+        disable_port(port: Int) {}
+        unbind_driver() {}
+
+    domain:
+        port: Int = 0
+        address: Int = 0
+        product: String = ""
+        reset_attempts: Int = 0
+        max_reset_attempts: Int = 3
+}
+
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label — expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun test_happy_path() {
+    val usb = UsbEnumerator()
+    check("initial detached", usb.status() as String, "detached")
+    usb.plug_in(1)
+    check("after plug_in", usb.status() as String, "resetting")
+    usb.reset_done(true)
+    check("reset ok -> addressing", usb.status() as String, "addressing")
+    usb.address_set(true, 7)
+    check("address ok -> reading", usb.status() as String, "reading descriptors")
+    usb.descriptors_read(true, "USB Keyboard")
+    check("descriptors ok -> binding", usb.status() as String, "binding driver")
+    usb.driver_bound(true)
+    check("driver bound -> configured", usb.status() as String, "configured")
+    println("PASS: happy path enumeration")
+}
+
+fun test_descriptor_failure_compensates() {
+    val usb = UsbEnumerator()
+    usb.plug_in(2)
+    usb.reset_done(true)
+    usb.address_set(true, 8)
+    usb.descriptors_read(false, "")
+    check("compensated to failed", usb.status() as String, "failed")
+    println("PASS: descriptor failure compensation")
+}
+
+fun test_driver_bind_failure_compensates() {
+    val usb = UsbEnumerator()
+    usb.plug_in(3)
+    usb.reset_done(true)
+    usb.address_set(true, 9)
+    usb.descriptors_read(true, "Mouse")
+    usb.driver_bound(false)
+    check("bind fail compensated to failed", usb.status() as String, "failed")
+    println("PASS: driver bind failure compensation")
+}
+
+fun test_unplug_during_enumeration() {
+    val usb = UsbEnumerator()
+    usb.plug_in(4)
+    check("in resetting", usb.status() as String, "resetting")
+    usb.unplug()
+    check("unplug -> detached", usb.status() as String, "detached")
+    println("PASS: unplug during enumeration forwards via HSM")
+}
+
+fun test_reset_retry_then_exhaust() {
+    val usb = UsbEnumerator()
+    usb.plug_in(5)
+    usb.reset_done(false)
+    check("retry 1", usb.status() as String, "resetting")
+    usb.reset_done(false)
+    check("retry 2", usb.status() as String, "resetting")
+    usb.reset_done(false)
+    check("exhausted -> failed", usb.status() as String, "failed")
+    println("PASS: reset retry exhaustion")
+}
+
+fun test_replug_from_failed() {
+    val usb = UsbEnumerator()
+    usb.plug_in(6)
+    usb.reset_done(false)
+    usb.reset_done(false)
+    usb.reset_done(false)
+    check("failed state", usb.status() as String, "failed")
+    usb.plug_in(6)
+    check("re-plug restarts enumeration", usb.status() as String, "resetting")
+    println("PASS: re-plug from failed state")
+}
+
+fun main() {
+    test_happy_path()
+    test_descriptor_failure_compensates()
+    test_driver_bind_failure_compensates()
+    test_unplug_during_enumeration()
+    test_reset_retry_then_exhaust()
+    test_replug_from_failed()
+    println("PASS: all USB enumeration tests passed")
+}

@@ -1,0 +1,127 @@
+@@target swift
+
+// OOM Killer — kernel mm/oom_kill.c semantics.
+
+import Foundation
+
+@@system OomKiller {
+    interface:
+        oom_detected(gfp_flags: Int): String
+        victim_exited(pid: Int, freed_kb: Int): String
+        oom_detected_again(gfp_flags: Int): String
+        status(): String
+
+    machine:
+        $Normal {
+            oom_detected(gfp_flags: Int): String {
+                @@:("selecting victim")
+                -> $Selecting
+            }
+            status(): String { @@:("normal") }
+        }
+
+        $Selecting {
+            $>() {
+                self.victim_pid = self.select_victim()
+                if self.victim_pid < 0 {
+                    -> $Panic
+                } else {
+                    -> $Killing
+                }
+            }
+            status(): String { @@:("selecting") }
+        }
+
+        $Killing {
+            $>() {
+                self.send_sigkill(self.victim_pid)
+                self.start_reaper_timer()
+            }
+            <$() {
+                self.cancel_reaper_timer()
+            }
+
+            victim_exited(pid: Int, freed_kb: Int): String {
+                if pid == self.victim_pid {
+                    self.total_freed_kb = self.total_freed_kb + freed_kb
+                    @@:("reclaimed")
+                    -> $Normal
+                } else {
+                    @@:("wrong pid, still waiting")
+                }
+            }
+
+            status(): String { @@:("killing") }
+        }
+
+        $Panic {
+            status(): String { @@:("panic") }
+        }
+
+    actions:
+        select_victim(): Int {
+            self.victim_score = 850
+            return 4242
+        }
+        send_sigkill(pid: Int) {}
+        start_reaper_timer() {}
+        cancel_reaper_timer() {}
+
+    domain:
+        victim_pid: Int = -1
+        victim_score: Int = 0
+        total_freed_kb: Int = 0
+}
+
+
+func check(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) — expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+
+func test_normal_oom_flow() {
+    var oom = @@OomKiller()
+    check("initial normal", oom.status() as! String, "normal")
+    check("oom_detected -> selecting", oom.oom_detected(0) as! String, "selecting victim")
+    check("arrived in killing", oom.status() as! String, "killing")
+    check("victim exits", oom.victim_exited(4242, 51200) as! String, "reclaimed")
+    check("back to normal", oom.status() as! String, "normal")
+    print("PASS: normal OOM flow")
+}
+
+func test_concurrent_oom_silently_dropped() {
+    var oom = @@OomKiller()
+    _ = oom.oom_detected(0)
+    check("in killing", oom.status() as! String, "killing")
+    _ = oom.oom_detected_again(0)
+    check("still killing (event dropped)", oom.status() as! String, "killing")
+    _ = oom.victim_exited(4242, 8192)
+    check("back to normal after reclaim", oom.status() as! String, "normal")
+    print("PASS: concurrent OOM events dropped in $Killing (safety)")
+}
+
+func test_wrong_pid_exit_ignored() {
+    var oom = @@OomKiller()
+    _ = oom.oom_detected(0)
+    check("waiting for victim", oom.victim_exited(9999, 1024) as! String, "wrong pid, still waiting")
+    check("still killing", oom.status() as! String, "killing")
+    _ = oom.victim_exited(4242, 2048)
+    check("correct pid -> normal", oom.status() as! String, "normal")
+    print("PASS: wrong-pid exit ignored in $Killing")
+}
+
+func test_oom_detected_ignored_in_selecting() {
+    var oom = @@OomKiller()
+    check("first oom", oom.oom_detected(0) as! String, "selecting victim")
+    _ = oom.oom_detected(0)
+    check("second oom dropped", oom.status() as! String, "killing")
+    print("PASS: oom_detected ignored while killing")
+}
+
+test_normal_oom_flow()
+test_concurrent_oom_silently_dropped()
+test_wrong_pid_exit_ignored()
+test_oom_detected_ignored_in_selecting()
+print("PASS: all OOM killer tests passed")

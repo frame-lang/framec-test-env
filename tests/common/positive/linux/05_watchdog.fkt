@@ -1,0 +1,148 @@
+@@target kotlin
+
+// Watchdog Timer — kernel drivers/watchdog/watchdog_dev.c magic-close semantics.
+
+@@system WatchdogDevice {
+    interface:
+        open(): String
+        write(data: String): String
+        ping(): String
+        close(): String
+        timeout_expired(): String
+        status(): String
+
+    machine:
+        $Inactive {
+            open(): String {
+                @@:("opened")
+                -> $Armed
+            }
+            status(): String { @@:("inactive") }
+        }
+
+        $Armed {
+            $>() {
+                this.magic_seen = false
+                this.start_hw_timer()
+            }
+
+            ping(): String {
+                this.reset_hw_timer()
+                @@:("pinged")
+            }
+            write(data: String): String {
+                if (data.contains("V")) {
+                    this.magic_seen = true
+                    @@:("magic character received")
+                } else {
+                    @@:("data written")
+                }
+                this.reset_hw_timer()
+            }
+            close(): String {
+                if (this.magic_seen) {
+                    this.stop_hw_timer()
+                    @@:("disarmed")
+                    -> $Inactive
+                } else {
+                    @@:("close ignored -- no magic char")
+                }
+            }
+            timeout_expired(): String {
+                @@:("SYSTEM RESET")
+                -> $Triggered
+            }
+            status(): String {
+                if (this.magic_seen) {
+                    @@:("armed (magic seen, close will disarm)")
+                } else {
+                    @@:("armed")
+                }
+            }
+        }
+
+        $Triggered {
+            status(): String { @@:("triggered -- system reset") }
+        }
+
+    actions:
+        start_hw_timer() {}
+        reset_hw_timer() {}
+        stop_hw_timer() {}
+
+    domain:
+        timeout_sec: Int = 60
+        magic_seen: Boolean = false
+}
+
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label — expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun test_open_and_ping() {
+    val wd = WatchdogDevice()
+    check("initial inactive", wd.status() as String, "inactive")
+    check("open returns opened", wd.open() as String, "opened")
+    check("armed after open", wd.status() as String, "armed")
+    check("ping", wd.ping() as String, "pinged")
+    check("still armed after ping", wd.status() as String, "armed")
+    println("PASS: open and ping")
+}
+
+fun test_close_without_magic_is_ignored() {
+    val wd = WatchdogDevice()
+    wd.open()
+    check("close without magic", wd.close() as String, "close ignored -- no magic char")
+    check("still armed after bad close", wd.status() as String, "armed")
+    println("PASS: close without magic ignored (safety property)")
+}
+
+fun test_magic_char_then_close_disarms() {
+    val wd = WatchdogDevice()
+    wd.open()
+    check("write with V sets magic", wd.write("goodbye V") as String, "magic character received")
+    check("status shows magic seen", wd.status() as String, "armed (magic seen, close will disarm)")
+    check("close after magic disarms", wd.close() as String, "disarmed")
+    check("back to inactive", wd.status() as String, "inactive")
+    println("PASS: magic char then close disarms")
+}
+
+fun test_write_without_magic_is_plain_data() {
+    val wd = WatchdogDevice()
+    wd.open()
+    check("write without V", wd.write("abcdef") as String, "data written")
+    check("still armed with no magic", wd.status() as String, "armed")
+    println("PASS: write without magic is plain data")
+}
+
+fun test_timeout_triggers_reset() {
+    val wd = WatchdogDevice()
+    wd.open()
+    check("timeout fires", wd.timeout_expired() as String, "SYSTEM RESET")
+    check("terminal triggered state", wd.status() as String, "triggered -- system reset")
+    println("PASS: timeout triggers system reset")
+}
+
+fun test_reopen_resets_magic_seen() {
+    val wd = WatchdogDevice()
+    wd.open()
+    wd.write("set V please")
+    wd.close()
+    wd.open()
+    check("magic_seen reset on reopen", wd.close() as String, "close ignored -- no magic char")
+    println("PASS: reopen resets magic_seen via enter handler")
+}
+
+fun main() {
+    test_open_and_ping()
+    test_close_without_magic_is_ignored()
+    test_magic_char_then_close_disarms()
+    test_write_without_magic_is_plain_data()
+    test_timeout_triggers_reset()
+    test_reopen_resets_magic_seen()
+    println("PASS: all watchdog tests passed")
+}

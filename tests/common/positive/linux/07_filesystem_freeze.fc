@@ -1,0 +1,210 @@
+@@target c
+
+// Filesystem Freeze — VFS fs/super.c semantics. 3-level HSM:
+//   $Active => $Readable => $Mounted
+//   $Frozen => $Readable => $Mounted
+// $Mounted provides read/sync/unmount for all mounted sub-states.
+// $Active adds write/freeze. $Frozen overrides write to block and adds thaw.
+// $Freezing is transient, bypasses $Readable (state in flux during flush).
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system Filesystem {
+    interface:
+        mount(device: str): str
+        unmount(): str
+        freeze(): str
+        thaw(): str
+        write(data: str): str
+        read(): str
+        sync(): str
+        status(): str
+        read_count(): int
+        write_count(): int
+
+    machine:
+        $Unmounted {
+            mount(device: str): str {
+                self->device = device;
+                @@:("mounted")
+                -> $Active
+            }
+            status(): str { @@:("unmounted") }
+            read_count(): int { @@:(self->reads) }
+            write_count(): int { @@:(self->writes) }
+        }
+
+        $Active => $Readable {
+            write(data: str): str {
+                self->writes = self->writes + 1;
+                @@:("wrote")
+            }
+            freeze(): str {
+                @@:("freezing")
+                -> $Freezing
+            }
+            status(): str { @@:("active") }
+            => $^
+        }
+
+        $Freezing => $Mounted {
+            $>() {
+                Filesystem_flush_pending_writes(self);
+                -> $Frozen
+            }
+            status(): str { @@:("freezing") }
+            => $^
+        }
+
+        $Frozen => $Readable {
+            write(data: str): str {
+                @@:("BLOCKED")
+            }
+            thaw(): str {
+                @@:("thawed")
+                -> $Active
+            }
+            status(): str { @@:("frozen") }
+            => $^
+        }
+
+        $Readable => $Mounted {
+            => $^
+        }
+
+        $Mounted {
+            read(): str {
+                self->reads = self->reads + 1;
+                @@:("read")
+            }
+            sync(): str {
+                @@:("synced")
+            }
+            unmount(): str {
+                @@:("unmounting")
+                -> $Unmounting
+            }
+            read_count(): int { @@:(self->reads) }
+            write_count(): int { @@:(self->writes) }
+        }
+
+        $Unmounting {
+            $>() {
+                Filesystem_flush_pending_writes(self);
+                Filesystem_release_resources(self);
+                -> $Unmounted
+            }
+        }
+
+    actions:
+        flush_pending_writes() {}
+        release_resources() {}
+
+    domain:
+        device: str = ""
+        writes: int = 0
+        reads: int = 0
+}
+
+
+void check_str(const char* label, const char* actual, const char* expected) {
+    if (actual == NULL || strcmp(actual, expected) != 0) {
+        printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual ? actual : "(null)");
+        exit(1);
+    }
+}
+
+void check_int(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s — expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void test_mount_write_read(void) {
+    Filesystem* fs = @@Filesystem();
+    check_str("initial unmounted", (const char*)Filesystem_status(fs), "unmounted");
+    check_str("mount", (const char*)Filesystem_mount(fs, "/dev/sda1"), "mounted");
+    check_str("active state", (const char*)Filesystem_status(fs), "active");
+    check_str("write 1", (const char*)Filesystem_write(fs, "hello"), "wrote");
+    check_str("read 1", (const char*)Filesystem_read(fs), "read");
+    check_str("sync via HSM", (const char*)Filesystem_sync(fs), "synced");
+    check_int("read count incremented", Filesystem_read_count(fs), 1);
+    check_int("write count incremented", Filesystem_write_count(fs), 1);
+    printf("PASS: mount + write + read + sync\n");
+    Filesystem_destroy(fs);
+}
+
+void test_freeze_blocks_writes_allows_reads(void) {
+    Filesystem* fs = @@Filesystem();
+    Filesystem_mount(fs, "/dev/sda1");
+    Filesystem_write(fs, "before freeze");
+    Filesystem_freeze(fs);
+    check_str("in frozen state", (const char*)Filesystem_status(fs), "frozen");
+    check_str("write blocked", (const char*)Filesystem_write(fs, "nope"), "BLOCKED");
+    check_str("read still works", (const char*)Filesystem_read(fs), "read");
+    check_int("read count 1", Filesystem_read_count(fs), 1);
+    check_int("write count unchanged", Filesystem_write_count(fs), 1);
+    printf("PASS: freeze blocks writes, allows reads (3-level HSM)\n");
+    Filesystem_destroy(fs);
+}
+
+void test_thaw_restores_write(void) {
+    Filesystem* fs = @@Filesystem();
+    Filesystem_mount(fs, "/dev/sda1");
+    Filesystem_freeze(fs);
+    check_str("thaw", (const char*)Filesystem_thaw(fs), "thawed");
+    check_str("back to active", (const char*)Filesystem_status(fs), "active");
+    check_str("write works again", (const char*)Filesystem_write(fs, "post-thaw"), "wrote");
+    printf("PASS: thaw restores write capability\n");
+    Filesystem_destroy(fs);
+}
+
+void test_unmount_forwards_via_hsm(void) {
+    Filesystem* fs = @@Filesystem();
+    Filesystem_mount(fs, "/dev/sda1");
+    check_str("unmount from Active", (const char*)Filesystem_unmount(fs), "unmounting");
+    check_str("eventually unmounted", (const char*)Filesystem_status(fs), "unmounted");
+    printf("PASS: unmount forwards from Active via $Readable to $Mounted\n");
+    Filesystem_destroy(fs);
+}
+
+void test_freeze_impossible_when_unmounted(void) {
+    Filesystem* fs = @@Filesystem();
+    // C returns NULL when no handler exists.
+    void* ret = Filesystem_freeze(fs);
+    if (ret != NULL) {
+        printf("FAIL: freeze unmounted expected NULL, got non-null\n");
+        exit(1);
+    }
+    check_str("still unmounted", (const char*)Filesystem_status(fs), "unmounted");
+    printf("PASS: freeze on unmounted fs is no-op\n");
+    Filesystem_destroy(fs);
+}
+
+void test_read_count_accumulates_across_states(void) {
+    Filesystem* fs = @@Filesystem();
+    Filesystem_mount(fs, "/dev/sda1");
+    Filesystem_read(fs);
+    Filesystem_read(fs);
+    Filesystem_freeze(fs);
+    Filesystem_read(fs);
+    Filesystem_thaw(fs);
+    Filesystem_read(fs);
+    check_int("reads across Active/Frozen/Active", Filesystem_read_count(fs), 4);
+    printf("PASS: read count spans states (domain var)\n");
+    Filesystem_destroy(fs);
+}
+
+int main(void) {
+    test_mount_write_read();
+    test_freeze_blocks_writes_allows_reads();
+    test_thaw_restores_write();
+    test_unmount_forwards_via_hsm();
+    test_freeze_impossible_when_unmounted();
+    test_read_count_accumulates_across_states();
+    printf("PASS: all filesystem freeze tests passed\n");
+    return 0;
+}

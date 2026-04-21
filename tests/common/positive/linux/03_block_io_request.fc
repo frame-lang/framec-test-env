@@ -1,0 +1,172 @@
+@@target c
+
+// Block I/O Request — kernel blk-mq layer semantics.
+// Request moves through Idle -> Queued -> InFlight -> (Done|Error) with
+// retry-on-failure and timeout-retry loops.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system BlockRequest {
+    interface:
+        submit(sector: int, size: int): str
+        dispatch(): str
+        complete(success: bool): str
+        timeout(): str
+        status(): str
+
+    machine:
+        $Idle {
+            submit(sector: int, size: int): str {
+                self->sector = sector;
+                self->size = size;
+                self->attempts = 0;
+                @@:("queued")
+                -> $Queued
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $Queued {
+            dispatch(): str {
+                @@:("dispatched")
+                -> $InFlight
+            }
+            status(): str { @@:("queued") }
+        }
+
+        $InFlight {
+            $>() {
+                self->attempts = self->attempts + 1;
+                BlockRequest_start_timeout(self);
+            }
+            <$() {
+                BlockRequest_cancel_timeout(self);
+            }
+
+            complete(success: bool): str {
+                if (success) {
+                    @@:("done")
+                    -> $Done
+                } else {
+                    if (self->attempts < self->max_retries) {
+                        @@:("requeued")
+                        -> $Queued
+                    } else {
+                        @@:("io error")
+                        -> $Error
+                    }
+                }
+            }
+            timeout(): str {
+                if (self->attempts < self->max_retries) {
+                    @@:("timeout, retrying")
+                    -> $Queued
+                } else {
+                    @@:("timeout, giving up")
+                    -> $Error
+                }
+            }
+            status(): str { @@:("in-flight") }
+        }
+
+        $Done {
+            status(): str { @@:("done") }
+        }
+
+        $Error {
+            status(): str { @@:("error") }
+        }
+
+    actions:
+        start_timeout() {}
+        cancel_timeout() {}
+
+    domain:
+        sector: int = 0
+        size: int = 0
+        attempts: int = 0
+        max_retries: int = 3
+        timeout_ms: int = 30000
+}
+
+
+void check(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void test_happy_path(void) {
+    BlockRequest* req = @@BlockRequest();
+    check("initial idle",   (const char*)BlockRequest_status(req),           "idle");
+    check("submit",         (const char*)BlockRequest_submit(req, 1024, 8),  "queued");
+    check("dispatch",       (const char*)BlockRequest_dispatch(req),         "dispatched");
+    check("complete ok",    (const char*)BlockRequest_complete(req, 1),      "done");
+    check("terminal done",  (const char*)BlockRequest_status(req),           "done");
+    printf("PASS: happy path\n");
+    BlockRequest_destroy(req);
+}
+
+void test_timeout_retry_then_complete(void) {
+    BlockRequest* req = @@BlockRequest();
+    BlockRequest_submit(req, 2048, 4);
+    BlockRequest_dispatch(req);
+    check("first timeout -> retry", (const char*)BlockRequest_timeout(req), "timeout, retrying");
+    check("back to queued after timeout", (const char*)BlockRequest_status(req), "queued");
+    BlockRequest_dispatch(req);
+    check("complete after retry", (const char*)BlockRequest_complete(req, 1), "done");
+    printf("PASS: timeout then retry success\n");
+    BlockRequest_destroy(req);
+}
+
+void test_failure_requeue_then_success(void) {
+    BlockRequest* req = @@BlockRequest();
+    BlockRequest_submit(req, 4096, 2);
+    BlockRequest_dispatch(req);
+    check("complete(false) -> requeued", (const char*)BlockRequest_complete(req, 0), "requeued");
+    BlockRequest_dispatch(req);
+    check("complete(true) -> done", (const char*)BlockRequest_complete(req, 1), "done");
+    printf("PASS: failure requeue then success\n");
+    BlockRequest_destroy(req);
+}
+
+void test_retry_exhaustion(void) {
+    BlockRequest* req = @@BlockRequest();
+    BlockRequest_submit(req, 8192, 1);
+    BlockRequest_dispatch(req);
+    check("req 1 failure requeued", (const char*)BlockRequest_complete(req, 0), "requeued");
+    BlockRequest_dispatch(req);
+    check("req 2 failure requeued", (const char*)BlockRequest_complete(req, 0), "requeued");
+    BlockRequest_dispatch(req);
+    check("req 3 failure -> io error", (const char*)BlockRequest_complete(req, 0), "io error");
+    check("terminal error state", (const char*)BlockRequest_status(req), "error");
+    printf("PASS: retry exhaustion -> error\n");
+    BlockRequest_destroy(req);
+}
+
+void test_timeout_exhaustion(void) {
+    BlockRequest* req = @@BlockRequest();
+    BlockRequest_submit(req, 16384, 1);
+    BlockRequest_dispatch(req);
+    check("to 1 retry", (const char*)BlockRequest_timeout(req), "timeout, retrying");
+    BlockRequest_dispatch(req);
+    check("to 2 retry", (const char*)BlockRequest_timeout(req), "timeout, retrying");
+    BlockRequest_dispatch(req);
+    check("to 3 giving up", (const char*)BlockRequest_timeout(req), "timeout, giving up");
+    check("error terminal", (const char*)BlockRequest_status(req), "error");
+    printf("PASS: timeout exhaustion -> error\n");
+    BlockRequest_destroy(req);
+}
+
+int main(void) {
+    test_happy_path();
+    test_timeout_retry_then_complete();
+    test_failure_requeue_then_success();
+    test_retry_exhaustion();
+    test_timeout_exhaustion();
+    printf("PASS: all block I/O request tests passed\n");
+    return 0;
+}

@@ -1,0 +1,273 @@
+@@target php
+
+<?php
+
+// Kernel Module Loader — pipeline with compensation (saga pattern).
+
+@@system ModuleLoader {
+    interface:
+        load(name: str)
+        unload(): str
+        acquire(): str
+        release(): str
+        resolve_done(success: bool, reason: str)
+        alloc_done(success: bool, reason: str)
+        relocate_done(success: bool, reason: str)
+        init_done(success: bool, reason: str)
+        status(): str
+        refcount(): int
+        failure_reason(): str
+
+    machine:
+        $Idle {
+            load(name: str) {
+                $this->name = $name;
+                $this->failure = "";
+                -> $ResolvingSymbols
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $ResolvingSymbols {
+            $>() {
+                $this->do_resolve($this->name);
+            }
+            resolve_done(success: bool, reason: str) {
+                if ($success) {
+                    -> $AllocatingMemory
+                } else {
+                    $this->failure = $reason;
+                    -> $Failed
+                }
+            }
+            status(): str { @@:("resolving") }
+        }
+
+        $AllocatingMemory {
+            $>() {
+                $this->do_alloc($this->name);
+            }
+            alloc_done(success: bool, reason: str) {
+                if ($success) {
+                    -> $Relocating
+                } else {
+                    $this->failure = $reason;
+                    -> $Failed
+                }
+            }
+            status(): str { @@:("allocating") }
+        }
+
+        $Relocating {
+            $>() {
+                $this->do_relocate($this->name);
+            }
+            relocate_done(success: bool, reason: str) {
+                if ($success) {
+                    -> $Initializing
+                } else {
+                    $this->failure = $reason;
+                    -> $UndoAlloc
+                }
+            }
+            status(): str { @@:("relocating") }
+        }
+
+        $Initializing {
+            $>() {
+                $this->do_init($this->name);
+            }
+            init_done(success: bool, reason: str) {
+                if ($success) {
+                    -> $Live
+                } else {
+                    $this->failure = $reason;
+                    -> $UndoRelocate
+                }
+            }
+            status(): str { @@:("initializing") }
+        }
+
+        $UndoRelocate {
+            $>() {
+                $this->do_undo_relocate($this->name);
+                -> $UndoAlloc
+            }
+        }
+
+        $UndoAlloc {
+            $>() {
+                $this->do_free($this->name);
+                -> $Failed
+            }
+        }
+
+        $Live {
+            $>() {
+                $this->refs = 0;
+            }
+
+            acquire(): str {
+                $this->refs = $this->refs + 1;
+                @@:("acquired")
+            }
+            release(): str {
+                $this->refs = $this->refs - 1;
+                @@:("released")
+            }
+            unload(): str {
+                if ($this->refs > 0) {
+                    @@:("busy")
+                } else {
+                    @@:("unloading")
+                    -> $Unloading
+                }
+            }
+            status(): str { @@:("live") }
+            refcount(): int { @@:($this->refs) }
+        }
+
+        $Unloading {
+            $>() {
+                $this->do_exit($this->name);
+                $this->do_free($this->name);
+                -> $Idle
+            }
+        }
+
+        $Failed {
+            load(name: str) {
+                $this->name = $name;
+                $this->failure = "";
+                -> $ResolvingSymbols
+            }
+            status(): str { @@:("failed") }
+            failure_reason(): str { @@:($this->failure) }
+        }
+
+    actions:
+        do_resolve(name) {}
+        do_alloc(name) {}
+        do_relocate(name) {}
+        do_init(name) {}
+        do_undo_relocate(name) {}
+        do_free(name) {}
+        do_exit(name) {}
+
+    domain:
+        name = ""
+        failure = ""
+        refs = 0
+}
+
+
+function check_str($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label — expected '$expected', got '" . ($actual === null ? "(null)" : $actual) . "'\n";
+        exit(1);
+    }
+}
+
+function check_int($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label — expected $expected, got $actual\n";
+        exit(1);
+    }
+}
+
+function test_happy_load_unload() {
+    $loader = @@ModuleLoader();
+    check_str("initial idle", $loader->status(), "idle");
+    $loader->load("ext4");
+    check_str("resolving", $loader->status(), "resolving");
+    $loader->resolve_done(true, "");
+    check_str("allocating", $loader->status(), "allocating");
+    $loader->alloc_done(true, "");
+    check_str("relocating", $loader->status(), "relocating");
+    $loader->relocate_done(true, "");
+    check_str("initializing", $loader->status(), "initializing");
+    $loader->init_done(true, "");
+    check_str("live", $loader->status(), "live");
+    check_int("refcount 0", $loader->refcount(), 0);
+    check_str("unload empty module", $loader->unload(), "unloading");
+    check_str("back to idle", $loader->status(), "idle");
+    echo "PASS: happy load/unload pipeline\n";
+}
+
+function test_init_failure_compensates() {
+    $loader = @@ModuleLoader();
+    $loader->load("buggy");
+    $loader->resolve_done(true, "");
+    $loader->alloc_done(true, "");
+    $loader->relocate_done(true, "");
+    $loader->init_done(false, "ENOMEM");
+    check_str("failed state", $loader->status(), "failed");
+    check_str("failure captured", $loader->failure_reason(), "ENOMEM");
+    echo "PASS: init failure compensation\n";
+}
+
+function test_relocate_failure_compensates() {
+    $loader = @@ModuleLoader();
+    $loader->load("symbol_err");
+    $loader->resolve_done(true, "");
+    $loader->alloc_done(true, "");
+    $loader->relocate_done(false, "undefined symbol");
+    check_str("failed from relocate", $loader->status(), "failed");
+    check_str("reason captured", $loader->failure_reason(), "undefined symbol");
+    echo "PASS: relocate failure compensation\n";
+}
+
+function test_early_failure_no_compensation_needed() {
+    $loader = @@ModuleLoader();
+    $loader->load("no_such_sym");
+    $loader->resolve_done(false, "symbol not found");
+    check_str("direct fail from resolve", $loader->status(), "failed");
+    check_str("resolve reason", $loader->failure_reason(), "symbol not found");
+    echo "PASS: early failure without compensation\n";
+}
+
+function test_refcount_blocks_unload() {
+    $loader = @@ModuleLoader();
+    $loader->load("shared_lib");
+    $loader->resolve_done(true, "");
+    $loader->alloc_done(true, "");
+    $loader->relocate_done(true, "");
+    $loader->init_done(true, "");
+    check_str("acquire returns 'acquired'", $loader->acquire(), "acquired");
+    check_int("refcount 1", $loader->refcount(), 1);
+    check_str("acquire again", $loader->acquire(), "acquired");
+    check_int("refcount 2", $loader->refcount(), 2);
+    check_str("unload blocked by refs", $loader->unload(), "busy");
+    check_str("still live", $loader->status(), "live");
+    $loader->release();
+    check_int("refcount after release", $loader->refcount(), 1);
+    check_str("still busy", $loader->unload(), "busy");
+    $loader->release();
+    check_int("refcount 0", $loader->refcount(), 0);
+    check_str("now unloads", $loader->unload(), "unloading");
+    check_str("idle again", $loader->status(), "idle");
+    echo "PASS: refcount blocks unload\n";
+}
+
+function test_reload_from_failed() {
+    $loader = @@ModuleLoader();
+    $loader->load("badmod");
+    $loader->resolve_done(false, "initial fail");
+    check_str("failed", $loader->status(), "failed");
+    $loader->load("goodmod");
+    check_str("restarted in resolving", $loader->status(), "resolving");
+    $loader->resolve_done(true, "");
+    $loader->alloc_done(true, "");
+    $loader->relocate_done(true, "");
+    $loader->init_done(true, "");
+    check_str("recovered to live", $loader->status(), "live");
+    echo "PASS: reload from failed\n";
+}
+
+test_happy_load_unload();
+test_init_failure_compensates();
+test_relocate_failure_compensates();
+test_early_failure_no_compensation_needed();
+test_refcount_blocks_unload();
+test_reload_from_failed();
+echo "PASS: all kernel module loader tests passed\n";

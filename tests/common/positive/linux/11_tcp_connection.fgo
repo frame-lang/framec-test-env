@@ -1,0 +1,236 @@
+@@target go
+
+// TCP Connection -- RFC 793 Figure 6 FSM with @@persist for TIME_WAIT.
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+@@persist
+@@system TcpConnection {
+    interface:
+        PassiveOpen()
+        ActiveOpen()
+        RecvSyn()
+        RecvSynAck()
+        RecvAck()
+        RecvFin()
+        AppClose()
+        AppSend(bytes_n: int)
+        Timeout2msl()
+        Abort()
+        StateName(): string
+
+    machine:
+        $Closed {
+            PassiveOpen() { -> $Listen }
+            ActiveOpen() {
+                s.send_syn()
+                -> $SynSent
+            }
+            StateName(): string { @@:("CLOSED") }
+        }
+
+        $Listen {
+            RecvSyn() {
+                s.send_syn_ack()
+                -> $SynReceived
+            }
+            AppClose() { -> $Closed }
+            StateName(): string { @@:("LISTEN") }
+        }
+
+        $SynSent {
+            RecvSynAck() {
+                s.send_ack()
+                -> $Established
+            }
+            RecvSyn() {
+                s.send_syn_ack()
+                -> $SynReceived
+            }
+            AppClose() { -> $Closed }
+            StateName(): string { @@:("SYN_SENT") }
+        }
+
+        $SynReceived {
+            RecvAck() { -> $Established }
+            AppClose() {
+                s.send_fin()
+                -> $FinWait1
+            }
+            StateName(): string { @@:("SYN_RECEIVED") }
+        }
+
+        $Established {
+            AppSend(bytes_n: int) {
+                s.bytes_sent = s.bytes_sent + bytes_n
+            }
+            AppClose() {
+                s.send_fin()
+                -> $FinWait1
+            }
+            RecvFin() {
+                s.send_ack()
+                -> $CloseWait
+            }
+            Abort() {
+                s.send_rst()
+                -> $Closed
+            }
+            StateName(): string { @@:("ESTABLISHED") }
+        }
+
+        $FinWait1 {
+            RecvAck() { -> $FinWait2 }
+            RecvFin() {
+                s.send_ack()
+                -> $Closing
+            }
+            StateName(): string { @@:("FIN_WAIT_1") }
+        }
+
+        $FinWait2 {
+            RecvFin() {
+                s.send_ack()
+                -> $TimeWait
+            }
+            StateName(): string { @@:("FIN_WAIT_2") }
+        }
+
+        $Closing {
+            RecvAck() { -> $TimeWait }
+            StateName(): string { @@:("CLOSING") }
+        }
+
+        $TimeWait {
+            $>() {
+                s.start_2msl_timer()
+            }
+            Timeout2msl() { -> $Closed }
+            StateName(): string { @@:("TIME_WAIT") }
+        }
+
+        $CloseWait {
+            AppClose() {
+                s.send_fin()
+                -> $LastAck
+            }
+            StateName(): string { @@:("CLOSE_WAIT") }
+        }
+
+        $LastAck {
+            RecvAck() { -> $Closed }
+            StateName(): string { @@:("LAST_ACK") }
+        }
+
+    actions:
+        send_syn()         {}
+        send_syn_ack()     {}
+        send_ack()         {}
+        send_fin()         {}
+        send_rst()         {}
+        start_2msl_timer() {}
+
+    domain:
+        local_port: int = 0
+        remote_port: int = 0
+        bytes_sent: int = 0
+}
+
+
+func check(label, actual, expected string) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func test_active_open_full_cycle() {
+	c := NewTcpConnection()
+	check("initial CLOSED", c.StateName(), "CLOSED")
+	c.ActiveOpen()
+	check("SYN_SENT", c.StateName(), "SYN_SENT")
+	c.RecvSynAck()
+	check("ESTABLISHED", c.StateName(), "ESTABLISHED")
+	c.AppSend(1024)
+	c.AppClose()
+	check("FIN_WAIT_1", c.StateName(), "FIN_WAIT_1")
+	c.RecvAck()
+	check("FIN_WAIT_2", c.StateName(), "FIN_WAIT_2")
+	c.RecvFin()
+	check("TIME_WAIT", c.StateName(), "TIME_WAIT")
+	c.Timeout2msl()
+	check("back to CLOSED", c.StateName(), "CLOSED")
+	fmt.Println("PASS: active open, full cycle to TIME_WAIT")
+}
+
+func test_passive_open_full_cycle() {
+	c := NewTcpConnection()
+	c.PassiveOpen()
+	check("LISTEN", c.StateName(), "LISTEN")
+	c.RecvSyn()
+	check("SYN_RECEIVED", c.StateName(), "SYN_RECEIVED")
+	c.RecvAck()
+	check("ESTABLISHED", c.StateName(), "ESTABLISHED")
+	c.RecvFin()
+	check("CLOSE_WAIT", c.StateName(), "CLOSE_WAIT")
+	c.AppClose()
+	check("LAST_ACK", c.StateName(), "LAST_ACK")
+	c.RecvAck()
+	check("CLOSED", c.StateName(), "CLOSED")
+	fmt.Println("PASS: passive open, peer-initiated close")
+}
+
+func test_simultaneous_close() {
+	c := NewTcpConnection()
+	c.ActiveOpen()
+	c.RecvSynAck()
+	c.AppClose()
+	check("in FIN_WAIT_1", c.StateName(), "FIN_WAIT_1")
+	c.RecvFin()
+	check("CLOSING (simultaneous)", c.StateName(), "CLOSING")
+	c.RecvAck()
+	check("TIME_WAIT after CLOSING ACK", c.StateName(), "TIME_WAIT")
+	fmt.Println("PASS: simultaneous close -> CLOSING -> TIME_WAIT")
+}
+
+func test_abort_from_established() {
+	c := NewTcpConnection()
+	c.ActiveOpen()
+	c.RecvSynAck()
+	c.Abort()
+	check("RST drops to CLOSED", c.StateName(), "CLOSED")
+	fmt.Println("PASS: abort sends RST and returns to CLOSED")
+}
+
+func test_persist_across_restart() {
+	c := NewTcpConnection()
+	c.ActiveOpen()
+	c.RecvSynAck()
+	c.AppSend(2048)
+	c.AppClose()
+	c.RecvAck()
+	c.RecvFin()
+	check("TIME_WAIT before persist", c.StateName(), "TIME_WAIT")
+	snap := c.SaveState()
+	c2 := RestoreTcpConnection(snap)
+	check("TIME_WAIT restored", c2.StateName(), "TIME_WAIT")
+	c2.Timeout2msl()
+	check("CLOSED after 2MSL", c2.StateName(), "CLOSED")
+	fmt.Println("PASS: @@persist survives simulated restart in TIME_WAIT")
+	_ = json.Valid // keep import used
+}
+
+func main() {
+	test_active_open_full_cycle()
+	test_passive_open_full_cycle()
+	test_simultaneous_close()
+	test_abort_from_established()
+	test_persist_across_restart()
+	fmt.Println("PASS: all TCP connection tests passed")
+}

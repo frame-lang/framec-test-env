@@ -1,0 +1,232 @@
+@@target kotlin
+
+// HTTP/1.1 Connection -- keep-alive lifecycle with HSM for cross-cutting errors.
+
+@@system HttpConnection {
+    interface:
+        connect(host: String, port: Int)
+        send_request(method: String, path: String)
+        headers_received(status_code: Int, keep_alive: Boolean, content_length: Int)
+        body_chunk_received(chunk: String)
+        body_complete()
+        keep_alive_timeout()
+        connection_error(reason: String)
+        close()
+        status(): String
+        request_count(): Int
+
+    machine:
+        $Disconnected {
+            connect(host: String, port: Int) {
+                this.host = host
+                this.port = port
+                -> $Connecting
+            }
+            status(): String { @@:("disconnected") }
+            request_count(): Int { @@:(this.requests) }
+        }
+
+        $Connecting {
+            $>() {
+                this.tcp_connect()
+                -> $Idle
+            }
+        }
+
+        $Idle => $Open {
+            $>() {
+                this.start_keep_alive_timer()
+            }
+            <$() {
+                this.cancel_keep_alive_timer()
+            }
+
+            send_request(method: String, path: String) {
+                this.current_method = method
+                this.current_path = path
+                this.emit_request()
+                -> $AwaitingResponse
+            }
+            keep_alive_timeout() {
+                -> $Closing
+            }
+            status(): String { @@:("idle") }
+            request_count(): Int { @@:(this.requests) }
+            => $^
+        }
+
+        $AwaitingResponse => $Open {
+            headers_received(status_code: Int, keep_alive: Boolean, content_length: Int) {
+                this.response_status = status_code
+                this.ka = keep_alive
+                this.content_length = content_length
+                if (content_length == 0) {
+                    -> $ResponseComplete
+                } else {
+                    -> $ReceivingBody
+                }
+            }
+            status(): String { @@:("awaiting response") }
+            request_count(): Int { @@:(this.requests) }
+            => $^
+        }
+
+        $ReceivingBody => $Open {
+            body_chunk_received(chunk: String) {
+                this.bytes_received = this.bytes_received + this.content_length
+            }
+            body_complete() {
+                -> $ResponseComplete
+            }
+            status(): String { @@:("receiving body") }
+            request_count(): Int { @@:(this.requests) }
+            => $^
+        }
+
+        $ResponseComplete => $Open {
+            $>() {
+                this.requests = this.requests + 1
+                if (this.ka) {
+                    -> $Idle
+                } else {
+                    -> $Closing
+                }
+            }
+            => $^
+        }
+
+        $Open {
+            connection_error(reason: String) {
+                -> $Disconnected
+            }
+            close() {
+                -> $Closing
+            }
+        }
+
+        $Closing {
+            $>() {
+                this.tcp_close()
+                -> $Disconnected
+            }
+        }
+
+    actions:
+        tcp_connect() {}
+        tcp_close() {}
+        emit_request() {}
+        start_keep_alive_timer() {}
+        cancel_keep_alive_timer() {}
+
+    domain:
+        host: String = ""
+        port: Int = 80
+        current_method: String = ""
+        current_path: String = ""
+        response_status: Int = 0
+        content_length: Int = 0
+        bytes_received: Int = 0
+        ka: Boolean = true
+        requests: Int = 0
+}
+
+
+fun check_str(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label -- expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun check_int(label: String, actual: Int, expected: Int) {
+    if (actual != expected) {
+        println("FAIL: $label -- expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun test_first_request_keepalive() {
+    val conn = HttpConnection()
+    check_str("disconnected", conn.status() as String, "disconnected")
+    conn.connect("example.com", 80)
+    check_str("idle after connect", conn.status() as String, "idle")
+    conn.send_request("GET", "/index.html")
+    check_str("awaiting response", conn.status() as String, "awaiting response")
+    conn.headers_received(200, true, 5)
+    check_str("receiving body", conn.status() as String, "receiving body")
+    conn.body_complete()
+    check_str("back to idle (keep-alive)", conn.status() as String, "idle")
+    check_int("request count 1", conn.request_count() as Int, 1)
+    println("PASS: first request, keep-alive cycles back to idle")
+}
+
+fun test_empty_body_skips_receiving() {
+    val conn = HttpConnection()
+    conn.connect("example.com", 80)
+    conn.send_request("GET", "/about")
+    conn.headers_received(200, true, 0)
+    check_str("idle after empty body", conn.status() as String, "idle")
+    println("PASS: empty body skips ReceivingBody")
+}
+
+fun test_connection_close_header() {
+    val conn = HttpConnection()
+    conn.connect("example.com", 80)
+    conn.send_request("POST", "/api")
+    conn.headers_received(201, false, 0)
+    check_str("disconnected after Connection: close", conn.status() as String, "disconnected")
+    println("PASS: Connection: close response path")
+}
+
+fun test_keep_alive_timeout() {
+    val conn = HttpConnection()
+    conn.connect("example.com", 80)
+    check_str("idle", conn.status() as String, "idle")
+    conn.keep_alive_timeout()
+    check_str("disconnected after timeout", conn.status() as String, "disconnected")
+    println("PASS: keep-alive timeout tears down connection")
+}
+
+fun test_connection_error_during_receive() {
+    val conn = HttpConnection()
+    conn.connect("example.com", 80)
+    conn.send_request("GET", "/large")
+    conn.headers_received(200, true, 1000)
+    check_str("receiving body", conn.status() as String, "receiving body")
+    conn.connection_error("peer reset")
+    check_str("disconnected after error", conn.status() as String, "disconnected")
+    println("PASS: connection_error from receiving body forwards via HSM")
+}
+
+fun test_explicit_close_during_idle() {
+    val conn = HttpConnection()
+    conn.connect("example.com", 80)
+    conn.close()
+    check_str("close from idle", conn.status() as String, "disconnected")
+    println("PASS: explicit close from idle via HSM parent")
+}
+
+fun test_multiple_request_reuse() {
+    val conn = HttpConnection()
+    conn.connect("example.com", 80)
+    conn.send_request("GET", "/one")
+    conn.headers_received(200, true, 0)
+    conn.send_request("GET", "/two")
+    conn.headers_received(200, true, 0)
+    conn.send_request("GET", "/three")
+    conn.headers_received(200, true, 0)
+    check_int("3 requests on same connection", conn.request_count() as Int, 3)
+    check_str("still idle", conn.status() as String, "idle")
+    println("PASS: connection reused across multiple requests")
+}
+
+fun main() {
+    test_first_request_keepalive()
+    test_empty_body_skips_receiving()
+    test_connection_close_header()
+    test_keep_alive_timeout()
+    test_connection_error_during_receive()
+    test_explicit_close_during_idle()
+    test_multiple_request_reuse()
+    println("PASS: all HTTP connection tests passed")
+}

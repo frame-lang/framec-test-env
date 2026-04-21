@@ -1,0 +1,149 @@
+@@target typescript
+
+// Watchdog Timer — kernel drivers/watchdog/watchdog_dev.c magic-close semantics.
+// The device stays armed unless close() follows a write containing 'V'
+// (the magic character). Safety-by-construction: the only path from
+// $Armed to $Inactive requires this.magic_seen == true.
+
+@@system WatchdogDevice {
+    interface:
+        open(): string
+        write(data: string): string
+        ping(): string
+        close(): string
+        timeout_expired(): string
+        status(): string
+
+    machine:
+        $Inactive {
+            open(): string {
+                @@:("opened")
+                -> $Armed
+            }
+            status(): string { @@:("inactive") }
+        }
+
+        $Armed {
+            $>() {
+                this.magic_seen = false;
+                this.start_hw_timer();
+            }
+
+            ping(): string {
+                this.reset_hw_timer();
+                @@:("pinged")
+            }
+            write(data: string): string {
+                if (data.includes("V")) {
+                    this.magic_seen = true;
+                    @@:("magic character received")
+                } else {
+                    @@:("data written")
+                }
+                this.reset_hw_timer();
+            }
+            close(): string {
+                if (this.magic_seen) {
+                    this.stop_hw_timer();
+                    @@:("disarmed")
+                    -> $Inactive
+                } else {
+                    @@:("close ignored -- no magic char")
+                }
+            }
+            timeout_expired(): string {
+                @@:("SYSTEM RESET")
+                -> $Triggered
+            }
+            status(): string {
+                if (this.magic_seen) {
+                    @@:("armed (magic seen, close will disarm)")
+                } else {
+                    @@:("armed")
+                }
+            }
+        }
+
+        $Triggered {
+            status(): string { @@:("triggered -- system reset") }
+        }
+
+    actions:
+        start_hw_timer() {}
+        reset_hw_timer() {}
+        stop_hw_timer() {}
+
+    domain:
+        timeout_sec: number = 60
+        magic_seen: boolean = false
+}
+
+
+function check(label: string, actual: string, expected: string): void {
+    if (actual !== expected) {
+        console.log(`FAIL: ${label} — expected '${expected}', got '${actual}'`);
+        throw new Error(`assertion failed: ${label}`);
+    }
+}
+
+function test_open_and_ping(): void {
+    const wd = @@WatchdogDevice();
+    check("initial inactive", wd.status(), "inactive");
+    check("open returns opened", wd.open(), "opened");
+    check("armed after open", wd.status(), "armed");
+    check("ping", wd.ping(), "pinged");
+    check("still armed after ping", wd.status(), "armed");
+    console.log("PASS: open and ping");
+}
+
+function test_close_without_magic_is_ignored(): void {
+    const wd = @@WatchdogDevice();
+    wd.open();
+    check("close without magic", wd.close(), "close ignored -- no magic char");
+    check("still armed after bad close", wd.status(), "armed");
+    console.log("PASS: close without magic ignored (safety property)");
+}
+
+function test_magic_char_then_close_disarms(): void {
+    const wd = @@WatchdogDevice();
+    wd.open();
+    check("write with V sets magic", wd.write("goodbye V"), "magic character received");
+    check("status shows magic seen", wd.status(), "armed (magic seen, close will disarm)");
+    check("close after magic disarms", wd.close(), "disarmed");
+    check("back to inactive", wd.status(), "inactive");
+    console.log("PASS: magic char then close disarms");
+}
+
+function test_write_without_magic_is_plain_data(): void {
+    const wd = @@WatchdogDevice();
+    wd.open();
+    check("write without V", wd.write("abcdef"), "data written");
+    check("still armed with no magic", wd.status(), "armed");
+    console.log("PASS: write without magic is plain data");
+}
+
+function test_timeout_triggers_reset(): void {
+    const wd = @@WatchdogDevice();
+    wd.open();
+    check("timeout fires", wd.timeout_expired(), "SYSTEM RESET");
+    check("terminal triggered state", wd.status(), "triggered -- system reset");
+    console.log("PASS: timeout triggers system reset");
+}
+
+function test_reopen_resets_magic_seen(): void {
+    const wd = @@WatchdogDevice();
+    wd.open();
+    wd.write("set V please");
+    wd.close();
+    wd.open();
+    check("magic_seen reset on reopen", wd.close(), "close ignored -- no magic char");
+    console.log("PASS: reopen resets magic_seen via enter handler");
+}
+
+test_open_and_ping();
+test_close_without_magic_is_ignored();
+test_magic_char_then_close_disarms();
+test_write_without_magic_is_plain_data();
+test_timeout_triggers_reset();
+test_reopen_resets_magic_seen();
+console.log("PASS: all watchdog tests passed");

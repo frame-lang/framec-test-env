@@ -1,0 +1,232 @@
+@@target swift
+
+// HTTP/1.1 Connection -- keep-alive lifecycle with HSM for cross-cutting errors.
+
+import Foundation
+
+@@system HttpConnection {
+    interface:
+        connect(host: String, port: Int)
+        send_request(method: String, path: String)
+        headers_received(status_code: Int, keep_alive: Bool, content_length: Int)
+        body_chunk_received(chunk: String)
+        body_complete()
+        keep_alive_timeout()
+        connection_error(reason: String)
+        close()
+        status(): String
+        request_count(): Int
+
+    machine:
+        $Disconnected {
+            connect(host: String, port: Int) {
+                self.host = host
+                self.port = port
+                -> $Connecting
+            }
+            status(): String { @@:("disconnected") }
+            request_count(): Int { @@:(self.requests) }
+        }
+
+        $Connecting {
+            $>() {
+                self.tcp_connect()
+                -> $Idle
+            }
+        }
+
+        $Idle => $Open {
+            $>() {
+                self.start_keep_alive_timer()
+            }
+            <$() {
+                self.cancel_keep_alive_timer()
+            }
+
+            send_request(method: String, path: String) {
+                self.current_method = method
+                self.current_path = path
+                self.emit_request()
+                -> $AwaitingResponse
+            }
+            keep_alive_timeout() {
+                -> $Closing
+            }
+            status(): String { @@:("idle") }
+            request_count(): Int { @@:(self.requests) }
+            => $^
+        }
+
+        $AwaitingResponse => $Open {
+            headers_received(status_code: Int, keep_alive: Bool, content_length: Int) {
+                self.response_status = status_code
+                self.ka = keep_alive
+                self.content_length = content_length
+                if content_length == 0 {
+                    -> $ResponseComplete
+                } else {
+                    -> $ReceivingBody
+                }
+            }
+            status(): String { @@:("awaiting response") }
+            request_count(): Int { @@:(self.requests) }
+            => $^
+        }
+
+        $ReceivingBody => $Open {
+            body_chunk_received(chunk: String) {
+                self.bytes_received = self.bytes_received + self.content_length
+            }
+            body_complete() {
+                -> $ResponseComplete
+            }
+            status(): String { @@:("receiving body") }
+            request_count(): Int { @@:(self.requests) }
+            => $^
+        }
+
+        $ResponseComplete => $Open {
+            $>() {
+                self.requests = self.requests + 1
+                if self.ka {
+                    -> $Idle
+                } else {
+                    -> $Closing
+                }
+            }
+            => $^
+        }
+
+        $Open {
+            connection_error(reason: String) {
+                -> $Disconnected
+            }
+            close() {
+                -> $Closing
+            }
+        }
+
+        $Closing {
+            $>() {
+                self.tcp_close()
+                -> $Disconnected
+            }
+        }
+
+    actions:
+        tcp_connect() {}
+        tcp_close() {}
+        emit_request() {}
+        start_keep_alive_timer() {}
+        cancel_keep_alive_timer() {}
+
+    domain:
+        host: String = ""
+        port: Int = 80
+        current_method: String = ""
+        current_path: String = ""
+        response_status: Int = 0
+        content_length: Int = 0
+        bytes_received: Int = 0
+        ka: Bool = true
+        requests: Int = 0
+}
+
+
+func check_str(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) -- expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+
+func check_int(_ label: String, _ actual: Int, _ expected: Int) {
+    if actual != expected {
+        print("FAIL: \(label) -- expected \(expected), got \(actual)")
+        exit(1)
+    }
+}
+
+func test_first_request_keepalive() {
+    var conn = @@HttpConnection()
+    check_str("disconnected", conn.status() as! String, "disconnected")
+    _ = conn.connect("example.com", 80)
+    check_str("idle after connect", conn.status() as! String, "idle")
+    _ = conn.send_request("GET", "/index.html")
+    check_str("awaiting response", conn.status() as! String, "awaiting response")
+    _ = conn.headers_received(200, true, 5)
+    check_str("receiving body", conn.status() as! String, "receiving body")
+    _ = conn.body_complete()
+    check_str("back to idle (keep-alive)", conn.status() as! String, "idle")
+    check_int("request count 1", conn.request_count() as! Int, 1)
+    print("PASS: first request, keep-alive cycles back to idle")
+}
+
+func test_empty_body_skips_receiving() {
+    var conn = @@HttpConnection()
+    _ = conn.connect("example.com", 80)
+    _ = conn.send_request("GET", "/about")
+    _ = conn.headers_received(200, true, 0)
+    check_str("idle after empty body", conn.status() as! String, "idle")
+    print("PASS: empty body skips ReceivingBody")
+}
+
+func test_connection_close_header() {
+    var conn = @@HttpConnection()
+    _ = conn.connect("example.com", 80)
+    _ = conn.send_request("POST", "/api")
+    _ = conn.headers_received(201, false, 0)
+    check_str("disconnected after Connection: close", conn.status() as! String, "disconnected")
+    print("PASS: Connection: close response path")
+}
+
+func test_keep_alive_timeout() {
+    var conn = @@HttpConnection()
+    _ = conn.connect("example.com", 80)
+    check_str("idle", conn.status() as! String, "idle")
+    _ = conn.keep_alive_timeout()
+    check_str("disconnected after timeout", conn.status() as! String, "disconnected")
+    print("PASS: keep-alive timeout tears down connection")
+}
+
+func test_connection_error_during_receive() {
+    var conn = @@HttpConnection()
+    _ = conn.connect("example.com", 80)
+    _ = conn.send_request("GET", "/large")
+    _ = conn.headers_received(200, true, 1000)
+    check_str("receiving body", conn.status() as! String, "receiving body")
+    _ = conn.connection_error("peer reset")
+    check_str("disconnected after error", conn.status() as! String, "disconnected")
+    print("PASS: connection_error from receiving body forwards via HSM")
+}
+
+func test_explicit_close_during_idle() {
+    var conn = @@HttpConnection()
+    _ = conn.connect("example.com", 80)
+    _ = conn.close()
+    check_str("close from idle", conn.status() as! String, "disconnected")
+    print("PASS: explicit close from idle via HSM parent")
+}
+
+func test_multiple_request_reuse() {
+    var conn = @@HttpConnection()
+    _ = conn.connect("example.com", 80)
+    _ = conn.send_request("GET", "/one")
+    _ = conn.headers_received(200, true, 0)
+    _ = conn.send_request("GET", "/two")
+    _ = conn.headers_received(200, true, 0)
+    _ = conn.send_request("GET", "/three")
+    _ = conn.headers_received(200, true, 0)
+    check_int("3 requests on same connection", conn.request_count() as! Int, 3)
+    check_str("still idle", conn.status() as! String, "idle")
+    print("PASS: connection reused across multiple requests")
+}
+
+test_first_request_keepalive()
+test_empty_body_skips_receiving()
+test_connection_close_header()
+test_keep_alive_timeout()
+test_connection_error_during_receive()
+test_explicit_close_during_idle()
+test_multiple_request_reuse()
+print("PASS: all HTTP connection tests passed")

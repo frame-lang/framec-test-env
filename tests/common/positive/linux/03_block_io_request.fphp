@@ -1,0 +1,160 @@
+@@target php
+
+<?php
+
+// Block I/O Request — kernel blk-mq layer semantics.
+
+@@system BlockRequest {
+    interface:
+        submit(sector: int, size: int): str
+        dispatch(): str
+        complete(success: bool): str
+        timeout(): str
+        status(): str
+
+    machine:
+        $Idle {
+            submit(sector: int, size: int): str {
+                $this->sector = $sector;
+                $this->size = $size;
+                $this->attempts = 0;
+                @@:("queued")
+                -> $Queued
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $Queued {
+            dispatch(): str {
+                @@:("dispatched")
+                -> $InFlight
+            }
+            status(): str { @@:("queued") }
+        }
+
+        $InFlight {
+            $>() {
+                $this->attempts = $this->attempts + 1;
+                $this->start_timeout();
+            }
+            <$() {
+                $this->cancel_timeout();
+            }
+
+            complete(success: bool): str {
+                if ($success) {
+                    @@:("done")
+                    -> $Done
+                } else {
+                    if ($this->attempts < $this->max_retries) {
+                        @@:("requeued")
+                        -> $Queued
+                    } else {
+                        @@:("io error")
+                        -> $Error
+                    }
+                }
+            }
+            timeout(): str {
+                if ($this->attempts < $this->max_retries) {
+                    @@:("timeout, retrying")
+                    -> $Queued
+                } else {
+                    @@:("timeout, giving up")
+                    -> $Error
+                }
+            }
+            status(): str { @@:("in-flight") }
+        }
+
+        $Done {
+            status(): str { @@:("done") }
+        }
+
+        $Error {
+            status(): str { @@:("error") }
+        }
+
+    actions:
+        start_timeout() {}
+        cancel_timeout() {}
+
+    domain:
+        sector = 0
+        size = 0
+        attempts = 0
+        max_retries = 3
+        timeout_ms = 30000
+}
+
+
+function check_value($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label — expected '$expected', got '$actual'\n";
+        exit(1);
+    }
+}
+
+function test_happy_path() {
+    $req = @@BlockRequest();
+    check_value("initial idle", $req->status(), "idle");
+    check_value("submit", $req->submit(1024, 8), "queued");
+    check_value("dispatch", $req->dispatch(), "dispatched");
+    check_value("complete ok", $req->complete(true), "done");
+    check_value("terminal done", $req->status(), "done");
+    echo "PASS: happy path\n";
+}
+
+function test_timeout_retry_then_complete() {
+    $req = @@BlockRequest();
+    $req->submit(2048, 4);
+    $req->dispatch();
+    check_value("first timeout -> retry", $req->timeout(), "timeout, retrying");
+    check_value("back to queued after timeout", $req->status(), "queued");
+    $req->dispatch();
+    check_value("complete after retry", $req->complete(true), "done");
+    echo "PASS: timeout then retry success\n";
+}
+
+function test_failure_requeue_then_success() {
+    $req = @@BlockRequest();
+    $req->submit(4096, 2);
+    $req->dispatch();
+    check_value("complete(false) -> requeued", $req->complete(false), "requeued");
+    $req->dispatch();
+    check_value("complete(true) -> done", $req->complete(true), "done");
+    echo "PASS: failure requeue then success\n";
+}
+
+function test_retry_exhaustion() {
+    $req = @@BlockRequest();
+    $req->submit(8192, 1);
+    $req->dispatch();
+    check_value("req 1 failure requeued", $req->complete(false), "requeued");
+    $req->dispatch();
+    check_value("req 2 failure requeued", $req->complete(false), "requeued");
+    $req->dispatch();
+    check_value("req 3 failure -> io error", $req->complete(false), "io error");
+    check_value("terminal error state", $req->status(), "error");
+    echo "PASS: retry exhaustion -> error\n";
+}
+
+function test_timeout_exhaustion() {
+    $req = @@BlockRequest();
+    $req->submit(16384, 1);
+    $req->dispatch();
+    check_value("to 1 retry", $req->timeout(), "timeout, retrying");
+    $req->dispatch();
+    check_value("to 2 retry", $req->timeout(), "timeout, retrying");
+    $req->dispatch();
+    check_value("to 3 giving up", $req->timeout(), "timeout, giving up");
+    check_value("error terminal", $req->status(), "error");
+    echo "PASS: timeout exhaustion -> error\n";
+}
+
+test_happy_path();
+test_timeout_retry_then_complete();
+test_failure_requeue_then_success();
+test_retry_exhaustion();
+test_timeout_exhaustion();
+echo "PASS: all block I/O request tests passed\n";

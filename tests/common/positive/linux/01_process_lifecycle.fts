@@ -1,0 +1,218 @@
+@@target typescript
+
+// Process Lifecycle — Linux task states.
+// Three-level HSM with explicit upward forwarding as per-state signal policy.
+
+@@system TaskLifecycle {
+    interface:
+        fork(): string
+        schedule(): string
+        block_on_io(): string
+        io_complete(): string
+        block_uninterruptible(): string
+        send_signal(sig: string): string
+        wait_by_parent(): string
+        status(): string
+
+    machine:
+        $New {
+            fork(): string {
+                this.pid = this.next_pid();
+                @@:("forked")
+                -> $Ready
+            }
+            status(): string { @@:("new") }
+        }
+
+        $Ready => $Alive {
+            schedule(): string {
+                @@:("running")
+                -> $Running
+            }
+            status(): string { @@:("ready") }
+            => $^
+        }
+
+        $Running => $Alive {
+            schedule(): string {
+                @@:("preempted")
+                -> $Ready
+            }
+            block_on_io(): string {
+                @@:("blocked")
+                -> $Interruptible
+            }
+            block_uninterruptible(): string {
+                @@:("blocked (D)")
+                -> $Uninterruptible
+            }
+            status(): string { @@:("running") }
+            => $^
+        }
+
+        $Interruptible => $Blocked {
+            io_complete(): string {
+                @@:("woke")
+                -> $Ready
+            }
+            send_signal(sig: string): string {
+                if (sig === "SIGKILL" || sig === "SIGTERM" || sig === "SIGSTOP") {
+                    => $^
+                } else {
+                    @@:("interrupted")
+                    -> $Ready
+                }
+            }
+            status(): string { @@:("interruptible") }
+            => $^
+        }
+
+        $Uninterruptible => $Blocked {
+            io_complete(): string {
+                @@:("woke")
+                -> $Ready
+            }
+            send_signal(sig: string): string {
+                if (sig === "SIGKILL") {
+                    => $^
+                } else {
+                    @@:("signal held pending (D-state)")
+                }
+            }
+            status(): string { @@:("uninterruptible") }
+            => $^
+        }
+
+        $Blocked => $Alive {
+            status(): string { @@:("blocked") }
+            => $^
+        }
+
+        $Alive {
+            send_signal(sig: string): string {
+                if (sig === "SIGKILL" || sig === "SIGTERM") {
+                    @@:("exiting")
+                    -> $Zombie
+                } else if (sig === "SIGSTOP") {
+                    @@:("stopped")
+                    -> $Stopped
+                } else {
+                    @@:("signal delivered")
+                }
+            }
+        }
+
+        $Stopped {
+            send_signal(sig: string): string {
+                if (sig === "SIGCONT") {
+                    @@:("continued")
+                    -> $Ready
+                } else if (sig === "SIGKILL") {
+                    @@:("killed while stopped")
+                    -> $Zombie
+                } else {
+                    @@:("signal ignored")
+                }
+            }
+            status(): string { @@:("stopped") }
+        }
+
+        $Zombie {
+            wait_by_parent(): string {
+                @@:("reaped")
+                -> $Dead
+            }
+            status(): string { @@:("zombie") }
+        }
+
+        $Dead {
+            status(): string { @@:("dead") }
+        }
+
+    actions:
+        next_pid(): number {
+            this.pid_counter = this.pid_counter + 1;
+            return this.pid_counter;
+        }
+
+    domain:
+        pid: number = 0
+        pid_counter: number = 100
+}
+
+
+function check(label: string, actual: string, expected: string): void {
+    if (actual !== expected) {
+        console.log(`FAIL: ${label} — expected '${expected}', got '${actual}'`);
+        throw new Error(`assertion failed: ${label}`);
+    }
+}
+
+function test_happy_path(): void {
+    const t = @@TaskLifecycle();
+    check("initial status", t.status(), "new");
+    check("fork",           t.fork(),   "forked");
+    check("after fork",     t.status(), "ready");
+    check("schedule",       t.schedule(), "running");
+    check("after schedule", t.status(), "running");
+    check("preempt",        t.schedule(), "preempted");
+    check("after preempt",  t.status(), "ready");
+    console.log("PASS: happy path");
+}
+
+function test_interruptible_wake_by_signal(): void {
+    const t = @@TaskLifecycle();
+    t.fork();
+    t.schedule();
+    check("block_on_io", t.block_on_io(), "blocked");
+    check("interruptible status", t.status(), "interruptible");
+    check("SIGUSR1 wakes interruptible",
+          t.send_signal("SIGUSR1"), "interrupted");
+    check("woke to ready", t.status(), "ready");
+    console.log("PASS: interruptible wake by signal");
+}
+
+function test_uninterruptible_holds_signal(): void {
+    const t = @@TaskLifecycle();
+    t.fork();
+    t.schedule();
+    check("block_uninterruptible",
+          t.block_uninterruptible(), "blocked (D)");
+    check("D state", t.status(), "uninterruptible");
+    check("SIGUSR1 held pending in D",
+          t.send_signal("SIGUSR1"), "signal held pending (D-state)");
+    check("still in D", t.status(), "uninterruptible");
+    console.log("PASS: uninterruptible holds non-fatal signal");
+}
+
+function test_sigkill_reaches_d_state(): void {
+    const t = @@TaskLifecycle();
+    t.fork();
+    t.schedule();
+    t.block_uninterruptible();
+    check("SIGKILL forwarded from D through $Alive",
+          t.send_signal("SIGKILL"), "exiting");
+    check("now zombie", t.status(), "zombie");
+    check("reap", t.wait_by_parent(), "reaped");
+    check("dead", t.status(), "dead");
+    console.log("PASS: SIGKILL reaches D state via $Alive forwarding");
+}
+
+function test_sigstop_sigcont(): void {
+    const t = @@TaskLifecycle();
+    t.fork();
+    t.schedule();
+    check("SIGSTOP from running",
+          t.send_signal("SIGSTOP"), "stopped");
+    check("stopped status", t.status(), "stopped");
+    check("SIGCONT resumes", t.send_signal("SIGCONT"), "continued");
+    check("back to ready", t.status(), "ready");
+    console.log("PASS: SIGSTOP/SIGCONT");
+}
+
+test_happy_path();
+test_interruptible_wake_by_signal();
+test_uninterruptible_holds_signal();
+test_sigkill_reaches_d_state();
+test_sigstop_sigcont();
+console.log("PASS: all process lifecycle tests passed");

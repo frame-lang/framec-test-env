@@ -1,0 +1,162 @@
+@@target c
+
+// Watchdog Timer — kernel drivers/watchdog/watchdog_dev.c magic-close semantics.
+// The device stays armed unless close() follows a write containing 'V'
+// (the magic character). Safety-by-construction: the only path from
+// $Armed to $Inactive requires self->magic_seen == true.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system WatchdogDevice {
+    interface:
+        open(): str
+        write(data: str): str
+        ping(): str
+        close(): str
+        timeout_expired(): str
+        status(): str
+
+    machine:
+        $Inactive {
+            open(): str {
+                @@:("opened")
+                -> $Armed
+            }
+            status(): str { @@:("inactive") }
+        }
+
+        $Armed {
+            $>() {
+                self->magic_seen = 0;
+                WatchdogDevice_start_hw_timer(self);
+            }
+
+            ping(): str {
+                WatchdogDevice_reset_hw_timer(self);
+                @@:("pinged")
+            }
+            write(data: str): str {
+                if (strstr(data, "V") != NULL) {
+                    self->magic_seen = 1;
+                    @@:("magic character received")
+                } else {
+                    @@:("data written")
+                }
+                WatchdogDevice_reset_hw_timer(self);
+            }
+            close(): str {
+                if (self->magic_seen) {
+                    WatchdogDevice_stop_hw_timer(self);
+                    @@:("disarmed")
+                    -> $Inactive
+                } else {
+                    @@:("close ignored -- no magic char")
+                }
+            }
+            timeout_expired(): str {
+                @@:("SYSTEM RESET")
+                -> $Triggered
+            }
+            status(): str {
+                if (self->magic_seen) {
+                    @@:("armed (magic seen, close will disarm)")
+                } else {
+                    @@:("armed")
+                }
+            }
+        }
+
+        $Triggered {
+            status(): str { @@:("triggered -- system reset") }
+        }
+
+    actions:
+        start_hw_timer() {}
+        reset_hw_timer() {}
+        stop_hw_timer() {}
+
+    domain:
+        timeout_sec: int = 60
+        magic_seen: bool = 0
+}
+
+
+void check(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void test_open_and_ping(void) {
+    WatchdogDevice* wd = @@WatchdogDevice();
+    check("initial inactive", (const char*)WatchdogDevice_status(wd), "inactive");
+    check("open returns opened", (const char*)WatchdogDevice_open(wd), "opened");
+    check("armed after open", (const char*)WatchdogDevice_status(wd), "armed");
+    check("ping", (const char*)WatchdogDevice_ping(wd), "pinged");
+    check("still armed after ping", (const char*)WatchdogDevice_status(wd), "armed");
+    printf("PASS: open and ping\n");
+    WatchdogDevice_destroy(wd);
+}
+
+void test_close_without_magic_is_ignored(void) {
+    WatchdogDevice* wd = @@WatchdogDevice();
+    WatchdogDevice_open(wd);
+    check("close without magic", (const char*)WatchdogDevice_close(wd), "close ignored -- no magic char");
+    check("still armed after bad close", (const char*)WatchdogDevice_status(wd), "armed");
+    printf("PASS: close without magic ignored (safety property)\n");
+    WatchdogDevice_destroy(wd);
+}
+
+void test_magic_char_then_close_disarms(void) {
+    WatchdogDevice* wd = @@WatchdogDevice();
+    WatchdogDevice_open(wd);
+    check("write with V sets magic", (const char*)WatchdogDevice_write(wd, "goodbye V"), "magic character received");
+    check("status shows magic seen", (const char*)WatchdogDevice_status(wd), "armed (magic seen, close will disarm)");
+    check("close after magic disarms", (const char*)WatchdogDevice_close(wd), "disarmed");
+    check("back to inactive", (const char*)WatchdogDevice_status(wd), "inactive");
+    printf("PASS: magic char then close disarms\n");
+    WatchdogDevice_destroy(wd);
+}
+
+void test_write_without_magic_is_plain_data(void) {
+    WatchdogDevice* wd = @@WatchdogDevice();
+    WatchdogDevice_open(wd);
+    check("write without V", (const char*)WatchdogDevice_write(wd, "abcdef"), "data written");
+    check("still armed with no magic", (const char*)WatchdogDevice_status(wd), "armed");
+    printf("PASS: write without magic is plain data\n");
+    WatchdogDevice_destroy(wd);
+}
+
+void test_timeout_triggers_reset(void) {
+    WatchdogDevice* wd = @@WatchdogDevice();
+    WatchdogDevice_open(wd);
+    check("timeout fires", (const char*)WatchdogDevice_timeout_expired(wd), "SYSTEM RESET");
+    check("terminal triggered state", (const char*)WatchdogDevice_status(wd), "triggered -- system reset");
+    printf("PASS: timeout triggers system reset\n");
+    WatchdogDevice_destroy(wd);
+}
+
+void test_reopen_resets_magic_seen(void) {
+    WatchdogDevice* wd = @@WatchdogDevice();
+    WatchdogDevice_open(wd);
+    WatchdogDevice_write(wd, "set V please");
+    WatchdogDevice_close(wd);
+    WatchdogDevice_open(wd);
+    check("magic_seen reset on reopen", (const char*)WatchdogDevice_close(wd), "close ignored -- no magic char");
+    printf("PASS: reopen resets magic_seen via enter handler\n");
+    WatchdogDevice_destroy(wd);
+}
+
+int main(void) {
+    test_open_and_ping();
+    test_close_without_magic_is_ignored();
+    test_magic_char_then_close_disarms();
+    test_write_without_magic_is_plain_data();
+    test_timeout_triggers_reset();
+    test_reopen_resets_magic_seen();
+    printf("PASS: all watchdog tests passed\n");
+    return 0;
+}

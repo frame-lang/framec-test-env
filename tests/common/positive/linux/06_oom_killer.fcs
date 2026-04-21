@@ -1,0 +1,131 @@
+@@target csharp
+
+// OOM Killer — kernel mm/oom_kill.c semantics.
+
+using System;
+
+@@system OomKiller {
+    interface:
+        oom_detected(gfp_flags: int): String
+        victim_exited(pid: int, freed_kb: int): String
+        oom_detected_again(gfp_flags: int): String
+        status(): String
+
+    machine:
+        $Normal {
+            oom_detected(gfp_flags: int): String {
+                @@:("selecting victim")
+                -> $Selecting
+            }
+            status(): String { @@:("normal") }
+        }
+
+        $Selecting {
+            $>() {
+                this.victim_pid = this.select_victim();
+                if (this.victim_pid < 0) {
+                    -> $Panic
+                } else {
+                    -> $Killing
+                }
+            }
+            status(): String { @@:("selecting") }
+        }
+
+        $Killing {
+            $>() {
+                this.send_sigkill(this.victim_pid);
+                this.start_reaper_timer();
+            }
+            <$() {
+                this.cancel_reaper_timer();
+            }
+
+            victim_exited(pid: int, freed_kb: int): String {
+                if (pid == this.victim_pid) {
+                    this.total_freed_kb = this.total_freed_kb + freed_kb;
+                    @@:("reclaimed")
+                    -> $Normal
+                } else {
+                    @@:("wrong pid, still waiting")
+                }
+            }
+
+            status(): String { @@:("killing") }
+        }
+
+        $Panic {
+            status(): String { @@:("panic") }
+        }
+
+    actions:
+        select_victim(): int {
+            this.victim_score = 850;
+            return 4242;
+        }
+        send_sigkill(pid: int) {}
+        start_reaper_timer() {}
+        cancel_reaper_timer() {}
+
+    domain:
+        victim_pid: int = -1
+        victim_score: int = 0
+        total_freed_kb: int = 0
+}
+
+
+class Program {
+    static void check(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} — expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+
+    static void test_normal_oom_flow() {
+        var oom = @@OomKiller();
+        check("initial normal", (string) oom.status(), "normal");
+        check("oom_detected -> selecting", (string) oom.oom_detected(0), "selecting victim");
+        check("arrived in killing", (string) oom.status(), "killing");
+        check("victim exits", (string) oom.victim_exited(4242, 51200), "reclaimed");
+        check("back to normal", (string) oom.status(), "normal");
+        Console.WriteLine("PASS: normal OOM flow");
+    }
+
+    static void test_concurrent_oom_silently_dropped() {
+        var oom = @@OomKiller();
+        oom.oom_detected(0);
+        check("in killing", (string) oom.status(), "killing");
+        oom.oom_detected_again(0);
+        check("still killing (event dropped)", (string) oom.status(), "killing");
+        oom.victim_exited(4242, 8192);
+        check("back to normal after reclaim", (string) oom.status(), "normal");
+        Console.WriteLine("PASS: concurrent OOM events dropped in $Killing (safety)");
+    }
+
+    static void test_wrong_pid_exit_ignored() {
+        var oom = @@OomKiller();
+        oom.oom_detected(0);
+        check("waiting for victim", (string) oom.victim_exited(9999, 1024), "wrong pid, still waiting");
+        check("still killing", (string) oom.status(), "killing");
+        oom.victim_exited(4242, 2048);
+        check("correct pid -> normal", (string) oom.status(), "normal");
+        Console.WriteLine("PASS: wrong-pid exit ignored in $Killing");
+    }
+
+    static void test_oom_detected_ignored_in_selecting() {
+        var oom = @@OomKiller();
+        check("first oom", (string) oom.oom_detected(0), "selecting victim");
+        oom.oom_detected(0);
+        check("second oom dropped", (string) oom.status(), "killing");
+        Console.WriteLine("PASS: oom_detected ignored while killing");
+    }
+
+    static void Main(string[] args) {
+        test_normal_oom_flow();
+        test_concurrent_oom_silently_dropped();
+        test_wrong_pid_exit_ignored();
+        test_oom_detected_ignored_in_selecting();
+        Console.WriteLine("PASS: all OOM killer tests passed");
+    }
+}

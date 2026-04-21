@@ -1,0 +1,230 @@
+@@target swift
+
+// DHCP Client -- RFC 2131 Figure 5 state machine.
+
+import Foundation
+
+@@system DhcpClient {
+    interface:
+        start()
+        offer_received(server_ip: String, offered_ip: String, lease_sec: Int)
+        ack_received(ip: String, lease_sec: Int)
+        nak_received()
+        t1_expired()
+        t2_expired()
+        lease_expired()
+        release()
+        status(): String
+
+    machine:
+        $Init {
+            $>() {
+                self.attempts = 0
+            }
+
+            start() {
+                -> $Selecting
+            }
+            status(): String { @@:("init") }
+        }
+
+        $Selecting {
+            $>() {
+                self.attempts = self.attempts + 1
+                self.broadcast_discover()
+            }
+
+            offer_received(server_ip: String, offered_ip: String, lease_sec: Int) {
+                self.server = server_ip
+                self.offered = offered_ip
+                self.lease_sec = lease_sec
+                -> $Requesting
+            }
+            status(): String { @@:("selecting") }
+        }
+
+        $Requesting {
+            $>() {
+                self.send_request()
+            }
+
+            ack_received(ip: String, lease_sec: Int) {
+                self.bound = ip
+                self.lease_sec = lease_sec
+                -> $Bound
+            }
+            nak_received() {
+                -> $Init
+            }
+            status(): String { @@:("requesting") }
+        }
+
+        $Bound {
+            $>() {
+                self.arm_timers()
+            }
+
+            t1_expired() {
+                -> $Renewing
+            }
+            release() {
+                self.cancel_all_timers()
+                self.send_release()
+                -> $Init
+            }
+            status(): String { @@:("bound") }
+        }
+
+        $Renewing {
+            $>() {
+                self.send_renew()
+            }
+
+            ack_received(ip: String, lease_sec: Int) {
+                self.lease_sec = lease_sec
+                -> $Bound
+            }
+            nak_received() {
+                self.cancel_all_timers()
+                -> $Init
+            }
+            t2_expired() {
+                -> $Rebinding
+            }
+            lease_expired() {
+                self.cancel_all_timers()
+                -> $Init
+            }
+            release() {
+                self.cancel_all_timers()
+                -> $Init
+            }
+            status(): String { @@:("renewing") }
+        }
+
+        $Rebinding {
+            $>() {
+                self.broadcast_renew()
+            }
+
+            ack_received(ip: String, lease_sec: Int) {
+                self.lease_sec = lease_sec
+                -> $Bound
+            }
+            nak_received() {
+                self.cancel_all_timers()
+                -> $Init
+            }
+            lease_expired() {
+                self.cancel_all_timers()
+                self.bound = ""
+                -> $Init
+            }
+            release() {
+                self.cancel_all_timers()
+                -> $Init
+            }
+            status(): String { @@:("rebinding") }
+        }
+
+    actions:
+        broadcast_discover()    {}
+        send_request()          {}
+        send_renew()            {}
+        broadcast_renew()       {}
+        send_release()          {}
+        arm_timers()            {}
+        cancel_all_timers()     {}
+
+    domain:
+        server: String = ""
+        offered: String = ""
+        bound: String = ""
+        lease_sec: Int = 0
+        attempts: Int = 0
+}
+
+
+func check(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) -- expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+
+func test_full_lease_acquisition() {
+    var dhcp = @@DhcpClient()
+    check("initial init", dhcp.status() as! String, "init")
+    _ = dhcp.start()
+    check("selecting", dhcp.status() as! String, "selecting")
+    _ = dhcp.offer_received("192.168.1.1", "192.168.1.100", 3600)
+    check("requesting after offer", dhcp.status() as! String, "requesting")
+    _ = dhcp.ack_received("192.168.1.100", 3600)
+    check("bound", dhcp.status() as! String, "bound")
+    print("PASS: full lease acquisition Init->Selecting->Requesting->Bound")
+}
+
+func test_t1_triggers_renewal() {
+    var dhcp = @@DhcpClient()
+    _ = dhcp.start()
+    _ = dhcp.offer_received("10.0.0.1", "10.0.0.100", 7200)
+    _ = dhcp.ack_received("10.0.0.100", 7200)
+    _ = dhcp.t1_expired()
+    check("renewing after t1", dhcp.status() as! String, "renewing")
+    _ = dhcp.ack_received("10.0.0.100", 7200)
+    check("back to bound after renew ack", dhcp.status() as! String, "bound")
+    print("PASS: T1 triggers renewal, ACK returns to bound")
+}
+
+func test_t2_triggers_rebind() {
+    var dhcp = @@DhcpClient()
+    _ = dhcp.start()
+    _ = dhcp.offer_received("10.0.0.1", "10.0.0.100", 7200)
+    _ = dhcp.ack_received("10.0.0.100", 7200)
+    _ = dhcp.t1_expired()
+    check("renewing", dhcp.status() as! String, "renewing")
+    _ = dhcp.t2_expired()
+    check("rebinding after t2", dhcp.status() as! String, "rebinding")
+    _ = dhcp.ack_received("10.0.0.100", 7200)
+    check("rebind ACK -> bound", dhcp.status() as! String, "bound")
+    print("PASS: T2 triggers rebind, ACK returns to bound")
+}
+
+func test_nak_during_requesting_restarts() {
+    var dhcp = @@DhcpClient()
+    _ = dhcp.start()
+    _ = dhcp.offer_received("10.0.0.1", "10.0.0.100", 7200)
+    _ = dhcp.nak_received()
+    check("NAK in Requesting -> Init", dhcp.status() as! String, "init")
+    print("PASS: NAK in Requesting restarts")
+}
+
+func test_lease_expired_in_rebinding() {
+    var dhcp = @@DhcpClient()
+    _ = dhcp.start()
+    _ = dhcp.offer_received("10.0.0.1", "10.0.0.100", 7200)
+    _ = dhcp.ack_received("10.0.0.100", 7200)
+    _ = dhcp.t1_expired()
+    _ = dhcp.t2_expired()
+    _ = dhcp.lease_expired()
+    check("lease_expired in Rebinding -> Init", dhcp.status() as! String, "init")
+    print("PASS: lease expiry in rebinding clears state")
+}
+
+func test_release_from_bound() {
+    var dhcp = @@DhcpClient()
+    _ = dhcp.start()
+    _ = dhcp.offer_received("10.0.0.1", "10.0.0.100", 7200)
+    _ = dhcp.ack_received("10.0.0.100", 7200)
+    _ = dhcp.release()
+    check("release -> init", dhcp.status() as! String, "init")
+    print("PASS: release from bound")
+}
+
+test_full_lease_acquisition()
+test_t1_triggers_renewal()
+test_t2_triggers_rebind()
+test_nak_during_requesting_restarts()
+test_lease_expired_in_rebinding()
+test_release_from_bound()
+print("PASS: all DHCP client tests passed")

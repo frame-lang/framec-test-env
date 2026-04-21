@@ -1,0 +1,256 @@
+@@target c
+
+// BGP Finite State Machine -- RFC 4271 Section 8 direct transcription.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@persist
+@@system BgpSession {
+    interface:
+        manual_start()
+        manual_stop()
+        tcp_connection_confirmed()
+        tcp_connection_fails()
+        open_received(asn: int, hold_time: int)
+        keepalive_received()
+        notification_received(code: int, subcode: int)
+        hold_timer_expired()
+        keepalive_timer_expired()
+        connect_retry_timer_expired()
+        status(): str
+
+    machine:
+        $Idle {
+            manual_start() {
+                self->connect_retry_count = 0;
+                BgpSession_start_connect_retry_timer(self);
+                BgpSession_initiate_tcp_connection(self);
+                -> $Connect
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $Connect {
+            tcp_connection_confirmed() {
+                BgpSession_cancel_connect_retry_timer(self);
+                BgpSession_send_open(self);
+                -> $OpenSent
+            }
+            tcp_connection_fails() {
+                -> $Active
+            }
+            connect_retry_timer_expired() {
+                BgpSession_initiate_tcp_connection(self);
+                BgpSession_start_connect_retry_timer(self);
+            }
+            manual_stop() {
+                -> $Idle
+            }
+            status(): str { @@:("connect") }
+        }
+
+        $Active {
+            tcp_connection_confirmed() {
+                BgpSession_cancel_connect_retry_timer(self);
+                BgpSession_send_open(self);
+                -> $OpenSent
+            }
+            connect_retry_timer_expired() {
+                self->connect_retry_count = self->connect_retry_count + 1;
+                BgpSession_initiate_tcp_connection(self);
+                BgpSession_start_connect_retry_timer(self);
+                -> $Connect
+            }
+            manual_stop() {
+                -> $Idle
+            }
+            status(): str { @@:("active") }
+        }
+
+        $OpenSent {
+            open_received(asn: int, hold_time: int) {
+                self->peer_asn = asn;
+                self->negotiated_hold = hold_time;
+                BgpSession_cancel_hold_timer(self);
+                BgpSession_send_keepalive(self);
+                -> $OpenConfirm
+            }
+            tcp_connection_fails() {
+                BgpSession_cancel_hold_timer(self);
+                -> $Active
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                BgpSession_send_notification(self);
+                -> $Idle
+            }
+            manual_stop() {
+                BgpSession_send_notification(self);
+                -> $Idle
+            }
+            status(): str { @@:("open sent") }
+        }
+
+        $OpenConfirm {
+            keepalive_received() {
+                -> $Established
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                BgpSession_send_notification(self);
+                -> $Idle
+            }
+            keepalive_timer_expired() {
+                BgpSession_send_keepalive(self);
+            }
+            manual_stop() {
+                BgpSession_send_notification(self);
+                -> $Idle
+            }
+            status(): str { @@:("open confirm") }
+        }
+
+        $Established {
+            keepalive_received() {
+                BgpSession_reset_hold_timer(self);
+            }
+            keepalive_timer_expired() {
+                BgpSession_send_keepalive(self);
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                BgpSession_send_notification(self);
+                -> $Idle
+            }
+            manual_stop() {
+                BgpSession_send_notification(self);
+                -> $Idle
+            }
+            status(): str { @@:("established") }
+        }
+
+    actions:
+        initiate_tcp_connection()   {}
+        send_open()                 {}
+        send_keepalive()            {}
+        send_notification()         {}
+        start_connect_retry_timer() {}
+        cancel_connect_retry_timer(){}
+        cancel_hold_timer()         {}
+        reset_hold_timer()          {}
+
+    domain:
+        local_asn: int = 65001
+        peer_asn: int = 0
+        negotiated_hold: int = 0
+        connect_retry_count: int = 0
+}
+
+
+void check(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void test_full_session_establishment(void) {
+    BgpSession* bgp = @@BgpSession();
+    check("initial idle", (const char*)BgpSession_status(bgp), "idle");
+    BgpSession_manual_start(bgp);
+    check("connect", (const char*)BgpSession_status(bgp), "connect");
+    BgpSession_tcp_connection_confirmed(bgp);
+    check("open sent", (const char*)BgpSession_status(bgp), "open sent");
+    BgpSession_open_received(bgp, 65002, 60);
+    check("open confirm", (const char*)BgpSession_status(bgp), "open confirm");
+    BgpSession_keepalive_received(bgp);
+    check("established", (const char*)BgpSession_status(bgp), "established");
+    printf("PASS: full BGP session establishment\n");
+    BgpSession_destroy(bgp);
+}
+
+void test_persist_across_restart(void) {
+    BgpSession* bgp = @@BgpSession();
+    BgpSession_manual_start(bgp);
+    BgpSession_tcp_connection_confirmed(bgp);
+    BgpSession_open_received(bgp, 65002, 60);
+    BgpSession_keepalive_received(bgp);
+    check("established", (const char*)BgpSession_status(bgp), "established");
+    char* snap = BgpSession_save_state(bgp);
+    BgpSession* bgp2 = BgpSession_restore_state(snap);
+    check("established survived restart", (const char*)BgpSession_status(bgp2), "established");
+    BgpSession_keepalive_timer_expired(bgp2);
+    BgpSession_keepalive_received(bgp2);
+    check("still established", (const char*)BgpSession_status(bgp2), "established");
+    printf("PASS: @@persist -- BGP session survives daemon restart\n");
+    free(snap);
+    BgpSession_destroy(bgp);
+    BgpSession_destroy(bgp2);
+}
+
+void test_hold_timer_teardown(void) {
+    BgpSession* bgp = @@BgpSession();
+    BgpSession_manual_start(bgp);
+    BgpSession_tcp_connection_confirmed(bgp);
+    BgpSession_open_received(bgp, 65002, 60);
+    BgpSession_keepalive_received(bgp);
+    BgpSession_hold_timer_expired(bgp);
+    check("hold expiry tears down", (const char*)BgpSession_status(bgp), "idle");
+    printf("PASS: hold timer expiry returns to idle\n");
+    BgpSession_destroy(bgp);
+}
+
+void test_tcp_failure_goes_active(void) {
+    BgpSession* bgp = @@BgpSession();
+    BgpSession_manual_start(bgp);
+    BgpSession_tcp_connection_fails(bgp);
+    check("active after TCP fail", (const char*)BgpSession_status(bgp), "active");
+    BgpSession_connect_retry_timer_expired(bgp);
+    check("retry transitions back to connect", (const char*)BgpSession_status(bgp), "connect");
+    printf("PASS: TCP failure path Active -> Connect\n");
+    BgpSession_destroy(bgp);
+}
+
+void test_notification_in_established_teardown(void) {
+    BgpSession* bgp = @@BgpSession();
+    BgpSession_manual_start(bgp);
+    BgpSession_tcp_connection_confirmed(bgp);
+    BgpSession_open_received(bgp, 65002, 60);
+    BgpSession_keepalive_received(bgp);
+    BgpSession_notification_received(bgp, 6, 0);
+    check("notification tears down", (const char*)BgpSession_status(bgp), "idle");
+    printf("PASS: notification in Established -> idle\n");
+    BgpSession_destroy(bgp);
+}
+
+void test_manual_stop_from_established(void) {
+    BgpSession* bgp = @@BgpSession();
+    BgpSession_manual_start(bgp);
+    BgpSession_tcp_connection_confirmed(bgp);
+    BgpSession_open_received(bgp, 65002, 60);
+    BgpSession_keepalive_received(bgp);
+    BgpSession_manual_stop(bgp);
+    check("manual stop", (const char*)BgpSession_status(bgp), "idle");
+    printf("PASS: manual_stop from established\n");
+    BgpSession_destroy(bgp);
+}
+
+int main(void) {
+    test_full_session_establishment();
+    test_persist_across_restart();
+    test_hold_timer_teardown();
+    test_tcp_failure_goes_active();
+    test_notification_in_established_teardown();
+    test_manual_stop_from_established();
+    printf("PASS: all BGP session tests passed\n");
+    return 0;
+}

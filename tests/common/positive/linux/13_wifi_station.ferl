@@ -1,0 +1,119 @@
+@@target erlang
+
+% Wi-Fi Station Management -- IEEE 802.11 station state machine.
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in erlang_batch.sh exercises every exported function and checks clean exit.
+
+@@system WifiStation {
+    interface:
+        scan_done(bssid: str, ssid: str)
+        auth_response(success: bool)
+        assoc_response(success: bool, aid: int)
+        eapol_key_msg(msg_num: int)
+        deauth(reason: str)
+        disassoc(reason: str)
+        disconnect()
+        status(): str
+        key_step(): int
+
+    machine:
+        $Disconnected {
+            scan_done(bssid: str, ssid: str) {
+                self.bssid = bssid,
+                self.ssid = ssid
+                -> $Authenticating
+            }
+            status(): str { @@:("disconnected") }
+            key_step(): int { @@:(0) }
+        }
+
+        $Authenticating => $Associated {
+            $>() {
+                self.send_auth_request()
+            }
+
+            auth_response(success: bool) {
+                if success {
+                    -> $Associating
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): str { @@:("authenticating") }
+            key_step(): int { @@:(0) }
+            => $^
+        }
+
+        $Associating => $Associated {
+            $>() {
+                self.send_assoc_request()
+            }
+
+            assoc_response(success: bool, aid: int) {
+                if success {
+                    self.aid = aid
+                    -> $KeyNegotiation
+                } else {
+                    -> $Disconnected
+                }
+            }
+            disassoc(reason: str) {
+                -> $Authenticating
+            }
+            status(): str { @@:("associating") }
+            key_step(): int { @@:(0) }
+            => $^
+        }
+
+        $KeyNegotiation => $Associated {
+            $.step = 0
+
+            eapol_key_msg(msg_num: int) {
+                $.step = msg_num
+                if msg_num == 4 {
+                    -> $Connected
+                }
+            }
+            disassoc(reason: str) {
+                -> $Authenticating
+            }
+            status(): str { @@:("key negotiation") }
+            key_step(): int { @@:($.step) }
+            => $^
+        }
+
+        $Associated {
+            deauth(reason: str) {
+                -> $Disconnected
+            }
+            disconnect() {
+                self.send_deauth()
+                -> $Disconnected
+            }
+        }
+
+        $Connected {
+            disassoc(reason: str) {
+                -> $Authenticating
+            }
+            deauth(reason: str) {
+                -> $Disconnected
+            }
+            disconnect() {
+                self.send_deauth()
+                -> $Disconnected
+            }
+            status(): str { @@:("connected") }
+            key_step(): int { @@:(4) }
+        }
+
+    actions:
+        send_auth_request() {}
+        send_assoc_request() {}
+        send_deauth() {}
+
+    domain:
+        bssid = ""
+        ssid = ""
+        aid = 0
+}

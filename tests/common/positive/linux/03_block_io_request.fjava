@@ -1,0 +1,162 @@
+@@target java
+
+// Block I/O Request — kernel blk-mq layer semantics.
+
+@@system BlockRequest {
+    interface:
+        submit(sector: int, size: int): String
+        dispatch(): String
+        complete(success: boolean): String
+        timeout(): String
+        status(): String
+
+    machine:
+        $Idle {
+            submit(sector: int, size: int): String {
+                this.sector = sector;
+                this.size = size;
+                this.attempts = 0;
+                @@:("queued")
+                -> $Queued
+            }
+            status(): String { @@:("idle") }
+        }
+
+        $Queued {
+            dispatch(): String {
+                @@:("dispatched")
+                -> $InFlight
+            }
+            status(): String { @@:("queued") }
+        }
+
+        $InFlight {
+            $>() {
+                this.attempts = this.attempts + 1;
+                this.start_timeout();
+            }
+            <$() {
+                this.cancel_timeout();
+            }
+
+            complete(success: boolean): String {
+                if (success) {
+                    @@:("done")
+                    -> $Done
+                } else {
+                    if (this.attempts < this.max_retries) {
+                        @@:("requeued")
+                        -> $Queued
+                    } else {
+                        @@:("io error")
+                        -> $Error
+                    }
+                }
+            }
+            timeout(): String {
+                if (this.attempts < this.max_retries) {
+                    @@:("timeout, retrying")
+                    -> $Queued
+                } else {
+                    @@:("timeout, giving up")
+                    -> $Error
+                }
+            }
+            status(): String { @@:("in-flight") }
+        }
+
+        $Done {
+            status(): String { @@:("done") }
+        }
+
+        $Error {
+            status(): String { @@:("error") }
+        }
+
+    actions:
+        start_timeout() {}
+        cancel_timeout() {}
+
+    domain:
+        sector: int = 0
+        size: int = 0
+        attempts: int = 0
+        max_retries: int = 3
+        timeout_ms: int = 30000
+}
+
+
+class Main {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " — expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+
+    static void test_happy_path() {
+        var req = @@BlockRequest();
+        check("initial idle",   (String) req.status(),           "idle");
+        check("submit",         (String) req.submit(1024, 8),    "queued");
+        check("dispatch",       (String) req.dispatch(),         "dispatched");
+        check("complete ok",    (String) req.complete(true),     "done");
+        check("terminal done",  (String) req.status(),           "done");
+        System.out.println("PASS: happy path");
+    }
+
+    static void test_timeout_retry_then_complete() {
+        var req = @@BlockRequest();
+        req.submit(2048, 4);
+        req.dispatch();
+        check("first timeout -> retry", (String) req.timeout(), "timeout, retrying");
+        check("back to queued after timeout", (String) req.status(), "queued");
+        req.dispatch();
+        check("complete after retry", (String) req.complete(true), "done");
+        System.out.println("PASS: timeout then retry success");
+    }
+
+    static void test_failure_requeue_then_success() {
+        var req = @@BlockRequest();
+        req.submit(4096, 2);
+        req.dispatch();
+        check("complete(false) -> requeued", (String) req.complete(false), "requeued");
+        req.dispatch();
+        check("complete(true) -> done", (String) req.complete(true), "done");
+        System.out.println("PASS: failure requeue then success");
+    }
+
+    static void test_retry_exhaustion() {
+        var req = @@BlockRequest();
+        req.submit(8192, 1);
+        req.dispatch();
+        check("req 1 failure requeued", (String) req.complete(false), "requeued");
+        req.dispatch();
+        check("req 2 failure requeued", (String) req.complete(false), "requeued");
+        req.dispatch();
+        check("req 3 failure -> io error", (String) req.complete(false), "io error");
+        check("terminal error state", (String) req.status(), "error");
+        System.out.println("PASS: retry exhaustion -> error");
+    }
+
+    static void test_timeout_exhaustion() {
+        var req = @@BlockRequest();
+        req.submit(16384, 1);
+        req.dispatch();
+        check("to 1 retry", (String) req.timeout(), "timeout, retrying");
+        req.dispatch();
+        check("to 2 retry", (String) req.timeout(), "timeout, retrying");
+        req.dispatch();
+        check("to 3 giving up", (String) req.timeout(), "timeout, giving up");
+        check("error terminal", (String) req.status(), "error");
+        System.out.println("PASS: timeout exhaustion -> error");
+    }
+
+    public static void main(String[] args) {
+        test_happy_path();
+        test_timeout_retry_then_complete();
+        test_failure_requeue_then_success();
+        test_retry_exhaustion();
+        test_timeout_exhaustion();
+        System.out.println("PASS: all block I/O request tests passed");
+    }
+}

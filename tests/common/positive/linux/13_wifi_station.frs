@@ -1,0 +1,218 @@
+@@target rust
+
+// Wi-Fi Station Management -- IEEE 802.11 station state machine.
+
+@@system WifiStation {
+    interface:
+        scan_done(bssid: String, ssid: String)
+        auth_response(success: bool)
+        assoc_response(success: bool, aid: i32)
+        eapol_key_msg(msg_num: i32)
+        deauth(reason: String)
+        disassoc(reason: String)
+        disconnect()
+        status(): String
+        key_step(): i32
+
+    machine:
+        $Disconnected {
+            scan_done(bssid: String, ssid: String) {
+                self.bssid = bssid;
+                self.ssid = ssid;
+                -> $Authenticating
+            }
+            status(): String { @@:("disconnected".to_string()) }
+            key_step(): i32 { @@:(0) }
+        }
+
+        $Authenticating => $Associated {
+            $>() {
+                self.send_auth_request();
+            }
+
+            auth_response(success: bool) {
+                if success {
+                    -> $Associating
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): String { @@:("authenticating".to_string()) }
+            key_step(): i32 { @@:(0) }
+            => $^
+        }
+
+        $Associating => $Associated {
+            $>() {
+                self.send_assoc_request();
+            }
+
+            assoc_response(success: bool, aid: i32) {
+                if success {
+                    self.aid = aid;
+                    -> $KeyNegotiation
+                } else {
+                    -> $Disconnected
+                }
+            }
+            disassoc(reason: String) {
+                -> $Authenticating
+            }
+            status(): String { @@:("associating".to_string()) }
+            key_step(): i32 { @@:(0) }
+            => $^
+        }
+
+        $KeyNegotiation => $Associated {
+            $.step: i32 = 0
+
+            eapol_key_msg(msg_num: i32) {
+                $.step = msg_num;
+                if msg_num == 4 {
+                    -> $Connected
+                }
+            }
+            disassoc(reason: String) {
+                -> $Authenticating
+            }
+            status(): String { @@:("key negotiation".to_string()) }
+            key_step(): i32 { @@:($.step) }
+            => $^
+        }
+
+        $Associated {
+            deauth(reason: String) {
+                -> $Disconnected
+            }
+            disconnect() {
+                self.send_deauth();
+                -> $Disconnected
+            }
+        }
+
+        $Connected {
+            disassoc(reason: String) {
+                -> $Authenticating
+            }
+            deauth(reason: String) {
+                -> $Disconnected
+            }
+            disconnect() {
+                self.send_deauth();
+                -> $Disconnected
+            }
+            status(): String { @@:("connected".to_string()) }
+            key_step(): i32 { @@:(4) }
+        }
+
+    actions:
+        send_auth_request() {}
+        send_assoc_request() {}
+        send_deauth() {}
+
+    domain:
+        bssid: String = "".to_string()
+        ssid: String = "".to_string()
+        aid: i32 = 0
+}
+
+
+fn check_str(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} -- expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn check_int(label: &str, actual: i32, expected: i32) {
+    if actual != expected {
+        println!("FAIL: {} -- expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn test_happy_connect() {
+    let mut sta = @@WifiStation();
+    check_str("initial disconnected", &sta.status(), "disconnected");
+    sta.scan_done("AA:BB:CC:DD:EE:FF".to_string(), "MyNet".to_string());
+    check_str("authenticating", &sta.status(), "authenticating");
+    sta.auth_response(true);
+    check_str("associating", &sta.status(), "associating");
+    sta.assoc_response(true, 1);
+    check_str("key negotiation", &sta.status(), "key negotiation");
+    sta.eapol_key_msg(1);
+    check_int("step 1", sta.key_step(), 1);
+    sta.eapol_key_msg(2);
+    check_int("step 2", sta.key_step(), 2);
+    sta.eapol_key_msg(3);
+    check_int("step 3", sta.key_step(), 3);
+    sta.eapol_key_msg(4);
+    check_str("connected", &sta.status(), "connected");
+    println!("PASS: happy connect through 4-way handshake");
+}
+
+fn test_auth_rejection() {
+    let mut sta = @@WifiStation();
+    sta.scan_done("aa".to_string(), "net".to_string());
+    sta.auth_response(false);
+    check_str("auth rejected -> disconnected", &sta.status(), "disconnected");
+    println!("PASS: auth rejection returns to disconnected");
+}
+
+fn test_deauth_from_keynegotiation_via_hsm() {
+    let mut sta = @@WifiStation();
+    sta.scan_done("aa".to_string(), "net".to_string());
+    sta.auth_response(true);
+    sta.assoc_response(true, 5);
+    sta.eapol_key_msg(2);
+    check_str("in key negotiation", &sta.status(), "key negotiation");
+    sta.deauth("AP restart".to_string());
+    check_str("deauth forwarded via HSM -> disconnected", &sta.status(), "disconnected");
+    println!("PASS: deauth forwards via HSM parent from key negotiation");
+}
+
+fn test_disassoc_drops_to_authenticating() {
+    let mut sta = @@WifiStation();
+    sta.scan_done("aa".to_string(), "net".to_string());
+    sta.auth_response(true);
+    sta.assoc_response(true, 7);
+    sta.eapol_key_msg(2);
+    sta.disassoc("reason".to_string());
+    check_str("disassoc -> authenticating", &sta.status(), "authenticating");
+    sta.assoc_response(true, 7);
+    check_int("step resets on reentry", sta.key_step(), 0);
+    println!("PASS: disassoc drops to authenticating (state var resets)");
+}
+
+fn test_deauth_from_connected() {
+    let mut sta = @@WifiStation();
+    sta.scan_done("aa".to_string(), "net".to_string());
+    sta.auth_response(true);
+    sta.assoc_response(true, 3);
+    sta.eapol_key_msg(4);
+    check_str("connected", &sta.status(), "connected");
+    sta.deauth("inactivity".to_string());
+    check_str("deauth from connected", &sta.status(), "disconnected");
+    println!("PASS: deauth from connected returns to disconnected");
+}
+
+fn test_disconnect_from_connected() {
+    let mut sta = @@WifiStation();
+    sta.scan_done("aa".to_string(), "net".to_string());
+    sta.auth_response(true);
+    sta.assoc_response(true, 3);
+    sta.eapol_key_msg(4);
+    sta.disconnect();
+    check_str("disconnect from connected", &sta.status(), "disconnected");
+    println!("PASS: explicit disconnect from connected");
+}
+
+fn main() {
+    test_happy_connect();
+    test_auth_rejection();
+    test_deauth_from_keynegotiation_via_hsm();
+    test_disassoc_drops_to_authenticating();
+    test_deauth_from_connected();
+    test_disconnect_from_connected();
+    println!("PASS: all Wi-Fi station tests passed");
+}

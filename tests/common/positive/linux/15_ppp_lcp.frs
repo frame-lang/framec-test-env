@@ -1,0 +1,337 @@
+@@target rust
+
+// PPP Link Control Protocol -- RFC 1661 Section 4 state table direct transcription.
+
+@@system PppLcp {
+    interface:
+        up()
+        down()
+        open()
+        close()
+        receive_configure_request(acceptable: bool)
+        receive_configure_ack()
+        receive_configure_nak()
+        receive_terminate_request()
+        receive_terminate_ack()
+        timeout_positive()
+        timeout_negative()
+        status(): String
+
+    machine:
+        $Initial {
+            up() { -> $Closed }
+            open() { -> $Starting }
+            status(): String { @@:("initial".to_string()) }
+        }
+
+        $Starting {
+            up() {
+                self.init_restart_count();
+                self.send_configure_request();
+                -> $ReqSent
+            }
+            close() { -> $Initial }
+            status(): String { @@:("starting".to_string()) }
+        }
+
+        $Closed {
+            open() {
+                self.init_restart_count();
+                self.send_configure_request();
+                -> $ReqSent
+            }
+            down() { -> $Initial }
+            receive_configure_request(acceptable: bool) {
+                self.send_terminate_ack();
+            }
+            status(): String { @@:("closed".to_string()) }
+        }
+
+        $Stopped {
+            open() { -> $Stopped }
+            down() { -> $Starting }
+            receive_configure_request(acceptable: bool) {
+                self.init_restart_count();
+                if acceptable {
+                    self.send_configure_ack();
+                    self.send_configure_request();
+                    -> $AckSent
+                } else {
+                    self.send_configure_nak();
+                    self.send_configure_request();
+                    -> $ReqSent
+                }
+            }
+            status(): String { @@:("stopped".to_string()) }
+        }
+
+        $Closing {
+            timeout_positive() {
+                self.send_terminate_request();
+            }
+            timeout_negative() {
+                -> $Closed
+            }
+            receive_terminate_ack() {
+                -> $Closed
+            }
+            down() { -> $Initial }
+            status(): String { @@:("closing".to_string()) }
+        }
+
+        $Stopping {
+            timeout_positive() {
+                self.send_terminate_request();
+            }
+            timeout_negative() {
+                -> $Stopped
+            }
+            receive_terminate_ack() {
+                -> $Stopped
+            }
+            down() { -> $Starting }
+            status(): String { @@:("stopping".to_string()) }
+        }
+
+        $ReqSent {
+            timeout_positive() {
+                self.send_configure_request();
+            }
+            timeout_negative() {
+                -> $Stopped
+            }
+            receive_configure_request(acceptable: bool) {
+                if acceptable {
+                    self.send_configure_ack();
+                    -> $AckSent
+                } else {
+                    self.send_configure_nak();
+                }
+            }
+            receive_configure_ack() {
+                self.init_restart_count();
+                -> $AckRcvd
+            }
+            receive_configure_nak() {
+                self.init_restart_count();
+                self.send_configure_request();
+            }
+            receive_terminate_request() {
+                self.send_terminate_ack();
+                -> $ReqSent
+            }
+            close() {
+                self.init_restart_count();
+                self.send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): String { @@:("req-sent".to_string()) }
+        }
+
+        $AckRcvd {
+            receive_configure_request(acceptable: bool) {
+                if acceptable {
+                    self.send_configure_ack();
+                    self.tlu();
+                    -> $Opened
+                } else {
+                    self.send_configure_nak();
+                }
+            }
+            timeout_positive() {
+                self.send_configure_request();
+                -> $ReqSent
+            }
+            timeout_negative() { -> $Stopped }
+            receive_configure_ack() {
+                self.send_configure_request();
+                -> $ReqSent
+            }
+            close() {
+                self.init_restart_count();
+                self.send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): String { @@:("ack-rcvd".to_string()) }
+        }
+
+        $AckSent {
+            receive_configure_ack() {
+                self.init_restart_count();
+                self.tlu();
+                -> $Opened
+            }
+            timeout_positive() {
+                self.send_configure_request();
+            }
+            timeout_negative() { -> $Stopped }
+            receive_configure_request(acceptable: bool) {
+                if acceptable {
+                    self.send_configure_ack();
+                } else {
+                    self.send_configure_nak();
+                    -> $ReqSent
+                }
+            }
+            receive_configure_nak() {
+                self.init_restart_count();
+                self.send_configure_request();
+                -> $ReqSent
+            }
+            close() {
+                self.init_restart_count();
+                self.send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): String { @@:("ack-sent".to_string()) }
+        }
+
+        $Opened {
+            <$() {
+                self.tld();
+            }
+
+            receive_configure_request(acceptable: bool) {
+                self.send_configure_request();
+                if acceptable {
+                    self.send_configure_ack();
+                    -> $AckSent
+                } else {
+                    self.send_configure_nak();
+                    -> $ReqSent
+                }
+            }
+            receive_terminate_request() {
+                self.send_terminate_ack();
+                self.zero_restart_count();
+                -> $Stopping
+            }
+            close() {
+                self.init_restart_count();
+                self.send_terminate_request();
+                -> $Closing
+            }
+            down() {
+                -> $Starting
+            }
+            status(): String { @@:("opened".to_string()) }
+        }
+
+    actions:
+        send_configure_request() {}
+        send_configure_ack()     {}
+        send_configure_nak()     {}
+        send_terminate_request() {}
+        send_terminate_ack()     {}
+        init_restart_count() {
+            self.restart_count = self.max_restart;
+        }
+        zero_restart_count() {
+            self.restart_count = 0;
+        }
+        tlu() {}
+        tld() {}
+
+    domain:
+        restart_count: i32 = 0
+        max_restart: i32 = 10
+}
+
+
+fn check(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} -- expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn test_normal_open() {
+    let mut ppp = @@PppLcp();
+    check("initial", &ppp.status(), "initial");
+    ppp.open();
+    check("starting", &ppp.status(), "starting");
+    ppp.up();
+    check("req-sent", &ppp.status(), "req-sent");
+    ppp.receive_configure_ack();
+    check("ack-rcvd", &ppp.status(), "ack-rcvd");
+    ppp.receive_configure_request(true);
+    check("opened", &ppp.status(), "opened");
+    println!("PASS: normal open sequence");
+}
+
+fn test_peer_renegotiation() {
+    let mut ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    check("opened first time", &ppp.status(), "opened");
+    ppp.receive_configure_request(true);
+    check("renegotiation -> AckSent", &ppp.status(), "ack-sent");
+    ppp.receive_configure_ack();
+    check("back to opened", &ppp.status(), "opened");
+    println!("PASS: peer-initiated renegotiation from opened");
+}
+
+fn test_clean_shutdown() {
+    let mut ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.close();
+    check("closing", &ppp.status(), "closing");
+    ppp.receive_terminate_ack();
+    check("closed", &ppp.status(), "closed");
+    println!("PASS: clean shutdown via close()");
+}
+
+fn test_peer_terminate() {
+    let mut ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.receive_terminate_request();
+    check("stopping on peer-terminate", &ppp.status(), "stopping");
+    ppp.receive_terminate_ack();
+    check("stopped", &ppp.status(), "stopped");
+    println!("PASS: peer-initiated terminate");
+}
+
+fn test_timeout_negative_from_closing() {
+    let mut ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.close();
+    check("closing", &ppp.status(), "closing");
+    ppp.timeout_negative();
+    check("closing exhausts to closed", &ppp.status(), "closed");
+    println!("PASS: timeout_negative in closing -> closed");
+}
+
+fn test_down_from_opened() {
+    let mut ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.down();
+    check("down from opened -> starting", &ppp.status(), "starting");
+    println!("PASS: down from opened");
+}
+
+fn main() {
+    test_normal_open();
+    test_peer_renegotiation();
+    test_clean_shutdown();
+    test_peer_terminate();
+    test_timeout_negative_from_closing();
+    test_down_from_opened();
+    println!("PASS: all PPP LCP tests passed");
+}

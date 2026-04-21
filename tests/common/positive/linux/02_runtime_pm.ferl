@@ -1,0 +1,108 @@
+@@target erlang
+
+% Runtime Power Management — kernel drivers/base/power/runtime.c semantics.
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in erlang_batch.sh exercises every exported function and checks clean exit.
+
+@@system RuntimePM {
+    interface:
+        get(): str
+        put(): str
+        autosuspend_expired(): str
+        resume_complete(): str
+        suspend_complete(success: bool): str
+        status(): str
+
+    machine:
+        $Active {
+            $>() {
+                self.cancel_timer()
+            }
+
+            get(): str {
+                self.usage_count = self.usage_count + 1,
+                @@:("get: usage=active")
+            }
+            put(): str {
+                self.usage_count = self.usage_count - 1,
+                @@:("put: usage=decremented")
+                if self.usage_count =< 0 {
+                    -> $Idle
+                }
+            }
+            status(): str { @@:("active") }
+        }
+
+        $Idle {
+            $>() {
+                self.start_autosuspend_timer()
+            }
+            <$() {
+                self.cancel_timer()
+            }
+
+            get(): str {
+                self.usage_count = self.usage_count + 1,
+                @@:("get: usage=from_idle")
+                -> $Active
+            }
+            autosuspend_expired(): str {
+                @@:("suspending")
+                -> $Suspending
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $Suspending {
+            $>() {
+                self.call_suspend_callback()
+            }
+
+            suspend_complete(success: bool): str {
+                if success {
+                    @@:("suspended")
+                    -> $Suspended
+                } else {
+                    @@:("suspend failed")
+                    -> $Active
+                }
+            }
+            get(): str {
+                self.usage_count = self.usage_count + 1,
+                @@:("resume requested during suspend")
+                -> $Resuming
+            }
+            status(): str { @@:("suspending") }
+        }
+
+        $Suspended {
+            get(): str {
+                self.usage_count = self.usage_count + 1,
+                @@:("waking")
+                -> $Resuming
+            }
+            status(): str { @@:("suspended") }
+        }
+
+        $Resuming {
+            $>() {
+                self.call_resume_callback()
+            }
+
+            resume_complete(): str {
+                @@:("resumed")
+                -> $Active
+            }
+            status(): str { @@:("resuming") }
+        }
+
+    actions:
+        start_autosuspend_timer() {}
+        cancel_timer() {}
+        call_suspend_callback() {}
+        call_resume_callback() {}
+
+    domain:
+        usage_count = 1
+        autosuspend_delay_ms = 500
+}

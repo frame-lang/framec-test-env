@@ -1,0 +1,73 @@
+@@target erlang
+
+% Watchdog Timer — kernel drivers/watchdog/watchdog_dev.c magic-close semantics.
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in erlang_batch.sh exercises every exported function and checks clean exit.
+
+@@system WatchdogDevice {
+    interface:
+        open(): str
+        write(data: str): str
+        ping(): str
+        close(): str
+        timeout_expired(): str
+        status(): str
+
+    machine:
+        $Inactive {
+            open(): str {
+                @@:("opened")
+                -> $Armed
+            }
+            status(): str { @@:("inactive") }
+        }
+
+        $Armed {
+            $>() {
+                self.magic_seen = false,
+                self.start_hw_timer()
+            }
+
+            ping(): str {
+                self.reset_hw_timer(),
+                @@:("pinged")
+            }
+            write(data: str): str {
+                self.reset_hw_timer(),
+                @@:("data written")
+            }
+            close(): str {
+                if self.magic_seen {
+                    self.stop_hw_timer(),
+                    @@:("disarmed")
+                    -> $Inactive
+                } else {
+                    @@:("close ignored -- no magic char")
+                }
+            }
+            timeout_expired(): str {
+                @@:("SYSTEM RESET")
+                -> $Triggered
+            }
+            status(): str {
+                if self.magic_seen {
+                    @@:("armed (magic seen, close will disarm)")
+                } else {
+                    @@:("armed")
+                }
+            }
+        }
+
+        $Triggered {
+            status(): str { @@:("triggered -- system reset") }
+        }
+
+    actions:
+        start_hw_timer() {}
+        reset_hw_timer() {}
+        stop_hw_timer() {}
+
+    domain:
+        timeout_sec = 60
+        magic_seen = false
+}

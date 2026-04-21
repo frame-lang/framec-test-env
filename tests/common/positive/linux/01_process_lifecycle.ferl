@@ -1,0 +1,156 @@
+@@target erlang
+
+% Process Lifecycle — Linux task states (kernel/sched/core.c semantics)
+% Three-level HSM with explicit upward forwarding as per-state signal policy.
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in erlang_batch.sh exercises every exported function and checks clean exit.
+
+@@system TaskLifecycle {
+    interface:
+        fork(): str
+        schedule(): str
+        block_on_io(): str
+        io_complete(): str
+        block_uninterruptible(): str
+        send_signal(sig: str): str
+        wait_by_parent(): str
+        status(): str
+
+    machine:
+        $New {
+            fork(): str {
+                self.next_pid(),
+                @@:("forked")
+                -> $Ready
+            }
+            status(): str { @@:("new") }
+        }
+
+        $Ready => $Alive {
+            schedule(): str {
+                @@:("running")
+                -> $Running
+            }
+            status(): str { @@:("ready") }
+            => $^
+        }
+
+        $Running => $Alive {
+            schedule(): str {
+                @@:("preempted")
+                -> $Ready
+            }
+            block_on_io(): str {
+                @@:("blocked")
+                -> $Interruptible
+            }
+            block_uninterruptible(): str {
+                @@:("blocked (D)")
+                -> $Uninterruptible
+            }
+            status(): str { @@:("running") }
+            => $^
+        }
+
+        $Interruptible => $Blocked {
+            io_complete(): str {
+                @@:("woke")
+                -> $Ready
+            }
+            send_signal(sig: str): str {
+                if sig == "SIGKILL" {
+                    => $^
+                } else {
+                    if sig == "SIGTERM" {
+                        => $^
+                    } else {
+                        if sig == "SIGSTOP" {
+                            => $^
+                        } else {
+                            @@:("interrupted")
+                            -> $Ready
+                        }
+                    }
+                }
+            }
+            status(): str { @@:("interruptible") }
+            => $^
+        }
+
+        $Uninterruptible => $Blocked {
+            io_complete(): str {
+                @@:("woke")
+                -> $Ready
+            }
+            % send_signal NOT handled — forwards via $Blocked to $Alive.
+            % Non-fatal signals hit the "ignored" branch there (D-state).
+            % SIGKILL still gets through (TASK_KILLABLE).
+            status(): str { @@:("uninterruptible") }
+            => $^
+        }
+
+        $Blocked => $Alive {
+            status(): str { @@:("blocked") }
+            => $^
+        }
+
+        $Alive {
+            send_signal(sig: str): str {
+                if sig == "SIGKILL" {
+                    @@:("exiting")
+                    -> $Zombie
+                } else {
+                    if sig == "SIGTERM" {
+                        @@:("exiting")
+                        -> $Zombie
+                    } else {
+                        if sig == "SIGSTOP" {
+                            @@:("stopped")
+                            -> $Stopped
+                        } else {
+                            @@:("signal ignored")
+                        }
+                    }
+                }
+            }
+        }
+
+        $Stopped {
+            send_signal(sig: str): str {
+                if sig == "SIGCONT" {
+                    @@:("continued")
+                    -> $Ready
+                } else {
+                    if sig == "SIGKILL" {
+                        @@:("killed while stopped")
+                        -> $Zombie
+                    } else {
+                        @@:("signal ignored")
+                    }
+                }
+            }
+            status(): str { @@:("stopped") }
+        }
+
+        $Zombie {
+            wait_by_parent(): str {
+                @@:("reaped")
+                -> $Dead
+            }
+            status(): str { @@:("zombie") }
+        }
+
+        $Dead {
+            status(): str { @@:("dead") }
+        }
+
+    actions:
+        next_pid() {
+            self.pid_counter = self.pid_counter + 1,
+            self.pid = self.pid_counter
+        }
+
+    domain:
+        pid = 0
+        pid_counter = 100
+}

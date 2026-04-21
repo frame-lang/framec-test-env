@@ -1,0 +1,241 @@
+@@target rust
+
+// USB Device Enumeration — multi-stage pipeline with compensation (saga).
+// Forward path: Resetting -> Addressing -> ReadingDescriptors -> BindingDriver -> Configured
+// Compensation chain on failure: UndoAddress -> UndoReset -> Failed
+// Every enumeration substate is a child of $Enumerating for shared unplug().
+
+@@system UsbEnumerator {
+    interface:
+        plug_in(port: i32)
+        reset_done(success: bool)
+        address_set(success: bool, addr: i32)
+        descriptors_read(success: bool, product: String)
+        driver_bound(success: bool)
+        unplug()
+        status(): String
+
+    machine:
+        $Detached {
+            plug_in(port: i32) {
+                self.port = port;
+                self.reset_attempts = 0;
+                -> $Resetting
+            }
+            status(): String { @@:("detached".to_string()) }
+        }
+
+        $Resetting => $Enumerating {
+            $>() {
+                self.reset_attempts = self.reset_attempts + 1;
+                self.issue_port_reset(self.port);
+            }
+
+            reset_done(success: bool) {
+                if success {
+                    -> $Addressing
+                } else {
+                    if self.reset_attempts < self.max_reset_attempts {
+                        -> $Resetting
+                    } else {
+                        -> $Failed
+                    }
+                }
+            }
+            status(): String { @@:("resetting".to_string()) }
+            => $^
+        }
+
+        $Addressing => $Enumerating {
+            $>() {
+                self.assign_address();
+            }
+
+            address_set(success: bool, addr: i32) {
+                if success {
+                    self.address = addr;
+                    -> $ReadingDescriptors
+                } else {
+                    -> $UndoReset
+                }
+            }
+            status(): String { @@:("addressing".to_string()) }
+            => $^
+        }
+
+        $ReadingDescriptors => $Enumerating {
+            $>() {
+                self.read_descriptors(self.address);
+            }
+
+            descriptors_read(success: bool, product: String) {
+                if success {
+                    self.product = product;
+                    -> $BindingDriver
+                } else {
+                    -> $UndoAddress
+                }
+            }
+            status(): String { @@:("reading descriptors".to_string()) }
+            => $^
+        }
+
+        $BindingDriver => $Enumerating {
+            $>() {
+                self.bind_driver(self.product);
+            }
+
+            driver_bound(success: bool) {
+                if success {
+                    -> $Configured
+                } else {
+                    -> $UndoAddress
+                }
+            }
+            status(): String { @@:("binding driver".to_string()) }
+            => $^
+        }
+
+        $Enumerating {
+            unplug() {
+                -> $Detached
+            }
+        }
+
+        $UndoAddress {
+            $>() {
+                self.release_address(self.address);
+                -> $UndoReset
+            }
+        }
+
+        $UndoReset {
+            $>() {
+                self.disable_port(self.port);
+                -> $Failed
+            }
+        }
+
+        $Configured {
+            unplug() {
+                self.unbind_driver();
+                self.release_address(self.address);
+                self.disable_port(self.port);
+                -> $Detached
+            }
+            status(): String { @@:("configured".to_string()) }
+        }
+
+        $Failed {
+            plug_in(port: i32) {
+                self.port = port;
+                self.reset_attempts = 0;
+                -> $Resetting
+            }
+            status(): String { @@:("failed".to_string()) }
+        }
+
+    actions:
+        issue_port_reset(port: i32) {}
+        assign_address() {}
+        read_descriptors(addr: i32) {}
+        bind_driver(product: String) {}
+        release_address(addr: i32) {}
+        disable_port(port: i32) {}
+        unbind_driver() {}
+
+    domain:
+        port: i32 = 0
+        address: i32 = 0
+        product: String = "".to_string()
+        reset_attempts: i32 = 0
+        max_reset_attempts: i32 = 3
+}
+
+
+fn check(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} — expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn test_happy_path() {
+    let mut usb = @@UsbEnumerator();
+    check("initial detached", &usb.status(), "detached");
+    usb.plug_in(1);
+    check("after plug_in", &usb.status(), "resetting");
+    usb.reset_done(true);
+    check("reset ok -> addressing", &usb.status(), "addressing");
+    usb.address_set(true, 7);
+    check("address ok -> reading", &usb.status(), "reading descriptors");
+    usb.descriptors_read(true, "USB Keyboard".to_string());
+    check("descriptors ok -> binding", &usb.status(), "binding driver");
+    usb.driver_bound(true);
+    check("driver bound -> configured", &usb.status(), "configured");
+    println!("PASS: happy path enumeration");
+}
+
+fn test_descriptor_failure_compensates() {
+    let mut usb = @@UsbEnumerator();
+    usb.plug_in(2);
+    usb.reset_done(true);
+    usb.address_set(true, 8);
+    usb.descriptors_read(false, "".to_string());
+    check("compensated to failed", &usb.status(), "failed");
+    println!("PASS: descriptor failure compensation");
+}
+
+fn test_driver_bind_failure_compensates() {
+    let mut usb = @@UsbEnumerator();
+    usb.plug_in(3);
+    usb.reset_done(true);
+    usb.address_set(true, 9);
+    usb.descriptors_read(true, "Mouse".to_string());
+    usb.driver_bound(false);
+    check("bind fail compensated to failed", &usb.status(), "failed");
+    println!("PASS: driver bind failure compensation");
+}
+
+fn test_unplug_during_enumeration() {
+    let mut usb = @@UsbEnumerator();
+    usb.plug_in(4);
+    check("in resetting", &usb.status(), "resetting");
+    usb.unplug();
+    check("unplug -> detached", &usb.status(), "detached");
+    println!("PASS: unplug during enumeration forwards via HSM");
+}
+
+fn test_reset_retry_then_exhaust() {
+    let mut usb = @@UsbEnumerator();
+    usb.plug_in(5);
+    usb.reset_done(false);
+    check("retry 1", &usb.status(), "resetting");
+    usb.reset_done(false);
+    check("retry 2", &usb.status(), "resetting");
+    usb.reset_done(false);
+    check("exhausted -> failed", &usb.status(), "failed");
+    println!("PASS: reset retry exhaustion");
+}
+
+fn test_replug_from_failed() {
+    let mut usb = @@UsbEnumerator();
+    usb.plug_in(6);
+    usb.reset_done(false);
+    usb.reset_done(false);
+    usb.reset_done(false);
+    check("failed state", &usb.status(), "failed");
+    usb.plug_in(6);
+    check("re-plug restarts enumeration", &usb.status(), "resetting");
+    println!("PASS: re-plug from failed state");
+}
+
+fn main() {
+    test_happy_path();
+    test_descriptor_failure_compensates();
+    test_driver_bind_failure_compensates();
+    test_unplug_during_enumeration();
+    test_reset_retry_then_exhaust();
+    test_replug_from_failed();
+    println!("PASS: all USB enumeration tests passed");
+}

@@ -1,0 +1,137 @@
+@@target erlang
+
+% TCP Connection -- RFC 793 Figure 6 FSM with @@persist for TIME_WAIT.
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in runner exercises every exported function and checks clean exit.
+
+@@persist
+@@system TcpConnection {
+    interface:
+        passive_open()
+        active_open()
+        recv_syn()
+        recv_syn_ack()
+        recv_ack()
+        recv_fin()
+        app_close()
+        app_send(bytes_n: int)
+        timeout_2msl()
+        abort()
+        state_name(): str
+
+    machine:
+        $Closed {
+            passive_open() { -> $Listen }
+            active_open() {
+                self.send_syn(),
+                -> $SynSent
+            }
+            state_name(): str { @@:("CLOSED") }
+        }
+
+        $Listen {
+            recv_syn() {
+                self.send_syn_ack(),
+                -> $SynReceived
+            }
+            app_close() { -> $Closed }
+            state_name(): str { @@:("LISTEN") }
+        }
+
+        $SynSent {
+            recv_syn_ack() {
+                self.send_ack(),
+                -> $Established
+            }
+            recv_syn() {
+                self.send_syn_ack(),
+                -> $SynReceived
+            }
+            app_close() { -> $Closed }
+            state_name(): str { @@:("SYN_SENT") }
+        }
+
+        $SynReceived {
+            recv_ack() { -> $Established }
+            app_close() {
+                self.send_fin(),
+                -> $FinWait1
+            }
+            state_name(): str { @@:("SYN_RECEIVED") }
+        }
+
+        $Established {
+            app_send(bytes_n: int) {
+                self.bytes_sent = self.bytes_sent + bytes_n
+            }
+            app_close() {
+                self.send_fin(),
+                -> $FinWait1
+            }
+            recv_fin() {
+                self.send_ack(),
+                -> $CloseWait
+            }
+            abort() {
+                self.send_rst(),
+                -> $Closed
+            }
+            state_name(): str { @@:("ESTABLISHED") }
+        }
+
+        $FinWait1 {
+            recv_ack() { -> $FinWait2 }
+            recv_fin() {
+                self.send_ack(),
+                -> $Closing
+            }
+            state_name(): str { @@:("FIN_WAIT_1") }
+        }
+
+        $FinWait2 {
+            recv_fin() {
+                self.send_ack(),
+                -> $TimeWait
+            }
+            state_name(): str { @@:("FIN_WAIT_2") }
+        }
+
+        $Closing {
+            recv_ack() { -> $TimeWait }
+            state_name(): str { @@:("CLOSING") }
+        }
+
+        $TimeWait {
+            $>() {
+                self.start_2msl_timer()
+            }
+            timeout_2msl() { -> $Closed }
+            state_name(): str { @@:("TIME_WAIT") }
+        }
+
+        $CloseWait {
+            app_close() {
+                self.send_fin(),
+                -> $LastAck
+            }
+            state_name(): str { @@:("CLOSE_WAIT") }
+        }
+
+        $LastAck {
+            recv_ack() { -> $Closed }
+            state_name(): str { @@:("LAST_ACK") }
+        }
+
+    actions:
+        send_syn()         {}
+        send_syn_ack()     {}
+        send_ack()         {}
+        send_fin()         {}
+        send_rst()         {}
+        start_2msl_timer() {}
+
+    domain:
+        local_port = 0
+        remote_port = 0
+        bytes_sent = 0
+}

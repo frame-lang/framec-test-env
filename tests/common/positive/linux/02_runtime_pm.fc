@@ -1,0 +1,183 @@
+@@target c
+
+// Runtime Power Management — kernel drivers/base/power/runtime.c semantics.
+// Device transitions through Active/Idle/Suspending/Suspended/Resuming
+// driven by usage count (get/put) and autosuspend timers (enter/exit).
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system RuntimePM {
+    interface:
+        get(): str
+        put(): str
+        autosuspend_expired(): str
+        resume_complete(): str
+        suspend_complete(success: bool): str
+        status(): str
+
+    machine:
+        $Active {
+            $>() {
+                RuntimePM_cancel_timer(self);
+            }
+
+            get(): str {
+                self->usage_count = self->usage_count + 1;
+                static char buf[64];
+                snprintf(buf, sizeof(buf), "get: usage=%d", self->usage_count);
+                @@:(buf)
+            }
+            put(): str {
+                self->usage_count = self->usage_count - 1;
+                static char buf[64];
+                snprintf(buf, sizeof(buf), "put: usage=%d", self->usage_count);
+                @@:(buf)
+                if (self->usage_count <= 0) {
+                    -> $Idle
+                }
+            }
+            status(): str { @@:("active") }
+        }
+
+        $Idle {
+            $>() {
+                RuntimePM_start_autosuspend_timer(self);
+            }
+            <$() {
+                RuntimePM_cancel_timer(self);
+            }
+
+            get(): str {
+                self->usage_count = self->usage_count + 1;
+                static char buf[64];
+                snprintf(buf, sizeof(buf), "get: usage=%d", self->usage_count);
+                @@:(buf)
+                -> $Active
+            }
+            autosuspend_expired(): str {
+                @@:("suspending")
+                -> $Suspending
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $Suspending {
+            $>() {
+                RuntimePM_call_suspend_callback(self);
+            }
+
+            suspend_complete(success: bool): str {
+                if (success) {
+                    @@:("suspended")
+                    -> $Suspended
+                } else {
+                    @@:("suspend failed")
+                    -> $Active
+                }
+            }
+            get(): str {
+                self->usage_count = self->usage_count + 1;
+                @@:("resume requested during suspend")
+                -> $Resuming
+            }
+            status(): str { @@:("suspending") }
+        }
+
+        $Suspended {
+            get(): str {
+                self->usage_count = self->usage_count + 1;
+                @@:("waking")
+                -> $Resuming
+            }
+            status(): str { @@:("suspended") }
+        }
+
+        $Resuming {
+            $>() {
+                RuntimePM_call_resume_callback(self);
+            }
+
+            resume_complete(): str {
+                @@:("resumed")
+                -> $Active
+            }
+            status(): str { @@:("resuming") }
+        }
+
+    actions:
+        start_autosuspend_timer() {}
+        cancel_timer() {}
+        call_suspend_callback() {}
+        call_resume_callback() {}
+
+    domain:
+        usage_count: int = 1
+        autosuspend_delay_ms: int = 500
+}
+
+
+void check(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void test_happy_idle_suspend_resume(void) {
+    RuntimePM* dev = @@RuntimePM();
+    check("initial active", (const char*)RuntimePM_status(dev), "active");
+    check("put drops to 0", (const char*)RuntimePM_put(dev), "put: usage=0");
+    check("idle after drain", (const char*)RuntimePM_status(dev), "idle");
+    check("autosuspend fires", (const char*)RuntimePM_autosuspend_expired(dev), "suspending");
+    check("suspend_complete true", (const char*)RuntimePM_suspend_complete(dev, 1), "suspended");
+    check("get wakes", (const char*)RuntimePM_get(dev), "waking");
+    check("resuming status", (const char*)RuntimePM_status(dev), "resuming");
+    check("resume_complete", (const char*)RuntimePM_resume_complete(dev), "resumed");
+    check("back to active", (const char*)RuntimePM_status(dev), "active");
+    printf("PASS: happy path (active -> idle -> suspended -> resumed)\n");
+    RuntimePM_destroy(dev);
+}
+
+void test_suspend_failure_returns_to_active(void) {
+    RuntimePM* dev = @@RuntimePM();
+    RuntimePM_put(dev);
+    RuntimePM_autosuspend_expired(dev);
+    check("suspend failed", (const char*)RuntimePM_suspend_complete(dev, 0), "suspend failed");
+    check("reverted to active", (const char*)RuntimePM_status(dev), "active");
+    printf("PASS: suspend failure -> active\n");
+    RuntimePM_destroy(dev);
+}
+
+void test_get_during_suspending_redirects_to_resuming(void) {
+    RuntimePM* dev = @@RuntimePM();
+    RuntimePM_put(dev);
+    RuntimePM_autosuspend_expired(dev);
+    check("suspending state", (const char*)RuntimePM_status(dev), "suspending");
+    check("get during suspend", (const char*)RuntimePM_get(dev), "resume requested during suspend");
+    check("redirected to resuming", (const char*)RuntimePM_status(dev), "resuming");
+    printf("PASS: get during suspending redirects to resuming\n");
+    RuntimePM_destroy(dev);
+}
+
+void test_usage_count_mgmt(void) {
+    RuntimePM* dev = @@RuntimePM();
+    check("get +1", (const char*)RuntimePM_get(dev), "get: usage=2");
+    check("get +1 again", (const char*)RuntimePM_get(dev), "get: usage=3");
+    check("put -1", (const char*)RuntimePM_put(dev), "put: usage=2");
+    check("put -1", (const char*)RuntimePM_put(dev), "put: usage=1");
+    check("put to 0 -> idle", (const char*)RuntimePM_put(dev), "put: usage=0");
+    check("idle", (const char*)RuntimePM_status(dev), "idle");
+    printf("PASS: usage count tracking\n");
+    RuntimePM_destroy(dev);
+}
+
+int main(void) {
+    test_happy_idle_suspend_resume();
+    test_suspend_failure_returns_to_active();
+    test_get_during_suspending_redirects_to_resuming();
+    test_usage_count_mgmt();
+    printf("PASS: all runtime PM tests passed\n");
+    return 0;
+}

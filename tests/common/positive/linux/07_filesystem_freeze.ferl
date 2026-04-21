@@ -1,0 +1,107 @@
+@@target erlang
+
+% Filesystem Freeze — VFS fs/super.c semantics. 3-level HSM:
+%   $Active => $Readable => $Mounted
+%   $Frozen => $Readable => $Mounted
+% $Mounted provides read/sync/unmount for all mounted sub-states.
+% $Active adds write/freeze. $Frozen overrides write to block and adds thaw.
+% $Freezing is transient, bypasses $Readable (state in flux during flush).
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in erlang_batch.sh exercises every exported function and checks clean exit.
+
+@@system Filesystem {
+    interface:
+        mount(device: str): str
+        unmount(): str
+        freeze(): str
+        thaw(): str
+        write(data: str): str
+        read(): str
+        sync(): str
+        status(): str
+        read_count(): int
+        write_count(): int
+
+    machine:
+        $Unmounted {
+            mount(device: str): str {
+                self.device = device,
+                @@:("mounted")
+                -> $Active
+            }
+            status(): str { @@:("unmounted") }
+            read_count(): int { @@:(self.reads) }
+            write_count(): int { @@:(self.writes) }
+        }
+
+        $Active => $Readable {
+            write(data: str): str {
+                self.writes = self.writes + 1,
+                @@:("wrote")
+            }
+            freeze(): str {
+                @@:("freezing")
+                -> $Freezing
+            }
+            status(): str { @@:("active") }
+            => $^
+        }
+
+        $Freezing => $Mounted {
+            $>() {
+                self.flush_pending_writes(),
+                -> $Frozen
+            }
+            status(): str { @@:("freezing") }
+            => $^
+        }
+
+        $Frozen => $Readable {
+            write(data: str): str {
+                @@:("BLOCKED")
+            }
+            thaw(): str {
+                @@:("thawed")
+                -> $Active
+            }
+            status(): str { @@:("frozen") }
+            => $^
+        }
+
+        $Readable => $Mounted {
+            => $^
+        }
+
+        $Mounted {
+            read(): str {
+                self.reads = self.reads + 1,
+                @@:("read")
+            }
+            sync(): str {
+                @@:("synced")
+            }
+            unmount(): str {
+                @@:("unmounting")
+                -> $Unmounting
+            }
+            read_count(): int { @@:(self.reads) }
+            write_count(): int { @@:(self.writes) }
+        }
+
+        $Unmounting {
+            $>() {
+                self.flush_pending_writes(),
+                self.release_resources(),
+                -> $Unmounted
+            }
+        }
+
+    actions:
+        flush_pending_writes() {}
+        release_resources() {}
+
+    domain:
+        device = ""
+        writes = 0
+        reads = 0
+}

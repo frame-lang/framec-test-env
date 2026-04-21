@@ -1,0 +1,223 @@
+@@target lua
+
+-- HTTP/1.1 Connection -- keep-alive lifecycle with HSM for cross-cutting errors.
+
+@@system HttpConnection {
+    interface:
+        connect(host: str, port: int)
+        send_request(method: str, path: str)
+        headers_received(status_code: int, keep_alive: bool, content_length: int)
+        body_chunk_received(chunk: str)
+        body_complete()
+        keep_alive_timeout()
+        connection_error(reason: str)
+        close()
+        status(): str
+        request_count(): int
+
+    machine:
+        $Disconnected {
+            connect(host: str, port: int) {
+                self.host = host
+                self.port = port
+                -> $Connecting
+            }
+            status(): str { @@:("disconnected") }
+            request_count(): int { @@:(self.requests) }
+        }
+
+        $Connecting {
+            $>() {
+                self:tcp_connect()
+                -> $Idle
+            }
+        }
+
+        $Idle => $Open {
+            $>() {
+                self:start_keep_alive_timer()
+            }
+            <$() {
+                self:cancel_keep_alive_timer()
+            }
+
+            send_request(method: str, path: str) {
+                self.current_method = method
+                self.current_path = path
+                self:emit_request()
+                -> $AwaitingResponse
+            }
+            keep_alive_timeout() {
+                -> $Closing
+            }
+            status(): str { @@:("idle") }
+            request_count(): int { @@:(self.requests) }
+            => $^
+        }
+
+        $AwaitingResponse => $Open {
+            headers_received(status_code: int, keep_alive: bool, content_length: int) {
+                self.response_status = status_code
+                self.ka = keep_alive
+                self.content_length = content_length
+                if content_length == 0 then
+                    -> $ResponseComplete
+                else
+                    -> $ReceivingBody
+                end
+            }
+            status(): str { @@:("awaiting response") }
+            request_count(): int { @@:(self.requests) }
+            => $^
+        }
+
+        $ReceivingBody => $Open {
+            body_chunk_received(chunk: str) {
+                self.bytes_received = self.bytes_received + self.content_length
+            }
+            body_complete() {
+                -> $ResponseComplete
+            }
+            status(): str { @@:("receiving body") }
+            request_count(): int { @@:(self.requests) }
+            => $^
+        }
+
+        $ResponseComplete => $Open {
+            $>() {
+                self.requests = self.requests + 1
+                if self.ka then
+                    -> $Idle
+                else
+                    -> $Closing
+                end
+            }
+            => $^
+        }
+
+        $Open {
+            connection_error(reason: str) {
+                -> $Disconnected
+            }
+            close() {
+                -> $Closing
+            }
+        }
+
+        $Closing {
+            $>() {
+                self:tcp_close()
+                -> $Disconnected
+            }
+        }
+
+    actions:
+        tcp_connect() {}
+        tcp_close() {}
+        emit_request() {}
+        start_keep_alive_timer() {}
+        cancel_keep_alive_timer() {}
+
+    domain:
+        host: str = ""
+        port: int = 80
+        current_method: str = ""
+        current_path: str = ""
+        response_status: int = 0
+        content_length: int = 0
+        bytes_received: int = 0
+        ka: bool = true
+        requests: int = 0
+}
+
+
+local function check(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " -- expected '" .. tostring(expected) .. "', got '" .. tostring(actual) .. "'")
+        os.exit(1)
+    end
+end
+
+local function test_first_request_keepalive()
+    local conn = @@HttpConnection()
+    check("disconnected", conn:status(), "disconnected")
+    conn:connect("example.com", 80)
+    check("idle after connect", conn:status(), "idle")
+    conn:send_request("GET", "/index.html")
+    check("awaiting response", conn:status(), "awaiting response")
+    conn:headers_received(200, true, 5)
+    check("receiving body", conn:status(), "receiving body")
+    conn:body_complete()
+    check("back to idle (keep-alive)", conn:status(), "idle")
+    check("request count 1", conn:request_count(), 1)
+    print("PASS: first request, keep-alive cycles back to idle")
+end
+
+local function test_empty_body_skips_receiving()
+    local conn = @@HttpConnection()
+    conn:connect("example.com", 80)
+    conn:send_request("GET", "/about")
+    conn:headers_received(200, true, 0)
+    check("idle after empty body", conn:status(), "idle")
+    print("PASS: empty body skips ReceivingBody")
+end
+
+local function test_connection_close_header()
+    local conn = @@HttpConnection()
+    conn:connect("example.com", 80)
+    conn:send_request("POST", "/api")
+    conn:headers_received(201, false, 0)
+    check("disconnected after Connection: close", conn:status(), "disconnected")
+    print("PASS: Connection: close response path")
+end
+
+local function test_keep_alive_timeout()
+    local conn = @@HttpConnection()
+    conn:connect("example.com", 80)
+    check("idle", conn:status(), "idle")
+    conn:keep_alive_timeout()
+    check("disconnected after timeout", conn:status(), "disconnected")
+    print("PASS: keep-alive timeout tears down connection")
+end
+
+local function test_connection_error_during_receive()
+    local conn = @@HttpConnection()
+    conn:connect("example.com", 80)
+    conn:send_request("GET", "/large")
+    conn:headers_received(200, true, 1000)
+    check("receiving body", conn:status(), "receiving body")
+    conn:connection_error("peer reset")
+    check("disconnected after error", conn:status(), "disconnected")
+    print("PASS: connection_error from receiving body forwards via HSM")
+end
+
+local function test_explicit_close_during_idle()
+    local conn = @@HttpConnection()
+    conn:connect("example.com", 80)
+    conn:close()
+    check("close from idle", conn:status(), "disconnected")
+    print("PASS: explicit close from idle via HSM parent")
+end
+
+local function test_multiple_request_reuse()
+    local conn = @@HttpConnection()
+    conn:connect("example.com", 80)
+    conn:send_request("GET", "/one")
+    conn:headers_received(200, true, 0)
+    conn:send_request("GET", "/two")
+    conn:headers_received(200, true, 0)
+    conn:send_request("GET", "/three")
+    conn:headers_received(200, true, 0)
+    check("3 requests on same connection", conn:request_count(), 3)
+    check("still idle", conn:status(), "idle")
+    print("PASS: connection reused across multiple requests")
+end
+
+test_first_request_keepalive()
+test_empty_body_skips_receiving()
+test_connection_close_header()
+test_keep_alive_timeout()
+test_connection_error_during_receive()
+test_explicit_close_during_idle()
+test_multiple_request_reuse()
+print("PASS: all HTTP connection tests passed")

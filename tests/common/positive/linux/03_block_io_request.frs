@@ -1,0 +1,164 @@
+@@target rust
+
+// Block I/O Request — kernel blk-mq layer semantics.
+// Request moves through Idle -> Queued -> InFlight -> (Done|Error) with
+// retry-on-failure and timeout-retry loops. Enter/exit handlers manage
+// the timeout timer; attempts counter is a domain variable so it survives
+// the InFlight -> Queued -> InFlight retry cycle.
+
+@@system BlockRequest {
+    interface:
+        submit(sector: i32, size: i32): String
+        dispatch(): String
+        complete(success: bool): String
+        timeout(): String
+        status(): String
+
+    machine:
+        $Idle {
+            submit(sector: i32, size: i32): String {
+                self.sector = sector;
+                self.size = size;
+                self.attempts = 0;
+                @@:("queued".to_string())
+                -> $Queued
+            }
+            status(): String { @@:("idle".to_string()) }
+        }
+
+        $Queued {
+            dispatch(): String {
+                @@:("dispatched".to_string())
+                -> $InFlight
+            }
+            status(): String { @@:("queued".to_string()) }
+        }
+
+        $InFlight {
+            $>() {
+                self.attempts = self.attempts + 1;
+                self.start_timeout();
+            }
+            <$() {
+                self.cancel_timeout();
+            }
+
+            complete(success: bool): String {
+                if success {
+                    @@:("done".to_string())
+                    -> $Done
+                } else {
+                    if self.attempts < self.max_retries {
+                        @@:("requeued".to_string())
+                        -> $Queued
+                    } else {
+                        @@:("io error".to_string())
+                        -> $Error
+                    }
+                }
+            }
+            timeout(): String {
+                if self.attempts < self.max_retries {
+                    @@:("timeout, retrying".to_string())
+                    -> $Queued
+                } else {
+                    @@:("timeout, giving up".to_string())
+                    -> $Error
+                }
+            }
+            status(): String { @@:("in-flight".to_string()) }
+        }
+
+        $Done {
+            status(): String { @@:("done".to_string()) }
+        }
+
+        $Error {
+            status(): String { @@:("error".to_string()) }
+        }
+
+    actions:
+        start_timeout() {}
+        cancel_timeout() {}
+
+    domain:
+        sector: i32 = 0
+        size: i32 = 0
+        attempts: i32 = 0
+        max_retries: i32 = 3
+        timeout_ms: i32 = 30000
+}
+
+
+fn check(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} — expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn test_happy_path() {
+    let mut req = @@BlockRequest();
+    check("initial idle",   &req.status(),           "idle");
+    check("submit",         &req.submit(1024, 8),    "queued");
+    check("dispatch",       &req.dispatch(),         "dispatched");
+    check("complete ok",    &req.complete(true),     "done");
+    check("terminal done",  &req.status(),           "done");
+    println!("PASS: happy path");
+}
+
+fn test_timeout_retry_then_complete() {
+    let mut req = @@BlockRequest();
+    req.submit(2048, 4);
+    req.dispatch();
+    check("first timeout -> retry", &req.timeout(), "timeout, retrying");
+    check("back to queued after timeout", &req.status(), "queued");
+    req.dispatch();
+    check("complete after retry", &req.complete(true), "done");
+    println!("PASS: timeout then retry success");
+}
+
+fn test_failure_requeue_then_success() {
+    let mut req = @@BlockRequest();
+    req.submit(4096, 2);
+    req.dispatch();
+    check("complete(false) -> requeued", &req.complete(false), "requeued");
+    req.dispatch();
+    check("complete(true) -> done", &req.complete(true), "done");
+    println!("PASS: failure requeue then success");
+}
+
+fn test_retry_exhaustion() {
+    let mut req = @@BlockRequest();
+    req.submit(8192, 1);
+    req.dispatch();
+    check("req 1 failure requeued", &req.complete(false), "requeued");
+    req.dispatch();
+    check("req 2 failure requeued", &req.complete(false), "requeued");
+    req.dispatch();
+    check("req 3 failure -> io error", &req.complete(false), "io error");
+    check("terminal error state", &req.status(), "error");
+    println!("PASS: retry exhaustion -> error");
+}
+
+fn test_timeout_exhaustion() {
+    let mut req = @@BlockRequest();
+    req.submit(16384, 1);
+    req.dispatch();
+    check("to 1 retry", &req.timeout(), "timeout, retrying");
+    req.dispatch();
+    check("to 2 retry", &req.timeout(), "timeout, retrying");
+    req.dispatch();
+    check("to 3 giving up", &req.timeout(), "timeout, giving up");
+    check("error terminal", &req.status(), "error");
+    println!("PASS: timeout exhaustion -> error");
+}
+
+fn main() {
+    test_happy_path();
+    test_timeout_retry_then_complete();
+    test_failure_requeue_then_success();
+    test_retry_exhaustion();
+    test_timeout_exhaustion();
+    println!("PASS: all block I/O request tests passed");
+}

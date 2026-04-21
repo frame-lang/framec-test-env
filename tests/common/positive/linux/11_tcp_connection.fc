@@ -1,0 +1,240 @@
+@@target c
+
+// TCP Connection -- RFC 793 Figure 6 FSM with @@persist for TIME_WAIT.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@persist
+@@system TcpConnection {
+    interface:
+        passive_open()
+        active_open()
+        recv_syn()
+        recv_syn_ack()
+        recv_ack()
+        recv_fin()
+        app_close()
+        app_send(bytes_n: int)
+        timeout_2msl()
+        abort()
+        state_name(): str
+
+    machine:
+        $Closed {
+            passive_open() { -> $Listen }
+            active_open() {
+                TcpConnection_send_syn(self);
+                -> $SynSent
+            }
+            state_name(): str { @@:("CLOSED") }
+        }
+
+        $Listen {
+            recv_syn() {
+                TcpConnection_send_syn_ack(self);
+                -> $SynReceived
+            }
+            app_close() { -> $Closed }
+            state_name(): str { @@:("LISTEN") }
+        }
+
+        $SynSent {
+            recv_syn_ack() {
+                TcpConnection_send_ack(self);
+                -> $Established
+            }
+            recv_syn() {
+                TcpConnection_send_syn_ack(self);
+                -> $SynReceived
+            }
+            app_close() { -> $Closed }
+            state_name(): str { @@:("SYN_SENT") }
+        }
+
+        $SynReceived {
+            recv_ack() { -> $Established }
+            app_close() {
+                TcpConnection_send_fin(self);
+                -> $FinWait1
+            }
+            state_name(): str { @@:("SYN_RECEIVED") }
+        }
+
+        $Established {
+            app_send(bytes_n: int) {
+                self->bytes_sent = self->bytes_sent + bytes_n;
+            }
+            app_close() {
+                TcpConnection_send_fin(self);
+                -> $FinWait1
+            }
+            recv_fin() {
+                TcpConnection_send_ack(self);
+                -> $CloseWait
+            }
+            abort() {
+                TcpConnection_send_rst(self);
+                -> $Closed
+            }
+            state_name(): str { @@:("ESTABLISHED") }
+        }
+
+        $FinWait1 {
+            recv_ack() { -> $FinWait2 }
+            recv_fin() {
+                TcpConnection_send_ack(self);
+                -> $Closing
+            }
+            state_name(): str { @@:("FIN_WAIT_1") }
+        }
+
+        $FinWait2 {
+            recv_fin() {
+                TcpConnection_send_ack(self);
+                -> $TimeWait
+            }
+            state_name(): str { @@:("FIN_WAIT_2") }
+        }
+
+        $Closing {
+            recv_ack() { -> $TimeWait }
+            state_name(): str { @@:("CLOSING") }
+        }
+
+        $TimeWait {
+            $>() {
+                TcpConnection_start_2msl_timer(self);
+            }
+            timeout_2msl() { -> $Closed }
+            state_name(): str { @@:("TIME_WAIT") }
+        }
+
+        $CloseWait {
+            app_close() {
+                TcpConnection_send_fin(self);
+                -> $LastAck
+            }
+            state_name(): str { @@:("CLOSE_WAIT") }
+        }
+
+        $LastAck {
+            recv_ack() { -> $Closed }
+            state_name(): str { @@:("LAST_ACK") }
+        }
+
+    actions:
+        send_syn()         {}
+        send_syn_ack()     {}
+        send_ack()         {}
+        send_fin()         {}
+        send_rst()         {}
+        start_2msl_timer() {}
+
+    domain:
+        local_port: int = 0
+        remote_port: int = 0
+        bytes_sent: int = 0
+}
+
+
+void check(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void test_active_open_full_cycle(void) {
+    TcpConnection* c = @@TcpConnection();
+    check("initial CLOSED", (const char*)TcpConnection_state_name(c), "CLOSED");
+    TcpConnection_active_open(c);
+    check("SYN_SENT", (const char*)TcpConnection_state_name(c), "SYN_SENT");
+    TcpConnection_recv_syn_ack(c);
+    check("ESTABLISHED", (const char*)TcpConnection_state_name(c), "ESTABLISHED");
+    TcpConnection_app_send(c, 1024);
+    TcpConnection_app_close(c);
+    check("FIN_WAIT_1", (const char*)TcpConnection_state_name(c), "FIN_WAIT_1");
+    TcpConnection_recv_ack(c);
+    check("FIN_WAIT_2", (const char*)TcpConnection_state_name(c), "FIN_WAIT_2");
+    TcpConnection_recv_fin(c);
+    check("TIME_WAIT", (const char*)TcpConnection_state_name(c), "TIME_WAIT");
+    TcpConnection_timeout_2msl(c);
+    check("back to CLOSED", (const char*)TcpConnection_state_name(c), "CLOSED");
+    printf("PASS: active open, full cycle to TIME_WAIT\n");
+    TcpConnection_destroy(c);
+}
+
+void test_passive_open_full_cycle(void) {
+    TcpConnection* c = @@TcpConnection();
+    TcpConnection_passive_open(c);
+    check("LISTEN", (const char*)TcpConnection_state_name(c), "LISTEN");
+    TcpConnection_recv_syn(c);
+    check("SYN_RECEIVED", (const char*)TcpConnection_state_name(c), "SYN_RECEIVED");
+    TcpConnection_recv_ack(c);
+    check("ESTABLISHED", (const char*)TcpConnection_state_name(c), "ESTABLISHED");
+    TcpConnection_recv_fin(c);
+    check("CLOSE_WAIT", (const char*)TcpConnection_state_name(c), "CLOSE_WAIT");
+    TcpConnection_app_close(c);
+    check("LAST_ACK", (const char*)TcpConnection_state_name(c), "LAST_ACK");
+    TcpConnection_recv_ack(c);
+    check("CLOSED", (const char*)TcpConnection_state_name(c), "CLOSED");
+    printf("PASS: passive open, peer-initiated close\n");
+    TcpConnection_destroy(c);
+}
+
+void test_simultaneous_close(void) {
+    TcpConnection* c = @@TcpConnection();
+    TcpConnection_active_open(c);
+    TcpConnection_recv_syn_ack(c);
+    TcpConnection_app_close(c);
+    check("in FIN_WAIT_1", (const char*)TcpConnection_state_name(c), "FIN_WAIT_1");
+    TcpConnection_recv_fin(c);
+    check("CLOSING (simultaneous)", (const char*)TcpConnection_state_name(c), "CLOSING");
+    TcpConnection_recv_ack(c);
+    check("TIME_WAIT after CLOSING ACK", (const char*)TcpConnection_state_name(c), "TIME_WAIT");
+    printf("PASS: simultaneous close -> CLOSING -> TIME_WAIT\n");
+    TcpConnection_destroy(c);
+}
+
+void test_abort_from_established(void) {
+    TcpConnection* c = @@TcpConnection();
+    TcpConnection_active_open(c);
+    TcpConnection_recv_syn_ack(c);
+    TcpConnection_abort(c);
+    check("RST drops to CLOSED", (const char*)TcpConnection_state_name(c), "CLOSED");
+    printf("PASS: abort sends RST and returns to CLOSED\n");
+    TcpConnection_destroy(c);
+}
+
+void test_persist_across_restart(void) {
+    TcpConnection* c = @@TcpConnection();
+    TcpConnection_active_open(c);
+    TcpConnection_recv_syn_ack(c);
+    TcpConnection_app_send(c, 2048);
+    TcpConnection_app_close(c);
+    TcpConnection_recv_ack(c);
+    TcpConnection_recv_fin(c);
+    check("TIME_WAIT before persist", (const char*)TcpConnection_state_name(c), "TIME_WAIT");
+    char* snap = TcpConnection_save_state(c);
+    TcpConnection* c2 = TcpConnection_restore_state(snap);
+    check("TIME_WAIT restored", (const char*)TcpConnection_state_name(c2), "TIME_WAIT");
+    TcpConnection_timeout_2msl(c2);
+    check("CLOSED after 2MSL", (const char*)TcpConnection_state_name(c2), "CLOSED");
+    printf("PASS: @@persist survives simulated restart in TIME_WAIT\n");
+    free(snap);
+    TcpConnection_destroy(c);
+    TcpConnection_destroy(c2);
+}
+
+int main(void) {
+    test_active_open_full_cycle();
+    test_passive_open_full_cycle();
+    test_simultaneous_close();
+    test_abort_from_established();
+    test_persist_across_restart();
+    printf("PASS: all TCP connection tests passed\n");
+    return 0;
+}

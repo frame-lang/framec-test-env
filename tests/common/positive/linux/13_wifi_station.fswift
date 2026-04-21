@@ -1,0 +1,218 @@
+@@target swift
+
+// Wi-Fi Station Management -- IEEE 802.11 station state machine.
+
+import Foundation
+
+@@system WifiStation {
+    interface:
+        scan_done(bssid: String, ssid: String)
+        auth_response(success: Bool)
+        assoc_response(success: Bool, aid: Int)
+        eapol_key_msg(msg_num: Int)
+        deauth(reason: String)
+        disassoc(reason: String)
+        disconnect()
+        status(): String
+        key_step(): Int
+
+    machine:
+        $Disconnected {
+            scan_done(bssid: String, ssid: String) {
+                self.bssid = bssid
+                self.ssid = ssid
+                -> $Authenticating
+            }
+            status(): String { @@:("disconnected") }
+            key_step(): Int { @@:(0) }
+        }
+
+        $Authenticating => $Associated {
+            $>() {
+                self.send_auth_request()
+            }
+
+            auth_response(success: Bool) {
+                if success {
+                    -> $Associating
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): String { @@:("authenticating") }
+            key_step(): Int { @@:(0) }
+            => $^
+        }
+
+        $Associating => $Associated {
+            $>() {
+                self.send_assoc_request()
+            }
+
+            assoc_response(success: Bool, aid: Int) {
+                if success {
+                    self.aid = aid
+                    -> $KeyNegotiation
+                } else {
+                    -> $Disconnected
+                }
+            }
+            disassoc(reason: String) {
+                -> $Authenticating
+            }
+            status(): String { @@:("associating") }
+            key_step(): Int { @@:(0) }
+            => $^
+        }
+
+        $KeyNegotiation => $Associated {
+            $.step: Int = 0
+
+            eapol_key_msg(msg_num: Int) {
+                $.step = msg_num
+                if msg_num == 4 {
+                    -> $Connected
+                }
+            }
+            disassoc(reason: String) {
+                -> $Authenticating
+            }
+            status(): String { @@:("key negotiation") }
+            key_step(): Int { @@:($.step) }
+            => $^
+        }
+
+        $Associated {
+            deauth(reason: String) {
+                -> $Disconnected
+            }
+            disconnect() {
+                self.send_deauth()
+                -> $Disconnected
+            }
+        }
+
+        $Connected {
+            disassoc(reason: String) {
+                -> $Authenticating
+            }
+            deauth(reason: String) {
+                -> $Disconnected
+            }
+            disconnect() {
+                self.send_deauth()
+                -> $Disconnected
+            }
+            status(): String { @@:("connected") }
+            key_step(): Int { @@:(4) }
+        }
+
+    actions:
+        send_auth_request() {}
+        send_assoc_request() {}
+        send_deauth() {}
+
+    domain:
+        bssid: String = ""
+        ssid: String = ""
+        aid: Int = 0
+}
+
+
+func check_str(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) -- expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+
+func check_int(_ label: String, _ actual: Int, _ expected: Int) {
+    if actual != expected {
+        print("FAIL: \(label) -- expected \(expected), got \(actual)")
+        exit(1)
+    }
+}
+
+func test_happy_connect() {
+    var sta = @@WifiStation()
+    check_str("initial disconnected", sta.status() as! String, "disconnected")
+    _ = sta.scan_done("AA:BB:CC:DD:EE:FF", "MyNet")
+    check_str("authenticating", sta.status() as! String, "authenticating")
+    _ = sta.auth_response(true)
+    check_str("associating", sta.status() as! String, "associating")
+    _ = sta.assoc_response(true, 1)
+    check_str("key negotiation", sta.status() as! String, "key negotiation")
+    _ = sta.eapol_key_msg(1)
+    check_int("step 1", sta.key_step() as! Int, 1)
+    _ = sta.eapol_key_msg(2)
+    check_int("step 2", sta.key_step() as! Int, 2)
+    _ = sta.eapol_key_msg(3)
+    check_int("step 3", sta.key_step() as! Int, 3)
+    _ = sta.eapol_key_msg(4)
+    check_str("connected", sta.status() as! String, "connected")
+    print("PASS: happy connect through 4-way handshake")
+}
+
+func test_auth_rejection() {
+    var sta = @@WifiStation()
+    _ = sta.scan_done("aa", "net")
+    _ = sta.auth_response(false)
+    check_str("auth rejected -> disconnected", sta.status() as! String, "disconnected")
+    print("PASS: auth rejection returns to disconnected")
+}
+
+func test_deauth_from_keynegotiation_via_hsm() {
+    var sta = @@WifiStation()
+    _ = sta.scan_done("aa", "net")
+    _ = sta.auth_response(true)
+    _ = sta.assoc_response(true, 5)
+    _ = sta.eapol_key_msg(2)
+    check_str("in key negotiation", sta.status() as! String, "key negotiation")
+    _ = sta.deauth("AP restart")
+    check_str("deauth forwarded via HSM -> disconnected", sta.status() as! String, "disconnected")
+    print("PASS: deauth forwards via HSM parent from key negotiation")
+}
+
+func test_disassoc_drops_to_authenticating() {
+    var sta = @@WifiStation()
+    _ = sta.scan_done("aa", "net")
+    _ = sta.auth_response(true)
+    _ = sta.assoc_response(true, 7)
+    _ = sta.eapol_key_msg(2)
+    _ = sta.disassoc("reason")
+    check_str("disassoc -> authenticating", sta.status() as! String, "authenticating")
+    _ = sta.assoc_response(true, 7)
+    check_int("step resets on reentry", sta.key_step() as! Int, 0)
+    print("PASS: disassoc drops to authenticating (state var resets)")
+}
+
+func test_deauth_from_connected() {
+    var sta = @@WifiStation()
+    _ = sta.scan_done("aa", "net")
+    _ = sta.auth_response(true)
+    _ = sta.assoc_response(true, 3)
+    _ = sta.eapol_key_msg(4)
+    check_str("connected", sta.status() as! String, "connected")
+    _ = sta.deauth("inactivity")
+    check_str("deauth from connected", sta.status() as! String, "disconnected")
+    print("PASS: deauth from connected returns to disconnected")
+}
+
+func test_disconnect_from_connected() {
+    var sta = @@WifiStation()
+    _ = sta.scan_done("aa", "net")
+    _ = sta.auth_response(true)
+    _ = sta.assoc_response(true, 3)
+    _ = sta.eapol_key_msg(4)
+    _ = sta.disconnect()
+    check_str("disconnect from connected", sta.status() as! String, "disconnected")
+    print("PASS: explicit disconnect from connected")
+}
+
+test_happy_connect()
+test_auth_rejection()
+test_deauth_from_keynegotiation_via_hsm()
+test_disassoc_drops_to_authenticating()
+test_deauth_from_connected()
+test_disconnect_from_connected()
+print("PASS: all Wi-Fi station tests passed")

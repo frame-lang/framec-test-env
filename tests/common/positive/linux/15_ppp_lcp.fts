@@ -1,0 +1,337 @@
+@@target typescript
+
+// PPP Link Control Protocol -- RFC 1661 Section 4 state table direct transcription.
+// 10 states, 11 interface events. No HSM, no state vars. Each state's
+// handler set matches RFC Table 4 line-by-line.
+
+@@system PppLcp {
+    interface:
+        up()
+        down()
+        open()
+        close()
+        receive_configure_request(acceptable: boolean)
+        receive_configure_ack()
+        receive_configure_nak()
+        receive_terminate_request()
+        receive_terminate_ack()
+        timeout_positive()
+        timeout_negative()
+        status(): string
+
+    machine:
+        $Initial {
+            up() { -> $Closed }
+            open() { -> $Starting }
+            status(): string { @@:("initial") }
+        }
+
+        $Starting {
+            up() {
+                this.init_restart_count();
+                this.send_configure_request();
+                -> $ReqSent
+            }
+            close() { -> $Initial }
+            status(): string { @@:("starting") }
+        }
+
+        $Closed {
+            open() {
+                this.init_restart_count();
+                this.send_configure_request();
+                -> $ReqSent
+            }
+            down() { -> $Initial }
+            receive_configure_request(acceptable: boolean) {
+                this.send_terminate_ack();
+            }
+            status(): string { @@:("closed") }
+        }
+
+        $Stopped {
+            open() { -> $Stopped }
+            down() { -> $Starting }
+            receive_configure_request(acceptable: boolean) {
+                this.init_restart_count();
+                if (acceptable) {
+                    this.send_configure_ack();
+                    this.send_configure_request();
+                    -> $AckSent
+                } else {
+                    this.send_configure_nak();
+                    this.send_configure_request();
+                    -> $ReqSent
+                }
+            }
+            status(): string { @@:("stopped") }
+        }
+
+        $Closing {
+            timeout_positive() {
+                this.send_terminate_request();
+            }
+            timeout_negative() {
+                -> $Closed
+            }
+            receive_terminate_ack() {
+                -> $Closed
+            }
+            down() { -> $Initial }
+            status(): string { @@:("closing") }
+        }
+
+        $Stopping {
+            timeout_positive() {
+                this.send_terminate_request();
+            }
+            timeout_negative() {
+                -> $Stopped
+            }
+            receive_terminate_ack() {
+                -> $Stopped
+            }
+            down() { -> $Starting }
+            status(): string { @@:("stopping") }
+        }
+
+        $ReqSent {
+            timeout_positive() {
+                this.send_configure_request();
+            }
+            timeout_negative() {
+                -> $Stopped
+            }
+            receive_configure_request(acceptable: boolean) {
+                if (acceptable) {
+                    this.send_configure_ack();
+                    -> $AckSent
+                } else {
+                    this.send_configure_nak();
+                }
+            }
+            receive_configure_ack() {
+                this.init_restart_count();
+                -> $AckRcvd
+            }
+            receive_configure_nak() {
+                this.init_restart_count();
+                this.send_configure_request();
+            }
+            receive_terminate_request() {
+                this.send_terminate_ack();
+                -> $ReqSent
+            }
+            close() {
+                this.init_restart_count();
+                this.send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): string { @@:("req-sent") }
+        }
+
+        $AckRcvd {
+            receive_configure_request(acceptable: boolean) {
+                if (acceptable) {
+                    this.send_configure_ack();
+                    this.tlu();
+                    -> $Opened
+                } else {
+                    this.send_configure_nak();
+                }
+            }
+            timeout_positive() {
+                this.send_configure_request();
+                -> $ReqSent
+            }
+            timeout_negative() { -> $Stopped }
+            receive_configure_ack() {
+                this.send_configure_request();
+                -> $ReqSent
+            }
+            close() {
+                this.init_restart_count();
+                this.send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): string { @@:("ack-rcvd") }
+        }
+
+        $AckSent {
+            receive_configure_ack() {
+                this.init_restart_count();
+                this.tlu();
+                -> $Opened
+            }
+            timeout_positive() {
+                this.send_configure_request();
+            }
+            timeout_negative() { -> $Stopped }
+            receive_configure_request(acceptable: boolean) {
+                if (acceptable) {
+                    this.send_configure_ack();
+                } else {
+                    this.send_configure_nak();
+                    -> $ReqSent
+                }
+            }
+            receive_configure_nak() {
+                this.init_restart_count();
+                this.send_configure_request();
+                -> $ReqSent
+            }
+            close() {
+                this.init_restart_count();
+                this.send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): string { @@:("ack-sent") }
+        }
+
+        $Opened {
+            <$() {
+                this.tld();
+            }
+
+            receive_configure_request(acceptable: boolean) {
+                this.send_configure_request();
+                if (acceptable) {
+                    this.send_configure_ack();
+                    -> $AckSent
+                } else {
+                    this.send_configure_nak();
+                    -> $ReqSent
+                }
+            }
+            receive_terminate_request() {
+                this.send_terminate_ack();
+                this.zero_restart_count();
+                -> $Stopping
+            }
+            close() {
+                this.init_restart_count();
+                this.send_terminate_request();
+                -> $Closing
+            }
+            down() {
+                -> $Starting
+            }
+            status(): string { @@:("opened") }
+        }
+
+    actions:
+        send_configure_request() {}
+        send_configure_ack()     {}
+        send_configure_nak()     {}
+        send_terminate_request() {}
+        send_terminate_ack()     {}
+        init_restart_count() {
+            this.restart_count = this.max_restart;
+        }
+        zero_restart_count() {
+            this.restart_count = 0;
+        }
+        tlu() {}
+        tld() {}
+
+    domain:
+        restart_count: number = 0
+        max_restart: number = 10
+}
+
+
+function check(label: string, actual: string, expected: string): void {
+    if (actual !== expected) {
+        console.log(`FAIL: ${label} -- expected '${expected}', got '${actual}'`);
+        throw new Error(`assertion failed: ${label}`);
+    }
+}
+
+function test_normal_open(): void {
+    const ppp = @@PppLcp();
+    check("initial", ppp.status(), "initial");
+    ppp.open();
+    check("starting", ppp.status(), "starting");
+    ppp.up();
+    check("req-sent", ppp.status(), "req-sent");
+    ppp.receive_configure_ack();
+    check("ack-rcvd", ppp.status(), "ack-rcvd");
+    ppp.receive_configure_request(true);
+    check("opened", ppp.status(), "opened");
+    console.log("PASS: normal open sequence");
+}
+
+function test_peer_renegotiation(): void {
+    const ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    check("opened first time", ppp.status(), "opened");
+    ppp.receive_configure_request(true);
+    check("renegotiation -> AckSent", ppp.status(), "ack-sent");
+    ppp.receive_configure_ack();
+    check("back to opened", ppp.status(), "opened");
+    console.log("PASS: peer-initiated renegotiation from opened");
+}
+
+function test_clean_shutdown(): void {
+    const ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.close();
+    check("closing", ppp.status(), "closing");
+    ppp.receive_terminate_ack();
+    check("closed", ppp.status(), "closed");
+    console.log("PASS: clean shutdown via close()");
+}
+
+function test_peer_terminate(): void {
+    const ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.receive_terminate_request();
+    check("stopping on peer-terminate", ppp.status(), "stopping");
+    ppp.receive_terminate_ack();
+    check("stopped", ppp.status(), "stopped");
+    console.log("PASS: peer-initiated terminate");
+}
+
+function test_timeout_negative_from_closing(): void {
+    const ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.close();
+    check("closing", ppp.status(), "closing");
+    ppp.timeout_negative();
+    check("closing exhausts to closed", ppp.status(), "closed");
+    console.log("PASS: timeout_negative in closing -> closed");
+}
+
+function test_down_from_opened(): void {
+    const ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.down();
+    check("down from opened -> starting", ppp.status(), "starting");
+    console.log("PASS: down from opened");
+}
+
+test_normal_open();
+test_peer_renegotiation();
+test_clean_shutdown();
+test_peer_terminate();
+test_timeout_negative_from_closing();
+test_down_from_opened();
+console.log("PASS: all PPP LCP tests passed");

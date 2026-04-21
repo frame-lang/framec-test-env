@@ -1,0 +1,203 @@
+@@target csharp
+
+// Filesystem Freeze — VFS fs/super.c semantics. 3-level HSM:
+//   $Active => $Readable => $Mounted
+//   $Frozen => $Readable => $Mounted
+// $Mounted provides read/sync/unmount for all mounted sub-states.
+// $Active adds write/freeze. $Frozen overrides write to block and adds thaw.
+// $Freezing is transient, bypasses $Readable (state in flux during flush).
+
+using System;
+
+@@system Filesystem {
+    interface:
+        mount(device: String): String
+        unmount(): String
+        freeze(): String
+        thaw(): String
+        write(data: String): String
+        read(): String
+        sync(): String
+        status(): String
+        read_count(): int
+        write_count(): int
+
+    machine:
+        $Unmounted {
+            mount(device: String): String {
+                this.device = device;
+                @@:("mounted")
+                -> $Active
+            }
+            status(): String { @@:("unmounted") }
+            read_count(): int { @@:(this.reads) }
+            write_count(): int { @@:(this.writes) }
+        }
+
+        $Active => $Readable {
+            write(data: String): String {
+                this.writes = this.writes + 1;
+                @@:("wrote")
+            }
+            freeze(): String {
+                @@:("freezing")
+                -> $Freezing
+            }
+            status(): String { @@:("active") }
+            => $^
+        }
+
+        $Freezing => $Mounted {
+            $>() {
+                this.flush_pending_writes();
+                -> $Frozen
+            }
+            status(): String { @@:("freezing") }
+            => $^
+        }
+
+        $Frozen => $Readable {
+            write(data: String): String {
+                @@:("BLOCKED")
+            }
+            thaw(): String {
+                @@:("thawed")
+                -> $Active
+            }
+            status(): String { @@:("frozen") }
+            => $^
+        }
+
+        $Readable => $Mounted {
+            => $^
+        }
+
+        $Mounted {
+            read(): String {
+                this.reads = this.reads + 1;
+                @@:("read")
+            }
+            sync(): String {
+                @@:("synced")
+            }
+            unmount(): String {
+                @@:("unmounting")
+                -> $Unmounting
+            }
+            read_count(): int { @@:(this.reads) }
+            write_count(): int { @@:(this.writes) }
+        }
+
+        $Unmounting {
+            $>() {
+                this.flush_pending_writes();
+                this.release_resources();
+                -> $Unmounted
+            }
+        }
+
+    actions:
+        flush_pending_writes() {}
+        release_resources() {}
+
+    domain:
+        device: String = ""
+        writes: int = 0
+        reads: int = 0
+}
+
+
+class Program {
+    static void check_str(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} — expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+
+    static void check_int(string label, int actual, int expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} — expected {expected}, got {actual}");
+            Environment.Exit(1);
+        }
+    }
+
+    static void test_mount_write_read() {
+        var fs = @@Filesystem();
+        check_str("initial unmounted", (string) fs.status(), "unmounted");
+        check_str("mount", (string) fs.mount("/dev/sda1"), "mounted");
+        check_str("active state", (string) fs.status(), "active");
+        check_str("write 1", (string) fs.write("hello"), "wrote");
+        check_str("read 1", (string) fs.read(), "read");
+        check_str("sync via HSM", (string) fs.sync(), "synced");
+        check_int("read count incremented", (int) fs.read_count(), 1);
+        check_int("write count incremented", (int) fs.write_count(), 1);
+        Console.WriteLine("PASS: mount + write + read + sync");
+    }
+
+    static void test_freeze_blocks_writes_allows_reads() {
+        var fs = @@Filesystem();
+        fs.mount("/dev/sda1");
+        fs.write("before freeze");
+        fs.freeze();
+        check_str("in frozen state", (string) fs.status(), "frozen");
+        check_str("write blocked", (string) fs.write("nope"), "BLOCKED");
+        check_str("read still works", (string) fs.read(), "read");
+        check_int("read count 1", (int) fs.read_count(), 1);
+        check_int("write count unchanged", (int) fs.write_count(), 1);
+        Console.WriteLine("PASS: freeze blocks writes, allows reads (3-level HSM)");
+    }
+
+    static void test_thaw_restores_write() {
+        var fs = @@Filesystem();
+        fs.mount("/dev/sda1");
+        fs.freeze();
+        check_str("thaw", (string) fs.thaw(), "thawed");
+        check_str("back to active", (string) fs.status(), "active");
+        check_str("write works again", (string) fs.write("post-thaw"), "wrote");
+        Console.WriteLine("PASS: thaw restores write capability");
+    }
+
+    static void test_unmount_forwards_via_hsm() {
+        var fs = @@Filesystem();
+        fs.mount("/dev/sda1");
+        check_str("unmount from Active", (string) fs.unmount(), "unmounting");
+        check_str("eventually unmounted", (string) fs.status(), "unmounted");
+        Console.WriteLine("PASS: unmount forwards from Active via $Readable to $Mounted");
+    }
+
+    static void test_freeze_impossible_when_unmounted() {
+        var fs = @@Filesystem();
+        // C# returns null when no handler exists.
+        var ret = fs.freeze();
+        if (ret != null) {
+            Console.WriteLine("FAIL: freeze unmounted expected null, got non-null");
+            Environment.Exit(1);
+        }
+        check_str("still unmounted", (string) fs.status(), "unmounted");
+        Console.WriteLine("PASS: freeze on unmounted fs is no-op");
+    }
+
+    static void test_read_count_accumulates_across_states() {
+        var fs = @@Filesystem();
+        fs.mount("/dev/sda1");
+        fs.read();
+        fs.read();
+        fs.freeze();
+        fs.read();
+        fs.thaw();
+        fs.read();
+        check_int("reads across Active/Frozen/Active", (int) fs.read_count(), 4);
+        Console.WriteLine("PASS: read count spans states (domain var)");
+    }
+
+    static void Main(string[] args) {
+        test_mount_write_read();
+        test_freeze_blocks_writes_allows_reads();
+        test_thaw_restores_write();
+        test_unmount_forwards_via_hsm();
+        test_freeze_impossible_when_unmounted();
+        test_read_count_accumulates_across_states();
+        Console.WriteLine("PASS: all filesystem freeze tests passed");
+    }
+}

@@ -1,0 +1,266 @@
+@@target javascript
+
+// Kernel Module Loader — pipeline with compensation (saga pattern).
+// Forward: Idle -> ResolvingSymbols -> AllocatingMemory -> Relocating -> Initializing -> Live
+// Compensation chain: UndoRelocate -> UndoAlloc -> Failed
+
+@@system ModuleLoader {
+    interface:
+        load(name: string)
+        unload(): string
+        acquire(): string
+        release(): string
+        resolve_done(success: boolean, reason: string)
+        alloc_done(success: boolean, reason: string)
+        relocate_done(success: boolean, reason: string)
+        init_done(success: boolean, reason: string)
+        status(): string
+        refcount(): number
+        failure_reason(): string
+
+    machine:
+        $Idle {
+            load(name: string) {
+                this.name = name;
+                this.failure = "";
+                -> $ResolvingSymbols
+            }
+            status(): string { @@:("idle") }
+        }
+
+        $ResolvingSymbols {
+            $>() {
+                this.do_resolve(this.name);
+            }
+            resolve_done(success: boolean, reason: string) {
+                if (success) {
+                    -> $AllocatingMemory
+                } else {
+                    this.failure = reason;
+                    -> $Failed
+                }
+            }
+            status(): string { @@:("resolving") }
+        }
+
+        $AllocatingMemory {
+            $>() {
+                this.do_alloc(this.name);
+            }
+            alloc_done(success: boolean, reason: string) {
+                if (success) {
+                    -> $Relocating
+                } else {
+                    this.failure = reason;
+                    -> $Failed
+                }
+            }
+            status(): string { @@:("allocating") }
+        }
+
+        $Relocating {
+            $>() {
+                this.do_relocate(this.name);
+            }
+            relocate_done(success: boolean, reason: string) {
+                if (success) {
+                    -> $Initializing
+                } else {
+                    this.failure = reason;
+                    -> $UndoAlloc
+                }
+            }
+            status(): string { @@:("relocating") }
+        }
+
+        $Initializing {
+            $>() {
+                this.do_init(this.name);
+            }
+            init_done(success: boolean, reason: string) {
+                if (success) {
+                    -> $Live
+                } else {
+                    this.failure = reason;
+                    -> $UndoRelocate
+                }
+            }
+            status(): string { @@:("initializing") }
+        }
+
+        $UndoRelocate {
+            $>() {
+                this.do_undo_relocate(this.name);
+                -> $UndoAlloc
+            }
+        }
+
+        $UndoAlloc {
+            $>() {
+                this.do_free(this.name);
+                -> $Failed
+            }
+        }
+
+        $Live {
+            $>() {
+                this.refs = 0;
+            }
+
+            acquire(): string {
+                this.refs = this.refs + 1;
+                @@:("acquired")
+            }
+            release(): string {
+                this.refs = this.refs - 1;
+                @@:("released")
+            }
+            unload(): string {
+                if (this.refs > 0) {
+                    @@:("busy")
+                } else {
+                    @@:("unloading")
+                    -> $Unloading
+                }
+            }
+            status(): string { @@:("live") }
+            refcount(): number { @@:(this.refs) }
+        }
+
+        $Unloading {
+            $>() {
+                this.do_exit(this.name);
+                this.do_free(this.name);
+                -> $Idle
+            }
+        }
+
+        $Failed {
+            load(name: string) {
+                this.name = name;
+                this.failure = "";
+                -> $ResolvingSymbols
+            }
+            status(): string { @@:("failed") }
+            failure_reason(): string { @@:(this.failure) }
+        }
+
+    actions:
+        do_resolve(name) {}
+        do_alloc(name) {}
+        do_relocate(name) {}
+        do_init(name) {}
+        do_undo_relocate(name) {}
+        do_free(name) {}
+        do_exit(name) {}
+
+    domain:
+        name = ""
+        failure = ""
+        refs = 0
+}
+
+
+function check(label, actual, expected) {
+    if (actual !== expected) {
+        console.log(`FAIL: ${label} — expected '${expected}', got '${actual}'`);
+        throw new Error(`assertion failed: ${label}`);
+    }
+}
+
+function test_happy_load_unload() {
+    const loader = @@ModuleLoader();
+    check("initial idle", loader.status(), "idle");
+    loader.load("ext4");
+    check("resolving", loader.status(), "resolving");
+    loader.resolve_done(true, "");
+    check("allocating", loader.status(), "allocating");
+    loader.alloc_done(true, "");
+    check("relocating", loader.status(), "relocating");
+    loader.relocate_done(true, "");
+    check("initializing", loader.status(), "initializing");
+    loader.init_done(true, "");
+    check("live", loader.status(), "live");
+    check("refcount 0", loader.refcount(), 0);
+    check("unload empty module", loader.unload(), "unloading");
+    check("back to idle", loader.status(), "idle");
+    console.log("PASS: happy load/unload pipeline");
+}
+
+function test_init_failure_compensates() {
+    const loader = @@ModuleLoader();
+    loader.load("buggy");
+    loader.resolve_done(true, "");
+    loader.alloc_done(true, "");
+    loader.relocate_done(true, "");
+    loader.init_done(false, "ENOMEM");
+    check("failed state", loader.status(), "failed");
+    check("failure captured", loader.failure_reason(), "ENOMEM");
+    console.log("PASS: init failure compensation");
+}
+
+function test_relocate_failure_compensates() {
+    const loader = @@ModuleLoader();
+    loader.load("symbol_err");
+    loader.resolve_done(true, "");
+    loader.alloc_done(true, "");
+    loader.relocate_done(false, "undefined symbol");
+    check("failed from relocate", loader.status(), "failed");
+    check("reason captured", loader.failure_reason(), "undefined symbol");
+    console.log("PASS: relocate failure compensation");
+}
+
+function test_early_failure_no_compensation_needed() {
+    const loader = @@ModuleLoader();
+    loader.load("no_such_sym");
+    loader.resolve_done(false, "symbol not found");
+    check("direct fail from resolve", loader.status(), "failed");
+    check("resolve reason", loader.failure_reason(), "symbol not found");
+    console.log("PASS: early failure without compensation");
+}
+
+function test_refcount_blocks_unload() {
+    const loader = @@ModuleLoader();
+    loader.load("shared_lib");
+    loader.resolve_done(true, "");
+    loader.alloc_done(true, "");
+    loader.relocate_done(true, "");
+    loader.init_done(true, "");
+    check("acquire returns 'acquired'", loader.acquire(), "acquired");
+    check("refcount 1", loader.refcount(), 1);
+    check("acquire again", loader.acquire(), "acquired");
+    check("refcount 2", loader.refcount(), 2);
+    check("unload blocked by refs", loader.unload(), "busy");
+    check("still live", loader.status(), "live");
+    loader.release();
+    check("refcount after release", loader.refcount(), 1);
+    check("still busy", loader.unload(), "busy");
+    loader.release();
+    check("refcount 0", loader.refcount(), 0);
+    check("now unloads", loader.unload(), "unloading");
+    check("idle again", loader.status(), "idle");
+    console.log("PASS: refcount blocks unload");
+}
+
+function test_reload_from_failed() {
+    const loader = @@ModuleLoader();
+    loader.load("badmod");
+    loader.resolve_done(false, "initial fail");
+    check("failed", loader.status(), "failed");
+    loader.load("goodmod");
+    check("restarted in resolving", loader.status(), "resolving");
+    loader.resolve_done(true, "");
+    loader.alloc_done(true, "");
+    loader.relocate_done(true, "");
+    loader.init_done(true, "");
+    check("recovered to live", loader.status(), "live");
+    console.log("PASS: reload from failed");
+}
+
+test_happy_load_unload();
+test_init_failure_compensates();
+test_relocate_failure_compensates();
+test_early_failure_no_compensation_needed();
+test_refcount_blocks_unload();
+test_reload_from_failed();
+console.log("PASS: all kernel module loader tests passed");

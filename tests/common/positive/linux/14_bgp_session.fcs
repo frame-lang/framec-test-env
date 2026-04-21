@@ -1,0 +1,247 @@
+@@target csharp
+
+// BGP Finite State Machine -- RFC 4271 Section 8 direct transcription.
+
+using System;
+using System.Text.Json;
+
+@@persist
+@@system BgpSession {
+    interface:
+        manual_start()
+        manual_stop()
+        tcp_connection_confirmed()
+        tcp_connection_fails()
+        open_received(asn: int, hold_time: int)
+        keepalive_received()
+        notification_received(code: int, subcode: int)
+        hold_timer_expired()
+        keepalive_timer_expired()
+        connect_retry_timer_expired()
+        status(): String
+
+    machine:
+        $Idle {
+            manual_start() {
+                this.connect_retry_count = 0;
+                this.start_connect_retry_timer();
+                this.initiate_tcp_connection();
+                -> $Connect
+            }
+            status(): String { @@:("idle") }
+        }
+
+        $Connect {
+            tcp_connection_confirmed() {
+                this.cancel_connect_retry_timer();
+                this.send_open();
+                -> $OpenSent
+            }
+            tcp_connection_fails() {
+                -> $Active
+            }
+            connect_retry_timer_expired() {
+                this.initiate_tcp_connection();
+                this.start_connect_retry_timer();
+            }
+            manual_stop() {
+                -> $Idle
+            }
+            status(): String { @@:("connect") }
+        }
+
+        $Active {
+            tcp_connection_confirmed() {
+                this.cancel_connect_retry_timer();
+                this.send_open();
+                -> $OpenSent
+            }
+            connect_retry_timer_expired() {
+                this.connect_retry_count = this.connect_retry_count + 1;
+                this.initiate_tcp_connection();
+                this.start_connect_retry_timer();
+                -> $Connect
+            }
+            manual_stop() {
+                -> $Idle
+            }
+            status(): String { @@:("active") }
+        }
+
+        $OpenSent {
+            open_received(asn: int, hold_time: int) {
+                this.peer_asn = asn;
+                this.negotiated_hold = hold_time;
+                this.cancel_hold_timer();
+                this.send_keepalive();
+                -> $OpenConfirm
+            }
+            tcp_connection_fails() {
+                this.cancel_hold_timer();
+                -> $Active
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                this.send_notification();
+                -> $Idle
+            }
+            manual_stop() {
+                this.send_notification();
+                -> $Idle
+            }
+            status(): String { @@:("open sent") }
+        }
+
+        $OpenConfirm {
+            keepalive_received() {
+                -> $Established
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                this.send_notification();
+                -> $Idle
+            }
+            keepalive_timer_expired() {
+                this.send_keepalive();
+            }
+            manual_stop() {
+                this.send_notification();
+                -> $Idle
+            }
+            status(): String { @@:("open confirm") }
+        }
+
+        $Established {
+            keepalive_received() {
+                this.reset_hold_timer();
+            }
+            keepalive_timer_expired() {
+                this.send_keepalive();
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                this.send_notification();
+                -> $Idle
+            }
+            manual_stop() {
+                this.send_notification();
+                -> $Idle
+            }
+            status(): String { @@:("established") }
+        }
+
+    actions:
+        initiate_tcp_connection()   {}
+        send_open()                 {}
+        send_keepalive()            {}
+        send_notification()         {}
+        start_connect_retry_timer() {}
+        cancel_connect_retry_timer(){}
+        cancel_hold_timer()         {}
+        reset_hold_timer()          {}
+
+    domain:
+        local_asn: int = 65001
+        peer_asn: int = 0
+        negotiated_hold: int = 0
+        connect_retry_count: int = 0
+}
+
+
+class Program {
+    static void check(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} -- expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+
+    static void test_full_session_establishment() {
+        var bgp = @@BgpSession();
+        check("initial idle", (string) bgp.status(), "idle");
+        bgp.manual_start();
+        check("connect", (string) bgp.status(), "connect");
+        bgp.tcp_connection_confirmed();
+        check("open sent", (string) bgp.status(), "open sent");
+        bgp.open_received(65002, 60);
+        check("open confirm", (string) bgp.status(), "open confirm");
+        bgp.keepalive_received();
+        check("established", (string) bgp.status(), "established");
+        Console.WriteLine("PASS: full BGP session establishment");
+    }
+
+    static void test_persist_across_restart() {
+        var bgp = @@BgpSession();
+        bgp.manual_start();
+        bgp.tcp_connection_confirmed();
+        bgp.open_received(65002, 60);
+        bgp.keepalive_received();
+        check("established", (string) bgp.status(), "established");
+        var snap = bgp.SaveState();
+        var bgp2 = BgpSession.RestoreState(snap);
+        check("established survived restart", (string) bgp2.status(), "established");
+        bgp2.keepalive_timer_expired();
+        bgp2.keepalive_received();
+        check("still established", (string) bgp2.status(), "established");
+        Console.WriteLine("PASS: @@persist -- BGP session survives daemon restart");
+    }
+
+    static void test_hold_timer_teardown() {
+        var bgp = @@BgpSession();
+        bgp.manual_start();
+        bgp.tcp_connection_confirmed();
+        bgp.open_received(65002, 60);
+        bgp.keepalive_received();
+        bgp.hold_timer_expired();
+        check("hold expiry tears down", (string) bgp.status(), "idle");
+        Console.WriteLine("PASS: hold timer expiry returns to idle");
+    }
+
+    static void test_tcp_failure_goes_active() {
+        var bgp = @@BgpSession();
+        bgp.manual_start();
+        bgp.tcp_connection_fails();
+        check("active after TCP fail", (string) bgp.status(), "active");
+        bgp.connect_retry_timer_expired();
+        check("retry transitions back to connect", (string) bgp.status(), "connect");
+        Console.WriteLine("PASS: TCP failure path Active -> Connect");
+    }
+
+    static void test_notification_in_established_teardown() {
+        var bgp = @@BgpSession();
+        bgp.manual_start();
+        bgp.tcp_connection_confirmed();
+        bgp.open_received(65002, 60);
+        bgp.keepalive_received();
+        bgp.notification_received(6, 0);
+        check("notification tears down", (string) bgp.status(), "idle");
+        Console.WriteLine("PASS: notification in Established -> idle");
+    }
+
+    static void test_manual_stop_from_established() {
+        var bgp = @@BgpSession();
+        bgp.manual_start();
+        bgp.tcp_connection_confirmed();
+        bgp.open_received(65002, 60);
+        bgp.keepalive_received();
+        bgp.manual_stop();
+        check("manual stop", (string) bgp.status(), "idle");
+        Console.WriteLine("PASS: manual_stop from established");
+    }
+
+    static void Main(string[] args) {
+        test_full_session_establishment();
+        test_persist_across_restart();
+        test_hold_timer_teardown();
+        test_tcp_failure_goes_active();
+        test_notification_in_established_teardown();
+        test_manual_stop_from_established();
+        Console.WriteLine("PASS: all BGP session tests passed");
+    }
+}

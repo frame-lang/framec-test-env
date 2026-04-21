@@ -1,0 +1,244 @@
+@@target c
+
+// HTTP/1.1 Connection -- keep-alive lifecycle with HSM for cross-cutting errors.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system HttpConnection {
+    interface:
+        connect(host: str, port: int)
+        send_request(method: str, path: str)
+        headers_received(status_code: int, keep_alive: bool, content_length: int)
+        body_chunk_received(chunk: str)
+        body_complete()
+        keep_alive_timeout()
+        connection_error(reason: str)
+        close()
+        status(): str
+        request_count(): int
+
+    machine:
+        $Disconnected {
+            connect(host: str, port: int) {
+                self->host = host;
+                self->port = port;
+                -> $Connecting
+            }
+            status(): str { @@:("disconnected") }
+            request_count(): int { @@:(self->requests) }
+        }
+
+        $Connecting {
+            $>() {
+                HttpConnection_tcp_connect(self);
+                -> $Idle
+            }
+        }
+
+        $Idle => $Open {
+            $>() {
+                HttpConnection_start_keep_alive_timer(self);
+            }
+            <$() {
+                HttpConnection_cancel_keep_alive_timer(self);
+            }
+
+            send_request(method: str, path: str) {
+                self->current_method = method;
+                self->current_path = path;
+                HttpConnection_emit_request(self);
+                -> $AwaitingResponse
+            }
+            keep_alive_timeout() {
+                -> $Closing
+            }
+            status(): str { @@:("idle") }
+            request_count(): int { @@:(self->requests) }
+            => $^
+        }
+
+        $AwaitingResponse => $Open {
+            headers_received(status_code: int, keep_alive: bool, content_length: int) {
+                self->response_status = status_code;
+                self->ka = keep_alive;
+                self->content_length = content_length;
+                if (content_length == 0) {
+                    -> $ResponseComplete
+                } else {
+                    -> $ReceivingBody
+                }
+            }
+            status(): str { @@:("awaiting response") }
+            request_count(): int { @@:(self->requests) }
+            => $^
+        }
+
+        $ReceivingBody => $Open {
+            body_chunk_received(chunk: str) {
+                self->bytes_received = self->bytes_received + self->content_length;
+            }
+            body_complete() {
+                -> $ResponseComplete
+            }
+            status(): str { @@:("receiving body") }
+            request_count(): int { @@:(self->requests) }
+            => $^
+        }
+
+        $ResponseComplete => $Open {
+            $>() {
+                self->requests = self->requests + 1;
+                if (self->ka) {
+                    -> $Idle
+                } else {
+                    -> $Closing
+                }
+            }
+            => $^
+        }
+
+        $Open {
+            connection_error(reason: str) {
+                -> $Disconnected
+            }
+            close() {
+                -> $Closing
+            }
+        }
+
+        $Closing {
+            $>() {
+                HttpConnection_tcp_close(self);
+                -> $Disconnected
+            }
+        }
+
+    actions:
+        tcp_connect() {}
+        tcp_close() {}
+        emit_request() {}
+        start_keep_alive_timer() {}
+        cancel_keep_alive_timer() {}
+
+    domain:
+        host: str = ""
+        port: int = 80
+        current_method: str = ""
+        current_path: str = ""
+        response_status: int = 0
+        content_length: int = 0
+        bytes_received: int = 0
+        ka: bool = 1
+        requests: int = 0
+}
+
+
+void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void check_int(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s -- expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void test_first_request_keepalive(void) {
+    HttpConnection* conn = @@HttpConnection();
+    check_str("disconnected", (const char*)HttpConnection_status(conn), "disconnected");
+    HttpConnection_connect(conn, "example.com", 80);
+    check_str("idle after connect", (const char*)HttpConnection_status(conn), "idle");
+    HttpConnection_send_request(conn, "GET", "/index.html");
+    check_str("awaiting response", (const char*)HttpConnection_status(conn), "awaiting response");
+    HttpConnection_headers_received(conn, 200, 1, 5);
+    check_str("receiving body", (const char*)HttpConnection_status(conn), "receiving body");
+    HttpConnection_body_complete(conn);
+    check_str("back to idle (keep-alive)", (const char*)HttpConnection_status(conn), "idle");
+    check_int("request count 1", HttpConnection_request_count(conn), 1);
+    printf("PASS: first request, keep-alive cycles back to idle\n");
+    HttpConnection_destroy(conn);
+}
+
+void test_empty_body_skips_receiving(void) {
+    HttpConnection* conn = @@HttpConnection();
+    HttpConnection_connect(conn, "example.com", 80);
+    HttpConnection_send_request(conn, "GET", "/about");
+    HttpConnection_headers_received(conn, 200, 1, 0);
+    check_str("idle after empty body", (const char*)HttpConnection_status(conn), "idle");
+    printf("PASS: empty body skips ReceivingBody\n");
+    HttpConnection_destroy(conn);
+}
+
+void test_connection_close_header(void) {
+    HttpConnection* conn = @@HttpConnection();
+    HttpConnection_connect(conn, "example.com", 80);
+    HttpConnection_send_request(conn, "POST", "/api");
+    HttpConnection_headers_received(conn, 201, 0, 0);
+    check_str("disconnected after Connection: close", (const char*)HttpConnection_status(conn), "disconnected");
+    printf("PASS: Connection: close response path\n");
+    HttpConnection_destroy(conn);
+}
+
+void test_keep_alive_timeout(void) {
+    HttpConnection* conn = @@HttpConnection();
+    HttpConnection_connect(conn, "example.com", 80);
+    check_str("idle", (const char*)HttpConnection_status(conn), "idle");
+    HttpConnection_keep_alive_timeout(conn);
+    check_str("disconnected after timeout", (const char*)HttpConnection_status(conn), "disconnected");
+    printf("PASS: keep-alive timeout tears down connection\n");
+    HttpConnection_destroy(conn);
+}
+
+void test_connection_error_during_receive(void) {
+    HttpConnection* conn = @@HttpConnection();
+    HttpConnection_connect(conn, "example.com", 80);
+    HttpConnection_send_request(conn, "GET", "/large");
+    HttpConnection_headers_received(conn, 200, 1, 1000);
+    check_str("receiving body", (const char*)HttpConnection_status(conn), "receiving body");
+    HttpConnection_connection_error(conn, "peer reset");
+    check_str("disconnected after error", (const char*)HttpConnection_status(conn), "disconnected");
+    printf("PASS: connection_error from receiving body forwards via HSM\n");
+    HttpConnection_destroy(conn);
+}
+
+void test_explicit_close_during_idle(void) {
+    HttpConnection* conn = @@HttpConnection();
+    HttpConnection_connect(conn, "example.com", 80);
+    HttpConnection_close(conn);
+    check_str("close from idle", (const char*)HttpConnection_status(conn), "disconnected");
+    printf("PASS: explicit close from idle via HSM parent\n");
+    HttpConnection_destroy(conn);
+}
+
+void test_multiple_request_reuse(void) {
+    HttpConnection* conn = @@HttpConnection();
+    HttpConnection_connect(conn, "example.com", 80);
+    HttpConnection_send_request(conn, "GET", "/one");
+    HttpConnection_headers_received(conn, 200, 1, 0);
+    HttpConnection_send_request(conn, "GET", "/two");
+    HttpConnection_headers_received(conn, 200, 1, 0);
+    HttpConnection_send_request(conn, "GET", "/three");
+    HttpConnection_headers_received(conn, 200, 1, 0);
+    check_int("3 requests on same connection", HttpConnection_request_count(conn), 3);
+    check_str("still idle", (const char*)HttpConnection_status(conn), "idle");
+    printf("PASS: connection reused across multiple requests\n");
+    HttpConnection_destroy(conn);
+}
+
+int main(void) {
+    test_first_request_keepalive();
+    test_empty_body_skips_receiving();
+    test_connection_close_header();
+    test_keep_alive_timeout();
+    test_connection_error_during_receive();
+    test_explicit_close_during_idle();
+    test_multiple_request_reuse();
+    printf("PASS: all HTTP connection tests passed\n");
+    return 0;
+}

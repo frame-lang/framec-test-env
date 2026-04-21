@@ -1,0 +1,286 @@
+@@target c
+
+// Kernel Module Loader — pipeline with compensation (saga pattern).
+// Forward: Idle -> ResolvingSymbols -> AllocatingMemory -> Relocating -> Initializing -> Live
+// Compensation chain: UndoRelocate -> UndoAlloc -> Failed
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system ModuleLoader {
+    interface:
+        load(name: str)
+        unload(): str
+        acquire(): str
+        release(): str
+        resolve_done(success: bool, reason: str)
+        alloc_done(success: bool, reason: str)
+        relocate_done(success: bool, reason: str)
+        init_done(success: bool, reason: str)
+        status(): str
+        refcount(): int
+        failure_reason(): str
+
+    machine:
+        $Idle {
+            load(name: str) {
+                self->name = name;
+                self->failure = "";
+                -> $ResolvingSymbols
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $ResolvingSymbols {
+            $>() {
+                ModuleLoader_do_resolve(self, self->name);
+            }
+            resolve_done(success: bool, reason: str) {
+                if (success) {
+                    -> $AllocatingMemory
+                } else {
+                    self->failure = reason;
+                    -> $Failed
+                }
+            }
+            status(): str { @@:("resolving") }
+        }
+
+        $AllocatingMemory {
+            $>() {
+                ModuleLoader_do_alloc(self, self->name);
+            }
+            alloc_done(success: bool, reason: str) {
+                if (success) {
+                    -> $Relocating
+                } else {
+                    self->failure = reason;
+                    -> $Failed
+                }
+            }
+            status(): str { @@:("allocating") }
+        }
+
+        $Relocating {
+            $>() {
+                ModuleLoader_do_relocate(self, self->name);
+            }
+            relocate_done(success: bool, reason: str) {
+                if (success) {
+                    -> $Initializing
+                } else {
+                    self->failure = reason;
+                    -> $UndoAlloc
+                }
+            }
+            status(): str { @@:("relocating") }
+        }
+
+        $Initializing {
+            $>() {
+                ModuleLoader_do_init(self, self->name);
+            }
+            init_done(success: bool, reason: str) {
+                if (success) {
+                    -> $Live
+                } else {
+                    self->failure = reason;
+                    -> $UndoRelocate
+                }
+            }
+            status(): str { @@:("initializing") }
+        }
+
+        $UndoRelocate {
+            $>() {
+                ModuleLoader_do_undo_relocate(self, self->name);
+                -> $UndoAlloc
+            }
+        }
+
+        $UndoAlloc {
+            $>() {
+                ModuleLoader_do_free(self, self->name);
+                -> $Failed
+            }
+        }
+
+        $Live {
+            $>() {
+                self->refs = 0;
+            }
+
+            acquire(): str {
+                self->refs = self->refs + 1;
+                @@:("acquired")
+            }
+            release(): str {
+                self->refs = self->refs - 1;
+                @@:("released")
+            }
+            unload(): str {
+                if (self->refs > 0) {
+                    @@:("busy")
+                } else {
+                    @@:("unloading")
+                    -> $Unloading
+                }
+            }
+            status(): str { @@:("live") }
+            refcount(): int { @@:(self->refs) }
+        }
+
+        $Unloading {
+            $>() {
+                ModuleLoader_do_exit(self, self->name);
+                ModuleLoader_do_free(self, self->name);
+                -> $Idle
+            }
+        }
+
+        $Failed {
+            load(name: str) {
+                self->name = name;
+                self->failure = "";
+                -> $ResolvingSymbols
+            }
+            status(): str { @@:("failed") }
+            failure_reason(): str { @@:(self->failure) }
+        }
+
+    actions:
+        do_resolve(name: str) {}
+        do_alloc(name: str) {}
+        do_relocate(name: str) {}
+        do_init(name: str) {}
+        do_undo_relocate(name: str) {}
+        do_free(name: str) {}
+        do_exit(name: str) {}
+
+    domain:
+        name: str = ""
+        failure: str = ""
+        refs: int = 0
+}
+
+
+void check_str(const char* label, const char* actual, const char* expected) {
+    if (actual == NULL || strcmp(actual, expected) != 0) {
+        printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual ? actual : "(null)");
+        exit(1);
+    }
+}
+
+void check_int(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s — expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void test_happy_load_unload(void) {
+    ModuleLoader* loader = @@ModuleLoader();
+    check_str("initial idle", (const char*)ModuleLoader_status(loader), "idle");
+    ModuleLoader_load(loader, "ext4");
+    check_str("resolving", (const char*)ModuleLoader_status(loader), "resolving");
+    ModuleLoader_resolve_done(loader, 1, "");
+    check_str("allocating", (const char*)ModuleLoader_status(loader), "allocating");
+    ModuleLoader_alloc_done(loader, 1, "");
+    check_str("relocating", (const char*)ModuleLoader_status(loader), "relocating");
+    ModuleLoader_relocate_done(loader, 1, "");
+    check_str("initializing", (const char*)ModuleLoader_status(loader), "initializing");
+    ModuleLoader_init_done(loader, 1, "");
+    check_str("live", (const char*)ModuleLoader_status(loader), "live");
+    check_int("refcount 0", ModuleLoader_refcount(loader), 0);
+    check_str("unload empty module", (const char*)ModuleLoader_unload(loader), "unloading");
+    check_str("back to idle", (const char*)ModuleLoader_status(loader), "idle");
+    printf("PASS: happy load/unload pipeline\n");
+    ModuleLoader_destroy(loader);
+}
+
+void test_init_failure_compensates(void) {
+    ModuleLoader* loader = @@ModuleLoader();
+    ModuleLoader_load(loader, "buggy");
+    ModuleLoader_resolve_done(loader, 1, "");
+    ModuleLoader_alloc_done(loader, 1, "");
+    ModuleLoader_relocate_done(loader, 1, "");
+    ModuleLoader_init_done(loader, 0, "ENOMEM");
+    check_str("failed state", (const char*)ModuleLoader_status(loader), "failed");
+    check_str("failure captured", (const char*)ModuleLoader_failure_reason(loader), "ENOMEM");
+    printf("PASS: init failure compensation\n");
+    ModuleLoader_destroy(loader);
+}
+
+void test_relocate_failure_compensates(void) {
+    ModuleLoader* loader = @@ModuleLoader();
+    ModuleLoader_load(loader, "symbol_err");
+    ModuleLoader_resolve_done(loader, 1, "");
+    ModuleLoader_alloc_done(loader, 1, "");
+    ModuleLoader_relocate_done(loader, 0, "undefined symbol");
+    check_str("failed from relocate", (const char*)ModuleLoader_status(loader), "failed");
+    check_str("reason captured", (const char*)ModuleLoader_failure_reason(loader), "undefined symbol");
+    printf("PASS: relocate failure compensation\n");
+    ModuleLoader_destroy(loader);
+}
+
+void test_early_failure_no_compensation_needed(void) {
+    ModuleLoader* loader = @@ModuleLoader();
+    ModuleLoader_load(loader, "no_such_sym");
+    ModuleLoader_resolve_done(loader, 0, "symbol not found");
+    check_str("direct fail from resolve", (const char*)ModuleLoader_status(loader), "failed");
+    check_str("resolve reason", (const char*)ModuleLoader_failure_reason(loader), "symbol not found");
+    printf("PASS: early failure without compensation\n");
+    ModuleLoader_destroy(loader);
+}
+
+void test_refcount_blocks_unload(void) {
+    ModuleLoader* loader = @@ModuleLoader();
+    ModuleLoader_load(loader, "shared_lib");
+    ModuleLoader_resolve_done(loader, 1, "");
+    ModuleLoader_alloc_done(loader, 1, "");
+    ModuleLoader_relocate_done(loader, 1, "");
+    ModuleLoader_init_done(loader, 1, "");
+    check_str("acquire returns 'acquired'", (const char*)ModuleLoader_acquire(loader), "acquired");
+    check_int("refcount 1", ModuleLoader_refcount(loader), 1);
+    check_str("acquire again", (const char*)ModuleLoader_acquire(loader), "acquired");
+    check_int("refcount 2", ModuleLoader_refcount(loader), 2);
+    check_str("unload blocked by refs", (const char*)ModuleLoader_unload(loader), "busy");
+    check_str("still live", (const char*)ModuleLoader_status(loader), "live");
+    ModuleLoader_release(loader);
+    check_int("refcount after release", ModuleLoader_refcount(loader), 1);
+    check_str("still busy", (const char*)ModuleLoader_unload(loader), "busy");
+    ModuleLoader_release(loader);
+    check_int("refcount 0", ModuleLoader_refcount(loader), 0);
+    check_str("now unloads", (const char*)ModuleLoader_unload(loader), "unloading");
+    check_str("idle again", (const char*)ModuleLoader_status(loader), "idle");
+    printf("PASS: refcount blocks unload\n");
+    ModuleLoader_destroy(loader);
+}
+
+void test_reload_from_failed(void) {
+    ModuleLoader* loader = @@ModuleLoader();
+    ModuleLoader_load(loader, "badmod");
+    ModuleLoader_resolve_done(loader, 0, "initial fail");
+    check_str("failed", (const char*)ModuleLoader_status(loader), "failed");
+    ModuleLoader_load(loader, "goodmod");
+    check_str("restarted in resolving", (const char*)ModuleLoader_status(loader), "resolving");
+    ModuleLoader_resolve_done(loader, 1, "");
+    ModuleLoader_alloc_done(loader, 1, "");
+    ModuleLoader_relocate_done(loader, 1, "");
+    ModuleLoader_init_done(loader, 1, "");
+    check_str("recovered to live", (const char*)ModuleLoader_status(loader), "live");
+    printf("PASS: reload from failed\n");
+    ModuleLoader_destroy(loader);
+}
+
+int main(void) {
+    test_happy_load_unload();
+    test_init_failure_compensates();
+    test_relocate_failure_compensates();
+    test_early_failure_no_compensation_needed();
+    test_refcount_blocks_unload();
+    test_reload_from_failed();
+    printf("PASS: all kernel module loader tests passed\n");
+    return 0;
+}

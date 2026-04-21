@@ -1,0 +1,220 @@
+@@target kotlin
+
+// Process Lifecycle — Linux task states (kernel/sched/core.c semantics)
+// Three-level HSM with explicit upward forwarding as per-state signal policy.
+
+@@system TaskLifecycle {
+    interface:
+        fork(): String
+        schedule(): String
+        block_on_io(): String
+        io_complete(): String
+        block_uninterruptible(): String
+        send_signal(sig: String): String
+        wait_by_parent(): String
+        status(): String
+
+    machine:
+        $New {
+            fork(): String {
+                this.pid = this.next_pid()
+                @@:("forked")
+                -> $Ready
+            }
+            status(): String { @@:("new") }
+        }
+
+        $Ready => $Alive {
+            schedule(): String {
+                @@:("running")
+                -> $Running
+            }
+            status(): String { @@:("ready") }
+            => $^
+        }
+
+        $Running => $Alive {
+            schedule(): String {
+                @@:("preempted")
+                -> $Ready
+            }
+            block_on_io(): String {
+                @@:("blocked")
+                -> $Interruptible
+            }
+            block_uninterruptible(): String {
+                @@:("blocked (D)")
+                -> $Uninterruptible
+            }
+            status(): String { @@:("running") }
+            => $^
+        }
+
+        $Interruptible => $Blocked {
+            io_complete(): String {
+                @@:("woke")
+                -> $Ready
+            }
+            send_signal(sig: String): String {
+                if (sig == "SIGKILL" || sig == "SIGTERM" || sig == "SIGSTOP") {
+                    => $^
+                } else {
+                    @@:("interrupted")
+                    -> $Ready
+                }
+            }
+            status(): String { @@:("interruptible") }
+            => $^
+        }
+
+        $Uninterruptible => $Blocked {
+            io_complete(): String {
+                @@:("woke")
+                -> $Ready
+            }
+            send_signal(sig: String): String {
+                if (sig == "SIGKILL") {
+                    => $^
+                } else {
+                    @@:("signal held pending (D-state)")
+                }
+            }
+            status(): String { @@:("uninterruptible") }
+            => $^
+        }
+
+        $Blocked => $Alive {
+            status(): String { @@:("blocked") }
+            => $^
+        }
+
+        $Alive {
+            send_signal(sig: String): String {
+                if (sig == "SIGKILL" || sig == "SIGTERM") {
+                    @@:("exiting")
+                    -> $Zombie
+                } else if (sig == "SIGSTOP") {
+                    @@:("stopped")
+                    -> $Stopped
+                } else {
+                    @@:("signal delivered")
+                }
+            }
+        }
+
+        $Stopped {
+            send_signal(sig: String): String {
+                if (sig == "SIGCONT") {
+                    @@:("continued")
+                    -> $Ready
+                } else if (sig == "SIGKILL") {
+                    @@:("killed while stopped")
+                    -> $Zombie
+                } else {
+                    @@:("signal ignored")
+                }
+            }
+            status(): String { @@:("stopped") }
+        }
+
+        $Zombie {
+            wait_by_parent(): String {
+                @@:("reaped")
+                -> $Dead
+            }
+            status(): String { @@:("zombie") }
+        }
+
+        $Dead {
+            status(): String { @@:("dead") }
+        }
+
+    actions:
+        next_pid(): Int {
+            this.pid_counter = this.pid_counter + 1
+            return this.pid_counter
+        }
+
+    domain:
+        pid: Int = 0
+        pid_counter: Int = 100
+}
+
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label — expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun test_happy_path() {
+    val t = TaskLifecycle()
+    check("initial status", t.status() as String, "new")
+    check("fork",           t.fork()   as String, "forked")
+    check("after fork",     t.status() as String, "ready")
+    check("schedule",       t.schedule() as String, "running")
+    check("after schedule", t.status() as String, "running")
+    check("preempt",        t.schedule() as String, "preempted")
+    check("after preempt",  t.status() as String, "ready")
+    println("PASS: happy path")
+}
+
+fun test_interruptible_wake_by_signal() {
+    val t = TaskLifecycle()
+    t.fork()
+    t.schedule()
+    check("block_on_io", t.block_on_io() as String, "blocked")
+    check("interruptible status", t.status() as String, "interruptible")
+    check("SIGUSR1 wakes interruptible",
+          t.send_signal("SIGUSR1") as String, "interrupted")
+    check("woke to ready", t.status() as String, "ready")
+    println("PASS: interruptible wake by signal")
+}
+
+fun test_uninterruptible_holds_signal() {
+    val t = TaskLifecycle()
+    t.fork()
+    t.schedule()
+    check("block_uninterruptible",
+          t.block_uninterruptible() as String, "blocked (D)")
+    check("D state", t.status() as String, "uninterruptible")
+    check("SIGUSR1 held pending in D",
+          t.send_signal("SIGUSR1") as String, "signal held pending (D-state)")
+    check("still in D", t.status() as String, "uninterruptible")
+    println("PASS: uninterruptible holds non-fatal signal")
+}
+
+fun test_sigkill_reaches_d_state() {
+    val t = TaskLifecycle()
+    t.fork()
+    t.schedule()
+    t.block_uninterruptible()
+    check("SIGKILL forwarded from D through \$Alive",
+          t.send_signal("SIGKILL") as String, "exiting")
+    check("now zombie", t.status() as String, "zombie")
+    check("reap", t.wait_by_parent() as String, "reaped")
+    check("dead", t.status() as String, "dead")
+    println("PASS: SIGKILL reaches D state via \$Alive forwarding")
+}
+
+fun test_sigstop_sigcont() {
+    val t = TaskLifecycle()
+    t.fork()
+    t.schedule()
+    check("SIGSTOP from running",
+          t.send_signal("SIGSTOP") as String, "stopped")
+    check("stopped status", t.status() as String, "stopped")
+    check("SIGCONT resumes", t.send_signal("SIGCONT") as String, "continued")
+    check("back to ready", t.status() as String, "ready")
+    println("PASS: SIGSTOP/SIGCONT")
+}
+
+fun main() {
+    test_happy_path()
+    test_interruptible_wake_by_signal()
+    test_uninterruptible_holds_signal()
+    test_sigkill_reaches_d_state()
+    test_sigstop_sigcont()
+    println("PASS: all process lifecycle tests passed")
+}

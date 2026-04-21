@@ -1,0 +1,236 @@
+@@target ruby
+
+# USB Device Enumeration — multi-stage pipeline with compensation (saga).
+
+@@system UsbEnumerator {
+    interface:
+        plug_in(port: int)
+        reset_done(success: bool)
+        address_set(success: bool, addr: int)
+        descriptors_read(success: bool, product: str)
+        driver_bound(success: bool)
+        unplug()
+        status(): str
+
+    machine:
+        $Detached {
+            plug_in(port: int) {
+                @port = port
+                @reset_attempts = 0
+                -> $Resetting
+            }
+            status(): str { @@:("detached") }
+        }
+
+        $Resetting => $Enumerating {
+            $>() {
+                @reset_attempts = @reset_attempts + 1
+                issue_port_reset(@port)
+            }
+
+            reset_done(success: bool) {
+                if success
+                    -> $Addressing
+                else
+                    if @reset_attempts < @max_reset_attempts
+                        -> $Resetting
+                    else
+                        -> $Failed
+                    end
+                end
+            }
+            status(): str { @@:("resetting") }
+            => $^
+        }
+
+        $Addressing => $Enumerating {
+            $>() {
+                assign_address()
+            }
+
+            address_set(success: bool, addr: int) {
+                if success
+                    @address = addr
+                    -> $ReadingDescriptors
+                else
+                    -> $UndoReset
+                end
+            }
+            status(): str { @@:("addressing") }
+            => $^
+        }
+
+        $ReadingDescriptors => $Enumerating {
+            $>() {
+                read_descriptors(@address)
+            }
+
+            descriptors_read(success: bool, product: str) {
+                if success
+                    @product = product
+                    -> $BindingDriver
+                else
+                    -> $UndoAddress
+                end
+            }
+            status(): str { @@:("reading descriptors") }
+            => $^
+        }
+
+        $BindingDriver => $Enumerating {
+            $>() {
+                bind_driver(@product)
+            }
+
+            driver_bound(success: bool) {
+                if success
+                    -> $Configured
+                else
+                    -> $UndoAddress
+                end
+            }
+            status(): str { @@:("binding driver") }
+            => $^
+        }
+
+        $Enumerating {
+            unplug() {
+                -> $Detached
+            }
+        }
+
+        $UndoAddress {
+            $>() {
+                release_address(@address)
+                -> $UndoReset
+            }
+        }
+
+        $UndoReset {
+            $>() {
+                disable_port(@port)
+                -> $Failed
+            }
+        }
+
+        $Configured {
+            unplug() {
+                unbind_driver()
+                release_address(@address)
+                disable_port(@port)
+                -> $Detached
+            }
+            status(): str { @@:("configured") }
+        }
+
+        $Failed {
+            plug_in(port: int) {
+                @port = port
+                @reset_attempts = 0
+                -> $Resetting
+            }
+            status(): str { @@:("failed") }
+        }
+
+    actions:
+        issue_port_reset(port) {}
+        assign_address() {}
+        read_descriptors(addr) {}
+        bind_driver(product) {}
+        release_address(addr) {}
+        disable_port(port) {}
+        unbind_driver() {}
+
+    domain:
+        port: int = 0
+        address: int = 0
+        product: str = ""
+        reset_attempts: int = 0
+        max_reset_attempts: int = 3
+}
+
+
+def check(label, actual, expected)
+    if actual != expected
+        puts "FAIL: #{label} — expected '#{expected}', got '#{actual}'"
+        exit 1
+    end
+end
+
+def test_happy_path
+    usb = UsbEnumerator.new
+    check("initial detached", usb.status, "detached")
+    usb.plug_in(1)
+    check("after plug_in", usb.status, "resetting")
+    usb.reset_done(true)
+    check("reset ok -> addressing", usb.status, "addressing")
+    usb.address_set(true, 7)
+    check("address ok -> reading", usb.status, "reading descriptors")
+    usb.descriptors_read(true, "USB Keyboard")
+    check("descriptors ok -> binding", usb.status, "binding driver")
+    usb.driver_bound(true)
+    check("driver bound -> configured", usb.status, "configured")
+    puts "PASS: happy path enumeration"
+end
+
+def test_descriptor_failure_compensates
+    usb = UsbEnumerator.new
+    usb.plug_in(2)
+    usb.reset_done(true)
+    usb.address_set(true, 8)
+    usb.descriptors_read(false, "")
+    check("compensated to failed", usb.status, "failed")
+    puts "PASS: descriptor failure compensation"
+end
+
+def test_driver_bind_failure_compensates
+    usb = UsbEnumerator.new
+    usb.plug_in(3)
+    usb.reset_done(true)
+    usb.address_set(true, 9)
+    usb.descriptors_read(true, "Mouse")
+    usb.driver_bound(false)
+    check("bind fail compensated to failed", usb.status, "failed")
+    puts "PASS: driver bind failure compensation"
+end
+
+def test_unplug_during_enumeration
+    usb = UsbEnumerator.new
+    usb.plug_in(4)
+    check("in resetting", usb.status, "resetting")
+    usb.unplug
+    check("unplug -> detached", usb.status, "detached")
+    puts "PASS: unplug during enumeration forwards via HSM"
+end
+
+def test_reset_retry_then_exhaust
+    usb = UsbEnumerator.new
+    usb.plug_in(5)
+    usb.reset_done(false)
+    check("retry 1", usb.status, "resetting")
+    usb.reset_done(false)
+    check("retry 2", usb.status, "resetting")
+    usb.reset_done(false)
+    check("exhausted -> failed", usb.status, "failed")
+    puts "PASS: reset retry exhaustion"
+end
+
+def test_replug_from_failed
+    usb = UsbEnumerator.new
+    usb.plug_in(6)
+    usb.reset_done(false)
+    usb.reset_done(false)
+    usb.reset_done(false)
+    check("failed state", usb.status, "failed")
+    usb.plug_in(6)
+    check("re-plug restarts enumeration", usb.status, "resetting")
+    puts "PASS: re-plug from failed state"
+end
+
+test_happy_path
+test_descriptor_failure_compensates
+test_driver_bind_failure_compensates
+test_unplug_during_enumeration
+test_reset_retry_then_exhaust
+test_replug_from_failed
+puts "PASS: all USB enumeration tests passed"

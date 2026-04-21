@@ -1,0 +1,280 @@
+@@target go
+
+// Kernel Module Loader — pipeline with compensation (saga pattern).
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system ModuleLoader {
+    interface:
+        load(name: string)
+        unload(): string
+        acquire(): string
+        release(): string
+        ResolveDone(success: bool, reason: string)
+        AllocDone(success: bool, reason: string)
+        RelocateDone(success: bool, reason: string)
+        InitDone(success: bool, reason: string)
+        status(): string
+        Refcount(): int
+        FailureReason(): string
+
+    machine:
+        $Idle {
+            load(name: string) {
+                s.name = name
+                s.failure = ""
+                -> $ResolvingSymbols
+            }
+            status(): string { @@:("idle") }
+        }
+
+        $ResolvingSymbols {
+            $>() {
+                s.do_resolve(s.name)
+            }
+            ResolveDone(success: bool, reason: string) {
+                if success {
+                    -> $AllocatingMemory
+                } else {
+                    s.failure = reason
+                    -> $Failed
+                }
+            }
+            status(): string { @@:("resolving") }
+        }
+
+        $AllocatingMemory {
+            $>() {
+                s.do_alloc(s.name)
+            }
+            AllocDone(success: bool, reason: string) {
+                if success {
+                    -> $Relocating
+                } else {
+                    s.failure = reason
+                    -> $Failed
+                }
+            }
+            status(): string { @@:("allocating") }
+        }
+
+        $Relocating {
+            $>() {
+                s.do_relocate(s.name)
+            }
+            RelocateDone(success: bool, reason: string) {
+                if success {
+                    -> $Initializing
+                } else {
+                    s.failure = reason
+                    -> $UndoAlloc
+                }
+            }
+            status(): string { @@:("relocating") }
+        }
+
+        $Initializing {
+            $>() {
+                s.do_init(s.name)
+            }
+            InitDone(success: bool, reason: string) {
+                if success {
+                    -> $Live
+                } else {
+                    s.failure = reason
+                    -> $UndoRelocate
+                }
+            }
+            status(): string { @@:("initializing") }
+        }
+
+        $UndoRelocate {
+            $>() {
+                s.do_undo_relocate(s.name)
+                -> $UndoAlloc
+            }
+        }
+
+        $UndoAlloc {
+            $>() {
+                s.do_free(s.name)
+                -> $Failed
+            }
+        }
+
+        $Live {
+            $>() {
+                s.refs = 0
+            }
+
+            acquire(): string {
+                s.refs = s.refs + 1
+                @@:("acquired")
+            }
+            release(): string {
+                s.refs = s.refs - 1
+                @@:("released")
+            }
+            unload(): string {
+                if s.refs > 0 {
+                    @@:("busy")
+                } else {
+                    @@:("unloading")
+                    -> $Unloading
+                }
+            }
+            status(): string { @@:("live") }
+            Refcount(): int { @@:(s.refs) }
+        }
+
+        $Unloading {
+            $>() {
+                s.do_exit(s.name)
+                s.do_free(s.name)
+                -> $Idle
+            }
+        }
+
+        $Failed {
+            load(name: string) {
+                s.name = name
+                s.failure = ""
+                -> $ResolvingSymbols
+            }
+            status(): string { @@:("failed") }
+            FailureReason(): string { @@:(s.failure) }
+        }
+
+    actions:
+        do_resolve(name: string) {}
+        do_alloc(name: string) {}
+        do_relocate(name: string) {}
+        do_init(name: string) {}
+        do_undo_relocate(name: string) {}
+        do_free(name: string) {}
+        do_exit(name: string) {}
+
+    domain:
+        name: string = ""
+        failure: string = ""
+        refs: int = 0
+}
+
+
+func check_str(label, actual, expected string) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func check_int(label string, actual, expected int) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s — expected %d, got %d\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func test_happy_load_unload() {
+	loader := NewModuleLoader()
+	check_str("initial idle", loader.Status(), "idle")
+	loader.Load("ext4")
+	check_str("resolving", loader.Status(), "resolving")
+	loader.ResolveDone(true, "")
+	check_str("allocating", loader.Status(), "allocating")
+	loader.AllocDone(true, "")
+	check_str("relocating", loader.Status(), "relocating")
+	loader.RelocateDone(true, "")
+	check_str("initializing", loader.Status(), "initializing")
+	loader.InitDone(true, "")
+	check_str("live", loader.Status(), "live")
+	check_int("Refcount 0", loader.Refcount(), 0)
+	check_str("unload empty module", loader.Unload(), "unloading")
+	check_str("back to idle", loader.Status(), "idle")
+	fmt.Println("PASS: happy load/unload pipeline")
+}
+
+func test_init_failure_compensates() {
+	loader := NewModuleLoader()
+	loader.Load("buggy")
+	loader.ResolveDone(true, "")
+	loader.AllocDone(true, "")
+	loader.RelocateDone(true, "")
+	loader.InitDone(false, "ENOMEM")
+	check_str("failed state", loader.Status(), "failed")
+	check_str("failure captured", loader.FailureReason(), "ENOMEM")
+	fmt.Println("PASS: init failure compensation")
+}
+
+func test_relocate_failure_compensates() {
+	loader := NewModuleLoader()
+	loader.Load("symbol_err")
+	loader.ResolveDone(true, "")
+	loader.AllocDone(true, "")
+	loader.RelocateDone(false, "undefined symbol")
+	check_str("failed from relocate", loader.Status(), "failed")
+	check_str("reason captured", loader.FailureReason(), "undefined symbol")
+	fmt.Println("PASS: relocate failure compensation")
+}
+
+func test_early_failure_no_compensation_needed() {
+	loader := NewModuleLoader()
+	loader.Load("no_such_sym")
+	loader.ResolveDone(false, "symbol not found")
+	check_str("direct fail from resolve", loader.Status(), "failed")
+	check_str("resolve reason", loader.FailureReason(), "symbol not found")
+	fmt.Println("PASS: early failure without compensation")
+}
+
+func test_Refcount_blocks_unload() {
+	loader := NewModuleLoader()
+	loader.Load("shared_lib")
+	loader.ResolveDone(true, "")
+	loader.AllocDone(true, "")
+	loader.RelocateDone(true, "")
+	loader.InitDone(true, "")
+	check_str("acquire returns 'acquired'", loader.Acquire(), "acquired")
+	check_int("Refcount 1", loader.Refcount(), 1)
+	check_str("acquire again", loader.Acquire(), "acquired")
+	check_int("Refcount 2", loader.Refcount(), 2)
+	check_str("unload blocked by refs", loader.Unload(), "busy")
+	check_str("still live", loader.Status(), "live")
+	loader.Release()
+	check_int("Refcount after release", loader.Refcount(), 1)
+	check_str("still busy", loader.Unload(), "busy")
+	loader.Release()
+	check_int("Refcount 0", loader.Refcount(), 0)
+	check_str("now unloads", loader.Unload(), "unloading")
+	check_str("idle again", loader.Status(), "idle")
+	fmt.Println("PASS: Refcount blocks unload")
+}
+
+func test_reload_from_failed() {
+	loader := NewModuleLoader()
+	loader.Load("badmod")
+	loader.ResolveDone(false, "initial fail")
+	check_str("failed", loader.Status(), "failed")
+	loader.Load("goodmod")
+	check_str("restarted in resolving", loader.Status(), "resolving")
+	loader.ResolveDone(true, "")
+	loader.AllocDone(true, "")
+	loader.RelocateDone(true, "")
+	loader.InitDone(true, "")
+	check_str("recovered to live", loader.Status(), "live")
+	fmt.Println("PASS: reload from failed")
+}
+
+func main() {
+	test_happy_load_unload()
+	test_init_failure_compensates()
+	test_relocate_failure_compensates()
+	test_early_failure_no_compensation_needed()
+	test_Refcount_blocks_unload()
+	test_reload_from_failed()
+	fmt.Println("PASS: all kernel module loader tests passed")
+}

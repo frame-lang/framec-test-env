@@ -1,0 +1,189 @@
+@@target ruby
+
+# TLS Handshake (server side) — RFC 5246 Section 7.3.
+
+@@system TlsServerHandshake {
+    interface:
+        client_hello(version: str, cipher: str)
+        client_key_exchange(key_data: str)
+        client_change_cipher_spec()
+        client_finished(verify: str)
+        alert(level: str, desc: str)
+        status(): str
+
+    machine:
+        $Idle {
+            client_hello(version: str, cipher: str) {
+                @client_version = version
+                if cipher == "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"
+                    @selected_cipher = cipher
+                    -> $ServerHello
+                else
+                    if cipher == "TLS_RSA_WITH_AES_128_CBC_SHA"
+                        @selected_cipher = cipher
+                        -> $ServerHello
+                    else
+                        send_alert()
+                        -> $Closed
+                    end
+                end
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $ServerHello => $Handshaking {
+            $>() {
+                send_server_hello()
+                send_certificate()
+                send_server_hello_done()
+                -> $AwaitClientKeyExchange
+            }
+            status(): str { @@:("server hello") }
+            => $^
+        }
+
+        $AwaitClientKeyExchange => $Handshaking {
+            client_key_exchange(key_data: str) {
+                @premaster = key_data
+                derive_keys()
+                -> $AwaitChangeCipherSpec
+            }
+            status(): str { @@:("await key exchange") }
+            => $^
+        }
+
+        $AwaitChangeCipherSpec => $Handshaking {
+            client_change_cipher_spec() {
+                @client_encrypted = true
+                -> $AwaitClientFinished
+            }
+            status(): str { @@:("await change cipher spec") }
+            => $^
+        }
+
+        $AwaitClientFinished => $Handshaking {
+            client_finished(verify: str) {
+                if verify == "valid"
+                    send_change_cipher_spec()
+                    send_finished()
+                    -> $Established
+                else
+                    send_alert()
+                    -> $Closed
+                end
+            }
+            status(): str { @@:("await client finished") }
+            => $^
+        }
+
+        $Handshaking {
+            alert(level: str, desc: str) {
+                if level == "fatal"
+                    -> $Closed
+                end
+            }
+        }
+
+        $Established {
+            alert(level: str, desc: str) {
+                if level == "fatal"
+                    -> $Closed
+                end
+            }
+            status(): str { @@:("established") }
+        }
+
+        $Closed {
+            status(): str { @@:("closed") }
+        }
+
+    actions:
+        send_server_hello() {}
+        send_certificate() {}
+        send_server_hello_done() {}
+        derive_keys() {}
+        send_change_cipher_spec() {}
+        send_finished() {}
+        send_alert() {}
+
+    domain:
+        client_version: str = ""
+        selected_cipher: str = ""
+        premaster: str = ""
+        client_encrypted: bool = false
+}
+
+
+def check(label, actual, expected)
+    if actual != expected
+        puts "FAIL: #{label} — expected '#{expected}', got '#{actual}'"
+        exit 1
+    end
+end
+
+def test_happy_handshake
+    tls = TlsServerHandshake.new
+    check("initial idle", tls.status, "idle")
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    check("after client_hello -> through ServerHello to await", tls.status, "await key exchange")
+    tls.client_key_exchange("premaster_data")
+    check("after key exchange", tls.status, "await change cipher spec")
+    tls.client_change_cipher_spec
+    check("after CCS", tls.status, "await client finished")
+    tls.client_finished("valid")
+    check("established", tls.status, "established")
+    puts "PASS: happy TLS handshake"
+end
+
+def test_unsupported_cipher_closes
+    tls = TlsServerHandshake.new
+    tls.client_hello("TLS 1.2", "TLS_NULL_WITH_NULL_NULL")
+    check("no matching cipher -> closed", tls.status, "closed")
+    puts "PASS: unsupported cipher closes handshake"
+end
+
+def test_fatal_alert_during_handshake
+    tls = TlsServerHandshake.new
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    tls.alert("fatal", "unexpected_message")
+    check("fatal alert -> closed (via HSM parent)", tls.status, "closed")
+    puts "PASS: fatal alert forwards via HSM parent to $Closed"
+end
+
+def test_warning_alert_ignored
+    tls = TlsServerHandshake.new
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    tls.alert("warning", "close_notify_soon")
+    check("warning alert doesn't close", tls.status, "await key exchange")
+    puts "PASS: warning alert doesn't close handshake"
+end
+
+def test_invalid_finished_closes
+    tls = TlsServerHandshake.new
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    tls.client_key_exchange("bogus")
+    tls.client_change_cipher_spec
+    tls.client_finished("invalid")
+    check("bad verify -> closed", tls.status, "closed")
+    puts "PASS: invalid client_finished closes"
+end
+
+def test_fatal_alert_in_established
+    tls = TlsServerHandshake.new
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    tls.client_key_exchange("pm")
+    tls.client_change_cipher_spec
+    tls.client_finished("valid")
+    check("established", tls.status, "established")
+    tls.alert("fatal", "bad_record_mac")
+    check("fatal in $Established -> closed", tls.status, "closed")
+    puts "PASS: fatal alert in established closes"
+end
+
+test_happy_handshake
+test_unsupported_cipher_closes
+test_fatal_alert_during_handshake
+test_warning_alert_ignored
+test_invalid_finished_closes
+test_fatal_alert_in_established
+puts "PASS: all TLS handshake tests passed"

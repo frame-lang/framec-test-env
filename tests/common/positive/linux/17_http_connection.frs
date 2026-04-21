@@ -1,0 +1,232 @@
+@@target rust
+
+// HTTP/1.1 Connection -- keep-alive lifecycle with HSM for cross-cutting errors.
+
+@@system HttpConnection {
+    interface:
+        connect(host: String, port: i32)
+        send_request(method: String, path: String)
+        headers_received(status_code: i32, keep_alive: bool, content_length: i32)
+        body_chunk_received(chunk: String)
+        body_complete()
+        keep_alive_timeout()
+        connection_error(reason: String)
+        close()
+        status(): String
+        request_count(): i32
+
+    machine:
+        $Disconnected {
+            connect(host: String, port: i32) {
+                self.host = host;
+                self.port = port;
+                -> $Connecting
+            }
+            status(): String { @@:("disconnected".to_string()) }
+            request_count(): i32 { @@:(self.requests) }
+        }
+
+        $Connecting {
+            $>() {
+                self.tcp_connect();
+                -> $Idle
+            }
+        }
+
+        $Idle => $Open {
+            $>() {
+                self.start_keep_alive_timer();
+            }
+            <$() {
+                self.cancel_keep_alive_timer();
+            }
+
+            send_request(method: String, path: String) {
+                self.current_method = method;
+                self.current_path = path;
+                self.emit_request();
+                -> $AwaitingResponse
+            }
+            keep_alive_timeout() {
+                -> $Closing
+            }
+            status(): String { @@:("idle".to_string()) }
+            request_count(): i32 { @@:(self.requests) }
+            => $^
+        }
+
+        $AwaitingResponse => $Open {
+            headers_received(status_code: i32, keep_alive: bool, content_length: i32) {
+                self.response_status = status_code;
+                self.ka = keep_alive;
+                self.content_length = content_length;
+                if content_length == 0 {
+                    -> $ResponseComplete
+                } else {
+                    -> $ReceivingBody
+                }
+            }
+            status(): String { @@:("awaiting response".to_string()) }
+            request_count(): i32 { @@:(self.requests) }
+            => $^
+        }
+
+        $ReceivingBody => $Open {
+            body_chunk_received(chunk: String) {
+                self.bytes_received = self.bytes_received + self.content_length;
+            }
+            body_complete() {
+                -> $ResponseComplete
+            }
+            status(): String { @@:("receiving body".to_string()) }
+            request_count(): i32 { @@:(self.requests) }
+            => $^
+        }
+
+        $ResponseComplete => $Open {
+            $>() {
+                self.requests = self.requests + 1;
+                if self.ka {
+                    -> $Idle
+                } else {
+                    -> $Closing
+                }
+            }
+            => $^
+        }
+
+        $Open {
+            connection_error(reason: String) {
+                -> $Disconnected
+            }
+            close() {
+                -> $Closing
+            }
+        }
+
+        $Closing {
+            $>() {
+                self.tcp_close();
+                -> $Disconnected
+            }
+        }
+
+    actions:
+        tcp_connect() {}
+        tcp_close() {}
+        emit_request() {}
+        start_keep_alive_timer() {}
+        cancel_keep_alive_timer() {}
+
+    domain:
+        host: String = "".to_string()
+        port: i32 = 80
+        current_method: String = "".to_string()
+        current_path: String = "".to_string()
+        response_status: i32 = 0
+        content_length: i32 = 0
+        bytes_received: i32 = 0
+        ka: bool = true
+        requests: i32 = 0
+}
+
+
+fn check_str(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} -- expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn check_int(label: &str, actual: i32, expected: i32) {
+    if actual != expected {
+        println!("FAIL: {} -- expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn test_first_request_keepalive() {
+    let mut conn = @@HttpConnection();
+    check_str("disconnected", &conn.status(), "disconnected");
+    conn.connect("example.com".to_string(), 80);
+    check_str("idle after connect", &conn.status(), "idle");
+    conn.send_request("GET".to_string(), "/index.html".to_string());
+    check_str("awaiting response", &conn.status(), "awaiting response");
+    conn.headers_received(200, true, 5);
+    check_str("receiving body", &conn.status(), "receiving body");
+    conn.body_complete();
+    check_str("back to idle (keep-alive)", &conn.status(), "idle");
+    check_int("request count 1", conn.request_count(), 1);
+    println!("PASS: first request, keep-alive cycles back to idle");
+}
+
+fn test_empty_body_skips_receiving() {
+    let mut conn = @@HttpConnection();
+    conn.connect("example.com".to_string(), 80);
+    conn.send_request("GET".to_string(), "/about".to_string());
+    conn.headers_received(200, true, 0);
+    check_str("idle after empty body", &conn.status(), "idle");
+    println!("PASS: empty body skips ReceivingBody");
+}
+
+fn test_connection_close_header() {
+    let mut conn = @@HttpConnection();
+    conn.connect("example.com".to_string(), 80);
+    conn.send_request("POST".to_string(), "/api".to_string());
+    conn.headers_received(201, false, 0);
+    check_str("disconnected after Connection: close", &conn.status(), "disconnected");
+    println!("PASS: Connection: close response path");
+}
+
+fn test_keep_alive_timeout() {
+    let mut conn = @@HttpConnection();
+    conn.connect("example.com".to_string(), 80);
+    check_str("idle", &conn.status(), "idle");
+    conn.keep_alive_timeout();
+    check_str("disconnected after timeout", &conn.status(), "disconnected");
+    println!("PASS: keep-alive timeout tears down connection");
+}
+
+fn test_connection_error_during_receive() {
+    let mut conn = @@HttpConnection();
+    conn.connect("example.com".to_string(), 80);
+    conn.send_request("GET".to_string(), "/large".to_string());
+    conn.headers_received(200, true, 1000);
+    check_str("receiving body", &conn.status(), "receiving body");
+    conn.connection_error("peer reset".to_string());
+    check_str("disconnected after error", &conn.status(), "disconnected");
+    println!("PASS: connection_error from receiving body forwards via HSM");
+}
+
+fn test_explicit_close_during_idle() {
+    let mut conn = @@HttpConnection();
+    conn.connect("example.com".to_string(), 80);
+    conn.close();
+    check_str("close from idle", &conn.status(), "disconnected");
+    println!("PASS: explicit close from idle via HSM parent");
+}
+
+fn test_multiple_request_reuse() {
+    let mut conn = @@HttpConnection();
+    conn.connect("example.com".to_string(), 80);
+    conn.send_request("GET".to_string(), "/one".to_string());
+    conn.headers_received(200, true, 0);
+    conn.send_request("GET".to_string(), "/two".to_string());
+    conn.headers_received(200, true, 0);
+    conn.send_request("GET".to_string(), "/three".to_string());
+    conn.headers_received(200, true, 0);
+    check_int("3 requests on same connection", conn.request_count(), 3);
+    check_str("still idle", &conn.status(), "idle");
+    println!("PASS: connection reused across multiple requests");
+}
+
+fn main() {
+    test_first_request_keepalive();
+    test_empty_body_skips_receiving();
+    test_connection_close_header();
+    test_keep_alive_timeout();
+    test_connection_error_during_receive();
+    test_explicit_close_during_idle();
+    test_multiple_request_reuse();
+    println!("PASS: all HTTP connection tests passed");
+}

@@ -1,0 +1,167 @@
+@@target cpp_17
+
+// Block I/O Request — kernel blk-mq layer semantics.
+
+#include <iostream>
+#include <string>
+#include <sstream>
+#include <cassert>
+#include <cstdlib>
+
+@@system BlockRequest {
+    interface:
+        submit(sector: int, size: int): str
+        dispatch(): str
+        complete(success: bool): str
+        timeout(): str
+        status(): str
+
+    machine:
+        $Idle {
+            submit(sector: int, size: int): str {
+                this->sector = sector;
+                this->size = size;
+                this->attempts = 0;
+                @@:(std::string("queued"))
+                -> $Queued
+            }
+            status(): str { @@:(std::string("idle")) }
+        }
+
+        $Queued {
+            dispatch(): str {
+                @@:(std::string("dispatched"))
+                -> $InFlight
+            }
+            status(): str { @@:(std::string("queued")) }
+        }
+
+        $InFlight {
+            $>() {
+                this->attempts = this->attempts + 1;
+                this->start_timeout();
+            }
+            <$() {
+                this->cancel_timeout();
+            }
+
+            complete(success: bool): str {
+                if (success) {
+                    @@:(std::string("done"))
+                    -> $Done
+                } else {
+                    if (this->attempts < this->max_retries) {
+                        @@:(std::string("requeued"))
+                        -> $Queued
+                    } else {
+                        @@:(std::string("io error"))
+                        -> $Error
+                    }
+                }
+            }
+            timeout(): str {
+                if (this->attempts < this->max_retries) {
+                    @@:(std::string("timeout, retrying"))
+                    -> $Queued
+                } else {
+                    @@:(std::string("timeout, giving up"))
+                    -> $Error
+                }
+            }
+            status(): str { @@:(std::string("in-flight")) }
+        }
+
+        $Done {
+            status(): str { @@:(std::string("done")) }
+        }
+
+        $Error {
+            status(): str { @@:(std::string("error")) }
+        }
+
+    actions:
+        start_timeout() {}
+        cancel_timeout() {}
+
+    domain:
+        sector: int = 0
+        size: int = 0
+        attempts: int = 0
+        max_retries: int = 3
+        timeout_ms: int = 30000
+}
+
+
+void check(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " — expected '" << expected << "', got '" << actual << "'" << std::endl;
+        std::exit(1);
+    }
+}
+
+void test_happy_path() {
+    auto req = @@BlockRequest();
+    check("initial idle",   std::any_cast<std::string>(req.status()),           "idle");
+    check("submit",         std::any_cast<std::string>(req.submit(1024, 8)),    "queued");
+    check("dispatch",       std::any_cast<std::string>(req.dispatch()),         "dispatched");
+    check("complete ok",    std::any_cast<std::string>(req.complete(true)),     "done");
+    check("terminal done",  std::any_cast<std::string>(req.status()),           "done");
+    std::cout << "PASS: happy path" << std::endl;
+}
+
+void test_timeout_retry_then_complete() {
+    auto req = @@BlockRequest();
+    req.submit(2048, 4);
+    req.dispatch();
+    check("first timeout -> retry", std::any_cast<std::string>(req.timeout()), "timeout, retrying");
+    check("back to queued after timeout", std::any_cast<std::string>(req.status()), "queued");
+    req.dispatch();
+    check("complete after retry", std::any_cast<std::string>(req.complete(true)), "done");
+    std::cout << "PASS: timeout then retry success" << std::endl;
+}
+
+void test_failure_requeue_then_success() {
+    auto req = @@BlockRequest();
+    req.submit(4096, 2);
+    req.dispatch();
+    check("complete(false) -> requeued", std::any_cast<std::string>(req.complete(false)), "requeued");
+    req.dispatch();
+    check("complete(true) -> done", std::any_cast<std::string>(req.complete(true)), "done");
+    std::cout << "PASS: failure requeue then success" << std::endl;
+}
+
+void test_retry_exhaustion() {
+    auto req = @@BlockRequest();
+    req.submit(8192, 1);
+    req.dispatch();
+    check("req 1 failure requeued", std::any_cast<std::string>(req.complete(false)), "requeued");
+    req.dispatch();
+    check("req 2 failure requeued", std::any_cast<std::string>(req.complete(false)), "requeued");
+    req.dispatch();
+    check("req 3 failure -> io error", std::any_cast<std::string>(req.complete(false)), "io error");
+    check("terminal error state", std::any_cast<std::string>(req.status()), "error");
+    std::cout << "PASS: retry exhaustion -> error" << std::endl;
+}
+
+void test_timeout_exhaustion() {
+    auto req = @@BlockRequest();
+    req.submit(16384, 1);
+    req.dispatch();
+    check("to 1 retry", std::any_cast<std::string>(req.timeout()), "timeout, retrying");
+    req.dispatch();
+    check("to 2 retry", std::any_cast<std::string>(req.timeout()), "timeout, retrying");
+    req.dispatch();
+    check("to 3 giving up", std::any_cast<std::string>(req.timeout()), "timeout, giving up");
+    check("error terminal", std::any_cast<std::string>(req.status()), "error");
+    std::cout << "PASS: timeout exhaustion -> error" << std::endl;
+}
+
+int main() {
+    test_happy_path();
+    test_timeout_retry_then_complete();
+    test_failure_requeue_then_success();
+    test_retry_exhaustion();
+    test_timeout_exhaustion();
+    std::cout << "PASS: all block I/O request tests passed" << std::endl;
+    return 0;
+}

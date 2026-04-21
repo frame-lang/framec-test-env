@@ -1,0 +1,187 @@
+@@target python_3
+
+# TLS Handshake (server side) — RFC 5246 §7.3.
+# HSM: every handshake sub-state is a child of $Handshaking, which handles
+# alert(). Fatal alerts from any sub-state drop to $Closed via => $^.
+# $ServerHello is a transient state — enter handler sends the message flight
+# and immediately transitions to $AwaitClientKeyExchange.
+#
+# Simplified from the cookbook: caller passes a single `cipher` string
+# instead of a list, so we avoid list-iteration natives (not portable).
+
+@@system TlsServerHandshake {
+    interface:
+        client_hello(version: str, cipher: str)
+        client_key_exchange(key_data: str)
+        client_change_cipher_spec()
+        client_finished(verify: str)
+        alert(level: str, desc: str)
+        status(): str
+
+    machine:
+        $Idle {
+            client_hello(version: str, cipher: str) {
+                self.client_version = version
+                if cipher == "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256":
+                    self.selected_cipher = cipher
+                    -> $ServerHello
+                elif cipher == "TLS_RSA_WITH_AES_128_CBC_SHA":
+                    self.selected_cipher = cipher
+                    -> $ServerHello
+                else:
+                    self.send_alert()
+                    -> $Closed
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $ServerHello => $Handshaking {
+            $>() {
+                self.send_server_hello()
+                self.send_certificate()
+                self.send_server_hello_done()
+                -> $AwaitClientKeyExchange
+            }
+            status(): str { @@:("server hello") }
+            => $^
+        }
+
+        $AwaitClientKeyExchange => $Handshaking {
+            client_key_exchange(key_data: str) {
+                self.premaster = key_data
+                self.derive_keys()
+                -> $AwaitChangeCipherSpec
+            }
+            status(): str { @@:("await key exchange") }
+            => $^
+        }
+
+        $AwaitChangeCipherSpec => $Handshaking {
+            client_change_cipher_spec() {
+                self.client_encrypted = True
+                -> $AwaitClientFinished
+            }
+            status(): str { @@:("await change cipher spec") }
+            => $^
+        }
+
+        $AwaitClientFinished => $Handshaking {
+            client_finished(verify: str) {
+                if verify == "valid":
+                    self.send_change_cipher_spec()
+                    self.send_finished()
+                    -> $Established
+                else:
+                    self.send_alert()
+                    -> $Closed
+            }
+            status(): str { @@:("await client finished") }
+            => $^
+        }
+
+        $Handshaking {
+            alert(level: str, desc: str) {
+                if level == "fatal":
+                    -> $Closed
+            }
+        }
+
+        $Established {
+            alert(level: str, desc: str) {
+                if level == "fatal":
+                    -> $Closed
+            }
+            status(): str { @@:("established") }
+        }
+
+        $Closed {
+            status(): str { @@:("closed") }
+        }
+
+    actions:
+        send_server_hello()      { pass }
+        send_certificate()       { pass }
+        send_server_hello_done() { pass }
+        derive_keys()            { pass }
+        send_change_cipher_spec(){ pass }
+        send_finished()          { pass }
+        send_alert()             { pass }
+
+    domain:
+        client_version: str = ""
+        selected_cipher: str = ""
+        premaster: str = ""
+        client_encrypted: bool = False
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} — expected {expected!r}, got {actual!r}")
+        raise SystemExit(1)
+
+def test_happy_handshake():
+    tls = @@TlsServerHandshake()
+    check("initial idle", tls.status(), "idle")
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    check("after client_hello -> through ServerHello to await",
+          tls.status(), "await key exchange")
+    tls.client_key_exchange("premaster_data")
+    check("after key exchange", tls.status(), "await change cipher spec")
+    tls.client_change_cipher_spec()
+    check("after CCS", tls.status(), "await client finished")
+    tls.client_finished("valid")
+    check("established", tls.status(), "established")
+    print("PASS: happy TLS handshake")
+
+def test_unsupported_cipher_closes():
+    tls = @@TlsServerHandshake()
+    tls.client_hello("TLS 1.2", "TLS_NULL_WITH_NULL_NULL")
+    check("no matching cipher -> closed", tls.status(), "closed")
+    print("PASS: unsupported cipher closes handshake")
+
+def test_fatal_alert_during_handshake():
+    tls = @@TlsServerHandshake()
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    # We're in $AwaitClientKeyExchange (child of $Handshaking)
+    tls.alert("fatal", "unexpected_message")
+    check("fatal alert -> closed (via HSM parent)", tls.status(), "closed")
+    print("PASS: fatal alert forwards via HSM parent to $Closed")
+
+def test_warning_alert_ignored():
+    tls = @@TlsServerHandshake()
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    tls.alert("warning", "close_notify_soon")
+    # Warning doesn't transition; we stay in $AwaitClientKeyExchange
+    check("warning alert doesn't close",
+          tls.status(), "await key exchange")
+    print("PASS: warning alert doesn't close handshake")
+
+def test_invalid_finished_closes():
+    tls = @@TlsServerHandshake()
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    tls.client_key_exchange("bogus")
+    tls.client_change_cipher_spec()
+    tls.client_finished("invalid")
+    check("bad verify -> closed", tls.status(), "closed")
+    print("PASS: invalid client_finished closes")
+
+def test_fatal_alert_in_established():
+    tls = @@TlsServerHandshake()
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    tls.client_key_exchange("pm")
+    tls.client_change_cipher_spec()
+    tls.client_finished("valid")
+    check("established", tls.status(), "established")
+    tls.alert("fatal", "bad_record_mac")
+    check("fatal in $Established -> closed", tls.status(), "closed")
+    print("PASS: fatal alert in established closes")
+
+if __name__ == '__main__':
+    test_happy_handshake()
+    test_unsupported_cipher_closes()
+    test_fatal_alert_during_handshake()
+    test_warning_alert_ignored()
+    test_invalid_finished_closes()
+    test_fatal_alert_in_established()
+    print("PASS: all TLS handshake tests passed")

@@ -1,0 +1,245 @@
+@@target dart
+
+// BGP Finite State Machine -- RFC 4271 Section 8 direct transcription.
+
+import 'dart:convert';
+import 'dart:io';
+
+@@persist
+@@system BgpSession {
+    interface:
+        manual_start()
+        manual_stop()
+        tcp_connection_confirmed()
+        tcp_connection_fails()
+        open_received(asn: int, hold_time: int)
+        keepalive_received()
+        notification_received(code: int, subcode: int)
+        hold_timer_expired()
+        keepalive_timer_expired()
+        connect_retry_timer_expired()
+        status(): String
+
+    machine:
+        $Idle {
+            manual_start() {
+                this.connect_retry_count = 0;
+                this.start_connect_retry_timer();
+                this.initiate_tcp_connection();
+                -> $Connect
+            }
+            status(): String { @@:("idle") }
+        }
+
+        $Connect {
+            tcp_connection_confirmed() {
+                this.cancel_connect_retry_timer();
+                this.send_open();
+                -> $OpenSent
+            }
+            tcp_connection_fails() {
+                -> $Active
+            }
+            connect_retry_timer_expired() {
+                this.initiate_tcp_connection();
+                this.start_connect_retry_timer();
+            }
+            manual_stop() {
+                -> $Idle
+            }
+            status(): String { @@:("connect") }
+        }
+
+        $Active {
+            tcp_connection_confirmed() {
+                this.cancel_connect_retry_timer();
+                this.send_open();
+                -> $OpenSent
+            }
+            connect_retry_timer_expired() {
+                this.connect_retry_count = this.connect_retry_count + 1;
+                this.initiate_tcp_connection();
+                this.start_connect_retry_timer();
+                -> $Connect
+            }
+            manual_stop() {
+                -> $Idle
+            }
+            status(): String { @@:("active") }
+        }
+
+        $OpenSent {
+            open_received(asn: int, hold_time: int) {
+                this.peer_asn = asn;
+                this.negotiated_hold = hold_time;
+                this.cancel_hold_timer();
+                this.send_keepalive();
+                -> $OpenConfirm
+            }
+            tcp_connection_fails() {
+                this.cancel_hold_timer();
+                -> $Active
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                this.send_notification();
+                -> $Idle
+            }
+            manual_stop() {
+                this.send_notification();
+                -> $Idle
+            }
+            status(): String { @@:("open sent") }
+        }
+
+        $OpenConfirm {
+            keepalive_received() {
+                -> $Established
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                this.send_notification();
+                -> $Idle
+            }
+            keepalive_timer_expired() {
+                this.send_keepalive();
+            }
+            manual_stop() {
+                this.send_notification();
+                -> $Idle
+            }
+            status(): String { @@:("open confirm") }
+        }
+
+        $Established {
+            keepalive_received() {
+                this.reset_hold_timer();
+            }
+            keepalive_timer_expired() {
+                this.send_keepalive();
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                this.send_notification();
+                -> $Idle
+            }
+            manual_stop() {
+                this.send_notification();
+                -> $Idle
+            }
+            status(): String { @@:("established") }
+        }
+
+    actions:
+        initiate_tcp_connection()   {}
+        send_open()                 {}
+        send_keepalive()            {}
+        send_notification()         {}
+        start_connect_retry_timer() {}
+        cancel_connect_retry_timer(){}
+        cancel_hold_timer()         {}
+        reset_hold_timer()          {}
+
+    domain:
+        local_asn: int = 65001
+        peer_asn: int = 0
+        negotiated_hold: int = 0
+        connect_retry_count: int = 0
+}
+
+
+void check(String label, String actual, String expected) {
+    if (actual != expected) {
+        print("FAIL: $label -- expected '$expected', got '$actual'");
+        exit(1);
+    }
+}
+
+void test_full_session_establishment() {
+    final bgp = @@BgpSession();
+    check("initial idle", bgp.status() as String, "idle");
+    bgp.manual_start();
+    check("connect", bgp.status() as String, "connect");
+    bgp.tcp_connection_confirmed();
+    check("open sent", bgp.status() as String, "open sent");
+    bgp.open_received(65002, 60);
+    check("open confirm", bgp.status() as String, "open confirm");
+    bgp.keepalive_received();
+    check("established", bgp.status() as String, "established");
+    print("PASS: full BGP session establishment");
+}
+
+void test_persist_across_restart() {
+    final bgp = @@BgpSession();
+    bgp.manual_start();
+    bgp.tcp_connection_confirmed();
+    bgp.open_received(65002, 60);
+    bgp.keepalive_received();
+    check("established", bgp.status() as String, "established");
+    final snap = bgp.saveState();
+    final bgp2 = BgpSession.restoreState(snap);
+    check("established survived restart", bgp2.status() as String, "established");
+    bgp2.keepalive_timer_expired();
+    bgp2.keepalive_received();
+    check("still established", bgp2.status() as String, "established");
+    print("PASS: @@persist -- BGP session survives daemon restart");
+}
+
+void test_hold_timer_teardown() {
+    final bgp = @@BgpSession();
+    bgp.manual_start();
+    bgp.tcp_connection_confirmed();
+    bgp.open_received(65002, 60);
+    bgp.keepalive_received();
+    bgp.hold_timer_expired();
+    check("hold expiry tears down", bgp.status() as String, "idle");
+    print("PASS: hold timer expiry returns to idle");
+}
+
+void test_tcp_failure_goes_active() {
+    final bgp = @@BgpSession();
+    bgp.manual_start();
+    bgp.tcp_connection_fails();
+    check("active after TCP fail", bgp.status() as String, "active");
+    bgp.connect_retry_timer_expired();
+    check("retry transitions back to connect", bgp.status() as String, "connect");
+    print("PASS: TCP failure path Active -> Connect");
+}
+
+void test_notification_in_established_teardown() {
+    final bgp = @@BgpSession();
+    bgp.manual_start();
+    bgp.tcp_connection_confirmed();
+    bgp.open_received(65002, 60);
+    bgp.keepalive_received();
+    bgp.notification_received(6, 0);
+    check("notification tears down", bgp.status() as String, "idle");
+    print("PASS: notification in Established -> idle");
+}
+
+void test_manual_stop_from_established() {
+    final bgp = @@BgpSession();
+    bgp.manual_start();
+    bgp.tcp_connection_confirmed();
+    bgp.open_received(65002, 60);
+    bgp.keepalive_received();
+    bgp.manual_stop();
+    check("manual stop", bgp.status() as String, "idle");
+    print("PASS: manual_stop from established");
+}
+
+void main() {
+    test_full_session_establishment();
+    test_persist_across_restart();
+    test_hold_timer_teardown();
+    test_tcp_failure_goes_active();
+    test_notification_in_established_teardown();
+    test_manual_stop_from_established();
+    print("PASS: all BGP session tests passed");
+}

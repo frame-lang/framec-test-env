@@ -1,0 +1,251 @@
+@@target c
+
+// USB Device Enumeration — multi-stage pipeline with compensation (saga).
+// Forward path: Resetting -> Addressing -> ReadingDescriptors -> BindingDriver -> Configured
+// Compensation chain on failure: UndoAddress -> UndoReset -> Failed
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system UsbEnumerator {
+    interface:
+        plug_in(port: int)
+        reset_done(success: bool)
+        address_set(success: bool, addr: int)
+        descriptors_read(success: bool, product: str)
+        driver_bound(success: bool)
+        unplug()
+        status(): str
+
+    machine:
+        $Detached {
+            plug_in(port: int) {
+                self->port = port;
+                self->reset_attempts = 0;
+                -> $Resetting
+            }
+            status(): str { @@:("detached") }
+        }
+
+        $Resetting => $Enumerating {
+            $>() {
+                self->reset_attempts = self->reset_attempts + 1;
+                UsbEnumerator_issue_port_reset(self);
+            }
+
+            reset_done(success: bool) {
+                if (success) {
+                    -> $Addressing
+                } else {
+                    if (self->reset_attempts < self->max_reset_attempts) {
+                        -> $Resetting
+                    } else {
+                        -> $Failed
+                    }
+                }
+            }
+            status(): str { @@:("resetting") }
+            => $^
+        }
+
+        $Addressing => $Enumerating {
+            $>() {
+                UsbEnumerator_assign_address(self);
+            }
+
+            address_set(success: bool, addr: int) {
+                if (success) {
+                    self->address = addr;
+                    -> $ReadingDescriptors
+                } else {
+                    -> $UndoReset
+                }
+            }
+            status(): str { @@:("addressing") }
+            => $^
+        }
+
+        $ReadingDescriptors => $Enumerating {
+            $>() {
+                UsbEnumerator_read_descriptors(self);
+            }
+
+            descriptors_read(success: bool, product: str) {
+                if (success) {
+                    self->product = product;
+                    -> $BindingDriver
+                } else {
+                    -> $UndoAddress
+                }
+            }
+            status(): str { @@:("reading descriptors") }
+            => $^
+        }
+
+        $BindingDriver => $Enumerating {
+            $>() {
+                UsbEnumerator_bind_driver(self);
+            }
+
+            driver_bound(success: bool) {
+                if (success) {
+                    -> $Configured
+                } else {
+                    -> $UndoAddress
+                }
+            }
+            status(): str { @@:("binding driver") }
+            => $^
+        }
+
+        $Enumerating {
+            unplug() {
+                -> $Detached
+            }
+        }
+
+        $UndoAddress {
+            $>() {
+                UsbEnumerator_release_address(self);
+                -> $UndoReset
+            }
+        }
+
+        $UndoReset {
+            $>() {
+                UsbEnumerator_disable_port(self);
+                -> $Failed
+            }
+        }
+
+        $Configured {
+            unplug() {
+                UsbEnumerator_unbind_driver(self);
+                UsbEnumerator_release_address(self);
+                UsbEnumerator_disable_port(self);
+                -> $Detached
+            }
+            status(): str { @@:("configured") }
+        }
+
+        $Failed {
+            plug_in(port: int) {
+                self->port = port;
+                self->reset_attempts = 0;
+                -> $Resetting
+            }
+            status(): str { @@:("failed") }
+        }
+
+    actions:
+        issue_port_reset() {}
+        assign_address() {}
+        read_descriptors() {}
+        bind_driver() {}
+        release_address() {}
+        disable_port() {}
+        unbind_driver() {}
+
+    domain:
+        port: int = 0
+        address: int = 0
+        product: str = ""
+        reset_attempts: int = 0
+        max_reset_attempts: int = 3
+}
+
+
+void check(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void test_happy_path(void) {
+    UsbEnumerator* usb = @@UsbEnumerator();
+    check("initial detached", (const char*)UsbEnumerator_status(usb), "detached");
+    UsbEnumerator_plug_in(usb, 1);
+    check("after plug_in", (const char*)UsbEnumerator_status(usb), "resetting");
+    UsbEnumerator_reset_done(usb, 1);
+    check("reset ok -> addressing", (const char*)UsbEnumerator_status(usb), "addressing");
+    UsbEnumerator_address_set(usb, 1, 7);
+    check("address ok -> reading", (const char*)UsbEnumerator_status(usb), "reading descriptors");
+    UsbEnumerator_descriptors_read(usb, 1, "USB Keyboard");
+    check("descriptors ok -> binding", (const char*)UsbEnumerator_status(usb), "binding driver");
+    UsbEnumerator_driver_bound(usb, 1);
+    check("driver bound -> configured", (const char*)UsbEnumerator_status(usb), "configured");
+    printf("PASS: happy path enumeration\n");
+    UsbEnumerator_destroy(usb);
+}
+
+void test_descriptor_failure_compensates(void) {
+    UsbEnumerator* usb = @@UsbEnumerator();
+    UsbEnumerator_plug_in(usb, 2);
+    UsbEnumerator_reset_done(usb, 1);
+    UsbEnumerator_address_set(usb, 1, 8);
+    UsbEnumerator_descriptors_read(usb, 0, "");
+    check("compensated to failed", (const char*)UsbEnumerator_status(usb), "failed");
+    printf("PASS: descriptor failure compensation\n");
+    UsbEnumerator_destroy(usb);
+}
+
+void test_driver_bind_failure_compensates(void) {
+    UsbEnumerator* usb = @@UsbEnumerator();
+    UsbEnumerator_plug_in(usb, 3);
+    UsbEnumerator_reset_done(usb, 1);
+    UsbEnumerator_address_set(usb, 1, 9);
+    UsbEnumerator_descriptors_read(usb, 1, "Mouse");
+    UsbEnumerator_driver_bound(usb, 0);
+    check("bind fail compensated to failed", (const char*)UsbEnumerator_status(usb), "failed");
+    printf("PASS: driver bind failure compensation\n");
+    UsbEnumerator_destroy(usb);
+}
+
+void test_unplug_during_enumeration(void) {
+    UsbEnumerator* usb = @@UsbEnumerator();
+    UsbEnumerator_plug_in(usb, 4);
+    check("in resetting", (const char*)UsbEnumerator_status(usb), "resetting");
+    UsbEnumerator_unplug(usb);
+    check("unplug -> detached", (const char*)UsbEnumerator_status(usb), "detached");
+    printf("PASS: unplug during enumeration forwards via HSM\n");
+    UsbEnumerator_destroy(usb);
+}
+
+void test_reset_retry_then_exhaust(void) {
+    UsbEnumerator* usb = @@UsbEnumerator();
+    UsbEnumerator_plug_in(usb, 5);
+    UsbEnumerator_reset_done(usb, 0);
+    check("retry 1", (const char*)UsbEnumerator_status(usb), "resetting");
+    UsbEnumerator_reset_done(usb, 0);
+    check("retry 2", (const char*)UsbEnumerator_status(usb), "resetting");
+    UsbEnumerator_reset_done(usb, 0);
+    check("exhausted -> failed", (const char*)UsbEnumerator_status(usb), "failed");
+    printf("PASS: reset retry exhaustion\n");
+    UsbEnumerator_destroy(usb);
+}
+
+void test_replug_from_failed(void) {
+    UsbEnumerator* usb = @@UsbEnumerator();
+    UsbEnumerator_plug_in(usb, 6);
+    UsbEnumerator_reset_done(usb, 0);
+    UsbEnumerator_reset_done(usb, 0);
+    UsbEnumerator_reset_done(usb, 0);
+    check("failed state", (const char*)UsbEnumerator_status(usb), "failed");
+    UsbEnumerator_plug_in(usb, 6);
+    check("re-plug restarts enumeration", (const char*)UsbEnumerator_status(usb), "resetting");
+    printf("PASS: re-plug from failed state\n");
+    UsbEnumerator_destroy(usb);
+}
+
+int main(void) {
+    test_happy_path();
+    test_descriptor_failure_compensates();
+    test_driver_bind_failure_compensates();
+    test_unplug_during_enumeration();
+    test_reset_retry_then_exhaust();
+    test_replug_from_failed();
+    printf("PASS: all USB enumeration tests passed\n");
+    return 0;
+}

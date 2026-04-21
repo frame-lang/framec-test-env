@@ -1,0 +1,226 @@
+@@target python_3
+
+# HTTP/1.1 Connection — keep-alive lifecycle with HSM for cross-cutting errors.
+# $Open parent handles close() and connection_error() for all sub-states
+# ($Idle, $AwaitingResponse, $ReceivingBody, $ResponseComplete).
+# $ResponseComplete is transient — enter handler cycles to $Idle or $Closing
+# based on keep_alive flag.
+
+@@system HttpConnection {
+    interface:
+        connect(host: str, port: int)
+        send_request(method: str, path: str)
+        headers_received(status_code: int, keep_alive: bool, content_length: int)
+        body_chunk_received(chunk: str)
+        body_complete()
+        keep_alive_timeout()
+        connection_error(reason: str)
+        close()
+        status(): str
+        request_count(): int
+
+    machine:
+        $Disconnected {
+            connect(host: str, port: int) {
+                self.host = host
+                self.port = port
+                -> $Connecting
+            }
+            status(): str { @@:("disconnected") }
+            request_count(): int { @@:(self.requests) }
+        }
+
+        $Connecting {
+            $>() {
+                self.tcp_connect()
+                -> $Idle
+            }
+        }
+
+        $Idle => $Open {
+            $>() {
+                self.start_keep_alive_timer()
+            }
+            <$() {
+                self.cancel_keep_alive_timer()
+            }
+
+            send_request(method: str, path: str) {
+                self.current_method = method
+                self.current_path = path
+                self.emit_request()
+                -> $AwaitingResponse
+            }
+            keep_alive_timeout() {
+                -> $Closing
+            }
+            status(): str { @@:("idle") }
+            request_count(): int { @@:(self.requests) }
+            => $^
+        }
+
+        $AwaitingResponse => $Open {
+            headers_received(status_code: int, keep_alive: bool, content_length: int) {
+                self.response_status = status_code
+                self.ka = keep_alive
+                self.content_length = content_length
+                if content_length == 0:
+                    -> $ResponseComplete
+                else:
+                    -> $ReceivingBody
+            }
+            status(): str { @@:("awaiting response") }
+            request_count(): int { @@:(self.requests) }
+            => $^
+        }
+
+        $ReceivingBody => $Open {
+            body_chunk_received(chunk: str) {
+                # Chunk accumulation is target-specific; we just count bytes.
+                self.bytes_received = self.bytes_received + self.content_length
+            }
+            body_complete() {
+                -> $ResponseComplete
+            }
+            status(): str { @@:("receiving body") }
+            request_count(): int { @@:(self.requests) }
+            => $^
+        }
+
+        $ResponseComplete => $Open {
+            $>() {
+                self.requests = self.requests + 1
+                if self.ka:
+                    -> $Idle
+                else:
+                    -> $Closing
+            }
+            => $^
+        }
+
+        $Open {
+            connection_error(reason: str) {
+                -> $Disconnected
+            }
+            close() {
+                -> $Closing
+            }
+        }
+
+        $Closing {
+            $>() {
+                self.tcp_close()
+                -> $Disconnected
+            }
+        }
+
+    actions:
+        tcp_connect()             { pass }
+        tcp_close()               { pass }
+        emit_request()            { pass }
+        start_keep_alive_timer()  { pass }
+        cancel_keep_alive_timer() { pass }
+
+    domain:
+        host: str = ""
+        port: int = 80
+        current_method: str = ""
+        current_path: str = ""
+        response_status: int = 0
+        content_length: int = 0
+        bytes_received: int = 0
+        ka: bool = True
+        requests: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} — expected {expected!r}, got {actual!r}")
+        raise SystemExit(1)
+
+def test_first_request_keepalive():
+    conn = @@HttpConnection()
+    check("disconnected", conn.status(), "disconnected")
+    conn.connect("example.com", 80)
+    # Transient $Connecting enter handler moves to Idle
+    check("idle after connect", conn.status(), "idle")
+    conn.send_request("GET", "/index.html")
+    check("awaiting response", conn.status(), "awaiting response")
+    conn.headers_received(200, True, 5)
+    check("receiving body", conn.status(), "receiving body")
+    conn.body_complete()
+    # $ResponseComplete enter -> $Idle (because keep_alive)
+    check("back to idle (keep-alive)", conn.status(), "idle")
+    check("request count 1", conn.request_count(), 1)
+    print("PASS: first request, keep-alive cycles back to idle")
+
+def test_empty_body_skips_receiving():
+    conn = @@HttpConnection()
+    conn.connect("example.com", 80)
+    conn.send_request("GET", "/about")
+    conn.headers_received(200, True, 0)
+    # content_length=0 -> skip $ReceivingBody directly to $ResponseComplete -> $Idle
+    check("idle after empty body", conn.status(), "idle")
+    print("PASS: empty body skips $ReceivingBody")
+
+def test_connection_close_header():
+    conn = @@HttpConnection()
+    conn.connect("example.com", 80)
+    conn.send_request("POST", "/api")
+    conn.headers_received(201, False, 0)
+    # ka=False -> $Closing -> $Disconnected
+    check("disconnected after Connection: close",
+          conn.status(), "disconnected")
+    print("PASS: Connection: close response path")
+
+def test_keep_alive_timeout():
+    conn = @@HttpConnection()
+    conn.connect("example.com", 80)
+    check("idle", conn.status(), "idle")
+    conn.keep_alive_timeout()
+    # $Closing enter -> $Disconnected
+    check("disconnected after timeout", conn.status(), "disconnected")
+    print("PASS: keep-alive timeout tears down connection")
+
+def test_connection_error_during_receive():
+    conn = @@HttpConnection()
+    conn.connect("example.com", 80)
+    conn.send_request("GET", "/large")
+    conn.headers_received(200, True, 1000)
+    check("receiving body", conn.status(), "receiving body")
+    # connection_error() not handled locally — forwards via HSM to $Open
+    conn.connection_error("peer reset")
+    check("disconnected after error", conn.status(), "disconnected")
+    print("PASS: connection_error from receiving body forwards via HSM")
+
+def test_explicit_close_during_idle():
+    conn = @@HttpConnection()
+    conn.connect("example.com", 80)
+    conn.close()
+    # close() handled by $Open via => $^; $Closing transient -> $Disconnected
+    check("close from idle", conn.status(), "disconnected")
+    print("PASS: explicit close from idle via HSM parent")
+
+def test_multiple_request_reuse():
+    conn = @@HttpConnection()
+    conn.connect("example.com", 80)
+    conn.send_request("GET", "/one")
+    conn.headers_received(200, True, 0)
+    conn.send_request("GET", "/two")
+    conn.headers_received(200, True, 0)
+    conn.send_request("GET", "/three")
+    conn.headers_received(200, True, 0)
+    check("3 requests on same connection", conn.request_count(), 3)
+    check("still idle", conn.status(), "idle")
+    print("PASS: connection reused across multiple requests")
+
+if __name__ == '__main__':
+    test_first_request_keepalive()
+    test_empty_body_skips_receiving()
+    test_connection_close_header()
+    test_keep_alive_timeout()
+    test_connection_error_during_receive()
+    test_explicit_close_during_idle()
+    test_multiple_request_reuse()
+    print("PASS: all HTTP connection tests passed")

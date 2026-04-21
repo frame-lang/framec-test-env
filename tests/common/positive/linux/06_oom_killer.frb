@@ -1,0 +1,125 @@
+@@target ruby
+
+# OOM Killer — kernel mm/oom_kill.c semantics.
+
+@@system OomKiller {
+    interface:
+        oom_detected(gfp_flags: int): str
+        victim_exited(pid: int, freed_kb: int): str
+        oom_detected_again(gfp_flags: int): str
+        status(): str
+
+    machine:
+        $Normal {
+            oom_detected(gfp_flags: int): str {
+                @@:("selecting victim")
+                -> $Selecting
+            }
+            status(): str { @@:("normal") }
+        }
+
+        $Selecting {
+            $>() {
+                @victim_pid = select_victim()
+                if @victim_pid < 0
+                    -> $Panic
+                else
+                    -> $Killing
+                end
+            }
+            status(): str { @@:("selecting") }
+        }
+
+        $Killing {
+            $>() {
+                send_sigkill(@victim_pid)
+                start_reaper_timer()
+            }
+            <$() {
+                cancel_reaper_timer()
+            }
+
+            victim_exited(pid: int, freed_kb: int): str {
+                if pid == @victim_pid
+                    @total_freed_kb = @total_freed_kb + freed_kb
+                    @@:("reclaimed")
+                    -> $Normal
+                else
+                    @@:("wrong pid, still waiting")
+                end
+            }
+
+            status(): str { @@:("killing") }
+        }
+
+        $Panic {
+            status(): str { @@:("panic") }
+        }
+
+    actions:
+        select_victim() {
+            @victim_score = 850
+            4242
+        }
+        send_sigkill(pid) {}
+        start_reaper_timer() {}
+        cancel_reaper_timer() {}
+
+    domain:
+        victim_pid: int = -1
+        victim_score: int = 0
+        total_freed_kb: int = 0
+}
+
+
+def check(label, actual, expected)
+    if actual != expected
+        puts "FAIL: #{label} — expected '#{expected}', got '#{actual}'"
+        exit 1
+    end
+end
+
+def test_normal_oom_flow
+    oom = OomKiller.new
+    check("initial normal", oom.status, "normal")
+    check("oom_detected -> selecting", oom.oom_detected(0), "selecting victim")
+    check("arrived in killing", oom.status, "killing")
+    check("victim exits", oom.victim_exited(4242, 51200), "reclaimed")
+    check("back to normal", oom.status, "normal")
+    puts "PASS: normal OOM flow"
+end
+
+def test_concurrent_oom_silently_dropped
+    oom = OomKiller.new
+    oom.oom_detected(0)
+    check("in killing", oom.status, "killing")
+    oom.oom_detected_again(0)
+    check("still killing (event dropped)", oom.status, "killing")
+    oom.victim_exited(4242, 8192)
+    check("back to normal after reclaim", oom.status, "normal")
+    puts "PASS: concurrent OOM events dropped in $Killing (safety)"
+end
+
+def test_wrong_pid_exit_ignored
+    oom = OomKiller.new
+    oom.oom_detected(0)
+    check("waiting for victim", oom.victim_exited(9999, 1024), "wrong pid, still waiting")
+    check("still killing", oom.status, "killing")
+    oom.victim_exited(4242, 2048)
+    check("correct pid -> normal", oom.status, "normal")
+    puts "PASS: wrong-pid exit ignored in $Killing"
+end
+
+def test_oom_detected_ignored_in_selecting
+    oom = OomKiller.new
+    check("first oom", oom.oom_detected(0), "selecting victim")
+    oom.oom_detected(0)
+    check("second oom dropped", oom.status, "killing")
+    puts "PASS: oom_detected ignored while killing"
+end
+
+test_normal_oom_flow
+test_concurrent_oom_silently_dropped
+test_wrong_pid_exit_ignored
+test_oom_detected_ignored_in_selecting
+puts "PASS: all OOM killer tests passed"

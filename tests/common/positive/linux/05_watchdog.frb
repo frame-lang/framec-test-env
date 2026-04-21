@@ -1,0 +1,146 @@
+@@target ruby
+
+# Watchdog Timer — kernel drivers/watchdog/watchdog_dev.c magic-close semantics.
+
+@@system WatchdogDevice {
+    interface:
+        open(): str
+        write(data: str): str
+        ping(): str
+        close(): str
+        timeout_expired(): str
+        status(): str
+
+    machine:
+        $Inactive {
+            open(): str {
+                @@:("opened")
+                -> $Armed
+            }
+            status(): str { @@:("inactive") }
+        }
+
+        $Armed {
+            $>() {
+                @magic_seen = false
+                start_hw_timer()
+            }
+
+            ping(): str {
+                reset_hw_timer()
+                @@:("pinged")
+            }
+            write(data: str): str {
+                if data.include?("V")
+                    @magic_seen = true
+                    @@:("magic character received")
+                else
+                    @@:("data written")
+                end
+                reset_hw_timer()
+            }
+            close(): str {
+                if @magic_seen
+                    stop_hw_timer()
+                    @@:("disarmed")
+                    -> $Inactive
+                else
+                    @@:("close ignored -- no magic char")
+                end
+            }
+            timeout_expired(): str {
+                @@:("SYSTEM RESET")
+                -> $Triggered
+            }
+            status(): str {
+                if @magic_seen
+                    @@:("armed (magic seen, close will disarm)")
+                else
+                    @@:("armed")
+                end
+            }
+        }
+
+        $Triggered {
+            status(): str { @@:("triggered -- system reset") }
+        }
+
+    actions:
+        start_hw_timer() {}
+        reset_hw_timer() {}
+        stop_hw_timer() {}
+
+    domain:
+        timeout_sec: int = 60
+        magic_seen: bool = false
+}
+
+
+def check(label, actual, expected)
+    if actual != expected
+        puts "FAIL: #{label} — expected '#{expected}', got '#{actual}'"
+        exit 1
+    end
+end
+
+def test_open_and_ping
+    wd = WatchdogDevice.new
+    check("initial inactive", wd.status, "inactive")
+    check("open returns opened", wd.open, "opened")
+    check("armed after open", wd.status, "armed")
+    check("ping", wd.ping, "pinged")
+    check("still armed after ping", wd.status, "armed")
+    puts "PASS: open and ping"
+end
+
+def test_close_without_magic_is_ignored
+    wd = WatchdogDevice.new
+    wd.open
+    check("close without magic", wd.close, "close ignored -- no magic char")
+    check("still armed after bad close", wd.status, "armed")
+    puts "PASS: close without magic ignored (safety property)"
+end
+
+def test_magic_char_then_close_disarms
+    wd = WatchdogDevice.new
+    wd.open
+    check("write with V sets magic", wd.write("goodbye V"), "magic character received")
+    check("status shows magic seen", wd.status, "armed (magic seen, close will disarm)")
+    check("close after magic disarms", wd.close, "disarmed")
+    check("back to inactive", wd.status, "inactive")
+    puts "PASS: magic char then close disarms"
+end
+
+def test_write_without_magic_is_plain_data
+    wd = WatchdogDevice.new
+    wd.open
+    check("write without V", wd.write("abcdef"), "data written")
+    check("still armed with no magic", wd.status, "armed")
+    puts "PASS: write without magic is plain data"
+end
+
+def test_timeout_triggers_reset
+    wd = WatchdogDevice.new
+    wd.open
+    check("timeout fires", wd.timeout_expired, "SYSTEM RESET")
+    check("terminal triggered state", wd.status, "triggered -- system reset")
+    puts "PASS: timeout triggers system reset"
+end
+
+def test_reopen_resets_magic_seen
+    wd = WatchdogDevice.new
+    wd.open
+    wd.write("set V please")
+    wd.close
+    wd.open
+    check("magic_seen reset on reopen", wd.close, "close ignored -- no magic char")
+    puts "PASS: reopen resets magic_seen via enter handler"
+end
+
+test_open_and_ping
+test_close_without_magic_is_ignored
+test_magic_char_then_close_disarms
+test_write_without_magic_is_plain_data
+test_timeout_triggers_reset
+test_reopen_resets_magic_seen
+puts "PASS: all watchdog tests passed"

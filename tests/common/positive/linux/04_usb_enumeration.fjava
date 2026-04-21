@@ -1,0 +1,240 @@
+@@target java
+
+// USB Device Enumeration — multi-stage pipeline with compensation (saga).
+
+@@system UsbEnumerator {
+    interface:
+        plug_in(port: int)
+        reset_done(success: boolean)
+        address_set(success: boolean, addr: int)
+        descriptors_read(success: boolean, product: String)
+        driver_bound(success: boolean)
+        unplug()
+        status(): String
+
+    machine:
+        $Detached {
+            plug_in(port: int) {
+                this.port = port;
+                this.reset_attempts = 0;
+                -> $Resetting
+            }
+            status(): String { @@:("detached") }
+        }
+
+        $Resetting => $Enumerating {
+            $>() {
+                this.reset_attempts = this.reset_attempts + 1;
+                this.issue_port_reset(this.port);
+            }
+
+            reset_done(success: boolean) {
+                if (success) {
+                    -> $Addressing
+                } else {
+                    if (this.reset_attempts < this.max_reset_attempts) {
+                        -> $Resetting
+                    } else {
+                        -> $Failed
+                    }
+                }
+            }
+            status(): String { @@:("resetting") }
+            => $^
+        }
+
+        $Addressing => $Enumerating {
+            $>() {
+                this.assign_address();
+            }
+
+            address_set(success: boolean, addr: int) {
+                if (success) {
+                    this.address = addr;
+                    -> $ReadingDescriptors
+                } else {
+                    -> $UndoReset
+                }
+            }
+            status(): String { @@:("addressing") }
+            => $^
+        }
+
+        $ReadingDescriptors => $Enumerating {
+            $>() {
+                this.read_descriptors(this.address);
+            }
+
+            descriptors_read(success: boolean, product: String) {
+                if (success) {
+                    this.product = product;
+                    -> $BindingDriver
+                } else {
+                    -> $UndoAddress
+                }
+            }
+            status(): String { @@:("reading descriptors") }
+            => $^
+        }
+
+        $BindingDriver => $Enumerating {
+            $>() {
+                this.bind_driver(this.product);
+            }
+
+            driver_bound(success: boolean) {
+                if (success) {
+                    -> $Configured
+                } else {
+                    -> $UndoAddress
+                }
+            }
+            status(): String { @@:("binding driver") }
+            => $^
+        }
+
+        $Enumerating {
+            unplug() {
+                -> $Detached
+            }
+        }
+
+        $UndoAddress {
+            $>() {
+                this.release_address(this.address);
+                -> $UndoReset
+            }
+        }
+
+        $UndoReset {
+            $>() {
+                this.disable_port(this.port);
+                -> $Failed
+            }
+        }
+
+        $Configured {
+            unplug() {
+                this.unbind_driver();
+                this.release_address(this.address);
+                this.disable_port(this.port);
+                -> $Detached
+            }
+            status(): String { @@:("configured") }
+        }
+
+        $Failed {
+            plug_in(port: int) {
+                this.port = port;
+                this.reset_attempts = 0;
+                -> $Resetting
+            }
+            status(): String { @@:("failed") }
+        }
+
+    actions:
+        issue_port_reset(port: int) {}
+        assign_address() {}
+        read_descriptors(addr: int) {}
+        bind_driver(product: String) {}
+        release_address(addr: int) {}
+        disable_port(port: int) {}
+        unbind_driver() {}
+
+    domain:
+        port: int = 0
+        address: int = 0
+        product: String = ""
+        reset_attempts: int = 0
+        max_reset_attempts: int = 3
+}
+
+
+class Main {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " — expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+
+    static void test_happy_path() {
+        var usb = @@UsbEnumerator();
+        check("initial detached", (String) usb.status(), "detached");
+        usb.plug_in(1);
+        check("after plug_in", (String) usb.status(), "resetting");
+        usb.reset_done(true);
+        check("reset ok -> addressing", (String) usb.status(), "addressing");
+        usb.address_set(true, 7);
+        check("address ok -> reading", (String) usb.status(), "reading descriptors");
+        usb.descriptors_read(true, "USB Keyboard");
+        check("descriptors ok -> binding", (String) usb.status(), "binding driver");
+        usb.driver_bound(true);
+        check("driver bound -> configured", (String) usb.status(), "configured");
+        System.out.println("PASS: happy path enumeration");
+    }
+
+    static void test_descriptor_failure_compensates() {
+        var usb = @@UsbEnumerator();
+        usb.plug_in(2);
+        usb.reset_done(true);
+        usb.address_set(true, 8);
+        usb.descriptors_read(false, "");
+        check("compensated to failed", (String) usb.status(), "failed");
+        System.out.println("PASS: descriptor failure compensation");
+    }
+
+    static void test_driver_bind_failure_compensates() {
+        var usb = @@UsbEnumerator();
+        usb.plug_in(3);
+        usb.reset_done(true);
+        usb.address_set(true, 9);
+        usb.descriptors_read(true, "Mouse");
+        usb.driver_bound(false);
+        check("bind fail compensated to failed", (String) usb.status(), "failed");
+        System.out.println("PASS: driver bind failure compensation");
+    }
+
+    static void test_unplug_during_enumeration() {
+        var usb = @@UsbEnumerator();
+        usb.plug_in(4);
+        check("in resetting", (String) usb.status(), "resetting");
+        usb.unplug();
+        check("unplug -> detached", (String) usb.status(), "detached");
+        System.out.println("PASS: unplug during enumeration forwards via HSM");
+    }
+
+    static void test_reset_retry_then_exhaust() {
+        var usb = @@UsbEnumerator();
+        usb.plug_in(5);
+        usb.reset_done(false);
+        check("retry 1", (String) usb.status(), "resetting");
+        usb.reset_done(false);
+        check("retry 2", (String) usb.status(), "resetting");
+        usb.reset_done(false);
+        check("exhausted -> failed", (String) usb.status(), "failed");
+        System.out.println("PASS: reset retry exhaustion");
+    }
+
+    static void test_replug_from_failed() {
+        var usb = @@UsbEnumerator();
+        usb.plug_in(6);
+        usb.reset_done(false);
+        usb.reset_done(false);
+        usb.reset_done(false);
+        check("failed state", (String) usb.status(), "failed");
+        usb.plug_in(6);
+        check("re-plug restarts enumeration", (String) usb.status(), "resetting");
+        System.out.println("PASS: re-plug from failed state");
+    }
+
+    public static void main(String[] args) {
+        test_happy_path();
+        test_descriptor_failure_compensates();
+        test_driver_bind_failure_compensates();
+        test_unplug_during_enumeration();
+        test_reset_retry_then_exhaust();
+        test_replug_from_failed();
+        System.out.println("PASS: all USB enumeration tests passed");
+    }
+}

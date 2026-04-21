@@ -1,0 +1,205 @@
+@@target cpp_17
+
+// NTP Client Association -- RFC 5905.
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <cstdlib>
+
+@@system NtpAssociation {
+    operations:
+        get_offset(): int { return this->last_offset; }
+        is_reachable(): bool { return this->reach_register > 0; }
+
+    interface:
+        poll_tick()
+        response_received(offset_ms: int, delay_ms: int)
+        poll_timeout()
+        status(): std::string
+        poll_interval(): int
+        reach(): int
+
+    machine:
+        $Unsynced {
+            $>() {
+                this->poll_interval_v = this->min_poll;
+            }
+
+            poll_tick() {
+            }
+            response_received(offset_ms: int, delay_ms: int) {
+                this->shift_reach_register(1);
+                this->last_offset = offset_ms;
+                this->last_delay = delay_ms;
+                this->good_responses = this->good_responses + 1;
+                if (this->good_responses >= this->sync_threshold) {
+                    -> $Synced
+                }
+            }
+            poll_timeout() {
+                this->shift_reach_register(0);
+            }
+            status(): std::string { @@:(std::string("unsynced")) }
+            poll_interval(): int { @@:(this->poll_interval_v) }
+            reach(): int { @@:(this->reach_register) }
+        }
+
+        $Synced {
+            poll_tick() {
+            }
+            response_received(offset_ms: int, delay_ms: int) {
+                this->shift_reach_register(1);
+                this->last_offset = offset_ms;
+                this->last_delay = delay_ms;
+                if (this->poll_interval_v < this->max_poll) {
+                    this->poll_interval_v = this->poll_interval_v * 2;
+                }
+            }
+            poll_timeout() {
+                this->shift_reach_register(0);
+                this->consecutive_timeouts = this->consecutive_timeouts + 1;
+                if (this->consecutive_timeouts >= 3) {
+                    this->consecutive_timeouts = 0;
+                    this->good_responses = 0;
+                    -> $Unsynced
+                }
+                if (this->poll_interval_v > this->min_poll) {
+                    this->poll_interval_v = this->poll_interval_v >> 1;
+                }
+            }
+            status(): std::string { @@:(std::string("synced")) }
+            poll_interval(): int { @@:(this->poll_interval_v) }
+            reach(): int { @@:(this->reach_register) }
+        }
+
+    actions:
+        shift_reach_register(bit: int) {
+            this->reach_register = ((this->reach_register << 1) | bit) & 0xFF;
+            if (bit != 0) {
+                this->consecutive_timeouts = 0;
+            }
+        }
+
+    domain:
+        poll_interval_v: int = 64
+        min_poll: int = 64
+        max_poll: int = 1024
+        reach_register: int = 0
+        last_offset: int = 0
+        last_delay: int = 0
+        good_responses: int = 0
+        sync_threshold: int = 3
+        consecutive_timeouts: int = 0
+}
+
+
+void check_str(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " -- expected '" << expected << "', got '" << actual << "'" << std::endl;
+        std::exit(1);
+    }
+}
+
+void check_int(const std::string& label, int actual, int expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " -- expected " << expected << ", got " << actual << std::endl;
+        std::exit(1);
+    }
+}
+
+void check_bool(const std::string& label, bool actual, bool expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " -- expected " << expected << ", got " << actual << std::endl;
+        std::exit(1);
+    }
+}
+
+void test_builds_to_sync() {
+    auto ntp = @@NtpAssociation();
+    check_str("initial unsynced", std::any_cast<std::string>(ntp.status()), "unsynced");
+    ntp.poll_tick();
+    ntp.response_received(12, 3);
+    ntp.poll_tick();
+    ntp.response_received(11, 2);
+    check_str("not yet synced (2 good)", std::any_cast<std::string>(ntp.status()), "unsynced");
+    ntp.poll_tick();
+    ntp.response_received(12, 3);
+    check_str("synced after 3 good responses", std::any_cast<std::string>(ntp.status()), "synced");
+    std::cout << "PASS: sync threshold reached after 3 good responses" << std::endl;
+}
+
+void test_poll_interval_backs_off() {
+    auto ntp = @@NtpAssociation();
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check_str("synced", std::any_cast<std::string>(ntp.status()), "synced");
+    check_int("interval at min (64)", std::any_cast<int>(ntp.poll_interval()), 64);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check_int("128 after 1 good in synced", std::any_cast<int>(ntp.poll_interval()), 128);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check_int("256 after 2 good", std::any_cast<int>(ntp.poll_interval()), 256);
+    std::cout << "PASS: poll interval doubles on success in synced" << std::endl;
+}
+
+void test_timeout_shrinks_interval() {
+    auto ntp = @@NtpAssociation();
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check_int("interval 128", std::any_cast<int>(ntp.poll_interval()), 128);
+    ntp.poll_tick(); ntp.poll_timeout();
+    check_int("timeout halves -> 64", std::any_cast<int>(ntp.poll_interval()), 64);
+    std::cout << "PASS: timeout halves poll interval in synced" << std::endl;
+}
+
+void test_three_timeouts_drops_to_unsync() {
+    auto ntp = @@NtpAssociation();
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check_str("synced", std::any_cast<std::string>(ntp.status()), "synced");
+    ntp.poll_tick(); ntp.poll_timeout();
+    ntp.poll_tick(); ntp.poll_timeout();
+    check_str("still synced after 2 timeouts", std::any_cast<std::string>(ntp.status()), "synced");
+    ntp.poll_tick(); ntp.poll_timeout();
+    check_str("3rd timeout drops to unsync", std::any_cast<std::string>(ntp.status()), "unsynced");
+    std::cout << "PASS: three consecutive timeouts drop to unsync" << std::endl;
+}
+
+void test_reach_register_shifts() {
+    auto ntp = @@NtpAssociation();
+    check_int("reach starts 0", std::any_cast<int>(ntp.reach()), 0);
+    ntp.poll_tick();
+    ntp.response_received(10, 2);
+    check_int("reach 0b00000001 = 1", std::any_cast<int>(ntp.reach()), 1);
+    ntp.poll_tick();
+    ntp.response_received(10, 2);
+    check_int("reach 0b00000011 = 3", std::any_cast<int>(ntp.reach()), 3);
+    ntp.poll_tick();
+    ntp.poll_timeout();
+    check_int("reach 0b00000110 = 6", std::any_cast<int>(ntp.reach()), 6);
+    std::cout << "PASS: reach register shifts correctly" << std::endl;
+}
+
+void test_is_reachable_operation() {
+    auto ntp = @@NtpAssociation();
+    check_bool("initial not reachable", ntp.is_reachable(), false);
+    ntp.poll_tick();
+    ntp.response_received(10, 2);
+    check_bool("after good response reachable", ntp.is_reachable(), true);
+    std::cout << "PASS: is_reachable() operation query" << std::endl;
+}
+
+int main() {
+    test_builds_to_sync();
+    test_poll_interval_backs_off();
+    test_timeout_shrinks_interval();
+    test_three_timeouts_drops_to_unsync();
+    test_reach_register_shifts();
+    test_is_reachable_operation();
+    std::cout << "PASS: all NTP association tests passed" << std::endl;
+    return 0;
+}

@@ -1,0 +1,251 @@
+@@target go
+
+// BGP Finite State Machine -- RFC 4271 Section 8 direct transcription.
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+@@persist
+@@system BgpSession {
+    interface:
+        ManualStart()
+        ManualStop()
+        TcpConnectionConfirmed()
+        TcpConnectionFails()
+        OpenReceived(asn: int, hold_time: int)
+        KeepaliveReceived()
+        NotificationReceived(code: int, subcode: int)
+        HoldTimerExpired()
+        KeepaliveTimerExpired()
+        ConnectRetryTimerExpired()
+        Status(): string
+
+    machine:
+        $Idle {
+            ManualStart() {
+                s.connect_retry_count = 0
+                s.start_connect_retry_timer()
+                s.initiate_tcp_connection()
+                -> $Connect
+            }
+            Status(): string { @@:("idle") }
+        }
+
+        $Connect {
+            TcpConnectionConfirmed() {
+                s.cancel_connect_retry_timer()
+                s.send_open()
+                -> $OpenSent
+            }
+            TcpConnectionFails() {
+                -> $Active
+            }
+            ConnectRetryTimerExpired() {
+                s.initiate_tcp_connection()
+                s.start_connect_retry_timer()
+            }
+            ManualStop() {
+                -> $Idle
+            }
+            Status(): string { @@:("connect") }
+        }
+
+        $Active {
+            TcpConnectionConfirmed() {
+                s.cancel_connect_retry_timer()
+                s.send_open()
+                -> $OpenSent
+            }
+            ConnectRetryTimerExpired() {
+                s.connect_retry_count = s.connect_retry_count + 1
+                s.initiate_tcp_connection()
+                s.start_connect_retry_timer()
+                -> $Connect
+            }
+            ManualStop() {
+                -> $Idle
+            }
+            Status(): string { @@:("active") }
+        }
+
+        $OpenSent {
+            OpenReceived(asn: int, hold_time: int) {
+                s.peer_asn = asn
+                s.negotiated_hold = hold_time
+                s.cancel_hold_timer()
+                s.send_keepalive()
+                -> $OpenConfirm
+            }
+            TcpConnectionFails() {
+                s.cancel_hold_timer()
+                -> $Active
+            }
+            NotificationReceived(code: int, subcode: int) {
+                -> $Idle
+            }
+            HoldTimerExpired() {
+                s.send_notification()
+                -> $Idle
+            }
+            ManualStop() {
+                s.send_notification()
+                -> $Idle
+            }
+            Status(): string { @@:("open sent") }
+        }
+
+        $OpenConfirm {
+            KeepaliveReceived() {
+                -> $Established
+            }
+            NotificationReceived(code: int, subcode: int) {
+                -> $Idle
+            }
+            HoldTimerExpired() {
+                s.send_notification()
+                -> $Idle
+            }
+            KeepaliveTimerExpired() {
+                s.send_keepalive()
+            }
+            ManualStop() {
+                s.send_notification()
+                -> $Idle
+            }
+            Status(): string { @@:("open confirm") }
+        }
+
+        $Established {
+            KeepaliveReceived() {
+                s.reset_hold_timer()
+            }
+            KeepaliveTimerExpired() {
+                s.send_keepalive()
+            }
+            NotificationReceived(code: int, subcode: int) {
+                -> $Idle
+            }
+            HoldTimerExpired() {
+                s.send_notification()
+                -> $Idle
+            }
+            ManualStop() {
+                s.send_notification()
+                -> $Idle
+            }
+            Status(): string { @@:("established") }
+        }
+
+    actions:
+        initiate_tcp_connection()   {}
+        send_open()                 {}
+        send_keepalive()            {}
+        send_notification()         {}
+        start_connect_retry_timer() {}
+        cancel_connect_retry_timer(){}
+        cancel_hold_timer()         {}
+        reset_hold_timer()          {}
+
+    domain:
+        local_asn: int = 65001
+        peer_asn: int = 0
+        negotiated_hold: int = 0
+        connect_retry_count: int = 0
+}
+
+
+func check(label, actual, expected string) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func test_full_session_establishment() {
+	bgp := NewBgpSession()
+	check("initial idle", bgp.Status(), "idle")
+	bgp.ManualStart()
+	check("connect", bgp.Status(), "connect")
+	bgp.TcpConnectionConfirmed()
+	check("open sent", bgp.Status(), "open sent")
+	bgp.OpenReceived(65002, 60)
+	check("open confirm", bgp.Status(), "open confirm")
+	bgp.KeepaliveReceived()
+	check("established", bgp.Status(), "established")
+	fmt.Println("PASS: full BGP session establishment")
+}
+
+func test_persist_across_restart() {
+	bgp := NewBgpSession()
+	bgp.ManualStart()
+	bgp.TcpConnectionConfirmed()
+	bgp.OpenReceived(65002, 60)
+	bgp.KeepaliveReceived()
+	check("established", bgp.Status(), "established")
+	snap := bgp.SaveState()
+	bgp2 := RestoreBgpSession(snap)
+	check("established survived restart", bgp2.Status(), "established")
+	bgp2.KeepaliveTimerExpired()
+	bgp2.KeepaliveReceived()
+	check("still established", bgp2.Status(), "established")
+	fmt.Println("PASS: @@persist -- BGP session survives daemon restart")
+	_ = json.Valid
+}
+
+func test_hold_timer_teardown() {
+	bgp := NewBgpSession()
+	bgp.ManualStart()
+	bgp.TcpConnectionConfirmed()
+	bgp.OpenReceived(65002, 60)
+	bgp.KeepaliveReceived()
+	bgp.HoldTimerExpired()
+	check("hold expiry tears down", bgp.Status(), "idle")
+	fmt.Println("PASS: hold timer expiry returns to idle")
+}
+
+func test_tcp_failure_goes_active() {
+	bgp := NewBgpSession()
+	bgp.ManualStart()
+	bgp.TcpConnectionFails()
+	check("active after TCP fail", bgp.Status(), "active")
+	bgp.ConnectRetryTimerExpired()
+	check("retry transitions back to connect", bgp.Status(), "connect")
+	fmt.Println("PASS: TCP failure path Active -> Connect")
+}
+
+func test_notification_in_established_teardown() {
+	bgp := NewBgpSession()
+	bgp.ManualStart()
+	bgp.TcpConnectionConfirmed()
+	bgp.OpenReceived(65002, 60)
+	bgp.KeepaliveReceived()
+	bgp.NotificationReceived(6, 0)
+	check("notification tears down", bgp.Status(), "idle")
+	fmt.Println("PASS: notification in Established -> idle")
+}
+
+func test_manual_stop_from_established() {
+	bgp := NewBgpSession()
+	bgp.ManualStart()
+	bgp.TcpConnectionConfirmed()
+	bgp.OpenReceived(65002, 60)
+	bgp.KeepaliveReceived()
+	bgp.ManualStop()
+	check("manual stop", bgp.Status(), "idle")
+	fmt.Println("PASS: manual_stop from established")
+}
+
+func main() {
+	test_full_session_establishment()
+	test_persist_across_restart()
+	test_hold_timer_teardown()
+	test_tcp_failure_goes_active()
+	test_notification_in_established_teardown()
+	test_manual_stop_from_established()
+	fmt.Println("PASS: all BGP session tests passed")
+}

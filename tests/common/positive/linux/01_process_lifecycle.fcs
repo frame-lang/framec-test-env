@@ -1,0 +1,224 @@
+@@target csharp
+
+// Process Lifecycle — Linux task states (kernel/sched/core.c semantics)
+// Three-level HSM with explicit upward forwarding as per-state signal policy.
+
+using System;
+
+@@system TaskLifecycle {
+    interface:
+        fork(): String
+        schedule(): String
+        block_on_io(): String
+        io_complete(): String
+        block_uninterruptible(): String
+        send_signal(sig: String): String
+        wait_by_parent(): String
+        status(): String
+
+    machine:
+        $New {
+            fork(): String {
+                this.pid = this.next_pid();
+                @@:("forked")
+                -> $Ready
+            }
+            status(): String { @@:("new") }
+        }
+
+        $Ready => $Alive {
+            schedule(): String {
+                @@:("running")
+                -> $Running
+            }
+            status(): String { @@:("ready") }
+            => $^
+        }
+
+        $Running => $Alive {
+            schedule(): String {
+                @@:("preempted")
+                -> $Ready
+            }
+            block_on_io(): String {
+                @@:("blocked")
+                -> $Interruptible
+            }
+            block_uninterruptible(): String {
+                @@:("blocked (D)")
+                -> $Uninterruptible
+            }
+            status(): String { @@:("running") }
+            => $^
+        }
+
+        $Interruptible => $Blocked {
+            io_complete(): String {
+                @@:("woke")
+                -> $Ready
+            }
+            send_signal(sig: String): String {
+                if (sig == "SIGKILL" || sig == "SIGTERM" || sig == "SIGSTOP") {
+                    => $^
+                } else {
+                    @@:("interrupted")
+                    -> $Ready
+                }
+            }
+            status(): String { @@:("interruptible") }
+            => $^
+        }
+
+        $Uninterruptible => $Blocked {
+            io_complete(): String {
+                @@:("woke")
+                -> $Ready
+            }
+            send_signal(sig: String): String {
+                if (sig == "SIGKILL") {
+                    => $^
+                } else {
+                    @@:("signal held pending (D-state)")
+                }
+            }
+            status(): String { @@:("uninterruptible") }
+            => $^
+        }
+
+        $Blocked => $Alive {
+            status(): String { @@:("blocked") }
+            => $^
+        }
+
+        $Alive {
+            send_signal(sig: String): String {
+                if (sig == "SIGKILL" || sig == "SIGTERM") {
+                    @@:("exiting")
+                    -> $Zombie
+                } else if (sig == "SIGSTOP") {
+                    @@:("stopped")
+                    -> $Stopped
+                } else {
+                    @@:("signal delivered")
+                }
+            }
+        }
+
+        $Stopped {
+            send_signal(sig: String): String {
+                if (sig == "SIGCONT") {
+                    @@:("continued")
+                    -> $Ready
+                } else if (sig == "SIGKILL") {
+                    @@:("killed while stopped")
+                    -> $Zombie
+                } else {
+                    @@:("signal ignored")
+                }
+            }
+            status(): String { @@:("stopped") }
+        }
+
+        $Zombie {
+            wait_by_parent(): String {
+                @@:("reaped")
+                -> $Dead
+            }
+            status(): String { @@:("zombie") }
+        }
+
+        $Dead {
+            status(): String { @@:("dead") }
+        }
+
+    actions:
+        next_pid(): int {
+            this.pid_counter = this.pid_counter + 1;
+            return this.pid_counter;
+        }
+
+    domain:
+        pid: int = 0
+        pid_counter: int = 100
+}
+
+
+class Program {
+    static void check(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} — expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+
+    static void test_happy_path() {
+        var t = @@TaskLifecycle();
+        check("initial status", (string) t.status(), "new");
+        check("fork",           (string) t.fork(),   "forked");
+        check("after fork",     (string) t.status(), "ready");
+        check("schedule",       (string) t.schedule(), "running");
+        check("after schedule", (string) t.status(), "running");
+        check("preempt",        (string) t.schedule(), "preempted");
+        check("after preempt",  (string) t.status(), "ready");
+        Console.WriteLine("PASS: happy path");
+    }
+
+    static void test_interruptible_wake_by_signal() {
+        var t = @@TaskLifecycle();
+        t.fork();
+        t.schedule();
+        check("block_on_io", (string) t.block_on_io(), "blocked");
+        check("interruptible status", (string) t.status(), "interruptible");
+        check("SIGUSR1 wakes interruptible",
+              (string) t.send_signal("SIGUSR1"), "interrupted");
+        check("woke to ready", (string) t.status(), "ready");
+        Console.WriteLine("PASS: interruptible wake by signal");
+    }
+
+    static void test_uninterruptible_holds_signal() {
+        var t = @@TaskLifecycle();
+        t.fork();
+        t.schedule();
+        check("block_uninterruptible",
+              (string) t.block_uninterruptible(), "blocked (D)");
+        check("D state", (string) t.status(), "uninterruptible");
+        check("SIGUSR1 held pending in D",
+              (string) t.send_signal("SIGUSR1"), "signal held pending (D-state)");
+        check("still in D", (string) t.status(), "uninterruptible");
+        Console.WriteLine("PASS: uninterruptible holds non-fatal signal");
+    }
+
+    static void test_sigkill_reaches_d_state() {
+        var t = @@TaskLifecycle();
+        t.fork();
+        t.schedule();
+        t.block_uninterruptible();
+        check("SIGKILL forwarded from D through $Alive",
+              (string) t.send_signal("SIGKILL"), "exiting");
+        check("now zombie", (string) t.status(), "zombie");
+        check("reap", (string) t.wait_by_parent(), "reaped");
+        check("dead", (string) t.status(), "dead");
+        Console.WriteLine("PASS: SIGKILL reaches D state via $Alive forwarding");
+    }
+
+    static void test_sigstop_sigcont() {
+        var t = @@TaskLifecycle();
+        t.fork();
+        t.schedule();
+        check("SIGSTOP from running",
+              (string) t.send_signal("SIGSTOP"), "stopped");
+        check("stopped status", (string) t.status(), "stopped");
+        check("SIGCONT resumes", (string) t.send_signal("SIGCONT"), "continued");
+        check("back to ready", (string) t.status(), "ready");
+        Console.WriteLine("PASS: SIGSTOP/SIGCONT");
+    }
+
+    static void Main(string[] args) {
+        test_happy_path();
+        test_interruptible_wake_by_signal();
+        test_uninterruptible_holds_signal();
+        test_sigkill_reaches_d_state();
+        test_sigstop_sigcont();
+        Console.WriteLine("PASS: all process lifecycle tests passed");
+    }
+}

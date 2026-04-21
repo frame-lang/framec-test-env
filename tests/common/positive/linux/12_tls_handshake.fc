@@ -1,0 +1,202 @@
+@@target c
+
+// TLS Handshake (server side) — RFC 5246 Section 7.3.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system TlsServerHandshake {
+    interface:
+        client_hello(version: str, cipher: str)
+        client_key_exchange(key_data: str)
+        client_change_cipher_spec()
+        client_finished(verify: str)
+        alert(level: str, desc: str)
+        status(): str
+
+    machine:
+        $Idle {
+            client_hello(version: str, cipher: str) {
+                self->client_version = version;
+                if (strcmp(cipher, "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256") == 0) {
+                    self->selected_cipher = cipher;
+                    -> $ServerHello
+                } else {
+                    if (strcmp(cipher, "TLS_RSA_WITH_AES_128_CBC_SHA") == 0) {
+                        self->selected_cipher = cipher;
+                        -> $ServerHello
+                    } else {
+                        TlsServerHandshake_send_alert(self);
+                        -> $Closed
+                    }
+                }
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $ServerHello => $Handshaking {
+            $>() {
+                TlsServerHandshake_send_server_hello(self);
+                TlsServerHandshake_send_certificate(self);
+                TlsServerHandshake_send_server_hello_done(self);
+                -> $AwaitClientKeyExchange
+            }
+            status(): str { @@:("server hello") }
+            => $^
+        }
+
+        $AwaitClientKeyExchange => $Handshaking {
+            client_key_exchange(key_data: str) {
+                self->premaster = key_data;
+                TlsServerHandshake_derive_keys(self);
+                -> $AwaitChangeCipherSpec
+            }
+            status(): str { @@:("await key exchange") }
+            => $^
+        }
+
+        $AwaitChangeCipherSpec => $Handshaking {
+            client_change_cipher_spec() {
+                self->client_encrypted = 1;
+                -> $AwaitClientFinished
+            }
+            status(): str { @@:("await change cipher spec") }
+            => $^
+        }
+
+        $AwaitClientFinished => $Handshaking {
+            client_finished(verify: str) {
+                if (strcmp(verify, "valid") == 0) {
+                    TlsServerHandshake_send_change_cipher_spec(self);
+                    TlsServerHandshake_send_finished(self);
+                    -> $Established
+                } else {
+                    TlsServerHandshake_send_alert(self);
+                    -> $Closed
+                }
+            }
+            status(): str { @@:("await client finished") }
+            => $^
+        }
+
+        $Handshaking {
+            alert(level: str, desc: str) {
+                if (strcmp(level, "fatal") == 0) {
+                    -> $Closed
+                }
+            }
+        }
+
+        $Established {
+            alert(level: str, desc: str) {
+                if (strcmp(level, "fatal") == 0) {
+                    -> $Closed
+                }
+            }
+            status(): str { @@:("established") }
+        }
+
+        $Closed {
+            status(): str { @@:("closed") }
+        }
+
+    actions:
+        send_server_hello() {}
+        send_certificate() {}
+        send_server_hello_done() {}
+        derive_keys() {}
+        send_change_cipher_spec() {}
+        send_finished() {}
+        send_alert() {}
+
+    domain:
+        client_version: str = ""
+        selected_cipher: str = ""
+        premaster: str = ""
+        client_encrypted: bool = 0
+}
+
+
+void check(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void test_happy_handshake(void) {
+    TlsServerHandshake* tls = @@TlsServerHandshake();
+    check("initial idle", (const char*)TlsServerHandshake_status(tls), "idle");
+    TlsServerHandshake_client_hello(tls, "TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA");
+    check("after client_hello -> through ServerHello to await", (const char*)TlsServerHandshake_status(tls), "await key exchange");
+    TlsServerHandshake_client_key_exchange(tls, "premaster_data");
+    check("after key exchange", (const char*)TlsServerHandshake_status(tls), "await change cipher spec");
+    TlsServerHandshake_client_change_cipher_spec(tls);
+    check("after CCS", (const char*)TlsServerHandshake_status(tls), "await client finished");
+    TlsServerHandshake_client_finished(tls, "valid");
+    check("established", (const char*)TlsServerHandshake_status(tls), "established");
+    printf("PASS: happy TLS handshake\n");
+    TlsServerHandshake_destroy(tls);
+}
+
+void test_unsupported_cipher_closes(void) {
+    TlsServerHandshake* tls = @@TlsServerHandshake();
+    TlsServerHandshake_client_hello(tls, "TLS 1.2", "TLS_NULL_WITH_NULL_NULL");
+    check("no matching cipher -> closed", (const char*)TlsServerHandshake_status(tls), "closed");
+    printf("PASS: unsupported cipher closes handshake\n");
+    TlsServerHandshake_destroy(tls);
+}
+
+void test_fatal_alert_during_handshake(void) {
+    TlsServerHandshake* tls = @@TlsServerHandshake();
+    TlsServerHandshake_client_hello(tls, "TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA");
+    TlsServerHandshake_alert(tls, "fatal", "unexpected_message");
+    check("fatal alert -> closed (via HSM parent)", (const char*)TlsServerHandshake_status(tls), "closed");
+    printf("PASS: fatal alert forwards via HSM parent to $Closed\n");
+    TlsServerHandshake_destroy(tls);
+}
+
+void test_warning_alert_ignored(void) {
+    TlsServerHandshake* tls = @@TlsServerHandshake();
+    TlsServerHandshake_client_hello(tls, "TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA");
+    TlsServerHandshake_alert(tls, "warning", "close_notify_soon");
+    check("warning alert doesn't close", (const char*)TlsServerHandshake_status(tls), "await key exchange");
+    printf("PASS: warning alert doesn't close handshake\n");
+    TlsServerHandshake_destroy(tls);
+}
+
+void test_invalid_finished_closes(void) {
+    TlsServerHandshake* tls = @@TlsServerHandshake();
+    TlsServerHandshake_client_hello(tls, "TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA");
+    TlsServerHandshake_client_key_exchange(tls, "bogus");
+    TlsServerHandshake_client_change_cipher_spec(tls);
+    TlsServerHandshake_client_finished(tls, "invalid");
+    check("bad verify -> closed", (const char*)TlsServerHandshake_status(tls), "closed");
+    printf("PASS: invalid client_finished closes\n");
+    TlsServerHandshake_destroy(tls);
+}
+
+void test_fatal_alert_in_established(void) {
+    TlsServerHandshake* tls = @@TlsServerHandshake();
+    TlsServerHandshake_client_hello(tls, "TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA");
+    TlsServerHandshake_client_key_exchange(tls, "pm");
+    TlsServerHandshake_client_change_cipher_spec(tls);
+    TlsServerHandshake_client_finished(tls, "valid");
+    check("established", (const char*)TlsServerHandshake_status(tls), "established");
+    TlsServerHandshake_alert(tls, "fatal", "bad_record_mac");
+    check("fatal in $Established -> closed", (const char*)TlsServerHandshake_status(tls), "closed");
+    printf("PASS: fatal alert in established closes\n");
+    TlsServerHandshake_destroy(tls);
+}
+
+int main(void) {
+    test_happy_handshake();
+    test_unsupported_cipher_closes();
+    test_fatal_alert_during_handshake();
+    test_warning_alert_ignored();
+    test_invalid_finished_closes();
+    test_fatal_alert_in_established();
+    printf("PASS: all TLS handshake tests passed\n");
+    return 0;
+}

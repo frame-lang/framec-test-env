@@ -1,0 +1,220 @@
+@@target java
+
+// Wi-Fi Station Management -- IEEE 802.11 station state machine.
+
+@@system WifiStation {
+    interface:
+        scan_done(bssid: String, ssid: String)
+        auth_response(success: boolean)
+        assoc_response(success: boolean, aid: int)
+        eapol_key_msg(msg_num: int)
+        deauth(reason: String)
+        disassoc(reason: String)
+        disconnect()
+        status(): String
+        key_step(): int
+
+    machine:
+        $Disconnected {
+            scan_done(bssid: String, ssid: String) {
+                this.bssid = bssid;
+                this.ssid = ssid;
+                -> $Authenticating
+            }
+            status(): String { @@:("disconnected") }
+            key_step(): int { @@:(0) }
+        }
+
+        $Authenticating => $Associated {
+            $>() {
+                this.send_auth_request();
+            }
+
+            auth_response(success: boolean) {
+                if (success) {
+                    -> $Associating
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): String { @@:("authenticating") }
+            key_step(): int { @@:(0) }
+            => $^
+        }
+
+        $Associating => $Associated {
+            $>() {
+                this.send_assoc_request();
+            }
+
+            assoc_response(success: boolean, aid: int) {
+                if (success) {
+                    this.aid = aid;
+                    -> $KeyNegotiation
+                } else {
+                    -> $Disconnected
+                }
+            }
+            disassoc(reason: String) {
+                -> $Authenticating
+            }
+            status(): String { @@:("associating") }
+            key_step(): int { @@:(0) }
+            => $^
+        }
+
+        $KeyNegotiation => $Associated {
+            $.step: int = 0
+
+            eapol_key_msg(msg_num: int) {
+                $.step = msg_num;
+                if (msg_num == 4) {
+                    -> $Connected
+                }
+            }
+            disassoc(reason: String) {
+                -> $Authenticating
+            }
+            status(): String { @@:("key negotiation") }
+            key_step(): int { @@:($.step) }
+            => $^
+        }
+
+        $Associated {
+            deauth(reason: String) {
+                -> $Disconnected
+            }
+            disconnect() {
+                this.send_deauth();
+                -> $Disconnected
+            }
+        }
+
+        $Connected {
+            disassoc(reason: String) {
+                -> $Authenticating
+            }
+            deauth(reason: String) {
+                -> $Disconnected
+            }
+            disconnect() {
+                this.send_deauth();
+                -> $Disconnected
+            }
+            status(): String { @@:("connected") }
+            key_step(): int { @@:(4) }
+        }
+
+    actions:
+        send_auth_request() {}
+        send_assoc_request() {}
+        send_deauth() {}
+
+    domain:
+        bssid: String = ""
+        ssid: String = ""
+        aid: int = 0
+}
+
+
+class Main {
+    static void check_str(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " -- expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+
+    static void check_int(String label, int actual, int expected) {
+        if (actual != expected) {
+            System.out.println("FAIL: " + label + " -- expected " + expected + ", got " + actual);
+            System.exit(1);
+        }
+    }
+
+    static void test_happy_connect() {
+        var sta = @@WifiStation();
+        check_str("initial disconnected", (String) sta.status(), "disconnected");
+        sta.scan_done("AA:BB:CC:DD:EE:FF", "MyNet");
+        check_str("authenticating", (String) sta.status(), "authenticating");
+        sta.auth_response(true);
+        check_str("associating", (String) sta.status(), "associating");
+        sta.assoc_response(true, 1);
+        check_str("key negotiation", (String) sta.status(), "key negotiation");
+        sta.eapol_key_msg(1);
+        check_int("step 1", (int) sta.key_step(), 1);
+        sta.eapol_key_msg(2);
+        check_int("step 2", (int) sta.key_step(), 2);
+        sta.eapol_key_msg(3);
+        check_int("step 3", (int) sta.key_step(), 3);
+        sta.eapol_key_msg(4);
+        check_str("connected", (String) sta.status(), "connected");
+        System.out.println("PASS: happy connect through 4-way handshake");
+    }
+
+    static void test_auth_rejection() {
+        var sta = @@WifiStation();
+        sta.scan_done("aa", "net");
+        sta.auth_response(false);
+        check_str("auth rejected -> disconnected", (String) sta.status(), "disconnected");
+        System.out.println("PASS: auth rejection returns to disconnected");
+    }
+
+    static void test_deauth_from_keynegotiation_via_hsm() {
+        var sta = @@WifiStation();
+        sta.scan_done("aa", "net");
+        sta.auth_response(true);
+        sta.assoc_response(true, 5);
+        sta.eapol_key_msg(2);
+        check_str("in key negotiation", (String) sta.status(), "key negotiation");
+        sta.deauth("AP restart");
+        check_str("deauth forwarded via HSM -> disconnected", (String) sta.status(), "disconnected");
+        System.out.println("PASS: deauth forwards via HSM parent from key negotiation");
+    }
+
+    static void test_disassoc_drops_to_authenticating() {
+        var sta = @@WifiStation();
+        sta.scan_done("aa", "net");
+        sta.auth_response(true);
+        sta.assoc_response(true, 7);
+        sta.eapol_key_msg(2);
+        sta.disassoc("reason");
+        check_str("disassoc -> authenticating", (String) sta.status(), "authenticating");
+        sta.assoc_response(true, 7);
+        check_int("step resets on reentry", (int) sta.key_step(), 0);
+        System.out.println("PASS: disassoc drops to authenticating (state var resets)");
+    }
+
+    static void test_deauth_from_connected() {
+        var sta = @@WifiStation();
+        sta.scan_done("aa", "net");
+        sta.auth_response(true);
+        sta.assoc_response(true, 3);
+        sta.eapol_key_msg(4);
+        check_str("connected", (String) sta.status(), "connected");
+        sta.deauth("inactivity");
+        check_str("deauth from connected", (String) sta.status(), "disconnected");
+        System.out.println("PASS: deauth from connected returns to disconnected");
+    }
+
+    static void test_disconnect_from_connected() {
+        var sta = @@WifiStation();
+        sta.scan_done("aa", "net");
+        sta.auth_response(true);
+        sta.assoc_response(true, 3);
+        sta.eapol_key_msg(4);
+        sta.disconnect();
+        check_str("disconnect from connected", (String) sta.status(), "disconnected");
+        System.out.println("PASS: explicit disconnect from connected");
+    }
+
+    public static void main(String[] args) {
+        test_happy_connect();
+        test_auth_rejection();
+        test_deauth_from_keynegotiation_via_hsm();
+        test_disassoc_drops_to_authenticating();
+        test_deauth_from_connected();
+        test_disconnect_from_connected();
+        System.out.println("PASS: all Wi-Fi station tests passed");
+    }
+}

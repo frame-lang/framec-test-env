@@ -1,0 +1,131 @@
+@@target erlang
+
+% HTTP/1.1 Connection -- keep-alive lifecycle with HSM for cross-cutting errors.
+
+@@system HttpConnection {
+    interface:
+        connect(host: str, port: int)
+        send_request(method: str, path: str)
+        headers_received(status_code: int, keep_alive: bool, content_length: int)
+        body_chunk_received(chunk: str)
+        body_complete()
+        keep_alive_timeout()
+        connection_error(reason: str)
+        close()
+        status(): str
+        request_count(): int
+
+    machine:
+        $Disconnected {
+            connect(host: str, port: int) {
+                self.host = host,
+                self.port = port
+                -> $Connecting
+            }
+            status(): str { @@:("disconnected") }
+            request_count(): int { @@:(self.requests) }
+        }
+
+        $Connecting {
+            $>() {
+                self.tcp_connect()
+                -> $Idle
+            }
+        }
+
+        $Idle => $Open {
+            $>() {
+                self.start_keep_alive_timer()
+            }
+            <$() {
+                self.cancel_keep_alive_timer()
+            }
+
+            send_request(method: str, path: str) {
+                self.current_method = method,
+                self.current_path = path
+                self.emit_request()
+                -> $AwaitingResponse
+            }
+            keep_alive_timeout() {
+                -> $Closing
+            }
+            status(): str { @@:("idle") }
+            request_count(): int { @@:(self.requests) }
+            => $^
+        }
+
+        $AwaitingResponse => $Open {
+            headers_received(status_code: int, keep_alive: bool, content_length: int) {
+                self.response_status = status_code,
+                self.ka = keep_alive,
+                self.content_length = content_length
+                if content_length == 0 {
+                    -> $ResponseComplete
+                } else {
+                    -> $ReceivingBody
+                }
+            }
+            status(): str { @@:("awaiting response") }
+            request_count(): int { @@:(self.requests) }
+            => $^
+        }
+
+        $ReceivingBody => $Open {
+            body_chunk_received(chunk: str) {
+                self.bytes_received = self.bytes_received + self.content_length
+            }
+            body_complete() {
+                -> $ResponseComplete
+            }
+            status(): str { @@:("receiving body") }
+            request_count(): int { @@:(self.requests) }
+            => $^
+        }
+
+        $ResponseComplete => $Open {
+            $>() {
+                self.requests = self.requests + 1
+                if self.ka {
+                    -> $Idle
+                } else {
+                    -> $Closing
+                }
+            }
+            => $^
+        }
+
+        $Open {
+            connection_error(reason: str) {
+                -> $Disconnected
+            }
+            close() {
+                -> $Closing
+            }
+        }
+
+        $Closing {
+            $>() {
+                self.tcp_close()
+                -> $Disconnected
+            }
+        }
+
+    actions:
+        tcp_connect() {}
+        tcp_close() {}
+        emit_request() {}
+        start_keep_alive_timer() {}
+        cancel_keep_alive_timer() {}
+
+    domain:
+        host = ""
+        port = 80
+        current_method = ""
+        current_path = ""
+        response_status = 0
+        content_length = 0
+        bytes_received = 0
+        ka = true
+        requests = 0
+}

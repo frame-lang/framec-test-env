@@ -1,0 +1,199 @@
+@@target kotlin
+
+// Filesystem Freeze — VFS fs/super.c semantics. 3-level HSM:
+//   $Active => $Readable => $Mounted
+//   $Frozen => $Readable => $Mounted
+// $Mounted provides read/sync/unmount for all mounted sub-states.
+// $Active adds write/freeze. $Frozen overrides write to block and adds thaw.
+// $Freezing is transient, bypasses $Readable (state in flux during flush).
+
+@@system Filesystem {
+    interface:
+        mount(device: String): String
+        unmount(): String
+        freeze(): String
+        thaw(): String
+        write(data: String): String
+        read(): String
+        sync(): String
+        status(): String
+        read_count(): Int
+        write_count(): Int
+
+    machine:
+        $Unmounted {
+            mount(device: String): String {
+                this.device = device
+                @@:("mounted")
+                -> $Active
+            }
+            status(): String { @@:("unmounted") }
+            read_count(): Int { @@:(this.reads) }
+            write_count(): Int { @@:(this.writes) }
+        }
+
+        $Active => $Readable {
+            write(data: String): String {
+                this.writes = this.writes + 1
+                @@:("wrote")
+            }
+            freeze(): String {
+                @@:("freezing")
+                -> $Freezing
+            }
+            status(): String { @@:("active") }
+            => $^
+        }
+
+        $Freezing => $Mounted {
+            $>() {
+                this.flush_pending_writes()
+                -> $Frozen
+            }
+            status(): String { @@:("freezing") }
+            => $^
+        }
+
+        $Frozen => $Readable {
+            write(data: String): String {
+                @@:("BLOCKED")
+            }
+            thaw(): String {
+                @@:("thawed")
+                -> $Active
+            }
+            status(): String { @@:("frozen") }
+            => $^
+        }
+
+        $Readable => $Mounted {
+            => $^
+        }
+
+        $Mounted {
+            read(): String {
+                this.reads = this.reads + 1
+                @@:("read")
+            }
+            sync(): String {
+                @@:("synced")
+            }
+            unmount(): String {
+                @@:("unmounting")
+                -> $Unmounting
+            }
+            read_count(): Int { @@:(this.reads) }
+            write_count(): Int { @@:(this.writes) }
+        }
+
+        $Unmounting {
+            $>() {
+                this.flush_pending_writes()
+                this.release_resources()
+                -> $Unmounted
+            }
+        }
+
+    actions:
+        flush_pending_writes() {}
+        release_resources() {}
+
+    domain:
+        device: String = ""
+        writes: Int = 0
+        reads: Int = 0
+}
+
+
+fun check_str(label: String, actual: String?, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label — expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun check_int(label: String, actual: Int, expected: Int) {
+    if (actual != expected) {
+        println("FAIL: $label — expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun test_mount_write_read() {
+    val fs = Filesystem()
+    check_str("initial unmounted", fs.status() as String, "unmounted")
+    check_str("mount", fs.mount("/dev/sda1") as String, "mounted")
+    check_str("active state", fs.status() as String, "active")
+    check_str("write 1", fs.write("hello") as String, "wrote")
+    check_str("read 1", fs.read() as String, "read")
+    check_str("sync via HSM", fs.sync() as String, "synced")
+    check_int("read count incremented", fs.read_count() as Int, 1)
+    check_int("write count incremented", fs.write_count() as Int, 1)
+    println("PASS: mount + write + read + sync")
+}
+
+fun test_freeze_blocks_writes_allows_reads() {
+    val fs = Filesystem()
+    fs.mount("/dev/sda1")
+    fs.write("before freeze")
+    fs.freeze()
+    check_str("in frozen state", fs.status() as String, "frozen")
+    check_str("write blocked", fs.write("nope") as String, "BLOCKED")
+    check_str("read still works", fs.read() as String, "read")
+    check_int("read count 1", fs.read_count() as Int, 1)
+    check_int("write count unchanged", fs.write_count() as Int, 1)
+    println("PASS: freeze blocks writes, allows reads (3-level HSM)")
+}
+
+fun test_thaw_restores_write() {
+    val fs = Filesystem()
+    fs.mount("/dev/sda1")
+    fs.freeze()
+    check_str("thaw", fs.thaw() as String, "thawed")
+    check_str("back to active", fs.status() as String, "active")
+    check_str("write works again", fs.write("post-thaw") as String, "wrote")
+    println("PASS: thaw restores write capability")
+}
+
+fun test_unmount_forwards_via_hsm() {
+    val fs = Filesystem()
+    fs.mount("/dev/sda1")
+    check_str("unmount from Active", fs.unmount() as String, "unmounting")
+    check_str("eventually unmounted", fs.status() as String, "unmounted")
+    println("PASS: unmount forwards from Active via \$Readable to \$Mounted")
+}
+
+fun test_freeze_impossible_when_unmounted() {
+    val fs = Filesystem()
+    // framec returns empty String default when no handler exists.
+    val ret = fs.freeze() as String
+    if (ret.isNotEmpty()) {
+        println("FAIL: freeze unmounted expected empty, got '$ret'")
+        throw AssertionError("freeze unmounted")
+    }
+    check_str("still unmounted", fs.status() as String, "unmounted")
+    println("PASS: freeze on unmounted fs is no-op")
+}
+
+fun test_read_count_accumulates_across_states() {
+    val fs = Filesystem()
+    fs.mount("/dev/sda1")
+    fs.read()
+    fs.read()
+    fs.freeze()
+    fs.read()
+    fs.thaw()
+    fs.read()
+    check_int("reads across Active/Frozen/Active", fs.read_count() as Int, 4)
+    println("PASS: read count spans states (domain var)")
+}
+
+fun main() {
+    test_mount_write_read()
+    test_freeze_blocks_writes_allows_reads()
+    test_thaw_restores_write()
+    test_unmount_forwards_via_hsm()
+    test_freeze_impossible_when_unmounted()
+    test_read_count_accumulates_across_states()
+    println("PASS: all filesystem freeze tests passed")
+}

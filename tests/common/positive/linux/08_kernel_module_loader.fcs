@@ -1,0 +1,277 @@
+@@target csharp
+
+// Kernel Module Loader — pipeline with compensation (saga pattern).
+
+using System;
+
+@@system ModuleLoader {
+    interface:
+        load(name: String)
+        unload(): String
+        acquire(): String
+        release(): String
+        resolve_done(success: bool, reason: String)
+        alloc_done(success: bool, reason: String)
+        relocate_done(success: bool, reason: String)
+        init_done(success: bool, reason: String)
+        status(): String
+        refcount(): int
+        failure_reason(): String
+
+    machine:
+        $Idle {
+            load(name: String) {
+                this.name = name;
+                this.failure = "";
+                -> $ResolvingSymbols
+            }
+            status(): String { @@:("idle") }
+        }
+
+        $ResolvingSymbols {
+            $>() {
+                this.do_resolve(this.name);
+            }
+            resolve_done(success: bool, reason: String) {
+                if (success) {
+                    -> $AllocatingMemory
+                } else {
+                    this.failure = reason;
+                    -> $Failed
+                }
+            }
+            status(): String { @@:("resolving") }
+        }
+
+        $AllocatingMemory {
+            $>() {
+                this.do_alloc(this.name);
+            }
+            alloc_done(success: bool, reason: String) {
+                if (success) {
+                    -> $Relocating
+                } else {
+                    this.failure = reason;
+                    -> $Failed
+                }
+            }
+            status(): String { @@:("allocating") }
+        }
+
+        $Relocating {
+            $>() {
+                this.do_relocate(this.name);
+            }
+            relocate_done(success: bool, reason: String) {
+                if (success) {
+                    -> $Initializing
+                } else {
+                    this.failure = reason;
+                    -> $UndoAlloc
+                }
+            }
+            status(): String { @@:("relocating") }
+        }
+
+        $Initializing {
+            $>() {
+                this.do_init(this.name);
+            }
+            init_done(success: bool, reason: String) {
+                if (success) {
+                    -> $Live
+                } else {
+                    this.failure = reason;
+                    -> $UndoRelocate
+                }
+            }
+            status(): String { @@:("initializing") }
+        }
+
+        $UndoRelocate {
+            $>() {
+                this.do_undo_relocate(this.name);
+                -> $UndoAlloc
+            }
+        }
+
+        $UndoAlloc {
+            $>() {
+                this.do_free(this.name);
+                -> $Failed
+            }
+        }
+
+        $Live {
+            $>() {
+                this.refs = 0;
+            }
+
+            acquire(): String {
+                this.refs = this.refs + 1;
+                @@:("acquired")
+            }
+            release(): String {
+                this.refs = this.refs - 1;
+                @@:("released")
+            }
+            unload(): String {
+                if (this.refs > 0) {
+                    @@:("busy")
+                } else {
+                    @@:("unloading")
+                    -> $Unloading
+                }
+            }
+            status(): String { @@:("live") }
+            refcount(): int { @@:(this.refs) }
+        }
+
+        $Unloading {
+            $>() {
+                this.do_exit(this.name);
+                this.do_free(this.name);
+                -> $Idle
+            }
+        }
+
+        $Failed {
+            load(name: String) {
+                this.name = name;
+                this.failure = "";
+                -> $ResolvingSymbols
+            }
+            status(): String { @@:("failed") }
+            failure_reason(): String { @@:(this.failure) }
+        }
+
+    actions:
+        do_resolve(name: String) {}
+        do_alloc(name: String) {}
+        do_relocate(name: String) {}
+        do_init(name: String) {}
+        do_undo_relocate(name: String) {}
+        do_free(name: String) {}
+        do_exit(name: String) {}
+
+    domain:
+        name: String = ""
+        failure: String = ""
+        refs: int = 0
+}
+
+
+class Program {
+    static void check_str(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} — expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+
+    static void check_int(string label, int actual, int expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} — expected {expected}, got {actual}");
+            Environment.Exit(1);
+        }
+    }
+
+    static void test_happy_load_unload() {
+        var loader = @@ModuleLoader();
+        check_str("initial idle", (string) loader.status(), "idle");
+        loader.load("ext4");
+        check_str("resolving", (string) loader.status(), "resolving");
+        loader.resolve_done(true, "");
+        check_str("allocating", (string) loader.status(), "allocating");
+        loader.alloc_done(true, "");
+        check_str("relocating", (string) loader.status(), "relocating");
+        loader.relocate_done(true, "");
+        check_str("initializing", (string) loader.status(), "initializing");
+        loader.init_done(true, "");
+        check_str("live", (string) loader.status(), "live");
+        check_int("refcount 0", (int) loader.refcount(), 0);
+        check_str("unload empty module", (string) loader.unload(), "unloading");
+        check_str("back to idle", (string) loader.status(), "idle");
+        Console.WriteLine("PASS: happy load/unload pipeline");
+    }
+
+    static void test_init_failure_compensates() {
+        var loader = @@ModuleLoader();
+        loader.load("buggy");
+        loader.resolve_done(true, "");
+        loader.alloc_done(true, "");
+        loader.relocate_done(true, "");
+        loader.init_done(false, "ENOMEM");
+        check_str("failed state", (string) loader.status(), "failed");
+        check_str("failure captured", (string) loader.failure_reason(), "ENOMEM");
+        Console.WriteLine("PASS: init failure compensation");
+    }
+
+    static void test_relocate_failure_compensates() {
+        var loader = @@ModuleLoader();
+        loader.load("symbol_err");
+        loader.resolve_done(true, "");
+        loader.alloc_done(true, "");
+        loader.relocate_done(false, "undefined symbol");
+        check_str("failed from relocate", (string) loader.status(), "failed");
+        check_str("reason captured", (string) loader.failure_reason(), "undefined symbol");
+        Console.WriteLine("PASS: relocate failure compensation");
+    }
+
+    static void test_early_failure_no_compensation_needed() {
+        var loader = @@ModuleLoader();
+        loader.load("no_such_sym");
+        loader.resolve_done(false, "symbol not found");
+        check_str("direct fail from resolve", (string) loader.status(), "failed");
+        check_str("resolve reason", (string) loader.failure_reason(), "symbol not found");
+        Console.WriteLine("PASS: early failure without compensation");
+    }
+
+    static void test_refcount_blocks_unload() {
+        var loader = @@ModuleLoader();
+        loader.load("shared_lib");
+        loader.resolve_done(true, "");
+        loader.alloc_done(true, "");
+        loader.relocate_done(true, "");
+        loader.init_done(true, "");
+        check_str("acquire returns 'acquired'", (string) loader.acquire(), "acquired");
+        check_int("refcount 1", (int) loader.refcount(), 1);
+        check_str("acquire again", (string) loader.acquire(), "acquired");
+        check_int("refcount 2", (int) loader.refcount(), 2);
+        check_str("unload blocked by refs", (string) loader.unload(), "busy");
+        check_str("still live", (string) loader.status(), "live");
+        loader.release();
+        check_int("refcount after release", (int) loader.refcount(), 1);
+        check_str("still busy", (string) loader.unload(), "busy");
+        loader.release();
+        check_int("refcount 0", (int) loader.refcount(), 0);
+        check_str("now unloads", (string) loader.unload(), "unloading");
+        check_str("idle again", (string) loader.status(), "idle");
+        Console.WriteLine("PASS: refcount blocks unload");
+    }
+
+    static void test_reload_from_failed() {
+        var loader = @@ModuleLoader();
+        loader.load("badmod");
+        loader.resolve_done(false, "initial fail");
+        check_str("failed", (string) loader.status(), "failed");
+        loader.load("goodmod");
+        check_str("restarted in resolving", (string) loader.status(), "resolving");
+        loader.resolve_done(true, "");
+        loader.alloc_done(true, "");
+        loader.relocate_done(true, "");
+        loader.init_done(true, "");
+        check_str("recovered to live", (string) loader.status(), "live");
+        Console.WriteLine("PASS: reload from failed");
+    }
+
+    static void Main(string[] args) {
+        test_happy_load_unload();
+        test_init_failure_compensates();
+        test_relocate_failure_compensates();
+        test_early_failure_no_compensation_needed();
+        test_refcount_blocks_unload();
+        test_reload_from_failed();
+        Console.WriteLine("PASS: all kernel module loader tests passed");
+    }
+}

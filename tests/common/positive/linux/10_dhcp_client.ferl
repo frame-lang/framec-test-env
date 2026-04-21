@@ -1,0 +1,145 @@
+@@target erlang
+
+% DHCP Client -- RFC 2131 Figure 5 state machine.
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in erlang_batch.sh exercises every exported function and checks clean exit.
+
+@@system DhcpClient {
+    interface:
+        start()
+        offer_received(server_ip: str, offered_ip: str, lease_sec: int)
+        ack_received(ip: str, lease_sec: int)
+        nak_received()
+        t1_expired()
+        t2_expired()
+        lease_expired()
+        release()
+        status(): str
+
+    machine:
+        $Init {
+            $>() {
+                self.attempts = 0
+            }
+
+            start() {
+                -> $Selecting
+            }
+            status(): str { @@:("init") }
+        }
+
+        $Selecting {
+            $>() {
+                self.attempts = self.attempts + 1,
+                self.broadcast_discover()
+            }
+
+            offer_received(server_ip: str, offered_ip: str, lease_sec: int) {
+                self.server = server_ip,
+                self.offered = offered_ip,
+                self.lease_sec = lease_sec,
+                -> $Requesting
+            }
+            status(): str { @@:("selecting") }
+        }
+
+        $Requesting {
+            $>() {
+                self.send_request()
+            }
+
+            ack_received(ip: str, lease_sec: int) {
+                self.bound = ip,
+                self.lease_sec = lease_sec,
+                -> $Bound
+            }
+            nak_received() {
+                -> $Init
+            }
+            status(): str { @@:("requesting") }
+        }
+
+        $Bound {
+            $>() {
+                self.arm_timers()
+            }
+
+            t1_expired() {
+                -> $Renewing
+            }
+            release() {
+                self.cancel_all_timers(),
+                self.send_release(),
+                -> $Init
+            }
+            status(): str { @@:("bound") }
+        }
+
+        $Renewing {
+            $>() {
+                self.send_renew()
+            }
+
+            ack_received(ip: str, lease_sec: int) {
+                self.lease_sec = lease_sec,
+                -> $Bound
+            }
+            nak_received() {
+                self.cancel_all_timers(),
+                -> $Init
+            }
+            t2_expired() {
+                -> $Rebinding
+            }
+            lease_expired() {
+                self.cancel_all_timers(),
+                -> $Init
+            }
+            release() {
+                self.cancel_all_timers(),
+                -> $Init
+            }
+            status(): str { @@:("renewing") }
+        }
+
+        $Rebinding {
+            $>() {
+                self.broadcast_renew()
+            }
+
+            ack_received(ip: str, lease_sec: int) {
+                self.lease_sec = lease_sec,
+                -> $Bound
+            }
+            nak_received() {
+                self.cancel_all_timers(),
+                -> $Init
+            }
+            lease_expired() {
+                self.cancel_all_timers(),
+                self.bound = "",
+                -> $Init
+            }
+            release() {
+                self.cancel_all_timers(),
+                -> $Init
+            }
+            status(): str { @@:("rebinding") }
+        }
+
+    actions:
+        broadcast_discover()    {}
+        send_request()          {}
+        send_renew()            {}
+        broadcast_renew()       {}
+        send_release()          {}
+        arm_timers()            {}
+        cancel_all_timers()     {}
+
+    domain:
+        server = ""
+        offered = ""
+        bound = ""
+        lease_sec = 0
+        attempts = 0
+}

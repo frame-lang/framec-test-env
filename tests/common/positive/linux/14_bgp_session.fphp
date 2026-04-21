@@ -1,0 +1,242 @@
+@@target php
+
+<?php
+
+// BGP Finite State Machine -- RFC 4271 Section 8 direct transcription.
+
+@@persist
+@@system BgpSession {
+    interface:
+        manual_start()
+        manual_stop()
+        tcp_connection_confirmed()
+        tcp_connection_fails()
+        open_received(asn: int, hold_time: int)
+        keepalive_received()
+        notification_received(code: int, subcode: int)
+        hold_timer_expired()
+        keepalive_timer_expired()
+        connect_retry_timer_expired()
+        status(): str
+
+    machine:
+        $Idle {
+            manual_start() {
+                $this->connect_retry_count = 0;
+                $this->start_connect_retry_timer();
+                $this->initiate_tcp_connection();
+                -> $Connect
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $Connect {
+            tcp_connection_confirmed() {
+                $this->cancel_connect_retry_timer();
+                $this->send_open();
+                -> $OpenSent
+            }
+            tcp_connection_fails() {
+                -> $Active
+            }
+            connect_retry_timer_expired() {
+                $this->initiate_tcp_connection();
+                $this->start_connect_retry_timer();
+            }
+            manual_stop() {
+                -> $Idle
+            }
+            status(): str { @@:("connect") }
+        }
+
+        $Active {
+            tcp_connection_confirmed() {
+                $this->cancel_connect_retry_timer();
+                $this->send_open();
+                -> $OpenSent
+            }
+            connect_retry_timer_expired() {
+                $this->connect_retry_count = $this->connect_retry_count + 1;
+                $this->initiate_tcp_connection();
+                $this->start_connect_retry_timer();
+                -> $Connect
+            }
+            manual_stop() {
+                -> $Idle
+            }
+            status(): str { @@:("active") }
+        }
+
+        $OpenSent {
+            open_received(asn: int, hold_time: int) {
+                $this->peer_asn = $asn;
+                $this->negotiated_hold = $hold_time;
+                $this->cancel_hold_timer();
+                $this->send_keepalive();
+                -> $OpenConfirm
+            }
+            tcp_connection_fails() {
+                $this->cancel_hold_timer();
+                -> $Active
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                $this->send_notification();
+                -> $Idle
+            }
+            manual_stop() {
+                $this->send_notification();
+                -> $Idle
+            }
+            status(): str { @@:("open sent") }
+        }
+
+        $OpenConfirm {
+            keepalive_received() {
+                -> $Established
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                $this->send_notification();
+                -> $Idle
+            }
+            keepalive_timer_expired() {
+                $this->send_keepalive();
+            }
+            manual_stop() {
+                $this->send_notification();
+                -> $Idle
+            }
+            status(): str { @@:("open confirm") }
+        }
+
+        $Established {
+            keepalive_received() {
+                $this->reset_hold_timer();
+            }
+            keepalive_timer_expired() {
+                $this->send_keepalive();
+            }
+            notification_received(code: int, subcode: int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                $this->send_notification();
+                -> $Idle
+            }
+            manual_stop() {
+                $this->send_notification();
+                -> $Idle
+            }
+            status(): str { @@:("established") }
+        }
+
+    actions:
+        initiate_tcp_connection()   {}
+        send_open()                 {}
+        send_keepalive()            {}
+        send_notification()         {}
+        start_connect_retry_timer() {}
+        cancel_connect_retry_timer(){}
+        cancel_hold_timer()         {}
+        reset_hold_timer()          {}
+
+    domain:
+        local_asn = 65001
+        peer_asn = 0
+        negotiated_hold = 0
+        connect_retry_count = 0
+}
+
+
+function check_value($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label -- expected '$expected', got '$actual'\n";
+        exit(1);
+    }
+}
+
+function test_full_session_establishment() {
+    $bgp = @@BgpSession();
+    check_value("initial idle", $bgp->status(), "idle");
+    $bgp->manual_start();
+    check_value("connect", $bgp->status(), "connect");
+    $bgp->tcp_connection_confirmed();
+    check_value("open sent", $bgp->status(), "open sent");
+    $bgp->open_received(65002, 60);
+    check_value("open confirm", $bgp->status(), "open confirm");
+    $bgp->keepalive_received();
+    check_value("established", $bgp->status(), "established");
+    echo "PASS: full BGP session establishment\n";
+}
+
+function test_persist_across_restart() {
+    $bgp = @@BgpSession();
+    $bgp->manual_start();
+    $bgp->tcp_connection_confirmed();
+    $bgp->open_received(65002, 60);
+    $bgp->keepalive_received();
+    check_value("established", $bgp->status(), "established");
+    $snap = $bgp->save_state();
+    $bgp2 = BgpSession::restore_state($snap);
+    check_value("established survived restart", $bgp2->status(), "established");
+    $bgp2->keepalive_timer_expired();
+    $bgp2->keepalive_received();
+    check_value("still established", $bgp2->status(), "established");
+    echo "PASS: @@persist -- BGP session survives daemon restart\n";
+}
+
+function test_hold_timer_teardown() {
+    $bgp = @@BgpSession();
+    $bgp->manual_start();
+    $bgp->tcp_connection_confirmed();
+    $bgp->open_received(65002, 60);
+    $bgp->keepalive_received();
+    $bgp->hold_timer_expired();
+    check_value("hold expiry tears down", $bgp->status(), "idle");
+    echo "PASS: hold timer expiry returns to idle\n";
+}
+
+function test_tcp_failure_goes_active() {
+    $bgp = @@BgpSession();
+    $bgp->manual_start();
+    $bgp->tcp_connection_fails();
+    check_value("active after TCP fail", $bgp->status(), "active");
+    $bgp->connect_retry_timer_expired();
+    check_value("retry transitions back to connect", $bgp->status(), "connect");
+    echo "PASS: TCP failure path Active -> Connect\n";
+}
+
+function test_notification_in_established_teardown() {
+    $bgp = @@BgpSession();
+    $bgp->manual_start();
+    $bgp->tcp_connection_confirmed();
+    $bgp->open_received(65002, 60);
+    $bgp->keepalive_received();
+    $bgp->notification_received(6, 0);
+    check_value("notification tears down", $bgp->status(), "idle");
+    echo "PASS: notification in Established -> idle\n";
+}
+
+function test_manual_stop_from_established() {
+    $bgp = @@BgpSession();
+    $bgp->manual_start();
+    $bgp->tcp_connection_confirmed();
+    $bgp->open_received(65002, 60);
+    $bgp->keepalive_received();
+    $bgp->manual_stop();
+    check_value("manual stop", $bgp->status(), "idle");
+    echo "PASS: manual_stop from established\n";
+}
+
+test_full_session_establishment();
+test_persist_across_restart();
+test_hold_timer_teardown();
+test_tcp_failure_goes_active();
+test_notification_in_established_teardown();
+test_manual_stop_from_established();
+echo "PASS: all BGP session tests passed\n";

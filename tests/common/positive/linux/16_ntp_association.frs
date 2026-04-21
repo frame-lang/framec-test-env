@@ -1,0 +1,199 @@
+@@target rust
+
+// NTP Client Association -- RFC 5905.
+
+@@system NtpAssociation {
+    operations:
+        get_offset(): i32 { @@:(self.last_offset) }
+        is_reachable(): bool { @@:(self.reach_register > 0) }
+
+    interface:
+        poll_tick()
+        response_received(offset_ms: i32, delay_ms: i32)
+        poll_timeout()
+        status(): String
+        poll_interval(): i32
+        reach(): i32
+
+    machine:
+        $Unsynced {
+            $>() {
+                self.poll_interval_v = self.min_poll;
+            }
+
+            poll_tick() {
+            }
+            response_received(offset_ms: i32, delay_ms: i32) {
+                self.shift_reach_register(1);
+                self.last_offset = offset_ms;
+                self.last_delay = delay_ms;
+                self.good_responses = self.good_responses + 1;
+                if self.good_responses >= self.sync_threshold {
+                    -> $Synced
+                }
+            }
+            poll_timeout() {
+                self.shift_reach_register(0);
+            }
+            status(): String { @@:("unsynced".to_string()) }
+            poll_interval(): i32 { @@:(self.poll_interval_v) }
+            reach(): i32 { @@:(self.reach_register) }
+        }
+
+        $Synced {
+            poll_tick() {
+            }
+            response_received(offset_ms: i32, delay_ms: i32) {
+                self.shift_reach_register(1);
+                self.last_offset = offset_ms;
+                self.last_delay = delay_ms;
+                if self.poll_interval_v < self.max_poll {
+                    self.poll_interval_v = self.poll_interval_v * 2;
+                }
+            }
+            poll_timeout() {
+                self.shift_reach_register(0);
+                self.consecutive_timeouts = self.consecutive_timeouts + 1;
+                if self.consecutive_timeouts >= 3 {
+                    self.consecutive_timeouts = 0;
+                    self.good_responses = 0;
+                    -> $Unsynced
+                }
+                if self.poll_interval_v > self.min_poll {
+                    self.poll_interval_v = self.poll_interval_v >> 1;
+                }
+            }
+            status(): String { @@:("synced".to_string()) }
+            poll_interval(): i32 { @@:(self.poll_interval_v) }
+            reach(): i32 { @@:(self.reach_register) }
+        }
+
+    actions:
+        shift_reach_register(bit: i32) {
+            self.reach_register = ((self.reach_register << 1) | bit) & 0xFF;
+            if bit != 0 {
+                self.consecutive_timeouts = 0;
+            }
+        }
+
+    domain:
+        poll_interval_v: i32 = 64
+        min_poll: i32 = 64
+        max_poll: i32 = 1024
+        reach_register: i32 = 0
+        last_offset: i32 = 0
+        last_delay: i32 = 0
+        good_responses: i32 = 0
+        sync_threshold: i32 = 3
+        consecutive_timeouts: i32 = 0
+}
+
+
+fn check_str(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} -- expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn check_int(label: &str, actual: i32, expected: i32) {
+    if actual != expected {
+        println!("FAIL: {} -- expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn check_bool(label: &str, actual: bool, expected: bool) {
+    if actual != expected {
+        println!("FAIL: {} -- expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn test_builds_to_sync() {
+    let mut ntp = @@NtpAssociation();
+    check_str("initial unsynced", &ntp.status(), "unsynced");
+    ntp.poll_tick();
+    ntp.response_received(12, 3);
+    ntp.poll_tick();
+    ntp.response_received(11, 2);
+    check_str("not yet synced (2 good)", &ntp.status(), "unsynced");
+    ntp.poll_tick();
+    ntp.response_received(12, 3);
+    check_str("synced after 3 good responses", &ntp.status(), "synced");
+    println!("PASS: sync threshold reached after 3 good responses");
+}
+
+fn test_poll_interval_backs_off() {
+    let mut ntp = @@NtpAssociation();
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check_str("synced", &ntp.status(), "synced");
+    check_int("interval at min (64)", ntp.poll_interval(), 64);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check_int("128 after 1 good in synced", ntp.poll_interval(), 128);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check_int("256 after 2 good", ntp.poll_interval(), 256);
+    println!("PASS: poll interval doubles on success in synced");
+}
+
+fn test_timeout_shrinks_interval() {
+    let mut ntp = @@NtpAssociation();
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check_int("interval 128", ntp.poll_interval(), 128);
+    ntp.poll_tick(); ntp.poll_timeout();
+    check_int("timeout halves -> 64", ntp.poll_interval(), 64);
+    println!("PASS: timeout halves poll interval in synced");
+}
+
+fn test_three_timeouts_drops_to_unsync() {
+    let mut ntp = @@NtpAssociation();
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check_str("synced", &ntp.status(), "synced");
+    ntp.poll_tick(); ntp.poll_timeout();
+    ntp.poll_tick(); ntp.poll_timeout();
+    check_str("still synced after 2 timeouts", &ntp.status(), "synced");
+    ntp.poll_tick(); ntp.poll_timeout();
+    check_str("3rd timeout drops to unsync", &ntp.status(), "unsynced");
+    println!("PASS: three consecutive timeouts drop to unsync");
+}
+
+fn test_reach_register_shifts() {
+    let mut ntp = @@NtpAssociation();
+    check_int("reach starts 0", ntp.reach(), 0);
+    ntp.poll_tick();
+    ntp.response_received(10, 2);
+    check_int("reach 0b00000001 = 1", ntp.reach(), 1);
+    ntp.poll_tick();
+    ntp.response_received(10, 2);
+    check_int("reach 0b00000011 = 3", ntp.reach(), 3);
+    ntp.poll_tick();
+    ntp.poll_timeout();
+    check_int("reach 0b00000110 = 6", ntp.reach(), 6);
+    println!("PASS: reach register shifts correctly");
+}
+
+fn test_is_reachable_operation() {
+    let mut ntp = @@NtpAssociation();
+    check_bool("initial not reachable", ntp.is_reachable(), false);
+    ntp.poll_tick();
+    ntp.response_received(10, 2);
+    check_bool("after good response reachable", ntp.is_reachable(), true);
+    println!("PASS: is_reachable() operation query");
+}
+
+fn main() {
+    test_builds_to_sync();
+    test_poll_interval_backs_off();
+    test_timeout_shrinks_interval();
+    test_three_timeouts_drops_to_unsync();
+    test_reach_register_shifts();
+    test_is_reachable_operation();
+    println!("PASS: all NTP association tests passed");
+}

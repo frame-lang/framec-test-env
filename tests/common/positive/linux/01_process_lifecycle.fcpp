@@ -1,0 +1,226 @@
+@@target cpp_17
+
+// Process Lifecycle — Linux task states (kernel/sched/core.c semantics)
+// Three-level HSM with explicit upward forwarding as per-state signal policy.
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <cstdlib>
+
+@@system TaskLifecycle {
+    interface:
+        fork(): str
+        schedule(): str
+        block_on_io(): str
+        io_complete(): str
+        block_uninterruptible(): str
+        send_signal(sig: str): str
+        wait_by_parent(): str
+        status(): str
+
+    machine:
+        $New {
+            fork(): str {
+                this->pid = this->next_pid();
+                @@:(std::string("forked"))
+                -> $Ready
+            }
+            status(): str { @@:(std::string("new")) }
+        }
+
+        $Ready => $Alive {
+            schedule(): str {
+                @@:(std::string("running"))
+                -> $Running
+            }
+            status(): str { @@:(std::string("ready")) }
+            => $^
+        }
+
+        $Running => $Alive {
+            schedule(): str {
+                @@:(std::string("preempted"))
+                -> $Ready
+            }
+            block_on_io(): str {
+                @@:(std::string("blocked"))
+                -> $Interruptible
+            }
+            block_uninterruptible(): str {
+                @@:(std::string("blocked (D)"))
+                -> $Uninterruptible
+            }
+            status(): str { @@:(std::string("running")) }
+            => $^
+        }
+
+        $Interruptible => $Blocked {
+            io_complete(): str {
+                @@:(std::string("woke"))
+                -> $Ready
+            }
+            send_signal(sig: str): str {
+                if (sig == "SIGKILL" || sig == "SIGTERM" || sig == "SIGSTOP") {
+                    => $^
+                } else {
+                    @@:(std::string("interrupted"))
+                    -> $Ready
+                }
+            }
+            status(): str { @@:(std::string("interruptible")) }
+            => $^
+        }
+
+        $Uninterruptible => $Blocked {
+            io_complete(): str {
+                @@:(std::string("woke"))
+                -> $Ready
+            }
+            send_signal(sig: str): str {
+                if (sig == "SIGKILL") {
+                    => $^
+                } else {
+                    @@:(std::string("signal held pending (D-state)"))
+                }
+            }
+            status(): str { @@:(std::string("uninterruptible")) }
+            => $^
+        }
+
+        $Blocked => $Alive {
+            status(): str { @@:(std::string("blocked")) }
+            => $^
+        }
+
+        $Alive {
+            send_signal(sig: str): str {
+                if (sig == "SIGKILL" || sig == "SIGTERM") {
+                    @@:(std::string("exiting"))
+                    -> $Zombie
+                } else if (sig == "SIGSTOP") {
+                    @@:(std::string("stopped"))
+                    -> $Stopped
+                } else {
+                    @@:(std::string("signal delivered"))
+                }
+            }
+        }
+
+        $Stopped {
+            send_signal(sig: str): str {
+                if (sig == "SIGCONT") {
+                    @@:(std::string("continued"))
+                    -> $Ready
+                } else if (sig == "SIGKILL") {
+                    @@:(std::string("killed while stopped"))
+                    -> $Zombie
+                } else {
+                    @@:(std::string("signal ignored"))
+                }
+            }
+            status(): str { @@:(std::string("stopped")) }
+        }
+
+        $Zombie {
+            wait_by_parent(): str {
+                @@:(std::string("reaped"))
+                -> $Dead
+            }
+            status(): str { @@:(std::string("zombie")) }
+        }
+
+        $Dead {
+            status(): str { @@:(std::string("dead")) }
+        }
+
+    actions:
+        next_pid(): int {
+            this->pid_counter = this->pid_counter + 1;
+            return this->pid_counter;
+        }
+
+    domain:
+        pid: int = 0
+        pid_counter: int = 100
+}
+
+
+void check(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " — expected '" << expected << "', got '" << actual << "'" << std::endl;
+        std::exit(1);
+    }
+}
+
+void test_happy_path() {
+    auto t = @@TaskLifecycle();
+    check("initial status", std::any_cast<std::string>(t.status()), "new");
+    check("fork",           std::any_cast<std::string>(t.fork()),   "forked");
+    check("after fork",     std::any_cast<std::string>(t.status()), "ready");
+    check("schedule",       std::any_cast<std::string>(t.schedule()), "running");
+    check("after schedule", std::any_cast<std::string>(t.status()), "running");
+    check("preempt",        std::any_cast<std::string>(t.schedule()), "preempted");
+    check("after preempt",  std::any_cast<std::string>(t.status()), "ready");
+    std::cout << "PASS: happy path" << std::endl;
+}
+
+void test_interruptible_wake_by_signal() {
+    auto t = @@TaskLifecycle();
+    t.fork();
+    t.schedule();
+    check("block_on_io", std::any_cast<std::string>(t.block_on_io()), "blocked");
+    check("interruptible status", std::any_cast<std::string>(t.status()), "interruptible");
+    check("SIGUSR1 wakes interruptible",
+          std::any_cast<std::string>(t.send_signal(std::string("SIGUSR1"))), "interrupted");
+    check("woke to ready", std::any_cast<std::string>(t.status()), "ready");
+    std::cout << "PASS: interruptible wake by signal" << std::endl;
+}
+
+void test_uninterruptible_holds_signal() {
+    auto t = @@TaskLifecycle();
+    t.fork();
+    t.schedule();
+    check("block_uninterruptible",
+          std::any_cast<std::string>(t.block_uninterruptible()), "blocked (D)");
+    check("D state", std::any_cast<std::string>(t.status()), "uninterruptible");
+    check("SIGUSR1 held pending in D",
+          std::any_cast<std::string>(t.send_signal(std::string("SIGUSR1"))), "signal held pending (D-state)");
+    check("still in D", std::any_cast<std::string>(t.status()), "uninterruptible");
+    std::cout << "PASS: uninterruptible holds non-fatal signal" << std::endl;
+}
+
+void test_sigkill_reaches_d_state() {
+    auto t = @@TaskLifecycle();
+    t.fork();
+    t.schedule();
+    t.block_uninterruptible();
+    check("SIGKILL forwarded from D through $Alive",
+          std::any_cast<std::string>(t.send_signal(std::string("SIGKILL"))), "exiting");
+    check("now zombie", std::any_cast<std::string>(t.status()), "zombie");
+    check("reap", std::any_cast<std::string>(t.wait_by_parent()), "reaped");
+    check("dead", std::any_cast<std::string>(t.status()), "dead");
+    std::cout << "PASS: SIGKILL reaches D state via $Alive forwarding" << std::endl;
+}
+
+void test_sigstop_sigcont() {
+    auto t = @@TaskLifecycle();
+    t.fork();
+    t.schedule();
+    check("SIGSTOP from running",
+          std::any_cast<std::string>(t.send_signal(std::string("SIGSTOP"))), "stopped");
+    check("stopped status", std::any_cast<std::string>(t.status()), "stopped");
+    check("SIGCONT resumes", std::any_cast<std::string>(t.send_signal(std::string("SIGCONT"))), "continued");
+    check("back to ready", std::any_cast<std::string>(t.status()), "ready");
+    std::cout << "PASS: SIGSTOP/SIGCONT" << std::endl;
+}
+
+int main() {
+    test_happy_path();
+    test_interruptible_wake_by_signal();
+    test_uninterruptible_holds_signal();
+    test_sigkill_reaches_d_state();
+    test_sigstop_sigcont();
+    std::cout << "PASS: all process lifecycle tests passed" << std::endl;
+    return 0;
+}

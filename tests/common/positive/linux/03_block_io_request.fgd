@@ -1,0 +1,152 @@
+@@target gdscript
+
+# Block I/O Request — kernel blk-mq layer semantics.
+
+extends SceneTree
+
+@@system BlockRequest {
+    interface:
+        submit(sector: int, size: int): str
+        dispatch(): str
+        complete(success: bool): str
+        timeout(): str
+        status(): str
+
+    machine:
+        $Idle {
+            submit(sector: int, size: int): str {
+                self.sector = sector
+                self.size = size
+                self.attempts = 0
+                @@:("queued")
+                -> $Queued
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $Queued {
+            dispatch(): str {
+                @@:("dispatched")
+                -> $InFlight
+            }
+            status(): str { @@:("queued") }
+        }
+
+        $InFlight {
+            $>() {
+                self.attempts = self.attempts + 1
+                self.start_timeout()
+            }
+            <$() {
+                self.cancel_timeout()
+            }
+
+            complete(success: bool): str {
+                if success:
+                    @@:("done")
+                    -> $Done
+                else:
+                    if self.attempts < self.max_retries:
+                        @@:("requeued")
+                        -> $Queued
+                    else:
+                        @@:("io error")
+                        -> $Error
+            }
+            timeout(): str {
+                if self.attempts < self.max_retries:
+                    @@:("timeout, retrying")
+                    -> $Queued
+                else:
+                    @@:("timeout, giving up")
+                    -> $Error
+            }
+            status(): str { @@:("in-flight") }
+        }
+
+        $Done {
+            status(): str { @@:("done") }
+        }
+
+        $Error {
+            status(): str { @@:("error") }
+        }
+
+    actions:
+        start_timeout() {}
+        cancel_timeout() {}
+
+    domain:
+        sector: int = 0
+        size: int = 0
+        attempts: int = 0
+        max_retries: int = 3
+        timeout_ms: int = 30000
+}
+
+
+func check(label, actual, expected):
+    if actual != expected:
+        print("FAIL: " + label + " — expected '" + str(expected) + "', got '" + str(actual) + "'")
+        quit(1)
+
+func test_happy_path():
+    var req = @@BlockRequest()
+    check("initial idle", req.status(), "idle")
+    check("submit", req.submit(1024, 8), "queued")
+    check("dispatch", req.dispatch(), "dispatched")
+    check("complete ok", req.complete(true), "done")
+    check("terminal done", req.status(), "done")
+    print("PASS: happy path")
+
+func test_timeout_retry_then_complete():
+    var req = @@BlockRequest()
+    req.submit(2048, 4)
+    req.dispatch()
+    check("first timeout -> retry", req.timeout(), "timeout, retrying")
+    check("back to queued after timeout", req.status(), "queued")
+    req.dispatch()
+    check("complete after retry", req.complete(true), "done")
+    print("PASS: timeout then retry success")
+
+func test_failure_requeue_then_success():
+    var req = @@BlockRequest()
+    req.submit(4096, 2)
+    req.dispatch()
+    check("complete(false) -> requeued", req.complete(false), "requeued")
+    req.dispatch()
+    check("complete(true) -> done", req.complete(true), "done")
+    print("PASS: failure requeue then success")
+
+func test_retry_exhaustion():
+    var req = @@BlockRequest()
+    req.submit(8192, 1)
+    req.dispatch()
+    check("req 1 failure requeued", req.complete(false), "requeued")
+    req.dispatch()
+    check("req 2 failure requeued", req.complete(false), "requeued")
+    req.dispatch()
+    check("req 3 failure -> io error", req.complete(false), "io error")
+    check("terminal error state", req.status(), "error")
+    print("PASS: retry exhaustion -> error")
+
+func test_timeout_exhaustion():
+    var req = @@BlockRequest()
+    req.submit(16384, 1)
+    req.dispatch()
+    check("to 1 retry", req.timeout(), "timeout, retrying")
+    req.dispatch()
+    check("to 2 retry", req.timeout(), "timeout, retrying")
+    req.dispatch()
+    check("to 3 giving up", req.timeout(), "timeout, giving up")
+    check("error terminal", req.status(), "error")
+    print("PASS: timeout exhaustion -> error")
+
+func _init():
+    test_happy_path()
+    test_timeout_retry_then_complete()
+    test_failure_requeue_then_success()
+    test_retry_exhaustion()
+    test_timeout_exhaustion()
+    print("PASS: all block I/O request tests passed")
+    quit()

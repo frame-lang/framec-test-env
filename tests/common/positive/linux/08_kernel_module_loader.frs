@@ -1,0 +1,275 @@
+@@target rust
+
+// Kernel Module Loader — pipeline with compensation (saga pattern).
+// Forward: Idle -> ResolvingSymbols -> AllocatingMemory -> Relocating -> Initializing -> Live
+// Compensation chain: UndoRelocate -> UndoAlloc -> Failed
+
+@@system ModuleLoader {
+    interface:
+        load(name: String)
+        unload(): String
+        acquire(): String
+        release(): String
+        resolve_done(success: bool, reason: String)
+        alloc_done(success: bool, reason: String)
+        relocate_done(success: bool, reason: String)
+        init_done(success: bool, reason: String)
+        status(): String
+        refcount(): i32
+        failure_reason(): String
+
+    machine:
+        $Idle {
+            load(name: String) {
+                self.name = name;
+                self.failure = "".to_string();
+                -> $ResolvingSymbols
+            }
+            status(): String { @@:("idle".to_string()) }
+        }
+
+        $ResolvingSymbols {
+            $>() {
+                self.do_resolve(self.name);
+            }
+            resolve_done(success: bool, reason: String) {
+                if success {
+                    -> $AllocatingMemory
+                } else {
+                    self.failure = reason;
+                    -> $Failed
+                }
+            }
+            status(): String { @@:("resolving".to_string()) }
+        }
+
+        $AllocatingMemory {
+            $>() {
+                self.do_alloc(self.name);
+            }
+            alloc_done(success: bool, reason: String) {
+                if success {
+                    -> $Relocating
+                } else {
+                    self.failure = reason;
+                    -> $Failed
+                }
+            }
+            status(): String { @@:("allocating".to_string()) }
+        }
+
+        $Relocating {
+            $>() {
+                self.do_relocate(self.name);
+            }
+            relocate_done(success: bool, reason: String) {
+                if success {
+                    -> $Initializing
+                } else {
+                    self.failure = reason;
+                    -> $UndoAlloc
+                }
+            }
+            status(): String { @@:("relocating".to_string()) }
+        }
+
+        $Initializing {
+            $>() {
+                self.do_init(self.name);
+            }
+            init_done(success: bool, reason: String) {
+                if success {
+                    -> $Live
+                } else {
+                    self.failure = reason;
+                    -> $UndoRelocate
+                }
+            }
+            status(): String { @@:("initializing".to_string()) }
+        }
+
+        $UndoRelocate {
+            $>() {
+                self.do_undo_relocate(self.name);
+                -> $UndoAlloc
+            }
+        }
+
+        $UndoAlloc {
+            $>() {
+                self.do_free(self.name);
+                -> $Failed
+            }
+        }
+
+        $Live {
+            $>() {
+                self.refs = 0;
+            }
+
+            acquire(): String {
+                self.refs = self.refs + 1;
+                @@:("acquired".to_string())
+            }
+            release(): String {
+                self.refs = self.refs - 1;
+                @@:("released".to_string())
+            }
+            unload(): String {
+                if self.refs > 0 {
+                    @@:("busy".to_string())
+                } else {
+                    @@:("unloading".to_string())
+                    -> $Unloading
+                }
+            }
+            status(): String { @@:("live".to_string()) }
+            refcount(): i32 { @@:(self.refs) }
+        }
+
+        $Unloading {
+            $>() {
+                self.do_exit(self.name);
+                self.do_free(self.name);
+                -> $Idle
+            }
+        }
+
+        $Failed {
+            load(name: String) {
+                self.name = name;
+                self.failure = "".to_string();
+                -> $ResolvingSymbols
+            }
+            status(): String { @@:("failed".to_string()) }
+            failure_reason(): String { @@:(self.failure.clone()) }
+        }
+
+    actions:
+        do_resolve(name: String) {}
+        do_alloc(name: String) {}
+        do_relocate(name: String) {}
+        do_init(name: String) {}
+        do_undo_relocate(name: String) {}
+        do_free(name: String) {}
+        do_exit(name: String) {}
+
+    domain:
+        name: String = "".to_string()
+        failure: String = "".to_string()
+        refs: i32 = 0
+}
+
+
+fn check_str(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} — expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn check_int(label: &str, actual: i32, expected: i32) {
+    if actual != expected {
+        println!("FAIL: {} — expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn test_happy_load_unload() {
+    let mut loader = @@ModuleLoader();
+    check_str("initial idle", &loader.status(), "idle");
+    loader.load("ext4".to_string());
+    check_str("resolving", &loader.status(), "resolving");
+    loader.resolve_done(true, "".to_string());
+    check_str("allocating", &loader.status(), "allocating");
+    loader.alloc_done(true, "".to_string());
+    check_str("relocating", &loader.status(), "relocating");
+    loader.relocate_done(true, "".to_string());
+    check_str("initializing", &loader.status(), "initializing");
+    loader.init_done(true, "".to_string());
+    check_str("live", &loader.status(), "live");
+    check_int("refcount 0", loader.refcount(), 0);
+    check_str("unload empty module", &loader.unload(), "unloading");
+    check_str("back to idle", &loader.status(), "idle");
+    println!("PASS: happy load/unload pipeline");
+}
+
+fn test_init_failure_compensates() {
+    let mut loader = @@ModuleLoader();
+    loader.load("buggy".to_string());
+    loader.resolve_done(true, "".to_string());
+    loader.alloc_done(true, "".to_string());
+    loader.relocate_done(true, "".to_string());
+    loader.init_done(false, "ENOMEM".to_string());
+    check_str("failed state", &loader.status(), "failed");
+    check_str("failure captured", &loader.failure_reason(), "ENOMEM");
+    println!("PASS: init failure compensation");
+}
+
+fn test_relocate_failure_compensates() {
+    let mut loader = @@ModuleLoader();
+    loader.load("symbol_err".to_string());
+    loader.resolve_done(true, "".to_string());
+    loader.alloc_done(true, "".to_string());
+    loader.relocate_done(false, "undefined symbol".to_string());
+    check_str("failed from relocate", &loader.status(), "failed");
+    check_str("reason captured", &loader.failure_reason(), "undefined symbol");
+    println!("PASS: relocate failure compensation");
+}
+
+fn test_early_failure_no_compensation_needed() {
+    let mut loader = @@ModuleLoader();
+    loader.load("no_such_sym".to_string());
+    loader.resolve_done(false, "symbol not found".to_string());
+    check_str("direct fail from resolve", &loader.status(), "failed");
+    check_str("resolve reason", &loader.failure_reason(), "symbol not found");
+    println!("PASS: early failure without compensation");
+}
+
+fn test_refcount_blocks_unload() {
+    let mut loader = @@ModuleLoader();
+    loader.load("shared_lib".to_string());
+    loader.resolve_done(true, "".to_string());
+    loader.alloc_done(true, "".to_string());
+    loader.relocate_done(true, "".to_string());
+    loader.init_done(true, "".to_string());
+    check_str("acquire returns 'acquired'", &loader.acquire(), "acquired");
+    check_int("refcount 1", loader.refcount(), 1);
+    check_str("acquire again", &loader.acquire(), "acquired");
+    check_int("refcount 2", loader.refcount(), 2);
+    check_str("unload blocked by refs", &loader.unload(), "busy");
+    check_str("still live", &loader.status(), "live");
+    loader.release();
+    check_int("refcount after release", loader.refcount(), 1);
+    check_str("still busy", &loader.unload(), "busy");
+    loader.release();
+    check_int("refcount 0", loader.refcount(), 0);
+    check_str("now unloads", &loader.unload(), "unloading");
+    check_str("idle again", &loader.status(), "idle");
+    println!("PASS: refcount blocks unload");
+}
+
+fn test_reload_from_failed() {
+    let mut loader = @@ModuleLoader();
+    loader.load("badmod".to_string());
+    loader.resolve_done(false, "initial fail".to_string());
+    check_str("failed", &loader.status(), "failed");
+    loader.load("goodmod".to_string());
+    check_str("restarted in resolving", &loader.status(), "resolving");
+    loader.resolve_done(true, "".to_string());
+    loader.alloc_done(true, "".to_string());
+    loader.relocate_done(true, "".to_string());
+    loader.init_done(true, "".to_string());
+    check_str("recovered to live", &loader.status(), "live");
+    println!("PASS: reload from failed");
+}
+
+fn main() {
+    test_happy_load_unload();
+    test_init_failure_compensates();
+    test_relocate_failure_compensates();
+    test_early_failure_no_compensation_needed();
+    test_refcount_blocks_unload();
+    test_reload_from_failed();
+    println!("PASS: all kernel module loader tests passed");
+}

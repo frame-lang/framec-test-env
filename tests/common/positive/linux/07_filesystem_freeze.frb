@@ -1,0 +1,197 @@
+@@target ruby
+
+# Filesystem Freeze — VFS fs/super.c semantics. 3-level HSM:
+#   $Active => $Readable => $Mounted
+#   $Frozen => $Readable => $Mounted
+# $Mounted provides read/sync/unmount for all mounted sub-states.
+# $Active adds write/freeze. $Frozen overrides write to block and adds thaw.
+# $Freezing is transient, bypasses $Readable (state in flux during flush).
+
+@@system Filesystem {
+    interface:
+        mount(device: str): str
+        unmount(): str
+        freeze(): str
+        thaw(): str
+        write(data: str): str
+        read(): str
+        sync(): str
+        status(): str
+        read_count(): int
+        write_count(): int
+
+    machine:
+        $Unmounted {
+            mount(device: str): str {
+                @device = device
+                @@:("mounted")
+                -> $Active
+            }
+            status(): str { @@:("unmounted") }
+            read_count(): int { @@:(@reads) }
+            write_count(): int { @@:(@writes) }
+        }
+
+        $Active => $Readable {
+            write(data: str): str {
+                @writes = @writes + 1
+                @@:("wrote")
+            }
+            freeze(): str {
+                @@:("freezing")
+                -> $Freezing
+            }
+            status(): str { @@:("active") }
+            => $^
+        }
+
+        $Freezing => $Mounted {
+            $>() {
+                flush_pending_writes()
+                -> $Frozen
+            }
+            status(): str { @@:("freezing") }
+            => $^
+        }
+
+        $Frozen => $Readable {
+            write(data: str): str {
+                @@:("BLOCKED")
+            }
+            thaw(): str {
+                @@:("thawed")
+                -> $Active
+            }
+            status(): str { @@:("frozen") }
+            => $^
+        }
+
+        $Readable => $Mounted {
+            => $^
+        }
+
+        $Mounted {
+            read(): str {
+                @reads = @reads + 1
+                @@:("read")
+            }
+            sync(): str {
+                @@:("synced")
+            }
+            unmount(): str {
+                @@:("unmounting")
+                -> $Unmounting
+            }
+            read_count(): int { @@:(@reads) }
+            write_count(): int { @@:(@writes) }
+        }
+
+        $Unmounting {
+            $>() {
+                flush_pending_writes()
+                release_resources()
+                -> $Unmounted
+            }
+        }
+
+    actions:
+        flush_pending_writes() {}
+        release_resources() {}
+
+    domain:
+        device: str = ""
+        writes: int = 0
+        reads: int = 0
+}
+
+
+def check_str(label, actual, expected)
+    if actual != expected
+        puts "FAIL: #{label} — expected '#{expected}', got '#{actual.inspect}'"
+        exit 1
+    end
+end
+
+def check_int(label, actual, expected)
+    if actual != expected
+        puts "FAIL: #{label} — expected #{expected}, got #{actual}"
+        exit 1
+    end
+end
+
+def test_mount_write_read
+    fs = Filesystem.new
+    check_str("initial unmounted", fs.status, "unmounted")
+    check_str("mount", fs.mount("/dev/sda1"), "mounted")
+    check_str("active state", fs.status, "active")
+    check_str("write 1", fs.write("hello"), "wrote")
+    check_str("read 1", fs.read, "read")
+    check_str("sync via HSM", fs.sync, "synced")
+    check_int("read count incremented", fs.read_count, 1)
+    check_int("write count incremented", fs.write_count, 1)
+    puts "PASS: mount + write + read + sync"
+end
+
+def test_freeze_blocks_writes_allows_reads
+    fs = Filesystem.new
+    fs.mount("/dev/sda1")
+    fs.write("before freeze")
+    fs.freeze
+    check_str("in frozen state", fs.status, "frozen")
+    check_str("write blocked", fs.write("nope"), "BLOCKED")
+    check_str("read still works", fs.read, "read")
+    check_int("read count 1", fs.read_count, 1)
+    check_int("write count unchanged", fs.write_count, 1)
+    puts "PASS: freeze blocks writes, allows reads (3-level HSM)"
+end
+
+def test_thaw_restores_write
+    fs = Filesystem.new
+    fs.mount("/dev/sda1")
+    fs.freeze
+    check_str("thaw", fs.thaw, "thawed")
+    check_str("back to active", fs.status, "active")
+    check_str("write works again", fs.write("post-thaw"), "wrote")
+    puts "PASS: thaw restores write capability"
+end
+
+def test_unmount_forwards_via_hsm
+    fs = Filesystem.new
+    fs.mount("/dev/sda1")
+    check_str("unmount from Active", fs.unmount, "unmounting")
+    check_str("eventually unmounted", fs.status, "unmounted")
+    puts "PASS: unmount forwards from Active via $Readable to $Mounted"
+end
+
+def test_freeze_impossible_when_unmounted
+    fs = Filesystem.new
+    # Ruby returns nil when no handler exists.
+    ret = fs.freeze
+    if !ret.nil?
+        puts "FAIL: freeze unmounted expected nil, got #{ret.inspect}"
+        exit 1
+    end
+    check_str("still unmounted", fs.status, "unmounted")
+    puts "PASS: freeze on unmounted fs is no-op"
+end
+
+def test_read_count_accumulates_across_states
+    fs = Filesystem.new
+    fs.mount("/dev/sda1")
+    fs.read
+    fs.read
+    fs.freeze
+    fs.read
+    fs.thaw
+    fs.read
+    check_int("reads across Active/Frozen/Active", fs.read_count, 4)
+    puts "PASS: read count spans states (domain var)"
+end
+
+test_mount_write_read
+test_freeze_blocks_writes_allows_reads
+test_thaw_restores_write
+test_unmount_forwards_via_hsm
+test_freeze_impossible_when_unmounted
+test_read_count_accumulates_across_states
+puts "PASS: all filesystem freeze tests passed"

@@ -1,0 +1,193 @@
+@@target typescript
+
+// NTP Client Association -- RFC 5905.
+// Polling interval adapts: doubles on success (up to max_poll), halves on
+// timeout (down to min_poll). Three consecutive timeouts drops sync.
+// Reachability register is 8-bit shift register; bit per poll attempt.
+// Uses operations (read-only queries) for get_offset/is_reachable.
+
+@@system NtpAssociation {
+    operations:
+        get_offset(): number { @@:(this.last_offset) }
+        is_reachable(): boolean { @@:(this.reach_register > 0) }
+
+    interface:
+        poll_tick()
+        response_received(offset_ms: number, delay_ms: number)
+        poll_timeout()
+        status(): string
+        poll_interval(): number
+        reach(): number
+
+    machine:
+        $Unsynced {
+            $>() {
+                this.poll_interval_v = this.min_poll;
+            }
+
+            poll_tick() {
+            }
+            response_received(offset_ms: number, delay_ms: number) {
+                this.shift_reach_register(1);
+                this.last_offset = offset_ms;
+                this.last_delay = delay_ms;
+                this.good_responses = this.good_responses + 1;
+                if (this.good_responses >= this.sync_threshold) {
+                    -> $Synced
+                }
+            }
+            poll_timeout() {
+                this.shift_reach_register(0);
+            }
+            status(): string { @@:("unsynced") }
+            poll_interval(): number { @@:(this.poll_interval_v) }
+            reach(): number { @@:(this.reach_register) }
+        }
+
+        $Synced {
+            poll_tick() {
+            }
+            response_received(offset_ms: number, delay_ms: number) {
+                this.shift_reach_register(1);
+                this.last_offset = offset_ms;
+                this.last_delay = delay_ms;
+                if (this.poll_interval_v < this.max_poll) {
+                    this.poll_interval_v = this.poll_interval_v * 2;
+                }
+            }
+            poll_timeout() {
+                this.shift_reach_register(0);
+                this.consecutive_timeouts = this.consecutive_timeouts + 1;
+                if (this.consecutive_timeouts >= 3) {
+                    this.consecutive_timeouts = 0;
+                    this.good_responses = 0;
+                    -> $Unsynced
+                }
+                if (this.poll_interval_v > this.min_poll) {
+                    this.poll_interval_v = this.poll_interval_v >> 1;
+                }
+            }
+            status(): string { @@:("synced") }
+            poll_interval(): number { @@:(this.poll_interval_v) }
+            reach(): number { @@:(this.reach_register) }
+        }
+
+    actions:
+        shift_reach_register(bit: number) {
+            this.reach_register = ((this.reach_register << 1) | bit) & 0xFF;
+            if (bit != 0) {
+                this.consecutive_timeouts = 0;
+            }
+        }
+
+    domain:
+        poll_interval_v: number = 64
+        min_poll: number = 64
+        max_poll: number = 1024
+        reach_register: number = 0
+        last_offset: number = 0
+        last_delay: number = 0
+        good_responses: number = 0
+        sync_threshold: number = 3
+        consecutive_timeouts: number = 0
+}
+
+
+function check(label: string, actual: any, expected: any): void {
+    if (actual !== expected) {
+        console.log(`FAIL: ${label} -- expected '${expected}', got '${actual}'`);
+        throw new Error(`assertion failed: ${label}`);
+    }
+}
+
+function test_builds_to_sync(): void {
+    const ntp = @@NtpAssociation();
+    check("initial unsynced", ntp.status(), "unsynced");
+    ntp.poll_tick();
+    ntp.response_received(12, 3);
+    ntp.poll_tick();
+    ntp.response_received(11, 2);
+    check("not yet synced (2 good)", ntp.status(), "unsynced");
+    ntp.poll_tick();
+    ntp.response_received(12, 3);
+    check("synced after 3 good responses", ntp.status(), "synced");
+    console.log("PASS: sync threshold reached after 3 good responses");
+}
+
+function test_poll_interval_backs_off(): void {
+    const ntp = @@NtpAssociation();
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check("synced", ntp.status(), "synced");
+    check("interval at min (64)", ntp.poll_interval(), 64);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check("128 after 1 good in synced", ntp.poll_interval(), 128);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check("256 after 2 good", ntp.poll_interval(), 256);
+    console.log("PASS: poll interval doubles on success in synced");
+}
+
+function test_timeout_shrinks_interval(): void {
+    const ntp = @@NtpAssociation();
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check("interval 128", ntp.poll_interval(), 128);
+    ntp.poll_tick(); ntp.poll_timeout();
+    check("timeout halves -> 64", ntp.poll_interval(), 64);
+    console.log("PASS: timeout halves poll interval in synced");
+}
+
+function test_three_timeouts_drops_to_unsync(): void {
+    const ntp = @@NtpAssociation();
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    ntp.poll_tick(); ntp.response_received(10, 2);
+    check("synced", ntp.status(), "synced");
+    ntp.poll_tick(); ntp.poll_timeout();
+    ntp.poll_tick(); ntp.poll_timeout();
+    check("still synced after 2 timeouts", ntp.status(), "synced");
+    ntp.poll_tick(); ntp.poll_timeout();
+    check("3rd timeout drops to unsync", ntp.status(), "unsynced");
+    console.log("PASS: three consecutive timeouts drop to unsync");
+}
+
+function test_reach_register_shifts(): void {
+    const ntp = @@NtpAssociation();
+    check("reach starts 0", ntp.reach(), 0);
+    ntp.poll_tick();
+    ntp.response_received(10, 2);
+    check("reach 0b00000001 = 1", ntp.reach(), 1);
+    ntp.poll_tick();
+    ntp.response_received(10, 2);
+    check("reach 0b00000011 = 3", ntp.reach(), 3);
+    ntp.poll_tick();
+    ntp.poll_timeout();
+    check("reach 0b00000110 = 6", ntp.reach(), 6);
+    console.log("PASS: reach register shifts correctly");
+}
+
+function test_is_reachable_operation(): void {
+    const ntp = @@NtpAssociation();
+    if ((ntp as any).is_reachable()) {
+        console.log("FAIL: not yet reachable, expected false, got true");
+        throw new Error("assertion failed");
+    }
+    ntp.poll_tick();
+    ntp.response_received(10, 2);
+    if (!(ntp as any).is_reachable()) {
+        console.log("FAIL: after good response, expected reachable");
+        throw new Error("assertion failed");
+    }
+    console.log("PASS: is_reachable() operation query");
+}
+
+test_builds_to_sync();
+test_poll_interval_backs_off();
+test_timeout_shrinks_interval();
+test_three_timeouts_drops_to_unsync();
+test_reach_register_shifts();
+test_is_reachable_operation();
+console.log("PASS: all NTP association tests passed");

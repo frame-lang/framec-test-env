@@ -1,0 +1,237 @@
+@@target cpp_17
+
+// DHCP Client -- RFC 2131 Figure 5 state machine.
+
+#include <iostream>
+#include <string>
+#include <sstream>
+#include <cassert>
+#include <cstdlib>
+
+@@system DhcpClient {
+    interface:
+        start()
+        offer_received(server_ip: std::string, offered_ip: std::string, lease_sec: int)
+        ack_received(ip: std::string, lease_sec: int)
+        nak_received()
+        t1_expired()
+        t2_expired()
+        lease_expired()
+        release()
+        status(): str
+
+    machine:
+        $Init {
+            $>() {
+                this->attempts = 0;
+            }
+
+            start() {
+                -> $Selecting
+            }
+            status(): str { @@:(std::string("init")) }
+        }
+
+        $Selecting {
+            $>() {
+                this->attempts = this->attempts + 1;
+                this->broadcast_discover();
+            }
+
+            offer_received(server_ip: std::string, offered_ip: std::string, lease_sec: int) {
+                this->server = server_ip;
+                this->offered = offered_ip;
+                this->lease_sec = lease_sec;
+                -> $Requesting
+            }
+            status(): str { @@:(std::string("selecting")) }
+        }
+
+        $Requesting {
+            $>() {
+                this->send_request();
+            }
+
+            ack_received(ip: std::string, lease_sec: int) {
+                this->bound = ip;
+                this->lease_sec = lease_sec;
+                -> $Bound
+            }
+            nak_received() {
+                -> $Init
+            }
+            status(): str { @@:(std::string("requesting")) }
+        }
+
+        $Bound {
+            $>() {
+                this->arm_timers();
+            }
+
+            t1_expired() {
+                -> $Renewing
+            }
+            release() {
+                this->cancel_all_timers();
+                this->send_release();
+                -> $Init
+            }
+            status(): str { @@:(std::string("bound")) }
+        }
+
+        $Renewing {
+            $>() {
+                this->send_renew();
+            }
+
+            ack_received(ip: std::string, lease_sec: int) {
+                this->lease_sec = lease_sec;
+                -> $Bound
+            }
+            nak_received() {
+                this->cancel_all_timers();
+                -> $Init
+            }
+            t2_expired() {
+                -> $Rebinding
+            }
+            lease_expired() {
+                this->cancel_all_timers();
+                -> $Init
+            }
+            release() {
+                this->cancel_all_timers();
+                -> $Init
+            }
+            status(): str { @@:(std::string("renewing")) }
+        }
+
+        $Rebinding {
+            $>() {
+                this->broadcast_renew();
+            }
+
+            ack_received(ip: std::string, lease_sec: int) {
+                this->lease_sec = lease_sec;
+                -> $Bound
+            }
+            nak_received() {
+                this->cancel_all_timers();
+                -> $Init
+            }
+            lease_expired() {
+                this->cancel_all_timers();
+                this->bound = std::string("");
+                -> $Init
+            }
+            release() {
+                this->cancel_all_timers();
+                -> $Init
+            }
+            status(): str { @@:(std::string("rebinding")) }
+        }
+
+    actions:
+        broadcast_discover()    {}
+        send_request()          {}
+        send_renew()            {}
+        broadcast_renew()       {}
+        send_release()          {}
+        arm_timers()            {}
+        cancel_all_timers()     {}
+
+    domain:
+        server: std::string = ""
+        offered: std::string = ""
+        bound: std::string = ""
+        lease_sec: int = 0
+        attempts: int = 0
+}
+
+
+void check(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " -- expected '" << expected << "', got '" << actual << "'" << std::endl;
+        std::exit(1);
+    }
+}
+
+void test_full_lease_acquisition() {
+    auto dhcp = @@DhcpClient();
+    check("initial init", std::any_cast<std::string>(dhcp.status()), "init");
+    dhcp.start();
+    check("selecting", std::any_cast<std::string>(dhcp.status()), "selecting");
+    dhcp.offer_received(std::string("192.168.1.1"), std::string("192.168.1.100"), 3600);
+    check("requesting after offer", std::any_cast<std::string>(dhcp.status()), "requesting");
+    dhcp.ack_received(std::string("192.168.1.100"), 3600);
+    check("bound", std::any_cast<std::string>(dhcp.status()), "bound");
+    std::cout << "PASS: full lease acquisition Init->Selecting->Requesting->Bound" << std::endl;
+}
+
+void test_t1_triggers_renewal() {
+    auto dhcp = @@DhcpClient();
+    dhcp.start();
+    dhcp.offer_received(std::string("10.0.0.1"), std::string("10.0.0.100"), 7200);
+    dhcp.ack_received(std::string("10.0.0.100"), 7200);
+    dhcp.t1_expired();
+    check("renewing after t1", std::any_cast<std::string>(dhcp.status()), "renewing");
+    dhcp.ack_received(std::string("10.0.0.100"), 7200);
+    check("back to bound after renew ack", std::any_cast<std::string>(dhcp.status()), "bound");
+    std::cout << "PASS: T1 triggers renewal, ACK returns to bound" << std::endl;
+}
+
+void test_t2_triggers_rebind() {
+    auto dhcp = @@DhcpClient();
+    dhcp.start();
+    dhcp.offer_received(std::string("10.0.0.1"), std::string("10.0.0.100"), 7200);
+    dhcp.ack_received(std::string("10.0.0.100"), 7200);
+    dhcp.t1_expired();
+    check("renewing", std::any_cast<std::string>(dhcp.status()), "renewing");
+    dhcp.t2_expired();
+    check("rebinding after t2", std::any_cast<std::string>(dhcp.status()), "rebinding");
+    dhcp.ack_received(std::string("10.0.0.100"), 7200);
+    check("rebind ACK -> bound", std::any_cast<std::string>(dhcp.status()), "bound");
+    std::cout << "PASS: T2 triggers rebind, ACK returns to bound" << std::endl;
+}
+
+void test_nak_during_requesting_restarts() {
+    auto dhcp = @@DhcpClient();
+    dhcp.start();
+    dhcp.offer_received(std::string("10.0.0.1"), std::string("10.0.0.100"), 7200);
+    dhcp.nak_received();
+    check("NAK in Requesting -> Init", std::any_cast<std::string>(dhcp.status()), "init");
+    std::cout << "PASS: NAK in Requesting restarts" << std::endl;
+}
+
+void test_lease_expired_in_rebinding() {
+    auto dhcp = @@DhcpClient();
+    dhcp.start();
+    dhcp.offer_received(std::string("10.0.0.1"), std::string("10.0.0.100"), 7200);
+    dhcp.ack_received(std::string("10.0.0.100"), 7200);
+    dhcp.t1_expired();
+    dhcp.t2_expired();
+    dhcp.lease_expired();
+    check("lease_expired in Rebinding -> Init", std::any_cast<std::string>(dhcp.status()), "init");
+    std::cout << "PASS: lease expiry in rebinding clears state" << std::endl;
+}
+
+void test_release_from_bound() {
+    auto dhcp = @@DhcpClient();
+    dhcp.start();
+    dhcp.offer_received(std::string("10.0.0.1"), std::string("10.0.0.100"), 7200);
+    dhcp.ack_received(std::string("10.0.0.100"), 7200);
+    dhcp.release();
+    check("release -> init", std::any_cast<std::string>(dhcp.status()), "init");
+    std::cout << "PASS: release from bound" << std::endl;
+}
+
+int main() {
+    test_full_lease_acquisition();
+    test_t1_triggers_renewal();
+    test_t2_triggers_rebind();
+    test_nak_during_requesting_restarts();
+    test_lease_expired_in_rebinding();
+    test_release_from_bound();
+    std::cout << "PASS: all DHCP client tests passed" << std::endl;
+    return 0;
+}

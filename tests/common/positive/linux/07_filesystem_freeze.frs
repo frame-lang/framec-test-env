@@ -1,0 +1,197 @@
+@@target rust
+
+// Filesystem Freeze — VFS fs/super.c semantics. 3-level HSM:
+//   $Active => $Readable => $Mounted
+//   $Frozen => $Readable => $Mounted
+// $Mounted provides read/sync/unmount for all mounted sub-states.
+// $Active adds write/freeze. $Frozen overrides write to block and adds thaw.
+// $Freezing is transient, bypasses $Readable (state in flux during flush).
+
+@@system Filesystem {
+    interface:
+        mount(device: String): String
+        unmount(): String
+        freeze(): String
+        thaw(): String
+        write(data: String): String
+        read(): String
+        sync(): String
+        status(): String
+        read_count(): i32
+        write_count(): i32
+
+    machine:
+        $Unmounted {
+            mount(device: String): String {
+                self.device = device;
+                @@:("mounted".to_string())
+                -> $Active
+            }
+            status(): String { @@:("unmounted".to_string()) }
+            read_count(): i32 { @@:(self.reads) }
+            write_count(): i32 { @@:(self.writes) }
+        }
+
+        $Active => $Readable {
+            write(data: String): String {
+                self.writes = self.writes + 1;
+                @@:("wrote".to_string())
+            }
+            freeze(): String {
+                @@:("freezing".to_string())
+                -> $Freezing
+            }
+            status(): String { @@:("active".to_string()) }
+            => $^
+        }
+
+        $Freezing => $Mounted {
+            $>() {
+                self.flush_pending_writes();
+                -> $Frozen
+            }
+            status(): String { @@:("freezing".to_string()) }
+            => $^
+        }
+
+        $Frozen => $Readable {
+            write(data: String): String {
+                @@:("BLOCKED".to_string())
+            }
+            thaw(): String {
+                @@:("thawed".to_string())
+                -> $Active
+            }
+            status(): String { @@:("frozen".to_string()) }
+            => $^
+        }
+
+        $Readable => $Mounted {
+            => $^
+        }
+
+        $Mounted {
+            read(): String {
+                self.reads = self.reads + 1;
+                @@:("read".to_string())
+            }
+            sync(): String {
+                @@:("synced".to_string())
+            }
+            unmount(): String {
+                @@:("unmounting".to_string())
+                -> $Unmounting
+            }
+            read_count(): i32 { @@:(self.reads) }
+            write_count(): i32 { @@:(self.writes) }
+        }
+
+        $Unmounting {
+            $>() {
+                self.flush_pending_writes();
+                self.release_resources();
+                -> $Unmounted
+            }
+        }
+
+    actions:
+        flush_pending_writes() {}
+        release_resources() {}
+
+    domain:
+        device: String = "".to_string()
+        writes: i32 = 0
+        reads: i32 = 0
+}
+
+
+fn check_str(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} — expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn check_int(label: &str, actual: i32, expected: i32) {
+    if actual != expected {
+        println!("FAIL: {} — expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn test_mount_write_read() {
+    let mut fs = @@Filesystem();
+    check_str("initial unmounted", &fs.status(), "unmounted");
+    check_str("mount", &fs.mount("/dev/sda1".to_string()), "mounted");
+    check_str("active state", &fs.status(), "active");
+    check_str("write 1", &fs.write("hello".to_string()), "wrote");
+    check_str("read 1", &fs.read(), "read");
+    check_str("sync via HSM", &fs.sync(), "synced");
+    check_int("read count incremented", fs.read_count(), 1);
+    check_int("write count incremented", fs.write_count(), 1);
+    println!("PASS: mount + write + read + sync");
+}
+
+fn test_freeze_blocks_writes_allows_reads() {
+    let mut fs = @@Filesystem();
+    fs.mount("/dev/sda1".to_string());
+    fs.write("before freeze".to_string());
+    fs.freeze();
+    check_str("in frozen state", &fs.status(), "frozen");
+    check_str("write blocked", &fs.write("nope".to_string()), "BLOCKED");
+    check_str("read still works", &fs.read(), "read");
+    check_int("read count 1", fs.read_count(), 1);
+    check_int("write count unchanged", fs.write_count(), 1);
+    println!("PASS: freeze blocks writes, allows reads (3-level HSM)");
+}
+
+fn test_thaw_restores_write() {
+    let mut fs = @@Filesystem();
+    fs.mount("/dev/sda1".to_string());
+    fs.freeze();
+    check_str("thaw", &fs.thaw(), "thawed");
+    check_str("back to active", &fs.status(), "active");
+    check_str("write works again", &fs.write("post-thaw".to_string()), "wrote");
+    println!("PASS: thaw restores write capability");
+}
+
+fn test_unmount_forwards_via_hsm() {
+    let mut fs = @@Filesystem();
+    fs.mount("/dev/sda1".to_string());
+    check_str("unmount from Active", &fs.unmount(), "unmounting");
+    check_str("eventually unmounted", &fs.status(), "unmounted");
+    println!("PASS: unmount forwards from Active via $Readable to $Mounted");
+}
+
+fn test_freeze_impossible_when_unmounted() {
+    let mut fs = @@Filesystem();
+    // Rust returns default String ("") when no handler exists.
+    check_str("freeze unmounted = no-op (no handler)",
+              &fs.freeze(), "");
+    check_str("still unmounted", &fs.status(), "unmounted");
+    println!("PASS: freeze on unmounted fs is no-op");
+}
+
+fn test_read_count_accumulates_across_states() {
+    let mut fs = @@Filesystem();
+    fs.mount("/dev/sda1".to_string());
+    fs.read();
+    fs.read();
+    fs.freeze();
+    fs.read();
+    fs.thaw();
+    fs.read();
+    check_int("reads across Active/Frozen/Active",
+              fs.read_count(), 4);
+    println!("PASS: read count spans states (domain var)");
+}
+
+fn main() {
+    test_mount_write_read();
+    test_freeze_blocks_writes_allows_reads();
+    test_thaw_restores_write();
+    test_unmount_forwards_via_hsm();
+    test_freeze_impossible_when_unmounted();
+    test_read_count_accumulates_across_states();
+    println!("PASS: all filesystem freeze tests passed");
+}

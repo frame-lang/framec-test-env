@@ -1,0 +1,237 @@
+@@target go
+
+// DHCP Client -- RFC 2131 Figure 5 state machine.
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system DhcpClient {
+    interface:
+        Start()
+        OfferReceived(server_ip: string, offered_ip: string, lease_sec: int)
+        AckReceived(ip: string, lease_sec: int)
+        NakReceived()
+        T1Expired()
+        T2Expired()
+        LeaseExpired()
+        Release()
+        Status(): string
+
+    machine:
+        $Init {
+            $>() {
+                s.attempts = 0
+            }
+
+            Start() {
+                -> $Selecting
+            }
+            Status(): string { @@:("init") }
+        }
+
+        $Selecting {
+            $>() {
+                s.attempts = s.attempts + 1
+                s.broadcast_discover()
+            }
+
+            OfferReceived(server_ip: string, offered_ip: string, lease_sec: int) {
+                s.server = server_ip
+                s.offered = offered_ip
+                s.lease_sec = lease_sec
+                -> $Requesting
+            }
+            Status(): string { @@:("selecting") }
+        }
+
+        $Requesting {
+            $>() {
+                s.send_request()
+            }
+
+            AckReceived(ip: string, lease_sec: int) {
+                s.bound = ip
+                s.lease_sec = lease_sec
+                -> $Bound
+            }
+            NakReceived() {
+                -> $Init
+            }
+            Status(): string { @@:("requesting") }
+        }
+
+        $Bound {
+            $>() {
+                s.arm_timers()
+            }
+
+            T1Expired() {
+                -> $Renewing
+            }
+            Release() {
+                s.cancel_all_timers()
+                s.send_release()
+                -> $Init
+            }
+            Status(): string { @@:("bound") }
+        }
+
+        $Renewing {
+            $>() {
+                s.send_renew()
+            }
+
+            AckReceived(ip: string, lease_sec: int) {
+                s.lease_sec = lease_sec
+                -> $Bound
+            }
+            NakReceived() {
+                s.cancel_all_timers()
+                -> $Init
+            }
+            T2Expired() {
+                -> $Rebinding
+            }
+            LeaseExpired() {
+                s.cancel_all_timers()
+                -> $Init
+            }
+            Release() {
+                s.cancel_all_timers()
+                -> $Init
+            }
+            Status(): string { @@:("renewing") }
+        }
+
+        $Rebinding {
+            $>() {
+                s.broadcast_renew()
+            }
+
+            AckReceived(ip: string, lease_sec: int) {
+                s.lease_sec = lease_sec
+                -> $Bound
+            }
+            NakReceived() {
+                s.cancel_all_timers()
+                -> $Init
+            }
+            LeaseExpired() {
+                s.cancel_all_timers()
+                s.bound = ""
+                -> $Init
+            }
+            Release() {
+                s.cancel_all_timers()
+                -> $Init
+            }
+            Status(): string { @@:("rebinding") }
+        }
+
+    actions:
+        broadcast_discover()    {}
+        send_request()          {}
+        send_renew()            {}
+        broadcast_renew()       {}
+        send_release()          {}
+        arm_timers()            {}
+        cancel_all_timers()     {}
+
+    domain:
+        server: string = ""
+        offered: string = ""
+        bound: string = ""
+        lease_sec: int = 0
+        attempts: int = 0
+}
+
+
+func check(label, actual, expected string) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func test_full_lease_acquisition() {
+	dhcp := NewDhcpClient()
+	check("initial init", dhcp.Status(), "init")
+	dhcp.Start()
+	check("selecting", dhcp.Status(), "selecting")
+	dhcp.OfferReceived("192.168.1.1", "192.168.1.100", 3600)
+	check("requesting after offer", dhcp.Status(), "requesting")
+	dhcp.AckReceived("192.168.1.100", 3600)
+	check("bound", dhcp.Status(), "bound")
+	fmt.Println("PASS: full lease acquisition Init->Selecting->Requesting->Bound")
+}
+
+func test_t1_triggers_renewal() {
+	dhcp := NewDhcpClient()
+	dhcp.Start()
+	dhcp.OfferReceived("10.0.0.1", "10.0.0.100", 7200)
+	dhcp.AckReceived("10.0.0.100", 7200)
+	dhcp.T1Expired()
+	check("renewing after t1", dhcp.Status(), "renewing")
+	dhcp.AckReceived("10.0.0.100", 7200)
+	check("back to bound after renew ack", dhcp.Status(), "bound")
+	fmt.Println("PASS: T1 triggers renewal, ACK returns to bound")
+}
+
+func test_t2_triggers_rebind() {
+	dhcp := NewDhcpClient()
+	dhcp.Start()
+	dhcp.OfferReceived("10.0.0.1", "10.0.0.100", 7200)
+	dhcp.AckReceived("10.0.0.100", 7200)
+	dhcp.T1Expired()
+	check("renewing", dhcp.Status(), "renewing")
+	dhcp.T2Expired()
+	check("rebinding after t2", dhcp.Status(), "rebinding")
+	dhcp.AckReceived("10.0.0.100", 7200)
+	check("rebind ACK -> bound", dhcp.Status(), "bound")
+	fmt.Println("PASS: T2 triggers rebind, ACK returns to bound")
+}
+
+func test_nak_during_requesting_restarts() {
+	dhcp := NewDhcpClient()
+	dhcp.Start()
+	dhcp.OfferReceived("10.0.0.1", "10.0.0.100", 7200)
+	dhcp.NakReceived()
+	check("NAK in Requesting -> Init", dhcp.Status(), "init")
+	fmt.Println("PASS: NAK in Requesting restarts")
+}
+
+func test_lease_expired_in_rebinding() {
+	dhcp := NewDhcpClient()
+	dhcp.Start()
+	dhcp.OfferReceived("10.0.0.1", "10.0.0.100", 7200)
+	dhcp.AckReceived("10.0.0.100", 7200)
+	dhcp.T1Expired()
+	dhcp.T2Expired()
+	dhcp.LeaseExpired()
+	check("lease_expired in Rebinding -> Init", dhcp.Status(), "init")
+	fmt.Println("PASS: lease expiry in rebinding clears state")
+}
+
+func test_release_from_bound() {
+	dhcp := NewDhcpClient()
+	dhcp.Start()
+	dhcp.OfferReceived("10.0.0.1", "10.0.0.100", 7200)
+	dhcp.AckReceived("10.0.0.100", 7200)
+	dhcp.Release()
+	check("release -> init", dhcp.Status(), "init")
+	fmt.Println("PASS: release from bound")
+}
+
+func main() {
+	test_full_lease_acquisition()
+	test_t1_triggers_renewal()
+	test_t2_triggers_rebind()
+	test_nak_during_requesting_restarts()
+	test_lease_expired_in_rebinding()
+	test_release_from_bound()
+	fmt.Println("PASS: all DHCP client tests passed")
+}

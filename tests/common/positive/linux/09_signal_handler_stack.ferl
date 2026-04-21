@@ -1,0 +1,73 @@
+@@target erlang
+
+% Signal Handler Stack — textbook push$/pop$ use case.
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in erlang_batch.sh exercises every exported function and checks clean exit.
+
+@@system SignalContext {
+    interface:
+        enter_user_code()
+        signal_arrives(sig: str)
+        handler_returns()
+        current_mode(): str
+        depth(): int
+        current_signum(): str
+
+    machine:
+        $Kernel {
+            enter_user_code() {
+                -> $UserMode
+            }
+            current_mode(): str { @@:("kernel") }
+            depth(): int { @@:(self.nesting) }
+            current_signum(): str { @@:("") }
+        }
+
+        $UserMode {
+            $.saved_regs = ""
+
+            $>() {
+                self.snapshot_registers()
+            }
+
+            signal_arrives(sig: str) {
+                self.nesting = self.nesting + 1,
+                push$
+                -> (sig) $SignalHandler
+            }
+            current_mode(): str { @@:("user") }
+            depth(): int { @@:(self.nesting) }
+            current_signum(): str { @@:("") }
+        }
+
+        $SignalHandler {
+            $.signum = ""
+
+            $>(sig: str) {
+                $.signum = sig
+            }
+
+            signal_arrives(sig: str) {
+                self.nesting = self.nesting + 1,
+                push$
+                -> (sig) $SignalHandler
+            }
+
+            handler_returns() {
+                self.nesting = self.nesting - 1,
+                -> pop$
+            }
+
+            current_mode(): str { @@:("handler") }
+            depth(): int { @@:(self.nesting) }
+            current_signum(): str { @@:($.signum) }
+        }
+
+    actions:
+        snapshot_registers() {
+            "regs_snapshot"
+        }
+
+    domain:
+        nesting = 0
+}

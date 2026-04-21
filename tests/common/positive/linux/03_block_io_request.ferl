@@ -1,0 +1,88 @@
+@@target erlang
+
+% Block I/O Request — kernel blk-mq layer semantics.
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in erlang_batch.sh exercises every exported function and checks clean exit.
+
+@@system BlockRequest {
+    interface:
+        submit(sector: int, size: int): str
+        dispatch(): str
+        complete(success: bool): str
+        timeout(): str
+        status(): str
+
+    machine:
+        $Idle {
+            submit(sector: int, size: int): str {
+                self.sector = sector,
+                self.size = size,
+                self.attempts = 0,
+                @@:("queued")
+                -> $Queued
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $Queued {
+            dispatch(): str {
+                @@:("dispatched")
+                -> $InFlight
+            }
+            status(): str { @@:("queued") }
+        }
+
+        $InFlight {
+            $>() {
+                self.attempts = self.attempts + 1,
+                self.start_timeout()
+            }
+            <$() {
+                self.cancel_timeout()
+            }
+
+            complete(success: bool): str {
+                if success {
+                    @@:("done")
+                    -> $Done
+                } else {
+                    if self.attempts < self.max_retries {
+                        @@:("requeued")
+                        -> $Queued
+                    } else {
+                        @@:("io error")
+                        -> $Error
+                    }
+                }
+            }
+            timeout(): str {
+                if self.attempts < self.max_retries {
+                    @@:("timeout, retrying")
+                    -> $Queued
+                } else {
+                    @@:("timeout, giving up")
+                    -> $Error
+                }
+            }
+            status(): str { @@:("in-flight") }
+        }
+
+        $Done {
+            status(): str { @@:("done") }
+        }
+
+        $Error {
+            status(): str { @@:("error") }
+        }
+
+    actions:
+        start_timeout() {}
+        cancel_timeout() {}
+
+    domain:
+        sector = 0
+        size = 0
+        attempts = 0
+        max_retries = 3
+        timeout_ms = 30000
+}

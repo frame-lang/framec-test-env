@@ -1,0 +1,273 @@
+@@target swift
+
+// Kernel Module Loader — pipeline with compensation (saga pattern).
+
+import Foundation
+
+@@system ModuleLoader {
+    interface:
+        load(name: String)
+        unload(): String
+        acquire(): String
+        release(): String
+        resolve_done(success: Bool, reason: String)
+        alloc_done(success: Bool, reason: String)
+        relocate_done(success: Bool, reason: String)
+        init_done(success: Bool, reason: String)
+        status(): String
+        refcount(): Int
+        failure_reason(): String
+
+    machine:
+        $Idle {
+            load(name: String) {
+                self.name = name
+                self.failure = ""
+                -> $ResolvingSymbols
+            }
+            status(): String { @@:("idle") }
+        }
+
+        $ResolvingSymbols {
+            $>() {
+                self.do_resolve(self.name)
+            }
+            resolve_done(success: Bool, reason: String) {
+                if success {
+                    -> $AllocatingMemory
+                } else {
+                    self.failure = reason
+                    -> $Failed
+                }
+            }
+            status(): String { @@:("resolving") }
+        }
+
+        $AllocatingMemory {
+            $>() {
+                self.do_alloc(self.name)
+            }
+            alloc_done(success: Bool, reason: String) {
+                if success {
+                    -> $Relocating
+                } else {
+                    self.failure = reason
+                    -> $Failed
+                }
+            }
+            status(): String { @@:("allocating") }
+        }
+
+        $Relocating {
+            $>() {
+                self.do_relocate(self.name)
+            }
+            relocate_done(success: Bool, reason: String) {
+                if success {
+                    -> $Initializing
+                } else {
+                    self.failure = reason
+                    -> $UndoAlloc
+                }
+            }
+            status(): String { @@:("relocating") }
+        }
+
+        $Initializing {
+            $>() {
+                self.do_init(self.name)
+            }
+            init_done(success: Bool, reason: String) {
+                if success {
+                    -> $Live
+                } else {
+                    self.failure = reason
+                    -> $UndoRelocate
+                }
+            }
+            status(): String { @@:("initializing") }
+        }
+
+        $UndoRelocate {
+            $>() {
+                self.do_undo_relocate(self.name)
+                -> $UndoAlloc
+            }
+        }
+
+        $UndoAlloc {
+            $>() {
+                self.do_free(self.name)
+                -> $Failed
+            }
+        }
+
+        $Live {
+            $>() {
+                self.refs = 0
+            }
+
+            acquire(): String {
+                self.refs = self.refs + 1
+                @@:("acquired")
+            }
+            release(): String {
+                self.refs = self.refs - 1
+                @@:("released")
+            }
+            unload(): String {
+                if self.refs > 0 {
+                    @@:("busy")
+                } else {
+                    @@:("unloading")
+                    -> $Unloading
+                }
+            }
+            status(): String { @@:("live") }
+            refcount(): Int { @@:(self.refs) }
+        }
+
+        $Unloading {
+            $>() {
+                self.do_exit(self.name)
+                self.do_free(self.name)
+                -> $Idle
+            }
+        }
+
+        $Failed {
+            load(name: String) {
+                self.name = name
+                self.failure = ""
+                -> $ResolvingSymbols
+            }
+            status(): String { @@:("failed") }
+            failure_reason(): String { @@:(self.failure) }
+        }
+
+    actions:
+        do_resolve(name: String) {}
+        do_alloc(name: String) {}
+        do_relocate(name: String) {}
+        do_init(name: String) {}
+        do_undo_relocate(name: String) {}
+        do_free(name: String) {}
+        do_exit(name: String) {}
+
+    domain:
+        name: String = ""
+        failure: String = ""
+        refs: Int = 0
+}
+
+
+func check_str(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) — expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+
+func check_int(_ label: String, _ actual: Int, _ expected: Int) {
+    if actual != expected {
+        print("FAIL: \(label) — expected \(expected), got \(actual)")
+        exit(1)
+    }
+}
+
+func test_happy_load_unload() {
+    var loader = @@ModuleLoader()
+    check_str("initial idle", loader.status() as! String, "idle")
+    _ = loader.load("ext4")
+    check_str("resolving", loader.status() as! String, "resolving")
+    _ = loader.resolve_done(true, "")
+    check_str("allocating", loader.status() as! String, "allocating")
+    _ = loader.alloc_done(true, "")
+    check_str("relocating", loader.status() as! String, "relocating")
+    _ = loader.relocate_done(true, "")
+    check_str("initializing", loader.status() as! String, "initializing")
+    _ = loader.init_done(true, "")
+    check_str("live", loader.status() as! String, "live")
+    check_int("refcount 0", loader.refcount() as! Int, 0)
+    check_str("unload empty module", loader.unload() as! String, "unloading")
+    check_str("back to idle", loader.status() as! String, "idle")
+    print("PASS: happy load/unload pipeline")
+}
+
+func test_init_failure_compensates() {
+    var loader = @@ModuleLoader()
+    _ = loader.load("buggy")
+    _ = loader.resolve_done(true, "")
+    _ = loader.alloc_done(true, "")
+    _ = loader.relocate_done(true, "")
+    _ = loader.init_done(false, "ENOMEM")
+    check_str("failed state", loader.status() as! String, "failed")
+    check_str("failure captured", loader.failure_reason() as! String, "ENOMEM")
+    print("PASS: init failure compensation")
+}
+
+func test_relocate_failure_compensates() {
+    var loader = @@ModuleLoader()
+    _ = loader.load("symbol_err")
+    _ = loader.resolve_done(true, "")
+    _ = loader.alloc_done(true, "")
+    _ = loader.relocate_done(false, "undefined symbol")
+    check_str("failed from relocate", loader.status() as! String, "failed")
+    check_str("reason captured", loader.failure_reason() as! String, "undefined symbol")
+    print("PASS: relocate failure compensation")
+}
+
+func test_early_failure_no_compensation_needed() {
+    var loader = @@ModuleLoader()
+    _ = loader.load("no_such_sym")
+    _ = loader.resolve_done(false, "symbol not found")
+    check_str("direct fail from resolve", loader.status() as! String, "failed")
+    check_str("resolve reason", loader.failure_reason() as! String, "symbol not found")
+    print("PASS: early failure without compensation")
+}
+
+func test_refcount_blocks_unload() {
+    var loader = @@ModuleLoader()
+    _ = loader.load("shared_lib")
+    _ = loader.resolve_done(true, "")
+    _ = loader.alloc_done(true, "")
+    _ = loader.relocate_done(true, "")
+    _ = loader.init_done(true, "")
+    check_str("acquire returns 'acquired'", loader.acquire() as! String, "acquired")
+    check_int("refcount 1", loader.refcount() as! Int, 1)
+    check_str("acquire again", loader.acquire() as! String, "acquired")
+    check_int("refcount 2", loader.refcount() as! Int, 2)
+    check_str("unload blocked by refs", loader.unload() as! String, "busy")
+    check_str("still live", loader.status() as! String, "live")
+    _ = loader.release()
+    check_int("refcount after release", loader.refcount() as! Int, 1)
+    check_str("still busy", loader.unload() as! String, "busy")
+    _ = loader.release()
+    check_int("refcount 0", loader.refcount() as! Int, 0)
+    check_str("now unloads", loader.unload() as! String, "unloading")
+    check_str("idle again", loader.status() as! String, "idle")
+    print("PASS: refcount blocks unload")
+}
+
+func test_reload_from_failed() {
+    var loader = @@ModuleLoader()
+    _ = loader.load("badmod")
+    _ = loader.resolve_done(false, "initial fail")
+    check_str("failed", loader.status() as! String, "failed")
+    _ = loader.load("goodmod")
+    check_str("restarted in resolving", loader.status() as! String, "resolving")
+    _ = loader.resolve_done(true, "")
+    _ = loader.alloc_done(true, "")
+    _ = loader.relocate_done(true, "")
+    _ = loader.init_done(true, "")
+    check_str("recovered to live", loader.status() as! String, "live")
+    print("PASS: reload from failed")
+}
+
+test_happy_load_unload()
+test_init_failure_compensates()
+test_relocate_failure_compensates()
+test_early_failure_no_compensation_needed()
+test_refcount_blocks_unload()
+test_reload_from_failed()
+print("PASS: all kernel module loader tests passed")

@@ -1,0 +1,329 @@
+@@target kotlin
+
+// SMTP Conversation -- RFC 5321 client state machine.
+
+@@system SmtpClient {
+    interface:
+        tcp_connected()
+        greeting_received(code: Int)
+        ehlo_response(code: Int, supports_starttls: Boolean)
+        starttls()
+        starttls_response(code: Int)
+        tls_handshake_complete()
+        mail_from(sender: String)
+        mail_response(code: Int)
+        rcpt_to(recipient: String)
+        rcpt_response(code: Int)
+        data()
+        data_response(code: Int)
+        data_body(body: String)
+        data_final_response(code: Int)
+        quit()
+        quit_response(code: Int)
+        status(): String
+        recipient_count(): Int
+        tls_on(): Boolean
+
+    machine:
+        $Disconnected {
+            tcp_connected() { -> $AwaitGreeting }
+            status(): String { @@:("disconnected") }
+            recipient_count(): Int { @@:(this.rcpt_count) }
+            tls_on(): Boolean { @@:(this.tls_active) }
+        }
+
+        $AwaitGreeting => $Connected {
+            greeting_received(code: Int) {
+                if (code == 220) {
+                    this.send_ehlo()
+                    -> $AwaitEhlo
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): String { @@:("await greeting") }
+            => $^
+        }
+
+        $AwaitEhlo => $Connected {
+            ehlo_response(code: Int, supports_starttls: Boolean) {
+                if (code == 250) {
+                    this.server_supports_starttls = supports_starttls
+                    -> $Ready
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): String { @@:("await ehlo") }
+            => $^
+        }
+
+        $Ready => $Connected {
+            starttls() {
+                if (this.server_supports_starttls) {
+                    if (this.tls_active == false) {
+                        this.send_starttls()
+                        -> $AwaitStartTlsResponse
+                    }
+                }
+            }
+            mail_from(sender: String) {
+                this.sender = sender
+                this.send_mail_from()
+                -> $AwaitMailResponse
+            }
+            quit() {
+                this.send_quit()
+                -> $AwaitQuitResponse
+            }
+            status(): String { @@:("ready") }
+            => $^
+        }
+
+        $AwaitStartTlsResponse => $Connected {
+            starttls_response(code: Int) {
+                if (code == 220) {
+                    -> $TlsHandshake
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): String { @@:("await starttls response") }
+            => $^
+        }
+
+        $TlsHandshake => $Connected {
+            tls_handshake_complete() {
+                this.tls_active = true
+                this.send_ehlo()
+                -> $AwaitEhlo
+            }
+            status(): String { @@:("tls handshake") }
+            => $^
+        }
+
+        $AwaitMailResponse => $Connected {
+            mail_response(code: Int) {
+                if (code == 250) {
+                    -> $AwaitRcpt
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): String { @@:("await mail response") }
+            => $^
+        }
+
+        $AwaitRcpt => $Connected {
+            rcpt_to(recipient: String) {
+                this.rcpt_count = this.rcpt_count + 1
+                this.send_rcpt_to()
+                -> $AwaitRcptResponse
+            }
+            data() {
+                if (this.rcpt_count > 0) {
+                    this.send_data()
+                    -> $AwaitDataResponse
+                }
+            }
+            status(): String { @@:("await rcpt") }
+            => $^
+        }
+
+        $AwaitRcptResponse => $Connected {
+            rcpt_response(code: Int) {
+                -> $AwaitRcpt
+            }
+            status(): String { @@:("await rcpt response") }
+            => $^
+        }
+
+        $AwaitDataResponse => $Connected {
+            data_response(code: Int) {
+                if (code == 354) {
+                    -> $SendingBody
+                } else {
+                    -> $Ready
+                }
+            }
+            status(): String { @@:("await data response") }
+            => $^
+        }
+
+        $SendingBody => $Connected {
+            data_body(body: String) {
+                this.send_body()
+                this.send_body_terminator()
+                -> $AwaitFinalResponse
+            }
+            status(): String { @@:("sending body") }
+            => $^
+        }
+
+        $AwaitFinalResponse => $Connected {
+            data_final_response(code: Int) {
+                this.rcpt_count = 0
+                -> $Ready
+            }
+            status(): String { @@:("await final response") }
+            => $^
+        }
+
+        $AwaitQuitResponse => $Connected {
+            quit_response(code: Int) {
+                -> $Disconnected
+            }
+            status(): String { @@:("await quit response") }
+            => $^
+        }
+
+        $Connected {
+            recipient_count(): Int { @@:(this.rcpt_count) }
+            tls_on(): Boolean { @@:(this.tls_active) }
+        }
+
+    actions:
+        send_ehlo()             {}
+        send_starttls()         {}
+        send_mail_from()        {}
+        send_rcpt_to()          {}
+        send_data()             {}
+        send_body()             {}
+        send_body_terminator()  {}
+        send_quit()             {}
+
+    domain:
+        server_supports_starttls: Boolean = false
+        tls_active: Boolean = false
+        sender: String = ""
+        rcpt_count: Int = 0
+}
+
+
+fun check_str(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label -- expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun check_int(label: String, actual: Int, expected: Int) {
+    if (actual != expected) {
+        println("FAIL: $label -- expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun check_bool(label: String, actual: Boolean, expected: Boolean) {
+    if (actual != expected) {
+        println("FAIL: $label -- expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun test_basic_exchange_no_tls() {
+    val smtp = SmtpClient()
+    check_str("initial disconnected", smtp.status() as String, "disconnected")
+    smtp.tcp_connected()
+    check_str("await greeting", smtp.status() as String, "await greeting")
+    smtp.greeting_received(220)
+    check_str("await ehlo", smtp.status() as String, "await ehlo")
+    smtp.ehlo_response(250, false)
+    check_str("ready", smtp.status() as String, "ready")
+    check_bool("tls off", smtp.tls_on() as Boolean, false)
+    println("PASS: basic TCP connect + EHLO")
+}
+
+fun test_starttls_upgrade() {
+    val smtp = SmtpClient()
+    smtp.tcp_connected()
+    smtp.greeting_received(220)
+    smtp.ehlo_response(250, true)
+    smtp.starttls()
+    check_str("await starttls response", smtp.status() as String, "await starttls response")
+    smtp.starttls_response(220)
+    check_str("tls handshake", smtp.status() as String, "tls handshake")
+    smtp.tls_handshake_complete()
+    check_str("await ehlo after TLS", smtp.status() as String, "await ehlo")
+    smtp.ehlo_response(250, true)
+    check_str("back to ready", smtp.status() as String, "ready")
+    check_bool("tls on", smtp.tls_on() as Boolean, true)
+    println("PASS: STARTTLS upgrade cycles through \$AwaitEhlo")
+}
+
+fun test_send_message_three_recipients() {
+    val smtp = SmtpClient()
+    smtp.tcp_connected()
+    smtp.greeting_received(220)
+    smtp.ehlo_response(250, false)
+    smtp.mail_from("alice@example.com")
+    check_str("await mail", smtp.status() as String, "await mail response")
+    smtp.mail_response(250)
+    smtp.rcpt_to("bob@example.com")
+    smtp.rcpt_response(250)
+    smtp.rcpt_to("carol@example.com")
+    smtp.rcpt_response(250)
+    smtp.rcpt_to("dan@example.com")
+    smtp.rcpt_response(250)
+    check_int("3 recipients", smtp.recipient_count() as Int, 3)
+    smtp.data()
+    check_str("await data response", smtp.status() as String, "await data response")
+    smtp.data_response(354)
+    smtp.data_body("Subject: hi\r\n\r\nhello")
+    smtp.data_final_response(250)
+    check_str("ready again", smtp.status() as String, "ready")
+    check_int("recipient count reset", smtp.recipient_count() as Int, 0)
+    println("PASS: send message with three recipients")
+}
+
+fun test_quit() {
+    val smtp = SmtpClient()
+    smtp.tcp_connected()
+    smtp.greeting_received(220)
+    smtp.ehlo_response(250, false)
+    smtp.quit()
+    smtp.quit_response(221)
+    check_str("disconnected after QUIT", smtp.status() as String, "disconnected")
+    println("PASS: clean QUIT shutdown")
+}
+
+fun test_greeting_reject() {
+    val smtp = SmtpClient()
+    smtp.tcp_connected()
+    smtp.greeting_received(500)
+    check_str("bad greeting -> disconnected", smtp.status() as String, "disconnected")
+    println("PASS: bad greeting drops connection")
+}
+
+fun test_starttls_refused_if_not_supported() {
+    val smtp = SmtpClient()
+    smtp.tcp_connected()
+    smtp.greeting_received(220)
+    smtp.ehlo_response(250, false)
+    smtp.starttls()
+    check_str("still ready (starttls refused)", smtp.status() as String, "ready")
+    check_bool("tls still off", smtp.tls_on() as Boolean, false)
+    println("PASS: starttls no-op when server doesn't support it")
+}
+
+fun test_mail_rejection_returns_to_ready() {
+    val smtp = SmtpClient()
+    smtp.tcp_connected()
+    smtp.greeting_received(220)
+    smtp.ehlo_response(250, false)
+    smtp.mail_from("bad@user")
+    smtp.mail_response(550)
+    check_str("mail rejected -> ready", smtp.status() as String, "ready")
+    println("PASS: mail rejection returns to ready")
+}
+
+fun main() {
+    test_basic_exchange_no_tls()
+    test_starttls_upgrade()
+    test_send_message_three_recipients()
+    test_quit()
+    test_greeting_reject()
+    test_starttls_refused_if_not_supported()
+    test_mail_rejection_returns_to_ready()
+    println("PASS: all SMTP conversation tests passed")
+}

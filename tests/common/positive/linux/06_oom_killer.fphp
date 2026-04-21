@@ -1,0 +1,127 @@
+@@target php
+
+<?php
+
+// OOM Killer — kernel mm/oom_kill.c semantics.
+
+@@system OomKiller {
+    interface:
+        oom_detected(gfp_flags: int): str
+        victim_exited(pid: int, freed_kb: int): str
+        oom_detected_again(gfp_flags: int): str
+        status(): str
+
+    machine:
+        $Normal {
+            oom_detected(gfp_flags: int): str {
+                @@:("selecting victim")
+                -> $Selecting
+            }
+            status(): str { @@:("normal") }
+        }
+
+        $Selecting {
+            $>() {
+                $this->victim_pid = $this->select_victim();
+                if ($this->victim_pid < 0) {
+                    -> $Panic
+                } else {
+                    -> $Killing
+                }
+            }
+            status(): str { @@:("selecting") }
+        }
+
+        $Killing {
+            $>() {
+                $this->send_sigkill($this->victim_pid);
+                $this->start_reaper_timer();
+            }
+            <$() {
+                $this->cancel_reaper_timer();
+            }
+
+            victim_exited(pid: int, freed_kb: int): str {
+                if ($pid === $this->victim_pid) {
+                    $this->total_freed_kb = $this->total_freed_kb + $freed_kb;
+                    @@:("reclaimed")
+                    -> $Normal
+                } else {
+                    @@:("wrong pid, still waiting")
+                }
+            }
+
+            status(): str { @@:("killing") }
+        }
+
+        $Panic {
+            status(): str { @@:("panic") }
+        }
+
+    actions:
+        select_victim() {
+            $this->victim_score = 850;
+            return 4242;
+        }
+        send_sigkill(pid) {}
+        start_reaper_timer() {}
+        cancel_reaper_timer() {}
+
+    domain:
+        victim_pid = -1
+        victim_score = 0
+        total_freed_kb = 0
+}
+
+
+function check_value($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label — expected '$expected', got '$actual'\n";
+        exit(1);
+    }
+}
+
+function test_normal_oom_flow() {
+    $oom = @@OomKiller();
+    check_value("initial normal", $oom->status(), "normal");
+    check_value("oom_detected -> selecting", $oom->oom_detected(0), "selecting victim");
+    check_value("arrived in killing", $oom->status(), "killing");
+    check_value("victim exits", $oom->victim_exited(4242, 51200), "reclaimed");
+    check_value("back to normal", $oom->status(), "normal");
+    echo "PASS: normal OOM flow\n";
+}
+
+function test_concurrent_oom_silently_dropped() {
+    $oom = @@OomKiller();
+    $oom->oom_detected(0);
+    check_value("in killing", $oom->status(), "killing");
+    $oom->oom_detected_again(0);
+    check_value("still killing (event dropped)", $oom->status(), "killing");
+    $oom->victim_exited(4242, 8192);
+    check_value("back to normal after reclaim", $oom->status(), "normal");
+    echo "PASS: concurrent OOM events dropped in \$Killing (safety)\n";
+}
+
+function test_wrong_pid_exit_ignored() {
+    $oom = @@OomKiller();
+    $oom->oom_detected(0);
+    check_value("waiting for victim", $oom->victim_exited(9999, 1024), "wrong pid, still waiting");
+    check_value("still killing", $oom->status(), "killing");
+    $oom->victim_exited(4242, 2048);
+    check_value("correct pid -> normal", $oom->status(), "normal");
+    echo "PASS: wrong-pid exit ignored in \$Killing\n";
+}
+
+function test_oom_detected_ignored_in_selecting() {
+    $oom = @@OomKiller();
+    check_value("first oom", $oom->oom_detected(0), "selecting victim");
+    $oom->oom_detected(0);
+    check_value("second oom dropped", $oom->status(), "killing");
+    echo "PASS: oom_detected ignored while killing\n";
+}
+
+test_normal_oom_flow();
+test_concurrent_oom_silently_dropped();
+test_wrong_pid_exit_ignored();
+test_oom_detected_ignored_in_selecting();
+echo "PASS: all OOM killer tests passed\n";

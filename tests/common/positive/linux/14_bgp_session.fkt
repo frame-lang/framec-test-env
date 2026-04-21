@@ -1,0 +1,243 @@
+@@target kotlin
+
+// BGP Finite State Machine -- RFC 4271 Section 8 direct transcription.
+
+@@persist
+@@system BgpSession {
+    interface:
+        manual_start()
+        manual_stop()
+        tcp_connection_confirmed()
+        tcp_connection_fails()
+        open_received(asn: Int, hold_time: Int)
+        keepalive_received()
+        notification_received(code: Int, subcode: Int)
+        hold_timer_expired()
+        keepalive_timer_expired()
+        connect_retry_timer_expired()
+        status(): String
+
+    machine:
+        $Idle {
+            manual_start() {
+                this.connect_retry_count = 0
+                this.start_connect_retry_timer()
+                this.initiate_tcp_connection()
+                -> $Connect
+            }
+            status(): String { @@:("idle") }
+        }
+
+        $Connect {
+            tcp_connection_confirmed() {
+                this.cancel_connect_retry_timer()
+                this.send_open()
+                -> $OpenSent
+            }
+            tcp_connection_fails() {
+                -> $Active
+            }
+            connect_retry_timer_expired() {
+                this.initiate_tcp_connection()
+                this.start_connect_retry_timer()
+            }
+            manual_stop() {
+                -> $Idle
+            }
+            status(): String { @@:("connect") }
+        }
+
+        $Active {
+            tcp_connection_confirmed() {
+                this.cancel_connect_retry_timer()
+                this.send_open()
+                -> $OpenSent
+            }
+            connect_retry_timer_expired() {
+                this.connect_retry_count = this.connect_retry_count + 1
+                this.initiate_tcp_connection()
+                this.start_connect_retry_timer()
+                -> $Connect
+            }
+            manual_stop() {
+                -> $Idle
+            }
+            status(): String { @@:("active") }
+        }
+
+        $OpenSent {
+            open_received(asn: Int, hold_time: Int) {
+                this.peer_asn = asn
+                this.negotiated_hold = hold_time
+                this.cancel_hold_timer()
+                this.send_keepalive()
+                -> $OpenConfirm
+            }
+            tcp_connection_fails() {
+                this.cancel_hold_timer()
+                -> $Active
+            }
+            notification_received(code: Int, subcode: Int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                this.send_notification()
+                -> $Idle
+            }
+            manual_stop() {
+                this.send_notification()
+                -> $Idle
+            }
+            status(): String { @@:("open sent") }
+        }
+
+        $OpenConfirm {
+            keepalive_received() {
+                -> $Established
+            }
+            notification_received(code: Int, subcode: Int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                this.send_notification()
+                -> $Idle
+            }
+            keepalive_timer_expired() {
+                this.send_keepalive()
+            }
+            manual_stop() {
+                this.send_notification()
+                -> $Idle
+            }
+            status(): String { @@:("open confirm") }
+        }
+
+        $Established {
+            keepalive_received() {
+                this.reset_hold_timer()
+            }
+            keepalive_timer_expired() {
+                this.send_keepalive()
+            }
+            notification_received(code: Int, subcode: Int) {
+                -> $Idle
+            }
+            hold_timer_expired() {
+                this.send_notification()
+                -> $Idle
+            }
+            manual_stop() {
+                this.send_notification()
+                -> $Idle
+            }
+            status(): String { @@:("established") }
+        }
+
+    actions:
+        initiate_tcp_connection()   {}
+        send_open()                 {}
+        send_keepalive()            {}
+        send_notification()         {}
+        start_connect_retry_timer() {}
+        cancel_connect_retry_timer(){}
+        cancel_hold_timer()         {}
+        reset_hold_timer()          {}
+
+    domain:
+        local_asn: Int = 65001
+        peer_asn: Int = 0
+        negotiated_hold: Int = 0
+        connect_retry_count: Int = 0
+}
+
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label -- expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun test_full_session_establishment() {
+    val bgp = BgpSession()
+    check("initial idle", bgp.status() as String, "idle")
+    bgp.manual_start()
+    check("connect", bgp.status() as String, "connect")
+    bgp.tcp_connection_confirmed()
+    check("open sent", bgp.status() as String, "open sent")
+    bgp.open_received(65002, 60)
+    check("open confirm", bgp.status() as String, "open confirm")
+    bgp.keepalive_received()
+    check("established", bgp.status() as String, "established")
+    println("PASS: full BGP session establishment")
+}
+
+fun test_persist_across_restart() {
+    val bgp = BgpSession()
+    bgp.manual_start()
+    bgp.tcp_connection_confirmed()
+    bgp.open_received(65002, 60)
+    bgp.keepalive_received()
+    check("established", bgp.status() as String, "established")
+    val snap = bgp.save_state()
+    val tmp = BgpSession()
+    val bgp2 = tmp.restore_state(snap)
+    check("established survived restart", bgp2.status() as String, "established")
+    bgp2.keepalive_timer_expired()
+    bgp2.keepalive_received()
+    check("still established", bgp2.status() as String, "established")
+    println("PASS: @@persist -- BGP session survives daemon restart")
+}
+
+fun test_hold_timer_teardown() {
+    val bgp = BgpSession()
+    bgp.manual_start()
+    bgp.tcp_connection_confirmed()
+    bgp.open_received(65002, 60)
+    bgp.keepalive_received()
+    bgp.hold_timer_expired()
+    check("hold expiry tears down", bgp.status() as String, "idle")
+    println("PASS: hold timer expiry returns to idle")
+}
+
+fun test_tcp_failure_goes_active() {
+    val bgp = BgpSession()
+    bgp.manual_start()
+    bgp.tcp_connection_fails()
+    check("active after TCP fail", bgp.status() as String, "active")
+    bgp.connect_retry_timer_expired()
+    check("retry transitions back to connect", bgp.status() as String, "connect")
+    println("PASS: TCP failure path Active -> Connect")
+}
+
+fun test_notification_in_established_teardown() {
+    val bgp = BgpSession()
+    bgp.manual_start()
+    bgp.tcp_connection_confirmed()
+    bgp.open_received(65002, 60)
+    bgp.keepalive_received()
+    bgp.notification_received(6, 0)
+    check("notification tears down", bgp.status() as String, "idle")
+    println("PASS: notification in Established -> idle")
+}
+
+fun test_manual_stop_from_established() {
+    val bgp = BgpSession()
+    bgp.manual_start()
+    bgp.tcp_connection_confirmed()
+    bgp.open_received(65002, 60)
+    bgp.keepalive_received()
+    bgp.manual_stop()
+    check("manual stop", bgp.status() as String, "idle")
+    println("PASS: manual_stop from established")
+}
+
+fun main() {
+    test_full_session_establishment()
+    test_persist_across_restart()
+    test_hold_timer_teardown()
+    test_tcp_failure_goes_active()
+    test_notification_in_established_teardown()
+    test_manual_stop_from_established()
+    println("PASS: all BGP session tests passed")
+}

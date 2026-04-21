@@ -1,0 +1,93 @@
+@@target erlang
+
+% NTP Client Association -- RFC 5905.
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in run_linux_recipes.sh exercises start_link and checks clean exit.
+% Action `shift_reach(bit)` encapsulates the reach-register shift logic
+% including the conditional consecutive_timeouts reset on success.
+
+@@system NtpAssociation {
+    operations:
+        get_offset(): int { return self.last_offset }
+        is_reachable(): bool { return self.reach_register > 0 }
+
+    interface:
+        poll_tick()
+        response_received(offset_ms: int, delay_ms: int)
+        poll_timeout()
+        status(): str
+        poll_interval(): int
+        reach(): int
+
+    machine:
+        $Unsynced {
+            $>() {
+                self.poll_interval_v = self.min_poll
+            }
+
+            poll_tick() {
+            }
+            response_received(offset_ms: int, delay_ms: int) {
+                self.shift_reach(1),
+                self.last_offset = offset_ms,
+                self.last_delay = delay_ms,
+                self.good_responses = self.good_responses + 1
+                if self.good_responses >= self.sync_threshold {
+                    -> $Synced
+                }
+            }
+            poll_timeout() {
+                self.shift_reach(0)
+            }
+            status(): str { @@:("unsynced") }
+            poll_interval(): int { @@:(self.poll_interval_v) }
+            reach(): int { @@:(self.reach_register) }
+        }
+
+        $Synced {
+            poll_tick() {
+            }
+            response_received(offset_ms: int, delay_ms: int) {
+                self.shift_reach(1),
+                self.last_offset = offset_ms,
+                self.last_delay = delay_ms
+                if self.poll_interval_v < self.max_poll {
+                    self.poll_interval_v = self.poll_interval_v * 2
+                }
+            }
+            poll_timeout() {
+                self.shift_reach(0),
+                self.consecutive_timeouts = self.consecutive_timeouts + 1
+                if self.consecutive_timeouts >= 3 {
+                    self.consecutive_timeouts = 0,
+                    self.good_responses = 0
+                    -> $Unsynced
+                }
+                if self.poll_interval_v > self.min_poll {
+                    self.poll_interval_v = self.poll_interval_v bsr 1
+                }
+            }
+            status(): str { @@:("synced") }
+            poll_interval(): int { @@:(self.poll_interval_v) }
+            reach(): int { @@:(self.reach_register) }
+        }
+
+    actions:
+        shift_reach(bit: int) {
+            self.reach_register = ((self.reach_register bsl 1) bor bit) band 16#FF
+            if bit == 1 {
+                self.consecutive_timeouts = 0
+            }
+        }
+
+    domain:
+        poll_interval_v = 64
+        min_poll = 64
+        max_poll = 1024
+        reach_register = 0
+        last_offset = 0
+        last_delay = 0
+        good_responses = 0
+        sync_threshold = 3
+        consecutive_timeouts = 0
+}

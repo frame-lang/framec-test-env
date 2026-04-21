@@ -1,0 +1,191 @@
+@@target kotlin
+
+// TLS Handshake (server side) — RFC 5246 Section 7.3.
+
+@@system TlsServerHandshake {
+    interface:
+        client_hello(version: String, cipher: String)
+        client_key_exchange(key_data: String)
+        client_change_cipher_spec()
+        client_finished(verify: String)
+        alert(level: String, desc: String)
+        status(): String
+
+    machine:
+        $Idle {
+            client_hello(version: String, cipher: String) {
+                this.client_version = version
+                if (cipher == "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256") {
+                    this.selected_cipher = cipher
+                    -> $ServerHello
+                } else {
+                    if (cipher == "TLS_RSA_WITH_AES_128_CBC_SHA") {
+                        this.selected_cipher = cipher
+                        -> $ServerHello
+                    } else {
+                        this.send_alert()
+                        -> $Closed
+                    }
+                }
+            }
+            status(): String { @@:("idle") }
+        }
+
+        $ServerHello => $Handshaking {
+            $>() {
+                this.send_server_hello()
+                this.send_certificate()
+                this.send_server_hello_done()
+                -> $AwaitClientKeyExchange
+            }
+            status(): String { @@:("server hello") }
+            => $^
+        }
+
+        $AwaitClientKeyExchange => $Handshaking {
+            client_key_exchange(key_data: String) {
+                this.premaster = key_data
+                this.derive_keys()
+                -> $AwaitChangeCipherSpec
+            }
+            status(): String { @@:("await key exchange") }
+            => $^
+        }
+
+        $AwaitChangeCipherSpec => $Handshaking {
+            client_change_cipher_spec() {
+                this.client_encrypted = true
+                -> $AwaitClientFinished
+            }
+            status(): String { @@:("await change cipher spec") }
+            => $^
+        }
+
+        $AwaitClientFinished => $Handshaking {
+            client_finished(verify: String) {
+                if (verify == "valid") {
+                    this.send_change_cipher_spec()
+                    this.send_finished()
+                    -> $Established
+                } else {
+                    this.send_alert()
+                    -> $Closed
+                }
+            }
+            status(): String { @@:("await client finished") }
+            => $^
+        }
+
+        $Handshaking {
+            alert(level: String, desc: String) {
+                if (level == "fatal") {
+                    -> $Closed
+                }
+            }
+        }
+
+        $Established {
+            alert(level: String, desc: String) {
+                if (level == "fatal") {
+                    -> $Closed
+                }
+            }
+            status(): String { @@:("established") }
+        }
+
+        $Closed {
+            status(): String { @@:("closed") }
+        }
+
+    actions:
+        send_server_hello() {}
+        send_certificate() {}
+        send_server_hello_done() {}
+        derive_keys() {}
+        send_change_cipher_spec() {}
+        send_finished() {}
+        send_alert() {}
+
+    domain:
+        client_version: String = ""
+        selected_cipher: String = ""
+        premaster: String = ""
+        client_encrypted: Boolean = false
+}
+
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label — expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun test_happy_handshake() {
+    val tls = TlsServerHandshake()
+    check("initial idle", tls.status() as String, "idle")
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    check("after client_hello -> through ServerHello to await", tls.status() as String, "await key exchange")
+    tls.client_key_exchange("premaster_data")
+    check("after key exchange", tls.status() as String, "await change cipher spec")
+    tls.client_change_cipher_spec()
+    check("after CCS", tls.status() as String, "await client finished")
+    tls.client_finished("valid")
+    check("established", tls.status() as String, "established")
+    println("PASS: happy TLS handshake")
+}
+
+fun test_unsupported_cipher_closes() {
+    val tls = TlsServerHandshake()
+    tls.client_hello("TLS 1.2", "TLS_NULL_WITH_NULL_NULL")
+    check("no matching cipher -> closed", tls.status() as String, "closed")
+    println("PASS: unsupported cipher closes handshake")
+}
+
+fun test_fatal_alert_during_handshake() {
+    val tls = TlsServerHandshake()
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    tls.alert("fatal", "unexpected_message")
+    check("fatal alert -> closed (via HSM parent)", tls.status() as String, "closed")
+    println("PASS: fatal alert forwards via HSM parent to \$Closed")
+}
+
+fun test_warning_alert_ignored() {
+    val tls = TlsServerHandshake()
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    tls.alert("warning", "close_notify_soon")
+    check("warning alert doesn't close", tls.status() as String, "await key exchange")
+    println("PASS: warning alert doesn't close handshake")
+}
+
+fun test_invalid_finished_closes() {
+    val tls = TlsServerHandshake()
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    tls.client_key_exchange("bogus")
+    tls.client_change_cipher_spec()
+    tls.client_finished("invalid")
+    check("bad verify -> closed", tls.status() as String, "closed")
+    println("PASS: invalid client_finished closes")
+}
+
+fun test_fatal_alert_in_established() {
+    val tls = TlsServerHandshake()
+    tls.client_hello("TLS 1.2", "TLS_RSA_WITH_AES_128_CBC_SHA")
+    tls.client_key_exchange("pm")
+    tls.client_change_cipher_spec()
+    tls.client_finished("valid")
+    check("established", tls.status() as String, "established")
+    tls.alert("fatal", "bad_record_mac")
+    check("fatal in \$Established -> closed", tls.status() as String, "closed")
+    println("PASS: fatal alert in established closes")
+}
+
+fun main() {
+    test_happy_handshake()
+    test_unsupported_cipher_closes()
+    test_fatal_alert_during_handshake()
+    test_warning_alert_ignored()
+    test_invalid_finished_closes()
+    test_fatal_alert_in_established()
+    println("PASS: all TLS handshake tests passed")
+}

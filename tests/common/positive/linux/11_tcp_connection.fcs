@@ -1,0 +1,232 @@
+@@target csharp
+
+// TCP Connection -- RFC 793 Figure 6 FSM with @@persist for TIME_WAIT.
+
+using System;
+using System.Text.Json;
+
+@@persist
+@@system TcpConnection {
+    interface:
+        passive_open()
+        active_open()
+        recv_syn()
+        recv_syn_ack()
+        recv_ack()
+        recv_fin()
+        app_close()
+        app_send(bytes_n: int)
+        timeout_2msl()
+        abort()
+        state_name(): String
+
+    machine:
+        $Closed {
+            passive_open() { -> $Listen }
+            active_open() {
+                this.send_syn();
+                -> $SynSent
+            }
+            state_name(): String { @@:("CLOSED") }
+        }
+
+        $Listen {
+            recv_syn() {
+                this.send_syn_ack();
+                -> $SynReceived
+            }
+            app_close() { -> $Closed }
+            state_name(): String { @@:("LISTEN") }
+        }
+
+        $SynSent {
+            recv_syn_ack() {
+                this.send_ack();
+                -> $Established
+            }
+            recv_syn() {
+                this.send_syn_ack();
+                -> $SynReceived
+            }
+            app_close() { -> $Closed }
+            state_name(): String { @@:("SYN_SENT") }
+        }
+
+        $SynReceived {
+            recv_ack() { -> $Established }
+            app_close() {
+                this.send_fin();
+                -> $FinWait1
+            }
+            state_name(): String { @@:("SYN_RECEIVED") }
+        }
+
+        $Established {
+            app_send(bytes_n: int) {
+                this.bytes_sent = this.bytes_sent + bytes_n;
+            }
+            app_close() {
+                this.send_fin();
+                -> $FinWait1
+            }
+            recv_fin() {
+                this.send_ack();
+                -> $CloseWait
+            }
+            abort() {
+                this.send_rst();
+                -> $Closed
+            }
+            state_name(): String { @@:("ESTABLISHED") }
+        }
+
+        $FinWait1 {
+            recv_ack() { -> $FinWait2 }
+            recv_fin() {
+                this.send_ack();
+                -> $Closing
+            }
+            state_name(): String { @@:("FIN_WAIT_1") }
+        }
+
+        $FinWait2 {
+            recv_fin() {
+                this.send_ack();
+                -> $TimeWait
+            }
+            state_name(): String { @@:("FIN_WAIT_2") }
+        }
+
+        $Closing {
+            recv_ack() { -> $TimeWait }
+            state_name(): String { @@:("CLOSING") }
+        }
+
+        $TimeWait {
+            $>() {
+                this.start_2msl_timer();
+            }
+            timeout_2msl() { -> $Closed }
+            state_name(): String { @@:("TIME_WAIT") }
+        }
+
+        $CloseWait {
+            app_close() {
+                this.send_fin();
+                -> $LastAck
+            }
+            state_name(): String { @@:("CLOSE_WAIT") }
+        }
+
+        $LastAck {
+            recv_ack() { -> $Closed }
+            state_name(): String { @@:("LAST_ACK") }
+        }
+
+    actions:
+        send_syn()         {}
+        send_syn_ack()     {}
+        send_ack()         {}
+        send_fin()         {}
+        send_rst()         {}
+        start_2msl_timer() {}
+
+    domain:
+        local_port: int = 0
+        remote_port: int = 0
+        bytes_sent: int = 0
+}
+
+
+class Program {
+    static void check(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} -- expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+
+    static void test_active_open_full_cycle() {
+        var c = @@TcpConnection();
+        check("initial CLOSED", (string) c.state_name(), "CLOSED");
+        c.active_open();
+        check("SYN_SENT", (string) c.state_name(), "SYN_SENT");
+        c.recv_syn_ack();
+        check("ESTABLISHED", (string) c.state_name(), "ESTABLISHED");
+        c.app_send(1024);
+        c.app_close();
+        check("FIN_WAIT_1", (string) c.state_name(), "FIN_WAIT_1");
+        c.recv_ack();
+        check("FIN_WAIT_2", (string) c.state_name(), "FIN_WAIT_2");
+        c.recv_fin();
+        check("TIME_WAIT", (string) c.state_name(), "TIME_WAIT");
+        c.timeout_2msl();
+        check("back to CLOSED", (string) c.state_name(), "CLOSED");
+        Console.WriteLine("PASS: active open, full cycle to TIME_WAIT");
+    }
+
+    static void test_passive_open_full_cycle() {
+        var c = @@TcpConnection();
+        c.passive_open();
+        check("LISTEN", (string) c.state_name(), "LISTEN");
+        c.recv_syn();
+        check("SYN_RECEIVED", (string) c.state_name(), "SYN_RECEIVED");
+        c.recv_ack();
+        check("ESTABLISHED", (string) c.state_name(), "ESTABLISHED");
+        c.recv_fin();
+        check("CLOSE_WAIT", (string) c.state_name(), "CLOSE_WAIT");
+        c.app_close();
+        check("LAST_ACK", (string) c.state_name(), "LAST_ACK");
+        c.recv_ack();
+        check("CLOSED", (string) c.state_name(), "CLOSED");
+        Console.WriteLine("PASS: passive open, peer-initiated close");
+    }
+
+    static void test_simultaneous_close() {
+        var c = @@TcpConnection();
+        c.active_open();
+        c.recv_syn_ack();
+        c.app_close();
+        check("in FIN_WAIT_1", (string) c.state_name(), "FIN_WAIT_1");
+        c.recv_fin();
+        check("CLOSING (simultaneous)", (string) c.state_name(), "CLOSING");
+        c.recv_ack();
+        check("TIME_WAIT after CLOSING ACK", (string) c.state_name(), "TIME_WAIT");
+        Console.WriteLine("PASS: simultaneous close -> CLOSING -> TIME_WAIT");
+    }
+
+    static void test_abort_from_established() {
+        var c = @@TcpConnection();
+        c.active_open();
+        c.recv_syn_ack();
+        c.abort();
+        check("RST drops to CLOSED", (string) c.state_name(), "CLOSED");
+        Console.WriteLine("PASS: abort sends RST and returns to CLOSED");
+    }
+
+    static void test_persist_across_restart() {
+        var c = @@TcpConnection();
+        c.active_open();
+        c.recv_syn_ack();
+        c.app_send(2048);
+        c.app_close();
+        c.recv_ack();
+        c.recv_fin();
+        check("TIME_WAIT before persist", (string) c.state_name(), "TIME_WAIT");
+        var snap = c.SaveState();
+        var c2 = TcpConnection.RestoreState(snap);
+        check("TIME_WAIT restored", (string) c2.state_name(), "TIME_WAIT");
+        c2.timeout_2msl();
+        check("CLOSED after 2MSL", (string) c2.state_name(), "CLOSED");
+        Console.WriteLine("PASS: @@persist survives simulated restart in TIME_WAIT");
+    }
+
+    static void Main(string[] args) {
+        test_active_open_full_cycle();
+        test_passive_open_full_cycle();
+        test_simultaneous_close();
+        test_abort_from_established();
+        test_persist_across_restart();
+        Console.WriteLine("PASS: all TCP connection tests passed");
+    }
+}

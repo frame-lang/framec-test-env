@@ -1,0 +1,229 @@
+@@target rust
+
+// TCP Connection -- RFC 793 Figure 6 FSM with @@persist for TIME_WAIT.
+
+use serde_json;
+
+@@persist
+@@system TcpConnection {
+    interface:
+        passive_open()
+        active_open()
+        recv_syn()
+        recv_syn_ack()
+        recv_ack()
+        recv_fin()
+        app_close()
+        app_send(bytes_n: i32)
+        timeout_2msl()
+        abort()
+        state_name(): String
+
+    machine:
+        $Closed {
+            passive_open() { -> $Listen }
+            active_open() {
+                self.send_syn();
+                -> $SynSent
+            }
+            state_name(): String { @@:("CLOSED".to_string()) }
+        }
+
+        $Listen {
+            recv_syn() {
+                self.send_syn_ack();
+                -> $SynReceived
+            }
+            app_close() { -> $Closed }
+            state_name(): String { @@:("LISTEN".to_string()) }
+        }
+
+        $SynSent {
+            recv_syn_ack() {
+                self.send_ack();
+                -> $Established
+            }
+            recv_syn() {
+                self.send_syn_ack();
+                -> $SynReceived
+            }
+            app_close() { -> $Closed }
+            state_name(): String { @@:("SYN_SENT".to_string()) }
+        }
+
+        $SynReceived {
+            recv_ack() { -> $Established }
+            app_close() {
+                self.send_fin();
+                -> $FinWait1
+            }
+            state_name(): String { @@:("SYN_RECEIVED".to_string()) }
+        }
+
+        $Established {
+            app_send(bytes_n: i32) {
+                self.bytes_sent = self.bytes_sent + bytes_n;
+            }
+            app_close() {
+                self.send_fin();
+                -> $FinWait1
+            }
+            recv_fin() {
+                self.send_ack();
+                -> $CloseWait
+            }
+            abort() {
+                self.send_rst();
+                -> $Closed
+            }
+            state_name(): String { @@:("ESTABLISHED".to_string()) }
+        }
+
+        $FinWait1 {
+            recv_ack() { -> $FinWait2 }
+            recv_fin() {
+                self.send_ack();
+                -> $Closing
+            }
+            state_name(): String { @@:("FIN_WAIT_1".to_string()) }
+        }
+
+        $FinWait2 {
+            recv_fin() {
+                self.send_ack();
+                -> $TimeWait
+            }
+            state_name(): String { @@:("FIN_WAIT_2".to_string()) }
+        }
+
+        $Closing {
+            recv_ack() { -> $TimeWait }
+            state_name(): String { @@:("CLOSING".to_string()) }
+        }
+
+        $TimeWait {
+            $>() {
+                self.start_2msl_timer();
+            }
+            timeout_2msl() { -> $Closed }
+            state_name(): String { @@:("TIME_WAIT".to_string()) }
+        }
+
+        $CloseWait {
+            app_close() {
+                self.send_fin();
+                -> $LastAck
+            }
+            state_name(): String { @@:("CLOSE_WAIT".to_string()) }
+        }
+
+        $LastAck {
+            recv_ack() { -> $Closed }
+            state_name(): String { @@:("LAST_ACK".to_string()) }
+        }
+
+    actions:
+        send_syn()         {}
+        send_syn_ack()     {}
+        send_ack()         {}
+        send_fin()         {}
+        send_rst()         {}
+        start_2msl_timer() {}
+
+    domain:
+        local_port: i32 = 0
+        remote_port: i32 = 0
+        bytes_sent: i32 = 0
+}
+
+
+fn check(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} -- expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn test_active_open_full_cycle() {
+    let mut c = @@TcpConnection();
+    check("initial CLOSED", &c.state_name(), "CLOSED");
+    c.active_open();
+    check("SYN_SENT", &c.state_name(), "SYN_SENT");
+    c.recv_syn_ack();
+    check("ESTABLISHED", &c.state_name(), "ESTABLISHED");
+    c.app_send(1024);
+    c.app_close();
+    check("FIN_WAIT_1", &c.state_name(), "FIN_WAIT_1");
+    c.recv_ack();
+    check("FIN_WAIT_2", &c.state_name(), "FIN_WAIT_2");
+    c.recv_fin();
+    check("TIME_WAIT", &c.state_name(), "TIME_WAIT");
+    c.timeout_2msl();
+    check("back to CLOSED", &c.state_name(), "CLOSED");
+    println!("PASS: active open, full cycle to TIME_WAIT");
+}
+
+fn test_passive_open_full_cycle() {
+    let mut c = @@TcpConnection();
+    c.passive_open();
+    check("LISTEN", &c.state_name(), "LISTEN");
+    c.recv_syn();
+    check("SYN_RECEIVED", &c.state_name(), "SYN_RECEIVED");
+    c.recv_ack();
+    check("ESTABLISHED", &c.state_name(), "ESTABLISHED");
+    c.recv_fin();
+    check("CLOSE_WAIT", &c.state_name(), "CLOSE_WAIT");
+    c.app_close();
+    check("LAST_ACK", &c.state_name(), "LAST_ACK");
+    c.recv_ack();
+    check("CLOSED", &c.state_name(), "CLOSED");
+    println!("PASS: passive open, peer-initiated close");
+}
+
+fn test_simultaneous_close() {
+    let mut c = @@TcpConnection();
+    c.active_open();
+    c.recv_syn_ack();
+    c.app_close();
+    check("in FIN_WAIT_1", &c.state_name(), "FIN_WAIT_1");
+    c.recv_fin();
+    check("CLOSING (simultaneous)", &c.state_name(), "CLOSING");
+    c.recv_ack();
+    check("TIME_WAIT after CLOSING ACK", &c.state_name(), "TIME_WAIT");
+    println!("PASS: simultaneous close -> CLOSING -> TIME_WAIT");
+}
+
+fn test_abort_from_established() {
+    let mut c = @@TcpConnection();
+    c.active_open();
+    c.recv_syn_ack();
+    c.abort();
+    check("RST drops to CLOSED", &c.state_name(), "CLOSED");
+    println!("PASS: abort sends RST and returns to CLOSED");
+}
+
+fn test_persist_across_restart() {
+    let mut c = @@TcpConnection();
+    c.active_open();
+    c.recv_syn_ack();
+    c.app_send(2048);
+    c.app_close();
+    c.recv_ack();
+    c.recv_fin();
+    check("TIME_WAIT before persist", &c.state_name(), "TIME_WAIT");
+    let snap = c.save_state();
+    let mut c2 = TcpConnection::restore_state(&snap);
+    check("TIME_WAIT restored", &c2.state_name(), "TIME_WAIT");
+    c2.timeout_2msl();
+    check("CLOSED after 2MSL", &c2.state_name(), "CLOSED");
+    println!("PASS: @@persist survives simulated restart in TIME_WAIT");
+}
+
+fn main() {
+    test_active_open_full_cycle();
+    test_passive_open_full_cycle();
+    test_simultaneous_close();
+    test_abort_from_established();
+    test_persist_across_restart();
+    println!("PASS: all TCP connection tests passed");
+}

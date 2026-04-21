@@ -1,0 +1,222 @@
+@@target go
+
+// Process Lifecycle — Linux task states (kernel/sched/core.c semantics)
+// Three-level HSM with explicit upward forwarding as per-state signal policy.
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system TaskLifecycle {
+    interface:
+        fork(): string
+        schedule(): string
+        block_on_io(): string
+        io_complete(): string
+        block_uninterruptible(): string
+        send_signal(sig: string): string
+        wait_by_parent(): string
+        status(): string
+
+    machine:
+        $New {
+            fork(): string {
+                s.pid = s.next_pid()
+                @@:("forked")
+                -> $Ready
+            }
+            status(): string { @@:("new") }
+        }
+
+        $Ready => $Alive {
+            schedule(): string {
+                @@:("running")
+                -> $Running
+            }
+            status(): string { @@:("ready") }
+            => $^
+        }
+
+        $Running => $Alive {
+            schedule(): string {
+                @@:("preempted")
+                -> $Ready
+            }
+            block_on_io(): string {
+                @@:("blocked")
+                -> $Interruptible
+            }
+            block_uninterruptible(): string {
+                @@:("blocked (D)")
+                -> $Uninterruptible
+            }
+            status(): string { @@:("running") }
+            => $^
+        }
+
+        $Interruptible => $Blocked {
+            io_complete(): string {
+                @@:("woke")
+                -> $Ready
+            }
+            send_signal(sig: string): string {
+                if sig == "SIGKILL" || sig == "SIGTERM" || sig == "SIGSTOP" {
+                    => $^
+                } else {
+                    @@:("interrupted")
+                    -> $Ready
+                }
+            }
+            status(): string { @@:("interruptible") }
+            => $^
+        }
+
+        $Uninterruptible => $Blocked {
+            io_complete(): string {
+                @@:("woke")
+                -> $Ready
+            }
+            send_signal(sig: string): string {
+                if sig == "SIGKILL" {
+                    => $^
+                } else {
+                    @@:("signal held pending (D-state)")
+                }
+            }
+            status(): string { @@:("uninterruptible") }
+            => $^
+        }
+
+        $Blocked => $Alive {
+            status(): string { @@:("blocked") }
+            => $^
+        }
+
+        $Alive {
+            send_signal(sig: string): string {
+                if sig == "SIGKILL" || sig == "SIGTERM" {
+                    @@:("exiting")
+                    -> $Zombie
+                } else if sig == "SIGSTOP" {
+                    @@:("stopped")
+                    -> $Stopped
+                } else {
+                    @@:("signal delivered")
+                }
+            }
+        }
+
+        $Stopped {
+            send_signal(sig: string): string {
+                if sig == "SIGCONT" {
+                    @@:("continued")
+                    -> $Ready
+                } else if sig == "SIGKILL" {
+                    @@:("killed while stopped")
+                    -> $Zombie
+                } else {
+                    @@:("signal ignored")
+                }
+            }
+            status(): string { @@:("stopped") }
+        }
+
+        $Zombie {
+            wait_by_parent(): string {
+                @@:("reaped")
+                -> $Dead
+            }
+            status(): string { @@:("zombie") }
+        }
+
+        $Dead {
+            status(): string { @@:("dead") }
+        }
+
+    actions:
+        next_pid(): int {
+            s.pid_counter = s.pid_counter + 1
+            return s.pid_counter
+        }
+
+    domain:
+        pid: int = 0
+        pid_counter: int = 100
+}
+
+
+func check(label, actual, expected string) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func test_happy_path() {
+	t := NewTaskLifecycle()
+	check("initial status", t.Status(), "new")
+	check("fork", t.Fork(), "forked")
+	check("after fork", t.Status(), "ready")
+	check("schedule", t.Schedule(), "running")
+	check("after schedule", t.Status(), "running")
+	check("preempt", t.Schedule(), "preempted")
+	check("after preempt", t.Status(), "ready")
+	fmt.Println("PASS: happy path")
+}
+
+func test_interruptible_wake_by_signal() {
+	t := NewTaskLifecycle()
+	t.Fork()
+	t.Schedule()
+	check("block_on_io", t.Block_on_io(), "blocked")
+	check("interruptible status", t.Status(), "interruptible")
+	check("SIGUSR1 wakes interruptible", t.Send_signal("SIGUSR1"), "interrupted")
+	check("woke to ready", t.Status(), "ready")
+	fmt.Println("PASS: interruptible wake by signal")
+}
+
+func test_uninterruptible_holds_signal() {
+	t := NewTaskLifecycle()
+	t.Fork()
+	t.Schedule()
+	check("block_uninterruptible", t.Block_uninterruptible(), "blocked (D)")
+	check("D state", t.Status(), "uninterruptible")
+	check("SIGUSR1 held pending in D", t.Send_signal("SIGUSR1"), "signal held pending (D-state)")
+	check("still in D", t.Status(), "uninterruptible")
+	fmt.Println("PASS: uninterruptible holds non-fatal signal")
+}
+
+func test_sigkill_reaches_d_state() {
+	t := NewTaskLifecycle()
+	t.Fork()
+	t.Schedule()
+	t.Block_uninterruptible()
+	check("SIGKILL forwarded from D through $Alive", t.Send_signal("SIGKILL"), "exiting")
+	check("now zombie", t.Status(), "zombie")
+	check("reap", t.Wait_by_parent(), "reaped")
+	check("dead", t.Status(), "dead")
+	fmt.Println("PASS: SIGKILL reaches D state via $Alive forwarding")
+}
+
+func test_sigstop_sigcont() {
+	t := NewTaskLifecycle()
+	t.Fork()
+	t.Schedule()
+	check("SIGSTOP from running", t.Send_signal("SIGSTOP"), "stopped")
+	check("stopped status", t.Status(), "stopped")
+	check("SIGCONT resumes", t.Send_signal("SIGCONT"), "continued")
+	check("back to ready", t.Status(), "ready")
+	fmt.Println("PASS: SIGSTOP/SIGCONT")
+}
+
+func main() {
+	test_happy_path()
+	test_interruptible_wake_by_signal()
+	test_uninterruptible_holds_signal()
+	test_sigkill_reaches_d_state()
+	test_sigstop_sigcont()
+	fmt.Println("PASS: all process lifecycle tests passed")
+}

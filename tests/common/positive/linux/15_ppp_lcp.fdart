@@ -1,0 +1,339 @@
+@@target dart
+
+// PPP Link Control Protocol -- RFC 1661 Section 4 state table direct transcription.
+
+import 'dart:io';
+
+@@system PppLcp {
+    interface:
+        up()
+        down()
+        open()
+        close()
+        receive_configure_request(acceptable: bool)
+        receive_configure_ack()
+        receive_configure_nak()
+        receive_terminate_request()
+        receive_terminate_ack()
+        timeout_positive()
+        timeout_negative()
+        status(): String
+
+    machine:
+        $Initial {
+            up() { -> $Closed }
+            open() { -> $Starting }
+            status(): String { @@:("initial") }
+        }
+
+        $Starting {
+            up() {
+                this.init_restart_count();
+                this.send_configure_request();
+                -> $ReqSent
+            }
+            close() { -> $Initial }
+            status(): String { @@:("starting") }
+        }
+
+        $Closed {
+            open() {
+                this.init_restart_count();
+                this.send_configure_request();
+                -> $ReqSent
+            }
+            down() { -> $Initial }
+            receive_configure_request(acceptable: bool) {
+                this.send_terminate_ack();
+            }
+            status(): String { @@:("closed") }
+        }
+
+        $Stopped {
+            open() { -> $Stopped }
+            down() { -> $Starting }
+            receive_configure_request(acceptable: bool) {
+                this.init_restart_count();
+                if (acceptable) {
+                    this.send_configure_ack();
+                    this.send_configure_request();
+                    -> $AckSent
+                } else {
+                    this.send_configure_nak();
+                    this.send_configure_request();
+                    -> $ReqSent
+                }
+            }
+            status(): String { @@:("stopped") }
+        }
+
+        $Closing {
+            timeout_positive() {
+                this.send_terminate_request();
+            }
+            timeout_negative() {
+                -> $Closed
+            }
+            receive_terminate_ack() {
+                -> $Closed
+            }
+            down() { -> $Initial }
+            status(): String { @@:("closing") }
+        }
+
+        $Stopping {
+            timeout_positive() {
+                this.send_terminate_request();
+            }
+            timeout_negative() {
+                -> $Stopped
+            }
+            receive_terminate_ack() {
+                -> $Stopped
+            }
+            down() { -> $Starting }
+            status(): String { @@:("stopping") }
+        }
+
+        $ReqSent {
+            timeout_positive() {
+                this.send_configure_request();
+            }
+            timeout_negative() {
+                -> $Stopped
+            }
+            receive_configure_request(acceptable: bool) {
+                if (acceptable) {
+                    this.send_configure_ack();
+                    -> $AckSent
+                } else {
+                    this.send_configure_nak();
+                }
+            }
+            receive_configure_ack() {
+                this.init_restart_count();
+                -> $AckRcvd
+            }
+            receive_configure_nak() {
+                this.init_restart_count();
+                this.send_configure_request();
+            }
+            receive_terminate_request() {
+                this.send_terminate_ack();
+                -> $ReqSent
+            }
+            close() {
+                this.init_restart_count();
+                this.send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): String { @@:("req-sent") }
+        }
+
+        $AckRcvd {
+            receive_configure_request(acceptable: bool) {
+                if (acceptable) {
+                    this.send_configure_ack();
+                    this.tlu();
+                    -> $Opened
+                } else {
+                    this.send_configure_nak();
+                }
+            }
+            timeout_positive() {
+                this.send_configure_request();
+                -> $ReqSent
+            }
+            timeout_negative() { -> $Stopped }
+            receive_configure_ack() {
+                this.send_configure_request();
+                -> $ReqSent
+            }
+            close() {
+                this.init_restart_count();
+                this.send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): String { @@:("ack-rcvd") }
+        }
+
+        $AckSent {
+            receive_configure_ack() {
+                this.init_restart_count();
+                this.tlu();
+                -> $Opened
+            }
+            timeout_positive() {
+                this.send_configure_request();
+            }
+            timeout_negative() { -> $Stopped }
+            receive_configure_request(acceptable: bool) {
+                if (acceptable) {
+                    this.send_configure_ack();
+                } else {
+                    this.send_configure_nak();
+                    -> $ReqSent
+                }
+            }
+            receive_configure_nak() {
+                this.init_restart_count();
+                this.send_configure_request();
+                -> $ReqSent
+            }
+            close() {
+                this.init_restart_count();
+                this.send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): String { @@:("ack-sent") }
+        }
+
+        $Opened {
+            <$() {
+                this.tld();
+            }
+
+            receive_configure_request(acceptable: bool) {
+                this.send_configure_request();
+                if (acceptable) {
+                    this.send_configure_ack();
+                    -> $AckSent
+                } else {
+                    this.send_configure_nak();
+                    -> $ReqSent
+                }
+            }
+            receive_terminate_request() {
+                this.send_terminate_ack();
+                this.zero_restart_count();
+                -> $Stopping
+            }
+            close() {
+                this.init_restart_count();
+                this.send_terminate_request();
+                -> $Closing
+            }
+            down() {
+                -> $Starting
+            }
+            status(): String { @@:("opened") }
+        }
+
+    actions:
+        send_configure_request() {}
+        send_configure_ack()     {}
+        send_configure_nak()     {}
+        send_terminate_request() {}
+        send_terminate_ack()     {}
+        init_restart_count() {
+            this.restart_count = this.max_restart;
+        }
+        zero_restart_count() {
+            this.restart_count = 0;
+        }
+        tlu() {}
+        tld() {}
+
+    domain:
+        restart_count: int = 0
+        max_restart: int = 10
+}
+
+
+void check(String label, String actual, String expected) {
+    if (actual != expected) {
+        print("FAIL: $label -- expected '$expected', got '$actual'");
+        exit(1);
+    }
+}
+
+void test_normal_open() {
+    final ppp = @@PppLcp();
+    check("initial", ppp.status() as String, "initial");
+    ppp.open();
+    check("starting", ppp.status() as String, "starting");
+    ppp.up();
+    check("req-sent", ppp.status() as String, "req-sent");
+    ppp.receive_configure_ack();
+    check("ack-rcvd", ppp.status() as String, "ack-rcvd");
+    ppp.receive_configure_request(true);
+    check("opened", ppp.status() as String, "opened");
+    print("PASS: normal open sequence");
+}
+
+void test_peer_renegotiation() {
+    final ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    check("opened first time", ppp.status() as String, "opened");
+    ppp.receive_configure_request(true);
+    check("renegotiation -> AckSent", ppp.status() as String, "ack-sent");
+    ppp.receive_configure_ack();
+    check("back to opened", ppp.status() as String, "opened");
+    print("PASS: peer-initiated renegotiation from opened");
+}
+
+void test_clean_shutdown() {
+    final ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.close();
+    check("closing", ppp.status() as String, "closing");
+    ppp.receive_terminate_ack();
+    check("closed", ppp.status() as String, "closed");
+    print("PASS: clean shutdown via close()");
+}
+
+void test_peer_terminate() {
+    final ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.receive_terminate_request();
+    check("stopping on peer-terminate", ppp.status() as String, "stopping");
+    ppp.receive_terminate_ack();
+    check("stopped", ppp.status() as String, "stopped");
+    print("PASS: peer-initiated terminate");
+}
+
+void test_timeout_negative_from_closing() {
+    final ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.close();
+    check("closing", ppp.status() as String, "closing");
+    ppp.timeout_negative();
+    check("closing exhausts to closed", ppp.status() as String, "closed");
+    print("PASS: timeout_negative in closing -> closed");
+}
+
+void test_down_from_opened() {
+    final ppp = @@PppLcp();
+    ppp.open();
+    ppp.up();
+    ppp.receive_configure_ack();
+    ppp.receive_configure_request(true);
+    ppp.down();
+    check("down from opened -> starting", ppp.status() as String, "starting");
+    print("PASS: down from opened");
+}
+
+void main() {
+    test_normal_open();
+    test_peer_renegotiation();
+    test_clean_shutdown();
+    test_peer_terminate();
+    test_timeout_negative_from_closing();
+    test_down_from_opened();
+    print("PASS: all PPP LCP tests passed");
+}

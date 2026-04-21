@@ -1,0 +1,239 @@
+@@target go
+
+// HTTP/1.1 Connection -- keep-alive lifecycle with HSM for cross-cutting errors.
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system HttpConnection {
+    interface:
+        Connect(host: string, port: int)
+        SendRequest(method: string, path: string)
+        HeadersReceived(status_code: int, keep_alive: bool, content_length: int)
+        BodyChunkReceived(chunk: string)
+        BodyComplete()
+        KeepAliveTimeout()
+        ConnectionError(reason: string)
+        Close()
+        Status(): string
+        RequestCount(): int
+
+    machine:
+        $Disconnected {
+            Connect(host: string, port: int) {
+                s.host = host
+                s.port = port
+                -> $Connecting
+            }
+            Status(): string { @@:("disconnected") }
+            RequestCount(): int { @@:(s.requests) }
+        }
+
+        $Connecting {
+            $>() {
+                s.tcp_connect()
+                -> $Idle
+            }
+        }
+
+        $Idle => $Open {
+            $>() {
+                s.start_keep_alive_timer()
+            }
+            <$() {
+                s.cancel_keep_alive_timer()
+            }
+
+            SendRequest(method: string, path: string) {
+                s.current_method = method
+                s.current_path = path
+                s.emit_request()
+                -> $AwaitingResponse
+            }
+            KeepAliveTimeout() {
+                -> $Closing
+            }
+            Status(): string { @@:("idle") }
+            RequestCount(): int { @@:(s.requests) }
+            => $^
+        }
+
+        $AwaitingResponse => $Open {
+            HeadersReceived(status_code: int, keep_alive: bool, content_length: int) {
+                s.response_status = status_code
+                s.ka = keep_alive
+                s.content_length = content_length
+                if content_length == 0 {
+                    -> $ResponseComplete
+                } else {
+                    -> $ReceivingBody
+                }
+            }
+            Status(): string { @@:("awaiting response") }
+            RequestCount(): int { @@:(s.requests) }
+            => $^
+        }
+
+        $ReceivingBody => $Open {
+            BodyChunkReceived(chunk: string) {
+                s.bytes_received = s.bytes_received + s.content_length
+            }
+            BodyComplete() {
+                -> $ResponseComplete
+            }
+            Status(): string { @@:("receiving body") }
+            RequestCount(): int { @@:(s.requests) }
+            => $^
+        }
+
+        $ResponseComplete => $Open {
+            $>() {
+                s.requests = s.requests + 1
+                if s.ka {
+                    -> $Idle
+                } else {
+                    -> $Closing
+                }
+            }
+            => $^
+        }
+
+        $Open {
+            ConnectionError(reason: string) {
+                -> $Disconnected
+            }
+            Close() {
+                -> $Closing
+            }
+        }
+
+        $Closing {
+            $>() {
+                s.tcp_close()
+                -> $Disconnected
+            }
+        }
+
+    actions:
+        tcp_connect()             {}
+        tcp_close()               {}
+        emit_request()            {}
+        start_keep_alive_timer()  {}
+        cancel_keep_alive_timer() {}
+
+    domain:
+        host: string = ""
+        port: int = 80
+        current_method: string = ""
+        current_path: string = ""
+        response_status: int = 0
+        content_length: int = 0
+        bytes_received: int = 0
+        ka: bool = true
+        requests: int = 0
+}
+
+
+func check_str(label, actual, expected string) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func check_int(label string, actual, expected int) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s -- expected %d, got %d\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func test_first_request_keepalive() {
+	conn := NewHttpConnection()
+	check_str("disconnected", conn.Status(), "disconnected")
+	conn.Connect("example.com", 80)
+	check_str("idle after connect", conn.Status(), "idle")
+	conn.SendRequest("GET", "/index.html")
+	check_str("awaiting response", conn.Status(), "awaiting response")
+	conn.HeadersReceived(200, true, 5)
+	check_str("receiving body", conn.Status(), "receiving body")
+	conn.BodyComplete()
+	check_str("back to idle (keep-alive)", conn.Status(), "idle")
+	check_int("request count 1", conn.RequestCount(), 1)
+	fmt.Println("PASS: first request, keep-alive cycles back to idle")
+}
+
+func test_empty_body_skips_receiving() {
+	conn := NewHttpConnection()
+	conn.Connect("example.com", 80)
+	conn.SendRequest("GET", "/about")
+	conn.HeadersReceived(200, true, 0)
+	check_str("idle after empty body", conn.Status(), "idle")
+	fmt.Println("PASS: empty body skips ReceivingBody")
+}
+
+func test_connection_close_header() {
+	conn := NewHttpConnection()
+	conn.Connect("example.com", 80)
+	conn.SendRequest("POST", "/api")
+	conn.HeadersReceived(201, false, 0)
+	check_str("disconnected after Connection: close", conn.Status(), "disconnected")
+	fmt.Println("PASS: Connection: close response path")
+}
+
+func test_keep_alive_timeout() {
+	conn := NewHttpConnection()
+	conn.Connect("example.com", 80)
+	check_str("idle", conn.Status(), "idle")
+	conn.KeepAliveTimeout()
+	check_str("disconnected after timeout", conn.Status(), "disconnected")
+	fmt.Println("PASS: keep-alive timeout tears down connection")
+}
+
+func test_connection_error_during_receive() {
+	conn := NewHttpConnection()
+	conn.Connect("example.com", 80)
+	conn.SendRequest("GET", "/large")
+	conn.HeadersReceived(200, true, 1000)
+	check_str("receiving body", conn.Status(), "receiving body")
+	conn.ConnectionError("peer reset")
+	check_str("disconnected after error", conn.Status(), "disconnected")
+	fmt.Println("PASS: connection_error from receiving body forwards via HSM")
+}
+
+func test_explicit_close_during_idle() {
+	conn := NewHttpConnection()
+	conn.Connect("example.com", 80)
+	conn.Close()
+	check_str("close from idle", conn.Status(), "disconnected")
+	fmt.Println("PASS: explicit close from idle via HSM parent")
+}
+
+func test_multiple_request_reuse() {
+	conn := NewHttpConnection()
+	conn.Connect("example.com", 80)
+	conn.SendRequest("GET", "/one")
+	conn.HeadersReceived(200, true, 0)
+	conn.SendRequest("GET", "/two")
+	conn.HeadersReceived(200, true, 0)
+	conn.SendRequest("GET", "/three")
+	conn.HeadersReceived(200, true, 0)
+	check_int("3 requests on same connection", conn.RequestCount(), 3)
+	check_str("still idle", conn.Status(), "idle")
+	fmt.Println("PASS: connection reused across multiple requests")
+}
+
+func main() {
+	test_first_request_keepalive()
+	test_empty_body_skips_receiving()
+	test_connection_close_header()
+	test_keep_alive_timeout()
+	test_connection_error_during_receive()
+	test_explicit_close_during_idle()
+	test_multiple_request_reuse()
+	fmt.Println("PASS: all HTTP connection tests passed")
+}

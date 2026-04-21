@@ -1,0 +1,156 @@
+@@target go
+
+// Watchdog Timer — kernel drivers/watchdog/watchdog_dev.c magic-close semantics.
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+@@system WatchdogDevice {
+    interface:
+        Open(): string
+        Write(data: string): string
+        Ping(): string
+        Close(): string
+        TimeoutExpired(): string
+        Status(): string
+
+    machine:
+        $Inactive {
+            Open(): string {
+                @@:("opened")
+                -> $Armed
+            }
+            Status(): string { @@:("inactive") }
+        }
+
+        $Armed {
+            $>() {
+                s.magic_seen = false
+                s.start_hw_timer()
+            }
+
+            Ping(): string {
+                s.reset_hw_timer()
+                @@:("pinged")
+            }
+            Write(data: string): string {
+                if strings.Contains(data, "V") {
+                    s.magic_seen = true
+                    @@:("magic character received")
+                } else {
+                    @@:("data written")
+                }
+                s.reset_hw_timer()
+            }
+            Close(): string {
+                if s.magic_seen {
+                    s.stop_hw_timer()
+                    @@:("disarmed")
+                    -> $Inactive
+                } else {
+                    @@:("close ignored -- no magic char")
+                }
+            }
+            TimeoutExpired(): string {
+                @@:("SYSTEM RESET")
+                -> $Triggered
+            }
+            Status(): string {
+                if s.magic_seen {
+                    @@:("armed (magic seen, close will disarm)")
+                } else {
+                    @@:("armed")
+                }
+            }
+        }
+
+        $Triggered {
+            Status(): string { @@:("triggered -- system reset") }
+        }
+
+    actions:
+        start_hw_timer() {}
+        reset_hw_timer() {}
+        stop_hw_timer() {}
+
+    domain:
+        timeout_sec: int = 60
+        magic_seen: bool = false
+}
+
+
+func check(label, actual, expected string) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func test_open_and_ping() {
+	wd := NewWatchdogDevice()
+	check("initial inactive", wd.Status(), "inactive")
+	check("open returns opened", wd.Open(), "opened")
+	check("armed after open", wd.Status(), "armed")
+	check("ping", wd.Ping(), "pinged")
+	check("still armed after ping", wd.Status(), "armed")
+	fmt.Println("PASS: open and ping")
+}
+
+func test_close_without_magic_is_ignored() {
+	wd := NewWatchdogDevice()
+	wd.Open()
+	check("close without magic", wd.Close(), "close ignored -- no magic char")
+	check("still armed after bad close", wd.Status(), "armed")
+	fmt.Println("PASS: close without magic ignored (safety property)")
+}
+
+func test_magic_char_then_close_disarms() {
+	wd := NewWatchdogDevice()
+	wd.Open()
+	check("write with V sets magic", wd.Write("goodbye V"), "magic character received")
+	check("status shows magic seen", wd.Status(), "armed (magic seen, close will disarm)")
+	check("close after magic disarms", wd.Close(), "disarmed")
+	check("back to inactive", wd.Status(), "inactive")
+	fmt.Println("PASS: magic char then close disarms")
+}
+
+func test_write_without_magic_is_plain_data() {
+	wd := NewWatchdogDevice()
+	wd.Open()
+	check("write without V", wd.Write("abcdef"), "data written")
+	check("still armed with no magic", wd.Status(), "armed")
+	fmt.Println("PASS: write without magic is plain data")
+}
+
+func test_timeout_triggers_reset() {
+	wd := NewWatchdogDevice()
+	wd.Open()
+	check("timeout fires", wd.TimeoutExpired(), "SYSTEM RESET")
+	check("terminal triggered state", wd.Status(), "triggered -- system reset")
+	fmt.Println("PASS: timeout triggers system reset")
+}
+
+func test_reopen_resets_magic_seen() {
+	wd := NewWatchdogDevice()
+	wd.Open()
+	wd.Write("set V please")
+	wd.Close()
+	wd.Open()
+	check("magic_seen reset on reopen", wd.Close(), "close ignored -- no magic char")
+	fmt.Println("PASS: reopen resets magic_seen via enter handler")
+}
+
+func main() {
+	test_open_and_ping()
+	test_close_without_magic_is_ignored()
+	test_magic_char_then_close_disarms()
+	test_write_without_magic_is_plain_data()
+	test_timeout_triggers_reset()
+	test_reopen_resets_magic_seen()
+	fmt.Println("PASS: all watchdog tests passed")
+}

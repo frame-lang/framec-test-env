@@ -1,0 +1,148 @@
+@@target swift
+
+// Watchdog Timer — kernel drivers/watchdog/watchdog_dev.c magic-close semantics.
+
+import Foundation
+
+@@system WatchdogDevice {
+    interface:
+        open(): String
+        write(data: String): String
+        ping(): String
+        close(): String
+        timeout_expired(): String
+        status(): String
+
+    machine:
+        $Inactive {
+            open(): String {
+                @@:("opened")
+                -> $Armed
+            }
+            status(): String { @@:("inactive") }
+        }
+
+        $Armed {
+            $>() {
+                self.magic_seen = false
+                self.start_hw_timer()
+            }
+
+            ping(): String {
+                self.reset_hw_timer()
+                @@:("pinged")
+            }
+            write(data: String): String {
+                if data.contains("V") {
+                    self.magic_seen = true
+                    @@:("magic character received")
+                } else {
+                    @@:("data written")
+                }
+                self.reset_hw_timer()
+            }
+            close(): String {
+                if self.magic_seen {
+                    self.stop_hw_timer()
+                    @@:("disarmed")
+                    -> $Inactive
+                } else {
+                    @@:("close ignored -- no magic char")
+                }
+            }
+            timeout_expired(): String {
+                @@:("SYSTEM RESET")
+                -> $Triggered
+            }
+            status(): String {
+                if self.magic_seen {
+                    @@:("armed (magic seen, close will disarm)")
+                } else {
+                    @@:("armed")
+                }
+            }
+        }
+
+        $Triggered {
+            status(): String { @@:("triggered -- system reset") }
+        }
+
+    actions:
+        start_hw_timer() {}
+        reset_hw_timer() {}
+        stop_hw_timer() {}
+
+    domain:
+        timeout_sec: Int = 60
+        magic_seen: Bool = false
+}
+
+
+func check(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) — expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+
+func test_open_and_ping() {
+    var wd = @@WatchdogDevice()
+    check("initial inactive", wd.status() as! String, "inactive")
+    check("open returns opened", wd.open() as! String, "opened")
+    check("armed after open", wd.status() as! String, "armed")
+    check("ping", wd.ping() as! String, "pinged")
+    check("still armed after ping", wd.status() as! String, "armed")
+    print("PASS: open and ping")
+}
+
+func test_close_without_magic_is_ignored() {
+    var wd = @@WatchdogDevice()
+    _ = wd.open()
+    check("close without magic", wd.close() as! String, "close ignored -- no magic char")
+    check("still armed after bad close", wd.status() as! String, "armed")
+    print("PASS: close without magic ignored (safety property)")
+}
+
+func test_magic_char_then_close_disarms() {
+    var wd = @@WatchdogDevice()
+    _ = wd.open()
+    check("write with V sets magic", wd.write("goodbye V") as! String, "magic character received")
+    check("status shows magic seen", wd.status() as! String, "armed (magic seen, close will disarm)")
+    check("close after magic disarms", wd.close() as! String, "disarmed")
+    check("back to inactive", wd.status() as! String, "inactive")
+    print("PASS: magic char then close disarms")
+}
+
+func test_write_without_magic_is_plain_data() {
+    var wd = @@WatchdogDevice()
+    _ = wd.open()
+    check("write without V", wd.write("abcdef") as! String, "data written")
+    check("still armed with no magic", wd.status() as! String, "armed")
+    print("PASS: write without magic is plain data")
+}
+
+func test_timeout_triggers_reset() {
+    var wd = @@WatchdogDevice()
+    _ = wd.open()
+    check("timeout fires", wd.timeout_expired() as! String, "SYSTEM RESET")
+    check("terminal triggered state", wd.status() as! String, "triggered -- system reset")
+    print("PASS: timeout triggers system reset")
+}
+
+func test_reopen_resets_magic_seen() {
+    var wd = @@WatchdogDevice()
+    _ = wd.open()
+    _ = wd.write("set V please")
+    _ = wd.close()
+    _ = wd.open()
+    check("magic_seen reset on reopen", wd.close() as! String, "close ignored -- no magic char")
+    print("PASS: reopen resets magic_seen via enter handler")
+}
+
+test_open_and_ping()
+test_close_without_magic_is_ignored()
+test_magic_char_then_close_disarms()
+test_write_without_magic_is_plain_data()
+test_timeout_triggers_reset()
+test_reopen_resets_magic_seen()
+print("PASS: all watchdog tests passed")

@@ -1,0 +1,151 @@
+@@target rust
+
+// Watchdog Timer — kernel drivers/watchdog/watchdog_dev.c magic-close semantics.
+// The device stays armed unless close() follows a write containing 'V'
+// (the magic character). Safety-by-construction: the only path from
+// $Armed to $Inactive requires self.magic_seen == true.
+
+@@system WatchdogDevice {
+    interface:
+        open(): String
+        write(data: String): String
+        ping(): String
+        close(): String
+        timeout_expired(): String
+        status(): String
+
+    machine:
+        $Inactive {
+            open(): String {
+                @@:("opened".to_string())
+                -> $Armed
+            }
+            status(): String { @@:("inactive".to_string()) }
+        }
+
+        $Armed {
+            $>() {
+                self.magic_seen = false;
+                self.start_hw_timer();
+            }
+
+            ping(): String {
+                self.reset_hw_timer();
+                @@:("pinged".to_string())
+            }
+            write(data: String): String {
+                if data.contains("V") {
+                    self.magic_seen = true;
+                    @@:("magic character received".to_string())
+                } else {
+                    @@:("data written".to_string())
+                }
+                self.reset_hw_timer();
+            }
+            close(): String {
+                if self.magic_seen {
+                    self.stop_hw_timer();
+                    @@:("disarmed".to_string())
+                    -> $Inactive
+                } else {
+                    @@:("close ignored -- no magic char".to_string())
+                }
+            }
+            timeout_expired(): String {
+                @@:("SYSTEM RESET".to_string())
+                -> $Triggered
+            }
+            status(): String {
+                if self.magic_seen {
+                    @@:("armed (magic seen, close will disarm)".to_string())
+                } else {
+                    @@:("armed".to_string())
+                }
+            }
+        }
+
+        $Triggered {
+            status(): String { @@:("triggered -- system reset".to_string()) }
+        }
+
+    actions:
+        start_hw_timer() {}
+        reset_hw_timer() {}
+        stop_hw_timer() {}
+
+    domain:
+        timeout_sec: i32 = 60
+        magic_seen: bool = false
+}
+
+
+fn check(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} — expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn test_open_and_ping() {
+    let mut wd = @@WatchdogDevice();
+    check("initial inactive", &wd.status(), "inactive");
+    check("open returns opened", &wd.open(), "opened");
+    check("armed after open", &wd.status(), "armed");
+    check("ping", &wd.ping(), "pinged");
+    check("still armed after ping", &wd.status(), "armed");
+    println!("PASS: open and ping");
+}
+
+fn test_close_without_magic_is_ignored() {
+    let mut wd = @@WatchdogDevice();
+    wd.open();
+    check("close without magic", &wd.close(), "close ignored -- no magic char");
+    check("still armed after bad close", &wd.status(), "armed");
+    println!("PASS: close without magic ignored (safety property)");
+}
+
+fn test_magic_char_then_close_disarms() {
+    let mut wd = @@WatchdogDevice();
+    wd.open();
+    check("write with V sets magic", &wd.write("goodbye V".to_string()), "magic character received");
+    check("status shows magic seen", &wd.status(), "armed (magic seen, close will disarm)");
+    check("close after magic disarms", &wd.close(), "disarmed");
+    check("back to inactive", &wd.status(), "inactive");
+    println!("PASS: magic char then close disarms");
+}
+
+fn test_write_without_magic_is_plain_data() {
+    let mut wd = @@WatchdogDevice();
+    wd.open();
+    check("write without V", &wd.write("abcdef".to_string()), "data written");
+    check("still armed with no magic", &wd.status(), "armed");
+    println!("PASS: write without magic is plain data");
+}
+
+fn test_timeout_triggers_reset() {
+    let mut wd = @@WatchdogDevice();
+    wd.open();
+    check("timeout fires", &wd.timeout_expired(), "SYSTEM RESET");
+    check("terminal triggered state", &wd.status(), "triggered -- system reset");
+    println!("PASS: timeout triggers system reset");
+}
+
+fn test_reopen_resets_magic_seen() {
+    let mut wd = @@WatchdogDevice();
+    wd.open();
+    wd.write("set V please".to_string());
+    wd.close();
+    wd.open();
+    check("magic_seen reset on reopen", &wd.close(), "close ignored -- no magic char");
+    println!("PASS: reopen resets magic_seen via enter handler");
+}
+
+fn main() {
+    test_open_and_ping();
+    test_close_without_magic_is_ignored();
+    test_magic_char_then_close_disarms();
+    test_write_without_magic_is_plain_data();
+    test_timeout_triggers_reset();
+    test_reopen_resets_magic_seen();
+    println!("PASS: all watchdog tests passed");
+}

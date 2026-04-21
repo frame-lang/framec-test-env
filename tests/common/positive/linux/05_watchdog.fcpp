@@ -1,0 +1,155 @@
+@@target cpp_17
+
+// Watchdog Timer — kernel drivers/watchdog/watchdog_dev.c magic-close semantics.
+
+#include <iostream>
+#include <string>
+#include <sstream>
+#include <cassert>
+#include <cstdlib>
+
+@@system WatchdogDevice {
+    interface:
+        open(): str
+        write(data: str): str
+        ping(): str
+        close(): str
+        timeout_expired(): str
+        status(): str
+
+    machine:
+        $Inactive {
+            open(): str {
+                @@:(std::string("opened"))
+                -> $Armed
+            }
+            status(): str { @@:(std::string("inactive")) }
+        }
+
+        $Armed {
+            $>() {
+                this->magic_seen = false;
+                this->start_hw_timer();
+            }
+
+            ping(): str {
+                this->reset_hw_timer();
+                @@:(std::string("pinged"))
+            }
+            write(data: str): str {
+                if (data.find("V") != std::string::npos) {
+                    this->magic_seen = true;
+                    @@:(std::string("magic character received"))
+                } else {
+                    @@:(std::string("data written"))
+                }
+                this->reset_hw_timer();
+            }
+            close(): str {
+                if (this->magic_seen) {
+                    this->stop_hw_timer();
+                    @@:(std::string("disarmed"))
+                    -> $Inactive
+                } else {
+                    @@:(std::string("close ignored -- no magic char"))
+                }
+            }
+            timeout_expired(): str {
+                @@:(std::string("SYSTEM RESET"))
+                -> $Triggered
+            }
+            status(): str {
+                if (this->magic_seen) {
+                    @@:(std::string("armed (magic seen, close will disarm)"))
+                } else {
+                    @@:(std::string("armed"))
+                }
+            }
+        }
+
+        $Triggered {
+            status(): str { @@:(std::string("triggered -- system reset")) }
+        }
+
+    actions:
+        start_hw_timer() {}
+        reset_hw_timer() {}
+        stop_hw_timer() {}
+
+    domain:
+        timeout_sec: int = 60
+        magic_seen: bool = false
+}
+
+
+void check(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " — expected '" << expected << "', got '" << actual << "'" << std::endl;
+        std::exit(1);
+    }
+}
+
+void test_open_and_ping() {
+    auto wd = @@WatchdogDevice();
+    check("initial inactive", std::any_cast<std::string>(wd.status()), "inactive");
+    check("open returns opened", std::any_cast<std::string>(wd.open()), "opened");
+    check("armed after open", std::any_cast<std::string>(wd.status()), "armed");
+    check("ping", std::any_cast<std::string>(wd.ping()), "pinged");
+    check("still armed after ping", std::any_cast<std::string>(wd.status()), "armed");
+    std::cout << "PASS: open and ping" << std::endl;
+}
+
+void test_close_without_magic_is_ignored() {
+    auto wd = @@WatchdogDevice();
+    wd.open();
+    check("close without magic", std::any_cast<std::string>(wd.close()), "close ignored -- no magic char");
+    check("still armed after bad close", std::any_cast<std::string>(wd.status()), "armed");
+    std::cout << "PASS: close without magic ignored (safety property)" << std::endl;
+}
+
+void test_magic_char_then_close_disarms() {
+    auto wd = @@WatchdogDevice();
+    wd.open();
+    check("write with V sets magic", std::any_cast<std::string>(wd.write(std::string("goodbye V"))), "magic character received");
+    check("status shows magic seen", std::any_cast<std::string>(wd.status()), "armed (magic seen, close will disarm)");
+    check("close after magic disarms", std::any_cast<std::string>(wd.close()), "disarmed");
+    check("back to inactive", std::any_cast<std::string>(wd.status()), "inactive");
+    std::cout << "PASS: magic char then close disarms" << std::endl;
+}
+
+void test_write_without_magic_is_plain_data() {
+    auto wd = @@WatchdogDevice();
+    wd.open();
+    check("write without V", std::any_cast<std::string>(wd.write(std::string("abcdef"))), "data written");
+    check("still armed with no magic", std::any_cast<std::string>(wd.status()), "armed");
+    std::cout << "PASS: write without magic is plain data" << std::endl;
+}
+
+void test_timeout_triggers_reset() {
+    auto wd = @@WatchdogDevice();
+    wd.open();
+    check("timeout fires", std::any_cast<std::string>(wd.timeout_expired()), "SYSTEM RESET");
+    check("terminal triggered state", std::any_cast<std::string>(wd.status()), "triggered -- system reset");
+    std::cout << "PASS: timeout triggers system reset" << std::endl;
+}
+
+void test_reopen_resets_magic_seen() {
+    auto wd = @@WatchdogDevice();
+    wd.open();
+    wd.write(std::string("set V please"));
+    wd.close();
+    wd.open();
+    check("magic_seen reset on reopen", std::any_cast<std::string>(wd.close()), "close ignored -- no magic char");
+    std::cout << "PASS: reopen resets magic_seen via enter handler" << std::endl;
+}
+
+int main() {
+    test_open_and_ping();
+    test_close_without_magic_is_ignored();
+    test_magic_char_then_close_disarms();
+    test_write_without_magic_is_plain_data();
+    test_timeout_triggers_reset();
+    test_reopen_resets_magic_seen();
+    std::cout << "PASS: all watchdog tests passed" << std::endl;
+    return 0;
+}

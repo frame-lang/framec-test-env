@@ -1,0 +1,164 @@
+@@target lua
+
+-- Runtime Power Management — kernel drivers/base/power/runtime.c semantics.
+
+@@system RuntimePM {
+    interface:
+        get(): str
+        put(): str
+        autosuspend_expired(): str
+        resume_complete(): str
+        suspend_complete(success: bool): str
+        status(): str
+
+    machine:
+        $Active {
+            $>() {
+                self:cancel_timer()
+            }
+
+            get(): str {
+                self.usage_count = self.usage_count + 1
+                @@:("get: usage=" .. tostring(self.usage_count))
+            }
+            put(): str {
+                self.usage_count = self.usage_count - 1
+                @@:("put: usage=" .. tostring(self.usage_count))
+                if self.usage_count <= 0 then
+                    -> $Idle
+                end
+            }
+            status(): str { @@:("active") }
+        }
+
+        $Idle {
+            $>() {
+                self:start_autosuspend_timer()
+            }
+            <$() {
+                self:cancel_timer()
+            }
+
+            get(): str {
+                self.usage_count = self.usage_count + 1
+                @@:("get: usage=" .. tostring(self.usage_count))
+                -> $Active
+            }
+            autosuspend_expired(): str {
+                @@:("suspending")
+                -> $Suspending
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $Suspending {
+            $>() {
+                self:call_suspend_callback()
+            }
+
+            suspend_complete(success: bool): str {
+                if success then
+                    @@:("suspended")
+                    -> $Suspended
+                else
+                    @@:("suspend failed")
+                    -> $Active
+                end
+            }
+            get(): str {
+                self.usage_count = self.usage_count + 1
+                @@:("resume requested during suspend")
+                -> $Resuming
+            }
+            status(): str { @@:("suspending") }
+        }
+
+        $Suspended {
+            get(): str {
+                self.usage_count = self.usage_count + 1
+                @@:("waking")
+                -> $Resuming
+            }
+            status(): str { @@:("suspended") }
+        }
+
+        $Resuming {
+            $>() {
+                self:call_resume_callback()
+            }
+
+            resume_complete(): str {
+                @@:("resumed")
+                -> $Active
+            }
+            status(): str { @@:("resuming") }
+        }
+
+    actions:
+        start_autosuspend_timer() {}
+        cancel_timer() {}
+        call_suspend_callback() {}
+        call_resume_callback() {}
+
+    domain:
+        usage_count: int = 1
+        autosuspend_delay_ms: int = 500
+}
+
+
+local function check(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " — expected '" .. tostring(expected) .. "', got '" .. tostring(actual) .. "'")
+        os.exit(1)
+    end
+end
+
+local function test_happy_idle_suspend_resume()
+    local dev = @@RuntimePM()
+    check("initial active", dev:status(), "active")
+    check("put drops to 0", dev:put(), "put: usage=0")
+    check("idle after drain", dev:status(), "idle")
+    check("autosuspend fires", dev:autosuspend_expired(), "suspending")
+    check("suspend_complete true", dev:suspend_complete(true), "suspended")
+    check("get wakes", dev:get(), "waking")
+    check("resuming status", dev:status(), "resuming")
+    check("resume_complete", dev:resume_complete(), "resumed")
+    check("back to active", dev:status(), "active")
+    print("PASS: happy path (active -> idle -> suspended -> resumed)")
+end
+
+local function test_suspend_failure_returns_to_active()
+    local dev = @@RuntimePM()
+    dev:put()
+    dev:autosuspend_expired()
+    check("suspend failed", dev:suspend_complete(false), "suspend failed")
+    check("reverted to active", dev:status(), "active")
+    print("PASS: suspend failure -> active")
+end
+
+local function test_get_during_suspending_redirects_to_resuming()
+    local dev = @@RuntimePM()
+    dev:put()
+    dev:autosuspend_expired()
+    check("suspending state", dev:status(), "suspending")
+    check("get during suspend", dev:get(), "resume requested during suspend")
+    check("redirected to resuming", dev:status(), "resuming")
+    print("PASS: get during suspending redirects to resuming")
+end
+
+local function test_usage_count_mgmt()
+    local dev = @@RuntimePM()
+    check("get +1", dev:get(), "get: usage=2")
+    check("get +1 again", dev:get(), "get: usage=3")
+    check("put -1", dev:put(), "put: usage=2")
+    check("put -1", dev:put(), "put: usage=1")
+    check("put to 0 -> idle", dev:put(), "put: usage=0")
+    check("idle", dev:status(), "idle")
+    print("PASS: usage count tracking")
+end
+
+test_happy_idle_suspend_resume()
+test_suspend_failure_returns_to_active()
+test_get_during_suspending_redirects_to_resuming()
+test_usage_count_mgmt()
+print("PASS: all runtime PM tests passed")

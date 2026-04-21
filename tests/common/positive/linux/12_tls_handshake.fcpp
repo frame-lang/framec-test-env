@@ -1,0 +1,197 @@
+@@target cpp_17
+
+// TLS Handshake (server side) — RFC 5246 Section 7.3.
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <cstdlib>
+
+@@system TlsServerHandshake {
+    interface:
+        client_hello(version: std::string, cipher: std::string)
+        client_key_exchange(key_data: std::string)
+        client_change_cipher_spec()
+        client_finished(verify: std::string)
+        alert(level: std::string, desc: std::string)
+        status(): std::string
+
+    machine:
+        $Idle {
+            client_hello(version: std::string, cipher: std::string) {
+                this->client_version = version;
+                if (cipher == "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256") {
+                    this->selected_cipher = cipher;
+                    -> $ServerHello
+                } else {
+                    if (cipher == "TLS_RSA_WITH_AES_128_CBC_SHA") {
+                        this->selected_cipher = cipher;
+                        -> $ServerHello
+                    } else {
+                        this->send_alert();
+                        -> $Closed
+                    }
+                }
+            }
+            status(): std::string { @@:(std::string("idle")) }
+        }
+
+        $ServerHello => $Handshaking {
+            $>() {
+                this->send_server_hello();
+                this->send_certificate();
+                this->send_server_hello_done();
+                -> $AwaitClientKeyExchange
+            }
+            status(): std::string { @@:(std::string("server hello")) }
+            => $^
+        }
+
+        $AwaitClientKeyExchange => $Handshaking {
+            client_key_exchange(key_data: std::string) {
+                this->premaster = key_data;
+                this->derive_keys();
+                -> $AwaitChangeCipherSpec
+            }
+            status(): std::string { @@:(std::string("await key exchange")) }
+            => $^
+        }
+
+        $AwaitChangeCipherSpec => $Handshaking {
+            client_change_cipher_spec() {
+                this->client_encrypted = true;
+                -> $AwaitClientFinished
+            }
+            status(): std::string { @@:(std::string("await change cipher spec")) }
+            => $^
+        }
+
+        $AwaitClientFinished => $Handshaking {
+            client_finished(verify: std::string) {
+                if (verify == "valid") {
+                    this->send_change_cipher_spec();
+                    this->send_finished();
+                    -> $Established
+                } else {
+                    this->send_alert();
+                    -> $Closed
+                }
+            }
+            status(): std::string { @@:(std::string("await client finished")) }
+            => $^
+        }
+
+        $Handshaking {
+            alert(level: std::string, desc: std::string) {
+                if (level == "fatal") {
+                    -> $Closed
+                }
+            }
+        }
+
+        $Established {
+            alert(level: std::string, desc: std::string) {
+                if (level == "fatal") {
+                    -> $Closed
+                }
+            }
+            status(): std::string { @@:(std::string("established")) }
+        }
+
+        $Closed {
+            status(): std::string { @@:(std::string("closed")) }
+        }
+
+    actions:
+        send_server_hello() {}
+        send_certificate() {}
+        send_server_hello_done() {}
+        derive_keys() {}
+        send_change_cipher_spec() {}
+        send_finished() {}
+        send_alert() {}
+
+    domain:
+        client_version: std::string = std::string("")
+        selected_cipher: std::string = std::string("")
+        premaster: std::string = std::string("")
+        client_encrypted: bool = false
+}
+
+
+void check(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " — expected '" << expected << "', got '" << actual << "'" << std::endl;
+        std::exit(1);
+    }
+}
+
+void test_happy_handshake() {
+    auto tls = @@TlsServerHandshake();
+    check("initial idle", std::any_cast<std::string>(tls.status()), "idle");
+    tls.client_hello(std::string("TLS 1.2"), std::string("TLS_RSA_WITH_AES_128_CBC_SHA"));
+    check("after client_hello -> through ServerHello to await", std::any_cast<std::string>(tls.status()), "await key exchange");
+    tls.client_key_exchange(std::string("premaster_data"));
+    check("after key exchange", std::any_cast<std::string>(tls.status()), "await change cipher spec");
+    tls.client_change_cipher_spec();
+    check("after CCS", std::any_cast<std::string>(tls.status()), "await client finished");
+    tls.client_finished(std::string("valid"));
+    check("established", std::any_cast<std::string>(tls.status()), "established");
+    std::cout << "PASS: happy TLS handshake" << std::endl;
+}
+
+void test_unsupported_cipher_closes() {
+    auto tls = @@TlsServerHandshake();
+    tls.client_hello(std::string("TLS 1.2"), std::string("TLS_NULL_WITH_NULL_NULL"));
+    check("no matching cipher -> closed", std::any_cast<std::string>(tls.status()), "closed");
+    std::cout << "PASS: unsupported cipher closes handshake" << std::endl;
+}
+
+void test_fatal_alert_during_handshake() {
+    auto tls = @@TlsServerHandshake();
+    tls.client_hello(std::string("TLS 1.2"), std::string("TLS_RSA_WITH_AES_128_CBC_SHA"));
+    tls.alert(std::string("fatal"), std::string("unexpected_message"));
+    check("fatal alert -> closed (via HSM parent)", std::any_cast<std::string>(tls.status()), "closed");
+    std::cout << "PASS: fatal alert forwards via HSM parent to $Closed" << std::endl;
+}
+
+void test_warning_alert_ignored() {
+    auto tls = @@TlsServerHandshake();
+    tls.client_hello(std::string("TLS 1.2"), std::string("TLS_RSA_WITH_AES_128_CBC_SHA"));
+    tls.alert(std::string("warning"), std::string("close_notify_soon"));
+    check("warning alert doesn't close", std::any_cast<std::string>(tls.status()), "await key exchange");
+    std::cout << "PASS: warning alert doesn't close handshake" << std::endl;
+}
+
+void test_invalid_finished_closes() {
+    auto tls = @@TlsServerHandshake();
+    tls.client_hello(std::string("TLS 1.2"), std::string("TLS_RSA_WITH_AES_128_CBC_SHA"));
+    tls.client_key_exchange(std::string("bogus"));
+    tls.client_change_cipher_spec();
+    tls.client_finished(std::string("invalid"));
+    check("bad verify -> closed", std::any_cast<std::string>(tls.status()), "closed");
+    std::cout << "PASS: invalid client_finished closes" << std::endl;
+}
+
+void test_fatal_alert_in_established() {
+    auto tls = @@TlsServerHandshake();
+    tls.client_hello(std::string("TLS 1.2"), std::string("TLS_RSA_WITH_AES_128_CBC_SHA"));
+    tls.client_key_exchange(std::string("pm"));
+    tls.client_change_cipher_spec();
+    tls.client_finished(std::string("valid"));
+    check("established", std::any_cast<std::string>(tls.status()), "established");
+    tls.alert(std::string("fatal"), std::string("bad_record_mac"));
+    check("fatal in $Established -> closed", std::any_cast<std::string>(tls.status()), "closed");
+    std::cout << "PASS: fatal alert in established closes" << std::endl;
+}
+
+int main() {
+    test_happy_handshake();
+    test_unsupported_cipher_closes();
+    test_fatal_alert_during_handshake();
+    test_warning_alert_ignored();
+    test_invalid_finished_closes();
+    test_fatal_alert_in_established();
+    std::cout << "PASS: all TLS handshake tests passed" << std::endl;
+    return 0;
+}

@@ -1,0 +1,170 @@
+@@target csharp
+
+// Runtime Power Management — kernel drivers/base/power/runtime.c semantics.
+
+using System;
+
+@@system RuntimePM {
+    interface:
+        get(): String
+        put(): String
+        autosuspend_expired(): String
+        resume_complete(): String
+        suspend_complete(success: bool): String
+        status(): String
+
+    machine:
+        $Active {
+            $>() {
+                this.cancel_timer();
+            }
+
+            get(): String {
+                this.usage_count = this.usage_count + 1;
+                @@:($"get: usage={this.usage_count}")
+            }
+            put(): String {
+                this.usage_count = this.usage_count - 1;
+                @@:($"put: usage={this.usage_count}")
+                if (this.usage_count <= 0) {
+                    -> $Idle
+                }
+            }
+            status(): String { @@:("active") }
+        }
+
+        $Idle {
+            $>() {
+                this.start_autosuspend_timer();
+            }
+            <$() {
+                this.cancel_timer();
+            }
+
+            get(): String {
+                this.usage_count = this.usage_count + 1;
+                @@:($"get: usage={this.usage_count}")
+                -> $Active
+            }
+            autosuspend_expired(): String {
+                @@:("suspending")
+                -> $Suspending
+            }
+            status(): String { @@:("idle") }
+        }
+
+        $Suspending {
+            $>() {
+                this.call_suspend_callback();
+            }
+
+            suspend_complete(success: bool): String {
+                if (success) {
+                    @@:("suspended")
+                    -> $Suspended
+                } else {
+                    @@:("suspend failed")
+                    -> $Active
+                }
+            }
+            get(): String {
+                this.usage_count = this.usage_count + 1;
+                @@:("resume requested during suspend")
+                -> $Resuming
+            }
+            status(): String { @@:("suspending") }
+        }
+
+        $Suspended {
+            get(): String {
+                this.usage_count = this.usage_count + 1;
+                @@:("waking")
+                -> $Resuming
+            }
+            status(): String { @@:("suspended") }
+        }
+
+        $Resuming {
+            $>() {
+                this.call_resume_callback();
+            }
+
+            resume_complete(): String {
+                @@:("resumed")
+                -> $Active
+            }
+            status(): String { @@:("resuming") }
+        }
+
+    actions:
+        start_autosuspend_timer() {}
+        cancel_timer() {}
+        call_suspend_callback() {}
+        call_resume_callback() {}
+
+    domain:
+        usage_count: int = 1
+        autosuspend_delay_ms: int = 500
+}
+
+
+class Program {
+    static void check(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} — expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+
+    static void test_happy_idle_suspend_resume() {
+        var dev = @@RuntimePM();
+        check("initial active", (string) dev.status(), "active");
+        check("put drops to 0", (string) dev.put(), "put: usage=0");
+        check("idle after drain", (string) dev.status(), "idle");
+        check("autosuspend fires", (string) dev.autosuspend_expired(), "suspending");
+        check("suspend_complete true", (string) dev.suspend_complete(true), "suspended");
+        check("get wakes", (string) dev.get(), "waking");
+        check("resuming status", (string) dev.status(), "resuming");
+        check("resume_complete", (string) dev.resume_complete(), "resumed");
+        check("back to active", (string) dev.status(), "active");
+        Console.WriteLine("PASS: happy path (active -> idle -> suspended -> resumed)");
+    }
+
+    static void test_suspend_failure_returns_to_active() {
+        var dev = @@RuntimePM();
+        dev.put();
+        dev.autosuspend_expired();
+        check("suspend failed", (string) dev.suspend_complete(false), "suspend failed");
+        check("reverted to active", (string) dev.status(), "active");
+        Console.WriteLine("PASS: suspend failure -> active");
+    }
+
+    static void test_get_during_suspending_redirects_to_resuming() {
+        var dev = @@RuntimePM();
+        dev.put();
+        dev.autosuspend_expired();
+        check("suspending state", (string) dev.status(), "suspending");
+        check("get during suspend", (string) dev.get(), "resume requested during suspend");
+        check("redirected to resuming", (string) dev.status(), "resuming");
+        Console.WriteLine("PASS: get during suspending redirects to resuming");
+    }
+
+    static void test_usage_count_mgmt() {
+        var dev = @@RuntimePM();
+        check("get +1", (string) dev.get(), "get: usage=2");
+        check("get +1 again", (string) dev.get(), "get: usage=3");
+        check("put -1", (string) dev.put(), "put: usage=2");
+        check("put -1", (string) dev.put(), "put: usage=1");
+        check("put to 0 -> idle", (string) dev.put(), "put: usage=0");
+        check("idle", (string) dev.status(), "idle");
+        Console.WriteLine("PASS: usage count tracking");
+    }
+
+    static void Main(string[] args) {
+        test_happy_idle_suspend_resume();
+        test_suspend_failure_returns_to_active();
+        test_get_during_suspending_redirects_to_resuming();
+        test_usage_count_mgmt();
+        Console.WriteLine("PASS: all runtime PM tests passed");
+    }
+}

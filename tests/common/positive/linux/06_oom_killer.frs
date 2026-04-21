@@ -1,0 +1,130 @@
+@@target rust
+
+// OOM Killer — kernel mm/oom_kill.c semantics. Safety-critical: while $Killing,
+// concurrent oom_detected_again() events are silently dropped because no handler
+// exists for them in that state.
+
+@@system OomKiller {
+    interface:
+        oom_detected(gfp_flags: i32): String
+        victim_exited(pid: i32, freed_kb: i32): String
+        oom_detected_again(gfp_flags: i32): String
+        status(): String
+
+    machine:
+        $Normal {
+            oom_detected(gfp_flags: i32): String {
+                @@:("selecting victim".to_string())
+                -> $Selecting
+            }
+            status(): String { @@:("normal".to_string()) }
+        }
+
+        $Selecting {
+            $>() {
+                self.victim_pid = self.select_victim();
+                if self.victim_pid < 0 {
+                    -> $Panic
+                } else {
+                    -> $Killing
+                }
+            }
+            status(): String { @@:("selecting".to_string()) }
+        }
+
+        $Killing {
+            $>() {
+                self.send_sigkill(self.victim_pid);
+                self.start_reaper_timer();
+            }
+            <$() {
+                self.cancel_reaper_timer();
+            }
+
+            victim_exited(pid: i32, freed_kb: i32): String {
+                if pid == self.victim_pid {
+                    self.total_freed_kb = self.total_freed_kb + freed_kb;
+                    @@:("reclaimed".to_string())
+                    -> $Normal
+                } else {
+                    @@:("wrong pid, still waiting".to_string())
+                }
+            }
+
+            // oom_detected_again NOT handled -- structural safety property.
+            status(): String { @@:("killing".to_string()) }
+        }
+
+        $Panic {
+            status(): String { @@:("panic".to_string()) }
+        }
+
+    actions:
+        select_victim(): i32 {
+            self.victim_score = 850;
+            return 4242;
+        }
+        send_sigkill(pid: i32) {}
+        start_reaper_timer() {}
+        cancel_reaper_timer() {}
+
+    domain:
+        victim_pid: i32 = -1
+        victim_score: i32 = 0
+        total_freed_kb: i32 = 0
+}
+
+
+fn check(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} — expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn test_normal_oom_flow() {
+    let mut oom = @@OomKiller();
+    check("initial normal", &oom.status(), "normal");
+    check("oom_detected -> selecting", &oom.oom_detected(0), "selecting victim");
+    check("arrived in killing", &oom.status(), "killing");
+    check("victim exits", &oom.victim_exited(4242, 51200), "reclaimed");
+    check("back to normal", &oom.status(), "normal");
+    println!("PASS: normal OOM flow");
+}
+
+fn test_concurrent_oom_silently_dropped() {
+    let mut oom = @@OomKiller();
+    oom.oom_detected(0);
+    check("in killing", &oom.status(), "killing");
+    oom.oom_detected_again(0);
+    check("still killing (event dropped)", &oom.status(), "killing");
+    oom.victim_exited(4242, 8192);
+    check("back to normal after reclaim", &oom.status(), "normal");
+    println!("PASS: concurrent OOM events dropped in $Killing (safety)");
+}
+
+fn test_wrong_pid_exit_ignored() {
+    let mut oom = @@OomKiller();
+    oom.oom_detected(0);
+    check("waiting for victim", &oom.victim_exited(9999, 1024), "wrong pid, still waiting");
+    check("still killing", &oom.status(), "killing");
+    oom.victim_exited(4242, 2048);
+    check("correct pid -> normal", &oom.status(), "normal");
+    println!("PASS: wrong-pid exit ignored in $Killing");
+}
+
+fn test_oom_detected_ignored_in_selecting() {
+    let mut oom = @@OomKiller();
+    check("first oom", &oom.oom_detected(0), "selecting victim");
+    oom.oom_detected(0);
+    check("second oom dropped", &oom.status(), "killing");
+    println!("PASS: oom_detected ignored while killing");
+}
+
+fn main() {
+    test_normal_oom_flow();
+    test_concurrent_oom_silently_dropped();
+    test_wrong_pid_exit_ignored();
+    test_oom_detected_ignored_in_selecting();
+    println!("PASS: all OOM killer tests passed");
+}

@@ -1,0 +1,227 @@
+@@target swift
+
+// TCP Connection -- RFC 793 Figure 6 FSM with @@persist for TIME_WAIT.
+
+import Foundation
+
+@@persist
+@@system TcpConnection {
+    interface:
+        passive_open()
+        active_open()
+        recv_syn()
+        recv_syn_ack()
+        recv_ack()
+        recv_fin()
+        app_close()
+        app_send(bytes_n: Int)
+        timeout_2msl()
+        abort()
+        state_name(): String
+
+    machine:
+        $Closed {
+            passive_open() { -> $Listen }
+            active_open() {
+                self.send_syn()
+                -> $SynSent
+            }
+            state_name(): String { @@:("CLOSED") }
+        }
+
+        $Listen {
+            recv_syn() {
+                self.send_syn_ack()
+                -> $SynReceived
+            }
+            app_close() { -> $Closed }
+            state_name(): String { @@:("LISTEN") }
+        }
+
+        $SynSent {
+            recv_syn_ack() {
+                self.send_ack()
+                -> $Established
+            }
+            recv_syn() {
+                self.send_syn_ack()
+                -> $SynReceived
+            }
+            app_close() { -> $Closed }
+            state_name(): String { @@:("SYN_SENT") }
+        }
+
+        $SynReceived {
+            recv_ack() { -> $Established }
+            app_close() {
+                self.send_fin()
+                -> $FinWait1
+            }
+            state_name(): String { @@:("SYN_RECEIVED") }
+        }
+
+        $Established {
+            app_send(bytes_n: Int) {
+                self.bytes_sent = self.bytes_sent + bytes_n
+            }
+            app_close() {
+                self.send_fin()
+                -> $FinWait1
+            }
+            recv_fin() {
+                self.send_ack()
+                -> $CloseWait
+            }
+            abort() {
+                self.send_rst()
+                -> $Closed
+            }
+            state_name(): String { @@:("ESTABLISHED") }
+        }
+
+        $FinWait1 {
+            recv_ack() { -> $FinWait2 }
+            recv_fin() {
+                self.send_ack()
+                -> $Closing
+            }
+            state_name(): String { @@:("FIN_WAIT_1") }
+        }
+
+        $FinWait2 {
+            recv_fin() {
+                self.send_ack()
+                -> $TimeWait
+            }
+            state_name(): String { @@:("FIN_WAIT_2") }
+        }
+
+        $Closing {
+            recv_ack() { -> $TimeWait }
+            state_name(): String { @@:("CLOSING") }
+        }
+
+        $TimeWait {
+            $>() {
+                self.start_2msl_timer()
+            }
+            timeout_2msl() { -> $Closed }
+            state_name(): String { @@:("TIME_WAIT") }
+        }
+
+        $CloseWait {
+            app_close() {
+                self.send_fin()
+                -> $LastAck
+            }
+            state_name(): String { @@:("CLOSE_WAIT") }
+        }
+
+        $LastAck {
+            recv_ack() { -> $Closed }
+            state_name(): String { @@:("LAST_ACK") }
+        }
+
+    actions:
+        send_syn()         {}
+        send_syn_ack()     {}
+        send_ack()         {}
+        send_fin()         {}
+        send_rst()         {}
+        start_2msl_timer() {}
+
+    domain:
+        local_port: Int = 0
+        remote_port: Int = 0
+        bytes_sent: Int = 0
+}
+
+
+func check(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) -- expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+
+func test_active_open_full_cycle() {
+    var c = @@TcpConnection()
+    check("initial CLOSED", c.state_name() as! String, "CLOSED")
+    _ = c.active_open()
+    check("SYN_SENT", c.state_name() as! String, "SYN_SENT")
+    _ = c.recv_syn_ack()
+    check("ESTABLISHED", c.state_name() as! String, "ESTABLISHED")
+    _ = c.app_send(1024)
+    _ = c.app_close()
+    check("FIN_WAIT_1", c.state_name() as! String, "FIN_WAIT_1")
+    _ = c.recv_ack()
+    check("FIN_WAIT_2", c.state_name() as! String, "FIN_WAIT_2")
+    _ = c.recv_fin()
+    check("TIME_WAIT", c.state_name() as! String, "TIME_WAIT")
+    _ = c.timeout_2msl()
+    check("back to CLOSED", c.state_name() as! String, "CLOSED")
+    print("PASS: active open, full cycle to TIME_WAIT")
+}
+
+func test_passive_open_full_cycle() {
+    var c = @@TcpConnection()
+    _ = c.passive_open()
+    check("LISTEN", c.state_name() as! String, "LISTEN")
+    _ = c.recv_syn()
+    check("SYN_RECEIVED", c.state_name() as! String, "SYN_RECEIVED")
+    _ = c.recv_ack()
+    check("ESTABLISHED", c.state_name() as! String, "ESTABLISHED")
+    _ = c.recv_fin()
+    check("CLOSE_WAIT", c.state_name() as! String, "CLOSE_WAIT")
+    _ = c.app_close()
+    check("LAST_ACK", c.state_name() as! String, "LAST_ACK")
+    _ = c.recv_ack()
+    check("CLOSED", c.state_name() as! String, "CLOSED")
+    print("PASS: passive open, peer-initiated close")
+}
+
+func test_simultaneous_close() {
+    var c = @@TcpConnection()
+    _ = c.active_open()
+    _ = c.recv_syn_ack()
+    _ = c.app_close()
+    check("in FIN_WAIT_1", c.state_name() as! String, "FIN_WAIT_1")
+    _ = c.recv_fin()
+    check("CLOSING (simultaneous)", c.state_name() as! String, "CLOSING")
+    _ = c.recv_ack()
+    check("TIME_WAIT after CLOSING ACK", c.state_name() as! String, "TIME_WAIT")
+    print("PASS: simultaneous close -> CLOSING -> TIME_WAIT")
+}
+
+func test_abort_from_established() {
+    var c = @@TcpConnection()
+    _ = c.active_open()
+    _ = c.recv_syn_ack()
+    _ = c.abort()
+    check("RST drops to CLOSED", c.state_name() as! String, "CLOSED")
+    print("PASS: abort sends RST and returns to CLOSED")
+}
+
+func test_persist_across_restart() {
+    var c = @@TcpConnection()
+    _ = c.active_open()
+    _ = c.recv_syn_ack()
+    _ = c.app_send(2048)
+    _ = c.app_close()
+    _ = c.recv_ack()
+    _ = c.recv_fin()
+    check("TIME_WAIT before persist", c.state_name() as! String, "TIME_WAIT")
+    let snap = c.saveState()
+    var c2 = TcpConnection.restoreState(snap)
+    check("TIME_WAIT restored", c2.state_name() as! String, "TIME_WAIT")
+    _ = c2.timeout_2msl()
+    check("CLOSED after 2MSL", c2.state_name() as! String, "CLOSED")
+    print("PASS: @@persist survives simulated restart in TIME_WAIT")
+}
+
+test_active_open_full_cycle()
+test_passive_open_full_cycle()
+test_simultaneous_close()
+test_abort_from_established()
+test_persist_across_restart()
+print("PASS: all TCP connection tests passed")

@@ -1,0 +1,179 @@
+@@target cpp_17
+
+// Runtime Power Management — kernel drivers/base/power/runtime.c semantics.
+
+#include <iostream>
+#include <string>
+#include <sstream>
+#include <cassert>
+#include <cstdlib>
+
+@@system RuntimePM {
+    interface:
+        get(): str
+        put(): str
+        autosuspend_expired(): str
+        resume_complete(): str
+        suspend_complete(success: bool): str
+        status(): str
+
+    machine:
+        $Active {
+            $>() {
+                this->cancel_timer();
+            }
+
+            get(): str {
+                this->usage_count = this->usage_count + 1;
+                std::ostringstream oss;
+                oss << "get: usage=" << this->usage_count;
+                @@:(oss.str())
+            }
+            put(): str {
+                this->usage_count = this->usage_count - 1;
+                std::ostringstream oss;
+                oss << "put: usage=" << this->usage_count;
+                @@:(oss.str())
+                if (this->usage_count <= 0) {
+                    -> $Idle
+                }
+            }
+            status(): str { @@:(std::string("active")) }
+        }
+
+        $Idle {
+            $>() {
+                this->start_autosuspend_timer();
+            }
+            <$() {
+                this->cancel_timer();
+            }
+
+            get(): str {
+                this->usage_count = this->usage_count + 1;
+                std::ostringstream oss;
+                oss << "get: usage=" << this->usage_count;
+                @@:(oss.str())
+                -> $Active
+            }
+            autosuspend_expired(): str {
+                @@:(std::string("suspending"))
+                -> $Suspending
+            }
+            status(): str { @@:(std::string("idle")) }
+        }
+
+        $Suspending {
+            $>() {
+                this->call_suspend_callback();
+            }
+
+            suspend_complete(success: bool): str {
+                if (success) {
+                    @@:(std::string("suspended"))
+                    -> $Suspended
+                } else {
+                    @@:(std::string("suspend failed"))
+                    -> $Active
+                }
+            }
+            get(): str {
+                this->usage_count = this->usage_count + 1;
+                @@:(std::string("resume requested during suspend"))
+                -> $Resuming
+            }
+            status(): str { @@:(std::string("suspending")) }
+        }
+
+        $Suspended {
+            get(): str {
+                this->usage_count = this->usage_count + 1;
+                @@:(std::string("waking"))
+                -> $Resuming
+            }
+            status(): str { @@:(std::string("suspended")) }
+        }
+
+        $Resuming {
+            $>() {
+                this->call_resume_callback();
+            }
+
+            resume_complete(): str {
+                @@:(std::string("resumed"))
+                -> $Active
+            }
+            status(): str { @@:(std::string("resuming")) }
+        }
+
+    actions:
+        start_autosuspend_timer() {}
+        cancel_timer() {}
+        call_suspend_callback() {}
+        call_resume_callback() {}
+
+    domain:
+        usage_count: int = 1
+        autosuspend_delay_ms: int = 500
+}
+
+
+void check(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " — expected '" << expected << "', got '" << actual << "'" << std::endl;
+        std::exit(1);
+    }
+}
+
+void test_happy_idle_suspend_resume() {
+    auto dev = @@RuntimePM();
+    check("initial active", std::any_cast<std::string>(dev.status()), "active");
+    check("put drops to 0", std::any_cast<std::string>(dev.put()), "put: usage=0");
+    check("idle after drain", std::any_cast<std::string>(dev.status()), "idle");
+    check("autosuspend fires", std::any_cast<std::string>(dev.autosuspend_expired()), "suspending");
+    check("suspend_complete true", std::any_cast<std::string>(dev.suspend_complete(true)), "suspended");
+    check("get wakes", std::any_cast<std::string>(dev.get()), "waking");
+    check("resuming status", std::any_cast<std::string>(dev.status()), "resuming");
+    check("resume_complete", std::any_cast<std::string>(dev.resume_complete()), "resumed");
+    check("back to active", std::any_cast<std::string>(dev.status()), "active");
+    std::cout << "PASS: happy path (active -> idle -> suspended -> resumed)" << std::endl;
+}
+
+void test_suspend_failure_returns_to_active() {
+    auto dev = @@RuntimePM();
+    dev.put();
+    dev.autosuspend_expired();
+    check("suspend failed", std::any_cast<std::string>(dev.suspend_complete(false)), "suspend failed");
+    check("reverted to active", std::any_cast<std::string>(dev.status()), "active");
+    std::cout << "PASS: suspend failure -> active" << std::endl;
+}
+
+void test_get_during_suspending_redirects_to_resuming() {
+    auto dev = @@RuntimePM();
+    dev.put();
+    dev.autosuspend_expired();
+    check("suspending state", std::any_cast<std::string>(dev.status()), "suspending");
+    check("get during suspend", std::any_cast<std::string>(dev.get()), "resume requested during suspend");
+    check("redirected to resuming", std::any_cast<std::string>(dev.status()), "resuming");
+    std::cout << "PASS: get during suspending redirects to resuming" << std::endl;
+}
+
+void test_usage_count_mgmt() {
+    auto dev = @@RuntimePM();
+    check("get +1", std::any_cast<std::string>(dev.get()), "get: usage=2");
+    check("get +1 again", std::any_cast<std::string>(dev.get()), "get: usage=3");
+    check("put -1", std::any_cast<std::string>(dev.put()), "put: usage=2");
+    check("put -1", std::any_cast<std::string>(dev.put()), "put: usage=1");
+    check("put to 0 -> idle", std::any_cast<std::string>(dev.put()), "put: usage=0");
+    check("idle", std::any_cast<std::string>(dev.status()), "idle");
+    std::cout << "PASS: usage count tracking" << std::endl;
+}
+
+int main() {
+    test_happy_idle_suspend_resume();
+    test_suspend_failure_returns_to_active();
+    test_get_during_suspending_redirects_to_resuming();
+    test_usage_count_mgmt();
+    std::cout << "PASS: all runtime PM tests passed" << std::endl;
+    return 0;
+}

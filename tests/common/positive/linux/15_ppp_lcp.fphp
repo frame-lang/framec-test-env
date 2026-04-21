@@ -1,0 +1,337 @@
+@@target php
+
+<?php
+
+// PPP Link Control Protocol -- RFC 1661 Section 4 state table direct transcription.
+
+@@system PppLcp {
+    interface:
+        up()
+        down()
+        open()
+        close()
+        receive_configure_request(acceptable: bool)
+        receive_configure_ack()
+        receive_configure_nak()
+        receive_terminate_request()
+        receive_terminate_ack()
+        timeout_positive()
+        timeout_negative()
+        status(): str
+
+    machine:
+        $Initial {
+            up() { -> $Closed }
+            open() { -> $Starting }
+            status(): str { @@:("initial") }
+        }
+
+        $Starting {
+            up() {
+                $this->init_restart_count();
+                $this->send_configure_request();
+                -> $ReqSent
+            }
+            close() { -> $Initial }
+            status(): str { @@:("starting") }
+        }
+
+        $Closed {
+            open() {
+                $this->init_restart_count();
+                $this->send_configure_request();
+                -> $ReqSent
+            }
+            down() { -> $Initial }
+            receive_configure_request(acceptable: bool) {
+                $this->send_terminate_ack();
+            }
+            status(): str { @@:("closed") }
+        }
+
+        $Stopped {
+            open() { -> $Stopped }
+            down() { -> $Starting }
+            receive_configure_request(acceptable: bool) {
+                $this->init_restart_count();
+                if ($acceptable) {
+                    $this->send_configure_ack();
+                    $this->send_configure_request();
+                    -> $AckSent
+                } else {
+                    $this->send_configure_nak();
+                    $this->send_configure_request();
+                    -> $ReqSent
+                }
+            }
+            status(): str { @@:("stopped") }
+        }
+
+        $Closing {
+            timeout_positive() {
+                $this->send_terminate_request();
+            }
+            timeout_negative() {
+                -> $Closed
+            }
+            receive_terminate_ack() {
+                -> $Closed
+            }
+            down() { -> $Initial }
+            status(): str { @@:("closing") }
+        }
+
+        $Stopping {
+            timeout_positive() {
+                $this->send_terminate_request();
+            }
+            timeout_negative() {
+                -> $Stopped
+            }
+            receive_terminate_ack() {
+                -> $Stopped
+            }
+            down() { -> $Starting }
+            status(): str { @@:("stopping") }
+        }
+
+        $ReqSent {
+            timeout_positive() {
+                $this->send_configure_request();
+            }
+            timeout_negative() {
+                -> $Stopped
+            }
+            receive_configure_request(acceptable: bool) {
+                if ($acceptable) {
+                    $this->send_configure_ack();
+                    -> $AckSent
+                } else {
+                    $this->send_configure_nak();
+                }
+            }
+            receive_configure_ack() {
+                $this->init_restart_count();
+                -> $AckRcvd
+            }
+            receive_configure_nak() {
+                $this->init_restart_count();
+                $this->send_configure_request();
+            }
+            receive_terminate_request() {
+                $this->send_terminate_ack();
+                -> $ReqSent
+            }
+            close() {
+                $this->init_restart_count();
+                $this->send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): str { @@:("req-sent") }
+        }
+
+        $AckRcvd {
+            receive_configure_request(acceptable: bool) {
+                if ($acceptable) {
+                    $this->send_configure_ack();
+                    $this->tlu();
+                    -> $Opened
+                } else {
+                    $this->send_configure_nak();
+                }
+            }
+            timeout_positive() {
+                $this->send_configure_request();
+                -> $ReqSent
+            }
+            timeout_negative() { -> $Stopped }
+            receive_configure_ack() {
+                $this->send_configure_request();
+                -> $ReqSent
+            }
+            close() {
+                $this->init_restart_count();
+                $this->send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): str { @@:("ack-rcvd") }
+        }
+
+        $AckSent {
+            receive_configure_ack() {
+                $this->init_restart_count();
+                $this->tlu();
+                -> $Opened
+            }
+            timeout_positive() {
+                $this->send_configure_request();
+            }
+            timeout_negative() { -> $Stopped }
+            receive_configure_request(acceptable: bool) {
+                if ($acceptable) {
+                    $this->send_configure_ack();
+                } else {
+                    $this->send_configure_nak();
+                    -> $ReqSent
+                }
+            }
+            receive_configure_nak() {
+                $this->init_restart_count();
+                $this->send_configure_request();
+                -> $ReqSent
+            }
+            close() {
+                $this->init_restart_count();
+                $this->send_terminate_request();
+                -> $Closing
+            }
+            down() { -> $Starting }
+            status(): str { @@:("ack-sent") }
+        }
+
+        $Opened {
+            <$() {
+                $this->tld();
+            }
+
+            receive_configure_request(acceptable: bool) {
+                $this->send_configure_request();
+                if ($acceptable) {
+                    $this->send_configure_ack();
+                    -> $AckSent
+                } else {
+                    $this->send_configure_nak();
+                    -> $ReqSent
+                }
+            }
+            receive_terminate_request() {
+                $this->send_terminate_ack();
+                $this->zero_restart_count();
+                -> $Stopping
+            }
+            close() {
+                $this->init_restart_count();
+                $this->send_terminate_request();
+                -> $Closing
+            }
+            down() {
+                -> $Starting
+            }
+            status(): str { @@:("opened") }
+        }
+
+    actions:
+        send_configure_request() {}
+        send_configure_ack()     {}
+        send_configure_nak()     {}
+        send_terminate_request() {}
+        send_terminate_ack()     {}
+        init_restart_count() {
+            $this->restart_count = $this->max_restart;
+        }
+        zero_restart_count() {
+            $this->restart_count = 0;
+        }
+        tlu() {}
+        tld() {}
+
+    domain:
+        restart_count = 0
+        max_restart = 10
+}
+
+
+function check_value($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label -- expected '$expected', got '$actual'\n";
+        exit(1);
+    }
+}
+
+function test_normal_open() {
+    $ppp = @@PppLcp();
+    check_value("initial", $ppp->status(), "initial");
+    $ppp->open();
+    check_value("starting", $ppp->status(), "starting");
+    $ppp->up();
+    check_value("req-sent", $ppp->status(), "req-sent");
+    $ppp->receive_configure_ack();
+    check_value("ack-rcvd", $ppp->status(), "ack-rcvd");
+    $ppp->receive_configure_request(true);
+    check_value("opened", $ppp->status(), "opened");
+    echo "PASS: normal open sequence\n";
+}
+
+function test_peer_renegotiation() {
+    $ppp = @@PppLcp();
+    $ppp->open();
+    $ppp->up();
+    $ppp->receive_configure_ack();
+    $ppp->receive_configure_request(true);
+    check_value("opened first time", $ppp->status(), "opened");
+    $ppp->receive_configure_request(true);
+    check_value("renegotiation -> AckSent", $ppp->status(), "ack-sent");
+    $ppp->receive_configure_ack();
+    check_value("back to opened", $ppp->status(), "opened");
+    echo "PASS: peer-initiated renegotiation from opened\n";
+}
+
+function test_clean_shutdown() {
+    $ppp = @@PppLcp();
+    $ppp->open();
+    $ppp->up();
+    $ppp->receive_configure_ack();
+    $ppp->receive_configure_request(true);
+    $ppp->close();
+    check_value("closing", $ppp->status(), "closing");
+    $ppp->receive_terminate_ack();
+    check_value("closed", $ppp->status(), "closed");
+    echo "PASS: clean shutdown via close()\n";
+}
+
+function test_peer_terminate() {
+    $ppp = @@PppLcp();
+    $ppp->open();
+    $ppp->up();
+    $ppp->receive_configure_ack();
+    $ppp->receive_configure_request(true);
+    $ppp->receive_terminate_request();
+    check_value("stopping on peer-terminate", $ppp->status(), "stopping");
+    $ppp->receive_terminate_ack();
+    check_value("stopped", $ppp->status(), "stopped");
+    echo "PASS: peer-initiated terminate\n";
+}
+
+function test_timeout_negative_from_closing() {
+    $ppp = @@PppLcp();
+    $ppp->open();
+    $ppp->up();
+    $ppp->receive_configure_ack();
+    $ppp->receive_configure_request(true);
+    $ppp->close();
+    check_value("closing", $ppp->status(), "closing");
+    $ppp->timeout_negative();
+    check_value("closing exhausts to closed", $ppp->status(), "closed");
+    echo "PASS: timeout_negative in closing -> closed\n";
+}
+
+function test_down_from_opened() {
+    $ppp = @@PppLcp();
+    $ppp->open();
+    $ppp->up();
+    $ppp->receive_configure_ack();
+    $ppp->receive_configure_request(true);
+    $ppp->down();
+    check_value("down from opened -> starting", $ppp->status(), "starting");
+    echo "PASS: down from opened\n";
+}
+
+test_normal_open();
+test_peer_renegotiation();
+test_clean_shutdown();
+test_peer_terminate();
+test_timeout_negative_from_closing();
+test_down_from_opened();
+echo "PASS: all PPP LCP tests passed\n";

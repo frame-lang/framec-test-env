@@ -1,0 +1,134 @@
+@@target go
+
+// OOM Killer — kernel mm/oom_kill.c semantics.
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system OomKiller {
+    interface:
+        OomDetected(gfp_flags: int): string
+        VictimExited(pid: int, freed_kb: int): string
+        OomDetectedAgain(gfp_flags: int): string
+        status(): string
+
+    machine:
+        $Normal {
+            OomDetected(gfp_flags: int): string {
+                @@:("selecting victim")
+                -> $Selecting
+            }
+            status(): string { @@:("normal") }
+        }
+
+        $Selecting {
+            $>() {
+                s.victim_pid = s.select_victim()
+                if s.victim_pid < 0 {
+                    -> $Panic
+                } else {
+                    -> $Killing
+                }
+            }
+            status(): string { @@:("selecting") }
+        }
+
+        $Killing {
+            $>() {
+                s.send_sigkill(s.victim_pid)
+                s.start_reaper_timer()
+            }
+            <$() {
+                s.cancel_reaper_timer()
+            }
+
+            VictimExited(pid: int, freed_kb: int): string {
+                if pid == s.victim_pid {
+                    s.total_freed_kb = s.total_freed_kb + freed_kb
+                    @@:("reclaimed")
+                    -> $Normal
+                } else {
+                    @@:("wrong pid, still waiting")
+                }
+            }
+
+            status(): string { @@:("killing") }
+        }
+
+        $Panic {
+            status(): string { @@:("panic") }
+        }
+
+    actions:
+        select_victim(): int {
+            s.victim_score = 850
+            return 4242
+        }
+        send_sigkill(pid: int) {}
+        start_reaper_timer() {}
+        cancel_reaper_timer() {}
+
+    domain:
+        victim_pid: int = -1
+        victim_score: int = 0
+        total_freed_kb: int = 0
+}
+
+
+func check(label, actual, expected string) {
+	if actual != expected {
+		fmt.Printf("FAIL: %s — expected '%s', got '%s'\n", label, expected, actual)
+		os.Exit(1)
+	}
+}
+
+func test_normal_oom_flow() {
+	oom := NewOomKiller()
+	check("initial normal", oom.Status(), "normal")
+	check("OomDetected -> selecting", oom.OomDetected(0), "selecting victim")
+	check("arrived in killing", oom.Status(), "killing")
+	check("victim exits", oom.VictimExited(4242, 51200), "reclaimed")
+	check("back to normal", oom.Status(), "normal")
+	fmt.Println("PASS: normal OOM flow")
+}
+
+func test_concurrent_oom_silently_dropped() {
+	oom := NewOomKiller()
+	oom.OomDetected(0)
+	check("in killing", oom.Status(), "killing")
+	oom.OomDetectedAgain(0)
+	check("still killing (event dropped)", oom.Status(), "killing")
+	oom.VictimExited(4242, 8192)
+	check("back to normal after reclaim", oom.Status(), "normal")
+	fmt.Println("PASS: concurrent OOM events dropped in $Killing (safety)")
+}
+
+func test_wrong_pid_exit_ignored() {
+	oom := NewOomKiller()
+	oom.OomDetected(0)
+	check("waiting for victim", oom.VictimExited(9999, 1024), "wrong pid, still waiting")
+	check("still killing", oom.Status(), "killing")
+	oom.VictimExited(4242, 2048)
+	check("correct pid -> normal", oom.Status(), "normal")
+	fmt.Println("PASS: wrong-pid exit ignored in $Killing")
+}
+
+func test_OomDetected_ignored_in_selecting() {
+	oom := NewOomKiller()
+	check("first oom", oom.OomDetected(0), "selecting victim")
+	oom.OomDetected(0)
+	check("second oom dropped", oom.Status(), "killing")
+	fmt.Println("PASS: OomDetected ignored while killing")
+}
+
+func main() {
+	test_normal_oom_flow()
+	test_concurrent_oom_silently_dropped()
+	test_wrong_pid_exit_ignored()
+	test_OomDetected_ignored_in_selecting()
+	fmt.Println("PASS: all OOM killer tests passed")
+}

@@ -1,0 +1,161 @@
+@@target erlang
+
+% Kernel Module Loader — pipeline with compensation (saga pattern).
+% Erlang convention: single system, no in-file test harness. Auto-driver
+% in erlang_batch.sh exercises every exported function and checks clean exit.
+
+@@system ModuleLoader {
+    interface:
+        load(name: str)
+        unload(): str
+        acquire(): str
+        release(): str
+        resolve_done(success: bool, reason: str)
+        alloc_done(success: bool, reason: str)
+        relocate_done(success: bool, reason: str)
+        init_done(success: bool, reason: str)
+        status(): str
+        refcount(): int
+        failure_reason(): str
+
+    machine:
+        $Idle {
+            load(name: str) {
+                self.name = name,
+                self.failure = ""
+                -> $ResolvingSymbols
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $ResolvingSymbols {
+            $>() {
+                self.do_resolve()
+            }
+            resolve_done(success: bool, reason: str) {
+                if success {
+                    -> $AllocatingMemory
+                } else {
+                    self.failure = reason
+                    -> $Failed
+                }
+            }
+            status(): str { @@:("resolving") }
+        }
+
+        $AllocatingMemory {
+            $>() {
+                self.do_alloc()
+            }
+            alloc_done(success: bool, reason: str) {
+                if success {
+                    -> $Relocating
+                } else {
+                    self.failure = reason
+                    -> $Failed
+                }
+            }
+            status(): str { @@:("allocating") }
+        }
+
+        $Relocating {
+            $>() {
+                self.do_relocate()
+            }
+            relocate_done(success: bool, reason: str) {
+                if success {
+                    -> $Initializing
+                } else {
+                    self.failure = reason
+                    -> $UndoAlloc
+                }
+            }
+            status(): str { @@:("relocating") }
+        }
+
+        $Initializing {
+            $>() {
+                self.do_init()
+            }
+            init_done(success: bool, reason: str) {
+                if success {
+                    -> $Live
+                } else {
+                    self.failure = reason
+                    -> $UndoRelocate
+                }
+            }
+            status(): str { @@:("initializing") }
+        }
+
+        $UndoRelocate {
+            $>() {
+                self.do_undo_relocate(),
+                -> $UndoAlloc
+            }
+        }
+
+        $UndoAlloc {
+            $>() {
+                self.do_free(),
+                -> $Failed
+            }
+        }
+
+        $Live {
+            $>() {
+                self.refs = 0
+            }
+
+            acquire(): str {
+                self.refs = self.refs + 1,
+                @@:("acquired")
+            }
+            release(): str {
+                self.refs = self.refs - 1,
+                @@:("released")
+            }
+            unload(): str {
+                if self.refs > 0 {
+                    @@:("busy")
+                } else {
+                    @@:("unloading")
+                    -> $Unloading
+                }
+            }
+            status(): str { @@:("live") }
+            refcount(): int { @@:(self.refs) }
+        }
+
+        $Unloading {
+            $>() {
+                self.do_exit(),
+                self.do_free(),
+                -> $Idle
+            }
+        }
+
+        $Failed {
+            load(name: str) {
+                self.name = name,
+                self.failure = ""
+                -> $ResolvingSymbols
+            }
+            status(): str { @@:("failed") }
+            failure_reason(): str { @@:(self.failure) }
+        }
+
+    actions:
+        do_resolve() {}
+        do_alloc() {}
+        do_relocate() {}
+        do_init() {}
+        do_undo_relocate() {}
+        do_free() {}
+        do_exit() {}
+
+    domain:
+        name = ""
+        failure = ""
+        refs = 0
+}

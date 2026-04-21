@@ -1,0 +1,150 @@
+@@target java
+
+// Watchdog Timer — kernel drivers/watchdog/watchdog_dev.c magic-close semantics.
+
+@@system WatchdogDevice {
+    interface:
+        open(): String
+        write(data: String): String
+        ping(): String
+        close(): String
+        timeout_expired(): String
+        status(): String
+
+    machine:
+        $Inactive {
+            open(): String {
+                @@:("opened")
+                -> $Armed
+            }
+            status(): String { @@:("inactive") }
+        }
+
+        $Armed {
+            $>() {
+                this.magic_seen = false;
+                this.start_hw_timer();
+            }
+
+            ping(): String {
+                this.reset_hw_timer();
+                @@:("pinged")
+            }
+            write(data: String): String {
+                if (data.contains("V")) {
+                    this.magic_seen = true;
+                    @@:("magic character received")
+                } else {
+                    @@:("data written")
+                }
+                this.reset_hw_timer();
+            }
+            close(): String {
+                if (this.magic_seen) {
+                    this.stop_hw_timer();
+                    @@:("disarmed")
+                    -> $Inactive
+                } else {
+                    @@:("close ignored -- no magic char")
+                }
+            }
+            timeout_expired(): String {
+                @@:("SYSTEM RESET")
+                -> $Triggered
+            }
+            status(): String {
+                if (this.magic_seen) {
+                    @@:("armed (magic seen, close will disarm)")
+                } else {
+                    @@:("armed")
+                }
+            }
+        }
+
+        $Triggered {
+            status(): String { @@:("triggered -- system reset") }
+        }
+
+    actions:
+        start_hw_timer() {}
+        reset_hw_timer() {}
+        stop_hw_timer() {}
+
+    domain:
+        timeout_sec: int = 60
+        magic_seen: boolean = false
+}
+
+
+class Main {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " — expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+
+    static void test_open_and_ping() {
+        var wd = @@WatchdogDevice();
+        check("initial inactive", (String) wd.status(), "inactive");
+        check("open returns opened", (String) wd.open(), "opened");
+        check("armed after open", (String) wd.status(), "armed");
+        check("ping", (String) wd.ping(), "pinged");
+        check("still armed after ping", (String) wd.status(), "armed");
+        System.out.println("PASS: open and ping");
+    }
+
+    static void test_close_without_magic_is_ignored() {
+        var wd = @@WatchdogDevice();
+        wd.open();
+        check("close without magic", (String) wd.close(), "close ignored -- no magic char");
+        check("still armed after bad close", (String) wd.status(), "armed");
+        System.out.println("PASS: close without magic ignored (safety property)");
+    }
+
+    static void test_magic_char_then_close_disarms() {
+        var wd = @@WatchdogDevice();
+        wd.open();
+        check("write with V sets magic", (String) wd.write("goodbye V"), "magic character received");
+        check("status shows magic seen", (String) wd.status(), "armed (magic seen, close will disarm)");
+        check("close after magic disarms", (String) wd.close(), "disarmed");
+        check("back to inactive", (String) wd.status(), "inactive");
+        System.out.println("PASS: magic char then close disarms");
+    }
+
+    static void test_write_without_magic_is_plain_data() {
+        var wd = @@WatchdogDevice();
+        wd.open();
+        check("write without V", (String) wd.write("abcdef"), "data written");
+        check("still armed with no magic", (String) wd.status(), "armed");
+        System.out.println("PASS: write without magic is plain data");
+    }
+
+    static void test_timeout_triggers_reset() {
+        var wd = @@WatchdogDevice();
+        wd.open();
+        check("timeout fires", (String) wd.timeout_expired(), "SYSTEM RESET");
+        check("terminal triggered state", (String) wd.status(), "triggered -- system reset");
+        System.out.println("PASS: timeout triggers system reset");
+    }
+
+    static void test_reopen_resets_magic_seen() {
+        var wd = @@WatchdogDevice();
+        wd.open();
+        wd.write("set V please");
+        wd.close();
+        wd.open();
+        check("magic_seen reset on reopen", (String) wd.close(), "close ignored -- no magic char");
+        System.out.println("PASS: reopen resets magic_seen via enter handler");
+    }
+
+    public static void main(String[] args) {
+        test_open_and_ping();
+        test_close_without_magic_is_ignored();
+        test_magic_char_then_close_disarms();
+        test_write_without_magic_is_plain_data();
+        test_timeout_triggers_reset();
+        test_reopen_resets_magic_seen();
+        System.out.println("PASS: all watchdog tests passed");
+    }
+}

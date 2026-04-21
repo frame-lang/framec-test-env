@@ -1,0 +1,229 @@
+@@target c
+
+// Wi-Fi Station Management -- IEEE 802.11 station state machine.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system WifiStation {
+    interface:
+        scan_done(bssid: str, ssid: str)
+        auth_response(success: bool)
+        assoc_response(success: bool, aid: int)
+        eapol_key_msg(msg_num: int)
+        deauth(reason: str)
+        disassoc(reason: str)
+        disconnect()
+        status(): str
+        key_step(): int
+
+    machine:
+        $Disconnected {
+            scan_done(bssid: str, ssid: str) {
+                self->bssid = bssid;
+                self->ssid = ssid;
+                -> $Authenticating
+            }
+            status(): str { @@:("disconnected") }
+            key_step(): int { @@:(0) }
+        }
+
+        $Authenticating => $Associated {
+            $>() {
+                WifiStation_send_auth_request(self);
+            }
+
+            auth_response(success: bool) {
+                if (success) {
+                    -> $Associating
+                } else {
+                    -> $Disconnected
+                }
+            }
+            status(): str { @@:("authenticating") }
+            key_step(): int { @@:(0) }
+            => $^
+        }
+
+        $Associating => $Associated {
+            $>() {
+                WifiStation_send_assoc_request(self);
+            }
+
+            assoc_response(success: bool, aid: int) {
+                if (success) {
+                    self->aid = aid;
+                    -> $KeyNegotiation
+                } else {
+                    -> $Disconnected
+                }
+            }
+            disassoc(reason: str) {
+                -> $Authenticating
+            }
+            status(): str { @@:("associating") }
+            key_step(): int { @@:(0) }
+            => $^
+        }
+
+        $KeyNegotiation => $Associated {
+            $.step: int = 0
+
+            eapol_key_msg(msg_num: int) {
+                $.step = msg_num;
+                if (msg_num == 4) {
+                    -> $Connected
+                }
+            }
+            disassoc(reason: str) {
+                -> $Authenticating
+            }
+            status(): str { @@:("key negotiation") }
+            key_step(): int { @@:($.step) }
+            => $^
+        }
+
+        $Associated {
+            deauth(reason: str) {
+                -> $Disconnected
+            }
+            disconnect() {
+                WifiStation_send_deauth(self);
+                -> $Disconnected
+            }
+        }
+
+        $Connected {
+            disassoc(reason: str) {
+                -> $Authenticating
+            }
+            deauth(reason: str) {
+                -> $Disconnected
+            }
+            disconnect() {
+                WifiStation_send_deauth(self);
+                -> $Disconnected
+            }
+            status(): str { @@:("connected") }
+            key_step(): int { @@:(4) }
+        }
+
+    actions:
+        send_auth_request() {}
+        send_assoc_request() {}
+        send_deauth() {}
+
+    domain:
+        bssid: str = ""
+        ssid: str = ""
+        aid: int = 0
+}
+
+
+void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s -- expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void check_int(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s -- expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+void test_happy_connect(void) {
+    WifiStation* sta = @@WifiStation();
+    check_str("initial disconnected", (const char*)WifiStation_status(sta), "disconnected");
+    WifiStation_scan_done(sta, "AA:BB:CC:DD:EE:FF", "MyNet");
+    check_str("authenticating", (const char*)WifiStation_status(sta), "authenticating");
+    WifiStation_auth_response(sta, 1);
+    check_str("associating", (const char*)WifiStation_status(sta), "associating");
+    WifiStation_assoc_response(sta, 1, 1);
+    check_str("key negotiation", (const char*)WifiStation_status(sta), "key negotiation");
+    WifiStation_eapol_key_msg(sta, 1);
+    check_int("step 1", WifiStation_key_step(sta), 1);
+    WifiStation_eapol_key_msg(sta, 2);
+    check_int("step 2", WifiStation_key_step(sta), 2);
+    WifiStation_eapol_key_msg(sta, 3);
+    check_int("step 3", WifiStation_key_step(sta), 3);
+    WifiStation_eapol_key_msg(sta, 4);
+    check_str("connected", (const char*)WifiStation_status(sta), "connected");
+    printf("PASS: happy connect through 4-way handshake\n");
+    WifiStation_destroy(sta);
+}
+
+void test_auth_rejection(void) {
+    WifiStation* sta = @@WifiStation();
+    WifiStation_scan_done(sta, "aa", "net");
+    WifiStation_auth_response(sta, 0);
+    check_str("auth rejected -> disconnected", (const char*)WifiStation_status(sta), "disconnected");
+    printf("PASS: auth rejection returns to disconnected\n");
+    WifiStation_destroy(sta);
+}
+
+void test_deauth_from_keynegotiation_via_hsm(void) {
+    WifiStation* sta = @@WifiStation();
+    WifiStation_scan_done(sta, "aa", "net");
+    WifiStation_auth_response(sta, 1);
+    WifiStation_assoc_response(sta, 1, 5);
+    WifiStation_eapol_key_msg(sta, 2);
+    check_str("in key negotiation", (const char*)WifiStation_status(sta), "key negotiation");
+    WifiStation_deauth(sta, "AP restart");
+    check_str("deauth forwarded via HSM -> disconnected", (const char*)WifiStation_status(sta), "disconnected");
+    printf("PASS: deauth forwards via HSM parent from key negotiation\n");
+    WifiStation_destroy(sta);
+}
+
+void test_disassoc_drops_to_authenticating(void) {
+    WifiStation* sta = @@WifiStation();
+    WifiStation_scan_done(sta, "aa", "net");
+    WifiStation_auth_response(sta, 1);
+    WifiStation_assoc_response(sta, 1, 7);
+    WifiStation_eapol_key_msg(sta, 2);
+    WifiStation_disassoc(sta, "reason");
+    check_str("disassoc -> authenticating", (const char*)WifiStation_status(sta), "authenticating");
+    WifiStation_assoc_response(sta, 1, 7);
+    check_int("step resets on reentry", WifiStation_key_step(sta), 0);
+    printf("PASS: disassoc drops to authenticating (state var resets)\n");
+    WifiStation_destroy(sta);
+}
+
+void test_deauth_from_connected(void) {
+    WifiStation* sta = @@WifiStation();
+    WifiStation_scan_done(sta, "aa", "net");
+    WifiStation_auth_response(sta, 1);
+    WifiStation_assoc_response(sta, 1, 3);
+    WifiStation_eapol_key_msg(sta, 4);
+    check_str("connected", (const char*)WifiStation_status(sta), "connected");
+    WifiStation_deauth(sta, "inactivity");
+    check_str("deauth from connected", (const char*)WifiStation_status(sta), "disconnected");
+    printf("PASS: deauth from connected returns to disconnected\n");
+    WifiStation_destroy(sta);
+}
+
+void test_disconnect_from_connected(void) {
+    WifiStation* sta = @@WifiStation();
+    WifiStation_scan_done(sta, "aa", "net");
+    WifiStation_auth_response(sta, 1);
+    WifiStation_assoc_response(sta, 1, 3);
+    WifiStation_eapol_key_msg(sta, 4);
+    WifiStation_disconnect(sta);
+    check_str("disconnect from connected", (const char*)WifiStation_status(sta), "disconnected");
+    printf("PASS: explicit disconnect from connected\n");
+    WifiStation_destroy(sta);
+}
+
+int main(void) {
+    test_happy_connect();
+    test_auth_rejection();
+    test_deauth_from_keynegotiation_via_hsm();
+    test_disassoc_drops_to_authenticating();
+    test_deauth_from_connected();
+    test_disconnect_from_connected();
+    printf("PASS: all Wi-Fi station tests passed\n");
+    return 0;
+}

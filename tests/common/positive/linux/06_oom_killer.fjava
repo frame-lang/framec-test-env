@@ -1,0 +1,129 @@
+@@target java
+
+// OOM Killer — kernel mm/oom_kill.c semantics.
+
+@@system OomKiller {
+    interface:
+        oom_detected(gfp_flags: int): String
+        victim_exited(pid: int, freed_kb: int): String
+        oom_detected_again(gfp_flags: int): String
+        status(): String
+
+    machine:
+        $Normal {
+            oom_detected(gfp_flags: int): String {
+                @@:("selecting victim")
+                -> $Selecting
+            }
+            status(): String { @@:("normal") }
+        }
+
+        $Selecting {
+            $>() {
+                this.victim_pid = this.select_victim();
+                if (this.victim_pid < 0) {
+                    -> $Panic
+                } else {
+                    -> $Killing
+                }
+            }
+            status(): String { @@:("selecting") }
+        }
+
+        $Killing {
+            $>() {
+                this.send_sigkill(this.victim_pid);
+                this.start_reaper_timer();
+            }
+            <$() {
+                this.cancel_reaper_timer();
+            }
+
+            victim_exited(pid: int, freed_kb: int): String {
+                if (pid == this.victim_pid) {
+                    this.total_freed_kb = this.total_freed_kb + freed_kb;
+                    @@:("reclaimed")
+                    -> $Normal
+                } else {
+                    @@:("wrong pid, still waiting")
+                }
+            }
+
+            status(): String { @@:("killing") }
+        }
+
+        $Panic {
+            status(): String { @@:("panic") }
+        }
+
+    actions:
+        select_victim(): int {
+            this.victim_score = 850;
+            return 4242;
+        }
+        send_sigkill(pid: int) {}
+        start_reaper_timer() {}
+        cancel_reaper_timer() {}
+
+    domain:
+        victim_pid: int = -1
+        victim_score: int = 0
+        total_freed_kb: int = 0
+}
+
+
+class Main {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " — expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+
+    static void test_normal_oom_flow() {
+        var oom = @@OomKiller();
+        check("initial normal", (String) oom.status(), "normal");
+        check("oom_detected -> selecting", (String) oom.oom_detected(0), "selecting victim");
+        check("arrived in killing", (String) oom.status(), "killing");
+        check("victim exits", (String) oom.victim_exited(4242, 51200), "reclaimed");
+        check("back to normal", (String) oom.status(), "normal");
+        System.out.println("PASS: normal OOM flow");
+    }
+
+    static void test_concurrent_oom_silently_dropped() {
+        var oom = @@OomKiller();
+        oom.oom_detected(0);
+        check("in killing", (String) oom.status(), "killing");
+        oom.oom_detected_again(0);
+        check("still killing (event dropped)", (String) oom.status(), "killing");
+        oom.victim_exited(4242, 8192);
+        check("back to normal after reclaim", (String) oom.status(), "normal");
+        System.out.println("PASS: concurrent OOM events dropped in $Killing (safety)");
+    }
+
+    static void test_wrong_pid_exit_ignored() {
+        var oom = @@OomKiller();
+        oom.oom_detected(0);
+        check("waiting for victim", (String) oom.victim_exited(9999, 1024), "wrong pid, still waiting");
+        check("still killing", (String) oom.status(), "killing");
+        oom.victim_exited(4242, 2048);
+        check("correct pid -> normal", (String) oom.status(), "normal");
+        System.out.println("PASS: wrong-pid exit ignored in $Killing");
+    }
+
+    static void test_oom_detected_ignored_in_selecting() {
+        var oom = @@OomKiller();
+        check("first oom", (String) oom.oom_detected(0), "selecting victim");
+        oom.oom_detected(0);
+        check("second oom dropped", (String) oom.status(), "killing");
+        System.out.println("PASS: oom_detected ignored while killing");
+    }
+
+    public static void main(String[] args) {
+        test_normal_oom_flow();
+        test_concurrent_oom_silently_dropped();
+        test_wrong_pid_exit_ignored();
+        test_oom_detected_ignored_in_selecting();
+        System.out.println("PASS: all OOM killer tests passed");
+    }
+}

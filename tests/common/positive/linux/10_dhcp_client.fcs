@@ -1,0 +1,234 @@
+@@target csharp
+
+// DHCP Client -- RFC 2131 Figure 5 state machine.
+
+using System;
+
+@@system DhcpClient {
+    interface:
+        start()
+        offer_received(server_ip: String, offered_ip: String, lease_sec: int)
+        ack_received(ip: String, lease_sec: int)
+        nak_received()
+        t1_expired()
+        t2_expired()
+        lease_expired()
+        release()
+        status(): String
+
+    machine:
+        $Init {
+            $>() {
+                this.attempts = 0;
+            }
+
+            start() {
+                -> $Selecting
+            }
+            status(): String { @@:("init") }
+        }
+
+        $Selecting {
+            $>() {
+                this.attempts = this.attempts + 1;
+                this.broadcast_discover();
+            }
+
+            offer_received(server_ip: String, offered_ip: String, lease_sec: int) {
+                this.server = server_ip;
+                this.offered = offered_ip;
+                this.lease_sec = lease_sec;
+                -> $Requesting
+            }
+            status(): String { @@:("selecting") }
+        }
+
+        $Requesting {
+            $>() {
+                this.send_request();
+            }
+
+            ack_received(ip: String, lease_sec: int) {
+                this.bound = ip;
+                this.lease_sec = lease_sec;
+                -> $Bound
+            }
+            nak_received() {
+                -> $Init
+            }
+            status(): String { @@:("requesting") }
+        }
+
+        $Bound {
+            $>() {
+                this.arm_timers();
+            }
+
+            t1_expired() {
+                -> $Renewing
+            }
+            release() {
+                this.cancel_all_timers();
+                this.send_release();
+                -> $Init
+            }
+            status(): String { @@:("bound") }
+        }
+
+        $Renewing {
+            $>() {
+                this.send_renew();
+            }
+
+            ack_received(ip: String, lease_sec: int) {
+                this.lease_sec = lease_sec;
+                -> $Bound
+            }
+            nak_received() {
+                this.cancel_all_timers();
+                -> $Init
+            }
+            t2_expired() {
+                -> $Rebinding
+            }
+            lease_expired() {
+                this.cancel_all_timers();
+                -> $Init
+            }
+            release() {
+                this.cancel_all_timers();
+                -> $Init
+            }
+            status(): String { @@:("renewing") }
+        }
+
+        $Rebinding {
+            $>() {
+                this.broadcast_renew();
+            }
+
+            ack_received(ip: String, lease_sec: int) {
+                this.lease_sec = lease_sec;
+                -> $Bound
+            }
+            nak_received() {
+                this.cancel_all_timers();
+                -> $Init
+            }
+            lease_expired() {
+                this.cancel_all_timers();
+                this.bound = "";
+                -> $Init
+            }
+            release() {
+                this.cancel_all_timers();
+                -> $Init
+            }
+            status(): String { @@:("rebinding") }
+        }
+
+    actions:
+        broadcast_discover()    {}
+        send_request()          {}
+        send_renew()            {}
+        broadcast_renew()       {}
+        send_release()          {}
+        arm_timers()            {}
+        cancel_all_timers()     {}
+
+    domain:
+        server: String = ""
+        offered: String = ""
+        bound: String = ""
+        lease_sec: int = 0
+        attempts: int = 0
+}
+
+
+class Program {
+    static void check(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} -- expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+
+    static void test_full_lease_acquisition() {
+        var dhcp = @@DhcpClient();
+        check("initial init", (string) dhcp.status(), "init");
+        dhcp.start();
+        check("selecting", (string) dhcp.status(), "selecting");
+        dhcp.offer_received("192.168.1.1", "192.168.1.100", 3600);
+        check("requesting after offer", (string) dhcp.status(), "requesting");
+        dhcp.ack_received("192.168.1.100", 3600);
+        check("bound", (string) dhcp.status(), "bound");
+        Console.WriteLine("PASS: full lease acquisition Init->Selecting->Requesting->Bound");
+    }
+
+    static void test_t1_triggers_renewal() {
+        var dhcp = @@DhcpClient();
+        dhcp.start();
+        dhcp.offer_received("10.0.0.1", "10.0.0.100", 7200);
+        dhcp.ack_received("10.0.0.100", 7200);
+        dhcp.t1_expired();
+        check("renewing after t1", (string) dhcp.status(), "renewing");
+        dhcp.ack_received("10.0.0.100", 7200);
+        check("back to bound after renew ack", (string) dhcp.status(), "bound");
+        Console.WriteLine("PASS: T1 triggers renewal, ACK returns to bound");
+    }
+
+    static void test_t2_triggers_rebind() {
+        var dhcp = @@DhcpClient();
+        dhcp.start();
+        dhcp.offer_received("10.0.0.1", "10.0.0.100", 7200);
+        dhcp.ack_received("10.0.0.100", 7200);
+        dhcp.t1_expired();
+        check("renewing", (string) dhcp.status(), "renewing");
+        dhcp.t2_expired();
+        check("rebinding after t2", (string) dhcp.status(), "rebinding");
+        dhcp.ack_received("10.0.0.100", 7200);
+        check("rebind ACK -> bound", (string) dhcp.status(), "bound");
+        Console.WriteLine("PASS: T2 triggers rebind, ACK returns to bound");
+    }
+
+    static void test_nak_during_requesting_restarts() {
+        var dhcp = @@DhcpClient();
+        dhcp.start();
+        dhcp.offer_received("10.0.0.1", "10.0.0.100", 7200);
+        dhcp.nak_received();
+        check("NAK in Requesting -> Init", (string) dhcp.status(), "init");
+        Console.WriteLine("PASS: NAK in Requesting restarts");
+    }
+
+    static void test_lease_expired_in_rebinding() {
+        var dhcp = @@DhcpClient();
+        dhcp.start();
+        dhcp.offer_received("10.0.0.1", "10.0.0.100", 7200);
+        dhcp.ack_received("10.0.0.100", 7200);
+        dhcp.t1_expired();
+        dhcp.t2_expired();
+        dhcp.lease_expired();
+        check("lease_expired in Rebinding -> Init", (string) dhcp.status(), "init");
+        Console.WriteLine("PASS: lease expiry in rebinding clears state");
+    }
+
+    static void test_release_from_bound() {
+        var dhcp = @@DhcpClient();
+        dhcp.start();
+        dhcp.offer_received("10.0.0.1", "10.0.0.100", 7200);
+        dhcp.ack_received("10.0.0.100", 7200);
+        dhcp.release();
+        check("release -> init", (string) dhcp.status(), "init");
+        Console.WriteLine("PASS: release from bound");
+    }
+
+    static void Main(string[] args) {
+        test_full_lease_acquisition();
+        test_t1_triggers_renewal();
+        test_t2_triggers_rebind();
+        test_nak_during_requesting_restarts();
+        test_lease_expired_in_rebinding();
+        test_release_from_bound();
+        Console.WriteLine("PASS: all DHCP client tests passed");
+    }
+}
