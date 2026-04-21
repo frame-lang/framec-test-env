@@ -15,21 +15,32 @@ Test sources for Frame V4 language validation across 11 backends.
 
 ## Supported Languages
 
-| Flag | Extension | Target | Tests |
-|------|-----------|--------|-------|
-| `--python`, `--py` | `.fpy` | `@@target python_3` | 161 |
-| `--typescript`, `--ts` | `.fts` | `@@target typescript` | 143 |
-| `--javascript`, `--js` | `.fjs` | `@@target javascript` | 137 |
-| `--rust`, `--rs` | `.frs` | `@@target rust` | 147 |
-| `--c` | `.fc` | `@@target c` | 147 |
-| `--cpp`, `--c++` | `.fcpp` | `@@target cpp_17` | 137 |
-| `--java` | `.fjava` | `@@target java` | 133 |
-| `--csharp`, `--cs` | `.fcs` | `@@target csharp` | 133 |
-| `--go` | `.fgo` | `@@target go` | 133 |
-| `--php` | `.fphp` | `@@target php` | 133 |
-| `--kotlin`, `--kt` | `.fkt` | `@@target kotlin` | 133 |
+Current counts from the 2026-04-20 matrix run. "Skip" numbers are all
+legitimate language-incompatibility (e.g. Ruby / Lua / PHP / Go / C can't
+express `async`, Java can't hold two public classes in one file); see
+the `@@skip` reason on each skipped test for the specific constraint.
 
-**Total: ~1537 tests, all passing.**
+| Target | Extension | Pass | Skip |
+|---|---|---:|---:|
+| `python_3` | `.fpy` | 225 | 0 |
+| `typescript` | `.fts` | 206 | 0 |
+| `javascript` | `.fjs` | 200 | 0 |
+| `rust` | `.frs` | 201 | 0 |
+| `c` | `.fc` | 208 | 2 |
+| `cpp_23` | `.fcpp` | 200 | 0 |
+| `csharp` | `.fcs` | 196 | 0 |
+| `java` | `.fjava` | 187 | 9 |
+| `go` | `.fgo` | 195 | 1 |
+| `php` | `.fphp` | 192 | 4 |
+| `kotlin` | `.fkt` | 196 | 0 |
+| `swift` | `.fswift` | 190 | 0 |
+| `ruby` | `.frb` | 198 | 1 |
+| `erlang` | `.ferl` | 187 | 11 |
+| `lua` | `.flua` | 198 | 1 |
+| `dart` | `.fdart` | 199 | 0 |
+| `gdscript` | `.fgd` | 199 | 0 |
+
+**Total: 3,377 passing, 0 failing, 29 skipped — 17 languages clean.**
 
 ## Test Structure Principles
 

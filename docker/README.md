@@ -73,7 +73,7 @@ Per container, the `runner.sh` script:
 
 All containers launch simultaneously via `docker compose up -d`. The `collect-results.sh` script polls until every container exits, then reads per-service logs via `docker compose logs --no-log-prefix <service>` to extract TAP results without interleaving. A summary report lists per-language pass/fail counts, with all failure lines grouped at the end.
 
-GDScript requires an x86_64 `framec` binary (Godot has no ARM64 build). The compose file uses a separate volume anchor (`FRAMEC_BIN_GD`) so all 17 containers can launch from a single `docker compose up -d` invocation with different binaries.
+All 17 containers share the same mounted `framec` binary. The GDScript image runs natively on both ARM64 and x86_64 (Godot 4.6.2 ships linux.arm64 + linux.x86_64 builds; see `docker/base/gdscript/Dockerfile`).
 
 ```bash
 # Via Makefile (recommended):
@@ -93,7 +93,7 @@ make test-python   # Single language (sequential, for debugging)
 | JavaScript | `node:20-slim` | — | `node file.mjs` | ~4s |
 | Rust | `rust:latest` | `cargo build` | binary | ~23s |
 | C | `gcc:14` | `gcc -lcjson` | binary | ~5s |
-| C++ | `gcc:14` | `g++ -std=c++17` | binary | ~43s |
+| C++ | `gcc:14` | `g++ -std=c++23` | binary | ~43s |
 | C# | `dotnet/sdk:8.0` | `dotnet build` | `dotnet run` | ~69s |
 | Java | `temurin:21-jdk` | `javac` | `java Main` | ~40s |
 | Go | `golang:1.23` | — | `go run` | ~13s |
@@ -106,13 +106,13 @@ make test-python   # Single language (sequential, for debugging)
 | Kotlin | `temurin:21-jdk` + kotlinc | `kotlinc -include-runtime` | `java -jar` | ~5m30s |
 | Swift | `swift:5.10` | — | `swift file.swift` | ~19s |
 | Ruby | `ruby:3.3-slim` | — | `ruby file.rb` | ~5s |
-| Erlang | `erlang:27` | `erlc` | compile-only* | ~2s |
+| Erlang | `erlang:27` | `erlc` | `escript run_test.escript` | ~4s |
 | Lua | `ubuntu:24.04` + lua5.4 | — | `lua file.lua` | ~2s |
 | Dart | `dart:3.4` | — | `dart run` | ~varies |
-| GDScript | `godot-ci:4.3` | — | `godot --headless` | x86 only** |
+| GDScript | `ubuntu:24.04` + Godot 4.6.2 | — | `godot --headless` | ~5s* |
 
-*Erlang: gen_statem modules compile but lack executable test harnesses (tracked issue)
-**GDScript: `godot-ci` only available for x86_64; skipped on ARM64 (Apple Silicon)
+*GDScript: native ARM64 image built from source (`docker/base/gdscript/`)
+**Erlang: the per-test escript driver (auto-generated in `erlang_batch.sh`) calls each interface export with dummy args and reports `ok` if none crash — semantic correctness is checked via pattern-match assertions inside the test source, which fault the runtime if a Frame guarantee regresses.
 
 ### Dependencies
 
@@ -131,7 +131,6 @@ docker/
 ├── collect-results.sh          # Waits for parallel containers, collects TAP results
 ├── run.sh                      # Orchestrator: clean, run, compare
 ├── framec-native               # Cached native-arch Linux binary (gitignored)
-├── framec-amd64                # Cached x86_64 binary for GDScript (gitignored)
 ├── README.md                   # This file
 ├── base/                       # One Dockerfile per language
 │   ├── python/Dockerfile
@@ -157,22 +156,17 @@ docker/
 
 ## Known Issues
 
-1. **Erlang tests are compile-only**: Generated Erlang code is a `gen_statem` module with no `main/0`. The test `.ferl` files lack native epilog code that starts the process and calls interface methods. Needs test harness code added to all 131 `.ferl` files.
+1. **Kotlin was slow (~5m30s)** historically because `kotlinc` has significant JVM startup per test. Now mitigated by `kotlin_batch.sh` — all `.kt` files in a test set are compiled together into a single JAR and dispatched by a pre-built `TestRunner.jar`. Total Kotlin runtime ~50s.
 
-2. **Lua tests are compile-only**: Same issue as Erlang. The `.flua` test files have no native epilog code. Needs harnesses added to all 136 `.flua` files.
+2. **Alpine images incompatible**: The mounted `framec` binary is dynamically linked against glibc. Alpine images (which use musl) can't execute it. All containers use Debian/Ubuntu base images.
 
-3. **GDScript requires x86_64**: The `godot-ci` Docker image is x86_64 only. On ARM64 (Apple Silicon), GDScript tests are skipped. A native ARM64 Godot build does not exist.
-
-4. **Kotlin is slow (~5m30s)**: The `kotlinc` compiler has significant JVM startup overhead per test. Could be improved with a batch compilation approach.
-
-5. **Alpine images incompatible**: The mounted `framec` binary is dynamically linked against glibc. Alpine images (which use musl) can't execute it. All containers use Debian/Ubuntu base images.
+3. **Java async** uses `CompletableFuture` (no native async/await); callers `.get()` to await. **C++ async** uses a generated `FrameTask<T>` coroutine promise and needs `-std=c++23` (or ≥ `c++20`). See `docs/framepiler_design.md § Async Dispatch Per Language` in the framepiler repo for the per-language model.
 
 ## Environment Variables
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
 | `FRAMEC_BIN` | Path to Linux framec binary (native arch) | Required |
-| `FRAMEC_BIN_GD` | Path to x86_64 framec binary (GDScript only) | Falls back to `FRAMEC_BIN` |
 | `COMPILE_ONLY` | Skip execution, transpile+compile only | `false` |
 
 ## Adding a New Language
