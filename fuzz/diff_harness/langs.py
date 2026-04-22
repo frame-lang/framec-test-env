@@ -415,6 +415,49 @@ void main() {
 """
 
 
+def php_persist(meta: dict) -> str:
+    """PHP persist harness. Uses `<?php ... ?>` prolog, `Class::method()`
+    for static calls, `$inst->method()` for instance calls. The body
+    constructs its own trace via `echo ... . PHP_EOL;`."""
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = [""]
+    lines.append(f"$inst = new {sys_name}();")
+    for _ in range(advances_pre):
+        lines.append("$inst->advance();")
+        lines.append('echo "TRACE: advance" . PHP_EOL;')
+    lines.append(f"$inst->set_x({set_x});")
+    lines.append(f'echo "TRACE: set_x {set_x}" . PHP_EOL;')
+    if has_str:
+        lines.append(f'$inst->set_s("{set_s}");')
+        lines.append(f'echo "TRACE: set_s \\"{set_s}\\"" . PHP_EOL;')
+    if has_bool:
+        lines.append(f"$inst->set_b({'true' if set_b else 'false'});")
+        lines.append(f'echo "TRACE: set_b {"true" if set_b else "false"}" . PHP_EOL;')
+    lines.append('echo "TRACE: status " . $inst->status() . PHP_EOL;')
+    lines.append("$blob = $inst->save_state();")
+    lines.append('echo "TRACE: save ok" . PHP_EOL;')
+    lines.append(f"$rest = {sys_name}::restore_state($blob);")
+    lines.append('echo "TRACE: restore ok" . PHP_EOL;')
+    lines.append('echo "TRACE: post_status " . $rest->status() . PHP_EOL;')
+    lines.append('echo "TRACE: post_x " . $rest->get_x() . PHP_EOL;')
+    if has_str:
+        lines.append('echo \'TRACE: post_s "\' . $rest->get_s() . \'"\' . PHP_EOL;')
+    if has_bool:
+        lines.append(
+            'echo "TRACE: post_b " . ($rest->get_b() ? "true" : "false") . PHP_EOL;'
+        )
+    lines.append('echo "TRACE: done" . PHP_EOL;')
+    return "\n".join(lines) + "\n"
+
+
 def dart_persist(meta: dict) -> str:
     sys_name = meta["sys_name"]
     seq = meta["sequence"]
@@ -1089,7 +1132,18 @@ def _php_trace(src: str) -> str:
         body = m.group(1)  # the "..." literal including quotes
         escaped = body.replace('$', r'\$')
         return f'echo {escaped} . PHP_EOL;'
-    return _sub_outside_strings(r'\bprint\(("[^"]*")\)', _fix, src)
+    src = _sub_outside_strings(r'\bprint\(("[^"]*")\)', _fix, src)
+    # PHP uses `$this->` for self and `$<name>` for variables. Frame
+    # bodies in our Phase-2 corpus are Python-flavored (`self.x = v;`);
+    # rewrite the two patterns outside string literals:
+    #   self.<ident>  →  $this-><ident>
+    #   bare `v` rvalue assignments (`= v;`) → `= $v;`
+    # PHP types aren't accepted as Frame annotations in the domain
+    # block the way Python accepts them, so we strip `: int` / `: str`
+    # / `: bool` from interface/param declarations for the PHP backend.
+    src = _sub_outside_strings(r'\bself\.(?=[A-Za-z_])', '$this->', src)
+    src = _sub_outside_strings(r'=\s*v\s*;', '= $v;', src)
+    return _lower_bool(src)
 
 
 def _dart_trace(src: str) -> str:
@@ -1237,6 +1291,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=php_canary,
+        render_persist=php_persist,
         rewrite_trace=_php_trace,
         prolog="<?php\n",
         notes="JSON string blob. static restore_state. New() fires constructor.",
