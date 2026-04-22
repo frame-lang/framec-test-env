@@ -952,35 +952,88 @@ def _which(cmd: str) -> Optional[str]:
 import re
 
 
+def _string_ranges(src: str) -> list[tuple[int, int]]:
+    """Return [start, end) byte ranges for every string literal in `src`.
+
+    Scans `"..."`, `'...'`, and `` `...` `` (JS/TS backtick strings),
+    handling `\\` escapes. Frame-source corpora don't embed exotic
+    string forms (raw strings, triple-quoted heredocs), so this simple
+    tracker is sufficient for the harness-level rewrites.
+
+    Comments are not tracked because generated Frame sources the harness
+    operates on never contain them."""
+    ranges: list[tuple[int, int]] = []
+    n = len(src)
+    i = 0
+    while i < n:
+        c = src[i]
+        if c in ('"', "'", "`"):
+            start = i
+            quote = c
+            i += 1
+            while i < n:
+                if src[i] == '\\' and i + 1 < n:
+                    i += 2
+                    continue
+                if src[i] == quote:
+                    i += 1
+                    break
+                i += 1
+            ranges.append((start, i))
+        else:
+            i += 1
+    return ranges
+
+
+def _sub_outside_strings(pattern: str, repl, src: str) -> str:
+    """Run `re.sub(pattern, repl, src)` but ignore matches whose start
+    position falls inside a string literal. `repl` may be a template
+    string (supporting `\\1` / `\\g<name>` backreferences) or a
+    callable receiving the match object. Mirrors the string-literal-
+    aware rewrite approach used by `replace_outside_strings_and_comments`
+    in framec's `codegen_utils`."""
+    compiled = re.compile(pattern)
+    ranges = _string_ranges(src)
+
+    def inside_string(pos: int) -> bool:
+        for start, end in ranges:
+            if start <= pos < end:
+                return True
+        return False
+
+    if callable(repl):
+        def sub_fn(m):
+            return m.group(0) if inside_string(m.start()) else repl(m)
+    else:
+        def sub_fn(m):
+            return m.group(0) if inside_string(m.start()) else m.expand(repl)
+
+    return compiled.sub(sub_fn, src)
+
+
 def _rewrite_self(src: str, to: str) -> str:
-    """Substitute `self.` → `to` (e.g. `this.` or `this->`) in the Frame
-    body so a Python-flavored pure-Frame source renders correctly in
-    the this-family / this-arrow-family backends. We avoid touching
-    occurrences inside string literals by matching only on the pattern
-    `self.<ident>` — Phase-2 generators never put `self.` inside a
-    string, so this is safe for our cases."""
-    # Match `self.` followed by an identifier-starting char. We keep
-    # this tight so trace strings like `"TRACE: ..."` stay untouched.
-    return re.sub(r'\bself\.(?=[A-Za-z_])', to, src)
+    """Substitute `self.` → `to` (`this.`, `s.`, `$this->`, …) in the
+    Frame body so a Python-flavored pure-Frame source renders correctly
+    in the target backend. String-literal-aware so `self.` inside a
+    TRACE string literal stays intact."""
+    return _sub_outside_strings(r'\bself\.(?=[A-Za-z_])', to, src)
 
 
 def _lower_bool(src: str) -> str:
-    """Lowercase `True`/`False` → `true`/`false` (for every backend
-    except Python, which is the canonical form we generate). Word-
-    boundary anchored so identifiers like `False_flag` aren't touched."""
-    src = re.sub(r'\bTrue\b', 'true', src)
-    src = re.sub(r'\bFalse\b', 'false', src)
+    """Lowercase `True`/`False` → `true`/`false`. Word-boundary anchored
+    so identifiers like `False_flag` aren't touched, and string-literal-
+    aware so `"True"` / `"False"` in quoted text are preserved."""
+    src = _sub_outside_strings(r'\bTrue\b', 'true', src)
+    src = _sub_outside_strings(r'\bFalse\b', 'false', src)
     return src
 
 
 def _map_str_type(src: str, native: str) -> str:
-    """Replace Frame's canonical `str` type keyword with a target's
+    """Replace Frame's portable `str` type keyword with the target's
     native string type (e.g. `String` in Rust/C#/Java, `string` in Go).
-    Matches only `str` appearing as a type — preceded by `:` or inside
-    a `(v: str)` style type annotation, word-boundary terminated."""
-    # Matches ": str" (with optional leading whitespace) or "(v: str,"
-    # in the same way framec's parser recognises type annotations.
-    return re.sub(r'(?<=:\s)str\b', native, src)
+    Matches only when preceded by `:` (optional whitespace) so it's
+    clearly a type annotation, and only outside string literals."""
+    return _sub_outside_strings(r'(?<=:\s)str\b', native, src)
 
 
 def _py_passthrough(src: str) -> str:
@@ -989,14 +1042,14 @@ def _py_passthrough(src: str) -> str:
 
 def _js_trace(src: str) -> str:
     # print("x") → console.log("x"); with statement terminator.
-    src = re.sub(r'\bprint\((.*?)\)', r'console.log(\1);', src)
+    src = _sub_outside_strings(r'\bprint\((.*?)\)', r'console.log(\1);', src)
     src = _rewrite_self(src, "this.")
     return _lower_bool(src)
 
 
 def _go_trace(src: str) -> str:
     # print("x") → fmt.Println("x")
-    src = re.sub(r'\bprint\((.*?)\)', r'fmt.Println(\1)', src)
+    src = _sub_outside_strings(r'\bprint\((.*?)\)', r'fmt.Println(\1)', src)
     # Go's generated methods use `s` as the receiver name. Native
     # statement bodies inside @@state handlers pass through unchanged
     # (Oceans Model), so we must pre-rewrite `self.` → `s.` at the
@@ -1009,7 +1062,7 @@ def _go_trace(src: str) -> str:
 def _ruby_trace(src: str) -> str:
     # print("x") → puts "x" (drop parens); and in Ruby, `print` without
     # parens is also valid but we normalize to `puts` for newline.
-    src = re.sub(r'\bprint\((.*?)\)', r'puts \1', src)
+    src = _sub_outside_strings(r'\bprint\((.*?)\)', r'puts \1', src)
     # Ruby uses `self.x` natively; no self→this rewrite needed.
     return _lower_bool(src)
 
@@ -1022,7 +1075,7 @@ def _lua_trace(src: str) -> str:
 
 def _rust_trace(src: str) -> str:
     # print("x") → println!("x");  — Rust requires the trailing `;`
-    src = re.sub(r'\bprint\((.*?)\)', r'println!(\1);', src)
+    src = _sub_outside_strings(r'\bprint\((.*?)\)', r'println!(\1);', src)
     # Rust uses `self.x` natively; no rewrite needed.
     return _lower_bool(src)
 
@@ -1036,7 +1089,7 @@ def _php_trace(src: str) -> str:
         body = m.group(1)  # the "..." literal including quotes
         escaped = body.replace('$', r'\$')
         return f'echo {escaped} . PHP_EOL;'
-    return re.sub(r'\bprint\(("[^"]*")\)', _fix, src)
+    return _sub_outside_strings(r'\bprint\(("[^"]*")\)', _fix, src)
 
 
 def _dart_trace(src: str) -> str:
@@ -1045,13 +1098,13 @@ def _dart_trace(src: str) -> str:
     def _fix(m: re.Match) -> str:
         lit = m.group(1).replace('$', r'\$')
         return f'print({lit});'
-    src = re.sub(r'\bprint\(("[^"]*")\)', _fix, src)
+    src = _sub_outside_strings(r'\bprint\(("[^"]*")\)', _fix, src)
     src = _rewrite_self(src, "this.")
     return _lower_bool(src)
 
 
 def _java_trace(src: str) -> str:
-    return re.sub(r'\bprint\(("[^"]*")\)', r'System.out.println(\1);', src)
+    return _sub_outside_strings(r'\bprint\(("[^"]*")\)', r'System.out.println(\1);', src)
 
 
 def _kotlin_trace(src: str) -> str:
@@ -1060,7 +1113,7 @@ def _kotlin_trace(src: str) -> str:
     def _fix(m: re.Match) -> str:
         lit = m.group(1).replace('$', r'\$')
         return f'println({lit})'
-    src = re.sub(r'\bprint\(("[^"]*")\)', _fix, src)
+    src = _sub_outside_strings(r'\bprint\(("[^"]*")\)', _fix, src)
     src = _rewrite_self(src, "this.")
     return _lower_bool(src)
 
@@ -1068,7 +1121,7 @@ def _kotlin_trace(src: str) -> str:
 def _swift_trace(src: str) -> str:
     # print("x") is valid Swift. Swift only interpolates `\(expr)` —
     # `$foo` is literal — so no escape needed for our canary.
-    src = re.sub(r'\bprint\(("[^"]*")\)', r'print(\1)', src)
+    src = _sub_outside_strings(r'\bprint\(("[^"]*")\)', r'print(\1)', src)
     # Swift uses `self.x` natively; no rewrite needed.
     return _lower_bool(src)
 
