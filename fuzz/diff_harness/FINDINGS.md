@@ -59,4 +59,41 @@ decide to ship a pure-Lua JSON fallback.
 
 ---
 
+---
+
+## 3. Rust `@@:(int_literal)` boxes as `i32` but interface returns `i64`
+
+**Severity:** codegen bug, any Frame source with `method(): int` that
+uses `@@:(<integer literal>)` as the return value will panic at runtime.
+
+**Symptom:** `thread 'main' panicked … Result::unwrap() on Err(Any …)`
+at the interface method's `.downcast::<i64>().unwrap()` call.
+
+**Root cause:** the generated handler body emits
+
+```rust
+let __return_val = Box::new(9) as Box<dyn std::any::Any>;
+ctx._return = Some(__return_val);
+```
+
+Rust's integer literal defaults to `i32`. The enclosing method
+signature is `pub fn go(&mut self) -> i64`, and the method's epilog
+does `*ret.downcast::<i64>().unwrap()`. Downcast fails (boxed type is
+`i32`, not `i64`) → unwrap panics.
+
+**Why existing tests don't catch it:** `18_session_persistence.frs`
+and most Rust persist tests use `str` returns, not `int`. The canary
+is the first to combine `@@persist` with `int` returns in the same
+recipe.
+
+**Fix:** emit `Box::new(9_i64)` (or use `as i64` cast) when the
+enclosing method's Frame return type is `int`. The box-to-type match
+is required for `downcast` to succeed.
+
+**Discovered by:** differential canary run, 2026-04-21. Run with
+`fuzz/diff_harness/run_diff.py canary/canary.frame --langs
+python_3,rust`.
+
+---
+
 *(New findings append below as the harness expands to more backends.)*

@@ -161,6 +161,30 @@ puts "TRACE: RET #{r}"
 """
 
 
+def rust_canary(_: str) -> str:
+    # framec Rust emits `pub fn go(&mut self) -> i32 { … }` on the
+    # System struct. `save_state(&mut self) -> String`,
+    # `restore_state(json: String) -> Self`.
+    return """
+fn main() {
+    let mut inst = Canary::new();
+    println!("TRACE: CALL go()");
+    let r = inst.go();
+    println!("TRACE: RET {}", r);
+    println!("TRACE: CALL go()");
+    let r = inst.go();
+    println!("TRACE: RET {}", r);
+    let blob = inst.save_state();
+    println!("TRACE: SAVE ok");
+    let mut inst2 = Canary::restore_state(&blob);
+    println!("TRACE: RESTORE ok");
+    println!("TRACE: CALL go()");
+    let r = inst2.go();
+    println!("TRACE: RET {}", r);
+}
+"""
+
+
 def lua_canary(_: str) -> str:
     return """
 local inst = Canary:new()
@@ -213,6 +237,20 @@ def run_lua(p: Path) -> List[str]:
     return ["lua5.4", str(p)] if _which("lua5.4") else ["lua", str(p)]
 
 
+def compile_rust(p: Path) -> List[str]:
+    # Copy emitted source into the pre-built cargo project's
+    # src/main.rs and cargo build. Runner then runs the binary.
+    import shutil as _sh
+    proj = Path(__file__).parent / "rust_proj"
+    _sh.copy(p, proj / "src" / "main.rs")
+    return ["cargo", "build", "--quiet", "--manifest-path", str(proj / "Cargo.toml")]
+
+
+def run_rust(p: Path) -> List[str]:
+    proj = Path(__file__).parent / "rust_proj"
+    return [str(proj / "target" / "debug" / "diff_harness_case")]
+
+
 def _which(cmd: str) -> Optional[str]:
     import shutil
     return shutil.which(cmd)
@@ -250,6 +288,11 @@ def _ruby_trace(src: str) -> str:
 def _lua_trace(src: str) -> str:
     # print("x") is valid Lua as-is. Passthrough.
     return src
+
+
+def _rust_trace(src: str) -> str:
+    # print("x") → println!("x");  — Rust requires the trailing `;`
+    return re.sub(r'\bprint\((.*?)\)', r'println!(\1);', src)
 
 
 LANGS = {
@@ -320,6 +363,18 @@ LANGS = {
         render_canary=lua_canary,
         rewrite_trace=_lua_trace,
         notes="JSON blob. `P:save_state()` method; `P.restore_state(json)` static.",
+    ),
+    "rust": Lang(
+        name="rust",
+        ext="frs",
+        out_ext="rs",
+        compile=compile_rust,
+        run=run_rust,
+        save_method="save_state",
+        restore_call="{S}::restore_state({B})",
+        render_canary=rust_canary,
+        rewrite_trace=_rust_trace,
+        notes="JSON string. save_state(&mut self), restore_state(json: String).",
     ),
 }
 
