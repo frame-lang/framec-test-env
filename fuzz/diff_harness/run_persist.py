@@ -65,6 +65,21 @@ def build_source(lang: Lang, system_block: str, meta: dict) -> str:
     return body + "\n" + harness
 
 
+def _docker_wrap(cmd: list[str], host_workdir: Path, image: str) -> list[str]:
+    """Wrap `cmd` (an argv list expected to run inside `image`) with a
+    `docker run --rm -v <host_workdir>:/work -w /work <image> <cmd>`
+    invocation. The caller's command should reference paths under
+    `/work` (the bind-mount's mount point)."""
+    return [
+        "docker", "run", "--rm",
+        "-v", f"{host_workdir}:/work",
+        "-w", "/work",
+        "--entrypoint", cmd[0],
+        image,
+        *cmd[1:],
+    ]
+
+
 def run_one(lang: Lang, case_path: Path, meta: dict, workdir: Path) -> CaseResult:
     case_id = case_path.stem
     src_text = build_source(lang, case_path.read_text(), meta)
@@ -90,23 +105,35 @@ def run_one(lang: Lang, case_path: Path, meta: dict, workdir: Path) -> CaseResul
                           stderr=f"framec emitted no .{lang.out_ext} file")
     emitted = candidates[0]
 
+    # For docker-backed langs, compile/run callables receive a path
+    # rooted at `/work/<filename>` — the container's view of the bind
+    # mount — rather than the host path.
+    if lang.docker_image:
+        path_for_cmd = Path("/work") / emitted.name
+    else:
+        path_for_cmd = emitted
+
     if lang.compile:
-        cc = lang.compile(emitted)
-        proc = subprocess.run(cc, capture_output=True, text=True, cwd=out_dir, timeout=120)
+        cc = lang.compile(path_for_cmd)
+        if lang.docker_image:
+            cc = _docker_wrap(cc, out_dir, lang.docker_image)
+        proc = subprocess.run(cc, capture_output=True, text=True, cwd=out_dir, timeout=180)
         if proc.returncode != 0:
             return CaseResult(case_id, lang.name, "compile", False, [],
                               stderr=(proc.stdout + proc.stderr)[:500])
 
-    run_cmd = lang.run(emitted) if lang.run else None
+    run_cmd = lang.run(path_for_cmd) if lang.run else None
     if run_cmd is None:
         return CaseResult(case_id, lang.name, "run", False, [],
                           stderr=f"no run command configured for {lang.name}")
+    if lang.docker_image:
+        run_cmd = _docker_wrap(run_cmd, out_dir, lang.docker_image)
     try:
         proc = subprocess.run(run_cmd, capture_output=True, text=True,
-                              timeout=30, cwd=out_dir)
+                              timeout=60, cwd=out_dir)
     except subprocess.TimeoutExpired:
         return CaseResult(case_id, lang.name, "run", False, [],
-                          stderr="run timed out after 30s")
+                          stderr="run timed out")
     if proc.returncode != 0:
         return CaseResult(case_id, lang.name, "run", False, [],
                           stderr=(proc.stdout + proc.stderr)[:500])

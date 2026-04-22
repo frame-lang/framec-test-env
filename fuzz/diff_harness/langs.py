@@ -63,6 +63,13 @@ class Lang:
     # (Ruby), etc. Kept separate from the harness because framec
     # requires these as pre-system native code.
     prolog: str = ""
+    # Docker image to use for compile + run when the backend's toolchain
+    # or libraries aren't present on the host (e.g. `org.json` for Java /
+    # Kotlin, `cjson` for Lua, C++23 on macOS). When set, the runner
+    # bind-mounts the case's output directory at `/work` inside the
+    # container and executes compile/run there — `compile` and `run`
+    # callables should reference files under `/work`.
+    docker_image: Optional[str] = None
     # Language support notes (free text, informational only).
     notes: str = ""
 
@@ -540,6 +547,55 @@ def swift_persist(meta: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def java_persist(meta: dict) -> str:
+    """Java persist harness. framec emits `<SysName>.java` with the
+    system class; we append a `<SysName>Main` class with `main()`. All
+    trace output goes through `System.out.println` — wrapped in one
+    method for brevity."""
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = ["", f"class {sys_name}Main {{"]
+    lines.append("    public static void main(String[] args) {")
+    lines.append(f"        {sys_name} inst = new {sys_name}();")
+    for _ in range(advances_pre):
+        lines.append("        inst.advance();")
+        lines.append('        System.out.println("TRACE: advance");')
+    lines.append(f"        inst.set_x({set_x});")
+    lines.append(f'        System.out.println("TRACE: set_x {set_x}");')
+    if has_str:
+        lines.append(f'        inst.set_s("{set_s}");')
+        lines.append(f'        System.out.println("TRACE: set_s \\"{set_s}\\"");')
+    if has_bool:
+        lines.append(f"        inst.set_b({'true' if set_b else 'false'});")
+        lines.append(f'        System.out.println("TRACE: set_b {"true" if set_b else "false"}");')
+    lines.append('        System.out.println("TRACE: status " + inst.status());')
+    lines.append("        String blob = inst.save_state();")
+    lines.append('        System.out.println("TRACE: save ok");')
+    lines.append(f"        {sys_name} rest = {sys_name}.restore_state(blob);")
+    lines.append('        System.out.println("TRACE: restore ok");')
+    lines.append('        System.out.println("TRACE: post_status " + rest.status());')
+    lines.append('        System.out.println("TRACE: post_x " + rest.get_x());')
+    if has_str:
+        lines.append(
+            '        System.out.println("TRACE: post_s \\"" + rest.get_s() + "\\"");'
+        )
+    if has_bool:
+        lines.append(
+            '        System.out.println("TRACE: post_b " + ((boolean)rest.get_b() ? "true" : "false"));'
+        )
+    lines.append('        System.out.println("TRACE: done");')
+    lines.append("    }")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
 def java_canary(_: str) -> str:
     return """
 class CanaryMain {
@@ -674,16 +730,25 @@ def kotlin_persist(meta: dict) -> str:
     lines.append('    println("TRACE: status ${inst.status()}")')
     lines.append("    val blob = inst.save_state()")
     lines.append('    println("TRACE: save ok")')
-    lines.append(f"    val rest = {sys_name}.restore_state(blob)")
+    # Framec Kotlin codegen emits `fun restore_state(…)` as an instance
+    # method rather than inside the companion object, so we can't call
+    # it statically as `Sys.restore_state(blob)`. Mirror the workaround
+    # the existing matrix tests use: create a throwaway instance and
+    # call `.restore_state()` on it. (Tracked as a framec codegen
+    # follow-up — see FINDINGS.)
+    lines.append(f"    val __tmp = {sys_name}()")
+    lines.append("    val rest = __tmp.restore_state(blob)")
     lines.append('    println("TRACE: restore ok")')
     lines.append('    println("TRACE: post_status ${rest.status()}")')
     lines.append('    println("TRACE: post_x ${rest.get_x()}")')
     if has_str:
         lines.append('    println("TRACE: post_s \\"${rest.get_s()}\\"")')
     if has_bool:
-        lines.append(
-            '    println("TRACE: post_b ${if (rest.get_b() as Boolean) \\"true\\" else \\"false\\"}")'
-        )
+        # Avoid nested-quote escapes inside the string interpolation
+        # brace — Kotlin's parser handles the escapes inconsistently.
+        # A named local binds cleanly.
+        lines.append('    val __b_str = if (rest.get_b() as Boolean) "true" else "false"')
+        lines.append('    println("TRACE: post_b $__b_str")')
     lines.append('    println("TRACE: done")')
     lines.append("}")
     return "\n".join(lines) + "\n"
@@ -759,7 +824,10 @@ def lua_persist(meta: dict) -> str:
     lines.append(f"local rest = {sys_name}.restore_state(blob)")
     lines.append('print("TRACE: restore ok")')
     lines.append('print("TRACE: post_status " .. rest:status())')
-    lines.append('print("TRACE: post_x " .. tostring(rest:get_x()))')
+    # Lua's cjson decodes `x` as a float on round-trip, so `1000`
+    # comes back as `1000.0`. Force integer formatting to match the
+    # Python oracle's stringified int.
+    lines.append('print("TRACE: post_x " .. string.format("%d", rest:get_x()))')
     if has_str:
         lines.append('print(\'TRACE: post_s "\' .. rest:get_s() .. \'"\')')
     if has_bool:
@@ -768,6 +836,58 @@ def lua_persist(meta: dict) -> str:
             "print(\"TRACE: post_b \" .. (rest:get_b() and \"true\" or \"false\"))"
         )
     lines.append('print("TRACE: done")')
+    return "\n".join(lines) + "\n"
+
+
+def cpp_persist(meta: dict) -> str:
+    """C++ persist harness. framec targets C++23; the generated system
+    is a class with static save_state/restore_state."""
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = ["", "int main() {"]
+    lines.append(f"    {sys_name} inst;")
+    for _ in range(advances_pre):
+        lines.append("    inst.advance();")
+        lines.append('    std::cout << "TRACE: advance" << std::endl;')
+    lines.append(f"    inst.set_x({set_x});")
+    lines.append(f'    std::cout << "TRACE: set_x {set_x}" << std::endl;')
+    if has_str:
+        lines.append(f'    inst.set_s(std::string("{set_s}"));')
+        lines.append(f'    std::cout << "TRACE: set_s \\"{set_s}\\"" << std::endl;')
+    if has_bool:
+        lines.append(f"    inst.set_b({'true' if set_b else 'false'});")
+        lines.append(f'    std::cout << "TRACE: set_b {"true" if set_b else "false"}" << std::endl;')
+    lines.append(
+        '    std::cout << "TRACE: status " << std::any_cast<std::string>(inst.status()) << std::endl;'
+    )
+    lines.append("    std::string blob = inst.save_state();")
+    lines.append('    std::cout << "TRACE: save ok" << std::endl;')
+    lines.append(f"    {sys_name} rest = {sys_name}::restore_state(blob);")
+    lines.append('    std::cout << "TRACE: restore ok" << std::endl;')
+    lines.append(
+        '    std::cout << "TRACE: post_status " << std::any_cast<std::string>(rest.status()) << std::endl;'
+    )
+    lines.append(
+        '    std::cout << "TRACE: post_x " << std::any_cast<int>(rest.get_x()) << std::endl;'
+    )
+    if has_str:
+        lines.append(
+            '    std::cout << "TRACE: post_s \\"" << std::any_cast<std::string>(rest.get_s()) << "\\"" << std::endl;'
+        )
+    if has_bool:
+        lines.append(
+            '    std::cout << "TRACE: post_b " << (std::any_cast<bool>(rest.get_b()) ? "true" : "false") << std::endl;'
+        )
+    lines.append('    std::cout << "TRACE: done" << std::endl;')
+    lines.append("    return 0;")
+    lines.append("}")
     return "\n".join(lines) + "\n"
 
 
@@ -888,8 +1008,12 @@ def run_ruby(p: Path) -> List[str]:
 
 
 def run_lua(p: Path) -> List[str]:
-    # Prefer lua5.4; fall back to plain `lua`.
-    return ["lua5.4", str(p)] if _which("lua5.4") else ["lua", str(p)]
+    # Inside docker-lua the binary is `lua5.4`. On the host we fall
+    # back to `lua` if 5.4 isn't on PATH (fuzz for Lua is docker-backed
+    # because the cjson dependency isn't typically installed on macOS).
+    if str(p).startswith("/work/") or _which("lua5.4"):
+        return ["lua5.4", str(p)]
+    return ["lua", str(p)]
 
 
 def run_php(p: Path) -> List[str]:
@@ -902,7 +1026,9 @@ def run_dart(p: Path) -> List[str]:
 
 def compile_java(p: Path) -> List[str]:
     # Frame emits the class under an exact filename; javac produces .class.
-    return ["javac", str(p)]
+    # In docker-java the container ships org.json at /lib/json.jar, so
+    # include it on the classpath for the persist save/restore code.
+    return ["javac", "-cp", "/lib/json.jar", str(p)]
 
 
 def run_java(p: Path) -> List[str]:
@@ -910,17 +1036,30 @@ def run_java(p: Path) -> List[str]:
     # Our harness wraps it with an additional CanaryMain class in the
     # same file, so javac produces both classes.
     cls = p.stem
-    return ["java", "-cp", str(p.parent), f"{cls}Main"]
+    return ["java", "-cp", f"/lib/json.jar:{p.parent}", f"{cls}Main"]
 
 
 def compile_kotlin(p: Path) -> List[str]:
-    # kotlinc writes a jar.
+    # kotlinc writes a jar. org.json is shipped at /lib/json.jar in
+    # docker-kotlin; the persist save_state/restore_state code imports
+    # it, so it's needed at compile AND run time. -J-Xmx2g mirrors the
+    # Kotlin docker runner which OOMs with the default heap.
     jar = p.with_suffix(".jar")
-    return ["kotlinc", str(p), "-include-runtime", "-d", str(jar)]
+    return [
+        "kotlinc", "-J-Xmx2g", "-cp", "/lib/json.jar",
+        str(p), "-include-runtime", "-d", str(jar),
+    ]
 
 
 def run_kotlin(p: Path) -> List[str]:
-    return ["java", "-jar", str(p.with_suffix(".jar"))]
+    # Kotlin generates the file-level main class by capitalizing the
+    # source filename and appending `Kt`, e.g. `case.kt` → `CaseKt`.
+    jar = p.with_suffix(".jar")
+    main_class = p.stem[:1].upper() + p.stem[1:] + "Kt"
+    return [
+        "java", "-cp", f"/lib/json.jar:{jar}",
+        main_class,
+    ]
 
 
 def compile_swift(p: Path) -> List[str]:
@@ -1079,6 +1218,13 @@ def _map_str_type(src: str, native: str) -> str:
     return _sub_outside_strings(r'(?<=:\s)str\b', native, src)
 
 
+def _map_bool_type(src: str, native: str) -> str:
+    """Replace Frame's portable `bool` type keyword with the target's
+    native boolean type (e.g. `boolean` in Java/Kotlin). Positional
+    match mirrors `_map_str_type`."""
+    return _sub_outside_strings(r'(?<=:\s)bool\b', native, src)
+
+
 def _py_passthrough(src: str) -> str:
     return src
 
@@ -1158,7 +1304,11 @@ def _dart_trace(src: str) -> str:
 
 
 def _java_trace(src: str) -> str:
-    return _sub_outside_strings(r'\bprint\(("[^"]*")\)', r'System.out.println(\1);', src)
+    src = _sub_outside_strings(r'\bprint\(("[^"]*")\)', r'System.out.println(\1);', src)
+    src = _sub_outside_strings(r'\bself\.(?=[A-Za-z_])', 'this.', src)
+    src = _map_str_type(src, "String")
+    src = _map_bool_type(src, "boolean")
+    return _lower_bool(src)
 
 
 def _kotlin_trace(src: str) -> str:
@@ -1169,6 +1319,8 @@ def _kotlin_trace(src: str) -> str:
         return f'println({lit})'
     src = _sub_outside_strings(r'\bprint\(("[^"]*")\)', _fix, src)
     src = _rewrite_self(src, "this.")
+    src = _map_str_type(src, "String")
+    src = _map_bool_type(src, "Boolean")
     return _lower_bool(src)
 
 
@@ -1181,11 +1333,14 @@ def _swift_trace(src: str) -> str:
 
 
 def _cpp_trace(src: str) -> str:
-    return re.sub(
+    src = _sub_outside_strings(
         r'\bprint\(("[^"]*")\)',
         r'std::cout << \1 << std::endl;',
         src,
     )
+    src = _sub_outside_strings(r'\bself\.(?=[A-Za-z_])', 'this->', src)
+    src = _map_str_type(src, "std::string")
+    return _lower_bool(src)
 
 
 def _csharp_trace(src: str) -> str:
@@ -1268,7 +1423,11 @@ LANGS = {
         render_canary=lua_canary,
         render_persist=lua_persist,
         rewrite_trace=_lua_trace,
-        notes="JSON blob. `P:save_state()` method; `P.restore_state(json)` static.",
+        docker_image="docker-lua",
+        notes=(
+            "JSON blob via cjson. Runs via docker-lua since macOS's "
+            "system lua lacks cjson; the container ships it preinstalled."
+        ),
     ),
     "rust": Lang(
         name="rust",
@@ -1318,11 +1477,13 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=java_canary,
+        render_persist=java_persist,
         rewrite_trace=_java_trace,
+        docker_image="docker-java",
         notes=(
-            "JSON string. snake_case methods. Needs org.json on classpath. "
-            "DOCKER-ONLY locally — Maven download is blocked by harness policy; "
-            "fuzz runs inside the Java container which already ships org.json."
+            "JSON string. snake_case methods. Uses docker-java image which "
+            "ships org.json at /lib/json.jar — harness wraps compile + run "
+            "via _docker_wrap so the classpath resolves inside the container."
         ),
     ),
     "kotlin": Lang(
@@ -1336,6 +1497,7 @@ LANGS = {
         render_canary=kotlin_canary,
         render_persist=kotlin_persist,
         rewrite_trace=_kotlin_trace,
+        docker_image="docker-kotlin",
         notes=(
             "JSON string. Builds a fat jar via kotlinc. Also needs org.json; "
             "same docker-only constraint as java."
@@ -1363,10 +1525,18 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=cpp_canary,
+        render_persist=cpp_persist,
         rewrite_trace=_cpp_trace,
+        docker_image="docker-cpp",
+        # Framec's C++ codegen references `nlohmann::json` in
+        # save_state/restore_state but doesn't emit the include; the
+        # user is expected to supply it in the prolog (matches what
+        # the existing matrix tests do). `<iostream>` is for the
+        # persist harness's `std::cout` calls.
+        prolog="#include <iostream>\n#include <nlohmann/json.hpp>\n",
         notes=(
-            "JSON string (std::string). Requires C++23. DOCKER-ONLY locally if "
-            "the host's clang/gcc is older than ~2024 (macOS Apple clang 12 is)."
+            "JSON string (std::string). Requires C++23. Uses docker-cpp "
+            "image (g++ 14+) since macOS Apple clang is typically older."
         ),
     ),
     "csharp": Lang(
