@@ -3,7 +3,7 @@
 Bugs surfaced by the differential trace harness during bring-up.
 Each is a codegen divergence from the Python oracle on the canary case.
 
-## 1. Ruby `restore_state` re-fires initial-state ENTER
+## 1. Ruby `restore_state` re-fires initial-state ENTER [FIXED]
 
 **Severity:** codegen bug, cross-cuts every Ruby `@@persist` program.
 
@@ -26,21 +26,19 @@ def self.restore_state(json)
 end
 ```
 
-**Fix:** `restore_state` needs to bypass the initial-state enter
-dispatch. Options:
-  - Use `allocate` instead of `new` (Ruby's class-level method that
-    creates an instance without calling `initialize`), then manually
-    set up the @__compartment and context stack.
-  - Add an internal constructor mode (e.g. `initialize(skip_enter:
-    true)`) used only by restore_state.
+**Fix:** `restore_state` now uses `Canary.allocate` (Ruby's class-level
+method that creates an instance without calling `initialize`) and
+manually sets up `@__compartment`, `@_state_stack`, `@_context_stack`,
+and `@__next_compartment`. The ENTER dispatch is skipped entirely.
 
 **Oracle (Python) comparison:** Python's `restore_state` uses
 `pickle.loads` which reconstructs the instance without calling
-`__init__`. No enter fires. That's the contract Ruby violates.
+`__init__`. Ruby now matches that contract.
 
-**Discovered by:** differential canary run, 2026-04-21. Run with
-`fuzz/diff_harness/run_diff.py canary/canary.frame --langs
-python_3,ruby`.
+**Discovered by:** differential canary run, 2026-04-21. Fixed in
+`framec/src/frame_c/compiler/codegen/interface_gen.rs` — the `Ruby`
+branch of the persist methods generator. Ruby integration test matrix
+unchanged at 215/0/1.
 
 ---
 
@@ -61,7 +59,7 @@ decide to ship a pure-Lua JSON fallback.
 
 ---
 
-## 3. Rust `@@:(int_literal)` boxes as `i32` but interface returns `i64`
+## 3. Rust `@@:(int_literal)` boxes as `i32` but interface returns `i64` [FIXED]
 
 **Severity:** codegen bug, any Frame source with `method(): int` that
 uses `@@:(<integer literal>)` as the return value will panic at runtime.
@@ -86,13 +84,20 @@ and most Rust persist tests use `str` returns, not `int`. The canary
 is the first to combine `@@persist` with `int` returns in the same
 recipe.
 
-**Fix:** emit `Box::new(9_i64)` (or use `as i64` cast) when the
-enclosing method's Frame return type is `int`. The box-to-type match
-is required for `downcast` to succeed.
+**Fix:** `rust_expand_box_return` and `rust_expand_box_return_bare` now
+take the handler's `return_type` (same way the C backend already did
+via `c_return_assign`) and a new `rust_wrap_for_boxing` helper wraps
+the expression:
+- `int` → `(expr) as i64`
+- `float` → `(expr) as f64`
+- string literal → `String::from(expr)` (existing behavior preserved)
 
-**Discovered by:** differential canary run, 2026-04-21. Run with
-`fuzz/diff_harness/run_diff.py canary/canary.frame --langs
-python_3,rust`.
+Non-literal expressions that are already the correct type get a
+redundant cast, which the Rust compiler elides.
+
+**Discovered by:** differential canary run, 2026-04-21. Fixed in
+`framec/src/frame_c/compiler/codegen/rust_system.rs`. Rust integration
+test matrix unchanged at 218/0/0.
 
 ---
 
