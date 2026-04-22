@@ -1802,10 +1802,11 @@ def _dart_trace(src: str) -> str:
 
 
 def _java_trace(src: str) -> str:
+    # Java's `map_type` now handles `str` → `String` and `bool` →
+    # `boolean` at framec-emit time (see backends/java.rs::emit_field),
+    # so the harness no longer needs to rewrite type annotations.
     src = _sub_outside_strings(r'\bprint\(("[^"]*")\)', r'System.out.println(\1);', src)
     src = _rewrite_self(src, 'this.')
-    src = _map_str_type(src, "String")
-    src = _map_bool_type(src, "boolean")
     return _lower_bool(src)
 
 
@@ -1865,9 +1866,11 @@ def _cpp_trace(src: str) -> str:
 
 
 def _csharp_trace(src: str) -> str:
+    # C#'s `map_type` now handles `str` → `string` at framec-emit
+    # time (see backends/csharp.rs::emit_field), so the harness no
+    # longer needs `_map_str_type`.
     src = re.sub(r'\bprint\(("[^"]*")\)', r'System.Console.WriteLine(\1);', src)
     src = _rewrite_self(src, "this.")
-    src = _map_str_type(src, "string")
     return _lower_bool(src)
 
 
