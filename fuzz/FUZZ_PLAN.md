@@ -85,27 +85,123 @@ all 17 backends and inspecting the generated save/restore API. **All 17
 backends emit persist code.** Naming varies — see the persist API
 table below; capture the quirks once in `diff_harness/langs.py`.
 
-| Backend     | `@@persist` | `@@:self` | Async | Operations | Multi-sys |
-|-------------|-------------|-----------|-------|------------|-----------|
-| Python      | ✓           | ✓         | ✓     | ✓          | ✓         |
-| TypeScript  | ✓           | ✓         | ✓     | ✓          | ✓         |
-| JavaScript  | ✓           | ✓         | ✓     | ✓          | ✓         |
-| Rust        | ✓           | ✓         | ✓     | ✓          | ✓         |
-| C           | ✓           | ✓         | ✗     | ✓          | ✓         |
-| C++         | ✓           | ✓         | ✓     | ✓          | ✓         |
-| C#          | ✓           | ✓         | ✓     | ✓          | ✓         |
-| Java        | ✓           | ✓         | ✓     | ✓          | ✓         |
-| Kotlin      | ✓           | ✓         | ✓     | ✓          | ✓         |
-| Swift       | ✓           | ✓         | ✓     | ✓          | ✓         |
-| Dart        | ✓           | ✓         | ✓     | ✓          | ✓         |
-| GDScript    | ✓           | ✓         | ✓     | ✓          | ✓         |
-| Go          | ✓           | ✓         | ✗     | ✓          | ✓         |
-| PHP         | ✓           | ✓         | ✗     | ✓          | ✓         |
-| Ruby        | ✓           | ✓         | ✗     | ✓          | ✓         |
-| Lua         | ✓           | ✓         | ✗     | ✓          | ✓         |
-| Erlang      | ✓           | ✓         | ✗     | ✓          | ✗         |
+| Backend     | `@@persist` | `@@:self` | HSM | Operations | Async | Multi-sys |
+|-------------|-------------|-----------|-----|------------|-------|-----------|
+| Python      | ✓           | ✓         | ✓   | ✓          | ✓     | ✓         |
+| TypeScript  | ✓           | ✓         | ✓   | ✓          | ✓     | ✓         |
+| JavaScript  | ✓           | ✓         | ✓   | ✓          | ✓     | ✓         |
+| Rust        | ✓           | ✓         | ✓   | ✓          | ✓     | ✓         |
+| C           | ✓           | ✓         | ✓   | ✓          | ✗     | ✓         |
+| C++         | ✓           | ✓         | ✓   | ✓          | ✓     | ✓         |
+| C#          | ✓           | ✓         | ✓   | ✓          | ✓     | ✓         |
+| Java        | ✓           | ✓         | ✓   | ✓          | ✓     | ✓         |
+| Kotlin      | ✓           | ✓         | ✓   | ✓          | ✓     | ✓         |
+| Swift       | ✓           | ✓         | ✓   | ✓          | ✓     | ✓         |
+| Dart        | ✓           | ✓         | ✓   | ✓          | ✓     | ✓         |
+| GDScript    | ✓           | ✓         | ✓   | ✓          | ✓     | ✓         |
+| Go          | ✓           | ✓         | ✓   | ✓          | ✗     | ✓         |
+| PHP         | ✓           | ✓         | ✓   | ✓          | ✗     | ✓         |
+| Ruby        | ✓           | ✓         | ✓   | ✓          | ✗     | ✓         |
+| Lua         | ✓           | ✓         | ✓   | ✓          | ✗     | ✓         |
+| Erlang      | ✓           | ✓         | ✓   | ✓          | ✗     | ✗         |
+
+**Concrete applicable-backend counts per phase:**
+
+| Phase | Feature            | Applicable |
+|-------|--------------------|------------|
+| 2     | `@@persist`        | **17** (done: 1,377 checks) |
+| 3     | `@@:self`          | **17** (done: 918 checks)   |
+| 4     | HSM parent-semantics | **17**     |
+| 5     | Operations         | **17**     |
+| 6     | Async              | **11** — C, Go, PHP, Ruby, Lua, Erlang lack async semantics |
+| 7     | Multi-system       | **16** — Erlang's gen_statem processes don't compose as in-process instances |
 
 `✗` are permanent exclusions — language-incompat, not framec gaps.
+
+## Exceptions & workarounds log
+
+As of Phase 3 completion. Every non-trivial deviation from "pure
+Frame source → clean trace-diff" is listed here. Categorized as:
+
+  **[F]** Framec codegen bug — should be fixed in framec (filed).
+  **[H]** Harness-layer translation — architecture, not exception.
+         Lives in `langs.py` because it's per-target syntax mapping
+         (e.g. `self.` → `this.` for JS) that framec deliberately
+         leaves to the Frame author.
+  **[S]** Scope reduction — axes narrowed vs. the original plan.
+
+### [F] Framec codegen bugs still open
+
+- **Kotlin `restore_state` emitted as instance method, not companion
+  static.** Fuzz harness uses the `tmp = Sys(); tmp.restore_state(...)`
+  workaround (same pattern the matrix tests use). Would benefit from
+  framec Kotlin fix to move the method into `companion object { }`.
+  FINDINGS #13 (not yet filed as a separate entry).
+
+- **C#/Java domain type `str` / `bool` not auto-mapped to native
+  `string` / `String` / `boolean`.** Framec emits raw Frame type
+  tokens; harness does `str → string` / `bool → boolean` rewrite.
+  Framec should mirror what it already does for Rust (`str` →
+  `String`) and Go (`str` → `string` — fixed this session).
+  FINDINGS #12 + Java analogue.
+
+### [F] Framec codegen bugs fixed this session
+
+- Rust `str = ""` domain default ↦ `String::from("")` (`4b225f3`).
+- Rust handler param `v: int` unpacked as String (same commit).
+- Rust `rust_json_extract*` mapped Frame `int` → `i32` instead of `i64`
+  (same commit).
+- Rust `Box::new(self.<non_copy_field>)` didn't auto-clone (`f9bc737`).
+- Go domain `str` not emitted as `string` (`1455d68`).
+- Go `self.` not rewritten to `s.` inside `@@:()` return expression
+  (same commit, hardened in `e6b921f`).
+- Erlang `self.x = v;` record-update trailing-`;` parse error
+  (`0132552`).
+
+### [H] Harness-layer per-target syntax mappings
+
+These are **not** exceptions — they're the expected architecture
+where one Frame source is translated to each target's native syntax
+before framec consumes it. Documented for audit:
+
+- `self.` → `this.` (JS, TS, Kotlin, Dart, C#, Java)
+- `self.` → `this->` (C++, PHP via `$this->`)
+- `self.` → `self->` (C pointer semantics)
+- `self.` → `s.` (Go receiver convention; ONLY for cases where
+  framec doesn't auto-rewrite — fixed the gap this session)
+- `True` / `False` → `true` / `false` (every lang except Python)
+- `str` → target native (`String` Rust/C#/Java; `string` Go/C++;
+  `char*` C)
+- `bool` → `boolean` (Java/Kotlin)
+- `= v;` → `= $v;` (PHP param sigil)
+- `@@:self.<method>()` preserved (Frame syntax, not native `self.`)
+
+### [H] Per-backend runtime quirks handled transparently
+
+- **Lua** `cjson` decodes ints as floats on round-trip; harness uses
+  `string.format("%d", rest:get_x())` to coerce.
+- **GDScript** Godot prints "Godot Engine v4.6.2 ..." banner on
+  stdout; `gdscript_run_custom` strips it before the trace diff.
+- **Erlang** module name = `snake_case(Frame system name)` and
+  persist API is `load_state/1` not `restore_state/1`.
+- **Kotlin** jar main class is `<source.stem.capitalize() + "Kt">`.
+- **C++** prolog injects `#include <nlohmann/json.hpp>` because
+  framec references `nlohmann::json` in save_state but doesn't emit
+  the include itself (user-supplied per framec convention).
+
+### [S] Scope reductions
+
+- **Phase 3 `@@:self`**: dropped `if_guarded` and `if_both_arms` post-
+  structures from the axes. Reason: they'd require per-target block-
+  syntax rewriting (Python `if X:` vs C-family `if (X) { }`), which
+  deserves a proper indent-aware transform, not a regex. Reinstating
+  is a follow-up — would add ~108 cases.
+  Current: 3 × 3 × 2 × 3 × **1** = 54 cases (was 162 in plan).
+
+### [S] Scope not reduced anywhere else
+
+Phase 2 persist runs every axis in the plan. Remaining phases will
+match the plan as written unless a real framec gap forces a drop.
 
 ### Persist API naming across backends (from Phase 1.1 probe)
 
@@ -186,8 +282,11 @@ Landing criteria:
 ### Phase 3 — `@@:self` on all backends (1 day)
 
 Same treatment applied to `gen_selfcall.py`. Axes unchanged:
-VARIANTS × POST_CALL_STMTS × POST_STRUCTURE. Expected: 162 × ~16 =
-**~2,600 cases**.
+VARIANTS × POST_CALL_STMTS × POST_STRUCTURE. Expected: 162 × 17 =
+**~2,754 cases**. **Done**: 54 × 17 = 918 checks clean; the missing
+108 cases per backend are the `if_guarded` / `if_both_arms`
+post-structure variants held back pending block-syntax transform
+(see Exceptions & workarounds).
 
 ### Phase 4 — HSM parent-semantics fuzz (1 day)
 
@@ -199,7 +298,7 @@ New fuzzer. Axes:
   guard-semantics class that bit us in Erlang @@:self).
 - 2-level and 3-level HSM.
 
-Expected: ~400 cases × ~16 backends = **~6,400 cases**.
+Expected: ~400 cases × 17 backends = **~6,800 cases**.
 
 ### Phase 5 — Operations fuzz (1 day)
 
@@ -211,7 +310,7 @@ Axes:
   `@@:return(expr)`.
 - Operation reads domain, operation writes domain.
 
-Expected: ~200 cases × ~16 backends = **~3,200 cases**.
+Expected: ~200 cases × 17 backends = **~3,400 cases**.
 
 ### Phase 6 — Async fuzz (1–2 days, narrower)
 
@@ -229,19 +328,21 @@ Axes:
 - System-as-handler-param.
 - Cross-system call, nested cross-system call.
 
-Expected: ~150 cases × ~16 backends = **~2,400 cases**.
+Expected: ~150 cases × 16 backends = **~2,400 cases**. (Erlang
+excluded — gen_statem processes can't be composed as in-process
+instances.)
 
 ## Grand-total projected coverage
 
-| Phase | New cases  | Cumulative |
-|-------|------------|------------|
-| Now   |     3,610  |     3,610  |
-| 2     |    ~2,430  |    ~6,040  |
-| 3     |    ~2,600  |    ~8,640  |
-| 4     |    ~6,400  |   ~15,040  |
-| 5     |    ~3,200  |   ~18,240  |
-| 6     |    ~1,100  |   ~19,340  |
-| 7     |    ~2,400  |   ~21,740  |
+| Phase | New cases  | Cumulative | Status                 |
+|-------|------------|------------|------------------------|
+| Now   |     3,610  |     3,610  | legacy baseline        |
+| 2     |     1,377  |     4,987  | **done** (17 × 81)     |
+| 3     |       918  |     5,905  | **done** (17 × 54; full axis reinstatement later adds ~1,836) |
+| 4     |    ~6,800  |   ~12,705  | next                   |
+| 5     |    ~3,400  |   ~16,105  |                        |
+| 6     |    ~1,100  |   ~17,205  | 11-backend subset      |
+| 7     |    ~2,400  |   ~19,605  | 16-backend subset      |
 
 Well under 50k — tight enough that a full fuzz run fits in a coffee-
 break, loose enough that it's catching real bugs per phase.
