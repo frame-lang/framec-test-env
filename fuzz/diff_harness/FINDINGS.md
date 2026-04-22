@@ -211,3 +211,103 @@ commit; will update FINDINGS once complete.
 ---
 
 *(New findings append below as the harness expands to more backends.)*
+
+---
+
+## 9. Rust `str` default-value mismatch in domain block [OPEN]
+
+**Severity:** framec Rust codegen. Any Frame source with a `str`-typed
+domain var defaulted to an empty string literal produces uncompilable
+Rust.
+
+**Symptom:** Phase-2 persist generator writes `s: str = ""`. framec
+Rust emits `pub s: String` in the struct (correct type mapping) but
+the constructor initializes with the literal `""` (which is `&'static
+str`, not `String`), so `rustc` rejects with:
+
+```
+error[E0308]: mismatched types
+  --> src/main.rs:116:16
+   |
+116 |             s: "",
+   |                ^^ expected `String`, found `&str`
+```
+
+**Root cause:** framec Rust's domain initializer emits the default
+expression verbatim from the Frame source. The type has been mapped to
+`String` but the default expression hasn't been wrapped in
+`String::from(...)` / `.to_string()`.
+
+**Existing tests don't hit this:** the demo suite uses
+`user: String = String::new()` (user writes Rust-native) so the issue
+only appears when the Frame source uses the portable `str` type name.
+
+**Fix location:** codegen that emits domain initializers for Rust —
+should wrap the default expression in `String::from(...)` when the
+Frame declared type was `str` (and thus Rust field type is `String`)
+and the default is a string literal.
+
+**Discovered by:** Phase-2 persist fuzz bring-up, 2026-04-22.
+
+---
+
+## 10. Go domain `str` type not mapped to `string` [OPEN]
+
+**Severity:** framec Go codegen. Same class as #9.
+
+**Symptom:** `s: str = ""` in Frame domain → `s str` in generated Go
+struct:
+```
+undefined: str
+```
+
+**Fix location:** Go struct field emission for domain vars. Should map
+the Frame type `str` to `string`.
+
+---
+
+## 11. Go `self.` not rewritten to `s.` inside `@@:()` return expressions [OPEN]
+
+**Severity:** framec Go codegen. Partial `self.` → `s.` rewrite.
+
+**Symptom:** Frame source:
+```
+get_x(): int { @@:(self.x) }
+```
+Emits Go:
+```go
+s._context_stack[...]._return = self.x    // <-- should be s.x
+```
+
+Statement-body uses of `self.` (e.g. `set_x(v: int) { self.x = v; }`)
+ARE correctly rewritten to `s.x = v`. Only the `@@:()` return-expansion
+path misses the rewrite.
+
+**Workaround in Frame source:** write the Go-native receiver directly
+(`@@:(s.x)`), as `18_session_persistence.fgo` does. But that locks the
+source to Go.
+
+**Fix location:** whichever codegen path expands `@@:()` into the
+`_return` assignment for Go — needs to apply the same
+`self.` → `s.` rewrite the statement path uses.
+
+---
+
+## 12. C# domain `str` type not mapped to `string` / `String` [OPEN]
+
+**Severity:** framec C# codegen. Same class as #9, #10.
+
+**Symptom:**
+```
+error CS0246: The type or namespace name 'str' could not be found
+```
+`str` in domain declaration is emitted verbatim; C# needs `string` or
+`String`.
+
+**Workaround:** Phase-2 harness `rewrite_trace` for C# does
+`str` → `string` before passing source to framec. Documented as a
+workaround pending the framec fix so the fuzz can run.
+
+---
+
+*(End of findings as of 2026-04-22.)*

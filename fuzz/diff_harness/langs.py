@@ -37,6 +37,22 @@ class Lang:
     # a ignored string placeholder so each harness can grow richer
     # per-case context later.
     render_canary: Optional[Callable[[str], str]] = None
+    # Phase-2 persist fuzz harness. Takes the case's meta dict
+    # (sys_name + axes + sequence) and returns the native epilog.
+    # Every renderer MUST produce the same normalized trace:
+    #   TRACE: advance           (advances_pre times)
+    #   TRACE: set_x <int>
+    #   TRACE: set_s "<str>"     (iff domain has str)
+    #   TRACE: set_b true|false  (iff domain has bool)
+    #   TRACE: status <sN>
+    #   TRACE: save ok
+    #   TRACE: restore ok
+    #   TRACE: post_status <sN>
+    #   TRACE: post_x <int>
+    #   TRACE: post_s "<str>"    (iff domain has str)
+    #   TRACE: post_b true|false (iff domain has bool)
+    #   TRACE: done
+    render_persist: Optional[Callable[[dict], str]] = None
     # Rewriter: turn a Python-syntax trace line like
     # `print("TRACE: ...")` into the backend's equivalent. Applied to
     # the @@system block by run_diff. Default assumes `print(...)` is
@@ -49,6 +65,37 @@ class Lang:
     prolog: str = ""
     # Language support notes (free text, informational only).
     notes: str = ""
+
+
+# --- Persist fuzz harness rendering helpers ---
+#
+# Each `render_persist` callback receives the case's meta dict from
+# gen_persist_pure.py, which has:
+#   sys_name         — "PersistNNNN"
+#   axes             — n_states, hsm_depth, domain_set, target_offset
+#   sequence         — advances_pre, set_x, set_s, set_b, expected_status
+#
+# The epilog drives: advance × advances_pre, set_x(int), set_s(str)
+# and set_b(bool) if applicable, status() to capture, save, restore,
+# then a second dump via get_x()/get_s()/get_b() + status() on the
+# restored instance. Every backend must emit the same normalized trace.
+
+
+def _fmt_bool_lit(lang_style: str, b: bool) -> str:
+    """Native literal for a boolean in the given language family."""
+    return {
+        "py": "True" if b else "False",
+        "lower": "true" if b else "false",
+    }[lang_style]
+
+
+def _norm_bool(expr: str, lang_style: str) -> str:
+    """Expression that evaluates to `"true"` / `"false"` (lowercase) for
+    a boolean value. Used in trace lines so every backend emits the same
+    string regardless of native bool→string formatting."""
+    return {
+        "py": f"('true' if {expr} else 'false')",
+    }[lang_style]
 
 
 # --- Per-language canary harness rendering ---
@@ -79,6 +126,49 @@ if __name__ == '__main__':
 """
 
 
+def py_persist(meta: dict) -> str:
+    """Python oracle for the persist fuzz. Every other backend's renderer
+    must produce the exact same stdout bytes."""
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = ["", "if __name__ == '__main__':"]
+    lines.append(f"    inst = @@{sys_name}()")
+    for _ in range(advances_pre):
+        lines.append("    inst.advance()")
+        lines.append('    print("TRACE: advance")')
+    lines.append(f"    inst.set_x({set_x})")
+    lines.append(f'    print("TRACE: set_x {set_x}")')
+    if has_str:
+        lines.append(f'    inst.set_s("{set_s}")')
+        lines.append(f'    print(\'TRACE: set_s "{set_s}"\')')
+    if has_bool:
+        lines.append(f"    inst.set_b({'True' if set_b else 'False'})")
+        lines.append(f'    print("TRACE: set_b {"true" if set_b else "false"}")')
+    lines.append('    print(f"TRACE: status {inst.status()}")')
+    lines.append("    blob = inst.save_state()")
+    lines.append('    print("TRACE: save ok")')
+    lines.append(f"    rest = {sys_name}.restore_state(blob)")
+    lines.append('    print("TRACE: restore ok")')
+    lines.append('    print(f"TRACE: post_status {rest.status()}")')
+    lines.append('    print(f"TRACE: post_x {rest.get_x()}")')
+    if has_str:
+        lines.append('    print(f\'TRACE: post_s "{rest.get_s()}"\')')
+    if has_bool:
+        # f-string can't contain a single-quoted literal inside its
+        # braces, so we build the expression as a plain string.
+        expr = "'true' if rest.get_b() else 'false'"
+        lines.append(f'    print(f"TRACE: post_b {{{expr}}}")')
+    lines.append('    print("TRACE: done")')
+    return "\n".join(lines) + "\n"
+
+
 def js_canary(_: str) -> str:
     return """
 const inst = new Canary();
@@ -96,6 +186,47 @@ console.log("TRACE: CALL go()");
 r = inst2.go();
 console.log("TRACE: RET " + r);
 """
+
+
+def js_persist(meta: dict) -> str:
+    """JS persist harness — must produce byte-identical trace to py_persist."""
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = [""]
+    lines.append(f"const inst = new {sys_name}();")
+    for _ in range(advances_pre):
+        lines.append("inst.advance();")
+        lines.append('console.log("TRACE: advance");')
+    lines.append(f"inst.set_x({set_x});")
+    lines.append(f'console.log("TRACE: set_x {set_x}");')
+    if has_str:
+        lines.append(f'inst.set_s("{set_s}");')
+        lines.append(f'console.log(\'TRACE: set_s "{set_s}"\');')
+    if has_bool:
+        lines.append(f"inst.set_b({'true' if set_b else 'false'});")
+        lines.append(f'console.log("TRACE: set_b {"true" if set_b else "false"}");')
+    lines.append('console.log("TRACE: status " + inst.status());')
+    lines.append("const blob = inst.saveState();")
+    lines.append('console.log("TRACE: save ok");')
+    lines.append(f"const rest = {sys_name}.restoreState(blob);")
+    lines.append('console.log("TRACE: restore ok");')
+    lines.append('console.log("TRACE: post_status " + rest.status());')
+    lines.append('console.log("TRACE: post_x " + rest.get_x());')
+    if has_str:
+        lines.append('console.log(\'TRACE: post_s "\' + rest.get_s() + \'"\');')
+    if has_bool:
+        lines.append(
+            'console.log("TRACE: post_b " + (rest.get_b() ? "true" : "false"));'
+        )
+    lines.append('console.log("TRACE: done");')
+    return "\n".join(lines) + "\n"
 
 
 def ts_canary(_: str) -> str:
@@ -118,6 +249,88 @@ console.log("TRACE: RET " + r);
 
 
 # --- Per-language canary harnesses (continued) ---
+
+
+def go_persist(meta: dict) -> str:
+    """Go harness. Framec emits methods as `FirstUpper + rest unchanged`,
+    so `set_x` → `Set_x`. Auto-generated persist methods use PascalCase
+    (`SaveState`). Restore is package-level: `RestorePersistNNNN(blob)`."""
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = ["", "func main() {"]
+    lines.append(f"    inst := New{sys_name}()")
+    for _ in range(advances_pre):
+        lines.append("    inst.Advance()")
+        lines.append('    fmt.Println("TRACE: advance")')
+    lines.append(f"    inst.Set_x({set_x})")
+    lines.append(f'    fmt.Println("TRACE: set_x {set_x}")')
+    if has_str:
+        lines.append(f'    inst.Set_s("{set_s}")')
+        lines.append(f'    fmt.Printf("TRACE: set_s \\"{set_s}\\"\\n")')
+    if has_bool:
+        lines.append(f"    inst.Set_b({'true' if set_b else 'false'})")
+        lines.append(f'    fmt.Println("TRACE: set_b {"true" if set_b else "false"}")')
+    lines.append('    fmt.Printf("TRACE: status %s\\n", inst.Status())')
+    lines.append("    blob := inst.SaveState()")
+    lines.append('    fmt.Println("TRACE: save ok")')
+    lines.append(f"    rest := Restore{sys_name}(blob)")
+    lines.append('    fmt.Println("TRACE: restore ok")')
+    lines.append('    fmt.Printf("TRACE: post_status %s\\n", rest.Status())')
+    lines.append('    fmt.Printf("TRACE: post_x %d\\n", rest.Get_x())')
+    if has_str:
+        lines.append('    fmt.Printf("TRACE: post_s \\"%s\\"\\n", rest.Get_s())')
+    if has_bool:
+        lines.append('    b_str := "false"')
+        lines.append('    if rest.Get_b() { b_str = "true" }')
+        lines.append('    fmt.Printf("TRACE: post_b %s\\n", b_str)')
+    lines.append('    fmt.Println("TRACE: done")')
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def ruby_persist(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = [""]
+    lines.append(f"inst = {sys_name}.new")
+    for _ in range(advances_pre):
+        lines.append("inst.advance")
+        lines.append('puts "TRACE: advance"')
+    lines.append(f"inst.set_x({set_x})")
+    lines.append(f'puts "TRACE: set_x {set_x}"')
+    if has_str:
+        lines.append(f'inst.set_s("{set_s}")')
+        lines.append(f'puts \'TRACE: set_s "{set_s}"\'')
+    if has_bool:
+        lines.append(f"inst.set_b({'true' if set_b else 'false'})")
+        lines.append(f'puts "TRACE: set_b {"true" if set_b else "false"}"')
+    lines.append('puts "TRACE: status #{inst.status}"')
+    lines.append("blob = inst.save_state")
+    lines.append('puts "TRACE: save ok"')
+    lines.append(f"rest = {sys_name}.restore_state(blob)")
+    lines.append('puts "TRACE: restore ok"')
+    lines.append('puts "TRACE: post_status #{rest.status}"')
+    lines.append('puts "TRACE: post_x #{rest.get_x}"')
+    if has_str:
+        lines.append('puts \'TRACE: post_s "\' + rest.get_s + \'"\'')
+    if has_bool:
+        lines.append('puts "TRACE: post_b #{rest.get_b ? \'true\' : \'false\'}"')
+    lines.append('puts "TRACE: done"')
+    return "\n".join(lines) + "\n"
 
 
 def go_canary(_: str) -> str:
@@ -202,6 +415,88 @@ void main() {
 """
 
 
+def dart_persist(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = ["", "void main() {"]
+    lines.append(f"    var inst = {sys_name}();")
+    for _ in range(advances_pre):
+        lines.append("    inst.advance();")
+        lines.append('    print("TRACE: advance");')
+    lines.append(f"    inst.set_x({set_x});")
+    lines.append(f'    print("TRACE: set_x {set_x}");')
+    if has_str:
+        lines.append(f'    inst.set_s("{set_s}");')
+        lines.append(f'    print(\'TRACE: set_s "{set_s}"\');')
+    if has_bool:
+        lines.append(f"    inst.set_b({'true' if set_b else 'false'});")
+        lines.append(f'    print("TRACE: set_b {"true" if set_b else "false"}");')
+    # Dart interpolates `$foo` — escape literal `$` unused here; method
+    # calls go in `${expr}`.
+    lines.append('    print("TRACE: status ${inst.status()}");')
+    lines.append("    var blob = inst.saveState();")
+    lines.append('    print("TRACE: save ok");')
+    lines.append(f"    var rest = {sys_name}.restoreState(blob);")
+    lines.append('    print("TRACE: restore ok");')
+    lines.append('    print("TRACE: post_status ${rest.status()}");')
+    lines.append('    print("TRACE: post_x ${rest.get_x()}");')
+    if has_str:
+        lines.append('    print(\'TRACE: post_s "\' + rest.get_s() + \'"\');')
+    if has_bool:
+        lines.append('    print("TRACE: post_b ${rest.get_b() ? \'true\' : \'false\'}");')
+    lines.append('    print("TRACE: done");')
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def swift_persist(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = [""]
+    lines.append(f"let inst = {sys_name}()")
+    for _ in range(advances_pre):
+        lines.append("inst.advance()")
+        lines.append('print("TRACE: advance")')
+    lines.append(f"inst.set_x({set_x})")
+    lines.append(f'print("TRACE: set_x {set_x}")')
+    if has_str:
+        lines.append(f'inst.set_s("{set_s}")')
+        lines.append(f'print("TRACE: set_s \\"{set_s}\\"")')
+    if has_bool:
+        lines.append(f"inst.set_b({'true' if set_b else 'false'})")
+        lines.append(f'print("TRACE: set_b {"true" if set_b else "false"}")')
+    # Swift interpolation: \(expr)
+    lines.append(r'print("TRACE: status \(inst.status())")')
+    lines.append("let blob = inst.saveState()")
+    lines.append('print("TRACE: save ok")')
+    lines.append(f"let rest = {sys_name}.restoreState(blob)")
+    lines.append('print("TRACE: restore ok")')
+    lines.append(r'print("TRACE: post_status \(rest.status())")')
+    lines.append(r'print("TRACE: post_x \(rest.get_x())")')
+    if has_str:
+        lines.append(r'print("TRACE: post_s \"\(rest.get_s())\"")')
+    if has_bool:
+        lines.append(
+            r'print("TRACE: post_b \(rest.get_b() ? "true" : "false")")'
+        )
+    lines.append('print("TRACE: done")')
+    return "\n".join(lines) + "\n"
+
+
 def java_canary(_: str) -> str:
     return """
 class CanaryMain {
@@ -263,6 +558,174 @@ print("TRACE: CALL go()")
 r = inst2.go()
 print("TRACE: RET \\(r)")
 """
+
+
+def csharp_persist(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = ["", "public class CanaryMain {"]
+    lines.append("    public static void Main() {")
+    lines.append(f"        var inst = new {sys_name}();")
+    for _ in range(advances_pre):
+        lines.append("        inst.advance();")
+        lines.append('        System.Console.WriteLine("TRACE: advance");')
+    lines.append(f"        inst.set_x({set_x});")
+    lines.append(f'        System.Console.WriteLine("TRACE: set_x {set_x}");')
+    if has_str:
+        lines.append(f'        inst.set_s("{set_s}");')
+        lines.append(f'        System.Console.WriteLine("TRACE: set_s \\"{set_s}\\"");')
+    if has_bool:
+        lines.append(f"        inst.set_b({'true' if set_b else 'false'});")
+        lines.append(f'        System.Console.WriteLine("TRACE: set_b {"true" if set_b else "false"}");')
+    lines.append('        System.Console.WriteLine("TRACE: status " + inst.status());')
+    lines.append("        var blob = inst.SaveState();")
+    lines.append('        System.Console.WriteLine("TRACE: save ok");')
+    lines.append(f"        var rest = {sys_name}.RestoreState(blob);")
+    lines.append('        System.Console.WriteLine("TRACE: restore ok");')
+    lines.append('        System.Console.WriteLine("TRACE: post_status " + rest.status());')
+    lines.append('        System.Console.WriteLine("TRACE: post_x " + rest.get_x());')
+    if has_str:
+        lines.append(
+            '        System.Console.WriteLine("TRACE: post_s \\"" + rest.get_s() + "\\"");'
+        )
+    if has_bool:
+        lines.append(
+            '        System.Console.WriteLine("TRACE: post_b " + (((bool)rest.get_b()) ? "true" : "false"));'
+        )
+    lines.append('        System.Console.WriteLine("TRACE: done");')
+    lines.append("    }")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def kotlin_persist(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = ["", "fun main() {"]
+    lines.append(f"    val inst = {sys_name}()")
+    for _ in range(advances_pre):
+        lines.append("    inst.advance()")
+        lines.append('    println("TRACE: advance")')
+    lines.append(f"    inst.set_x({set_x})")
+    lines.append(f'    println("TRACE: set_x {set_x}")')
+    if has_str:
+        lines.append(f'    inst.set_s("{set_s}")')
+        lines.append(f'    println("TRACE: set_s \\"{set_s}\\"")')
+    if has_bool:
+        lines.append(f"    inst.set_b({'true' if set_b else 'false'})")
+        lines.append(f'    println("TRACE: set_b {"true" if set_b else "false"}")')
+    lines.append('    println("TRACE: status ${inst.status()}")')
+    lines.append("    val blob = inst.save_state()")
+    lines.append('    println("TRACE: save ok")')
+    lines.append(f"    val rest = {sys_name}.restore_state(blob)")
+    lines.append('    println("TRACE: restore ok")')
+    lines.append('    println("TRACE: post_status ${rest.status()}")')
+    lines.append('    println("TRACE: post_x ${rest.get_x()}")')
+    if has_str:
+        lines.append('    println("TRACE: post_s \\"${rest.get_s()}\\"")')
+    if has_bool:
+        lines.append(
+            '    println("TRACE: post_b ${if (rest.get_b() as Boolean) \\"true\\" else \\"false\\"}")'
+        )
+    lines.append('    println("TRACE: done")')
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def rust_persist(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = ["", "fn main() {"]
+    lines.append(f"    let mut inst = {sys_name}::new();")
+    for _ in range(advances_pre):
+        lines.append("    inst.advance();")
+        lines.append('    println!("TRACE: advance");')
+    lines.append(f"    inst.set_x({set_x});")
+    lines.append(f'    println!("TRACE: set_x {set_x}");')
+    if has_str:
+        lines.append(f'    inst.set_s(String::from("{set_s}"));')
+        lines.append(f'    println!("TRACE: set_s \\"{set_s}\\"");')
+    if has_bool:
+        lines.append(f"    inst.set_b({'true' if set_b else 'false'});")
+        lines.append(f'    println!("TRACE: set_b {"true" if set_b else "false"}");')
+    lines.append('    println!("TRACE: status {}", inst.status());')
+    lines.append("    let blob = inst.save_state();")
+    lines.append('    println!("TRACE: save ok");')
+    lines.append(f"    let mut rest = {sys_name}::restore_state(&blob);")
+    lines.append('    println!("TRACE: restore ok");')
+    lines.append('    println!("TRACE: post_status {}", rest.status());')
+    lines.append('    println!("TRACE: post_x {}", rest.get_x());')
+    if has_str:
+        lines.append(r'    println!("TRACE: post_s \"{}\"", rest.get_s());')
+    if has_bool:
+        lines.append(
+            '    println!("TRACE: post_b {}", if rest.get_b() { "true" } else { "false" });'
+        )
+    lines.append('    println!("TRACE: done");')
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
+def lua_persist(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = [""]
+    lines.append(f"local inst = {sys_name}:new()")
+    for _ in range(advances_pre):
+        lines.append("inst:advance()")
+        lines.append('print("TRACE: advance")')
+    lines.append(f"inst:set_x({set_x})")
+    lines.append(f'print("TRACE: set_x {set_x}")')
+    if has_str:
+        lines.append(f'inst:set_s("{set_s}")')
+        lines.append(f'print(\'TRACE: set_s "{set_s}"\')')
+    if has_bool:
+        lines.append(f"inst:set_b({'true' if set_b else 'false'})")
+        lines.append(f'print("TRACE: set_b {"true" if set_b else "false"}")')
+    lines.append('print("TRACE: status " .. inst:status())')
+    lines.append("local blob = inst:save_state()")
+    lines.append('print("TRACE: save ok")')
+    lines.append(f"local rest = {sys_name}.restore_state(blob)")
+    lines.append('print("TRACE: restore ok")')
+    lines.append('print("TRACE: post_status " .. rest:status())')
+    lines.append('print("TRACE: post_x " .. tostring(rest:get_x()))')
+    if has_str:
+        lines.append('print(\'TRACE: post_s "\' .. rest:get_s() .. \'"\')')
+    if has_bool:
+        # Lua: no ternary; use and/or idiom.
+        lines.append(
+            "print(\"TRACE: post_b \" .. (rest:get_b() and \"true\" or \"false\"))"
+        )
+    lines.append('print("TRACE: done")')
+    return "\n".join(lines) + "\n"
 
 
 def cpp_canary(_: str) -> str:
@@ -489,34 +952,75 @@ def _which(cmd: str) -> Optional[str]:
 import re
 
 
+def _rewrite_self(src: str, to: str) -> str:
+    """Substitute `self.` → `to` (e.g. `this.` or `this->`) in the Frame
+    body so a Python-flavored pure-Frame source renders correctly in
+    the this-family / this-arrow-family backends. We avoid touching
+    occurrences inside string literals by matching only on the pattern
+    `self.<ident>` — Phase-2 generators never put `self.` inside a
+    string, so this is safe for our cases."""
+    # Match `self.` followed by an identifier-starting char. We keep
+    # this tight so trace strings like `"TRACE: ..."` stay untouched.
+    return re.sub(r'\bself\.(?=[A-Za-z_])', to, src)
+
+
+def _lower_bool(src: str) -> str:
+    """Lowercase `True`/`False` → `true`/`false` (for every backend
+    except Python, which is the canonical form we generate). Word-
+    boundary anchored so identifiers like `False_flag` aren't touched."""
+    src = re.sub(r'\bTrue\b', 'true', src)
+    src = re.sub(r'\bFalse\b', 'false', src)
+    return src
+
+
+def _map_str_type(src: str, native: str) -> str:
+    """Replace Frame's canonical `str` type keyword with a target's
+    native string type (e.g. `String` in Rust/C#/Java, `string` in Go).
+    Matches only `str` appearing as a type — preceded by `:` or inside
+    a `(v: str)` style type annotation, word-boundary terminated."""
+    # Matches ": str" (with optional leading whitespace) or "(v: str,"
+    # in the same way framec's parser recognises type annotations.
+    return re.sub(r'(?<=:\s)str\b', native, src)
+
+
 def _py_passthrough(src: str) -> str:
     return src
 
 
 def _js_trace(src: str) -> str:
     # print("x") → console.log("x"); with statement terminator.
-    return re.sub(r'\bprint\((.*?)\)', r'console.log(\1);', src)
+    src = re.sub(r'\bprint\((.*?)\)', r'console.log(\1);', src)
+    src = _rewrite_self(src, "this.")
+    return _lower_bool(src)
 
 
 def _go_trace(src: str) -> str:
     # print("x") → fmt.Println("x")
-    return re.sub(r'\bprint\((.*?)\)', r'fmt.Println(\1)', src)
+    src = re.sub(r'\bprint\((.*?)\)', r'fmt.Println(\1)', src)
+    # framec's Go codegen rewrites `self.` to `s.` on its own, so no
+    # rewrite here. Bool case must be lowered for native literal syntax.
+    return _lower_bool(src)
 
 
 def _ruby_trace(src: str) -> str:
     # print("x") → puts "x" (drop parens); and in Ruby, `print` without
     # parens is also valid but we normalize to `puts` for newline.
-    return re.sub(r'\bprint\((.*?)\)', r'puts \1', src)
+    src = re.sub(r'\bprint\((.*?)\)', r'puts \1', src)
+    # Ruby uses `self.x` natively; no self→this rewrite needed.
+    return _lower_bool(src)
 
 
 def _lua_trace(src: str) -> str:
     # print("x") is valid Lua as-is. Passthrough.
-    return src
+    # Lua uses `self.x` natively (in method-colon-call style).
+    return _lower_bool(src)
 
 
 def _rust_trace(src: str) -> str:
     # print("x") → println!("x");  — Rust requires the trailing `;`
-    return re.sub(r'\bprint\((.*?)\)', r'println!(\1);', src)
+    src = re.sub(r'\bprint\((.*?)\)', r'println!(\1);', src)
+    # Rust uses `self.x` natively; no rewrite needed.
+    return _lower_bool(src)
 
 
 def _php_trace(src: str) -> str:
@@ -537,7 +1041,9 @@ def _dart_trace(src: str) -> str:
     def _fix(m: re.Match) -> str:
         lit = m.group(1).replace('$', r'\$')
         return f'print({lit});'
-    return re.sub(r'\bprint\(("[^"]*")\)', _fix, src)
+    src = re.sub(r'\bprint\(("[^"]*")\)', _fix, src)
+    src = _rewrite_self(src, "this.")
+    return _lower_bool(src)
 
 
 def _java_trace(src: str) -> str:
@@ -550,13 +1056,17 @@ def _kotlin_trace(src: str) -> str:
     def _fix(m: re.Match) -> str:
         lit = m.group(1).replace('$', r'\$')
         return f'println({lit})'
-    return re.sub(r'\bprint\(("[^"]*")\)', _fix, src)
+    src = re.sub(r'\bprint\(("[^"]*")\)', _fix, src)
+    src = _rewrite_self(src, "this.")
+    return _lower_bool(src)
 
 
 def _swift_trace(src: str) -> str:
     # print("x") is valid Swift. Swift only interpolates `\(expr)` —
     # `$foo` is literal — so no escape needed for our canary.
-    return re.sub(r'\bprint\(("[^"]*")\)', r'print(\1)', src)
+    src = re.sub(r'\bprint\(("[^"]*")\)', r'print(\1)', src)
+    # Swift uses `self.x` natively; no rewrite needed.
+    return _lower_bool(src)
 
 
 def _cpp_trace(src: str) -> str:
@@ -568,7 +1078,10 @@ def _cpp_trace(src: str) -> str:
 
 
 def _csharp_trace(src: str) -> str:
-    return re.sub(r'\bprint\(("[^"]*")\)', r'System.Console.WriteLine(\1);', src)
+    src = re.sub(r'\bprint\(("[^"]*")\)', r'System.Console.WriteLine(\1);', src)
+    src = _rewrite_self(src, "this.")
+    src = _map_str_type(src, "string")
+    return _lower_bool(src)
 
 
 LANGS = {
@@ -580,6 +1093,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=py_canary,
+        render_persist=py_persist,
         rewrite_trace=_py_passthrough,
         notes="Pickle blob. staticmethod restore_state. Oracle reference.",
     ),
@@ -591,6 +1105,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=js_canary,
+        render_persist=js_persist,
         rewrite_trace=_js_trace,
         notes="JSON string blob. camelCase methods. Requires .mjs for ESM.",
     ),
@@ -602,6 +1117,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=ts_canary,
+        render_persist=js_persist,  # JS & TS share persist harness text
         rewrite_trace=_js_trace,  # same syntax as JS
         notes="JSON string blob. Same method names as JavaScript.",
     ),
@@ -613,6 +1129,7 @@ LANGS = {
         save_method="SaveState",
         restore_call="Restore{S}({B})",  # package-level function
         render_canary=go_canary,
+        render_persist=go_persist,
         rewrite_trace=_go_trace,
         prolog='package main\n\nimport (\n\t"encoding/json"\n\t"fmt"\n)\n\nvar _ = json.Marshal\n',
         notes="JSON blob. PascalCase methods. Restore is pkg-level `RestoreP()`.",
@@ -625,6 +1142,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=ruby_canary,
+        render_persist=ruby_persist,
         rewrite_trace=_ruby_trace,
         prolog="require 'json'\n",
         notes="JSON blob. snake_case methods, classmethod restore_state.",
@@ -637,6 +1155,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=lua_canary,
+        render_persist=lua_persist,
         rewrite_trace=_lua_trace,
         notes="JSON blob. `P:save_state()` method; `P.restore_state(json)` static.",
     ),
@@ -649,6 +1168,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=rust_canary,
+        render_persist=rust_persist,
         rewrite_trace=_rust_trace,
         notes="JSON string. save_state(&mut self), restore_state(json: String).",
     ),
@@ -672,6 +1192,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=dart_canary,
+        render_persist=dart_persist,
         rewrite_trace=_dart_trace,
         prolog="import 'dart:convert';\n",
         notes="JSON string. camelCase methods (saveState/restoreState).",
@@ -701,6 +1222,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=kotlin_canary,
+        render_persist=kotlin_persist,
         rewrite_trace=_kotlin_trace,
         notes=(
             "JSON string. Builds a fat jar via kotlinc. Also needs org.json; "
@@ -716,6 +1238,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=swift_canary,
+        render_persist=swift_persist,
         rewrite_trace=_swift_trace,
         notes="JSON string. camelCase methods. swiftc produces single binary.",
     ),
@@ -743,6 +1266,7 @@ LANGS = {
         save_method="SaveState",
         restore_call="{S}.RestoreState({B})",
         render_canary=csharp_canary,
+        render_persist=csharp_persist,
         rewrite_trace=_csharp_trace,
         notes="JSON string. PascalCase methods. dotnet csproj + build+run.",
     ),
