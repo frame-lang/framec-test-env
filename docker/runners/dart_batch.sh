@@ -154,7 +154,15 @@ exec_one() {
         echo "dill missing" > "$EXEC_DIR/${sanitized}.out"
         return
     fi
-    timeout "$TIMEOUT_SEC" dart "$dill" > "$EXEC_DIR/${sanitized}.out" 2>&1
+    # setsid --wait: the Dart VM spawns isolate/helper threads and can
+    # leave detached children writing to our redirected stdout after the
+    # main process exits. Without --wait, this shell proceeds to write
+    # .rc while .out is still growing; the classifier then reads a
+    # partial file and reports "unrecognized output" intermittently
+    # under heavy parallel load. --wait blocks until every process in
+    # the new session exits, guaranteeing .out is fully flushed.
+    setsid --wait timeout "$TIMEOUT_SEC" dart "$dill" \
+        > "$EXEC_DIR/${sanitized}.out" 2>&1
     echo $? > "$EXEC_DIR/${sanitized}.rc"
 }
 export -f exec_one
@@ -199,7 +207,14 @@ while IFS=$'\t' read -r num status name rest; do
             elif [ -z "$out" ]; then
                 echo "ok $num - $name # clean exit"; pass=$((pass+1))
             else
-                echo "not ok $num - $name # unrecognized output"
+                # Preserve full output for post-hoc analysis. /output is
+                # volume-mounted to the host so artifacts survive container
+                # teardown — the harness grep filters out inline TAP
+                # comment lines, so we lose the first 3 unless we save them.
+                unrec_dir="/output/__unrecognized__"
+                mkdir -p "$unrec_dir" 2>/dev/null
+                cp "$out_file" "$unrec_dir/${bin}.out" 2>/dev/null
+                echo "not ok $num - $name # unrecognized output (full: $unrec_dir/${bin}.out)"
                 echo "$out" | head -3 | sed 's/^/  # /'
                 fail=$((fail+1))
             fi ;;

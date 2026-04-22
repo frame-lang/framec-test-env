@@ -125,7 +125,13 @@ run_one() {
         echo "source missing" > "$STATUS_DIR/${sanitized}.out"
         return
     fi
-    timeout "$TIMEOUT_SEC" godot --headless --script "$src" \
+    # setsid --wait: godot spawns detached helper children that inherit
+    # our redirected stdout fd. A plain redirection lets this shell move
+    # on to write .rc while those children are still writing to .out —
+    # the classifier then reads a partially-populated file and reports
+    # "unrecognized output". --wait blocks until every process in the
+    # new session exits, so .out is fully flushed before we proceed.
+    setsid --wait timeout "$TIMEOUT_SEC" godot --headless --script "$src" \
         > "$STATUS_DIR/${sanitized}.out" 2>&1
     echo $? > "$STATUS_DIR/${sanitized}.rc"
 }
@@ -172,7 +178,14 @@ while IFS=$'\t' read -r num status name rest; do
             elif [ -z "$out" ]; then
                 echo "ok $num - $name # clean exit"; pass=$((pass+1))
             else
-                echo "not ok $num - $name # unrecognized output"
+                # Preserve full output for post-hoc analysis. /output is
+                # volume-mounted to the host so artifacts survive container
+                # teardown — the harness grep filters out inline TAP
+                # comment lines, so we lose the first 3 unless we save them.
+                unrec_dir="/output/__unrecognized__"
+                mkdir -p "$unrec_dir" 2>/dev/null
+                cp "$out_file" "$unrec_dir/${sanitized}.out" 2>/dev/null
+                echo "not ok $num - $name # unrecognized output (full: $unrec_dir/${sanitized}.out)"
                 echo "$out" | head -3 | sed 's/^/  # /'
                 fail=$((fail+1))
             fi ;;

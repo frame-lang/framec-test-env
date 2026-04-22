@@ -1,7 +1,13 @@
 FROM ubuntu:24.04
 
 # Install Godot 4.6.2 headless (ARM64 native)
-RUN apt-get update && apt-get install -y --no-install-recommends wget unzip ca-certificates && \
+# libfontconfig1 is needed even in --headless mode: Godot probes system
+# fonts at startup and without libfontconfig it prints a loader error
+# then spams "Unable to load fontconfig" from subsystems that keep
+# writing to our captured stdout AFTER the main Godot process exits,
+# racing with the harness's output read and causing "unrecognized
+# output" flakes.
+RUN apt-get update && apt-get install -y --no-install-recommends wget unzip ca-certificates libfontconfig1 && \
     GODOT_VERSION=4.6.2 && \
     ARCH=$(dpkg --print-architecture) && \
     if [ "$ARCH" = "arm64" ]; then \

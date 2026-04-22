@@ -166,8 +166,12 @@ try_kotlinc() {
     local files
     files=$(find "$COMPILE_DIR" -name "*.kt" 2>/dev/null | tr '\n' ' ')
     [ -z "$files" ] && return 0
+    # -J-Xmx2g: kotlinc's default max heap (~320 MB) is exhausted by a
+    # batch compile of the full test corpus (200+ .kt files) with
+    # -include-runtime — the compiler OOMs holding ASTs, symbol tables,
+    # and bytecode simultaneously. 2 GB has ample margin at current size.
     # shellcheck disable=SC2086
-    kotlinc $kt_cp $files -include-runtime -d "$ALL_JAR" 2>/tmp/kotlinc_err
+    kotlinc -J-Xmx2g $kt_cp $files -include-runtime -d "$ALL_JAR" 2>/tmp/kotlinc_err
 }
 
 kt_mass_fail() {
