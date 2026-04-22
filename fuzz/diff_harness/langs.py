@@ -18,7 +18,7 @@ invocations; same binary names, so the Lang config stays portable.
 """
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, List, Optional
+from typing import Callable, Dict, List, Optional
 
 
 @dataclass
@@ -33,29 +33,26 @@ class Lang:
     # Persist API naming quirks (see FUZZ_PLAN.md table).
     save_method: str = "save_state"
     restore_call: str = "restore_state"
-    # Per-language harness rendered AFTER the @@system block. Takes
-    # a ignored string placeholder so each harness can grow richer
-    # per-case context later.
+    # Canary harness (pre-Phase-2, kept for the existing canary runner).
+    # Takes an ignored placeholder string and returns the native epilog.
     render_canary: Optional[Callable[[str], str]] = None
-    # Phase-2 persist fuzz harness. Takes the case's meta dict
-    # (sys_name + axes + sequence) and returns the native epilog.
-    # Every renderer MUST produce the same normalized trace:
-    #   TRACE: advance           (advances_pre times)
-    #   TRACE: set_x <int>
-    #   TRACE: set_s "<str>"     (iff domain has str)
-    #   TRACE: set_b true|false  (iff domain has bool)
-    #   TRACE: status <sN>
-    #   TRACE: save ok
-    #   TRACE: restore ok
-    #   TRACE: post_status <sN>
-    #   TRACE: post_x <int>
-    #   TRACE: post_s "<str>"    (iff domain has str)
-    #   TRACE: post_b true|false (iff domain has bool)
-    #   TRACE: done
-    render_persist: Optional[Callable[[dict], str]] = None
+    # Per-harness-kind renderer. Keyed on `meta["harness_kind"]` from
+    # the case's `.meta` sidecar — one entry per fuzz Phase:
+    #   "persist"     (Phase 2) — save/restore round-trip with normalized
+    #                 TRACE lines for every step of the sequence.
+    #   "selfcall"    (Phase 3) — `@@:self.<method>()` guard semantics.
+    #   "hsm"         (Phase 4) — HSM parent-forwarding semantics.
+    #   "operations"  (Phase 5) — `operation` blocks.
+    #   "async"       (Phase 6) — `async` handler await sequences.
+    #   "multi_system"(Phase 7) — system-in-domain composition.
+    # Each renderer takes the case's meta dict and returns the native
+    # epilog spliced after the @@system block. Every renderer MUST
+    # produce a byte-identical trace to the Python oracle's output for
+    # the same case.
+    renderers: Dict[str, Callable[[dict], str]] = field(default_factory=dict)
     # Rewriter: turn a Python-syntax trace line like
     # `print("TRACE: ...")` into the backend's equivalent. Applied to
-    # the @@system block by run_diff. Default assumes `print(...)` is
+    # the @@system block by run_fuzz. Default assumes `print(...)` is
     # valid in the target (true for Python, Lua, Swift, GDScript, Dart).
     rewrite_trace: Callable[[str], str] = lambda s: s
     # Native prolog injected BEFORE the @@system block, AFTER the
@@ -74,16 +71,16 @@ class Lang:
     # (e.g. Erlang renames the emitted file to match `-module(...)` and
     # wraps execution in an escript; GDScript invokes Godot with a
     # driver script) can supply a custom handler here. Signature:
-    #   (emitted: Path, out_dir: Path, meta: dict) -> (returncode, stdout, stderr)
+    #   (emitted: Path, out_dir: Path, meta: dict) -> (stage, returncode, output)
     # When set, the default compile/run path is bypassed entirely.
-    run_persist_custom: Optional[Callable[[Path, Path, dict], tuple]] = None
+    run_custom: Optional[Callable[[Path, Path, dict], tuple]] = None
     # Language support notes (free text, informational only).
     notes: str = ""
 
 
 # --- Persist fuzz harness rendering helpers ---
 #
-# Each `render_persist` callback receives the case's meta dict from
+# Each `renderers["persist"]` callback receives the case's meta dict from
 # gen_persist_pure.py, which has:
 #   sys_name         — "PersistNNNN"
 #   axes             — n_states, hsm_depth, domain_set, target_offset
@@ -181,6 +178,245 @@ def py_persist(meta: dict) -> str:
         lines.append(f'    print(f"TRACE: post_b {{{expr}}}")')
     lines.append('    print("TRACE: done")')
     return "\n".join(lines) + "\n"
+
+
+# --- Phase-3 @@:self fuzz harnesses ---
+#
+# Each renderer produces the same normalized trace against the oracle:
+#   TRACE: drive
+#   TRACE: status <sN>
+#   TRACE: trace <int>
+#   TRACE: done
+#
+# The per-backend variants differ only in native call syntax.
+
+
+def py_selfcall(meta: dict) -> str:
+    """Python oracle — canonical trace output."""
+    sys_name = meta["sys_name"]
+    return (
+        f"\nif __name__ == '__main__':\n"
+        f"    inst = @@{sys_name}()\n"
+        f"    inst.drive()\n"
+        f'    print("TRACE: drive")\n'
+        f'    print(f"TRACE: status {{inst.status()}}")\n'
+        f'    print(f"TRACE: trace {{inst.trace()}}")\n'
+        f'    print("TRACE: done")\n'
+    )
+
+
+def js_selfcall(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nconst inst = new {sys_name}();\n"
+        f"inst.drive();\n"
+        f'console.log("TRACE: drive");\n'
+        f'console.log("TRACE: status " + inst.status());\n'
+        f'console.log("TRACE: trace " + inst.trace());\n'
+        f'console.log("TRACE: done");\n'
+    )
+
+
+def ruby_selfcall(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\ninst = {sys_name}.new\n"
+        f"inst.drive\n"
+        f'puts "TRACE: drive"\n'
+        f'puts "TRACE: status #{{inst.status}}"\n'
+        f'puts "TRACE: trace #{{inst.trace}}"\n'
+        f'puts "TRACE: done"\n'
+    )
+
+
+def go_selfcall(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nfunc main() {{\n"
+        f"    inst := New{sys_name}()\n"
+        f"    inst.Drive()\n"
+        f'    fmt.Println("TRACE: drive")\n'
+        f'    fmt.Printf("TRACE: status %s\\n", inst.Status())\n'
+        f'    fmt.Printf("TRACE: trace %d\\n", inst.Trace())\n'
+        f'    fmt.Println("TRACE: done")\n'
+        f"}}\n"
+    )
+
+
+def dart_selfcall(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nvoid main() {{\n"
+        f"    var inst = {sys_name}();\n"
+        f"    inst.drive();\n"
+        f'    print("TRACE: drive");\n'
+        f'    print("TRACE: status ${{inst.status()}}");\n'
+        f'    print("TRACE: trace ${{inst.trace()}}");\n'
+        f'    print("TRACE: done");\n'
+        f"}}\n"
+    )
+
+
+def swift_selfcall(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nlet inst = {sys_name}()\n"
+        f"inst.drive()\n"
+        f'print("TRACE: drive")\n'
+        r'print("TRACE: status \(inst.status())")' "\n"
+        r'print("TRACE: trace \(inst.trace())")' "\n"
+        f'print("TRACE: done")\n'
+    )
+
+
+def csharp_selfcall(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\npublic class CanaryMain {{\n"
+        f"    public static void Main() {{\n"
+        f"        var inst = new {sys_name}();\n"
+        f"        inst.drive();\n"
+        f'        System.Console.WriteLine("TRACE: drive");\n'
+        f'        System.Console.WriteLine("TRACE: status " + inst.status());\n'
+        f'        System.Console.WriteLine("TRACE: trace " + inst.trace());\n'
+        f'        System.Console.WriteLine("TRACE: done");\n'
+        f"    }}\n"
+        f"}}\n"
+    )
+
+
+def rust_selfcall(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nfn main() {{\n"
+        f"    let mut inst = {sys_name}::new();\n"
+        f"    inst.drive();\n"
+        f'    println!("TRACE: drive");\n'
+        f'    println!("TRACE: status {{}}", inst.status());\n'
+        f'    println!("TRACE: trace {{}}", inst.trace());\n'
+        f'    println!("TRACE: done");\n'
+        f"}}\n"
+    )
+
+
+def php_selfcall(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\n$inst = new {sys_name}();\n"
+        f"$inst->drive();\n"
+        f'echo "TRACE: drive" . PHP_EOL;\n'
+        f'echo "TRACE: status " . $inst->status() . PHP_EOL;\n'
+        f'echo "TRACE: trace " . $inst->trace() . PHP_EOL;\n'
+        f'echo "TRACE: done" . PHP_EOL;\n'
+    )
+
+
+def java_selfcall(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nclass {sys_name}Main {{\n"
+        f"    public static void main(String[] args) {{\n"
+        f"        {sys_name} inst = new {sys_name}();\n"
+        f"        inst.drive();\n"
+        f'        System.out.println("TRACE: drive");\n'
+        f'        System.out.println("TRACE: status " + inst.status());\n'
+        f'        System.out.println("TRACE: trace " + inst.trace());\n'
+        f'        System.out.println("TRACE: done");\n'
+        f"    }}\n"
+        f"}}\n"
+    )
+
+
+def kotlin_selfcall(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nfun main() {{\n"
+        f"    val inst = {sys_name}()\n"
+        f"    inst.drive()\n"
+        f'    println("TRACE: drive")\n'
+        f'    println("TRACE: status ${{inst.status()}}")\n'
+        f'    println("TRACE: trace ${{inst.trace()}}")\n'
+        f'    println("TRACE: done")\n'
+        f"}}\n"
+    )
+
+
+def cpp_selfcall(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nint main() {{\n"
+        f"    {sys_name} inst;\n"
+        f"    inst.drive();\n"
+        f'    std::cout << "TRACE: drive" << std::endl;\n'
+        f'    std::cout << "TRACE: status " << std::any_cast<std::string>(inst.status()) << std::endl;\n'
+        f'    std::cout << "TRACE: trace " << std::any_cast<int>(inst.trace()) << std::endl;\n'
+        f'    std::cout << "TRACE: done" << std::endl;\n'
+        f"    return 0;\n"
+        f"}}\n"
+    )
+
+
+def lua_selfcall(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nlocal inst = {sys_name}:new()\n"
+        f"inst:drive()\n"
+        f'print("TRACE: drive")\n'
+        f'print("TRACE: status " .. inst:status())\n'
+        f'print("TRACE: trace " .. string.format("%d", inst:trace()))\n'
+        f'print("TRACE: done")\n'
+    )
+
+
+def c_selfcall(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nint main(void) {{\n"
+        f"    {sys_name}* inst = @@{sys_name}();\n"
+        f"    {sys_name}_drive(inst);\n"
+        f'    printf("TRACE: drive\\n");\n'
+        f'    printf("TRACE: status %s\\n", {sys_name}_status(inst));\n'
+        f'    printf("TRACE: trace %d\\n", {sys_name}_trace(inst));\n'
+        f'    printf("TRACE: done\\n");\n'
+        f"    {sys_name}_destroy(inst);\n"
+        f"    return 0;\n"
+        f"}}\n"
+    )
+
+
+def gdscript_selfcall(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nfunc _init():\n"
+        f"    var inst = @@{sys_name}()\n"
+        f"    inst.drive()\n"
+        f'    print("TRACE: drive")\n'
+        f'    print("TRACE: status " + str(inst.status()))\n'
+        f'    print("TRACE: trace " + str(inst.trace()))\n'
+        f'    print("TRACE: done")\n'
+        f"    quit()\n"
+    )
+
+
+def _erlang_selfcall_escript(meta: dict) -> str:
+    """Escript driver for @@:self fuzz — emitted by erlang_run_custom
+    when `meta["harness_kind"] == "selfcall"`."""
+    sys_name = meta["sys_name"]
+    module = _erlang_module_name(sys_name)
+    return (
+        "#!/usr/bin/env escript\n"
+        "main(_) ->\n"
+        '    code:add_patha("."),\n'
+        f"    {{ok, Pid}} = {module}:start_link(),\n"
+        f"    _ = {module}:drive(Pid),\n"
+        '    io:format("TRACE: drive~n"),\n'
+        f"    Status = {module}:status(Pid),\n"
+        '    io:format("TRACE: status ~s~n", [Status]),\n'
+        f"    Trace = {module}:trace(Pid),\n"
+        '    io:format("TRACE: trace ~p~n", [Trace]),\n'
+        '    io:format("TRACE: done~n"),\n'
+        "    init:stop().\n"
+    )
 
 
 def js_canary(_: str) -> str:
@@ -1031,13 +1267,20 @@ def _erlang_persist_escript(meta: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+_ERLANG_ESCRIPT_BY_KIND = {
+    "persist": lambda meta: _erlang_persist_escript(meta),
+    "selfcall": lambda meta: _erlang_selfcall_escript(meta),
+}
+
+
 def erlang_run_custom(emitted: Path, out_dir: Path, meta: dict) -> tuple:
     """End-to-end Erlang compile + run in a Docker container:
       1. Rename the emitted `.erl` to `<module>.erl` so erlc is happy.
       2. erlc → `<module>.beam`.
-      3. Write the escript driver built from `meta`.
+      3. Write the escript driver built from `meta` (selected by
+         `meta["harness_kind"]`).
       4. escript-run the driver.
-    Returns `(returncode, stdout, stderr)`."""
+    Returns `(stage, returncode, output)`."""
     import subprocess
     sys_name = meta["sys_name"]
     module = _erlang_module_name(sys_name)
@@ -1056,9 +1299,13 @@ def erlang_run_custom(emitted: Path, out_dir: Path, meta: dict) -> tuple:
     proc = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=180)
     if proc.returncode != 0:
         return ("compile", proc.returncode, proc.stdout + proc.stderr)
-    # Step 3: write escript driver.
+    # Step 3: pick the escript driver for this case's kind and write it.
+    kind = meta.get("harness_kind", "persist")
+    driver_fn = _ERLANG_ESCRIPT_BY_KIND.get(kind)
+    if driver_fn is None:
+        return ("compile", 1, f"erlang: no escript template for kind {kind!r}")
     driver = out_dir / "run_test.escript"
-    driver.write_text(_erlang_persist_escript(meta))
+    driver.write_text(driver_fn(meta))
     driver.chmod(0o755)
     # Step 4: execute.
     run_cmd = [
@@ -1444,8 +1691,12 @@ def _rewrite_self(src: str, to: str) -> str:
     """Substitute `self.` → `to` (`this.`, `s.`, `$this->`, …) in the
     Frame body so a Python-flavored pure-Frame source renders correctly
     in the target backend. String-literal-aware so `self.` inside a
-    TRACE string literal stays intact."""
-    return _sub_outside_strings(r'\bself\.(?=[A-Za-z_])', to, src)
+    TRACE string literal stays intact. Also preserves Frame's own
+    `@@:self.<method>()` construct — that's framec syntax, not a
+    native `self.` access."""
+    return _sub_outside_strings(
+        r'(?<!@@:)\bself\.(?=[A-Za-z_])', to, src,
+    )
 
 
 def _lower_bool(src: str) -> str:
@@ -1534,7 +1785,7 @@ def _php_trace(src: str) -> str:
     # PHP types aren't accepted as Frame annotations in the domain
     # block the way Python accepts them, so we strip `: int` / `: str`
     # / `: bool` from interface/param declarations for the PHP backend.
-    src = _sub_outside_strings(r'\bself\.(?=[A-Za-z_])', '$this->', src)
+    src = _rewrite_self(src, '$this->')
     src = _sub_outside_strings(r'=\s*v\s*;', '= $v;', src)
     return _lower_bool(src)
 
@@ -1552,7 +1803,7 @@ def _dart_trace(src: str) -> str:
 
 def _java_trace(src: str) -> str:
     src = _sub_outside_strings(r'\bprint\(("[^"]*")\)', r'System.out.println(\1);', src)
-    src = _sub_outside_strings(r'\bself\.(?=[A-Za-z_])', 'this.', src)
+    src = _rewrite_self(src, 'this.')
     src = _map_str_type(src, "String")
     src = _map_bool_type(src, "boolean")
     return _lower_bool(src)
@@ -1586,13 +1837,17 @@ def _gdscript_trace(src: str) -> str:
 
 
 def _erlang_trace(src: str) -> str:
-    # Erlang doesn't use `;` as a statement terminator — it uses `,`
-    # between statements and `.` as clause-terminator. framec's
-    # Erlang codegen rewrites `self.x = V;` into record-update syntax
-    # `Data#data{x = V}` but leaves any trailing `;` inside the braces,
-    # producing an Erlang parse error. Strip `;` from the rhs of
-    # `= v;` assignments in our generated Frame bodies.
-    src = _sub_outside_strings(r'(=\s*v)\s*;', r'\1', src)
+    # Erlang doesn't use `;` as a C-style statement terminator — it
+    # uses `,` between statements and `.` as clause-terminator. framec
+    # rewrites `self.x = <expr>;` into record-update syntax
+    # `Data#data{x = <expr>}`, but the trailing `;` is copied verbatim
+    # into the `{…}` and parses as a case-clause separator, producing
+    # a syntax error. Strip the trailing `;` from any self-assignment
+    # in our generated Frame body so framec produces a clean record
+    # update.
+    src = _sub_outside_strings(
+        r'(self\.\w+\s*=\s*[^;\n]+);', r'\1', src,
+    )
     # Erlang treats Capitalized identifiers as variables; the canonical
     # Python bool atoms `True`/`False` would be read as unbound vars.
     # Atoms are lowercase.
@@ -1602,7 +1857,7 @@ def _erlang_trace(src: str) -> str:
 def _c_trace(src: str) -> str:
     # C uses pointer-to-struct access (`self->x`) rather than dot.
     # `str` in Frame maps to `char*` in the C backend.
-    src = _sub_outside_strings(r'\bself\.(?=[A-Za-z_])', 'self->', src)
+    src = _rewrite_self(src, 'self->')
     src = _sub_outside_strings(r'(?<=:\s)str\b', 'char*', src)
     return _lower_bool(src)
 
@@ -1613,7 +1868,7 @@ def _cpp_trace(src: str) -> str:
         r'std::cout << \1 << std::endl;',
         src,
     )
-    src = _sub_outside_strings(r'\bself\.(?=[A-Za-z_])', 'this->', src)
+    src = _rewrite_self(src, 'this->')
     src = _map_str_type(src, "std::string")
     return _lower_bool(src)
 
@@ -1634,7 +1889,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=py_canary,
-        render_persist=py_persist,
+        renderers={'persist': py_persist, 'selfcall': py_selfcall},
         rewrite_trace=_py_passthrough,
         notes="Pickle blob. staticmethod restore_state. Oracle reference.",
     ),
@@ -1646,7 +1901,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=js_canary,
-        render_persist=js_persist,
+        renderers={'persist': js_persist, 'selfcall': js_selfcall},
         rewrite_trace=_js_trace,
         notes="JSON string blob. camelCase methods. Requires .mjs for ESM.",
     ),
@@ -1658,7 +1913,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=ts_canary,
-        render_persist=js_persist,  # JS & TS share persist harness text
+        renderers={'persist': js_persist, 'selfcall': js_selfcall},  # JS & TS share persist harness text
         rewrite_trace=_js_trace,  # same syntax as JS
         notes="JSON string blob. Same method names as JavaScript.",
     ),
@@ -1670,7 +1925,7 @@ LANGS = {
         save_method="SaveState",
         restore_call="Restore{S}({B})",  # package-level function
         render_canary=go_canary,
-        render_persist=go_persist,
+        renderers={'persist': go_persist, 'selfcall': go_selfcall},
         rewrite_trace=_go_trace,
         prolog='package main\n\nimport (\n\t"encoding/json"\n\t"fmt"\n)\n\nvar _ = json.Marshal\n',
         notes="JSON blob. PascalCase methods. Restore is pkg-level `RestoreP()`.",
@@ -1683,7 +1938,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=ruby_canary,
-        render_persist=ruby_persist,
+        renderers={'persist': ruby_persist, 'selfcall': ruby_selfcall},
         rewrite_trace=_ruby_trace,
         prolog="require 'json'\n",
         notes="JSON blob. snake_case methods, classmethod restore_state.",
@@ -1696,7 +1951,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=lua_canary,
-        render_persist=lua_persist,
+        renderers={'persist': lua_persist, 'selfcall': lua_selfcall},
         rewrite_trace=_lua_trace,
         docker_image="docker-lua",
         notes=(
@@ -1710,8 +1965,8 @@ LANGS = {
         out_ext="gd",
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
-        render_persist=gdscript_persist,
-        run_persist_custom=gdscript_run_custom,
+        renderers={'persist': gdscript_persist, 'selfcall': gdscript_selfcall},
+        run_custom=gdscript_run_custom,
         rewrite_trace=_gdscript_trace,
         docker_image="docker-gdscript",  # informational; custom hook wraps itself
         # GDScript `extends SceneTree` gives us access to `quit()` and
@@ -1730,7 +1985,7 @@ LANGS = {
         run=run_c,
         save_method="save_state",
         restore_call="{S}_restore_state({B})",
-        render_persist=c_persist,
+        renderers={'persist': c_persist, 'selfcall': c_selfcall},
         rewrite_trace=_c_trace,
         docker_image="docker-c",
         # framec's C codegen uses cJSON and bool; user-supplied includes
@@ -1757,7 +2012,7 @@ LANGS = {
         # `-module(...)` directive, then compiled via `erlc`, then driven
         # by an escript (not a main() call). The custom hook handles all
         # four steps and returns an Erlang trace matching the oracle.
-        run_persist_custom=erlang_run_custom,
+        run_custom=erlang_run_custom,
         rewrite_trace=_erlang_trace,
         docker_image="docker-erlang",  # informational; custom hook wraps itself
         notes=(
@@ -1775,7 +2030,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=rust_canary,
-        render_persist=rust_persist,
+        renderers={'persist': rust_persist, 'selfcall': rust_selfcall},
         rewrite_trace=_rust_trace,
         notes="JSON string. save_state(&mut self), restore_state(json: String).",
     ),
@@ -1787,7 +2042,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=php_canary,
-        render_persist=php_persist,
+        renderers={'persist': php_persist, 'selfcall': php_selfcall},
         rewrite_trace=_php_trace,
         prolog="<?php\n",
         notes="JSON string blob. static restore_state. New() fires constructor.",
@@ -1800,7 +2055,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=dart_canary,
-        render_persist=dart_persist,
+        renderers={'persist': dart_persist, 'selfcall': dart_selfcall},
         rewrite_trace=_dart_trace,
         prolog="import 'dart:convert';\n",
         notes="JSON string. camelCase methods (saveState/restoreState).",
@@ -1814,7 +2069,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=java_canary,
-        render_persist=java_persist,
+        renderers={'persist': java_persist, 'selfcall': java_selfcall},
         rewrite_trace=_java_trace,
         docker_image="docker-java",
         notes=(
@@ -1832,7 +2087,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=kotlin_canary,
-        render_persist=kotlin_persist,
+        renderers={'persist': kotlin_persist, 'selfcall': kotlin_selfcall},
         rewrite_trace=_kotlin_trace,
         docker_image="docker-kotlin",
         notes=(
@@ -1849,7 +2104,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=swift_canary,
-        render_persist=swift_persist,
+        renderers={'persist': swift_persist, 'selfcall': swift_selfcall},
         rewrite_trace=_swift_trace,
         notes="JSON string. camelCase methods. swiftc produces single binary.",
     ),
@@ -1862,7 +2117,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=cpp_canary,
-        render_persist=cpp_persist,
+        renderers={'persist': cpp_persist, 'selfcall': cpp_selfcall},
         rewrite_trace=_cpp_trace,
         docker_image="docker-cpp",
         # Framec's C++ codegen references `nlohmann::json` in
@@ -1885,7 +2140,7 @@ LANGS = {
         save_method="SaveState",
         restore_call="{S}.RestoreState({B})",
         render_canary=csharp_canary,
-        render_persist=csharp_persist,
+        renderers={'persist': csharp_persist, 'selfcall': csharp_selfcall},
         rewrite_trace=_csharp_trace,
         notes="JSON string. PascalCase methods. dotnet csproj + build+run.",
     ),

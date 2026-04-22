@@ -1,15 +1,23 @@
 #!/usr/bin/env python3
-"""Batch differential trace runner for Phase-2 @@persist fuzz.
+"""Batch differential trace runner for the pure-Frame fuzz harness.
 
-Reads case/meta pairs from `cases/persist/`, renders the per-backend
-epilog via `langs.py`'s `render_persist`, transpiles + compiles + runs,
-and byte-diffs every backend's trace against the Python oracle.
+Reads `case_NNNN.frame` + `.meta` pairs from a cases directory,
+dispatches to the per-backend renderer keyed on `meta["harness_kind"]`
+(persist, selfcall, hsm, operations, async, multi_system, …),
+transpiles + compiles + runs each case under every configured
+backend, and byte-diffs every backend's trace against the Python
+oracle.
+
+Backends register per-kind renderers in `langs.py`'s
+`Lang.renderers: dict[str, Callable[[dict], str]]`. Some backends
+(Erlang, GDScript) instead supply a `run_custom` hook that
+bypasses the standard compile+run flow.
 
 Usage:
-    run_persist.py                                  # all cases, all configured langs
-    run_persist.py --max 20                         # first 20 cases
-    run_persist.py --langs python_3,javascript       # subset of backends
-    run_persist.py --cases ../cases/persist         # custom cases dir
+    run_fuzz.py                                   # default cases dir (../cases/persist), all backends
+    run_fuzz.py --cases ../cases/selfcall         # Phase-3 @@:self fuzz
+    run_fuzz.py --max 20                          # first 20 cases
+    run_fuzz.py --langs python_3,javascript       # subset of backends
 """
 from __future__ import annotations
 import argparse
@@ -42,11 +50,12 @@ class CaseResult:
 
 def build_source(lang: Lang, system_block: str, meta: dict) -> str:
     """Produce lang-specific source: rewrite @@target, inject prolog,
-    rewrite_trace, optionally append render_persist epilog.
+    rewrite_trace, optionally append a kind-specific renderer's epilog.
 
-    When the language uses a `run_persist_custom` hook (Erlang, …),
-    the epilog lives in a separate driver file rather than being
-    spliced into the Frame source, so `render_persist` isn't required."""
+    The renderer is looked up in `lang.renderers` via
+    `meta["harness_kind"]`. When the language's only hook is
+    `run_custom` (Erlang, …) the epilog is emitted separately by
+    that hook rather than spliced into the Frame source here."""
     lines = system_block.splitlines(keepends=True)
     rewritten = []
     prolog_injected = False
@@ -63,18 +72,18 @@ def build_source(lang: Lang, system_block: str, meta: dict) -> str:
             rewritten.append(line)
     body = "".join(rewritten)
     body = lang.rewrite_trace(body)
-    # If the language has a `render_persist` callback, splice its
-    # epilog into the Frame source (for backends where the driver
-    # can live alongside the @@system block — all C-family langs,
-    # Python, Ruby, GDScript, …). Otherwise the `run_persist_custom`
-    # hook is solely responsible for building the driver (Erlang
-    # escript pattern).
-    if lang.render_persist is not None:
-        harness = lang.render_persist(meta)
+    # Default kind is "persist" for back-compat with legacy meta files
+    # that predate the harness_kind field.
+    kind = meta.get("harness_kind", "persist")
+    renderer = lang.renderers.get(kind)
+    if renderer is not None:
+        harness = renderer(meta)
         return body + "\n" + harness
-    if lang.run_persist_custom is None:
+    # Backends without an in-source renderer for this kind must supply
+    # `run_custom` (Erlang escript, GDScript godot invocation).
+    if lang.run_custom is None:
         raise RuntimeError(
-            f"{lang.name}: neither render_persist nor run_persist_custom configured"
+            f"{lang.name}: no renderers[{kind!r}] or run_custom configured"
         )
     return body
 
@@ -121,8 +130,8 @@ def run_one(lang: Lang, case_path: Path, meta: dict, workdir: Path) -> CaseResul
 
     # If the language supplies a custom runner (Erlang, GDScript, …),
     # bypass the standard compile+run flow.
-    if lang.run_persist_custom is not None:
-        stage, rc, output = lang.run_persist_custom(emitted, out_dir, meta)
+    if lang.run_custom is not None:
+        stage, rc, output = lang.run_custom(emitted, out_dir, meta)
         if rc != 0:
             return CaseResult(case_id, lang.name, stage, False, [],
                               stderr=output[:500])
@@ -180,28 +189,39 @@ def main() -> int:
     ap.add_argument("--cases", type=Path,
                     default=Path(__file__).resolve().parents[1] / "cases" / "persist")
     ap.add_argument("--langs", default=None,
-                    help="Comma-separated. Default: every backend with render_persist configured.")
+                    help="Comma-separated. Default: every backend that can run this kind.")
     ap.add_argument("--max", type=int, default=None,
                     help="Limit to first N cases (by case_id sort).")
-    ap.add_argument("--workdir", type=Path, default=Path("/tmp/persist_fuzz_work"))
+    ap.add_argument("--workdir", type=Path, default=Path("/tmp/fuzz_work"))
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
+
+    # Peek at the first case's meta to discover which kind we're
+    # running; this lets `--langs` default filter by backends that can
+    # render THAT specific kind rather than by whether they have any
+    # renderer at all.
+    cases_sorted = sorted(args.cases.glob("case_*.frame"))
+    first_kind = "persist"
+    if cases_sorted:
+        try:
+            first_kind = json.loads(
+                cases_sorted[0].with_suffix(".meta").read_text()
+            ).get("harness_kind", "persist")
+        except Exception:
+            pass
 
     if args.langs:
         wanted = [l.strip() for l in args.langs.split(",") if l.strip()]
     else:
-        # Include any backend that can run persist cases — either the
-        # standard `render_persist` path or a `run_persist_custom` hook
-        # (Erlang, GDScript — both covered).
         wanted = [
             k for k, v in LANGS.items()
-            if v.render_persist is not None or v.run_persist_custom is not None
+            if v.renderers.get(first_kind) is not None or v.run_custom is not None
         ]
     if "python_3" not in wanted:
         print("FATAL: python_3 required as oracle", file=sys.stderr)
         return 2
 
-    cases = sorted(args.cases.glob("case_*.frame"))
+    cases = cases_sorted
     if args.max:
         cases = cases[:args.max]
     if not cases:
@@ -210,7 +230,7 @@ def main() -> int:
 
     args.workdir.mkdir(parents=True, exist_ok=True)
 
-    print(f"=== Phase 2 persist fuzz: {len(cases)} cases × {len(wanted)} backends ===")
+    print(f"=== {first_kind} fuzz: {len(cases)} cases × {len(wanted)} backends ===")
     print(f"backends: {','.join(wanted)}")
     print()
 
