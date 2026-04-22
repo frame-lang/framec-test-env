@@ -1026,14 +1026,10 @@ def kotlin_persist(meta: dict) -> str:
     lines.append('    println("TRACE: status ${inst.status()}")')
     lines.append("    val blob = inst.save_state()")
     lines.append('    println("TRACE: save ok")')
-    # Framec Kotlin codegen emits `fun restore_state(…)` as an instance
-    # method rather than inside the companion object, so we can't call
-    # it statically as `Sys.restore_state(blob)`. Mirror the workaround
-    # the existing matrix tests use: create a throwaway instance and
-    # call `.restore_state()` on it. (Tracked as a framec codegen
-    # follow-up — see FINDINGS.)
-    lines.append(f"    val __tmp = {sys_name}()")
-    lines.append("    val rest = __tmp.restore_state(blob)")
+    # framec's Kotlin codegen now emits `restore_state` inside the
+    # `companion object { }` block so it's callable statically,
+    # matching every other backend's persist API.
+    lines.append(f"    val rest = {sys_name}.restore_state(blob)")
     lines.append('    println("TRACE: restore ok")')
     lines.append('    println("TRACE: post_status ${rest.status()}")')
     lines.append('    println("TRACE: post_x ${rest.get_x()}")')
