@@ -101,4 +101,64 @@ test matrix unchanged at 218/0/0.
 
 ---
 
+---
+
+## 4. PHP `restore_state` re-fires initial-state ENTER [FIXED]
+
+**Severity:** same class as Ruby bug #1 — every PHP `@@persist` program
+leaks initial-state enter side effects on restore.
+
+**Symptom:** `Canary::restore_state($blob)` prints an extra
+`TRACE: ENTER $A` before returning to the caller.
+
+**Root cause:** generated `restore_state` used `new P()` which fires
+the constructor, which dispatches the initial state's `$>()`
+handler.
+
+**Fix:** PHP now uses
+`(new \ReflectionClass(P::class))->newInstanceWithoutConstructor()`
+instead of `new P()`. This produces an instance without running
+`__construct`. Instance props (`_state_stack`, `_context_stack`,
+`__compartment`) are set up explicitly from the saved blob.
+
+**Discovered by:** differential canary run, 2026-04-21. Fixed in
+`framec/src/frame_c/compiler/codegen/interface_gen.rs` — PHP branch of
+the persist generator. PHP Docker matrix unchanged at 209/0/4.
+
+---
+
+## 5. Swift `restoreState` re-fires initial-state ENTER [FIXED]
+
+**Severity:** same class as Ruby/PHP — every Swift `@@persist` program
+leaks the initial state's `$>()` handler on restore.
+
+**Symptom:** Swift canary emitted `TRACE: ENTER $A` directly before
+`TRACE: RESTORE ok`. Python emitted nothing between SAVE and RESTORE.
+
+**Root cause:** generated `restoreState` used `let instance = Canary()`
+which runs the default `init()`, which dispatches the initial-state
+enter handler. Swift has no equivalent of Ruby's `allocate` or PHP's
+`ReflectionClass::newInstanceWithoutConstructor`, so a second init
+would be the idiomatic fix — but that would require non-trivial
+refactoring of the Constructor codegen.
+
+**Fix:** class-static flag `__skipInitialEnter` (declared in
+`generate_swift_machinery`) gates the ENTER dispatch inside the
+generated `init()`. `restoreState` sets the flag true, calls
+`Canary()`, resets it false, then overwrites the compartment from
+the saved blob. The flag is always emitted (default false) so
+non-persist systems are unaffected.
+
+Single-threaded re-entrancy caveat: calling `restoreState` from
+inside an enter handler would race with the flag. Acceptable
+constraint for `@@persist`; documented in the generator comment.
+
+**Discovered by:** differential canary run, 2026-04-21. Fixed in
+`framec/src/frame_c/compiler/codegen/interface_gen.rs` (Swift
+restoreState emission) and `codegen/system_codegen.rs` (Swift
+init_event_code wraps ENTER in `if !Canary.__skipInitialEnter`).
+Swift Docker matrix unchanged at 207/0/0.
+
+---
+
 *(New findings append below as the harness expands to more backends.)*
