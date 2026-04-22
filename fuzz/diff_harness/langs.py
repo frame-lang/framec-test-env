@@ -666,6 +666,59 @@ print("TRACE: RET \\(r)")
 """
 
 
+def c_persist(meta: dict) -> str:
+    """C persist harness. framec emits a single .c file with a struct
+    type and `SysName_method(self, args)` functions. `@@SysName()`
+    expands to `SysName_new()`; persist API is
+    `SysName_save_state(self) → char*` and
+    `SysName_restore_state(json) → SysName*`."""
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = ["", "int main(void) {"]
+    lines.append(f"    {sys_name}* inst = @@{sys_name}();")
+    for _ in range(advances_pre):
+        lines.append(f"    {sys_name}_advance(inst);")
+        lines.append('    printf("TRACE: advance\\n");')
+    lines.append(f"    {sys_name}_set_x(inst, {set_x});")
+    lines.append(f'    printf("TRACE: set_x {set_x}\\n");')
+    if has_str:
+        lines.append(f'    {sys_name}_set_s(inst, "{set_s}");')
+        lines.append(f'    printf("TRACE: set_s \\"{set_s}\\"\\n");')
+    if has_bool:
+        # C's bool literal in stdbool.h is lowercase `true`/`false`.
+        lines.append(f"    {sys_name}_set_b(inst, {'true' if set_b else 'false'});")
+        lines.append(f'    printf("TRACE: set_b {"true" if set_b else "false"}\\n");')
+    lines.append(f'    printf("TRACE: status %s\\n", {sys_name}_status(inst));')
+    lines.append(f"    char* blob = {sys_name}_save_state(inst);")
+    lines.append('    printf("TRACE: save ok\\n");')
+    lines.append(f"    {sys_name}* rest = {sys_name}_restore_state(blob);")
+    lines.append('    printf("TRACE: restore ok\\n");')
+    lines.append(f'    printf("TRACE: post_status %s\\n", {sys_name}_status(rest));')
+    lines.append(f'    printf("TRACE: post_x %d\\n", {sys_name}_get_x(rest));')
+    if has_str:
+        lines.append(
+            f'    printf("TRACE: post_s \\"%s\\"\\n", {sys_name}_get_s(rest));'
+        )
+    if has_bool:
+        lines.append(
+            f'    printf("TRACE: post_b %s\\n", {sys_name}_get_b(rest) ? "true" : "false");'
+        )
+    lines.append('    printf("TRACE: done\\n");')
+    lines.append(f"    {sys_name}_destroy(inst);")
+    lines.append(f"    {sys_name}_destroy(rest);")
+    lines.append("    free(blob);")
+    lines.append("    return 0;")
+    lines.append("}")
+    return "\n".join(lines) + "\n"
+
+
 def csharp_persist(meta: dict) -> str:
     sys_name = meta["sys_name"]
     seq = meta["sequence"]
@@ -1207,6 +1260,17 @@ def run_dart(p: Path) -> List[str]:
     return ["dart", "run", str(p)]
 
 
+def compile_c(p: Path) -> List[str]:
+    # docker-c image ships cJSON in /usr/include/cjson and linker
+    # finds it via `-lcjson`. The emitted .c file is self-contained.
+    bin_path = p.with_suffix("")
+    return ["gcc", "-o", str(bin_path), str(p), "-lcjson"]
+
+
+def run_c(p: Path) -> List[str]:
+    return [str(p.with_suffix(""))]
+
+
 def compile_java(p: Path) -> List[str]:
     # Frame emits the class under an exact filename; javac produces .class.
     # In docker-java the container ships org.json at /lib/json.jar, so
@@ -1535,6 +1599,14 @@ def _erlang_trace(src: str) -> str:
     return _lower_bool(src)
 
 
+def _c_trace(src: str) -> str:
+    # C uses pointer-to-struct access (`self->x`) rather than dot.
+    # `str` in Frame maps to `char*` in the C backend.
+    src = _sub_outside_strings(r'\bself\.(?=[A-Za-z_])', 'self->', src)
+    src = _sub_outside_strings(r'(?<=:\s)str\b', 'char*', src)
+    return _lower_bool(src)
+
+
 def _cpp_trace(src: str) -> str:
     src = _sub_outside_strings(
         r'\bprint\(("[^"]*")\)',
@@ -1648,6 +1720,30 @@ LANGS = {
         notes=(
             "Runs via `godot --headless --script` in docker-gdscript. "
             "Engine banner is stripped from stdout by the custom hook."
+        ),
+    ),
+    "c": Lang(
+        name="c",
+        ext="fc",
+        out_ext="c",
+        compile=compile_c,
+        run=run_c,
+        save_method="save_state",
+        restore_call="{S}_restore_state({B})",
+        render_persist=c_persist,
+        rewrite_trace=_c_trace,
+        docker_image="docker-c",
+        # framec's C codegen uses cJSON and bool; user-supplied includes
+        # are stdio (for printf trace) + cJSON (for serialization) +
+        # stdbool (for `true`/`false` literals). Compiled with `-lcjson`
+        # in the docker-c container.
+        prolog="#include <stdio.h>\n#include <stdlib.h>\n#include <stdbool.h>\n#include <cjson/cJSON.h>\n",
+        notes=(
+            "Pointer-based ABI: `SysName_method(self, args)`. The custom "
+            "rewriter translates `self.` to `self->` and `str` to "
+            "`char*` since framec's C backend doesn't auto-translate "
+            "those from the portable Frame keywords. Compiled inside "
+            "docker-c with `gcc -lcjson`."
         ),
     ),
     "erlang": Lang(
