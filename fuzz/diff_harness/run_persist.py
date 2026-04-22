@@ -42,7 +42,11 @@ class CaseResult:
 
 def build_source(lang: Lang, system_block: str, meta: dict) -> str:
     """Produce lang-specific source: rewrite @@target, inject prolog,
-    rewrite_trace, append render_persist epilog."""
+    rewrite_trace, optionally append render_persist epilog.
+
+    When the language uses a `run_persist_custom` hook (Erlang, …),
+    the epilog lives in a separate driver file rather than being
+    spliced into the Frame source, so `render_persist` isn't required."""
     lines = system_block.splitlines(keepends=True)
     rewritten = []
     prolog_injected = False
@@ -59,10 +63,20 @@ def build_source(lang: Lang, system_block: str, meta: dict) -> str:
             rewritten.append(line)
     body = "".join(rewritten)
     body = lang.rewrite_trace(body)
-    if lang.render_persist is None:
-        raise RuntimeError(f"{lang.name}: no render_persist configured")
-    harness = lang.render_persist(meta)
-    return body + "\n" + harness
+    # If the language has a `render_persist` callback, splice its
+    # epilog into the Frame source (for backends where the driver
+    # can live alongside the @@system block — all C-family langs,
+    # Python, Ruby, GDScript, …). Otherwise the `run_persist_custom`
+    # hook is solely responsible for building the driver (Erlang
+    # escript pattern).
+    if lang.render_persist is not None:
+        harness = lang.render_persist(meta)
+        return body + "\n" + harness
+    if lang.run_persist_custom is None:
+        raise RuntimeError(
+            f"{lang.name}: neither render_persist nor run_persist_custom configured"
+        )
+    return body
 
 
 def _docker_wrap(cmd: list[str], host_workdir: Path, image: str) -> list[str]:
@@ -104,6 +118,16 @@ def run_one(lang: Lang, case_path: Path, meta: dict, workdir: Path) -> CaseResul
         return CaseResult(case_id, lang.name, "transpile", False, [],
                           stderr=f"framec emitted no .{lang.out_ext} file")
     emitted = candidates[0]
+
+    # If the language supplies a custom runner (Erlang, GDScript, …),
+    # bypass the standard compile+run flow.
+    if lang.run_persist_custom is not None:
+        stage, rc, output = lang.run_persist_custom(emitted, out_dir, meta)
+        if rc != 0:
+            return CaseResult(case_id, lang.name, stage, False, [],
+                              stderr=output[:500])
+        trace = [l for l in output.splitlines() if l.startswith("TRACE: ")]
+        return CaseResult(case_id, lang.name, "run", True, trace)
 
     # For docker-backed langs, compile/run callables receive a path
     # rooted at `/work/<filename>` — the container's view of the bind
@@ -166,7 +190,13 @@ def main() -> int:
     if args.langs:
         wanted = [l.strip() for l in args.langs.split(",") if l.strip()]
     else:
-        wanted = [k for k, v in LANGS.items() if v.render_persist is not None]
+        # Include any backend that can run persist cases — either the
+        # standard `render_persist` path or a `run_persist_custom` hook
+        # (Erlang, GDScript — both covered).
+        wanted = [
+            k for k, v in LANGS.items()
+            if v.render_persist is not None or v.run_persist_custom is not None
+        ]
     if "python_3" not in wanted:
         print("FATAL: python_3 required as oracle", file=sys.stderr)
         return 2

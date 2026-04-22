@@ -70,6 +70,13 @@ class Lang:
     # container and executes compile/run there — `compile` and `run`
     # callables should reference files under `/work`.
     docker_image: Optional[str] = None
+    # Backends that don't fit the `compile(path) + run(path)` template
+    # (e.g. Erlang renames the emitted file to match `-module(...)` and
+    # wraps execution in an escript; GDScript invokes Godot with a
+    # driver script) can supply a custom handler here. Signature:
+    #   (emitted: Path, out_dir: Path, meta: dict) -> (returncode, stdout, stderr)
+    # When set, the default compile/run path is bypassed entirely.
+    run_persist_custom: Optional[Callable[[Path, Path, dict], tuple]] = None
     # Language support notes (free text, informational only).
     notes: str = ""
 
@@ -839,6 +846,182 @@ def lua_persist(meta: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def gdscript_persist(meta: dict) -> str:
+    """GDScript persist harness. Runs as a Godot --headless --script.
+    Entry point is `func _init()` in a `SceneTree`-extending class."""
+    sys_name = meta["sys_name"]
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = ["", "func _init():"]
+    lines.append(f"    var inst = @@{sys_name}()")
+    for _ in range(advances_pre):
+        lines.append("    inst.advance()")
+        lines.append('    print("TRACE: advance")')
+    lines.append(f"    inst.set_x({set_x})")
+    lines.append(f'    print("TRACE: set_x {set_x}")')
+    if has_str:
+        lines.append(f'    inst.set_s("{set_s}")')
+        lines.append(f'    print(\'TRACE: set_s "{set_s}"\')')
+    if has_bool:
+        lines.append(f"    inst.set_b({'true' if set_b else 'false'})")
+        lines.append(f'    print("TRACE: set_b {"true" if set_b else "false"}")')
+    lines.append('    print("TRACE: status " + str(inst.status()))')
+    lines.append("    var blob = inst.save_state()")
+    lines.append('    print("TRACE: save ok")')
+    lines.append(f"    var rest = {sys_name}.restore_state(blob)")
+    lines.append('    print("TRACE: restore ok")')
+    lines.append('    print("TRACE: post_status " + str(rest.status()))')
+    lines.append('    print("TRACE: post_x " + str(rest.get_x()))')
+    if has_str:
+        lines.append('    print(\'TRACE: post_s "\' + str(rest.get_s()) + \'"\')')
+    if has_bool:
+        lines.append(
+            '    print("TRACE: post_b " + ("true" if rest.get_b() else "false"))'
+        )
+    lines.append('    print("TRACE: done")')
+    lines.append("    quit()")
+    return "\n".join(lines) + "\n"
+
+
+def gdscript_run_custom(emitted: Path, out_dir: Path, meta: dict) -> tuple:
+    """Run the emitted .gd through Godot headless inside the
+    docker-gdscript container.
+
+    Godot prints "Godot Engine vX.Y ..." on startup which we filter
+    out of stdout — the oracle trace doesn't include it."""
+    import subprocess
+    cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{out_dir}:/work", "-w", "/work",
+        "--entrypoint", "godot",
+        "docker-gdscript",
+        "--headless", "--script", emitted.name,
+    ]
+    try:
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        return ("run", 124, "run timed out")
+    # Strip the engine banner from the output so the diff against the
+    # Python oracle only sees the TRACE lines.
+    filtered = "\n".join(
+        l for l in proc.stdout.splitlines()
+        if not l.startswith("Godot Engine")
+    )
+    return ("run", proc.returncode, filtered if proc.returncode == 0 else filtered + proc.stderr)
+
+
+def _erlang_module_name(sys_name: str) -> str:
+    """Convert a Frame system name (PascalCase) to its Erlang module
+    name (snake_case). Mirrors `to_snake_case` in framec's codegen."""
+    out = []
+    for i, c in enumerate(sys_name):
+        if c.isupper() and i > 0 and not sys_name[i - 1].isupper():
+            out.append('_')
+        out.append(c.lower())
+    return ''.join(out)
+
+
+def _erlang_persist_escript(meta: dict) -> str:
+    """Return the escript driver text that runs the persist sequence
+    against the compiled Erlang module. Called by `erlang_run_custom`
+    after the module compiles."""
+    sys_name = meta["sys_name"]
+    module = _erlang_module_name(sys_name)
+    seq = meta["sequence"]
+    advances_pre = seq["advances_pre"]
+    set_x = seq["set_x"]
+    set_s = seq["set_s"]
+    set_b = seq["set_b"]
+    has_str = set_s is not None
+    has_bool = set_b is not None
+
+    lines = ["#!/usr/bin/env escript"]
+    lines.append("main(_) ->")
+    lines.append('    code:add_patha("."),')
+    lines.append(f"    {{ok, Pid}} = {module}:start_link(),")
+    for _ in range(advances_pre):
+        lines.append(f"    _ = {module}:advance(Pid),")
+        lines.append('    io:format("TRACE: advance~n"),')
+    lines.append(f"    _ = {module}:set_x(Pid, {set_x}),")
+    lines.append(f'    io:format("TRACE: set_x {set_x}~n"),')
+    if has_str:
+        lines.append(f'    _ = {module}:set_s(Pid, "{set_s}"),')
+        lines.append(f'    io:format("TRACE: set_s \\"{set_s}\\"~n"),')
+    if has_bool:
+        lines.append(f"    _ = {module}:set_b(Pid, {'true' if set_b else 'false'}),")
+        lines.append(f'    io:format("TRACE: set_b {"true" if set_b else "false"}~n"),')
+    lines.append(f"    Status = {module}:status(Pid),")
+    lines.append('    io:format("TRACE: status ~s~n", [Status]),')
+    lines.append(f"    Blob = {module}:save_state(Pid),")
+    lines.append('    io:format("TRACE: save ok~n"),')
+    lines.append(f"    {{ok, Pid2}} = {module}:load_state(Blob),")
+    lines.append('    io:format("TRACE: restore ok~n"),')
+    lines.append(f"    PostStatus = {module}:status(Pid2),")
+    lines.append('    io:format("TRACE: post_status ~s~n", [PostStatus]),')
+    lines.append(f"    PostX = {module}:get_x(Pid2),")
+    lines.append('    io:format("TRACE: post_x ~p~n", [PostX]),')
+    if has_str:
+        lines.append(f"    PostS = {module}:get_s(Pid2),")
+        lines.append('    io:format("TRACE: post_s \\"~s\\"~n", [PostS]),')
+    if has_bool:
+        lines.append(f"    PostB = {module}:get_b(Pid2),")
+        lines.append('    BStr = case PostB of true -> "true"; _ -> "false" end,')
+        lines.append('    io:format("TRACE: post_b ~s~n", [BStr]),')
+    lines.append('    io:format("TRACE: done~n"),')
+    lines.append("    init:stop().")
+    return "\n".join(lines) + "\n"
+
+
+def erlang_run_custom(emitted: Path, out_dir: Path, meta: dict) -> tuple:
+    """End-to-end Erlang compile + run in a Docker container:
+      1. Rename the emitted `.erl` to `<module>.erl` so erlc is happy.
+      2. erlc → `<module>.beam`.
+      3. Write the escript driver built from `meta`.
+      4. escript-run the driver.
+    Returns `(returncode, stdout, stderr)`."""
+    import subprocess
+    sys_name = meta["sys_name"]
+    module = _erlang_module_name(sys_name)
+    target_erl = out_dir / f"{module}.erl"
+    # Step 1: rename.
+    if emitted != target_erl:
+        emitted.rename(target_erl)
+    # Step 2: compile via docker.
+    compile_cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{out_dir}:/work", "-w", "/work",
+        "--entrypoint", "erlc",
+        "docker-erlang",
+        f"{module}.erl",
+    ]
+    proc = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=180)
+    if proc.returncode != 0:
+        return ("compile", proc.returncode, proc.stdout + proc.stderr)
+    # Step 3: write escript driver.
+    driver = out_dir / "run_test.escript"
+    driver.write_text(_erlang_persist_escript(meta))
+    driver.chmod(0o755)
+    # Step 4: execute.
+    run_cmd = [
+        "docker", "run", "--rm",
+        "-v", f"{out_dir}:/work", "-w", "/work",
+        "--entrypoint", "escript",
+        "docker-erlang",
+        "run_test.escript",
+    ]
+    try:
+        proc = subprocess.run(run_cmd, capture_output=True, text=True, timeout=60)
+    except subprocess.TimeoutExpired:
+        return ("run", 124, "run timed out")
+    return ("run", proc.returncode, proc.stdout if proc.returncode == 0 else proc.stdout + proc.stderr)
+
+
 def cpp_persist(meta: dict) -> str:
     """C++ persist harness. framec targets C++23; the generated system
     is a class with static save_state/restore_state."""
@@ -1332,6 +1515,26 @@ def _swift_trace(src: str) -> str:
     return _lower_bool(src)
 
 
+def _gdscript_trace(src: str) -> str:
+    # GDScript uses `true`/`false` lowercase and `self.x` natively.
+    # `print(...)` is valid as-is.
+    return _lower_bool(src)
+
+
+def _erlang_trace(src: str) -> str:
+    # Erlang doesn't use `;` as a statement terminator — it uses `,`
+    # between statements and `.` as clause-terminator. framec's
+    # Erlang codegen rewrites `self.x = V;` into record-update syntax
+    # `Data#data{x = V}` but leaves any trailing `;` inside the braces,
+    # producing an Erlang parse error. Strip `;` from the rhs of
+    # `= v;` assignments in our generated Frame bodies.
+    src = _sub_outside_strings(r'(=\s*v)\s*;', r'\1', src)
+    # Erlang treats Capitalized identifiers as variables; the canonical
+    # Python bool atoms `True`/`False` would be read as unbound vars.
+    # Atoms are lowercase.
+    return _lower_bool(src)
+
+
 def _cpp_trace(src: str) -> str:
     src = _sub_outside_strings(
         r'\bprint\(("[^"]*")\)',
@@ -1427,6 +1630,44 @@ LANGS = {
         notes=(
             "JSON blob via cjson. Runs via docker-lua since macOS's "
             "system lua lacks cjson; the container ships it preinstalled."
+        ),
+    ),
+    "gdscript": Lang(
+        name="gdscript",
+        ext="fgd",
+        out_ext="gd",
+        save_method="save_state",
+        restore_call="{S}.restore_state({B})",
+        render_persist=gdscript_persist,
+        run_persist_custom=gdscript_run_custom,
+        rewrite_trace=_gdscript_trace,
+        docker_image="docker-gdscript",  # informational; custom hook wraps itself
+        # GDScript `extends SceneTree` gives us access to `quit()` and
+        # lets us use `func _init()` as the entry point.
+        prolog="extends SceneTree\n",
+        notes=(
+            "Runs via `godot --headless --script` in docker-gdscript. "
+            "Engine banner is stripped from stdout by the custom hook."
+        ),
+    ),
+    "erlang": Lang(
+        name="erlang",
+        ext="ferl",
+        out_ext="erl",
+        save_method="save_state",
+        restore_call="{S}:load_state({B})",  # note: load_state, not restore
+        # Erlang uses a custom runner instead of the standard compile+run
+        # path: framec emits a .erl that needs to be renamed to match the
+        # `-module(...)` directive, then compiled via `erlc`, then driven
+        # by an escript (not a main() call). The custom hook handles all
+        # four steps and returns an Erlang trace matching the oracle.
+        run_persist_custom=erlang_run_custom,
+        rewrite_trace=_erlang_trace,
+        docker_image="docker-erlang",  # informational; custom hook wraps itself
+        notes=(
+            "gen_statem process model. PascalCase Frame names map to "
+            "snake_case Erlang module names (Persist0000 → persist0000). "
+            "Persist API uses load_state/1 not restore_state/1."
         ),
     ),
     "rust": Lang(
