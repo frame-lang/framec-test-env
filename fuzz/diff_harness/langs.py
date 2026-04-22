@@ -444,7 +444,7 @@ def compile_csharp(p: Path) -> List[str]:
         csproj.write_text("""<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>Exe</OutputType>
-    <TargetFramework>net9.0</TargetFramework>
+    <TargetFramework>net10.0</TargetFramework>
     <RootNamespace>Harness</RootNamespace>
     <StartupObject>CanaryMain</StartupObject>
   </PropertyGroup>

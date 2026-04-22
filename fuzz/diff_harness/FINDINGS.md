@@ -161,4 +161,53 @@ Swift Docker matrix unchanged at 207/0/0.
 
 ---
 
+---
+
+## 6. C# `RestoreState` re-fires initial-state ENTER [FIXED]
+
+**Severity:** same class as Ruby/PHP/Swift.
+
+**Fix:** use `RuntimeHelpers.GetUninitializedObject(typeof(P))` — the
+modern .NET API that allocates an instance without running the
+constructor. Instance fields (`_state_stack`, `_context_stack`) are
+populated explicitly before the compartment is overwritten from the
+saved blob.
+
+Docker matrix unchanged at 213/0/0.
+
+---
+
+## 7. Java / Kotlin / C++ / GDScript — same restore-fires-ENTER bug [FIXED]
+
+Audit of every remaining backend's `restore_state` path confirmed the
+pattern: any backend whose generated code calls the public constructor
+to obtain the instance *before* overwriting the compartment inherits
+the same bug. The ones that dodged it did so by construction:
+
+  * **Python** — `pickle.loads` bypasses `__init__`.
+  * **JS / TS** — `Object.create(P.prototype)` bypasses the ctor.
+  * **Go / Rust** — plain struct literal, no ctor to bypass.
+  * **Dart** — a generated private `P._restore()` ctor already exists.
+  * **Lua** — bare table + metatable, no ctor.
+
+**Fix:** class-static flag `__skipInitialEnter` across Java, Kotlin,
+C++, and GDScript. The flag is declared in each backend's
+`generate_*_machinery` function (Java `private static boolean`,
+Kotlin `companion object { @JvmStatic var }`, C++ `inline static
+bool`, GDScript `static var`). The ctor's ENTER-dispatch body in
+`system_codegen.rs` wraps the dispatch in `if !__skipInitialEnter`.
+`restore_state` in each backend sets the flag true, calls the ctor,
+resets false, then overwrites the compartment.
+
+Swift uses the same pattern (fixed earlier). Ruby/PHP/C# use native
+skip-ctor APIs (`allocate`, `ReflectionClass::newInstanceWithoutConstructor`,
+`RuntimeHelpers.GetUninitializedObject`) where available — those
+three are cleaner than the flag but the flag is portable everywhere
+else.
+
+**Verification:** full Docker matrix run pending at time of this
+commit; will update FINDINGS once complete.
+
+---
+
 *(New findings append below as the harness expands to more backends.)*
