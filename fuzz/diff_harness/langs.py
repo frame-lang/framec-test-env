@@ -1837,20 +1837,11 @@ def _gdscript_trace(src: str) -> str:
 
 
 def _erlang_trace(src: str) -> str:
-    # Erlang doesn't use `;` as a C-style statement terminator — it
-    # uses `,` between statements and `.` as clause-terminator. framec
-    # rewrites `self.x = <expr>;` into record-update syntax
-    # `Data#data{x = <expr>}`, but the trailing `;` is copied verbatim
-    # into the `{…}` and parses as a case-clause separator, producing
-    # a syntax error. Strip the trailing `;` from any self-assignment
-    # in our generated Frame body so framec produces a clean record
-    # update.
-    src = _sub_outside_strings(
-        r'(self\.\w+\s*=\s*[^;\n]+);', r'\1', src,
-    )
     # Erlang treats Capitalized identifiers as variables; the canonical
     # Python bool atoms `True`/`False` would be read as unbound vars.
-    # Atoms are lowercase.
+    # Atoms are lowercase. No `;`-stripping needed here — framec's
+    # Erlang codegen (`erlang_system.rs::rewrite_line`) now trims a
+    # trailing `;` from the RHS before constructing the record update.
     return _lower_bool(src)
 
 
