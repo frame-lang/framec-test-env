@@ -997,8 +997,12 @@ def _js_trace(src: str) -> str:
 def _go_trace(src: str) -> str:
     # print("x") → fmt.Println("x")
     src = re.sub(r'\bprint\((.*?)\)', r'fmt.Println(\1)', src)
-    # framec's Go codegen rewrites `self.` to `s.` on its own, so no
-    # rewrite here. Bool case must be lowered for native literal syntax.
+    # Go's generated methods use `s` as the receiver name. Native
+    # statement bodies inside @@state handlers pass through unchanged
+    # (Oceans Model), so we must pre-rewrite `self.` → `s.` at the
+    # harness layer. The @@:() return-expression path is rewritten
+    # inside framec itself (see frame_expansion.rs Go branches).
+    src = _rewrite_self(src, "s.")
     return _lower_bool(src)
 
 

@@ -214,7 +214,7 @@ commit; will update FINDINGS once complete.
 
 ---
 
-## 9. Rust `str` default-value mismatch in domain block [OPEN]
+## 9. Rust `str` default-value mismatch in domain block [FIXED]
 
 **Severity:** framec Rust codegen. Any Frame source with a `str`-typed
 domain var defaulted to an empty string literal produces uncompilable
@@ -247,11 +247,26 @@ should wrap the default expression in `String::from(...)` when the
 Frame declared type was `str` (and thus Rust field type is `String`)
 and the default is a string literal.
 
-**Discovered by:** Phase-2 persist fuzz bring-up, 2026-04-22.
+**Fix:** `generate_rust_constructor` in `rust_system.rs` now routes
+domain initializers through `rust_wrap_for_boxing` with the field's
+declared type, so `s: str = ""` emits `s: String::from("")`. Also
+fixed two adjacent Rust codegen bugs uncovered while iterating:
+  - Handler-dispatch param unpacking was keyed on Rust type names
+    (`i64`, `f64`, …), so a Frame `int` param fell through to the
+    catch-all and was downcast as `String`. Added `int → i64` and
+    `float → f64` normalization.
+  - `rust_json_extract` / `rust_json_extract_unwrap` mapped Frame
+    `int → i32`, but `RustBackend::convert_type` maps it to `i64`,
+    so `restore_state` produced `expected i64, found i32`. Fixed by
+    making `int` map to `i64` in the extract path.
+
+Commit: `4b225f3`. Docker matrix Rust 218/218 unchanged; Phase-2
+persist fuzz Rust 0/20 → 4/20 (remaining 16 fail on the separate
+known String-clone-in-@@:() limitation).
 
 ---
 
-## 10. Go domain `str` type not mapped to `string` [OPEN]
+## 10. Go domain `str` type not mapped to `string` [FIXED]
 
 **Severity:** framec Go codegen. Same class as #9.
 
@@ -264,9 +279,15 @@ undefined: str
 **Fix location:** Go struct field emission for domain vars. Should map
 the Frame type `str` to `string`.
 
+**Fix:** `GoBackend::emit_field` now routes the field type through
+`self.map_type(raw_type)`, applying the `str → string` mapping that
+was already present but unused for domain fields.
+
+Commit: `1455d68`. Docker matrix Go 212/212 unchanged.
+
 ---
 
-## 11. Go `self.` not rewritten to `s.` inside `@@:()` return expressions [OPEN]
+## 11. Go `self.` not rewritten to `s.` inside `@@:()` return expressions [FIXED]
 
 **Severity:** framec Go codegen. Partial `self.` → `s.` rewrite.
 
@@ -290,6 +311,17 @@ source to Go.
 **Fix location:** whichever codegen path expands `@@:()` into the
 `_return` assignment for Go — needs to apply the same
 `self.` → `s.` rewrite the statement path uses.
+
+**Fix:** All three Go return-assignment branches in
+`frame_expansion.rs` (`@@:return = expr` assignment, bare `@@:(expr)`,
+and the standalone-expression variant) now apply a
+`expanded_expr.replace("self.", "s.")` pass, mirroring the Erlang
+branch that does the analogous `Data#data.` rewrite. Statement-body
+`self.` is still the user's responsibility in .fgo sources, but the
+@@:() return path is now consistent.
+
+Commit: `1455d68`. Full 8-backend Phase-2 fuzz (python_3, javascript,
+typescript, ruby, dart, swift, csharp, go) at 648/648 trace-diff checks.
 
 ---
 
