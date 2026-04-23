@@ -162,13 +162,18 @@ def gen_system(case_id: int, outer: str, inner: str) -> tuple[str, str, int]:
     lines.extend(inner_setup(inner))
     lines.extend(outer_body(outer, inner_src))
     lines.append("            }")
-    lines.append("            echo(n: int): int { @@:(n) }")
-    # Use the declared param name `n` directly — framec binds it as
-    # a typed local at the top of the handler in every backend. Using
-    # `@@:params.n` instead would emit an untyped `_parameters[0]`
-    # access in typed targets (Go, Java, C, etc.), where the `+`
-    # operator then fails with "cannot operate on Any/Object".
-    lines.append("            dbl(n: int): int { @@:(n + n) }")
+    # `@@:params.n` (not bare `n`) to keep the body portable — PHP
+    # writes `$n`, Erlang writes `N`. Framec translates @@:params per-
+    # target; a bare identifier here would fail in PHP (undefined
+    # constant `n`) and Erlang (unbound variable).
+    lines.append("            echo(n: int): int { @@:(@@:params.n) }")
+    # `@@:params.n` is now framec-translated per target: it emits
+    # the declared typed local `n` (or `$n` for PHP, `N` for Erlang).
+    # Using the Frame construct keeps the single source portable —
+    # native `n` would break PHP (undefined constant `n` — needs `$n`)
+    # and potentially other targets where the bare name isn't in
+    # scope as written.
+    lines.append("            dbl(n: int): int { @@:(@@:params.n + @@:params.n) }")
     lines.append("            get_sv(): int { @@:($.val) }")
     lines.append("")
     lines.append("            $.val: int = 0")
