@@ -341,6 +341,70 @@ Expected: ~150 cases × 16 backends = **~2,400 cases**. (Erlang
 excluded — gen_statem processes can't be composed as in-process
 instances.)
 
+### Phase 8 — Negative (passthrough-error) fuzz
+
+**Goal:** validate that Frame's native-code passthrough model correctly
+surfaces bad native syntax at the *target* compiler, not silently at
+Frame. Every case is a Frame source that is valid Frame structurally
+but contains a native expression that should fail in exactly one
+backend's native compiler.
+
+**Pattern:** the fuzz source emits, say, `return true` in an operation
+body. Python compilation of that source must fail at the Python
+interpreter (`NameError: name 'true' is not defined`), not at
+framec. The oracle is the error class / message fragment expected
+from the target compiler, pinned per-backend.
+
+**Axes (draft):**
+- bad_literal: `true`/`false` to a Python target, `True`/`False` to
+  JS/Go/Rust, integer overflow literals, non-UTF8 string escapes.
+- bad_identifier: camelCase in a snake_case-only spot, reserved
+  keywords as variable names per-language.
+- bad_type: using `string` in a Go spec (should be `string` works —
+  but `str` wouldn't), using `Number` in a Rust spec, etc.
+- bad_expression: Python-style `not x` in a brace-family target;
+  C-style `x && y` in a Python target.
+
+**Contract per case:**
+```json
+{
+  "harness_kind": "negative",
+  "expected": {
+    "stage": "target_compile" | "target_runtime",
+    "error_fragment": "NameError: name 'true' is not defined"
+  }
+}
+```
+
+**Framec MUST:**
+1. Transpile without error (the Frame structure is valid).
+2. Pass the bad native text through verbatim.
+3. The target compiler/interpreter emits its native error.
+
+**Framec MUST NOT:**
+- Translate bad literals into "something that works" (that would
+  hide the author's mistake).
+- Silently drop or rewrite the offending token.
+- Fail at the Frame stage for syntax it doesn't own.
+
+**Runner behavior:** success = target compile/run failed with the
+expected `error_fragment` substring. Failure = target compile/run
+*succeeded* (framec translated something it shouldn't have) OR
+framec itself failed (framec is validating native syntax it
+shouldn't be).
+
+Expected: ~50 cases × 17 backends = **~850 cases**. Each case is
+authored, not generated, because the expected error text is highly
+specific; a generator would hit the combinatorial explosion of
+target error formats.
+
+**Why this matters:** without negative fuzz, a framec regression that
+silently rewrites `return true` → `return True` for Python (a hack
+even if well-intentioned) would go undetected — the positive fuzz
+would still pass, because the "fix" makes the bad spec work. Negative
+fuzz locks in the contract that bad Frame specs fail where they
+should: at the native compiler.
+
 ## Grand-total projected coverage
 
 | Phase | New cases  | Cumulative | Status                              |
@@ -348,10 +412,11 @@ instances.)
 | Now   |     3,610  |     3,610  | legacy baseline                     |
 | 2     |     1,377  |     4,987  | **done** (17 × 81)                  |
 | 3     |     2,646  |     7,633  | **done** (16 × 162 + Erlang 54; 108 Erlang skips) |
-| 4     |    ~6,800  |   ~14,433  | next                                |
-| 5     |    ~3,400  |   ~17,833  |                                     |
+| 4     |    ~6,800  |   ~14,433  | **done** (17 × 81 clean after Erlang post-fwd fix) |
+| 5     |    ~3,400  |   ~17,833  | **done** (17 × 27 clean; 3×3×3 axes MVP) |
 | 6     |    ~1,100  |   ~18,933  | 11-backend subset                   |
 | 7     |    ~2,400  |   ~21,333  | 16-backend subset                   |
+| 8     |      ~850  |   ~22,183  | negative passthrough — after 5–7    |
 
 Well under 50k — tight enough that a full fuzz run fits in a coffee-
 break, loose enough that it's catching real bugs per phase.

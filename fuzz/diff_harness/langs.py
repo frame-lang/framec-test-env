@@ -213,6 +213,331 @@ def py_persist(meta: dict) -> str:
 # The per-backend variants differ only in native call syntax.
 
 
+def py_operations(meta: dict) -> str:
+    """Python oracle for Phase-5 operations fuzz. Prints TRACE for:
+      - direct op invocation (bypassing the state machine),
+      - post-drive() result (op called via caller_context path),
+      - final counter (to observe domain mutations).
+
+    Python's `str(True)` is `"True"` but every other backend renders
+    `true` lowercase. Frame has no cross-target bool-to-string rule,
+    so we normalize here: any Python bool gets lowercased in-trace so
+    byte-diff succeeds against JS/Go/etc."""
+    sys_name = meta["sys_name"]
+    return (
+        f"\n_norm = lambda v: ('true' if v else 'false') if isinstance(v, bool) else v\n"
+        f"if __name__ == '__main__':\n"
+        f"    inst = @@{sys_name}()\n"
+        f'    print(f"TRACE: direct {{_norm(inst.Op())}}")\n'
+        f"    inst.drive()\n"
+        f'    print(f"TRACE: via_event {{_norm(inst.get_result())}}")\n'
+        f'    print(f"TRACE: counter {{inst.get_counter()}}")\n'
+        f'    print("TRACE: done")\n'
+    )
+
+
+# Phase-5 operations fuzz renderers. Per-backend instantiates the
+# system, calls op() directly (bypassing the state machine), fires
+# drive() (which invokes op via the case's caller_context path),
+# then prints direct/via_event/counter/done. Bool rendering is
+# target-native where `tostring(bool)` already prints `"true"`/
+# `"false"` (most backends); where it doesn't, an inline ternary
+# produces the same string. `rtype` drives the print form — int
+# and str use default stringification; bool uses the normalized
+# form so the trace is byte-equal to Python's `_norm` oracle.
+
+
+def _ops_rtype(meta: dict) -> str:
+    return meta["axes"]["return_type"]
+
+
+def js_operations(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    rtype = _ops_rtype(meta)
+    # JS `console.log(true)` → "true"; no normalization needed.
+    _ = rtype  # type-driven variance not currently required
+    return (
+        f"\nconst inst = new {sys_name}();\n"
+        f'console.log("TRACE: direct " + inst.Op());\n'
+        f"inst.drive();\n"
+        f'console.log("TRACE: via_event " + inst.get_result());\n'
+        f'console.log("TRACE: counter " + inst.get_counter());\n'
+        f'console.log("TRACE: done");\n'
+    )
+
+
+def ts_operations(meta: dict) -> str:
+    # TypeScript uses the same runtime trace semantics as JS.
+    return js_operations(meta)
+
+
+def go_operations(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    rtype = _ops_rtype(meta)
+    # Go's fmt.Print on bool → "true"/"false"; on string → raw bytes;
+    # on int → decimal. Default %v matches the oracle for every type.
+    _ = rtype
+    return (
+        f"\nfunc main() {{\n"
+        f"    inst := New{sys_name}()\n"
+        f'    fmt.Printf("TRACE: direct %v\\n", inst.Op())\n'
+        f"    inst.Drive()\n"
+        f'    fmt.Printf("TRACE: via_event %v\\n", inst.Get_result())\n'
+        f'    fmt.Printf("TRACE: counter %v\\n", inst.Get_counter())\n'
+        f'    fmt.Println("TRACE: done")\n'
+        f"}}\n"
+    )
+
+
+def ruby_operations(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\ninst = {sys_name}.new\n"
+        f'puts "TRACE: direct #{{inst.Op}}"\n'
+        f"inst.drive\n"
+        f'puts "TRACE: via_event #{{inst.get_result}}"\n'
+        f'puts "TRACE: counter #{{inst.get_counter}}"\n'
+        f'puts "TRACE: done"\n'
+    )
+
+
+def dart_operations(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nvoid main() {{\n"
+        f"    var inst = {sys_name}();\n"
+        f'    print("TRACE: direct ${{inst.Op()}}");\n'
+        f"    inst.drive();\n"
+        f'    print("TRACE: via_event ${{inst.get_result()}}");\n'
+        f'    print("TRACE: counter ${{inst.get_counter()}}");\n'
+        f'    print("TRACE: done");\n'
+        f"}}\n"
+    )
+
+
+def swift_operations(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nlet inst = {sys_name}()\n"
+        + r'print("TRACE: direct \(inst.Op())")' + "\n"
+        f"inst.drive()\n"
+        + r'print("TRACE: via_event \(inst.get_result())")' + "\n"
+        + r'print("TRACE: counter \(inst.get_counter())")' + "\n"
+        + 'print("TRACE: done")\n'
+    )
+
+
+def csharp_operations(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    rtype = _ops_rtype(meta)
+    # C#'s `object.ToString()` on bool yields "True"/"False" (capitalized).
+    # Force lowercase explicitly when the op returns bool to match the
+    # oracle.
+    if rtype == "bool":
+        fmt_direct = 'inst.Op().ToString().ToLower()'  # C# bool → "True"/"False" → normalize to lowercase
+        fmt_via = 'inst.get_result().ToString().ToLower()'
+    else:
+        fmt_direct = 'inst.Op()'
+        fmt_via = 'inst.get_result()'
+    # Class name MUST be `CanaryMain` — the csproj hardcodes
+    # `<StartupObject>CanaryMain</StartupObject>` (shared across all
+    # harness kinds, including the persist/selfcall/hsm phases).
+    return (
+        f"\npublic class CanaryMain {{\n"
+        f"    public static void Main() {{\n"
+        f"        var inst = new {sys_name}();\n"
+        f'        System.Console.WriteLine("TRACE: direct " + {fmt_direct});\n'
+        f"        inst.drive();\n"
+        f'        System.Console.WriteLine("TRACE: via_event " + {fmt_via});\n'
+        f'        System.Console.WriteLine("TRACE: counter " + inst.get_counter());\n'
+        f'        System.Console.WriteLine("TRACE: done");\n'
+        f"    }}\n"
+        f"}}\n"
+    )
+
+
+def rust_operations(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nfn main() {{\n"
+        f"    let mut inst = {sys_name}::new();\n"
+        f'    println!("TRACE: direct {{}}", inst.Op());\n'
+        f"    inst.drive();\n"
+        f'    println!("TRACE: via_event {{}}", inst.get_result());\n'
+        f'    println!("TRACE: counter {{}}", inst.get_counter());\n'
+        f'    println!("TRACE: done");\n'
+        f"}}\n"
+    )
+
+
+def php_operations(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    rtype = _ops_rtype(meta)
+    # PHP echoes bool false as `""` and true as `"1"` — neither matches
+    # the oracle. Use var_export for bool; regular echo for int/str.
+    if rtype == "bool":
+        fmt_direct = 'var_export($inst->Op(), true)'
+        fmt_via = 'var_export($inst->get_result(), true)'
+    else:
+        fmt_direct = '$inst->Op()'
+        fmt_via = '$inst->get_result()'
+    return (
+        f"\n$inst = new {sys_name}();\n"
+        f'echo "TRACE: direct " . {fmt_direct} . PHP_EOL;\n'
+        f"$inst->drive();\n"
+        f'echo "TRACE: via_event " . {fmt_via} . PHP_EOL;\n'
+        f'echo "TRACE: counter " . $inst->get_counter() . PHP_EOL;\n'
+        f'echo "TRACE: done" . PHP_EOL;\n'
+    )
+
+
+def java_operations(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nclass {sys_name}Main {{\n"
+        f"    public static void main(String[] args) {{\n"
+        f"        {sys_name} inst = new {sys_name}();\n"
+        f'        System.out.println("TRACE: direct " + inst.Op());\n'
+        f"        inst.drive();\n"
+        f'        System.out.println("TRACE: via_event " + inst.get_result());\n'
+        f'        System.out.println("TRACE: counter " + inst.get_counter());\n'
+        f'        System.out.println("TRACE: done");\n'
+        f"    }}\n"
+        f"}}\n"
+    )
+
+
+def kotlin_operations(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nfun main() {{\n"
+        f"    val inst = {sys_name}()\n"
+        f'    println("TRACE: direct ${{inst.Op()}}")\n'
+        f"    inst.drive()\n"
+        f'    println("TRACE: via_event ${{inst.get_result()}}")\n'
+        f'    println("TRACE: counter ${{inst.get_counter()}}")\n'
+        f'    println("TRACE: done")\n'
+        f"}}\n"
+    )
+
+
+def cpp_operations(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    rtype = _ops_rtype(meta)
+    # C++ default stream << bool prints 1/0. Enable boolalpha globally
+    # so bool renders "true"/"false" matching the oracle. For str/int
+    # the flag is a no-op.
+    _ = rtype
+    return (
+        f"\nint main() {{\n"
+        f"    std::cout << std::boolalpha;\n"
+        f"    auto inst = {sys_name}();\n"
+        f'    std::cout << "TRACE: direct " << inst.Op() << std::endl;\n'
+        f"    inst.drive();\n"
+        f'    std::cout << "TRACE: via_event " << inst.get_result() << std::endl;\n'
+        f'    std::cout << "TRACE: counter " << inst.get_counter() << std::endl;\n'
+        f'    std::cout << "TRACE: done" << std::endl;\n'
+        f"    return 0;\n"
+        f"}}\n"
+    )
+
+
+def lua_operations(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    rtype = _ops_rtype(meta)
+    # Lua's tostring(true) → "true"; string.format "%s" with bool
+    # errors out. Use tostring() consistently.
+    _ = rtype
+    return (
+        f"\nlocal inst = {sys_name}:new()\n"
+        f'print("TRACE: direct " .. tostring(inst:Op()))\n'
+        f"inst:drive()\n"
+        f'print("TRACE: via_event " .. tostring(inst:get_result()))\n'
+        f'print("TRACE: counter " .. tostring(inst:get_counter()))\n'
+        f'print("TRACE: done")\n'
+    )
+
+
+def c_operations(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    rtype = _ops_rtype(meta)
+    # framec's C backend emits functions prefixed with the capital
+    # `<SysName>_<method>` and a `<SysName>_new()` constructor that
+    # returns a heap-allocated pointer. `@@SysName()` is Frame sugar
+    # that framec expands to `<SysName>_new()`. Bool in C is `int`
+    # (0/1) so we ternary-render for trace parity with the oracle.
+    if rtype == "bool":
+        direct = f'({sys_name}_Op(inst) ? "true" : "false")'
+        via = f'({sys_name}_get_result(inst) ? "true" : "false")'
+        direct_fmt = '%s'
+        via_fmt = '%s'
+    elif rtype == "str":
+        direct = f'{sys_name}_Op(inst)'
+        via = f'{sys_name}_get_result(inst)'
+        direct_fmt = '%s'
+        via_fmt = '%s'
+    else:  # int
+        direct = f'{sys_name}_Op(inst)'
+        via = f'{sys_name}_get_result(inst)'
+        direct_fmt = '%d'
+        via_fmt = '%d'
+    return (
+        f"\nint main(void) {{\n"
+        f"    {sys_name}* inst = @@{sys_name}();\n"
+        f'    printf("TRACE: direct {direct_fmt}\\n", {direct});\n'
+        f"    {sys_name}_drive(inst);\n"
+        f'    printf("TRACE: via_event {via_fmt}\\n", {via});\n'
+        f'    printf("TRACE: counter %d\\n", {sys_name}_get_counter(inst));\n'
+        f'    printf("TRACE: done\\n");\n'
+        f"    {sys_name}_destroy(inst);\n"
+        f"    return 0;\n"
+        f"}}\n"
+    )
+
+
+def gdscript_operations(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nfunc _init():\n"
+        f"    var inst = @@{sys_name}()\n"
+        f'    print("TRACE: direct " + str(inst.Op()))\n'
+        f"    inst.drive()\n"
+        f'    print("TRACE: via_event " + str(inst.get_result()))\n'
+        f'    print("TRACE: counter " + str(inst.get_counter()))\n'
+        f'    print("TRACE: done")\n'
+        f"    quit()\n"
+    )
+
+
+def _erlang_operations_escript(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    module = _erlang_module_name(sys_name)
+    rtype = _ops_rtype(meta)
+    # Erlang atoms `true`/`false` already render lowercase via ~p. For
+    # str rtype, the op returns an Erlang string (list of chars); use
+    # ~s to emit the raw chars. For int, ~p. For bool, ~p → `true`/
+    # `false`.
+    if rtype == "str":
+        fmt = "~s"
+    else:
+        fmt = "~p"
+    return (
+        "#!/usr/bin/env escript\n"
+        "main(_) ->\n"
+        '    code:add_patha("."),\n'
+        f"    {{ok, Pid}} = {module}:start_link(),\n"
+        f"    Direct = {module}:op(Pid),\n"
+        f'    io:format("TRACE: direct {fmt}~n", [Direct]),\n'
+        f"    _ = {module}:drive(Pid),\n"
+        f"    ViaEvent = {module}:get_result(Pid),\n"
+        f'    io:format("TRACE: via_event {fmt}~n", [ViaEvent]),\n'
+        f"    Counter = {module}:get_counter(Pid),\n"
+        '    io:format("TRACE: counter ~p~n", [Counter]),\n'
+        '    io:format("TRACE: done~n"),\n'
+        "    init:stop().\n"
+    )
+
+
 def py_selfcall(meta: dict) -> str:
     """Python oracle — canonical trace output."""
     sys_name = meta["sys_name"]
@@ -1541,6 +1866,7 @@ _ERLANG_ESCRIPT_BY_KIND = {
     "persist": lambda meta: _erlang_persist_escript(meta),
     "selfcall": lambda meta: _erlang_selfcall_escript(meta),
     "hsm": lambda meta: _erlang_hsm_escript(meta),
+    "operations": lambda meta: _erlang_operations_escript(meta),
 }
 
 
@@ -2184,7 +2510,18 @@ def _ruby_trace(src: str) -> str:
 
 def _lua_trace(src: str) -> str:
     # print("x") is valid Lua as-is. Passthrough.
-    # Lua uses `self.x` natively (in method-colon-call style).
+    # Lua field access is `self.x` but METHOD dispatch uses colon:
+    # `self:op()` passes self as first arg; `self.op()` does not
+    # (and explodes if op touches self). The canonical Python-style
+    # fuzz source writes `self.Op()`; we rewrite to `self:Op()` for
+    # the declared-op names the Phase-5 generator uses. Field access
+    # (e.g., `self.counter`) stays dot.
+    for op_name in ("Op", "OpOuter", "Bump"):
+        src = _sub_outside_strings(
+            rf'\bself\.{op_name}\(',
+            f'self:{op_name}(',
+            src,
+        )
     src = _py_if_to_lua(src)
     return _lower_bool(src)
 
@@ -2193,6 +2530,18 @@ def _rust_trace(src: str) -> str:
     # print("x") → println!("x");  — Rust requires the trailing `;`
     src = _sub_outside_strings(r'\bprint\((.*?)\)', r'println!(\1);', src)
     # Rust uses `self.x` natively; no rewrite needed.
+    # Frame `str` maps to `String` in Rust (owned). A bare literal
+    # `"hello"` is `&'static str` and does not coerce to `String`
+    # without an explicit conversion. In `return <literal>;` sites
+    # this is a type error. Wrap string literals with `.to_string()`
+    # so the canonical Python-style fuzz source compiles. We only
+    # touch the common `return "<lit>";` and `= "<lit>";` forms —
+    # anything else stays native.
+    src = _sub_outside_strings(
+        r'\breturn\s+"([^"]*)";',
+        r'return "\1".to_string();',
+        src,
+    )
     src = _py_if_to_c_family(src)
     return _lower_bool(src)
 
@@ -2284,6 +2633,27 @@ def _erlang_trace(src: str) -> str:
 def _c_trace(src: str) -> str:
     # C uses pointer-to-struct access (`self->x`) rather than dot.
     # `str` in Frame maps to `char*` in the C backend.
+    # Method dispatch in C has no dot/arrow form; framec emits ops
+    # as free functions `<SysName>_<OpName>(self, …)`. The canonical
+    # Python-style fuzz source writes `self.Op()` — we rewrite to
+    # `<SysName>_Op(self)` for the declared-op names the Phase-5
+    # generator uses. Extract SysName from the first `@@system` line.
+    m = re.search(r'@@system\s+([A-Za-z_][A-Za-z0-9_]*)\b', src)
+    sys_name = m.group(1) if m else None
+    if sys_name is not None:
+        for op_name in ("Op", "OpOuter", "Bump"):
+            # `self.Op()` (no-arg) → `<Sys>_Op(self)`
+            src = _sub_outside_strings(
+                rf'\bself\.{op_name}\(\)',
+                f'{sys_name}_{op_name}(self)',
+                src,
+            )
+            # `self.Op(a, b)` (with args) → `<Sys>_Op(self, a, b)`
+            src = _sub_outside_strings(
+                rf'\bself\.{op_name}\(([^)]+)\)',
+                rf'{sys_name}_{op_name}(self, \1)',
+                src,
+            )
     src = _rewrite_self(src, 'self->')
     src = _sub_outside_strings(r'(?<=:\s)str\b', 'char*', src)
     src = _py_if_to_c_family(src)
@@ -2321,7 +2691,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=py_canary,
-        renderers={'persist': py_persist, 'selfcall': py_selfcall, 'hsm': py_hsm},
+        renderers={'persist': py_persist, 'selfcall': py_selfcall, 'hsm': py_hsm, 'operations': py_operations},
         rewrite_trace=_py_passthrough,
         notes="Pickle blob. staticmethod restore_state. Oracle reference.",
     ),
@@ -2333,7 +2703,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=js_canary,
-        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm},
+        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm, 'operations': js_operations},
         rewrite_trace=_js_trace,
         notes="JSON string blob. camelCase methods. Requires .mjs for ESM.",
     ),
@@ -2345,7 +2715,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=ts_canary,
-        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm},  # JS & TS share persist harness text
+        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm, 'operations': ts_operations},  # JS & TS share persist harness text
         rewrite_trace=_js_trace,  # same syntax as JS
         notes="JSON string blob. Same method names as JavaScript.",
     ),
@@ -2357,7 +2727,7 @@ LANGS = {
         save_method="SaveState",
         restore_call="Restore{S}({B})",  # package-level function
         render_canary=go_canary,
-        renderers={'persist': go_persist, 'selfcall': go_selfcall, 'hsm': go_hsm},
+        renderers={'persist': go_persist, 'selfcall': go_selfcall, 'hsm': go_hsm, 'operations': go_operations},
         rewrite_trace=_go_trace,
         prolog='package main\n\nimport (\n\t"encoding/json"\n\t"fmt"\n)\n\nvar _ = json.Marshal\n',
         notes="JSON blob. PascalCase methods. Restore is pkg-level `RestoreP()`.",
@@ -2370,7 +2740,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=ruby_canary,
-        renderers={'persist': ruby_persist, 'selfcall': ruby_selfcall, 'hsm': ruby_hsm},
+        renderers={'persist': ruby_persist, 'selfcall': ruby_selfcall, 'hsm': ruby_hsm, 'operations': ruby_operations},
         rewrite_trace=_ruby_trace,
         prolog="require 'json'\n",
         notes="JSON blob. snake_case methods, classmethod restore_state.",
@@ -2383,7 +2753,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=lua_canary,
-        renderers={'persist': lua_persist, 'selfcall': lua_selfcall, 'hsm': lua_hsm},
+        renderers={'persist': lua_persist, 'selfcall': lua_selfcall, 'hsm': lua_hsm, 'operations': lua_operations},
         rewrite_trace=_lua_trace,
         docker_image="docker-lua",
         notes=(
@@ -2397,7 +2767,7 @@ LANGS = {
         out_ext="gd",
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
-        renderers={'persist': gdscript_persist, 'selfcall': gdscript_selfcall, 'hsm': gdscript_hsm},
+        renderers={'persist': gdscript_persist, 'selfcall': gdscript_selfcall, 'hsm': gdscript_hsm, 'operations': gdscript_operations},
         run_custom=gdscript_run_custom,
         rewrite_trace=_gdscript_trace,
         docker_image="docker-gdscript",  # informational; custom hook wraps itself
@@ -2417,7 +2787,7 @@ LANGS = {
         run=run_c,
         save_method="save_state",
         restore_call="{S}_restore_state({B})",
-        renderers={'persist': c_persist, 'selfcall': c_selfcall, 'hsm': c_hsm},
+        renderers={'persist': c_persist, 'selfcall': c_selfcall, 'hsm': c_hsm, 'operations': c_operations},
         rewrite_trace=_c_trace,
         docker_image="docker-c",
         # framec's C codegen uses cJSON and bool; user-supplied includes
@@ -2463,7 +2833,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=rust_canary,
-        renderers={'persist': rust_persist, 'selfcall': rust_selfcall, 'hsm': rust_hsm},
+        renderers={'persist': rust_persist, 'selfcall': rust_selfcall, 'hsm': rust_hsm, 'operations': rust_operations},
         rewrite_trace=_rust_trace,
         notes="JSON string. save_state(&mut self), restore_state(json: String).",
     ),
@@ -2475,7 +2845,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=php_canary,
-        renderers={'persist': php_persist, 'selfcall': php_selfcall, 'hsm': php_hsm},
+        renderers={'persist': php_persist, 'selfcall': php_selfcall, 'hsm': php_hsm, 'operations': php_operations},
         rewrite_trace=_php_trace,
         prolog="<?php\n",
         notes="JSON string blob. static restore_state. New() fires constructor.",
@@ -2488,7 +2858,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=dart_canary,
-        renderers={'persist': dart_persist, 'selfcall': dart_selfcall, 'hsm': dart_hsm},
+        renderers={'persist': dart_persist, 'selfcall': dart_selfcall, 'hsm': dart_hsm, 'operations': dart_operations},
         rewrite_trace=_dart_trace,
         prolog="import 'dart:convert';\n",
         notes="JSON string. camelCase methods (saveState/restoreState).",
@@ -2502,7 +2872,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=java_canary,
-        renderers={'persist': java_persist, 'selfcall': java_selfcall, 'hsm': java_hsm},
+        renderers={'persist': java_persist, 'selfcall': java_selfcall, 'hsm': java_hsm, 'operations': java_operations},
         rewrite_trace=_java_trace,
         docker_image="docker-java",
         notes=(
@@ -2520,7 +2890,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=kotlin_canary,
-        renderers={'persist': kotlin_persist, 'selfcall': kotlin_selfcall, 'hsm': kotlin_hsm},
+        renderers={'persist': kotlin_persist, 'selfcall': kotlin_selfcall, 'hsm': kotlin_hsm, 'operations': kotlin_operations},
         rewrite_trace=_kotlin_trace,
         docker_image="docker-kotlin",
         # kotlinc -J-Xmx2g: 2GB heap per invocation. At --jobs=14 that's
@@ -2540,7 +2910,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=swift_canary,
-        renderers={'persist': swift_persist, 'selfcall': swift_selfcall, 'hsm': swift_hsm},
+        renderers={'persist': swift_persist, 'selfcall': swift_selfcall, 'hsm': swift_hsm, 'operations': swift_operations},
         rewrite_trace=_swift_trace,
         notes="JSON string. camelCase methods. swiftc produces single binary.",
     ),
@@ -2553,7 +2923,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=cpp_canary,
-        renderers={'persist': cpp_persist, 'selfcall': cpp_selfcall, 'hsm': cpp_hsm},
+        renderers={'persist': cpp_persist, 'selfcall': cpp_selfcall, 'hsm': cpp_hsm, 'operations': cpp_operations},
         rewrite_trace=_cpp_trace,
         docker_image="docker-cpp",
         # Framec's C++ codegen references `nlohmann::json` in
@@ -2576,7 +2946,7 @@ LANGS = {
         save_method="SaveState",
         restore_call="{S}.RestoreState({B})",
         render_canary=csharp_canary,
-        renderers={'persist': csharp_persist, 'selfcall': csharp_selfcall, 'hsm': csharp_hsm},
+        renderers={'persist': csharp_persist, 'selfcall': csharp_selfcall, 'hsm': csharp_hsm, 'operations': csharp_operations},
         rewrite_trace=_csharp_trace,
         notes="JSON string. PascalCase methods. dotnet csproj + build+run.",
     ),
