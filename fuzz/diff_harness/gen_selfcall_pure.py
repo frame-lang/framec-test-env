@@ -37,12 +37,7 @@ STATE_COUNTS = [2, 3, 5]
 HSM_DEPTHS = [0, 1, 2]
 VARIANTS = ["transition", "noop"]
 POST_CALL_STMTS = [1, 2, 3]
-# "linear" only for now. Block-structured variants (`if_guarded`,
-# `if_both_arms`) need per-language block-syntax rewriting (Python's
-# `if X:` vs C-family `if (X) { … }`) which deserves a deliberate
-# follow-up rather than a regex hack. TODO: reinstate once we have a
-# proper block-syntax transform in the harness.
-POST_STRUCTURES = ["linear"]
+POST_STRUCTURES = ["linear", "if_guarded", "if_both_arms"]
 
 
 def state_name(i: int) -> str:
@@ -56,9 +51,16 @@ def gen_caller_body(call_target: str, post_k: int, post_structure: str) -> list[
       @@:self.<call_target>();
       <post_structure block (mutates t_count post_k times)>
 
-    All statements use `self.` + `;` suffix — the per-target rewriter
-    in `langs.py` translates for this/this->/ $this-> as needed, and
-    strips `;` where the target language can't handle it."""
+    The generator emits PYTHON-CANONICAL syntax (indent-based `if X:`
+    / `else:` blocks) as the single source of truth. Per-target
+    rewriters in `langs.py` translate to each backend's native form:
+    C-family `if (X) { ... } else { ... }`, Ruby/Lua `if X then ...
+    else ... end`, Erlang `case X of ... end`. Python and GDScript
+    (indent + `:`) need no transform.
+
+    All non-block statements use `self.` + `;` suffix — per-target
+    rewriters translate `self.` to `this.`/`s.`/`$this->` etc. and
+    strip `;` where the target language can't handle it."""
     out = []
     out.append("                self.t_count = 1;")
     out.append(f"                @@:self.{call_target}();")
@@ -69,20 +71,18 @@ def gen_caller_body(call_target: str, post_k: int, post_structure: str) -> list[
         # Fresh instance has `self.x == 0` so the TRUE branch always
         # fires. The FALSE branch is structurally there to exercise
         # the guard's handling of both arms.
-        out.append("                if self.x == 0 {")
+        out.append("                if self.x == 0:")
         for _ in range(post_k):
             out.append("                    self.t_count = self.t_count + 1;")
-        out.append("                } else {")
+        out.append("                else:")
         out.append("                    self.t_count = self.t_count + 0;")
-        out.append("                }")
     elif post_structure == "if_both_arms":
-        out.append("                if self.x == 0 {")
+        out.append("                if self.x == 0:")
         for _ in range(post_k):
             out.append("                    self.t_count = self.t_count + 1;")
-        out.append("                } else {")
+        out.append("                else:")
         for _ in range(post_k):
             out.append("                    self.t_count = self.t_count + 1;")
-        out.append("                }")
     return out
 
 

@@ -191,12 +191,21 @@ before framec consumes it. Documented for audit:
 
 ### [S] Scope reductions
 
-- **Phase 3 `@@:self`**: dropped `if_guarded` and `if_both_arms` post-
-  structures from the axes. Reason: they'd require per-target block-
-  syntax rewriting (Python `if X:` vs C-family `if (X) { }`), which
-  deserves a proper indent-aware transform, not a regex. Reinstating
-  is a follow-up — would add ~108 cases.
-  Current: 3 × 3 × 2 × 3 × **1** = 54 cases (was 162 in plan).
+- **Phase 3 `@@:self`** — **reinstated** (all three post_structure
+  axes now run: `linear`, `if_guarded`, `if_both_arms` = 162 cases).
+  The harness ships an indent-aware block-syntax transform
+  (`_transform_py_if_blocks` in `langs.py`) with per-target
+  specializations:
+    - C-family (JS, TS, Kotlin, Dart, C#, Java, C, C++, Swift, Rust,
+      Go, PHP): `if (X) { … } else { … }`
+    - Ruby:    `if X … else … end`
+    - Lua:     `if X then … else … end`
+    - Python, GDScript: no transform — generator's canonical form
+  Erlang explicitly skips `if_guarded` / `if_both_arms` via
+  `Lang.case_supported` — its `if`/`case` syntax diverges
+  structurally (expression-returning arms, `DataN` record-update
+  chains, `,`-separated statements) and needs its own transform.
+  Runs 54 of 162 applicable cases (108 skipped).
 
 ### [S] Scope not reduced anywhere else
 
@@ -283,10 +292,10 @@ Landing criteria:
 
 Same treatment applied to `gen_selfcall.py`. Axes unchanged:
 VARIANTS × POST_CALL_STMTS × POST_STRUCTURE. Expected: 162 × 17 =
-**~2,754 cases**. **Done**: 54 × 17 = 918 checks clean; the missing
-108 cases per backend are the `if_guarded` / `if_both_arms`
-post-structure variants held back pending block-syntax transform
-(see Exceptions & workarounds).
+**~2,754 cases**. **Done**: 2,646 trace-diff checks clean (16 × 162 +
+Erlang 54 applicable); 108 Erlang cases explicitly skipped by
+`Lang.case_supported` pending an Erlang-specific if-to-case
+transform (see Exceptions & workarounds [S]).
 
 ### Phase 4 — HSM parent-semantics fuzz (1 day)
 
@@ -334,15 +343,15 @@ instances.)
 
 ## Grand-total projected coverage
 
-| Phase | New cases  | Cumulative | Status                 |
-|-------|------------|------------|------------------------|
-| Now   |     3,610  |     3,610  | legacy baseline        |
-| 2     |     1,377  |     4,987  | **done** (17 × 81)     |
-| 3     |       918  |     5,905  | **done** (17 × 54; full axis reinstatement later adds ~1,836) |
-| 4     |    ~6,800  |   ~12,705  | next                   |
-| 5     |    ~3,400  |   ~16,105  |                        |
-| 6     |    ~1,100  |   ~17,205  | 11-backend subset      |
-| 7     |    ~2,400  |   ~19,605  | 16-backend subset      |
+| Phase | New cases  | Cumulative | Status                              |
+|-------|------------|------------|-------------------------------------|
+| Now   |     3,610  |     3,610  | legacy baseline                     |
+| 2     |     1,377  |     4,987  | **done** (17 × 81)                  |
+| 3     |     2,646  |     7,633  | **done** (16 × 162 + Erlang 54; 108 Erlang skips) |
+| 4     |    ~6,800  |   ~14,433  | next                                |
+| 5     |    ~3,400  |   ~17,833  |                                     |
+| 6     |    ~1,100  |   ~18,933  | 11-backend subset                   |
+| 7     |    ~2,400  |   ~21,333  | 16-backend subset                   |
 
 Well under 50k — tight enough that a full fuzz run fits in a coffee-
 break, loose enough that it's catching real bugs per phase.

@@ -74,6 +74,14 @@ class Lang:
     #   (emitted: Path, out_dir: Path, meta: dict) -> (stage, returncode, output)
     # When set, the default compile/run path is bypassed entirely.
     run_custom: Optional[Callable[[Path, Path, dict], tuple]] = None
+    # Per-backend case filter. Returns True if the case described by
+    # `meta` is runnable on this backend, False to skip (distinct from
+    # pass/fail). Use for axis values the backend can't express — e.g.
+    # Erlang's if/case syntax divergence makes the Phase-3 selfcall
+    # `if_guarded` / `if_both_arms` post-structures infeasible until a
+    # proper Erlang if-transform is built.
+    # Default None: all cases supported.
+    case_supported: Optional[Callable[[dict], bool]] = None
     # Language support notes (free text, informational only).
     notes: str = ""
 
@@ -1269,6 +1277,23 @@ _ERLANG_ESCRIPT_BY_KIND = {
 }
 
 
+def erlang_case_supported(meta: dict) -> bool:
+    """Erlang's if/case/end syntax diverges structurally from C-family
+    `if ( ) { }` — each arm is an expression returning a value, the
+    binding flows through `DataN` record-update chains, and statements
+    are `,`-separated rather than `;`-terminated. Phase-3 selfcall's
+    `if_guarded` / `if_both_arms` post-structures would need a proper
+    Erlang if-to-case transform before they can round-trip. Until
+    that's built, we only run the `linear` post-structure on Erlang.
+
+    Other harness kinds don't emit language-neutral `if` blocks
+    (persist has none; future kinds are evaluated when added), so
+    this filter is narrowly scoped."""
+    if meta.get("harness_kind") != "selfcall":
+        return True
+    return meta.get("axes", {}).get("post_structure") == "linear"
+
+
 def erlang_run_custom(emitted: Path, out_dir: Path, meta: dict) -> tuple:
     """End-to-end Erlang compile + run in a Docker container:
       1. Rename the emitted `.erl` to `<module>.erl` so erlc is happy.
@@ -1719,6 +1744,101 @@ def _map_bool_type(src: str, native: str) -> str:
     return _sub_outside_strings(r'(?<=:\s)bool\b', native, src)
 
 
+def _transform_py_if_blocks(
+    src: str,
+    *,
+    open_suffix: str,
+    else_token: str,
+    close_token: str,
+) -> str:
+    """Rewrite Python-style indent-based `if X: … else: …` blocks to a
+    block-delimited form. Used by per-backend `rewrite_trace` helpers to
+    translate the pure-Frame generator's canonical Python-style control
+    flow into each target's native syntax.
+
+    Parameters (per-target syntax tokens):
+      open_suffix  — appended after `if <COND>` on the opener line.
+                     C-family: ` {`;  Lua: ` then`;  Ruby: `` (bare).
+      else_token   — replaces `else:` when dedented to the if's indent.
+                     C-family: `} else {`; Ruby/Lua: `else`.
+      close_token  — emitted at the if's indent when the body dedents.
+                     C-family: `}`; Ruby/Lua: `end`; Python: `` (none).
+
+    Also wraps the condition in `(...)` for C-family (open_suffix
+    starts with ` {`) since those langs require parens around the
+    predicate. Other targets keep the condition bare.
+
+    Scope: handles simple single-level `if COND: / else:` blocks with
+    consistent indentation — the only shape the Phase-3 generator
+    emits. Does NOT handle `elif`, nested ifs, or multi-line
+    conditions (none of which the generator produces).
+    """
+    needs_parens = open_suffix.lstrip().startswith("{")
+    lines = src.split('\n')
+    out: list[str] = []
+    # Stack of indent-columns of currently-open if blocks.
+    open_ifs: list[int] = []
+    if_re = re.compile(r'^(\s*)if\s+(.+):\s*$')
+
+    for line in lines:
+        stripped = line.lstrip()
+        indent = len(line) - len(stripped)
+
+        # Close any open ifs we've dedented out of (unless the current
+        # line is the matching `else:`, in which case keep the block
+        # open so `else_token` gets a chance to fire).
+        while (
+            open_ifs
+            and indent <= open_ifs[-1]
+            and not (indent == open_ifs[-1] and stripped == 'else:')
+        ):
+            close_at = open_ifs.pop()
+            if close_token:
+                out.append(' ' * close_at + close_token)
+
+        # Opening: `if COND:` → `if COND<open_suffix>` (parens for
+        # C-family).
+        m = if_re.match(line)
+        if m:
+            open_indent = len(m.group(1))
+            cond = m.group(2).strip()
+            head = f'if ({cond})' if needs_parens else f'if {cond}'
+            out.append(f'{" " * open_indent}{head}{open_suffix}')
+            open_ifs.append(open_indent)
+            continue
+
+        # Matching `else:` at the open if's indent.
+        if open_ifs and indent == open_ifs[-1] and stripped == 'else:':
+            out.append(f'{" " * indent}{else_token}')
+            continue
+
+        out.append(line)
+
+    while open_ifs:
+        close_at = open_ifs.pop()
+        if close_token:
+            out.append(' ' * close_at + close_token)
+    return '\n'.join(out)
+
+
+def _py_if_to_c_family(src: str) -> str:
+    return _transform_py_if_blocks(
+        src, open_suffix=' {', else_token='} else {', close_token='}',
+    )
+
+
+def _py_if_to_ruby(src: str) -> str:
+    return _transform_py_if_blocks(
+        src, open_suffix='', else_token='else', close_token='end',
+    )
+
+
+def _py_if_to_lua(src: str) -> str:
+    return _transform_py_if_blocks(
+        src, open_suffix=' then', else_token='else', close_token='end',
+    )
+
+
 def _py_passthrough(src: str) -> str:
     return src
 
@@ -1727,6 +1847,7 @@ def _js_trace(src: str) -> str:
     # print("x") → console.log("x"); with statement terminator.
     src = _sub_outside_strings(r'\bprint\((.*?)\)', r'console.log(\1);', src)
     src = _rewrite_self(src, "this.")
+    src = _py_if_to_c_family(src)
     return _lower_bool(src)
 
 
@@ -1739,6 +1860,7 @@ def _go_trace(src: str) -> str:
     # harness layer. The @@:() return-expression path is rewritten
     # inside framec itself (see frame_expansion.rs Go branches).
     src = _rewrite_self(src, "s.")
+    src = _py_if_to_c_family(src)
     return _lower_bool(src)
 
 
@@ -1747,12 +1869,14 @@ def _ruby_trace(src: str) -> str:
     # parens is also valid but we normalize to `puts` for newline.
     src = _sub_outside_strings(r'\bprint\((.*?)\)', r'puts \1', src)
     # Ruby uses `self.x` natively; no self→this rewrite needed.
+    src = _py_if_to_ruby(src)
     return _lower_bool(src)
 
 
 def _lua_trace(src: str) -> str:
     # print("x") is valid Lua as-is. Passthrough.
     # Lua uses `self.x` natively (in method-colon-call style).
+    src = _py_if_to_lua(src)
     return _lower_bool(src)
 
 
@@ -1760,6 +1884,7 @@ def _rust_trace(src: str) -> str:
     # print("x") → println!("x");  — Rust requires the trailing `;`
     src = _sub_outside_strings(r'\bprint\((.*?)\)', r'println!(\1);', src)
     # Rust uses `self.x` natively; no rewrite needed.
+    src = _py_if_to_c_family(src)
     return _lower_bool(src)
 
 
@@ -1783,6 +1908,7 @@ def _php_trace(src: str) -> str:
     # / `: bool` from interface/param declarations for the PHP backend.
     src = _rewrite_self(src, '$this->')
     src = _sub_outside_strings(r'=\s*v\s*;', '= $v;', src)
+    src = _py_if_to_c_family(src)
     return _lower_bool(src)
 
 
@@ -1794,6 +1920,7 @@ def _dart_trace(src: str) -> str:
         return f'print({lit});'
     src = _sub_outside_strings(r'\bprint\(("[^"]*")\)', _fix, src)
     src = _rewrite_self(src, "this.")
+    src = _py_if_to_c_family(src)
     return _lower_bool(src)
 
 
@@ -1803,6 +1930,7 @@ def _java_trace(src: str) -> str:
     # so the harness no longer needs to rewrite type annotations.
     src = _sub_outside_strings(r'\bprint\(("[^"]*")\)', r'System.out.println(\1);', src)
     src = _rewrite_self(src, 'this.')
+    src = _py_if_to_c_family(src)
     return _lower_bool(src)
 
 
@@ -1816,6 +1944,7 @@ def _kotlin_trace(src: str) -> str:
     src = _rewrite_self(src, "this.")
     src = _map_str_type(src, "String")
     src = _map_bool_type(src, "Boolean")
+    src = _py_if_to_c_family(src)
     return _lower_bool(src)
 
 
@@ -1824,6 +1953,7 @@ def _swift_trace(src: str) -> str:
     # `$foo` is literal — so no escape needed for our canary.
     src = _sub_outside_strings(r'\bprint\(("[^"]*")\)', r'print(\1)', src)
     # Swift uses `self.x` natively; no rewrite needed.
+    src = _py_if_to_c_family(src)
     return _lower_bool(src)
 
 
@@ -1847,6 +1977,7 @@ def _c_trace(src: str) -> str:
     # `str` in Frame maps to `char*` in the C backend.
     src = _rewrite_self(src, 'self->')
     src = _sub_outside_strings(r'(?<=:\s)str\b', 'char*', src)
+    src = _py_if_to_c_family(src)
     return _lower_bool(src)
 
 
@@ -1858,6 +1989,7 @@ def _cpp_trace(src: str) -> str:
     )
     src = _rewrite_self(src, 'this->')
     src = _map_str_type(src, "std::string")
+    src = _py_if_to_c_family(src)
     return _lower_bool(src)
 
 
@@ -1867,6 +1999,7 @@ def _csharp_trace(src: str) -> str:
     # longer needs `_map_str_type`.
     src = re.sub(r'\bprint\(("[^"]*")\)', r'System.Console.WriteLine(\1);', src)
     src = _rewrite_self(src, "this.")
+    src = _py_if_to_c_family(src)
     return _lower_bool(src)
 
 
@@ -2003,6 +2136,7 @@ LANGS = {
         # by an escript (not a main() call). The custom hook handles all
         # four steps and returns an Erlang trace matching the oracle.
         run_custom=erlang_run_custom,
+        case_supported=erlang_case_supported,
         rewrite_trace=_erlang_trace,
         docker_image="docker-erlang",  # informational; custom hook wraps itself
         notes=(

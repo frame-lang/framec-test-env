@@ -42,10 +42,13 @@ FRAMEC = os.environ.get(
 class CaseResult:
     case_id: str
     lang: str
-    stage: str
+    stage: str  # "transpile" | "compile" | "run" | "skip"
     ok: bool
     trace: list[str]
     stderr: str = ""
+    # Distinct from ok=False: the backend explicitly doesn't support
+    # this case's axis combination (see `Lang.case_supported`).
+    skipped: bool = False
 
 
 def build_source(lang: Lang, system_block: str, meta: dict) -> str:
@@ -104,6 +107,13 @@ def _docker_wrap(cmd: list[str], host_workdir: Path, image: str) -> list[str]:
 
 
 def run_one(lang: Lang, case_path: Path, meta: dict, workdir: Path) -> CaseResult:
+    # Honor per-backend case filter — some backends can't express
+    # certain axis values (e.g. Erlang's if/case syntax differs
+    # structurally from C-family if-else).
+    if lang.case_supported is not None and not lang.case_supported(meta):
+        return CaseResult(
+            case_path.stem, lang.name, "skip", True, [], skipped=True,
+        )
     case_id = case_path.stem
     src_text = build_source(lang, case_path.read_text(), meta)
 
@@ -235,7 +245,7 @@ def main() -> int:
     print()
 
     per_lang_stats: dict[str, dict[str, int]] = {
-        lang: {"pass": 0, "transpile_fail": 0, "compile_fail": 0,
+        lang: {"pass": 0, "skip": 0, "transpile_fail": 0, "compile_fail": 0,
                "run_fail": 0, "diff_fail": 0}
         for lang in wanted
     }
@@ -248,11 +258,13 @@ def main() -> int:
 
         # Oracle first.
         oracle = run_one(LANGS["python_3"], case_path, meta, args.workdir)
+        if oracle.skipped:
+            per_lang_stats["python_3"]["skip"] += 1
+            continue
         if not oracle.ok:
             per_lang_stats["python_3"][oracle.stage + "_fail"] += 1
             if "python_3" not in first_failures:
                 first_failures["python_3"] = (case_id, f"{oracle.stage}: {oracle.stderr[:200]}")
-            # oracle failed → can't validate other backends on this case
             if args.verbose:
                 print(f"  {case_id}  ORACLE FAIL ({oracle.stage})")
             continue
@@ -262,6 +274,9 @@ def main() -> int:
             if lang_name == "python_3":
                 continue
             result = run_one(LANGS[lang_name], case_path, meta, args.workdir)
+            if result.skipped:
+                per_lang_stats[lang_name]["skip"] += 1
+                continue
             if not result.ok:
                 per_lang_stats[lang_name][result.stage + "_fail"] += 1
                 if lang_name not in first_failures:
@@ -291,23 +306,23 @@ def main() -> int:
     print()
     print("=== Results ===")
     total_cases = len(cases)
+    any_failures = False
     for lang in wanted:
         stats = per_lang_stats[lang]
-        total = sum(stats.values())
+        applicable = total_cases - stats["skip"]
         label = f"{lang}:"
-        bits = [f"pass={stats['pass']}/{total_cases}"]
+        bits = [f"pass={stats['pass']}/{applicable}"]
+        if stats["skip"]:
+            bits.append(f"skip={stats['skip']}")
         for k in ("transpile_fail", "compile_fail", "run_fail", "diff_fail"):
             if stats[k]:
                 bits.append(f"{k}={stats[k]}")
+                any_failures = True
         print(f"  {label:15s} {' '.join(bits)}")
         if lang in first_failures:
             cid, reason = first_failures[lang]
             print(f"    first failure: {cid} — {reason}")
 
-    any_failures = any(
-        s != per_lang_stats[lang]["pass"]
-        for lang, s in [(l, total_cases) for l in wanted]
-    )
     return 1 if any_failures else 0
 
 
