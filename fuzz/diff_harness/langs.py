@@ -213,6 +213,208 @@ def py_persist(meta: dict) -> str:
 # The per-backend variants differ only in native call syntax.
 
 
+# Phase-9 nested-Frame-syntax fuzz renderers. Probe the system's
+# `probe(x)` method and emit its return value. Minimal trace so the
+# diff is stable across bool-rendering, stringification, and printf-
+# formatting quirks — we keep the probe value integer-valued.
+
+
+def py_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\nif __name__ == '__main__':\n"
+        f"    inst = @@{sys_name}()\n"
+        f'    print(f"TRACE: probe {{inst.probe({x})}}")\n'
+        f'    print("TRACE: done")\n'
+    )
+
+
+def js_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\nconst inst = new {sys_name}();\n"
+        f'console.log("TRACE: probe " + inst.probe({x}));\n'
+        f'console.log("TRACE: done");\n'
+    )
+
+
+def ts_nested(meta: dict) -> str:
+    return js_nested(meta)
+
+
+def go_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\nfunc main() {{\n"
+        f"    inst := New{sys_name}()\n"
+        f'    fmt.Printf("TRACE: probe %v\\n", inst.Probe({x}))\n'
+        f'    fmt.Println("TRACE: done")\n'
+        f"}}\n"
+    )
+
+
+def ruby_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\ninst = {sys_name}.new\n"
+        f'puts "TRACE: probe #{{inst.probe({x})}}"\n'
+        f'puts "TRACE: done"\n'
+    )
+
+
+def dart_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\nvoid main() {{\n"
+        f"    var inst = {sys_name}();\n"
+        f'    print("TRACE: probe ${{inst.probe({x})}}");\n'
+        f'    print("TRACE: done");\n'
+        f"}}\n"
+    )
+
+
+def swift_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\nlet inst = {sys_name}()\n"
+        + r'print("TRACE: probe \(inst.probe('+str(x)+'))")' + "\n"
+        + 'print("TRACE: done")\n'
+    )
+
+
+def csharp_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\npublic class CanaryMain {{\n"
+        f"    public static void Main() {{\n"
+        f"        var inst = new {sys_name}();\n"
+        f'        System.Console.WriteLine("TRACE: probe " + inst.probe({x}));\n'
+        f'        System.Console.WriteLine("TRACE: done");\n'
+        f"    }}\n"
+        f"}}\n"
+    )
+
+
+def rust_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\nfn main() {{\n"
+        f"    let mut inst = {sys_name}::new();\n"
+        f'    println!("TRACE: probe {{}}", inst.probe({x}));\n'
+        f'    println!("TRACE: done");\n'
+        f"}}\n"
+    )
+
+
+def php_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\n$inst = new {sys_name}();\n"
+        f'echo "TRACE: probe " . $inst->probe({x}) . PHP_EOL;\n'
+        f'echo "TRACE: done" . PHP_EOL;\n'
+    )
+
+
+def java_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\nclass {sys_name}Main {{\n"
+        f"    public static void main(String[] args) {{\n"
+        f"        {sys_name} inst = new {sys_name}();\n"
+        f'        System.out.println("TRACE: probe " + inst.probe({x}));\n'
+        f'        System.out.println("TRACE: done");\n'
+        f"    }}\n"
+        f"}}\n"
+    )
+
+
+def kotlin_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\nfun main() {{\n"
+        f"    val inst = {sys_name}()\n"
+        f'    println("TRACE: probe ${{inst.probe({x})}}")\n'
+        f'    println("TRACE: done")\n'
+        f"}}\n"
+    )
+
+
+def cpp_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\nint main() {{\n"
+        f"    auto inst = {sys_name}();\n"
+        f'    std::cout << "TRACE: probe " << inst.probe({x}) << std::endl;\n'
+        f'    std::cout << "TRACE: done" << std::endl;\n'
+        f"    return 0;\n"
+        f"}}\n"
+    )
+
+
+def lua_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\nlocal inst = {sys_name}:new()\n"
+        f'print("TRACE: probe " .. tostring(inst:probe({x})))\n'
+        f'print("TRACE: done")\n'
+    )
+
+
+def c_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\nint main(void) {{\n"
+        f"    {sys_name}* inst = @@{sys_name}();\n"
+        f'    printf("TRACE: probe %d\\n", {sys_name}_probe(inst, {x}));\n'
+        f'    printf("TRACE: done\\n");\n'
+        f"    {sys_name}_destroy(inst);\n"
+        f"    return 0;\n"
+        f"}}\n"
+    )
+
+
+def gdscript_nested(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    x = meta["probe_x"]
+    return (
+        f"\nfunc _init():\n"
+        f"    var inst = @@{sys_name}()\n"
+        f'    print("TRACE: probe " + str(inst.probe({x})))\n'
+        f'    print("TRACE: done")\n'
+        f"    quit()\n"
+    )
+
+
+def _erlang_nested_escript(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    module = _erlang_module_name(sys_name)
+    x = meta["probe_x"]
+    return (
+        "#!/usr/bin/env escript\n"
+        "main(_) ->\n"
+        '    code:add_patha("."),\n'
+        f"    {{ok, Pid}} = {module}:start_link(),\n"
+        f"    Result = {module}:probe(Pid, {x}),\n"
+        '    io:format("TRACE: probe ~p~n", [Result]),\n'
+        '    io:format("TRACE: done~n"),\n'
+        "    init:stop().\n"
+    )
+
+
 def py_operations(meta: dict) -> str:
     """Python oracle for Phase-5 operations fuzz. Prints TRACE for:
       - direct op invocation (bypassing the state machine),
@@ -1867,6 +2069,7 @@ _ERLANG_ESCRIPT_BY_KIND = {
     "selfcall": lambda meta: _erlang_selfcall_escript(meta),
     "hsm": lambda meta: _erlang_hsm_escript(meta),
     "operations": lambda meta: _erlang_operations_escript(meta),
+    "nested": lambda meta: _erlang_nested_escript(meta),
 }
 
 
@@ -2692,7 +2895,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=py_canary,
-        renderers={'persist': py_persist, 'selfcall': py_selfcall, 'hsm': py_hsm, 'operations': py_operations},
+        renderers={'persist': py_persist, 'selfcall': py_selfcall, 'hsm': py_hsm, 'operations': py_operations, 'nested': py_nested},
         rewrite_trace=_py_passthrough,
         notes="Pickle blob. staticmethod restore_state. Oracle reference.",
     ),
@@ -2704,7 +2907,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=js_canary,
-        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm, 'operations': js_operations},
+        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm, 'operations': js_operations, 'nested': js_nested},
         rewrite_trace=_js_trace,
         notes="JSON string blob. camelCase methods. Requires .mjs for ESM.",
     ),
@@ -2716,7 +2919,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=ts_canary,
-        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm, 'operations': ts_operations},  # JS & TS share persist harness text
+        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm, 'operations': ts_operations, 'nested': ts_nested},  # JS & TS share persist harness text
         rewrite_trace=_js_trace,  # same syntax as JS
         notes="JSON string blob. Same method names as JavaScript.",
     ),
@@ -2728,7 +2931,7 @@ LANGS = {
         save_method="SaveState",
         restore_call="Restore{S}({B})",  # package-level function
         render_canary=go_canary,
-        renderers={'persist': go_persist, 'selfcall': go_selfcall, 'hsm': go_hsm, 'operations': go_operations},
+        renderers={'persist': go_persist, 'selfcall': go_selfcall, 'hsm': go_hsm, 'operations': go_operations, 'nested': go_nested},
         rewrite_trace=_go_trace,
         prolog='package main\n\nimport (\n\t"encoding/json"\n\t"fmt"\n)\n\nvar _ = json.Marshal\n',
         notes="JSON blob. PascalCase methods. Restore is pkg-level `RestoreP()`.",
@@ -2741,7 +2944,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=ruby_canary,
-        renderers={'persist': ruby_persist, 'selfcall': ruby_selfcall, 'hsm': ruby_hsm, 'operations': ruby_operations},
+        renderers={'persist': ruby_persist, 'selfcall': ruby_selfcall, 'hsm': ruby_hsm, 'operations': ruby_operations, 'nested': ruby_nested},
         rewrite_trace=_ruby_trace,
         prolog="require 'json'\n",
         notes="JSON blob. snake_case methods, classmethod restore_state.",
@@ -2754,7 +2957,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=lua_canary,
-        renderers={'persist': lua_persist, 'selfcall': lua_selfcall, 'hsm': lua_hsm, 'operations': lua_operations},
+        renderers={'persist': lua_persist, 'selfcall': lua_selfcall, 'hsm': lua_hsm, 'operations': lua_operations, 'nested': lua_nested},
         rewrite_trace=_lua_trace,
         docker_image="docker-lua",
         notes=(
@@ -2768,7 +2971,7 @@ LANGS = {
         out_ext="gd",
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
-        renderers={'persist': gdscript_persist, 'selfcall': gdscript_selfcall, 'hsm': gdscript_hsm, 'operations': gdscript_operations},
+        renderers={'persist': gdscript_persist, 'selfcall': gdscript_selfcall, 'hsm': gdscript_hsm, 'operations': gdscript_operations, 'nested': gdscript_nested},
         run_custom=gdscript_run_custom,
         rewrite_trace=_gdscript_trace,
         docker_image="docker-gdscript",  # informational; custom hook wraps itself
@@ -2788,7 +2991,7 @@ LANGS = {
         run=run_c,
         save_method="save_state",
         restore_call="{S}_restore_state({B})",
-        renderers={'persist': c_persist, 'selfcall': c_selfcall, 'hsm': c_hsm, 'operations': c_operations},
+        renderers={'persist': c_persist, 'selfcall': c_selfcall, 'hsm': c_hsm, 'operations': c_operations, 'nested': c_nested},
         rewrite_trace=_c_trace,
         docker_image="docker-c",
         # framec's C codegen uses cJSON and bool; user-supplied includes
@@ -2834,7 +3037,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=rust_canary,
-        renderers={'persist': rust_persist, 'selfcall': rust_selfcall, 'hsm': rust_hsm, 'operations': rust_operations},
+        renderers={'persist': rust_persist, 'selfcall': rust_selfcall, 'hsm': rust_hsm, 'operations': rust_operations, 'nested': rust_nested},
         rewrite_trace=_rust_trace,
         notes="JSON string. save_state(&mut self), restore_state(json: String).",
     ),
@@ -2846,7 +3049,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=php_canary,
-        renderers={'persist': php_persist, 'selfcall': php_selfcall, 'hsm': php_hsm, 'operations': php_operations},
+        renderers={'persist': php_persist, 'selfcall': php_selfcall, 'hsm': php_hsm, 'operations': php_operations, 'nested': php_nested},
         rewrite_trace=_php_trace,
         prolog="<?php\n",
         notes="JSON string blob. static restore_state. New() fires constructor.",
@@ -2859,7 +3062,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=dart_canary,
-        renderers={'persist': dart_persist, 'selfcall': dart_selfcall, 'hsm': dart_hsm, 'operations': dart_operations},
+        renderers={'persist': dart_persist, 'selfcall': dart_selfcall, 'hsm': dart_hsm, 'operations': dart_operations, 'nested': dart_nested},
         rewrite_trace=_dart_trace,
         prolog="import 'dart:convert';\n",
         notes="JSON string. camelCase methods (saveState/restoreState).",
@@ -2873,7 +3076,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=java_canary,
-        renderers={'persist': java_persist, 'selfcall': java_selfcall, 'hsm': java_hsm, 'operations': java_operations},
+        renderers={'persist': java_persist, 'selfcall': java_selfcall, 'hsm': java_hsm, 'operations': java_operations, 'nested': java_nested},
         rewrite_trace=_java_trace,
         docker_image="docker-java",
         notes=(
@@ -2891,7 +3094,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=kotlin_canary,
-        renderers={'persist': kotlin_persist, 'selfcall': kotlin_selfcall, 'hsm': kotlin_hsm, 'operations': kotlin_operations},
+        renderers={'persist': kotlin_persist, 'selfcall': kotlin_selfcall, 'hsm': kotlin_hsm, 'operations': kotlin_operations, 'nested': kotlin_nested},
         rewrite_trace=_kotlin_trace,
         docker_image="docker-kotlin",
         # kotlinc -J-Xmx2g: 2GB heap per invocation. At --jobs=14 that's
@@ -2911,7 +3114,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=swift_canary,
-        renderers={'persist': swift_persist, 'selfcall': swift_selfcall, 'hsm': swift_hsm, 'operations': swift_operations},
+        renderers={'persist': swift_persist, 'selfcall': swift_selfcall, 'hsm': swift_hsm, 'operations': swift_operations, 'nested': swift_nested},
         rewrite_trace=_swift_trace,
         notes="JSON string. camelCase methods. swiftc produces single binary.",
     ),
@@ -2924,7 +3127,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=cpp_canary,
-        renderers={'persist': cpp_persist, 'selfcall': cpp_selfcall, 'hsm': cpp_hsm, 'operations': cpp_operations},
+        renderers={'persist': cpp_persist, 'selfcall': cpp_selfcall, 'hsm': cpp_hsm, 'operations': cpp_operations, 'nested': cpp_nested},
         rewrite_trace=_cpp_trace,
         docker_image="docker-cpp",
         # Framec's C++ codegen references `nlohmann::json` in
@@ -2947,7 +3150,7 @@ LANGS = {
         save_method="SaveState",
         restore_call="{S}.RestoreState({B})",
         render_canary=csharp_canary,
-        renderers={'persist': csharp_persist, 'selfcall': csharp_selfcall, 'hsm': csharp_hsm, 'operations': csharp_operations},
+        renderers={'persist': csharp_persist, 'selfcall': csharp_selfcall, 'hsm': csharp_hsm, 'operations': csharp_operations, 'nested': csharp_nested},
         rewrite_trace=_csharp_trace,
         notes="JSON string. PascalCase methods. dotnet csproj + build+run.",
     ),
