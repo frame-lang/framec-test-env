@@ -1871,22 +1871,14 @@ _ERLANG_ESCRIPT_BY_KIND = {
 
 
 def erlang_case_supported(meta: dict) -> bool:
-    """Erlang's if/case/end syntax diverges structurally from C-family
-    `if ( ) { }` — each arm is an expression returning a value, the
-    binding flows through `DataN` record-update chains, and statements
-    are `,`-separated rather than `;`-terminated. Phase-3 selfcall's
-    `if_guarded` / `if_both_arms` post-structures (and the same two
-    in Phase-4 HSM) would need a proper Erlang if-to-case transform
-    before they can round-trip. Until that's built, we only run the
-    `linear` post-structure on Erlang.
-
-    Persist has no language-neutral `if` blocks, so it's unaffected."""
-    kind = meta.get("harness_kind")
-    axes = meta.get("axes", {})
-    if kind == "selfcall":
-        return axes.get("post_structure") == "linear"
-    if kind == "hsm":
-        return axes.get("post_forward_structure") == "linear"
+    """Historically Erlang was gated to `linear` post-structures
+    because Python-indent `if X:` / `else:` passed through framec
+    unchanged, yielding a parse error. With `_py_if_to_c_family`
+    now active in `_erlang_trace` (2026-04-24), the canonical
+    Python-style source is pre-converted to brace form before framec
+    sees it, and `erlang_transform_blocks` converts brace-if to
+    `case/of/end`. All post-structures are supported."""
+    _ = meta
     return True
 
 
@@ -2627,6 +2619,15 @@ def _erlang_trace(src: str) -> str:
     # Atoms are lowercase. No `;`-stripping needed here — framec's
     # Erlang codegen (`erlang_system.rs::rewrite_line`) now trims a
     # trailing `;` from the RHS before constructing the record update.
+    #
+    # Python-indent `if X:` / `else:` is bridged through brace syntax
+    # (`if X { … } else { … }`) so framec's `erlang_transform_blocks`
+    # can convert it to Erlang `case (X) of true -> …; false -> … end`.
+    # Without this preprocessor the Python syntax passes through
+    # verbatim — emitting `if X:` which is a parse error in Erlang.
+    # Unlocks Phase-3 selfcall + Phase-4 HSM `if_guarded` and
+    # `if_both_arms` axes on Erlang.
+    src = _py_if_to_c_family(src)
     return _lower_bool(src)
 
 
