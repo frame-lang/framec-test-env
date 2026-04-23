@@ -89,6 +89,13 @@ class Lang:
     # proper Erlang if-transform is built.
     # Default None: all cases supported.
     case_supported: Optional[Callable[[dict], bool]] = None
+    # Maximum concurrent compile+run invocations of this backend under
+    # the parallel case runner. Cap here for backends whose toolchain is
+    # memory-heavy enough that saturating `--jobs` also saturates RAM.
+    # Kotlin's `kotlinc -J-Xmx2g` × `--jobs` concurrency OOMs on a
+    # 16-GB host; cap it to ~2. Default None = unbounded (subject only
+    # to the overall `--jobs`).
+    concurrency_limit: Optional[int] = None
     # Language support notes (free text, informational only).
     notes: str = ""
 
@@ -1637,18 +1644,47 @@ def run_csharp(p: Path) -> List[str]:
     return ["dotnet", "run", "--project", str(proj_dir), "--no-build"]
 
 
+_RUST_CARGO_TOML = (
+    "[package]\n"
+    "name = \"diff_harness_case\"\n"
+    "version = \"0.0.0\"\n"
+    "edition = \"2021\"\n"
+    "\n"
+    "[[bin]]\n"
+    "name = \"case\"\n"
+    "path = \"src/main.rs\"\n"
+    "\n"
+    "[dependencies]\n"
+    "serde_json = \"1\"\n"
+    "\n"
+    "[profile.dev]\n"
+    "debug = false\n"
+    "incremental = false\n"
+    "opt-level = 0\n"
+)
+
+
 def compile_rust(p: Path) -> List[str]:
-    # Copy emitted source into the pre-built cargo project's
-    # src/main.rs and cargo build. Runner then runs the binary.
+    # Per-case Cargo project alongside the emitted `main.rs` so
+    # concurrent cases don't clobber each other's source. The
+    # emitted path is the case's `<case>.rs`; we stage it as
+    # `./src/main.rs` next to a freshly-written `Cargo.toml`, then
+    # `cargo build` in that directory.
     import shutil as _sh
-    proj = Path(__file__).parent / "rust_proj"
-    _sh.copy(p, proj / "src" / "main.rs")
-    return ["cargo", "build", "--quiet", "--manifest-path", str(proj / "Cargo.toml")]
+    proj = p.parent
+    src_dir = proj / "src"
+    src_dir.mkdir(exist_ok=True)
+    _sh.copy(p, src_dir / "main.rs")
+    (proj / "Cargo.toml").write_text(_RUST_CARGO_TOML)
+    return [
+        "cargo", "build", "--quiet",
+        "--manifest-path", str(proj / "Cargo.toml"),
+    ]
 
 
 def run_rust(p: Path) -> List[str]:
-    proj = Path(__file__).parent / "rust_proj"
-    return [str(proj / "target" / "debug" / "diff_harness_case")]
+    proj = p.parent
+    return [str(proj / "target" / "debug" / "case")]
 
 
 def _which(cmd: str) -> Optional[str]:
@@ -2230,6 +2266,9 @@ LANGS = {
         renderers={'persist': kotlin_persist, 'selfcall': kotlin_selfcall},
         rewrite_trace=_kotlin_trace,
         docker_image="docker-kotlin",
+        # kotlinc -J-Xmx2g: 2GB heap per invocation. At --jobs=14 that's
+        # 28GB; a 16GB host OOMs. Cap at 2 concurrent kotlincs.
+        concurrency_limit=2,
         notes=(
             "JSON string. Builds a fat jar via kotlinc. Also needs org.json; "
             "same docker-only constraint as java."

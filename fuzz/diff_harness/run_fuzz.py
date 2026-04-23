@@ -25,6 +25,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -110,6 +111,30 @@ def build_source(lang: Lang, system_block: str, meta: dict) -> str:
 
 _POOL_CONTAINERS: dict[str, str] = {}  # lang_name → container_id
 _POOL_WORKDIR: Optional[Path] = None
+_POOL_LOCK = threading.Lock()  # guards _POOL_CONTAINERS mutations
+
+# Per-backend semaphores enforce `Lang.concurrency_limit`. Only
+# populated for langs that set the field (memory-heavy toolchains
+# like kotlinc with -J-Xmx2g). Built lazily in `_get_backend_sem`.
+_BACKEND_SEMAPHORES: dict[str, threading.Semaphore] = {}
+_BACKEND_SEM_LOCK = threading.Lock()
+
+
+def _get_backend_sem(lang: Lang) -> Optional[threading.Semaphore]:
+    """Return the shared semaphore for this backend, or None if the
+    backend has no concurrency cap. Lazy-inits under a lock so the
+    first race resolves to a single Semaphore instance."""
+    if lang.concurrency_limit is None:
+        return None
+    sem = _BACKEND_SEMAPHORES.get(lang.name)
+    if sem is not None:
+        return sem
+    with _BACKEND_SEM_LOCK:
+        sem = _BACKEND_SEMAPHORES.get(lang.name)
+        if sem is None:
+            sem = threading.Semaphore(lang.concurrency_limit)
+            _BACKEND_SEMAPHORES[lang.name] = sem
+        return sem
 
 
 def _container_name(lang_name: str, workdir: Path) -> str:
@@ -123,40 +148,67 @@ def _container_name(lang_name: str, workdir: Path) -> str:
 def _ensure_pool(lang: Lang, workdir: Path) -> str:
     """Start (or reuse) a long-running container for `lang.docker_image`
     bind-mounting `workdir` at `/fuzz_work`. Returns the container
-    name; subsequent `docker exec` calls use it."""
-    if lang.name in _POOL_CONTAINERS:
-        return _POOL_CONTAINERS[lang.name]
-    assert lang.docker_image is not None
-    name = _container_name(lang.name, workdir)
-    # Remove any stale container with this name (e.g. previous run
-    # interrupted before atexit fired).
-    subprocess.run(["docker", "rm", "-f", name],
-                   capture_output=True, check=False)
-    proc = subprocess.run(
-        [
-            "docker", "run", "-d", "--name", name,
-            "-v", f"{workdir}:/fuzz_work",
-            "--entrypoint", "sleep",
-            lang.docker_image,
-            "infinity",
-        ],
-        capture_output=True, text=True, timeout=60,
-    )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"docker run -d failed for {lang.docker_image}: "
-            f"{(proc.stderr or proc.stdout).strip()}"
+    name; subsequent `docker exec` calls use it.
+
+    Thread-safe: guarded by `_POOL_LOCK` so concurrent callers for
+    the same lang race through a single container-start."""
+    # Fast path: already started.
+    cached = _POOL_CONTAINERS.get(lang.name)
+    if cached is not None:
+        return cached
+    with _POOL_LOCK:
+        # Re-check under the lock — another thread may have started
+        # the container while we were waiting.
+        cached = _POOL_CONTAINERS.get(lang.name)
+        if cached is not None:
+            return cached
+        assert lang.docker_image is not None
+        name = _container_name(lang.name, workdir)
+        # Remove any stale container with this name (e.g. previous run
+        # interrupted before atexit fired).
+        subprocess.run(["docker", "rm", "-f", name],
+                       capture_output=True, check=False)
+        proc = subprocess.run(
+            [
+                "docker", "run", "-d", "--name", name,
+                "-v", f"{workdir}:/fuzz_work",
+                "--entrypoint", "sleep",
+                lang.docker_image,
+                "infinity",
+            ],
+            capture_output=True, text=True, timeout=60,
         )
-    _POOL_CONTAINERS[lang.name] = name
-    return name
+        if proc.returncode != 0:
+            raise RuntimeError(
+                f"docker run -d failed for {lang.docker_image}: "
+                f"{(proc.stderr or proc.stdout).strip()}"
+            )
+        _POOL_CONTAINERS[lang.name] = name
+        return name
 
 
 def _teardown_pool() -> None:
     """Tear down all persistent fuzz containers. Registered via
-    atexit so interrupted runs don't leak containers."""
-    for name in _POOL_CONTAINERS.values():
-        subprocess.run(["docker", "rm", "-f", name],
-                       capture_output=True, check=False)
+    atexit so interrupted runs don't leak containers. Parallelized
+    via raw threads — `ThreadPoolExecutor` can't accept new submits
+    after interpreter shutdown, and serial teardown of 6-7
+    containers would add 20-30 s to the tail of every fuzz run."""
+    names = list(_POOL_CONTAINERS.values())
+    if not names:
+        return
+    threads: list[threading.Thread] = []
+    for n in names:
+        t = threading.Thread(
+            target=lambda name=n: subprocess.run(
+                ["docker", "rm", "-f", name],
+                capture_output=True, check=False,
+            ),
+            daemon=False,
+        )
+        t.start()
+        threads.append(t)
+    for t in threads:
+        t.join()
     _POOL_CONTAINERS.clear()
 
 
@@ -224,6 +276,24 @@ def run_one(lang: Lang, case_path: Path, meta: dict, workdir: Path) -> CaseResul
                           stderr=f"framec emitted no .{lang.out_ext} file")
     emitted = candidates[0]
 
+    # Acquire the per-backend concurrency cap, if one is set. The
+    # semaphore is a no-op (returns None, `with` block is a pass) for
+    # backends without a cap. Gates only the downstream compile+run
+    # steps — the `framec` transpile above is cheap and shared.
+    backend_sem = _get_backend_sem(lang)
+    if backend_sem is not None:
+        backend_sem.acquire()
+    try:
+        return _run_one_toolchain(lang, case_id, emitted, out_dir, meta, workdir)
+    finally:
+        if backend_sem is not None:
+            backend_sem.release()
+
+
+def _run_one_toolchain(lang: Lang, case_id: str, emitted: Path,
+                       out_dir: Path, meta: dict, workdir: Path) -> CaseResult:
+    """Compile + run phase of run_one, extracted so the per-backend
+    semaphore wrapper in run_one can own the acquire/release."""
     # If the language supplies a custom runner (Erlang, GDScript, …),
     # bypass the standard compile+run flow.
     if lang.run_custom is not None:
@@ -291,6 +361,7 @@ def first_divergence(a: list[str], b: list[str]) -> str:
 
 
 def main() -> int:
+    import os as _os
     ap = argparse.ArgumentParser()
     ap.add_argument("--cases", type=Path,
                     default=Path(__file__).resolve().parents[1] / "cases" / "persist")
@@ -299,6 +370,15 @@ def main() -> int:
     ap.add_argument("--max", type=int, default=None,
                     help="Limit to first N cases (by case_id sort).")
     ap.add_argument("--workdir", type=Path, default=Path("/tmp/fuzz_work"))
+    ap.add_argument(
+        "--jobs", "-j", type=int,
+        default=max(4, (_os.cpu_count() or 4)),
+        help="Parallel case workers (default: CPU count, min 4). "
+             "Each worker processes one case's full pipeline "
+             "(transpile → compile → run → diff) end-to-end; docker "
+             "backends serialize on the shared persistent container, "
+             "which handles concurrent `docker exec` calls safely.",
+    )
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -346,57 +426,77 @@ def main() -> int:
         for lang in wanted
     }
     first_failures: dict[str, tuple[str, str]] = {}  # lang → (case_id, reason)
+    stats_lock = threading.Lock()
 
-    for case_path in cases:
+    def process_case(case_path: Path) -> None:
+        """Full pipeline for one case: oracle → other backends → diff.
+        Thread-safe against `per_lang_stats` / `first_failures` via
+        `stats_lock`. Safe against other concurrent cases because each
+        case has its own output directory."""
         case_id = case_path.stem
-        meta_path = case_path.with_suffix(".meta")
-        meta = json.loads(meta_path.read_text())
+        meta = json.loads(case_path.with_suffix(".meta").read_text())
 
-        # Oracle first.
         oracle = run_one(LANGS["python_3"], case_path, meta, args.workdir)
-        if oracle.skipped:
-            per_lang_stats["python_3"]["skip"] += 1
-            continue
-        if not oracle.ok:
-            per_lang_stats["python_3"][oracle.stage + "_fail"] += 1
-            if "python_3" not in first_failures:
-                first_failures["python_3"] = (case_id, f"{oracle.stage}: {oracle.stderr[:200]}")
-            if args.verbose:
-                print(f"  {case_id}  ORACLE FAIL ({oracle.stage})")
-            continue
-        per_lang_stats["python_3"]["pass"] += 1
+        with stats_lock:
+            if oracle.skipped:
+                per_lang_stats["python_3"]["skip"] += 1
+                return
+            if not oracle.ok:
+                per_lang_stats["python_3"][oracle.stage + "_fail"] += 1
+                first_failures.setdefault(
+                    "python_3",
+                    (case_id, f"{oracle.stage}: {oracle.stderr[:200]}"),
+                )
+                return
+            per_lang_stats["python_3"]["pass"] += 1
 
         for lang_name in wanted:
             if lang_name == "python_3":
                 continue
             result = run_one(LANGS[lang_name], case_path, meta, args.workdir)
-            if result.skipped:
-                per_lang_stats[lang_name]["skip"] += 1
-                continue
-            if not result.ok:
-                per_lang_stats[lang_name][result.stage + "_fail"] += 1
-                if lang_name not in first_failures:
-                    first_failures[lang_name] = (
-                        case_id, f"{result.stage}: {result.stderr[:200]}"
+            with stats_lock:
+                if result.skipped:
+                    per_lang_stats[lang_name]["skip"] += 1
+                    continue
+                if not result.ok:
+                    per_lang_stats[lang_name][result.stage + "_fail"] += 1
+                    first_failures.setdefault(
+                        lang_name,
+                        (case_id, f"{result.stage}: {result.stderr[:200]}"),
                     )
-                if args.verbose:
-                    print(f"  {case_id}  {lang_name:12s} {result.stage.upper()} FAIL")
-                continue
-            if result.trace != oracle.trace:
-                per_lang_stats[lang_name]["diff_fail"] += 1
-                if lang_name not in first_failures:
-                    first_failures[lang_name] = (
-                        case_id, first_divergence(oracle.trace, result.trace)
+                    continue
+                if result.trace != oracle.trace:
+                    per_lang_stats[lang_name]["diff_fail"] += 1
+                    first_failures.setdefault(
+                        lang_name,
+                        (case_id, first_divergence(oracle.trace, result.trace)),
                     )
-                if args.verbose:
-                    print(f"  {case_id}  {lang_name:12s} DIFF")
-                continue
-            per_lang_stats[lang_name]["pass"] += 1
+                    continue
+                per_lang_stats[lang_name]["pass"] += 1
 
-        if not args.verbose and (len([c for c in cases if cases.index(c) <= cases.index(case_path)]) % 20 == 0 or case_path == cases[-1]):
-            # Progress dot every 20 cases.
-            done = cases.index(case_path) + 1
-            print(f"  ... {done}/{len(cases)}", flush=True)
+    # Pre-warm the docker container pool so startup happens once rather
+    # than racing between threads. Each docker-backed lang gets its
+    # container spun up serially here before the parallel work starts.
+    for lang_name in wanted:
+        lang = LANGS[lang_name]
+        if lang.docker_image is not None:
+            _ensure_pool(lang, args.workdir)
+
+    # Dispatch all cases to a thread pool. Each worker runs one case's
+    # full pipeline end-to-end. Inside a case, the oracle runs first,
+    # then the other backends sequentially — that's just the case's
+    # local data dependency, not a cross-case serialization.
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+    done_count = 0
+    with ThreadPoolExecutor(max_workers=args.jobs) as pool:
+        futures = [pool.submit(process_case, cp) for cp in cases]
+        for fut in as_completed(futures):
+            fut.result()  # surface exceptions
+            done_count += 1
+            if not args.verbose and (
+                done_count % 20 == 0 or done_count == len(cases)
+            ):
+                print(f"  ... {done_count}/{len(cases)}", flush=True)
 
     # Report
     print()
