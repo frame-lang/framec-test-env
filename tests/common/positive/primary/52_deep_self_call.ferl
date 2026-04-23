@@ -1,0 +1,72 @@
+@@target erlang
+
+@@system DeepSelfCall {
+    interface:
+        start_chain(mode: str): str
+        level_one(mode: str): str
+        level_two(mode: str): str
+        level_three(mode: str): str
+        get_trace(): str
+        get_state(): str
+        reset()
+
+    machine:
+        $Active {
+            start_chain(mode: str): str {
+                self.trace = ""
+                self.trace = self.trace ++ "start:before;"
+                @@:self.level_one(Mode)
+                self.trace = self.trace ++ "start:after;"
+                @@:(self.trace)
+            }
+
+            level_one(mode: str): str {
+                self.trace = self.trace ++ "L1:before;"
+                @@:self.level_two(Mode)
+                self.trace = self.trace ++ "L1:after;"
+                @@:(self.trace)
+            }
+
+            level_two(mode: str): str {
+                self.trace = self.trace ++ "L2:before;"
+                if Mode == "transition_at_two" {
+                    self.trace = self.trace ++ "L2:transitioning;"
+                    -> $Done
+                } else {
+                    @@:self.level_three(Mode)
+                    self.trace = self.trace ++ "L2:after;"
+                    @@:(self.trace)
+                }
+            }
+
+            level_three(mode: str): str {
+                self.trace = self.trace ++ "L3:before;"
+                if Mode == "transition_at_three" {
+                    self.trace = self.trace ++ "L3:transitioning;"
+                    -> $Done
+                } else {
+                    self.trace = self.trace ++ "L3:after;"
+                    @@:(self.trace)
+                }
+            }
+
+            get_trace(): str { @@:(self.trace) }
+            get_state(): str { @@:(atom_to_list(element(1, Data))) }
+
+            reset() {
+                self.trace = ""
+            }
+        }
+
+        $Done {
+            get_trace(): str { @@:(self.trace) }
+            get_state(): str { @@:(atom_to_list(element(1, Data))) }
+            reset() {
+                self.trace = ""
+                -> $Active
+            }
+        }
+
+    domain:
+        trace: str = ""
+}

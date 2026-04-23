@@ -341,6 +341,34 @@ Expected: ~150 cases × 16 backends = **~2,400 cases**. (Erlang
 excluded — gen_statem processes can't be composed as in-process
 instances.)
 
+### Phase 9 — Nested Frame syntax fuzz
+
+**Goal:** validate that Frame constructs nest recursively. Every
+Frame segment accepts any sub-expression that is itself a Frame
+segment (or a native expression that contains Frame segments).
+
+**Patterns to cover:**
+- `@@:self.foo(@@:return)` — `@@:return` as an arg
+- `@@:self.foo(@@:params.x)` — `@@:params` as an arg
+- `@@:(self.op(@@:return))` — self-call inside return expression
+- `@@:return = @@:self.foo()` — self-call as return-value assignment RHS
+- `$.var = @@:self.foo()` — self-call as state-var assignment RHS
+- `@@:self.foo(self.op())` — operation call as an arg
+- `@@:(self.op(@@:params.x))` — operation call with `@@:params` inside
+- Two levels deep: `@@:self.foo(@@:self.bar(@@:return))` (if the
+  spec allows)
+
+**Contract:** the single generated Frame source compiles to every
+backend with byte-identical semantic output. Nested Frame syntax
+is expanded recursively at framec's segmentation / expansion stage
+— NOT left verbatim in the target source.
+
+**Expected:** ~60 cases × 17 backends = **~1,020 cases**.
+
+**Current status:** defect #10 in `_scratch/defect_tracker_cookbook_port.md`
+— one-level nesting already fails (the inner segment passes through
+verbatim). Phase 9 is gated on that defect's fix.
+
 ### Phase 8 — Negative (passthrough-error) fuzz
 
 **Goal:** validate that Frame's native-code passthrough model correctly
@@ -417,6 +445,7 @@ should: at the native compiler.
 | 6     |    ~1,100  |   ~18,933  | 11-backend subset                   |
 | 7     |    ~2,400  |   ~21,333  | 16-backend subset                   |
 | 8     |      ~850  |   ~22,183  | negative passthrough — after 5–7    |
+| 9     |    ~1,020  |   ~23,203  | nested frame syntax — gated on defect #10 |
 
 Well under 50k — tight enough that a full fuzz run fits in a coffee-
 break, loose enough that it's catching real bugs per phase.
