@@ -1,0 +1,40 @@
+@@target python_3
+
+# Test: Frame syntax nested inside another Frame segment's args.
+# Previously `@@:self.foo(@@:return)` leaked the inner `@@:return`
+# verbatim to the target (defect #10, fixed 2026-04-24). The
+# segmenter now recursively expands Frame syntax in `@@:self.method`
+# args.
+
+@@system Nest {
+    interface:
+        outer(x: int): int
+        double(n: int): int
+        get_last(): int
+
+    machine:
+        $A {
+            outer(x: int): int {
+                @@:return = x
+                @@:self.double(@@:return)
+                @@:(@@:return)
+            }
+
+            double(n: int): int {
+                self.last = n + n
+                @@:(self.last)
+            }
+
+            get_last(): int { @@:(self.last) }
+        }
+
+    domain:
+        last: int = 0
+}
+
+if __name__ == "__main__":
+    inst = @@Nest()
+    r = inst.outer(5)
+    assert r == 5, f"expected outer(5) == 5, got {r}"
+    assert inst.get_last() == 10, f"expected last == 10, got {inst.get_last()}"
+    print("PASS: nested_frame_args")
