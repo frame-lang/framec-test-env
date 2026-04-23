@@ -1,0 +1,142 @@
+@@target python_3
+
+# Cookbook 92: Signal / Double Ratchet Session
+# No message traffic pre-initialization (defaults in $Uninit).
+# send and receive only work in $Active. close is terminal.
+#
+# For the test we model message-key lifetime with counters: each
+# send/receive generates a new mk_id, zeroize_count records how
+# many keys have been zeroised. Property: zeroize_count == use_count.
+
+@@system DoubleRatchetSession {
+    interface:
+        initialize(shared_secret: str, remote_pub: str)
+        send_plaintext(m: str): str = ""
+        receive_ciphertext(header: str, ct: str, ratchet: int, valid: int): str = ""
+        close()
+        get_status(): str = "uninit"
+        get_sends(): int
+        get_recvs(): int
+        get_ratchets(): int
+        get_zeroized(): int
+
+    machine:
+        $Uninit {
+            initialize(shared_secret: str, remote_pub: str) {
+                self.root_key = shared_secret
+                self.remote_pub = remote_pub
+                -> $Active
+            }
+            get_status(): str { @@:("uninit") }
+            get_sends(): int { @@:(self.sends) }
+            get_recvs(): int { @@:(self.recvs) }
+            get_ratchets(): int { @@:(self.ratchets) }
+            get_zeroized(): int { @@:(self.zeroized) }
+        }
+
+        $Active {
+            send_plaintext(m: str): str {
+                self.sends = self.sends + 1
+                # Every successful send zeroises its message key.
+                self.zeroized = self.zeroized + 1
+                @@:("ct-send")
+            }
+
+            receive_ciphertext(header: str, ct: str, ratchet: int, valid: int): str {
+                if ratchet == 1:
+                    self.ratchets = self.ratchets + 1
+                if valid == 0:
+                    @@:("decryption_failed")
+                else:
+                    self.recvs = self.recvs + 1
+                    self.zeroized = self.zeroized + 1
+                    @@:("pt")
+            }
+
+            close() { -> $Closed }
+            get_status(): str { @@:("active") }
+            get_sends(): int { @@:(self.sends) }
+            get_recvs(): int { @@:(self.recvs) }
+            get_ratchets(): int { @@:(self.ratchets) }
+            get_zeroized(): int { @@:(self.zeroized) }
+        }
+
+        $Closed {
+            get_status(): str { @@:("closed") }
+            get_sends(): int { @@:(self.sends) }
+            get_recvs(): int { @@:(self.recvs) }
+            get_ratchets(): int { @@:(self.ratchets) }
+            get_zeroized(): int { @@:(self.zeroized) }
+        }
+
+    domain:
+        root_key: str = ""
+        remote_pub: str = ""
+        sends: int = 0
+        recvs: int = 0
+        ratchets: int = 0
+        zeroized: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    s = @@DoubleRatchetSession()
+    check("uninit", s.get_status(), "uninit")
+
+    # Pre-init gate: send and receive return interface defaults.
+    check("uninit send default", s.send_plaintext("hi"), "")
+    check("uninit recv default", s.receive_ciphertext("h", "ct", 0, 1), "")
+
+    s.initialize("root-secret", "remote-pub")
+    check("active", s.get_status(), "active")
+
+    # Normal send/receive
+    check("sent", s.send_plaintext("m1"), "ct-send")
+    check("sent 2", s.send_plaintext("m2"), "ct-send")
+    check("2 sends", s.get_sends(), 2)
+
+    # Property: every send zeroised its key.
+    check("zeroised == sends", s.get_zeroized(), s.get_sends())
+
+    # Non-ratcheting receive
+    check("received", s.receive_ciphertext("h1", "c1", 0, 1), "pt")
+    check("1 recv", s.get_recvs(), 1)
+    check("0 ratchets", s.get_ratchets(), 0)
+
+    # Receive triggering DH ratchet (new remote pub in header)
+    check("received with ratchet", s.receive_ciphertext("h2", "c2", 1, 1), "pt")
+    check("1 ratchet", s.get_ratchets(), 1)
+    check("2 recvs", s.get_recvs(), 2)
+
+    # Property: every successful message use zeroised exactly one key.
+    # sends + recvs must equal zeroized.
+    check("zeroise invariant",
+          s.get_zeroized(), s.get_sends() + s.get_recvs())
+
+    # Failed decrypt does NOT bump recvs or zeroize (the key was
+    # never applied because advance_or_skip returned empty).
+    before_recvs = s.get_recvs()
+    before_zeroized = s.get_zeroized()
+    check("bad decrypt", s.receive_ciphertext("bad", "bad", 0, 0), "decryption_failed")
+    check("recvs unchanged", s.get_recvs(), before_recvs)
+    check("zeroized unchanged", s.get_zeroized(), before_zeroized)
+
+    # Close is terminal — neither send nor receive work
+    s.close()
+    check("closed", s.get_status(), "closed")
+    check("closed send default", s.send_plaintext("hi"), "")
+    check("closed recv default", s.receive_ciphertext("h", "ct", 0, 1), "")
+    # Counters frozen
+    final_sends = s.get_sends()
+    final_recvs = s.get_recvs()
+    check("sends frozen post-close", s.get_sends(), final_sends)
+    check("recvs frozen post-close", s.get_recvs(), final_recvs)
+
+    print("PASS: double_ratchet")

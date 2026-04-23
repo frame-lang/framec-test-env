@@ -1,0 +1,194 @@
+@@target python_3
+
+# Cookbook 88: WebAuthn / FIDO2
+# Single-use challenges (server-generated at begin_*). Origin
+# binding, UV gate, counter regression — each on the only path
+# to $Authenticated. Test models each gate as a boolean the
+# caller controls so the branch matrix is deterministic.
+
+@@system WebAuthnCeremony {
+    interface:
+        begin_registration(user_id: str, rp_id: str)
+        registration_response(chal_ok: int, origin_ok: int, att_ok: int)
+        begin_authentication(user_id: str, rp_id: str, uv_required: int)
+        assertion_response(chal_ok: int, origin_ok: int, uv_ok: int, sig_ok: int, counter_ok: int)
+        timeout()
+        get_status(): str = "idle"
+        get_user(): str
+        get_rp(): str
+
+    machine:
+        $Idle {
+            begin_registration(user_id: str, rp_id: str) {
+                self.user_id = user_id
+                self.rp_id = rp_id
+                self.uv_required = 1
+                -> $AwaitingRegistration
+            }
+            begin_authentication(user_id: str, rp_id: str, uv_required: int) {
+                self.user_id = user_id
+                self.rp_id = rp_id
+                self.uv_required = uv_required
+                -> $AwaitingAssertion
+            }
+            get_status(): str { @@:("idle") }
+            get_user(): str { @@:(self.user_id) }
+            get_rp(): str { @@:(self.rp_id) }
+        }
+
+        $AwaitingRegistration {
+            registration_response(chal_ok: int, origin_ok: int, att_ok: int) {
+                if chal_ok == 0:
+                    -> $Failed
+                elif origin_ok == 0:
+                    -> $Failed
+                elif att_ok == 0:
+                    -> $Failed
+                else:
+                    -> $Registered
+            }
+            timeout() { -> $Failed }
+            get_status(): str { @@:("awaiting_registration") }
+            get_user(): str { @@:(self.user_id) }
+            get_rp(): str { @@:(self.rp_id) }
+        }
+
+        $AwaitingAssertion {
+            assertion_response(chal_ok: int, origin_ok: int, uv_ok: int, sig_ok: int, counter_ok: int) {
+                if chal_ok == 0:
+                    -> $Failed
+                elif origin_ok == 0:
+                    -> $Failed
+                elif self.uv_required == 1 and uv_ok == 0:
+                    -> $Failed
+                elif sig_ok == 0:
+                    -> $Failed
+                elif counter_ok == 0:
+                    -> $Failed
+                else:
+                    -> $Authenticated
+            }
+            timeout() { -> $Failed }
+            get_status(): str { @@:("awaiting_assertion") }
+            get_user(): str { @@:(self.user_id) }
+            get_rp(): str { @@:(self.rp_id) }
+        }
+
+        $Registered {
+            get_status(): str { @@:("registered") }
+            get_user(): str { @@:(self.user_id) }
+            get_rp(): str { @@:(self.rp_id) }
+        }
+        $Authenticated {
+            get_status(): str { @@:("authenticated") }
+            get_user(): str { @@:(self.user_id) }
+            get_rp(): str { @@:(self.rp_id) }
+        }
+        $Failed {
+            get_status(): str { @@:("failed") }
+            get_user(): str { @@:(self.user_id) }
+            get_rp(): str { @@:(self.rp_id) }
+        }
+
+    domain:
+        user_id: str = ""
+        rp_id: str = ""
+        uv_required: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    # Successful registration
+    w = @@WebAuthnCeremony()
+    check("idle", w.get_status(), "idle")
+    w.begin_registration("alice", "example.com")
+    check("awaiting registration", w.get_status(), "awaiting_registration")
+    check("user captured", w.get_user(), "alice")
+    check("rp captured", w.get_rp(), "example.com")
+
+    w.registration_response(1, 1, 1)
+    check("registered", w.get_status(), "registered")
+
+    # Registered is terminal — replay does nothing
+    w.registration_response(1, 1, 1)
+    check("registered absorbs replay", w.get_status(), "registered")
+
+    # Challenge mismatch at registration
+    w2 = @@WebAuthnCeremony()
+    w2.begin_registration("bob", "example.com")
+    w2.registration_response(0, 1, 1)
+    check("reg chal mismatch", w2.get_status(), "failed")
+
+    # Origin mismatch at registration (phishing defense)
+    w3 = @@WebAuthnCeremony()
+    w3.begin_registration("carol", "evil.com")
+    w3.registration_response(1, 0, 1)
+    check("reg origin mismatch", w3.get_status(), "failed")
+
+    # Attestation failure
+    w4 = @@WebAuthnCeremony()
+    w4.begin_registration("dave", "example.com")
+    w4.registration_response(1, 1, 0)
+    check("reg attestation failed", w4.get_status(), "failed")
+
+    # Registration timeout
+    w5 = @@WebAuthnCeremony()
+    w5.begin_registration("eve", "example.com")
+    w5.timeout()
+    check("reg timeout", w5.get_status(), "failed")
+
+    # Successful authentication — UV required + provided
+    w6 = @@WebAuthnCeremony()
+    w6.begin_authentication("alice", "example.com", 1)
+    check("awaiting assertion", w6.get_status(), "awaiting_assertion")
+    w6.assertion_response(1, 1, 1, 1, 1)
+    check("authenticated", w6.get_status(), "authenticated")
+
+    # UV required but not provided -> fail
+    w7 = @@WebAuthnCeremony()
+    w7.begin_authentication("alice", "example.com", 1)
+    w7.assertion_response(1, 1, 0, 1, 1)
+    check("uv gate", w7.get_status(), "failed")
+
+    # UV not required — assertion without UV is fine
+    w8 = @@WebAuthnCeremony()
+    w8.begin_authentication("alice", "example.com", 0)
+    w8.assertion_response(1, 1, 0, 1, 1)
+    check("uv not required", w8.get_status(), "authenticated")
+
+    # Origin confusion — cross-origin assertion rejected
+    w9 = @@WebAuthnCeremony()
+    w9.begin_authentication("alice", "example.com", 1)
+    w9.assertion_response(1, 0, 1, 1, 1)
+    check("origin confusion", w9.get_status(), "failed")
+
+    # Signature failure
+    w10 = @@WebAuthnCeremony()
+    w10.begin_authentication("alice", "example.com", 1)
+    w10.assertion_response(1, 1, 1, 0, 1)
+    check("signature fail", w10.get_status(), "failed")
+
+    # Counter regression -> clone detected
+    w11 = @@WebAuthnCeremony()
+    w11.begin_authentication("alice", "example.com", 1)
+    w11.assertion_response(1, 1, 1, 1, 0)
+    check("counter regression", w11.get_status(), "failed")
+
+    # Challenge mismatch at authentication (replay of old challenge)
+    w12 = @@WebAuthnCeremony()
+    w12.begin_authentication("alice", "example.com", 1)
+    w12.assertion_response(0, 1, 1, 1, 1)
+    check("challenge replay", w12.get_status(), "failed")
+
+    # Assertion replay after $Authenticated is absorbed
+    w6.assertion_response(0, 0, 0, 0, 0)
+    check("authenticated absorbs replay", w6.get_status(), "authenticated")
+
+    print("PASS: webauthn")

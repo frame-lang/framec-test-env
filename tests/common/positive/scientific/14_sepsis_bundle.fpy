@@ -1,0 +1,208 @@
+@@target python_3
+
+# Cookbook 85: Sepsis Hour-1 Bundle
+# Timed checklist state machine. Terminal splits into OnTime
+# (elapsed <= 60 min) vs Late. Quality metric encoded by WHICH
+# terminal is reached, not a post-hoc query.
+
+@@system SepsisBundle {
+    interface:
+        recognize_sepsis()
+        lactate_drawn(value: float)
+        cultures_drawn()
+        antibiotics_given()
+        fluids_complete()
+        reassess_map(map_mmhg: int)
+        pressors_started()
+        tick_minute()
+        status(): str
+        bundle_complete(): bool = False
+        elapsed_min(): int
+        pressors_indicated(): bool
+
+    machine:
+        $PreRecognition {
+            recognize_sepsis() {
+                self.elapsed = 0
+                self.lactate = 0.0
+                self.cultures = False
+                self.abx = False
+                self.fluids = False
+                self.reassessed = False
+                self.pressors_needed = False
+                self.pressors = False
+                -> $BundleActive
+            }
+            status(): str { @@:("pre-recognition") }
+            elapsed_min(): int { @@:(self.elapsed) }
+            pressors_indicated(): bool { @@:(self.pressors_needed) }
+        }
+
+        $BundleActive {
+            lactate_drawn(value: float) {
+                self.lactate = value
+                if self.is_complete():
+                    if self.elapsed <= 60:
+                        -> $OnTime
+                    else:
+                        -> $Late
+            }
+            cultures_drawn() {
+                self.cultures = True
+                if self.is_complete():
+                    if self.elapsed <= 60:
+                        -> $OnTime
+                    else:
+                        -> $Late
+            }
+            antibiotics_given() {
+                self.abx = True
+                if self.is_complete():
+                    if self.elapsed <= 60:
+                        -> $OnTime
+                    else:
+                        -> $Late
+            }
+            fluids_complete() {
+                self.fluids = True
+                if self.is_complete():
+                    if self.elapsed <= 60:
+                        -> $OnTime
+                    else:
+                        -> $Late
+            }
+            reassess_map(map_mmhg: int) {
+                self.reassessed = True
+                self.pressors_needed = map_mmhg < 65
+                if self.is_complete():
+                    if self.elapsed <= 60:
+                        -> $OnTime
+                    else:
+                        -> $Late
+            }
+            pressors_started() {
+                self.pressors = True
+                if self.is_complete():
+                    if self.elapsed <= 60:
+                        -> $OnTime
+                    else:
+                        -> $Late
+            }
+            tick_minute() { self.elapsed = self.elapsed + 1 }
+            status(): str { @@:("active") }
+            elapsed_min(): int { @@:(self.elapsed) }
+            pressors_indicated(): bool { @@:(self.pressors_needed) }
+        }
+
+        $OnTime {
+            bundle_complete(): bool { @@:(True) }
+            status(): str { @@:("on time") }
+            elapsed_min(): int { @@:(self.elapsed) }
+            pressors_indicated(): bool { @@:(self.pressors_needed) }
+        }
+
+        $Late {
+            bundle_complete(): bool { @@:(True) }
+            status(): str { @@:("late") }
+            elapsed_min(): int { @@:(self.elapsed) }
+            pressors_indicated(): bool { @@:(self.pressors_needed) }
+        }
+
+    actions:
+        is_complete(): bool {
+            base = self.cultures and self.abx and self.fluids and self.lactate > 0 and self.reassessed
+            if self.pressors_needed:
+                return base and self.pressors
+            return base
+        }
+
+    domain:
+        elapsed: int = 0
+        lactate: float = 0.0
+        cultures: bool = False
+        abx: bool = False
+        fluids: bool = False
+        reassessed: bool = False
+        pressors_needed: bool = False
+        pressors: bool = False
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    # Scenario A: on-time bundle, no pressors indicated (MAP adequate)
+    a = @@SepsisBundle()
+    check("pre-recognition", a.status(), "pre-recognition")
+    check("bundle_complete default False before recognize",
+          a.bundle_complete(), False)
+
+    # Until recognized, most events are silently ignored.
+    a.lactate_drawn(3.4)
+    a.antibiotics_given()
+    check("pre-rec absorbs events", a.status(), "pre-recognition")
+
+    a.recognize_sepsis()
+    check("active", a.status(), "active")
+
+    # Complete the bundle under 60 minutes, with MAP >= 65 (no pressors).
+    a.lactate_drawn(3.4)
+    a.cultures_drawn()
+    i = 0
+    while i < 15:
+        a.tick_minute()
+        i = i + 1
+    a.antibiotics_given()
+    a.fluids_complete()
+    check("still active after fluids", a.status(), "active")
+    a.reassess_map(75)   # MAP 75 — no pressors indicated
+    check("on time", a.status(), "on time")
+    check("complete", a.bundle_complete(), True)
+    check("no pressors indicated", a.pressors_indicated(), False)
+    check("under 60 min", a.elapsed_min() <= 60, True)
+
+    # After OnTime, further bundle events are silently absorbed
+    # (the terminal state has no such handlers).
+    a.antibiotics_given()
+    a.tick_minute()
+    check("on time absorbs events", a.status(), "on time")
+
+    # Scenario B: late bundle, pressors required
+    b = @@SepsisBundle()
+    b.recognize_sepsis()
+    b.lactate_drawn(4.2)
+    b.cultures_drawn()
+    b.antibiotics_given()
+    b.fluids_complete()
+    # Pass 60 minutes, reassess with low MAP (pressors needed)
+    i = 0
+    while i < 70:
+        b.tick_minute()
+        i = i + 1
+    b.reassess_map(58)  # MAP 58 -> pressors needed
+    # is_complete() still false since pressors not yet started
+    check("active — pressors pending", b.status(), "active")
+    check("pressors flagged", b.pressors_indicated(), True)
+
+    b.pressors_started()
+    check("late terminal", b.status(), "late")
+    check("complete (late)", b.bundle_complete(), True)
+    check("over 60 min", b.elapsed_min() > 60, True)
+
+    # Scenario C: MAP reassessed good -> no pressors required and the
+    # bundle can complete without pressors_started being called.
+    c = @@SepsisBundle()
+    c.recognize_sepsis()
+    c.lactate_drawn(2.0)
+    c.cultures_drawn()
+    c.antibiotics_given()
+    c.fluids_complete()
+    c.reassess_map(80)   # MAP 80, no pressors needed
+    check("reassess completes w/o pressors", c.status(), "on time")
+
+    print("PASS: sepsis_bundle")

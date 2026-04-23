@@ -1,0 +1,115 @@
+@@target python_3
+
+# Cookbook 77: Neuron Action Potential
+# Four states: Resting → Depolarizing → Repolarizing → Refractory.
+# Refractory absorbs stimulation silently (absolute refractory period).
+
+@@system Neuron {
+    interface:
+        stimulate(input: float)
+        tick()
+        voltage(): float
+        phase(): str
+
+    machine:
+        $Resting {
+            stimulate(input: float) {
+                self.v = self.v + input
+                if self.v >= self.threshold:
+                    -> $Depolarizing
+            }
+            tick() { self.v = self.v + (self.v_rest - self.v) * 0.2 }
+            voltage(): float { @@:(self.v) }
+            phase(): str { @@:("resting") }
+        }
+
+        $Depolarizing {
+            $>() { self.v = self.v_peak }
+            tick() { -> $Repolarizing }
+            voltage(): float { @@:(self.v) }
+            phase(): str { @@:("spike") }
+        }
+
+        $Repolarizing {
+            tick() {
+                self.v = self.v_hyper
+                -> $Refractory
+            }
+            voltage(): float { @@:(self.v) }
+            phase(): str { @@:("repolarizing") }
+        }
+
+        $Refractory {
+            stimulate(input: float) { }
+            tick() {
+                self.ref_ticks = self.ref_ticks + 1
+                if self.ref_ticks >= 3:
+                    self.ref_ticks = 0
+                    -> $Resting
+            }
+            voltage(): float { @@:(self.v) }
+            phase(): str { @@:("refractory") }
+        }
+
+    domain:
+        v: float = -70.0
+        v_rest: float = -70.0
+        v_peak: float = 40.0
+        v_hyper: float = -80.0
+        threshold: float = -55.0
+        ref_ticks: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    n = @@Neuron()
+    check("start resting", n.phase(), "resting")
+    check("start voltage", n.voltage(), -70.0)
+
+    # Sub-threshold stimulation: v goes -70 + 5 = -65, below -55.
+    n.stimulate(5.0)
+    check("sub-threshold stays resting", n.phase(), "resting")
+    check("sub-threshold voltage", n.voltage(), -65.0)
+
+    # Second sub-threshold: -65 + 5 = -60, still below -55.
+    n.stimulate(5.0)
+    check("still resting", n.phase(), "resting")
+
+    # Threshold crossed: -60 + 6 = -54 >= -55.
+    n.stimulate(6.0)
+    check("spike", n.phase(), "spike")
+    check("peak voltage", n.voltage(), 40.0)
+
+    # Automatic phases driven by tick()
+    n.tick()
+    check("repolarizing", n.phase(), "repolarizing")
+
+    n.tick()
+    check("refractory", n.phase(), "refractory")
+    check("hyperpolarized", n.voltage(), -80.0)
+
+    # Absolute refractory: stimulate is a no-op, voltage unchanged.
+    n.stimulate(100.0)
+    check("refractory absorbs stim", n.phase(), "refractory")
+    check("refractory voltage unchanged", n.voltage(), -80.0)
+
+    # Refractory clears after 3 ticks.
+    n.tick()
+    check("still refractory t+1", n.phase(), "refractory")
+    n.tick()
+    check("still refractory t+2", n.phase(), "refractory")
+    n.tick()
+    check("resting after t+3", n.phase(), "resting")
+
+    # Can fire again after refractory clears.
+    n.stimulate(30.0)
+    check("second spike", n.phase(), "spike")
+
+    print("PASS: neuron_action")

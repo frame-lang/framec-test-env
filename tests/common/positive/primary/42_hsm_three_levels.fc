@@ -1,0 +1,143 @@
+@@target c
+
+// Test 42: HSM Three-Level Hierarchy
+//
+// $Grandchild => $Child => $Parent
+// Forward through multiple levels; state vars isolated per level.
+//
+// Log is a base-10 digit accumulator. Each tag is guarded on that
+// level's own state-scoped var so the test exercises both the
+// ordering of HSM forward dispatch AND compartment isolation of
+// state-scoped variables:
+//   1 = Grandchild:handled_at_grandchild  (iff $.grandchild_var == 1)
+//   2 = Grandchild:forward_to_child
+//   3 = Child:forward_to_child            (iff $.child_var == 10)
+//   4 = Grandchild:forward_to_parent
+//   5 = Child:forward_to_parent           (iff $.child_var == 10)
+//   6 = Parent:forward_to_parent          (iff $.parent_var == 100)
+//   7 = Grandchild:forward_through_all
+//   8 = Child:forward_through_all         (iff $.child_var == 10)
+//   9 = Parent:forward_through_all        (iff $.parent_var == 100)
+//
+// Final expected log: 123456789.
+
+@@system HSMThreeLevels {
+    interface:
+        handle_at_grandchild(): void
+        forward_to_child(): void
+        forward_to_parent(): void
+        forward_through_all(): void
+        get_log(): int
+
+    machine:
+        $Grandchild => $Child {
+            $.grandchild_var: int = 1
+
+            handle_at_grandchild() {
+                if ($.grandchild_var == 1) {
+                    self->log = self->log * 10 + 1;
+                }
+            }
+
+            forward_to_child() {
+                self->log = self->log * 10 + 2;
+                => $^
+            }
+
+            forward_to_parent() {
+                self->log = self->log * 10 + 4;
+                => $^
+            }
+
+            forward_through_all() {
+                self->log = self->log * 10 + 7;
+                => $^
+            }
+
+            get_log(): int {
+                @@:(self->log)
+                return;
+            }
+        }
+
+        $Child => $Parent {
+            $.child_var: int = 10
+
+            forward_to_child() {
+                if ($.child_var == 10) {
+                    self->log = self->log * 10 + 3;
+                }
+            }
+
+            forward_to_parent() {
+                if ($.child_var == 10) {
+                    self->log = self->log * 10 + 5;
+                }
+                => $^
+            }
+
+            forward_through_all() {
+                if ($.child_var == 10) {
+                    self->log = self->log * 10 + 8;
+                }
+                => $^
+            }
+
+            get_log(): int {
+                @@:(self->log)
+                return;
+            }
+        }
+
+        $Parent {
+            $.parent_var: int = 100
+
+            forward_to_parent() {
+                if ($.parent_var == 100) {
+                    self->log = self->log * 10 + 6;
+                }
+            }
+
+            forward_through_all() {
+                if ($.parent_var == 100) {
+                    self->log = self->log * 10 + 9;
+                }
+            }
+
+            get_log(): int {
+                @@:(self->log)
+                return;
+            }
+        }
+    domain:
+        log : int
+}
+
+int main() {
+    printf("=== Test 42: HSM Three-Level Hierarchy ===\n");
+    HSMThreeLevels* s = @@HSMThreeLevels();
+
+    HSMThreeLevels_handle_at_grandchild(s);
+    int log = HSMThreeLevels_get_log(s);
+    if (log != 1) { printf("FAIL: expected 1, got %d\n", log); return 1; }
+    printf("TC1.2.2: Grandchild handles locally (state var isolated) - PASS (log=%d)\n", log);
+
+    HSMThreeLevels_forward_to_child(s);
+    log = HSMThreeLevels_get_log(s);
+    if (log != 123) { printf("FAIL: expected 123, got %d\n", log); return 1; }
+    printf("TC1.2.3: Forward grandchild->child (child state var isolated) - PASS (log=%d)\n", log);
+
+    HSMThreeLevels_forward_to_parent(s);
+    log = HSMThreeLevels_get_log(s);
+    if (log != 123456) { printf("FAIL: expected 123456, got %d\n", log); return 1; }
+    printf("TC1.2.4: Forward grandchild->child->parent (parent state var isolated) - PASS (log=%d)\n", log);
+
+    HSMThreeLevels_forward_through_all(s);
+    log = HSMThreeLevels_get_log(s);
+    if (log != 123456789) { printf("FAIL: expected 123456789, got %d\n", log); return 1; }
+    printf("TC1.2.5+6: Full chain forward + state vars isolated - PASS (log=%d)\n", log);
+
+    printf("PASS: HSM three-level hierarchy works correctly\n");
+    HSMThreeLevels_destroy(s);
+    return 0;
+}

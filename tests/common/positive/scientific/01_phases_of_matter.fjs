@@ -1,0 +1,142 @@
+// Cookbook 72: Phases of Matter (JavaScript)
+
+@@system Substance(melting_point: float, boiling_point: float, ionization_point: float) {
+    interface:
+        add_heat(joules: float)
+        remove_heat(joules: float)
+        temperature(): float
+        phase(): str
+
+    machine:
+        $Solid {
+            add_heat(joules: float) {
+                this.temp = this.temp + joules / this.heat_capacity
+                if (this.temp >= this.mp) {
+                    this.temp = this.mp
+                    this.latent_absorbed = 0.0
+                    -> $Melting
+                }
+            }
+            remove_heat(joules: float) {
+                this.temp = this.temp - joules / this.heat_capacity
+            }
+            temperature(): float { @@:(this.temp) }
+            phase(): str { @@:("solid") }
+        }
+
+        $Melting {
+            add_heat(joules: float) {
+                this.latent_absorbed = this.latent_absorbed + joules
+                if (this.latent_absorbed >= this.latent_fusion) {
+                    -> $Liquid
+                }
+            }
+            remove_heat(joules: float) {
+                this.latent_absorbed = this.latent_absorbed - joules
+                if (this.latent_absorbed <= 0) {
+                    -> $Solid
+                }
+            }
+            temperature(): float { @@:(this.mp) }
+            phase(): str { @@:("melting") }
+        }
+
+        $Liquid {
+            add_heat(joules: float) {
+                this.temp = this.temp + joules / this.heat_capacity
+                if (this.temp >= this.bp) {
+                    this.temp = this.bp
+                    this.latent_absorbed = 0.0
+                    -> $Boiling
+                }
+            }
+            remove_heat(joules: float) {
+                this.temp = this.temp - joules / this.heat_capacity
+                if (this.temp <= this.mp) {
+                    this.temp = this.mp
+                    this.latent_absorbed = this.latent_fusion
+                    -> $Melting
+                }
+            }
+            temperature(): float { @@:(this.temp) }
+            phase(): str { @@:("liquid") }
+        }
+
+        $Boiling {
+            add_heat(joules: float) {
+                this.latent_absorbed = this.latent_absorbed + joules
+                if (this.latent_absorbed >= this.latent_vaporization) {
+                    -> $Gas
+                }
+            }
+            remove_heat(joules: float) {
+                this.latent_absorbed = this.latent_absorbed - joules
+                if (this.latent_absorbed <= 0) {
+                    -> $Liquid
+                }
+            }
+            temperature(): float { @@:(this.bp) }
+            phase(): str { @@:("boiling") }
+        }
+
+        $Gas {
+            add_heat(joules: float) {
+                this.temp = this.temp + joules / this.heat_capacity
+                if (this.temp >= this.ip) {
+                    -> $Plasma
+                }
+            }
+            remove_heat(joules: float) {
+                this.temp = this.temp - joules / this.heat_capacity
+                if (this.temp <= this.bp) {
+                    this.temp = this.bp
+                    this.latent_absorbed = this.latent_vaporization
+                    -> $Boiling
+                }
+            }
+            temperature(): float { @@:(this.temp) }
+            phase(): str { @@:("gas") }
+        }
+
+        $Plasma {
+            remove_heat(joules: float) {
+                this.temp = this.temp - joules / this.heat_capacity
+                if (this.temp <= this.ip) {
+                    -> $Gas
+                }
+            }
+            temperature(): float { @@:(this.temp) }
+            phase(): str { @@:("plasma") }
+        }
+
+    domain:
+        mp = melting_point
+        bp = boiling_point
+        ip = ionization_point
+        temp = -50.0
+        heat_capacity = 4.18
+        latent_fusion = 334.0
+        latent_vaporization = 2260.0
+        latent_absorbed = 0.0
+}
+
+function check(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'")
+        process.exit(1)
+    }
+}
+
+const water = @@Substance(0.0, 100.0, 10000.0)
+check("initial phase", water.phase(), "solid")
+water.add_heat(209.0);         check("after 209J",     water.phase(), "melting")
+water.add_heat(334.0);         check("after fusion",   water.phase(), "liquid")
+water.add_heat(418.0);         check("at boiling",     water.phase(), "boiling")
+water.add_heat(2260.0);        check("vaporised",      water.phase(), "gas")
+water.add_heat(41382.0);       check("ionised",        water.phase(), "plasma")
+water.remove_heat(1.0);        check("plasma cooled",  water.phase(), "gas")
+water.remove_heat(41400.0);    check("gas -> boiling", water.phase(), "boiling")
+water.remove_heat(2260.0);     check("liquid again",   water.phase(), "liquid")
+water.remove_heat(418.0);      check("melting again",  water.phase(), "melting")
+water.remove_heat(334.0);      check("frozen",         water.phase(), "solid")
+console.log("PASS: phases_of_matter")

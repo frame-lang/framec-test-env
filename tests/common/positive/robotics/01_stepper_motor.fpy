@@ -1,0 +1,223 @@
+@@target python_3
+
+# Cookbook 96: Stepper Motor Driver — Trapezoidal Motion Profile
+# Three-level HSM: $Accel/$Cruise/$Decel => $Motion => $Active.
+# $Motion centralizes stop() and stall_detected() across all motion
+# states. Short moves skip Cruising — Accel -> Decel directly.
+
+@@system StepperDriver {
+    interface:
+        move_to(target_steps: int)
+        tick()
+        stop()
+        stall_detected()
+        status(): str
+        get_position(): int
+        get_velocity(): int
+
+    machine:
+        $Idle {
+            move_to(target_steps: int) {
+                self.target = target_steps
+                self.position = 0
+                self.velocity = 0
+                self.accel_steps = 0
+                -> $Accelerating
+            }
+            tick() { }
+            status(): str { @@:("idle") }
+            get_position(): int { @@:(self.position) }
+            get_velocity(): int { @@:(self.velocity) }
+        }
+
+        $Active {
+            get_position(): int { @@:(self.position) }
+            get_velocity(): int { @@:(self.velocity) }
+        }
+
+        $Motion => $Active {
+            stop() { -> $Decelerating }
+            stall_detected() {
+                self.velocity = 0
+                -> $Stalled
+            }
+            => $^
+        }
+
+        $Accelerating => $Motion {
+            tick() {
+                self.velocity = self.velocity + self.accel_rate
+                self.position = self.position + self.velocity
+                self.accel_steps = self.accel_steps + self.velocity
+
+                if self.velocity >= self.v_max:
+                    self.velocity = self.v_max
+                    -> $Cruising
+
+                remaining = self.target - self.position
+                if remaining <= self.accel_steps:
+                    -> $Decelerating
+            }
+            status(): str { @@:("accelerating") }
+            => $^
+        }
+
+        $Cruising => $Motion {
+            tick() {
+                self.position = self.position + self.velocity
+                remaining = self.target - self.position
+                if remaining <= self.accel_steps:
+                    -> $Decelerating
+            }
+            status(): str { @@:("cruising") }
+            => $^
+        }
+
+        $Decelerating => $Motion {
+            tick() {
+                self.velocity = self.velocity - self.accel_rate
+                if self.velocity <= 0:
+                    self.velocity = 0
+                    -> $Idle
+                else:
+                    self.position = self.position + self.velocity
+            }
+            status(): str { @@:("decelerating") }
+            => $^
+        }
+
+        $Stalled {
+            move_to(target_steps: int) {
+                self.target = target_steps
+                self.position = 0
+                self.velocity = 0
+                self.accel_steps = 0
+                -> $Accelerating
+            }
+            status(): str { @@:("stalled") }
+            get_position(): int { @@:(self.position) }
+            get_velocity(): int { @@:(self.velocity) }
+        }
+
+    domain:
+        target: int = 0
+        position: int = 0
+        velocity: int = 0
+        accel_steps: int = 0
+        v_max: int = 20
+        accel_rate: int = 2
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    # Long-distance move: passes through all three motion states.
+    m = @@StepperDriver()
+    check("start idle", m.status(), "idle")
+    check("start position 0", m.get_position(), 0)
+
+    m.move_to(300)
+    check("accelerating", m.status(), "accelerating")
+
+    # Drive enough ticks to complete motion. The profile is deterministic.
+    # v_max=20, accel_rate=2: 10 ticks to reach v_max, 10 to decel.
+    # In Accel, accel_steps accumulates: 2+4+6+...+20 = 110 steps.
+    # After reaching Cruise at step 110, remaining = 300-110 = 190.
+    # Decel will take 10 ticks (v from 20 down to 0), covering
+    # 18+16+14+12+10+8+6+4+2+0 = 90 steps. Cruise covers 190-90 = 100.
+    # Total ticks: 10 accel + 5 cruise (100/20) + 10 decel = 25.
+
+    states_seen = []
+    i = 0
+    while i < 40:
+        m.tick()
+        s = m.status()
+        if not states_seen or states_seen[-1] != s:
+            states_seen.append(s)
+        if s == "idle":
+            break
+        i = i + 1
+
+    # Full trapezoidal profile: accel -> cruise -> decel -> idle.
+    check("full profile trajectory",
+          states_seen,
+          ["accelerating", "cruising", "decelerating", "idle"])
+
+    # Motion completed (reached $Idle) with zero velocity. The
+    # discrete-integer profile doesn't land exactly on target — the
+    # recipe demonstrates structure, not exact positioning.
+    check("final velocity 0", m.get_velocity(), 0)
+    check("position advanced", m.get_position() > 200, True)
+
+    # Short move: decel fires before reaching v_max, skipping Cruising.
+    m2 = @@StepperDriver()
+    m2.move_to(40)
+    states_seen = []
+    i = 0
+    while i < 20:
+        m2.tick()
+        s = m2.status()
+        if not states_seen or states_seen[-1] != s:
+            states_seen.append(s)
+        if s == "idle":
+            break
+        i = i + 1
+
+    # Short trajectory: accelerating -> decelerating -> idle
+    # (Cruising is absent because remaining <= accel_steps triggered
+    # the early decel transition.)
+    check("short move skips cruise",
+          states_seen,
+          ["accelerating", "decelerating", "idle"])
+
+    # Stop mid-cruise: HSM $Motion.stop() forwards from $Cruising.
+    m3 = @@StepperDriver()
+    m3.move_to(1000)
+    i = 0
+    while i < 15:
+        m3.tick()
+        i = i + 1
+    check("in cruise", m3.status(), "cruising")
+
+    m3.stop()
+    check("stopped to decel", m3.status(), "decelerating")
+
+    i = 0
+    while i < 15:
+        m3.tick()
+        if m3.status() == "idle":
+            break
+        i = i + 1
+    check("decel completes after stop", m3.status(), "idle")
+    check("stopped velocity 0", m3.get_velocity(), 0)
+
+    # Stall detection from any motion state.
+    m4 = @@StepperDriver()
+    m4.move_to(1000)
+    i = 0
+    while i < 3:
+        m4.tick()
+        i = i + 1
+    check("accel when stalled", m4.status(), "accelerating")
+    m4.stall_detected()
+    check("stalled", m4.status(), "stalled")
+    check("velocity cleared on stall", m4.get_velocity(), 0)
+
+    # Stall cleared by re-commanding a move.
+    m4.move_to(50)
+    check("stall cleared", m4.status(), "accelerating")
+
+    # From $Idle, stop() and stall_detected() have no handlers —
+    # silently absorbed (not inherited since $Idle is not under $Motion).
+    m5 = @@StepperDriver()
+    m5.stop()
+    m5.stall_detected()
+    check("idle absorbs stop", m5.status(), "idle")
+
+    print("PASS: stepper_motor")

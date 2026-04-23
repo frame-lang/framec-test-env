@@ -1,0 +1,117 @@
+@@target c
+
+// Test 44: HSM Sibling Transitions
+// Exit/enter handlers fire on sibling transition; parent relation preserved.
+
+@@system HSMSiblingTransitions {
+    interface:
+        go_to_b(): void
+        go_to_a(): void
+        forward_action(): void
+        get_a_enter(): int
+        get_a_exit(): int
+        get_b_enter(): int
+        get_b_exit(): int
+        get_parent_fwd(): int
+        get_state(): char*
+
+    machine:
+        $ChildA => $Parent {
+            $>() { self->a_enter = self->a_enter + 1; }
+            <$() { self->a_exit  = self->a_exit  + 1; }
+            go_to_b() { -> $ChildB }
+            forward_action() { => $^ }
+            get_a_enter(): int { @@:(self->a_enter) return; }
+            get_a_exit():  int { @@:(self->a_exit)  return; }
+            get_b_enter(): int { @@:(self->b_enter) return; }
+            get_b_exit():  int { @@:(self->b_exit)  return; }
+            get_parent_fwd(): int { @@:(self->parent_fwd) return; }
+            get_state(): char* { @@:("ChildA") return; }
+        }
+
+        $ChildB => $Parent {
+            $>() { self->b_enter = self->b_enter + 1; }
+            <$() { self->b_exit  = self->b_exit  + 1; }
+            go_to_a() { -> $ChildA }
+            forward_action() { => $^ }
+            get_a_enter(): int { @@:(self->a_enter) return; }
+            get_a_exit():  int { @@:(self->a_exit)  return; }
+            get_b_enter(): int { @@:(self->b_enter) return; }
+            get_b_exit():  int { @@:(self->b_exit)  return; }
+            get_parent_fwd(): int { @@:(self->parent_fwd) return; }
+            get_state(): char* { @@:("ChildB") return; }
+        }
+
+        $Parent {
+            forward_action() { self->parent_fwd = self->parent_fwd + 1; }
+            get_a_enter(): int { @@:(self->a_enter) return; }
+            get_a_exit():  int { @@:(self->a_exit)  return; }
+            get_b_enter(): int { @@:(self->b_enter) return; }
+            get_b_exit():  int { @@:(self->b_exit)  return; }
+            get_parent_fwd(): int { @@:(self->parent_fwd) return; }
+            get_state(): char* { @@:("Parent") return; }
+        }
+    domain:
+        a_enter    : int
+        a_exit     : int
+        b_enter    : int
+        b_exit     : int
+        parent_fwd : int
+}
+
+int main() {
+    printf("=== Test 44: HSM Sibling Transitions ===\n");
+    HSMSiblingTransitions* s = @@HSMSiblingTransitions();
+
+    // TC1.4.0: Initial ChildA with enter fired
+    if (HSMSiblingTransitions_get_a_enter(s) != 1
+        || strcmp(HSMSiblingTransitions_get_state(s), "ChildA") != 0) {
+        printf("FAIL: initial ChildA:enter expected once\n"); return 1;
+    }
+    printf("TC1.4.0: Initial ChildA with enter - PASS\n");
+
+    // TC1.4.1-3: A->B transition fires A:exit then B:enter
+    HSMSiblingTransitions_go_to_b(s);
+    if (strcmp(HSMSiblingTransitions_get_state(s), "ChildB") != 0
+        || HSMSiblingTransitions_get_a_exit(s) != 1
+        || HSMSiblingTransitions_get_b_enter(s) != 1) {
+        printf("FAIL: A->B: state=%s a_exit=%d b_enter=%d\n",
+               HSMSiblingTransitions_get_state(s),
+               HSMSiblingTransitions_get_a_exit(s),
+               HSMSiblingTransitions_get_b_enter(s));
+        return 1;
+    }
+    printf("TC1.4.1-3: A->B fires A:exit + B:enter - PASS\n");
+
+    // TC1.4.4: Parent relationship preserved - ChildB forwards
+    HSMSiblingTransitions_forward_action(s);
+    if (HSMSiblingTransitions_get_parent_fwd(s) != 1) {
+        printf("FAIL: parent_fwd after B forward expected 1\n"); return 1;
+    }
+    printf("TC1.4.4: Parent relationship preserved after transition - PASS\n");
+
+    // TC1.4.5: B->A transition
+    HSMSiblingTransitions_go_to_a(s);
+    if (strcmp(HSMSiblingTransitions_get_state(s), "ChildA") != 0
+        || HSMSiblingTransitions_get_b_exit(s) != 1
+        || HSMSiblingTransitions_get_a_enter(s) != 2) {
+        printf("FAIL: B->A: a_enter=%d b_exit=%d\n",
+               HSMSiblingTransitions_get_a_enter(s),
+               HSMSiblingTransitions_get_b_exit(s));
+        return 1;
+    }
+    printf("TC1.4.5: B->A with enter/exit (a_enter=2) - PASS\n");
+
+    // TC1.4.6: ChildA forwards again
+    HSMSiblingTransitions_forward_action(s);
+    if (HSMSiblingTransitions_get_parent_fwd(s) != 2) {
+        printf("FAIL: parent_fwd expected 2, got %d\n",
+               HSMSiblingTransitions_get_parent_fwd(s));
+        return 1;
+    }
+    printf("TC1.4.6: ChildA forwards after return (parent_fwd=2) - PASS\n");
+
+    printf("PASS: HSM sibling transitions work correctly\n");
+    HSMSiblingTransitions_destroy(s);
+    return 0;
+}

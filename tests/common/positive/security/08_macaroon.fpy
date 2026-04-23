@@ -1,0 +1,150 @@
+@@target python_3
+
+# Cookbook 93: Macaroon-Style Capability Token Verifier
+# Signature before caveats, caveats in strict index order, perform()
+# only in $Authorized.
+#
+# present() accepts a caveat_count instead of a list so the test is
+# type-portable. Callers then fire caveat_verified(pass, idx)
+# exactly `caveat_count` times to drive through.
+
+@@system MacaroonVerifier {
+    interface:
+        present(token: str, caveat_count: int)
+        caveat_verified(passed: int, caveat_index: int)
+        sig_verified(passed: int)
+        perform(action: str, resource: str, allowed: int): str = "denied"
+        get_status(): str = ""
+        get_caveat_index(): int
+
+    machine:
+        $Idle {
+            present(token: str, caveat_count: int) {
+                self.token = token
+                self.caveats = caveat_count
+                self.caveat_index = 0
+                -> $CheckingSignature
+            }
+            get_status(): str { @@:("idle") }
+            get_caveat_index(): int { @@:(self.caveat_index) }
+        }
+
+        $CheckingSignature {
+            sig_verified(passed: int) {
+                if passed == 1:
+                    -> $CheckingCaveats
+                else:
+                    -> $Rejected
+            }
+            get_status(): str { @@:("checking_sig") }
+            get_caveat_index(): int { @@:(self.caveat_index) }
+        }
+
+        $CheckingCaveats {
+            $>() {
+                if self.caveat_index >= self.caveats:
+                    -> $Authorized
+            }
+
+            caveat_verified(passed: int, caveat_index: int) {
+                if caveat_index != self.caveat_index:
+                    -> $Rejected
+                elif passed == 0:
+                    -> $Rejected
+                else:
+                    self.caveat_index = self.caveat_index + 1
+                    -> $CheckingCaveats
+            }
+            get_status(): str { @@:("checking_caveats") }
+            get_caveat_index(): int { @@:(self.caveat_index) }
+        }
+
+        $Authorized {
+            perform(action: str, resource: str, allowed: int): str {
+                if allowed == 1:
+                    @@:("allowed")
+                else:
+                    @@:("denied")
+            }
+            get_status(): str { @@:("authorized") }
+            get_caveat_index(): int { @@:(self.caveat_index) }
+        }
+
+        $Rejected {
+            get_status(): str { @@:("rejected") }
+            get_caveat_index(): int { @@:(self.caveat_index) }
+        }
+
+    domain:
+        token: str = ""
+        caveats: int = 0
+        caveat_index: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    # Perform is denied in all non-Authorized states.
+    v = @@MacaroonVerifier()
+    check("idle", v.get_status(), "idle")
+    check("idle perform denied", v.perform("read", "doc", 1), "denied")
+
+    v.present("TOK", 3)
+    check("checking sig", v.get_status(), "checking_sig")
+    check("sig-check perform denied", v.perform("read", "doc", 1), "denied")
+
+    v.sig_verified(1)
+    check("checking caveats", v.get_status(), "checking_caveats")
+    check("caveat-check perform denied", v.perform("read", "doc", 1), "denied")
+
+    # All three caveats verified in order
+    v.caveat_verified(1, 0)
+    check("caveat 0 done, index advanced", v.get_caveat_index(), 1)
+    v.caveat_verified(1, 1)
+    v.caveat_verified(1, 2)
+    check("authorized", v.get_status(), "authorized")
+
+    # perform works in authorized
+    check("in-scope perform", v.perform("read", "doc", 1), "allowed")
+    check("out-of-scope perform", v.perform("write", "doc", 0), "denied")
+
+    # replay of caveat_verified in Authorized has no handler -> absorbed
+    v.caveat_verified(1, 99)
+    check("authorized absorbs caveat", v.get_status(), "authorized")
+
+    # Signature failure
+    v2 = @@MacaroonVerifier()
+    v2.present("TOK", 2)
+    v2.sig_verified(0)
+    check("sig failed", v2.get_status(), "rejected")
+    check("rejected denies perform", v2.perform("read", "doc", 1), "denied")
+
+    # Caveat failure mid-sequence
+    v3 = @@MacaroonVerifier()
+    v3.present("TOK", 3)
+    v3.sig_verified(1)
+    v3.caveat_verified(1, 0)
+    v3.caveat_verified(0, 1)     # failure on caveat 1
+    check("caveat failed -> rejected", v3.get_status(), "rejected")
+
+    # Out-of-order caveat index -> rejected
+    v4 = @@MacaroonVerifier()
+    v4.present("TOK", 3)
+    v4.sig_verified(1)
+    v4.caveat_verified(1, 0)
+    v4.caveat_verified(1, 2)     # skipped 1 — attacker reorder
+    check("out-of-order -> rejected", v4.get_status(), "rejected")
+
+    # Zero caveats: sig verified -> directly to Authorized via $>() guard
+    v5 = @@MacaroonVerifier()
+    v5.present("TOK", 0)
+    v5.sig_verified(1)
+    check("no caveats -> authorized", v5.get_status(), "authorized")
+
+    print("PASS: macaroon")

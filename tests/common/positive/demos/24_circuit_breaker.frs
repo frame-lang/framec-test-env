@@ -1,0 +1,84 @@
+@@target rust
+
+@@system CircuitBreaker {
+    interface:
+        call(): String
+        success()
+        failure()
+        tick()
+        status(): String
+
+    machine:
+        $Closed {
+            $.failures: i32 = 0
+            call(): String { @@:(String::from("allowed")) }
+            success() { $.failures = 0; }
+            failure() {
+                $.failures = $.failures + 1;
+                if $.failures >= self.threshold {
+                    -> $Open
+                }
+            }
+            status(): String { @@:(format!("closed ({} failures)", $.failures)) }
+        }
+        $Open {
+            $.cooldown_remaining: i32 = 0
+            $>() {
+                $.cooldown_remaining = self.cooldown;
+            }
+            call(): String { @@:(String::from("blocked")) }
+            tick() {
+                $.cooldown_remaining = $.cooldown_remaining - 1;
+                if $.cooldown_remaining <= 0 {
+                    -> $HalfOpen
+                }
+            }
+            status(): String { @@:(format!("open ({} ticks left)", $.cooldown_remaining)) }
+        }
+        $HalfOpen {
+            call(): String { @@:(String::from("testing")) }
+            success() { -> $Closed }
+            failure() { -> $Open }
+            status(): String { @@:(String::from("half-open")) }
+        }
+
+    domain:
+        threshold: i32 = 3
+        cooldown: i32 = 5
+}
+
+fn main() {
+    let mut cb = @@CircuitBreaker();
+    let mut failures = 0;
+
+    cb.failure();
+    cb.failure();
+    cb.failure();
+    let c1 = cb.call();
+    if c1 != "blocked" {
+        println!("FAIL: expected blocked, got {}", c1);
+        failures += 1;
+    }
+    let mut i = 0;
+    while i < 5 {
+        cb.tick();
+        i += 1;
+    }
+    let c2 = cb.call();
+    if c2 != "testing" {
+        println!("FAIL: expected testing, got {}", c2);
+        failures += 1;
+    }
+    cb.success();
+    let s = cb.status();
+    if s != "closed (0 failures)" {
+        println!("FAIL: expected reset, got {}", s);
+        failures += 1;
+    }
+
+    if failures > 0 {
+        println!("FAIL: circuit_breaker ({} failures)", failures);
+        std::process::exit(1);
+    }
+    println!("PASS: circuit_breaker");
+}

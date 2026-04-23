@@ -1,0 +1,162 @@
+@@target python_3
+
+# Cookbook 81: Infusion Pump (safety-critical)
+# $Primed is the only state that defines start_infusion; Alarm has
+# no infusion handlers — impossible by construction, not by guard.
+
+@@system InfusionPump {
+    interface:
+        power_on()
+        set_rate(ml_per_hr: float)
+        prime()
+        start_infusion()
+        occlusion_detected()
+        acknowledge_alarm()
+        tick_minute()
+        volume_delivered(): float = 0.0
+        rate_mL_per_hr(): float
+        alarm_reason(): str
+        status(): str
+
+    machine:
+        $Off {
+            power_on() { -> $Idle }
+            status(): str { @@:("off") }
+            rate_mL_per_hr(): float { @@:(self.rate) }
+            volume_delivered(): float { @@:(self.volume) }
+            alarm_reason(): str { @@:("") }
+        }
+
+        $Operational {
+            occlusion_detected() { -> ("occlusion") $Alarm }
+        }
+
+        $Idle => $Operational {
+            set_rate(ml_per_hr: float) { self.rate = ml_per_hr }
+            prime() {
+                if self.rate > 0:
+                    -> $Primed
+            }
+            status(): str { @@:("idle") }
+            rate_mL_per_hr(): float { @@:(self.rate) }
+            volume_delivered(): float { @@:(self.volume) }
+            alarm_reason(): str { @@:("") }
+            => $^
+        }
+
+        $Primed => $Operational {
+            start_infusion() { -> $Running }
+            status(): str { @@:("primed") }
+            rate_mL_per_hr(): float { @@:(self.rate) }
+            volume_delivered(): float { @@:(self.volume) }
+            alarm_reason(): str { @@:("") }
+            => $^
+        }
+
+        $Running => $Operational {
+            tick_minute() { self.volume = self.volume + self.rate / 60.0 }
+            status(): str { @@:("running") }
+            rate_mL_per_hr(): float { @@:(self.rate) }
+            volume_delivered(): float { @@:(self.volume) }
+            alarm_reason(): str { @@:("") }
+            => $^
+        }
+
+        $Alarm {
+            $.reason: str = "unknown"
+            $>(reason: str) { $.reason = reason }
+            acknowledge_alarm() { -> $Idle }
+            status(): str { @@:("alarm") }
+            alarm_reason(): str { @@:($.reason) }
+            rate_mL_per_hr(): float { @@:(self.rate) }
+            volume_delivered(): float { @@:(self.volume) }
+        }
+
+    domain:
+        rate: float = 0.0
+        volume: float = 0.0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    p = @@InfusionPump()
+    check("start off", p.status(), "off")
+
+    # Safety: set_rate and start_infusion in Off are structurally
+    # absent — no handlers, silently ignored.
+    p.set_rate(100.0)
+    check("rate unchanged in Off", p.rate_mL_per_hr(), 0.0)
+    p.start_infusion()
+    check("still off", p.status(), "off")
+
+    # Power on to Idle
+    p.power_on()
+    check("idle", p.status(), "idle")
+
+    # Set rate works in Idle
+    p.set_rate(100.0)
+    check("rate set", p.rate_mL_per_hr(), 100.0)
+
+    # Structural gate: start_infusion has no handler in Idle.
+    # This is the critical safety property — no code flag, just
+    # the absence of the handler.
+    p.start_infusion()
+    check("idle cannot start", p.status(), "idle")
+    check("no volume yet", p.volume_delivered(), 0.0)
+
+    # Prime requires rate > 0. With rate set, transitions to Primed.
+    p.prime()
+    check("primed", p.status(), "primed")
+
+    # Now start_infusion works.
+    p.start_infusion()
+    check("running", p.status(), "running")
+
+    # 10 minutes of 100 mL/hr = 100 * (10/60) = 16.666...
+    i = 0
+    while i < 10:
+        p.tick_minute()
+        i = i + 1
+    # Integer-safe check: 10 * 100 / 60 = 16.666666666666668
+    check("running still", p.status(), "running")
+    vol_after_10 = p.volume_delivered()
+    check("volume ≈ 10*100/60",
+          abs(vol_after_10 - (10.0 * 100.0 / 60.0)) < 1e-9, True)
+
+    # Occlusion signal from $Running forwards to $Operational
+    # parent, which transitions to $Alarm with reason="occlusion".
+    p.occlusion_detected()
+    check("alarm on occlusion", p.status(), "alarm")
+    check("alarm reason via state var", p.alarm_reason(), "occlusion")
+
+    # $Alarm has no start_infusion, prime, or tick_minute — all
+    # silently absorbed. Volume must not advance.
+    p.start_infusion()
+    p.prime()
+    p.tick_minute()
+    check("alarm still alarm", p.status(), "alarm")
+    check("volume locked in alarm", p.volume_delivered(), vol_after_10)
+
+    # Only acknowledge_alarm exits the alarm state — back to Idle.
+    # Priming is required again before resuming delivery.
+    p.acknowledge_alarm()
+    check("ack returns to idle", p.status(), "idle")
+
+    # Rate is still 100 (domain persists).
+    check("rate persisted across alarm", p.rate_mL_per_hr(), 100.0)
+
+    p.prime()
+    p.start_infusion()
+    p.tick_minute()
+    # Volume accumulates on top of pre-alarm volume.
+    check("volume continues from prior",
+          abs(p.volume_delivered() - (vol_after_10 + 100.0 / 60.0)) < 1e-9, True)
+
+    print("PASS: infusion_pump")

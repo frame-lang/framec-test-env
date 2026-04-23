@@ -1,0 +1,185 @@
+@@target python_3
+
+# Cookbook 105: Tool Changer — Interlocked Coupling Sequence
+# Safety interlock: request_uncouple has no handler in $Working.
+# Same lock_lost event means: normal in Approaching/Uncoupling,
+# fault in Coupled, emergency in Working.
+
+@@system ToolChanger {
+    interface:
+        request_couple(tool_id: str)
+        request_uncouple()
+        lock_confirmed()
+        lock_lost()
+        tool_energized()
+        tool_deenergized()
+        abort()
+        status(): str
+        is_energized(): int
+        attached_tool(): str
+
+    machine:
+        $NoTool {
+            request_couple(tool_id: str) {
+                self.tool_id = tool_id
+                -> $Approaching
+            }
+            request_uncouple() { }
+            status(): str { @@:("no_tool") }
+            is_energized(): int { @@:(self.energized) }
+            attached_tool(): str { @@:(self.tool_id) }
+        }
+
+        $Transitioning {
+            is_energized(): int { @@:(self.energized) }
+            attached_tool(): str { @@:(self.tool_id) }
+        }
+
+        $Coupling => $Transitioning {
+            lock_lost() {
+                self.tool_id = ""
+                -> $NoTool
+            }
+            => $^
+        }
+
+        $Approaching => $Coupling {
+            lock_confirmed() { -> $Coupled }
+            abort() {
+                self.tool_id = ""
+                -> $NoTool
+            }
+            status(): str { @@:("approaching") }
+            => $^
+        }
+
+        $Coupled {
+            tool_energized() {
+                self.energized = 1
+                -> $Working
+            }
+            request_uncouple() { -> $Uncoupling }
+            lock_lost() { -> $Fault }
+            status(): str { @@:("coupled") }
+            is_energized(): int { @@:(self.energized) }
+            attached_tool(): str { @@:(self.tool_id) }
+        }
+
+        $Working {
+            tool_deenergized() {
+                self.energized = 0
+                -> $Coupled
+            }
+            # request_uncouple intentionally absent — safety interlock
+            lock_lost() {
+                self.energized = 0
+                -> $Fault
+            }
+            status(): str { @@:("working") }
+            is_energized(): int { @@:(self.energized) }
+            attached_tool(): str { @@:(self.tool_id) }
+        }
+
+        $Uncoupling => $Transitioning {
+            lock_lost() {
+                self.tool_id = ""
+                -> $NoTool
+            }
+            status(): str { @@:("uncoupling") }
+            => $^
+        }
+
+        $Fault {
+            abort() {
+                self.tool_id = ""
+                self.energized = 0
+                -> $NoTool
+            }
+            status(): str { @@:("fault") }
+            is_energized(): int { @@:(self.energized) }
+            attached_tool(): str { @@:(self.tool_id) }
+        }
+
+    domain:
+        tool_id: str = ""
+        energized: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    tc = @@ToolChanger()
+    check("no tool", tc.status(), "no_tool")
+    check("no tool stored", tc.attached_tool(), "")
+    check("not energized", tc.is_energized(), 0)
+
+    tc.request_couple("drill_8mm")
+    check("approaching", tc.status(), "approaching")
+    check("tool captured", tc.attached_tool(), "drill_8mm")
+
+    tc.lock_confirmed()
+    check("coupled", tc.status(), "coupled")
+
+    tc.tool_energized()
+    check("working", tc.status(), "working")
+    check("energized", tc.is_energized(), 1)
+
+    # CRITICAL SAFETY PROPERTY: request_uncouple has no handler in
+    # $Working — silently absorbed. The tool stays attached and
+    # energized; there's no code flag, the *handler is absent*.
+    tc.request_uncouple()
+    check("working absorbs uncouple", tc.status(), "working")
+    check("still attached", tc.attached_tool(), "drill_8mm")
+    check("still energized", tc.is_energized(), 1)
+
+    # De-energize first — only then can we uncouple.
+    tc.tool_deenergized()
+    check("coupled de-energized", tc.status(), "coupled")
+    check("not energized", tc.is_energized(), 0)
+
+    tc.request_uncouple()
+    check("uncoupling", tc.status(), "uncoupling")
+
+    tc.lock_lost()
+    check("no tool again", tc.status(), "no_tool")
+    check("tool cleared", tc.attached_tool(), "")
+
+    # lock_lost severity depends on state: from $Coupled it's a fault
+    tc2 = @@ToolChanger()
+    tc2.request_couple("router")
+    tc2.lock_confirmed()
+    tc2.lock_lost()
+    check("lock_lost in coupled -> fault", tc2.status(), "fault")
+
+    # lock_lost in $Working is an emergency; de-energize + fault
+    tc3 = @@ToolChanger()
+    tc3.request_couple("saw")
+    tc3.lock_confirmed()
+    tc3.tool_energized()
+    tc3.lock_lost()
+    check("lock_lost in working -> fault", tc3.status(), "fault")
+    check("fault de-energizes", tc3.is_energized(), 0)
+
+    # abort from fault clears
+    tc3.abort()
+    check("abort clears fault", tc3.status(), "no_tool")
+
+    # Abort during approach clears
+    tc4 = @@ToolChanger()
+    tc4.request_couple("probe")
+    tc4.abort()
+    check("abort during approach", tc4.status(), "no_tool")
+
+    # lock_lost in Approaching is normal (coupling failed)
+    tc5 = @@ToolChanger()
+    tc5.request_couple("clamp")
+    tc5.lock_lost()
+    check("lock_lost in approaching -> no_tool", tc5.status(), "no_tool")
+
+    print("PASS: tool_changer")

@@ -1,0 +1,76 @@
+@@target c
+
+// Test 45: HSM Enter in Child Only
+// Only child has $>(); parent has no enter handler.
+
+@@system HSMEnterChildOnly {
+    interface:
+        go_to_child(): void
+        forward_action(): void
+        get_child_enter(): int
+        get_parent_fwd(): int
+        get_state(): char*
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            get_child_enter(): int { @@:(self->child_enter) return; }
+            get_parent_fwd(): int { @@:(self->parent_fwd) return; }
+            get_state(): char* { @@:("Start") return; }
+        }
+
+        $Child => $Parent {
+            $>() { self->child_enter = self->child_enter + 1; }
+            forward_action() { => $^ }
+            get_child_enter(): int { @@:(self->child_enter) return; }
+            get_parent_fwd(): int { @@:(self->parent_fwd) return; }
+            get_state(): char* { @@:("Child") return; }
+        }
+
+        $Parent {
+            forward_action() { self->parent_fwd = self->parent_fwd + 1; }
+            get_child_enter(): int { @@:(self->child_enter) return; }
+            get_parent_fwd(): int { @@:(self->parent_fwd) return; }
+            get_state(): char* { @@:("Parent") return; }
+        }
+    domain:
+        child_enter : int
+        parent_fwd  : int
+}
+
+int main() {
+    printf("=== Test 45: HSM Enter in Child Only ===\n");
+    HSMEnterChildOnly* s = @@HSMEnterChildOnly();
+
+    if (strcmp(HSMEnterChildOnly_get_state(s), "Start") != 0) {
+        printf("FAIL: initial Start\n"); return 1;
+    }
+    printf("TC2.1.0: Initial state Start - PASS\n");
+
+    // TC2.1.1: Child enter fires on entry
+    HSMEnterChildOnly_go_to_child(s);
+    if (HSMEnterChildOnly_get_child_enter(s) != 1
+        || strcmp(HSMEnterChildOnly_get_state(s), "Child") != 0) {
+        printf("FAIL: child_enter=%d state=%s\n",
+               HSMEnterChildOnly_get_child_enter(s),
+               HSMEnterChildOnly_get_state(s));
+        return 1;
+    }
+    printf("TC2.1.1: Child enter handler fires - PASS\n");
+
+    // TC2.1.2: No error when parent lacks enter (implicit — we ran)
+    printf("TC2.1.2: No error when parent lacks enter - PASS\n");
+
+    // TC2.1.3: Forward works
+    HSMEnterChildOnly_forward_action(s);
+    if (HSMEnterChildOnly_get_parent_fwd(s) != 1) {
+        printf("FAIL: parent_fwd expected 1, got %d\n",
+               HSMEnterChildOnly_get_parent_fwd(s));
+        return 1;
+    }
+    printf("TC2.1.3: Forward works without parent enter - PASS\n");
+
+    printf("PASS: HSM enter in child only works correctly\n");
+    HSMEnterChildOnly_destroy(s);
+    return 0;
+}

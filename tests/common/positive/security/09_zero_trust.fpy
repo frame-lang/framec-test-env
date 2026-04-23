@@ -1,0 +1,224 @@
+@@target python_3
+
+# Cookbook 94: Zero-Trust Session with Continuous Verification
+# HSM: $LiveSession centralizes channel_binding_mismatch, heartbeat,
+# and logout across $FullAccess / $Degraded. Risk signals can
+# downgrade to $Degraded or terminate. Channel binding re-checked
+# on every resource request.
+
+@@system ZeroTrustSession {
+    interface:
+        authenticate(user_id: str, device_id: str, channel_id: str, mfa_factor: str)
+        auth_result(passed: int, risk_score: int)
+        request_resource(resource: str, channel_id: str, policy_ok: int): str = "denied"
+        posture_update(score: int)
+        risk_signal_update(score: int)
+        channel_binding_mismatch()
+        session_heartbeat()
+        logout()
+        get_status(): str = ""
+        get_risk(): int
+
+    machine:
+        $Anonymous {
+            authenticate(user_id: str, device_id: str, channel_id: str, mfa_factor: str) {
+                self.user_id = user_id
+                self.device_id = device_id
+                self.bound_channel = channel_id
+                -> $Authenticating
+            }
+            get_status(): str { @@:("anonymous") }
+            get_risk(): int { @@:(self.current_risk) }
+        }
+
+        $Authenticating {
+            auth_result(passed: int, risk_score: int) {
+                if passed == 0:
+                    -> $Anonymous
+                elif risk_score > self.high_risk_threshold:
+                    -> $StepUpRequired
+                else:
+                    self.current_risk = risk_score
+                    -> $FullAccess
+            }
+            get_status(): str { @@:("authenticating") }
+            get_risk(): int { @@:(self.current_risk) }
+        }
+
+        $StepUpRequired {
+            authenticate(user_id: str, device_id: str, channel_id: str, mfa_factor: str) {
+                -> $Authenticating
+            }
+            request_resource(resource: str, channel_id: str, policy_ok: int): str {
+                @@:("denied_stepup")
+            }
+            logout() { -> $Anonymous }
+            get_status(): str { @@:("step_up_required") }
+            get_risk(): int { @@:(self.current_risk) }
+        }
+
+        $LiveSession {
+            channel_binding_mismatch() { -> $Terminated }
+            session_heartbeat() { }
+            logout() { -> $Anonymous }
+            get_risk(): int { @@:(self.current_risk) }
+        }
+
+        $FullAccess => $LiveSession {
+            request_resource(resource: str, channel_id: str, policy_ok: int): str {
+                if channel_id != self.bound_channel:
+                    @@:("denied_channel")
+                    -> $Terminated
+                elif policy_ok == 1:
+                    @@:("allowed")
+                else:
+                    @@:("denied_policy")
+            }
+            posture_update(score: int) {
+                if score < self.min_posture:
+                    -> $Degraded
+            }
+            risk_signal_update(score: int) {
+                self.current_risk = score
+                if score > self.block_threshold:
+                    -> $Terminated
+                elif score > self.high_risk_threshold:
+                    -> $Degraded
+            }
+            get_status(): str { @@:("full_access") }
+            => $^
+        }
+
+        $Degraded => $LiveSession {
+            request_resource(resource: str, channel_id: str, policy_ok: int): str {
+                if channel_id != self.bound_channel:
+                    @@:("denied_channel")
+                    -> $Terminated
+                elif policy_ok == 1:
+                    @@:("allowed_low_trust")
+                else:
+                    @@:("denied_low_trust")
+            }
+            risk_signal_update(score: int) {
+                self.current_risk = score
+                if score > self.block_threshold:
+                    -> $Terminated
+            }
+            posture_update(score: int) {
+                if score >= self.min_posture:
+                    -> $FullAccess
+            }
+            get_status(): str { @@:("degraded") }
+            => $^
+        }
+
+        $Terminated {
+            get_status(): str { @@:("terminated") }
+            get_risk(): int { @@:(self.current_risk) }
+        }
+
+    domain:
+        user_id: str = ""
+        device_id: str = ""
+        bound_channel: str = ""
+        current_risk: int = 0
+        high_risk_threshold: int = 70
+        block_threshold: int = 90
+        min_posture: int = 60
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    # Pre-auth resource access is denied by interface default.
+    s = @@ZeroTrustSession()
+    check("anonymous", s.get_status(), "anonymous")
+    check("anon denied", s.request_resource("doc", "ch1", 1), "denied")
+
+    s.authenticate("alice", "dev-1", "ch-A", "totp")
+    check("authenticating", s.get_status(), "authenticating")
+    check("authing denied", s.request_resource("doc", "ch-A", 1), "denied")
+
+    s.auth_result(1, 30)
+    check("full access", s.get_status(), "full_access")
+    check("risk recorded", s.get_risk(), 30)
+
+    # Channel binding mismatch on request terminates
+    check("match ok", s.request_resource("doc", "ch-A", 1), "allowed")
+    check("policy denied", s.request_resource("doc", "ch-A", 0), "denied_policy")
+
+    # Hijack via explicit mismatch event (HSM parent handler)
+    s.channel_binding_mismatch()
+    check("hijack -> terminated", s.get_status(), "terminated")
+    check("terminated denies", s.request_resource("doc", "ch-A", 1), "denied")
+
+    # Channel mismatch on request also terminates
+    s2 = @@ZeroTrustSession()
+    s2.authenticate("bob", "dev-2", "ch-B", "totp")
+    s2.auth_result(1, 20)
+    check("mismatch denied", s2.request_resource("doc", "ch-WRONG", 1), "denied_channel")
+    check("mismatch terminates", s2.get_status(), "terminated")
+
+    # Step-up path: high-risk auth requires re-auth
+    s3 = @@ZeroTrustSession()
+    s3.authenticate("carol", "dev-3", "ch-C", "totp")
+    s3.auth_result(1, 85)   # > high_risk_threshold (70)
+    check("step up", s3.get_status(), "step_up_required")
+    check("step-up denies resource",
+          s3.request_resource("doc", "ch-C", 1), "denied_stepup")
+
+    # Re-auth from step-up
+    s3.authenticate("carol", "dev-3", "ch-C", "u2f")
+    check("re-authing", s3.get_status(), "authenticating")
+    s3.auth_result(1, 30)
+    check("full access after step-up", s3.get_status(), "full_access")
+
+    # Posture degradation
+    s4 = @@ZeroTrustSession()
+    s4.authenticate("dave", "dev-4", "ch-D", "totp")
+    s4.auth_result(1, 20)
+    s4.posture_update(50)   # < min_posture (60)
+    check("posture degrade", s4.get_status(), "degraded")
+
+    # Degraded allows with stricter policy
+    check("degraded + allowed",
+          s4.request_resource("doc", "ch-D", 1), "allowed_low_trust")
+    check("degraded + denied",
+          s4.request_resource("doc", "ch-D", 0), "denied_low_trust")
+
+    # Posture restores to FullAccess
+    s4.posture_update(80)
+    check("posture restored", s4.get_status(), "full_access")
+
+    # Risk update crosses block threshold -> terminated
+    s4.risk_signal_update(95)
+    check("risk block -> terminated", s4.get_status(), "terminated")
+
+    # Risk update crosses high threshold but not block -> degraded
+    s5 = @@ZeroTrustSession()
+    s5.authenticate("eve", "dev-5", "ch-E", "totp")
+    s5.auth_result(1, 20)
+    s5.risk_signal_update(75)
+    check("risk degrade", s5.get_status(), "degraded")
+
+    # Logout from any active state (HSM parent)
+    s6 = @@ZeroTrustSession()
+    s6.authenticate("fred", "dev-6", "ch-F", "totp")
+    s6.auth_result(1, 20)
+    s6.logout()
+    check("logout -> anonymous", s6.get_status(), "anonymous")
+
+    # Heartbeat is a no-op
+    s7 = @@ZeroTrustSession()
+    s7.authenticate("greg", "dev-7", "ch-G", "totp")
+    s7.auth_result(1, 20)
+    s7.session_heartbeat()
+    check("heartbeat noop", s7.get_status(), "full_access")
+
+    print("PASS: zero_trust")

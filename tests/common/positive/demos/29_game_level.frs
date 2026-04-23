@@ -1,0 +1,116 @@
+@@target rust
+
+// Game Level -- multi-system (SurvivalLevel + Game) (Rust)
+
+@@system SurvivalLevel {
+    interface:
+        take_hit(damage: i32)
+        heal(amount: i32)
+        get_hp(): i32
+        status(): String
+
+    machine:
+        $Alive {
+            take_hit(damage: i32) {
+                self.hp = self.hp - damage;
+                if self.hp <= 0 {
+                    self.hp = 0;
+                    -> $Dead
+                }
+            }
+            heal(amount: i32) {
+                self.hp = self.hp + amount;
+                if self.hp > self.max_hp {
+                    self.hp = self.max_hp;
+                }
+            }
+            get_hp(): i32 { @@:(self.hp) }
+            status(): String { @@:(String::from("alive")) }
+        }
+        $Dead {
+            get_hp(): i32 { @@:(0) }
+            status(): String { @@:(String::from("dead")) }
+        }
+
+    domain:
+        hp: i32 = 100
+        max_hp: i32 = 100
+}
+
+@@system Game {
+    interface:
+        attack(damage: i32)
+        use_potion()
+        player_hp(): i32
+        player_status(): String
+
+    machine:
+        $Playing {
+            attack(damage: i32) {
+                self.level.take_hit(damage);
+                if self.level.status() == "dead" {
+                    -> $GameOver
+                }
+            }
+            use_potion() {
+                self.level.heal(30);
+            }
+            player_hp(): i32 { @@:(self.level.get_hp()) }
+            player_status(): String { @@:(self.level.status()) }
+        }
+        $GameOver {
+            player_hp(): i32 { @@:(0) }
+            player_status(): String { @@:(String::from("game_over")) }
+        }
+
+    domain:
+        level: SurvivalLevel = SurvivalLevel::new()
+}
+
+fn main() {
+    let mut game = @@Game();
+    let mut failures = 0;
+
+    if game.player_hp() != 100 {
+        println!("FAIL: expected 100 hp");
+        failures += 1;
+    }
+    if game.player_status() != "alive" {
+        println!("FAIL: expected alive");
+        failures += 1;
+    }
+
+    game.attack(30);
+    if game.player_hp() != 70 {
+        println!("FAIL: expected 70 hp, got {}", game.player_hp());
+        failures += 1;
+    }
+
+    game.use_potion();
+    if game.player_hp() != 100 {
+        println!("FAIL: expected 100 hp after heal, got {}", game.player_hp());
+        failures += 1;
+    }
+
+    game.attack(90);
+    if game.player_hp() != 10 {
+        println!("FAIL: expected 10 hp");
+        failures += 1;
+    }
+
+    game.attack(20);
+    if game.player_status() != "game_over" {
+        println!("FAIL: expected game_over");
+        failures += 1;
+    }
+    if game.player_hp() != 0 {
+        println!("FAIL: expected 0 hp");
+        failures += 1;
+    }
+
+    if failures > 0 {
+        println!("FAIL: game_level ({} failures)", failures);
+        std::process::exit(1);
+    }
+    println!("PASS: game_level");
+}

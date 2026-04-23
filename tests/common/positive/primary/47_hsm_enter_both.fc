@@ -1,0 +1,86 @@
+@@target c
+
+// Test 47: HSM Enter in Both Child and Parent
+// Both levels have $>(); no implicit cascading.
+
+@@system HSMEnterBoth {
+    interface:
+        go_to_child(): void
+        go_to_parent(): void
+        get_child_enter(): int
+        get_parent_enter(): int
+        get_state(): char*
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_child_enter(): int { @@:(self->child_enter) return; }
+            get_parent_enter(): int { @@:(self->parent_enter) return; }
+            get_state(): char* { @@:("Start") return; }
+        }
+
+        $Child => $Parent {
+            $>() { self->child_enter = self->child_enter + 1; }
+            go_to_parent() { -> $Parent }
+            get_child_enter(): int { @@:(self->child_enter) return; }
+            get_parent_enter(): int { @@:(self->parent_enter) return; }
+            get_state(): char* { @@:("Child") return; }
+        }
+
+        $Parent {
+            $>() { self->parent_enter = self->parent_enter + 1; }
+            go_to_child() { -> $Child }
+            get_child_enter(): int { @@:(self->child_enter) return; }
+            get_parent_enter(): int { @@:(self->parent_enter) return; }
+            get_state(): char* { @@:("Parent") return; }
+        }
+    domain:
+        child_enter  : int
+        parent_enter : int
+}
+
+int main() {
+    printf("=== Test 47: HSM Enter in Both ===\n");
+    HSMEnterBoth* s = @@HSMEnterBoth();
+
+    // TC2.3.1: Only child enter fires on entering child
+    HSMEnterBoth_go_to_child(s);
+    if (HSMEnterBoth_get_child_enter(s) != 1
+        || HSMEnterBoth_get_parent_enter(s) != 0) {
+        printf("FAIL: child_enter=%d parent_enter=%d\n",
+               HSMEnterBoth_get_child_enter(s),
+               HSMEnterBoth_get_parent_enter(s));
+        return 1;
+    }
+    printf("TC2.3.1: Only child:enter fires on child entry - PASS\n");
+
+    // TC2.3.2: Transition child -> parent fires parent enter
+    HSMEnterBoth_go_to_parent(s);
+    if (HSMEnterBoth_get_parent_enter(s) != 1) {
+        printf("FAIL: parent_enter expected 1\n"); return 1;
+    }
+    printf("TC2.3.2: Parent enter fires on parent entry - PASS\n");
+
+    // TC2.3.3: Counts exactly 1 each
+    if (HSMEnterBoth_get_child_enter(s) != 1
+        || HSMEnterBoth_get_parent_enter(s) != 1) {
+        printf("FAIL: expected 1/1\n"); return 1;
+    }
+    printf("TC2.3.3: No implicit cascading (1 each) - PASS\n");
+
+    // TC2.3.4: Re-enter child
+    HSMEnterBoth_go_to_child(s);
+    if (HSMEnterBoth_get_child_enter(s) != 2
+        || HSMEnterBoth_get_parent_enter(s) != 1) {
+        printf("FAIL: child_enter=%d parent_enter=%d\n",
+               HSMEnterBoth_get_child_enter(s),
+               HSMEnterBoth_get_parent_enter(s));
+        return 1;
+    }
+    printf("TC2.3.4: Re-entering child re-fires its enter - PASS\n");
+
+    printf("PASS: HSM enter in both works correctly\n");
+    HSMEnterBoth_destroy(s);
+    return 0;
+}

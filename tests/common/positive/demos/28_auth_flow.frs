@@ -1,0 +1,107 @@
+@@target rust
+
+// Auth Flow -- multi-system with LoginManager + App (Rust)
+
+@@system LoginManager {
+    interface:
+        login(user: String, pass: String): String
+        logout(): String
+        status(): String
+
+    machine:
+        $LoggedOut {
+            login(user: String, pass: String): String {
+                if pass == "secret" {
+                    self.current_user = user;
+                    -> $LoggedIn
+                    @@:(String::from("ok"))
+                } else {
+                    @@:(String::from("denied"))
+                }
+            }
+            status(): String { @@:(String::from("logged_out")) }
+        }
+        $LoggedIn {
+            logout(): String {
+                let u = self.current_user.clone();
+                self.current_user = String::from("");
+                -> $LoggedOut
+                @@:(u)
+            }
+            status(): String { @@:(String::from("logged_in")) }
+        }
+
+    domain:
+        current_user: String = String::from("")
+}
+
+@@system App {
+    interface:
+        do_login(user: String, pass: String): String
+        do_logout(): String
+        app_status(): String
+
+    machine:
+        $Ready {
+            do_login(user: String, pass: String): String {
+                let result = self.login_mgr.login(user, pass);
+                @@:(result)
+            }
+            do_logout(): String {
+                let result = self.login_mgr.logout();
+                @@:(result)
+            }
+            app_status(): String {
+                @@:(self.login_mgr.status())
+            }
+        }
+
+    domain:
+        login_mgr: LoginManager = LoginManager::new()
+}
+
+fn main() {
+    let mut app = @@App();
+    let mut failures = 0;
+
+    if app.app_status() != "logged_out" {
+        println!("FAIL: expected logged_out");
+        failures += 1;
+    }
+
+    let r1 = app.do_login(String::from("alice"), String::from("wrong"));
+    if r1 != "denied" {
+        println!("FAIL: expected denied, got {}", r1);
+        failures += 1;
+    }
+    if app.app_status() != "logged_out" {
+        println!("FAIL: still logged_out");
+        failures += 1;
+    }
+
+    let r2 = app.do_login(String::from("alice"), String::from("secret"));
+    if r2 != "ok" {
+        println!("FAIL: expected ok, got {}", r2);
+        failures += 1;
+    }
+    if app.app_status() != "logged_in" {
+        println!("FAIL: expected logged_in");
+        failures += 1;
+    }
+
+    let r3 = app.do_logout();
+    if r3 != "alice" {
+        println!("FAIL: expected alice, got {}", r3);
+        failures += 1;
+    }
+    if app.app_status() != "logged_out" {
+        println!("FAIL: expected logged_out after logout");
+        failures += 1;
+    }
+
+    if failures > 0 {
+        println!("FAIL: auth_flow ({} failures)", failures);
+        std::process::exit(1);
+    }
+    println!("PASS: auth_flow");
+}

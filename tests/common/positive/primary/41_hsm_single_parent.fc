@@ -1,0 +1,107 @@
+@@target c
+
+// Test 41: HSM Single Parent Relationship
+//
+// Tests basic child-parent HSM relationship:
+// - Child declares parent with `=> $Parent` syntax
+// - Child can forward events to parent
+// - Child remains current state after forward
+// - Parent handler executes and returns control
+//
+// Python version tracks execution order via self.log.append(str).
+// C port uses a base-10 digit accumulator (self->log) where each
+// execution step appends a digit:
+//   1 = Child:before_forward
+//   2 = Parent:forward_to_parent
+//   3 = Child:after_forward
+//   4 = Child:child_only
+// Digit sequences assert ordering.
+
+@@system HSMSingleParent {
+    interface:
+        child_only(): void
+        forward_to_parent(): void
+        get_log(): int
+        get_state(): char*
+
+    machine:
+        $Child => $Parent {
+            child_only() {
+                self->log = self->log * 10 + 4;
+            }
+
+            forward_to_parent() {
+                self->log = self->log * 10 + 1;
+                => $^
+                self->log = self->log * 10 + 3;
+            }
+
+            get_log(): int {
+                @@:(self->log)
+                return;
+            }
+
+            get_state(): char* {
+                @@:("Child")
+                return;
+            }
+        }
+
+        $Parent {
+            forward_to_parent() {
+                self->log = self->log * 10 + 2;
+            }
+
+            get_log(): int {
+                @@:(self->log)
+                return;
+            }
+
+            get_state(): char* {
+                @@:("Parent")
+                return;
+            }
+        }
+    domain:
+        log : int
+}
+
+int main() {
+    printf("=== Test 41: HSM Single Parent ===\n");
+    HSMSingleParent* s = @@HSMSingleParent();
+
+    // TC1.1.1: compiled OK
+    printf("TC1.1.1: Child-Parent relationship compiles - PASS\n");
+
+    // TC1.1.2 + TC1.1.4: Child forwards to parent, parent executes, Child:after_forward runs after parent
+    HSMSingleParent_forward_to_parent(s);
+    int log = HSMSingleParent_get_log(s);
+    // Expected sequence: [1 (before), 2 (parent), 3 (after)] => log == 123
+    if (log != 123) {
+        printf("FAIL: Expected 123, got %d\n", log);
+        return 1;
+    }
+    printf("TC1.1.2/4: Child->Parent forward, order 1,2,3 - PASS (log=%d)\n", log);
+
+    // TC1.1.3: Child remains current state after forward
+    char* state = HSMSingleParent_get_state(s);
+    if (strcmp(state, "Child") != 0) {
+        printf("FAIL: Expected 'Child', got '%s'\n", state);
+        return 1;
+    }
+    printf("TC1.1.3: Child remains current state after forward - PASS\n");
+
+    // TC1.1.5: Child-only event not forwarded
+    HSMSingleParent_child_only(s);
+    log = HSMSingleParent_get_log(s);
+    // Expected: 123 * 10 + 4 == 1234
+    if (log != 1234) {
+        printf("FAIL: Expected 1234, got %d\n", log);
+        return 1;
+    }
+    printf("TC1.1.5: Child-only event handled locally - PASS (log=%d)\n", log);
+
+    printf("PASS: HSM single parent relationship works correctly\n");
+    HSMSingleParent_destroy(s);
+    return 0;
+}

@@ -1,0 +1,79 @@
+@@target python_3
+
+# Cookbook 76: Enzyme Kinetics (Michaelis-Menten)
+# Single-molecule two-state machine: E ⇌ ES → E + P. Steady-state
+# fractions reproduce MM saturation without solving ODEs.
+
+import random
+
+@@system EnzymeMolecule(substrate_conc: float) {
+    interface:
+        tick()
+        state_name(): str
+        products_made(): int
+
+    machine:
+        $Free {
+            tick() {
+                if random.random() < 0.1 * self.s_conc:
+                    -> $Bound
+            }
+            state_name(): str { @@:("E (free)") }
+            products_made(): int { @@:(self.products) }
+        }
+        $Bound {
+            tick() {
+                r = random.random()
+                if r < 0.3:
+                    self.products = self.products + 1
+                    -> $Free
+                elif r < 0.5:
+                    -> $Free
+            }
+            state_name(): str { @@:("ES (bound)") }
+            products_made(): int { @@:(self.products) }
+        }
+
+    domain:
+        s_conc = substrate_conc
+        products: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    # Deterministic under fixed seed: product counts stabilise to
+    # specific integers per substrate concentration. The sequence
+    # [low, mid, high] → [p1, p2, p3] with p1 < p2 < p3 is the
+    # Michaelis-Menten saturation signature.
+    random.seed(7)
+    results = []
+    for s in [0.5, 2.0, 10.0]:
+        e = @@EnzymeMolecule(s)
+        check(f"s={s} starts free", e.state_name(), "E (free)")
+        for _ in range(10000):
+            e.tick()
+        results.append(e.products_made())
+
+    # Monotonic saturation: higher substrate → more products
+    check("saturation order", results[0] < results[1], True)
+    check("saturation order 2", results[1] < results[2], True)
+
+    # Diminishing returns: doubling [S] from 2.0 to 10.0 (5x) should
+    # produce less than 5x more products because the enzyme saturates.
+    ratio_low_mid = results[1] / max(results[0], 1)
+    ratio_mid_high = results[2] / max(results[1], 1)
+    check("diminishing returns", ratio_mid_high < ratio_low_mid, True)
+
+    # Deterministic signature under seed=7. Any change to random.random()
+    # call count inside handlers, or to state dispatch ordering, would
+    # shift these. Recompute if the model deliberately changes.
+    check("seed=7 signature", results, [281, 871, 1996])
+
+    print("PASS: enzyme_kinetics")

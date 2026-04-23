@@ -1,0 +1,156 @@
+@@target python_3
+
+# Cookbook 83: AED / Defibrillator
+# Mandatory sequence: Off -> AwaitingPads -> Analyzing ->
+# {Charging -> AwaitingClear -> ReadyToShock | NotAdvised}.
+# press_shock() only exists in ReadyToShock — impossible by
+# construction to bypass.
+
+@@system AED {
+    interface:
+        power_on()
+        pads_attached()
+        rhythm_detected(rhythm: str)
+        tick_ms(ms: int)
+        press_shock()
+        confirm_clear()
+        status(): str
+        shock_count(): int
+        charge_pct(): int
+
+    machine:
+        $Off {
+            power_on() { -> $AwaitingPads }
+            status(): str { @@:("off") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $AwaitingPads {
+            pads_attached() { -> $Analyzing }
+            status(): str { @@:("attach pads") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $Analyzing {
+            rhythm_detected(rhythm: str) {
+                self.last_rhythm = rhythm
+                if rhythm == "VF" or rhythm == "VT":
+                    -> $Charging
+                else:
+                    -> $NotAdvised
+            }
+            status(): str { @@:("analyzing") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $Charging {
+            $>() { self.charge_pct_dom = 0 }
+            tick_ms(ms: int) {
+                self.charge_pct_dom = self.charge_pct_dom + ms
+                if self.charge_pct_dom >= 100:
+                    -> $AwaitingClear
+            }
+            status(): str { @@:("charging") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $AwaitingClear {
+            confirm_clear() { -> $ReadyToShock }
+            status(): str { @@:("awaiting clear") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $ReadyToShock {
+            press_shock() {
+                self.shocks = self.shocks + 1
+                -> $Analyzing
+            }
+            status(): str { @@:("ready to shock") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $NotAdvised {
+            status(): str { @@:("no shock advised") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+    domain:
+        last_rhythm: str = ""
+        charge_pct_dom: int = 0
+        shocks: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    a = @@AED()
+    check("start off", a.status(), "off")
+
+    # Safety: press_shock is structurally absent everywhere except
+    # $ReadyToShock. Verify at every precursor state.
+    a.press_shock()
+    check("off cannot shock", a.shock_count(), 0)
+
+    a.power_on()
+    check("awaiting pads", a.status(), "attach pads")
+    a.press_shock()
+    check("awaiting pads cannot shock", a.shock_count(), 0)
+
+    a.pads_attached()
+    check("analyzing", a.status(), "analyzing")
+    a.press_shock()
+    check("analyzing cannot shock", a.shock_count(), 0)
+
+    # Shockable rhythm
+    a.rhythm_detected("VF")
+    check("charging", a.status(), "charging")
+    a.press_shock()
+    check("charging cannot shock", a.shock_count(), 0)
+
+    # Partial charge: need 100ms of ticks.
+    a.tick_ms(50)
+    check("still charging", a.status(), "charging")
+    check("charge 50", a.charge_pct(), 50)
+    a.press_shock()
+    check("still cannot shock half-charged", a.shock_count(), 0)
+
+    # Finish charge
+    a.tick_ms(50)
+    check("awaiting clear", a.status(), "awaiting clear")
+    a.press_shock()
+    check("awaiting clear cannot shock", a.shock_count(), 0)
+
+    # Confirm clear
+    a.confirm_clear()
+    check("ready", a.status(), "ready to shock")
+
+    # Now press_shock actually fires
+    a.press_shock()
+    check("shocked", a.shock_count(), 1)
+    # Returns to Analyzing for re-assessment
+    check("back to analyzing", a.status(), "analyzing")
+
+    # Non-shockable rhythm path
+    a.rhythm_detected("asystole")
+    check("no shock advised", a.status(), "no shock advised")
+    # $NotAdvised has no press_shock handler, no transitions back
+    a.press_shock()
+    a.tick_ms(100)
+    a.confirm_clear()
+    check("not-advised absorbs everything", a.status(), "no shock advised")
+    check("still 1 shock total", a.shock_count(), 1)
+
+    print("PASS: aed")

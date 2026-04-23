@@ -1,0 +1,173 @@
+@@target python_3
+
+# Cookbook 72: Phases of Matter
+# Six-state thermodynamic model with latent-heat plateaus. System
+# parameters set melting, boiling, and ionization points; the
+# substance walks the full phase chain on add/remove_heat.
+
+@@system Substance(melting_point: float, boiling_point: float, ionization_point: float) {
+    interface:
+        add_heat(joules: float)
+        remove_heat(joules: float)
+        temperature(): float
+        phase(): str
+
+    machine:
+        $Solid {
+            add_heat(joules: float) {
+                self.temp = self.temp + joules / self.heat_capacity
+                if self.temp >= self.mp:
+                    self.temp = self.mp
+                    self.latent_absorbed = 0.0
+                    -> $Melting
+            }
+            remove_heat(joules: float) {
+                self.temp = self.temp - joules / self.heat_capacity
+            }
+            temperature(): float { @@:(self.temp) }
+            phase(): str { @@:("solid") }
+        }
+
+        $Melting {
+            add_heat(joules: float) {
+                self.latent_absorbed = self.latent_absorbed + joules
+                if self.latent_absorbed >= self.latent_fusion:
+                    -> $Liquid
+            }
+            remove_heat(joules: float) {
+                self.latent_absorbed = self.latent_absorbed - joules
+                if self.latent_absorbed <= 0:
+                    -> $Solid
+            }
+            temperature(): float { @@:(self.mp) }
+            phase(): str { @@:("melting") }
+        }
+
+        $Liquid {
+            add_heat(joules: float) {
+                self.temp = self.temp + joules / self.heat_capacity
+                if self.temp >= self.bp:
+                    self.temp = self.bp
+                    self.latent_absorbed = 0.0
+                    -> $Boiling
+            }
+            remove_heat(joules: float) {
+                self.temp = self.temp - joules / self.heat_capacity
+                if self.temp <= self.mp:
+                    self.temp = self.mp
+                    self.latent_absorbed = self.latent_fusion
+                    -> $Melting
+            }
+            temperature(): float { @@:(self.temp) }
+            phase(): str { @@:("liquid") }
+        }
+
+        $Boiling {
+            add_heat(joules: float) {
+                self.latent_absorbed = self.latent_absorbed + joules
+                if self.latent_absorbed >= self.latent_vaporization:
+                    -> $Gas
+            }
+            remove_heat(joules: float) {
+                self.latent_absorbed = self.latent_absorbed - joules
+                if self.latent_absorbed <= 0:
+                    -> $Liquid
+            }
+            temperature(): float { @@:(self.bp) }
+            phase(): str { @@:("boiling") }
+        }
+
+        $Gas {
+            add_heat(joules: float) {
+                self.temp = self.temp + joules / self.heat_capacity
+                if self.temp >= self.ip:
+                    -> $Plasma
+            }
+            remove_heat(joules: float) {
+                self.temp = self.temp - joules / self.heat_capacity
+                if self.temp <= self.bp:
+                    self.temp = self.bp
+                    self.latent_absorbed = self.latent_vaporization
+                    -> $Boiling
+            }
+            temperature(): float { @@:(self.temp) }
+            phase(): str { @@:("gas") }
+        }
+
+        $Plasma {
+            remove_heat(joules: float) {
+                self.temp = self.temp - joules / self.heat_capacity
+                if self.temp <= self.ip:
+                    -> $Gas
+            }
+            temperature(): float { @@:(self.temp) }
+            phase(): str { @@:("plasma") }
+        }
+
+    domain:
+        mp = melting_point
+        bp = boiling_point
+        ip = ionization_point
+        temp: float = -50.0
+        heat_capacity: float = 4.18
+        latent_fusion: float = 334.0
+        latent_vaporization: float = 2260.0
+        latent_absorbed: float = 0.0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    water = @@Substance(0.0, 100.0, 10000.0)
+
+    # Initial state: Solid at -50 C
+    check("initial phase", water.phase(), "solid")
+
+    # 50 C * 4.18 = 209 J to reach melting point exactly
+    water.add_heat(209.0)
+    check("after 209J", water.phase(), "melting")
+
+    # latent_fusion = 334 J to finish melting
+    water.add_heat(334.0)
+    check("after fusion", water.phase(), "liquid")
+
+    # 100 C * 4.18 = 418 J to reach boiling point
+    water.add_heat(418.0)
+    check("at boiling", water.phase(), "boiling")
+
+    # latent_vaporization = 2260 J to finish boiling
+    water.add_heat(2260.0)
+    check("vaporised", water.phase(), "gas")
+
+    # 9900 C * 4.18 = 41382 J to reach ionization
+    water.add_heat(41382.0)
+    check("ionised", water.phase(), "plasma")
+
+    # Reverse: plasma -> gas
+    water.remove_heat(1.0)
+    check("plasma cooled", water.phase(), "gas")
+
+    # Gas -> Boiling: need to drop temp from ~9999.76 back to bp (100).
+    # 9899.76 C * 4.18 = 41380.59 J to reach bp; use 41400 for margin.
+    water.remove_heat(41400.0)
+    check("gas -> boiling", water.phase(), "boiling")
+
+    # Boiling -> Liquid: remove latent_vaporization
+    water.remove_heat(2260.0)
+    check("liquid again", water.phase(), "liquid")
+
+    # Liquid -> Melting at mp
+    water.remove_heat(418.0)
+    check("melting again", water.phase(), "melting")
+
+    # Melting -> Solid
+    water.remove_heat(334.0)
+    check("frozen", water.phase(), "solid")
+
+    print("PASS: phases_of_matter")

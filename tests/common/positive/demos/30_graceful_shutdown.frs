@@ -1,0 +1,107 @@
+@@target rust
+
+// Graceful Shutdown -- service pattern with enter handler chain (Rust)
+
+@@system GracefulShutdown {
+    operations:
+        cleanup_done(): bool {
+            return self.cleanup_done;
+        }
+
+    interface:
+        process_data(): String
+        status(): String
+        get_cycles(): i32
+
+    machine:
+        $Init {
+            $>() {
+                self.cycles = 0;
+                -> $ProcessData
+            }
+        }
+        $ProcessData {
+            $>() {
+                self.cycles = self.cycles + 1;
+            }
+
+            process_data(): String {
+                if self.cycles >= self.max_cycles {
+                    -> $ShuttingDown
+                    @@:(String::from("shutting_down"))
+                } else {
+                    -> $ProcessData
+                    @@:(String::from("processed"))
+                }
+            }
+            status(): String { @@:(String::from("processing")) }
+            get_cycles(): i32 { @@:(self.cycles) }
+        }
+        $ShuttingDown {
+            $>() {
+                self.cleanup_done = true;
+            }
+
+            status(): String { @@:(String::from("shutdown")) }
+            get_cycles(): i32 { @@:(self.cycles) }
+        }
+
+    domain:
+        cycles: i32 = 0
+        max_cycles: i32 = 3
+        cleanup_done: bool = false
+}
+
+fn main() {
+    let mut svc = @@GracefulShutdown();
+    let mut failures = 0;
+
+    if svc.status() != "processing" {
+        println!("FAIL: expected processing, got {}", svc.status());
+        failures += 1;
+    }
+    if svc.get_cycles() != 1 {
+        println!("FAIL: expected 1 cycle, got {}", svc.get_cycles());
+        failures += 1;
+    }
+
+    let r1 = svc.process_data();
+    if r1 != "processed" {
+        println!("FAIL: expected processed, got {}", r1);
+        failures += 1;
+    }
+    if svc.get_cycles() != 2 {
+        println!("FAIL: expected 2 cycles");
+        failures += 1;
+    }
+
+    let r2 = svc.process_data();
+    if r2 != "processed" {
+        println!("FAIL: expected processed");
+        failures += 1;
+    }
+    if svc.get_cycles() != 3 {
+        println!("FAIL: expected 3 cycles");
+        failures += 1;
+    }
+
+    let r3 = svc.process_data();
+    if r3 != "shutting_down" {
+        println!("FAIL: expected shutting_down, got {}", r3);
+        failures += 1;
+    }
+    if svc.status() != "shutdown" {
+        println!("FAIL: expected shutdown, got {}", svc.status());
+        failures += 1;
+    }
+    if !svc.cleanup_done() {
+        println!("FAIL: cleanup_done should be true");
+        failures += 1;
+    }
+
+    if failures > 0 {
+        println!("FAIL: graceful_shutdown ({} failures)", failures);
+        std::process::exit(1);
+    }
+    println!("PASS: graceful_shutdown");
+}

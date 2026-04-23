@@ -1,0 +1,131 @@
+@@target python_3
+
+# Cookbook 79: Titration Protocol
+# Endpoint-locked state machine: Setup -> Titrating -> NearEndpoint
+# -> Complete. Complete absorbs add_drop (no handler) so the result
+# cannot be contaminated after recording.
+
+@@system Titration {
+    interface:
+        add_drop(volume_mL: float)
+        observe_color(color: str)
+        record_endpoint()
+        new_trial()
+        result_mL(): float = 0.0
+        status(): str
+        volume_mL(): float
+
+    machine:
+        $Setup {
+            add_drop(volume_mL: float) {
+                self.volume = 0.0
+                -> $Titrating
+            }
+            volume_mL(): float { @@:(self.volume) }
+            status(): str { @@:("setup") }
+        }
+
+        $Titrating {
+            add_drop(volume_mL: float) { self.volume = self.volume + volume_mL }
+            observe_color(color: str) {
+                if color == "pink":
+                    -> $NearEndpoint
+            }
+            volume_mL(): float { @@:(self.volume) }
+            status(): str { @@:("titrating") }
+        }
+
+        $NearEndpoint {
+            add_drop(volume_mL: float) { self.volume = self.volume + volume_mL }
+            observe_color(color: str) {
+                if color == "clear":
+                    -> $Titrating
+            }
+            record_endpoint() { -> $Complete }
+            volume_mL(): float { @@:(self.volume) }
+            status(): str { @@:("near endpoint") }
+        }
+
+        $Complete {
+            new_trial() {
+                self.volume = 0.0
+                -> $Setup
+            }
+            result_mL(): float { @@:(self.volume) }
+            volume_mL(): float { @@:(self.volume) }
+            status(): str { @@:("complete") }
+        }
+
+    domain:
+        volume: float = 0.0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    t = @@Titration()
+    check("start setup", t.status(), "setup")
+
+    # First drop transitions to Titrating and resets volume — note
+    # that the `volume_mL` parameter passed to Setup.add_drop is
+    # discarded; the handler just moves state and zeroes volume.
+    t.add_drop(1.0)
+    check("titrating", t.status(), "titrating")
+    check("volume zeroed on first", t.volume_mL(), 0.0)
+
+    # Subsequent drops accumulate.
+    t.add_drop(5.0)
+    t.add_drop(3.0)
+    check("accumulating", t.volume_mL(), 8.0)
+
+    # Pink color moves us to near-endpoint; drops still accumulate.
+    t.observe_color("pink")
+    check("near endpoint", t.status(), "near endpoint")
+
+    # False endpoint: clear reverts to titrating (protocol recovery).
+    t.observe_color("clear")
+    check("back to titrating", t.status(), "titrating")
+
+    # Back to pink.
+    t.observe_color("pink")
+    check("near endpoint 2", t.status(), "near endpoint")
+
+    # Fine drop near endpoint then lock in.
+    t.add_drop(0.05)
+    t.record_endpoint()
+    check("complete", t.status(), "complete")
+    check("recorded volume", t.result_mL(), 8.05)
+
+    # Critical assertion: Complete has no add_drop handler, so further
+    # drops are silently absorbed. Volume must NOT change. This is
+    # the "endpoint is structural, not a flag" property.
+    t.add_drop(10.0)
+    check("endpoint locked", t.result_mL(), 8.05)
+    t.add_drop(5.0)
+    check("endpoint still locked", t.result_mL(), 8.05)
+
+    # observe_color/record_endpoint also have no handlers in Complete.
+    t.observe_color("pink")
+    t.record_endpoint()
+    check("still locked after ignored events", t.result_mL(), 8.05)
+
+    # new_trial is the only way out, wipes volume.
+    t.new_trial()
+    check("new trial back to setup", t.status(), "setup")
+    check("volume cleared", t.volume_mL(), 0.0)
+
+    # Second trial works independently. Setup absorbs the first drop
+    # (moves to Titrating with volume=0), then real drops accumulate.
+    t.add_drop(2.0)   # zeroes volume, transitions
+    t.add_drop(1.5)   # counts
+    t.observe_color("pink")
+    t.record_endpoint()
+    check("second endpoint", t.result_mL(), 1.5)
+
+    print("PASS: titration")

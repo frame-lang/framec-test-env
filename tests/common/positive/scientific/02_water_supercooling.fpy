@@ -1,0 +1,122 @@
+@@target python_3
+
+# Cookbook 73: Water with Supercooling
+# Metastability — Supercooled and Ice can be at the same temperature
+# but respond differently to shake()/nucleate(). Tests structural
+# state distinction independent of numeric ranges.
+
+@@system Water {
+    interface:
+        cool(delta: float)
+        heat(delta: float)
+        nucleate()
+        shake()
+        temperature(): float
+        phase(): str
+
+    machine:
+        $Liquid {
+            cool(delta: float) {
+                self.temp = self.temp - delta
+                if self.temp < 0.0:
+                    -> $Supercooled
+            }
+            heat(delta: float) { self.temp = self.temp + delta }
+            temperature(): float { @@:(self.temp) }
+            phase(): str { @@:("liquid") }
+        }
+
+        $Supercooled {
+            cool(delta: float) {
+                self.temp = self.temp - delta
+                if self.temp <= -42.0:
+                    -> $Ice
+            }
+            heat(delta: float) {
+                self.temp = self.temp + delta
+                if self.temp >= 0.0:
+                    -> $Liquid
+            }
+            nucleate() { -> $Ice }
+            shake() { -> $Ice }
+            temperature(): float { @@:(self.temp) }
+            phase(): str { @@:("supercooled liquid") }
+        }
+
+        $Ice {
+            heat(delta: float) {
+                self.temp = self.temp + delta
+                if self.temp >= 0.0:
+                    -> $Liquid
+            }
+            cool(delta: float) { self.temp = self.temp - delta }
+            temperature(): float { @@:(self.temp) }
+            phase(): str { @@:("ice") }
+        }
+
+    domain:
+        temp: float = 25.0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    # Supercooled path: cool a clean droplet below 0 C without freezing
+    w = @@Water()
+    check("start", w.phase(), "liquid")
+    w.cool(30.0)       # temp 25 -> -5: crosses 0, enters Supercooled
+    check("after big cool", w.phase(), "supercooled liquid")
+
+    # Shake triggers crystallization even at same temperature
+    w.shake()
+    check("shaken", w.phase(), "ice")
+
+    # Metastability asserted structurally: at same temp -5, a fresh
+    # droplet is supercooled but an already-crystallized one is ice.
+    w2 = @@Water()
+    w2.cool(30.0)
+    check("w2 supercooled", w2.phase(), "supercooled liquid")
+    # w1 (w) and w2 now at same temperature, different phases — that's
+    # the metastability point of the recipe.
+    check("same temp", w.temperature(), w2.temperature())
+    check("different phase", w.phase() == w2.phase(), False)
+
+    # Nucleate from supercooled — same outcome as shake
+    w3 = @@Water()
+    w3.cool(30.0)
+    w3.nucleate()
+    check("nucleated", w3.phase(), "ice")
+
+    # Deep supercooling (below -42 C) spontaneously freezes. The
+    # -42 guard lives in $Supercooled.cool, so we need two cool calls:
+    # the first crosses 0 (Liquid -> Supercooled), the second crosses
+    # -42 (Supercooled -> Ice). A single jumbo-delta call wouldn't
+    # trigger the second transition — state is set only after the
+    # current handler finishes.
+    w4 = @@Water()
+    w4.cool(30.0)       # 25 -> -5: enters Supercooled
+    check("w4 supercooled", w4.phase(), "supercooled liquid")
+    w4.cool(40.0)       # -5 -> -45: crosses -42, enters Ice
+    check("deep cool", w4.phase(), "ice")
+
+    # Heat ice back to liquid
+    w4.heat(50.0)       # -45 -> 5
+    check("melted", w4.phase(), "liquid")
+
+    # shake() in $Liquid and $Ice is silently ignored
+    w5 = @@Water()      # $Liquid
+    w5.shake()
+    check("liquid shake ignored", w5.phase(), "liquid")
+    w6 = @@Water()
+    w6.cool(30.0); w6.cool(40.0)  # drive through Supercooled into Ice
+    check("w6 is ice", w6.phase(), "ice")
+    w6.shake()
+    check("ice shake ignored", w6.phase(), "ice")
+
+    print("PASS: water_supercooling")

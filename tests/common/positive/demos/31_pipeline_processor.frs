@@ -1,0 +1,97 @@
+@@target rust
+
+// Pipeline Processor -- 5-stage enter handler chain (Rust)
+
+@@system PipelineProcessor {
+    interface:
+        start(data: String)
+        status(): String
+        get_step_count(): i32
+
+    machine:
+        $Idle {
+            start(data: String) {
+                self.data = data;
+                -> $Validate
+            }
+            status(): String { @@:(String::from("idle")) }
+            get_step_count(): i32 { @@:(self.step_count) }
+        }
+        $Validate {
+            $>() {
+                self.step_count = self.step_count + 1;
+                -> $Transform
+            }
+            status(): String { @@:(String::from("validate")) }
+        }
+        $Transform {
+            $>() {
+                self.step_count = self.step_count + 1;
+                -> $Enrich
+            }
+            status(): String { @@:(String::from("transform")) }
+        }
+        $Enrich {
+            $>() {
+                self.step_count = self.step_count + 1;
+                -> $Store
+            }
+            status(): String { @@:(String::from("enrich")) }
+        }
+        $Store {
+            $>() {
+                self.step_count = self.step_count + 1;
+                -> $Complete
+            }
+            status(): String { @@:(String::from("store")) }
+        }
+        $Complete {
+            status(): String { @@:(String::from("complete")) }
+            get_step_count(): i32 { @@:(self.step_count) }
+            start(data: String) {
+                self.data = data;
+                self.step_count = 0;
+                -> $Validate
+            }
+        }
+
+    domain:
+        data: String = String::from("")
+        step_count: i32 = 0
+}
+
+fn main() {
+    let mut pp = @@PipelineProcessor();
+    let mut failures = 0;
+
+    if pp.status() != "idle" {
+        println!("FAIL: expected idle");
+        failures += 1;
+    }
+
+    pp.start(String::from("batch_1"));
+    if pp.status() != "complete" {
+        println!("FAIL: expected complete, got {}", pp.status());
+        failures += 1;
+    }
+    if pp.get_step_count() != 4 {
+        println!("FAIL: expected 4 steps, got {}", pp.get_step_count());
+        failures += 1;
+    }
+
+    pp.start(String::from("batch_2"));
+    if pp.status() != "complete" {
+        println!("FAIL: expected complete on second run");
+        failures += 1;
+    }
+    if pp.get_step_count() != 4 {
+        println!("FAIL: expected 4 steps on second run");
+        failures += 1;
+    }
+
+    if failures > 0 {
+        println!("FAIL: pipeline_processor ({} failures)", failures);
+        std::process::exit(1);
+    }
+    println!("PASS: pipeline_processor");
+}

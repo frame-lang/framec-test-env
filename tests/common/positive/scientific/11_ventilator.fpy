@@ -1,0 +1,137 @@
+@@target python_3
+
+# Cookbook 82: Ventilator Breath Cycle
+# Timed phases: Inspiration -> Expiration -> Pause -> Inspiration.
+# Patient effort is an explicit no-op in Inspiration/Expiration
+# (safety: don't cut short a breath mid-delivery), only a transition
+# trigger in Pause.
+
+@@system Ventilator {
+    interface:
+        power_on()
+        tick_ms(ms: int)
+        patient_effort_detected()
+        stop()
+        phase(): str
+        breath_count(): int
+
+    machine:
+        $Off {
+            power_on() { -> $Inspiration }
+            phase(): str { @@:("off") }
+            breath_count(): int { @@:(self.breaths) }
+        }
+
+        $Ventilating {
+            stop() { -> $Off }
+            breath_count(): int { @@:(self.breaths) }
+        }
+
+        $Inspiration => $Ventilating {
+            $>() {
+                self.phase_ms = 0
+                self.breaths = self.breaths + 1
+            }
+            tick_ms(ms: int) {
+                self.phase_ms = self.phase_ms + ms
+                if self.phase_ms >= 1000:
+                    -> $Expiration
+            }
+            patient_effort_detected() { }
+            phase(): str { @@:("inspiration") }
+            => $^
+        }
+
+        $Expiration => $Ventilating {
+            $>() { self.phase_ms = 0 }
+            tick_ms(ms: int) {
+                self.phase_ms = self.phase_ms + ms
+                if self.phase_ms >= 1500:
+                    -> $Pause
+            }
+            patient_effort_detected() { }
+            phase(): str { @@:("expiration") }
+            => $^
+        }
+
+        $Pause => $Ventilating {
+            $>() { self.phase_ms = 0 }
+            tick_ms(ms: int) {
+                self.phase_ms = self.phase_ms + ms
+                if self.phase_ms >= 500:
+                    -> $Inspiration
+            }
+            patient_effort_detected() { -> $Inspiration }
+            phase(): str { @@:("pause") }
+            => $^
+        }
+
+    domain:
+        phase_ms: int = 0
+        breaths: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    v = @@Ventilator()
+    check("start off", v.phase(), "off")
+
+    v.power_on()
+    check("inspiration on power-on", v.phase(), "inspiration")
+    check("first breath counted", v.breath_count(), 1)
+
+    # Patient effort during inspiration is silently absorbed (safety).
+    v.patient_effort_detected()
+    check("inspiration absorbs effort", v.phase(), "inspiration")
+
+    # 1000ms of inspiration -> expiration
+    v.tick_ms(500)
+    check("mid inspiration", v.phase(), "inspiration")
+    v.tick_ms(500)
+    check("expiration", v.phase(), "expiration")
+
+    # Patient effort in expiration also silently absorbed.
+    v.patient_effort_detected()
+    check("expiration absorbs effort", v.phase(), "expiration")
+
+    # 1500ms of expiration -> pause
+    v.tick_ms(1500)
+    check("pause", v.phase(), "pause")
+
+    # Patient effort in pause WILL trigger next inspiration
+    # (the whole point of the recipe).
+    v.patient_effort_detected()
+    check("pause triggers next breath", v.phase(), "inspiration")
+    check("breath 2 counted", v.breath_count(), 2)
+
+    # Passive timeout: let the cycle run through to another pause
+    # (1000 + 1500 = 2500ms to reach pause).
+    v.tick_ms(1000)   # -> expiration
+    check("expiration 2", v.phase(), "expiration")
+    v.tick_ms(1500)   # -> pause
+    check("pause 2", v.phase(), "pause")
+    # 500ms pause -> inspiration
+    v.tick_ms(500)
+    check("inspiration 3 passive", v.phase(), "inspiration")
+    check("breath 3 counted", v.breath_count(), 3)
+
+    # stop() is HSM-handled at $Ventilating; any active phase exits
+    # to Off.
+    v.stop()
+    check("stopped", v.phase(), "off")
+    # breaths is a domain var, persists.
+    check("breath count persists across stop", v.breath_count(), 3)
+
+    # In $Off, tick_ms and patient_effort are silently ignored.
+    v.tick_ms(10000)
+    v.patient_effort_detected()
+    check("off absorbs ticks and effort", v.phase(), "off")
+
+    print("PASS: ventilator")

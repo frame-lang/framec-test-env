@@ -1,0 +1,98 @@
+@@target rust
+
+// Deployment Pipeline -- push$/pop$, enter args (Rust)
+
+@@system DeploymentPipeline {
+    interface:
+        start(version: String)
+        approve()
+        reject()
+        status(): String
+
+    machine:
+        $Idle {
+            start(version: String) {
+                self.version = version;
+                -> ("build") $Stage
+            }
+            status(): String { @@:("idle") }
+        }
+        $Stage {
+            $.name: String = ""
+
+            $>(name: String) { $.name = name; }
+
+            approve() {
+                if $.name == "build" {
+                    push$
+                    -> ("test") $Stage
+                } else if $.name == "test" {
+                    push$
+                    -> ("deploy") $Stage
+                } else {
+                    -> $Done
+                }
+            }
+            reject() {
+                -> pop$
+            }
+            status(): String { @@:($.name.clone()) }
+        }
+        $Done {
+            status(): String { @@:("done") }
+        }
+
+    domain:
+        version: String = ""
+}
+
+
+fn main() {
+    let mut dp = @@DeploymentPipeline();
+    let mut failures = 0;
+
+    if dp.status() != "idle" {
+        println!("FAIL: expected idle, got {}", dp.status());
+        failures += 1;
+    }
+
+    dp.start(String::from("v2.0"));
+    if dp.status() != "build" {
+        println!("FAIL: expected build, got {}", dp.status());
+        failures += 1;
+    }
+
+    dp.approve();
+    if dp.status() != "test" {
+        println!("FAIL: expected test, got {}", dp.status());
+        failures += 1;
+    }
+
+    dp.reject();
+    if dp.status() != "build" {
+        println!("FAIL: expected build after reject, got {}", dp.status());
+        failures += 1;
+    }
+
+    dp.approve();
+    if dp.status() != "test" {
+        println!("FAIL: expected test again");
+        failures += 1;
+    }
+    dp.approve();
+    if dp.status() != "deploy" {
+        println!("FAIL: expected deploy, got {}", dp.status());
+        failures += 1;
+    }
+    dp.approve();
+    if dp.status() != "done" {
+        println!("FAIL: expected done, got {}", dp.status());
+        failures += 1;
+    }
+
+    if failures > 0 {
+        println!("FAIL: deployment_pipeline ({} failures)", failures);
+        std::process::exit(1);
+    }
+    println!("PASS: deployment_pipeline");
+}

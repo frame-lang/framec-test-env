@@ -1,0 +1,215 @@
+@@target python_3
+
+# Cookbook 95: Secure Boot / Measured Boot Chain
+# Linear verify-measure-antirollback-jump chain. Each stage reached
+# only after previous stage's full sequence. CRTM failure goes to
+# $Halted (no recovery at root of trust); post-ROM failures go to
+# $Recovery. Init has no antirollback (handed to IMA/dm-verity).
+
+@@system SecureBoot {
+    interface:
+        power_on()
+        verify_result(stage: int, passed: int)
+        measurement_extended(stage: int)
+        antirollback_check(passed: int)
+        get_stage(): int = -1
+
+    machine:
+        $Rom {
+            $>() {
+                self.current_stage = 0
+            }
+            measurement_extended(stage: int) {
+                if stage == 0:
+                    self.current_stage = 0
+            }
+            verify_result(stage: int, passed: int) {
+                if stage == 1 and passed != 0:
+                    -> $VerifyingBootloader
+                else:
+                    -> $Halted
+            }
+            get_stage(): int { @@:(0) }
+        }
+
+        $VerifyingBootloader {
+            measurement_extended(stage: int) {
+                if stage == 1:
+                    -> $AntirollbackBootloader
+            }
+            get_stage(): int { @@:(1) }
+        }
+
+        $AntirollbackBootloader {
+            antirollback_check(passed: int) {
+                if passed != 0:
+                    -> $BootloaderRunning
+                else:
+                    -> $Halted
+            }
+            get_stage(): int { @@:(1) }
+        }
+
+        $BootloaderRunning {
+            verify_result(stage: int, passed: int) {
+                if stage == 2 and passed != 0:
+                    -> $VerifyingKernel
+                else:
+                    -> $Recovery
+            }
+            get_stage(): int { @@:(2) }
+        }
+
+        $VerifyingKernel {
+            measurement_extended(stage: int) {
+                if stage == 2:
+                    -> $AntirollbackKernel
+            }
+            get_stage(): int { @@:(2) }
+        }
+
+        $AntirollbackKernel {
+            antirollback_check(passed: int) {
+                if passed != 0:
+                    -> $KernelRunning
+                else:
+                    -> $Recovery
+            }
+            get_stage(): int { @@:(2) }
+        }
+
+        $KernelRunning {
+            verify_result(stage: int, passed: int) {
+                if stage == 3 and passed != 0:
+                    -> $VerifyingInit
+                else:
+                    -> $Recovery
+            }
+            get_stage(): int { @@:(3) }
+        }
+
+        $VerifyingInit {
+            measurement_extended(stage: int) {
+                if stage == 3:
+                    -> $Booted
+            }
+            get_stage(): int { @@:(3) }
+        }
+
+        $Booted {
+            get_stage(): int { @@:(4) }
+        }
+        $Recovery {
+            get_stage(): int { @@:(-2) }
+        }
+        $Halted {
+            get_stage(): int { @@:(-1) }
+        }
+
+    domain:
+        current_stage: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    # Full successful boot chain.
+    b = @@SecureBoot()
+    check("rom stage", b.get_stage(), 0)
+
+    # CRTM self-measurement extended, then verify bootloader signature.
+    b.measurement_extended(0)
+    b.verify_result(1, 1)
+    check("verifying bootloader", b.get_stage(), 1)
+
+    b.measurement_extended(1)
+    check("antirollback bootloader", b.get_stage(), 1)
+
+    b.antirollback_check(1)
+    check("bootloader running", b.get_stage(), 2)
+
+    b.verify_result(2, 1)
+    b.measurement_extended(2)
+    b.antirollback_check(1)
+    check("kernel running", b.get_stage(), 3)
+
+    b.verify_result(3, 1)
+    b.measurement_extended(3)
+    check("booted", b.get_stage(), 4)
+
+    # Bootloader signature failure at ROM -> $Halted (no recovery at root)
+    b2 = @@SecureBoot()
+    b2.measurement_extended(0)
+    b2.verify_result(1, 0)
+    check("bootloader sig bad -> halted", b2.get_stage(), -1)
+    # Halted is terminal
+    b2.verify_result(2, 1)
+    check("halted absorbs", b2.get_stage(), -1)
+
+    # Bootloader rollback -> $Halted (still at root of trust)
+    b3 = @@SecureBoot()
+    b3.measurement_extended(0)
+    b3.verify_result(1, 1)
+    b3.measurement_extended(1)
+    b3.antirollback_check(0)
+    check("bootloader rollback -> halted", b3.get_stage(), -1)
+
+    # Kernel sig failure -> $Recovery (post-ROM failures recoverable)
+    b4 = @@SecureBoot()
+    b4.measurement_extended(0)
+    b4.verify_result(1, 1)
+    b4.measurement_extended(1)
+    b4.antirollback_check(1)
+    b4.verify_result(2, 0)
+    check("kernel sig bad -> recovery", b4.get_stage(), -2)
+
+    # Kernel rollback -> $Recovery
+    b5 = @@SecureBoot()
+    b5.measurement_extended(0)
+    b5.verify_result(1, 1)
+    b5.measurement_extended(1)
+    b5.antirollback_check(1)
+    b5.verify_result(2, 1)
+    b5.measurement_extended(2)
+    b5.antirollback_check(0)
+    check("kernel rollback -> recovery", b5.get_stage(), -2)
+
+    # Init sig failure -> $Recovery
+    b6 = @@SecureBoot()
+    b6.measurement_extended(0)
+    b6.verify_result(1, 1)
+    b6.measurement_extended(1)
+    b6.antirollback_check(1)
+    b6.verify_result(2, 1)
+    b6.measurement_extended(2)
+    b6.antirollback_check(1)
+    b6.verify_result(3, 0)
+    check("init sig bad -> recovery", b6.get_stage(), -2)
+
+    # Events without a handler in $Rom (antirollback_check) are
+    # silently absorbed — no transition.
+    b7 = @@SecureBoot()
+    b7.antirollback_check(1)
+    check("antirollback in ROM absorbed", b7.get_stage(), 0)
+
+    # Wrong-stage measurement is absorbed: extended(stage=5) in $Rom
+    # checks for stage==0, so the handler body does nothing and there's
+    # no transition.
+    b7.measurement_extended(5)
+    check("wrong-stage measurement absorbed", b7.get_stage(), 0)
+
+    # Note: verify_result in $Rom with (stage, passed) != (1, non-zero)
+    # is NOT absorbed — the else branch transitions to $Halted. This
+    # is the intended behavior: bootloader verification failure at
+    # root of trust is terminal.
+    b8 = @@SecureBoot()
+    b8.verify_result(3, 1)  # wrong stage, passed=1 — still halts (else branch)
+    check("bogus verify at ROM halts", b8.get_stage(), -1)
+
+    print("PASS: secure_boot")

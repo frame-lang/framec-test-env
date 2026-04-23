@@ -1,0 +1,116 @@
+@@target c
+
+// Test 49: HSM Enter/Exit with Parameters
+// Exit and enter handlers receive transition arguments.
+// C port observes the parameter values via domain-scoped int fields
+// set during each handler.
+
+@@system HSMEnterExitParams {
+    interface:
+        go_to_a(): void
+        go_to_sibling(): void
+        go_back(): void
+        get_a_enter_code(): int
+        get_a_exit_code(): int
+        get_b_enter_code(): int
+        get_b_exit_code(): int
+        get_state(): char*
+
+    machine:
+        $Start {
+            // Initial transition to ChildA with enter arg 1 ("starting")
+            go_to_a() { -> (1) $ChildA }
+            get_a_enter_code(): int { @@:(self->a_enter_code) return; }
+            get_a_exit_code():  int { @@:(self->a_exit_code)  return; }
+            get_b_enter_code(): int { @@:(self->b_enter_code) return; }
+            get_b_exit_code():  int { @@:(self->b_exit_code)  return; }
+            get_state(): char* { @@:("Start") return; }
+        }
+
+        $ChildA => $Parent {
+            $>(msg: int) { self->a_enter_code = msg; }
+            <$(reason: int) { self->a_exit_code = reason; }
+
+            // exit ChildA with code 2 ("leaving_A"), enter ChildB with code 3 ("arriving_B")
+            go_to_sibling() { (2) -> (3) $ChildB }
+
+            get_a_enter_code(): int { @@:(self->a_enter_code) return; }
+            get_a_exit_code():  int { @@:(self->a_exit_code)  return; }
+            get_b_enter_code(): int { @@:(self->b_enter_code) return; }
+            get_b_exit_code():  int { @@:(self->b_exit_code)  return; }
+            get_state(): char* { @@:("ChildA") return; }
+        }
+
+        $ChildB => $Parent {
+            $>(msg: int) { self->b_enter_code = msg; }
+            <$(reason: int) { self->b_exit_code = reason; }
+
+            // exit ChildB with code 4 ("leaving_B"), re-enter ChildA with code 5 ("returning_A")
+            go_back() { (4) -> (5) $ChildA }
+
+            get_a_enter_code(): int { @@:(self->a_enter_code) return; }
+            get_a_exit_code():  int { @@:(self->a_exit_code)  return; }
+            get_b_enter_code(): int { @@:(self->b_enter_code) return; }
+            get_b_exit_code():  int { @@:(self->b_exit_code)  return; }
+            get_state(): char* { @@:("ChildB") return; }
+        }
+
+        $Parent {
+            get_a_enter_code(): int { @@:(self->a_enter_code) return; }
+            get_a_exit_code():  int { @@:(self->a_exit_code)  return; }
+            get_b_enter_code(): int { @@:(self->b_enter_code) return; }
+            get_b_exit_code():  int { @@:(self->b_exit_code)  return; }
+            get_state(): char* { @@:("Parent") return; }
+        }
+    domain:
+        a_enter_code : int
+        a_exit_code  : int
+        b_enter_code : int
+        b_exit_code  : int
+}
+
+int main() {
+    printf("=== Test 49: HSM Enter/Exit with Params ===\n");
+    HSMEnterExitParams* s = @@HSMEnterExitParams();
+
+    // Initial transition Start -> ChildA(1)
+    HSMEnterExitParams_go_to_a(s);
+    if (HSMEnterExitParams_get_a_enter_code(s) != 1) {
+        printf("FAIL: a_enter_code expected 1, got %d\n",
+               HSMEnterExitParams_get_a_enter_code(s));
+        return 1;
+    }
+    printf("TC2.5.0: Initial transition with enter param (code=1) - PASS\n");
+
+    // ChildA -> ChildB with exit code 2, enter code 3
+    HSMEnterExitParams_go_to_sibling(s);
+    if (HSMEnterExitParams_get_a_exit_code(s) != 2) {
+        printf("FAIL: a_exit_code expected 2, got %d\n",
+               HSMEnterExitParams_get_a_exit_code(s));
+        return 1;
+    }
+    printf("TC2.5.1: Exit params passed (code=2) - PASS\n");
+
+    if (HSMEnterExitParams_get_b_enter_code(s) != 3
+        || strcmp(HSMEnterExitParams_get_state(s), "ChildB") != 0) {
+        printf("FAIL: b_enter_code expected 3, state=%s\n",
+               HSMEnterExitParams_get_state(s));
+        return 1;
+    }
+    printf("TC2.5.2: Enter params passed to target (code=3) - PASS\n");
+
+    // ChildB -> ChildA with exit code 4, re-enter code 5
+    HSMEnterExitParams_go_back(s);
+    if (HSMEnterExitParams_get_b_exit_code(s) != 4
+        || HSMEnterExitParams_get_a_enter_code(s) != 5) {
+        printf("FAIL: b_exit_code=%d a_enter_code=%d\n",
+               HSMEnterExitParams_get_b_exit_code(s),
+               HSMEnterExitParams_get_a_enter_code(s));
+        return 1;
+    }
+    printf("TC2.5.3: Return transition with params (exit=4, enter=5) - PASS\n");
+
+    printf("PASS: HSM enter/exit with params works correctly\n");
+    HSMEnterExitParams_destroy(s);
+    return 0;
+}

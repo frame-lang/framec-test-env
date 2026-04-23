@@ -1,0 +1,170 @@
+@@target python_3
+
+# Cookbook 99: PID Loop Supervisor
+# HSM $Enabled groups Tuning/Holding/Tracking/Saturated; the native
+# PID math lives in actions. This port drops the list-typed
+# trajectory axis and focuses on mode transitions + saturation
+# integrator freeze.
+
+@@system PidSupervisor {
+    interface:
+        enable()
+        disable()
+        set_setpoint(sp: float)
+        start_autotune()
+        tune_step_done()
+        tick(measurement: float): float
+        saturate_detected()
+        clear_saturation()
+        status(): str
+        integrator_val(): float
+
+    machine:
+        $Disabled {
+            enable() { -> $Holding }
+            tick(measurement: float): float { @@:(0.0) }
+            status(): str { @@:("disabled") }
+            integrator_val(): float { @@:(self.integrator) }
+        }
+
+        $Enabled {
+            disable() {
+                self.integrator = 0.0
+                self.last_error = 0.0
+                -> $Disabled
+            }
+            saturate_detected() { -> $Saturated }
+            integrator_val(): float { @@:(self.integrator) }
+        }
+
+        $Tuning => $Enabled {
+            tick(measurement: float): float { @@:(0.0) }
+            tune_step_done() { -> $Holding }
+            status(): str { @@:("tuning") }
+            => $^
+        }
+
+        $Holding => $Enabled {
+            set_setpoint(sp: float) { self.setpoint = sp }
+            start_autotune() { -> $Tuning }
+            tick(measurement: float): float {
+                error = self.setpoint - measurement
+                self.integrator = self.integrator + error
+                derivative = error - self.last_error
+                self.last_error = error
+                @@:(self.kp * error + self.ki * self.integrator + self.kd * derivative)
+            }
+            status(): str { @@:("holding") }
+            => $^
+        }
+
+        $Saturated => $Enabled {
+            tick(measurement: float): float {
+                error = self.setpoint - measurement
+                derivative = error - self.last_error
+                self.last_error = error
+                # I is frozen in $Saturated
+                @@:(self.kp * error + self.kd * derivative)
+            }
+            clear_saturation() { -> $Holding }
+            status(): str { @@:("saturated") }
+            => $^
+        }
+
+    domain:
+        kp: float = 1.0
+        ki: float = 0.1
+        kd: float = 0.01
+        setpoint: float = 0.0
+        integrator: float = 0.0
+        last_error: float = 0.0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+def near(actual, expected):
+    return abs(actual - expected) < 1e-9
+
+
+if __name__ == '__main__':
+    p = @@PidSupervisor()
+    check("disabled initially", p.status(), "disabled")
+
+    # tick() in $Disabled always returns 0 regardless of measurement.
+    check("disabled tick 0", p.tick(10.0), 0.0)
+
+    # set_setpoint has no handler in $Disabled — silently absorbed.
+    p.set_setpoint(100.0)
+    check("disabled absorbs setpoint", p.status(), "disabled")
+
+    p.enable()
+    check("enabled -> holding", p.status(), "holding")
+
+    # Set a meaningful setpoint and tick.
+    # kp=1.0, ki=0.1, kd=0.01, setpoint=10, measurement=0:
+    # error=10, integrator=10, derivative=10
+    # output = 1.0*10 + 0.1*10 + 0.01*10 = 11.1
+    p.set_setpoint(10.0)
+    out1 = p.tick(0.0)
+    check("first pid step", near(out1, 11.1), True)
+    check("integrator accumulated", near(p.integrator_val(), 10.0), True)
+
+    # Another tick at measurement=5:
+    # error=5, integrator=15, derivative=5-10=-5
+    # output = 1.0*5 + 0.1*15 + 0.01*(-5) = 5 + 1.5 - 0.05 = 6.45
+    out2 = p.tick(5.0)
+    check("second pid step", near(out2, 6.45), True)
+    check("integrator grew", near(p.integrator_val(), 15.0), True)
+
+    # Saturation freezes the integrator: further ticks compute P+D only
+    p.saturate_detected()
+    check("saturated", p.status(), "saturated")
+    # At measurement=6: error=4, derivative=4-5=-1
+    # output = 1.0*4 + 0.01*(-1) = 3.99 (no I term)
+    out3 = p.tick(6.0)
+    check("saturated pid no-I", near(out3, 3.99), True)
+    check("integrator frozen during saturation",
+          near(p.integrator_val(), 15.0), True)
+
+    # Clear saturation returns to holding with integrator preserved.
+    p.clear_saturation()
+    check("holding after clear", p.status(), "holding")
+    check("integrator survives", near(p.integrator_val(), 15.0), True)
+
+    # Autotune
+    p.start_autotune()
+    check("tuning", p.status(), "tuning")
+    # set_setpoint has no handler in Tuning — absorbed
+    p.set_setpoint(50.0)
+    check("tuning absorbs setpoint", p.status(), "tuning")
+
+    # Tune step completes
+    p.tune_step_done()
+    check("tuning done -> holding", p.status(), "holding")
+
+    # Disable clears integrator (and last_error)
+    p.disable()
+    check("disabled", p.status(), "disabled")
+    check("integrator cleared on disable",
+          p.integrator_val(), 0.0)
+
+    # Saturation from $Holding works (HSM parent handler)
+    p2 = @@PidSupervisor()
+    p2.enable()
+    p2.saturate_detected()
+    check("holding->saturated via HSM", p2.status(), "saturated")
+
+    # Saturation from $Tuning also works (HSM parent)
+    p3 = @@PidSupervisor()
+    p3.enable()
+    p3.start_autotune()
+    p3.saturate_detected()
+    check("tuning->saturated via HSM", p3.status(), "saturated")
+
+    print("PASS: pid_supervisor")

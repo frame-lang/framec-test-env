@@ -1,0 +1,161 @@
+@@target c
+
+// Test 43: HSM Multiple Children of Same Parent
+// Three siblings $ChildA/$ChildB/$ChildC all declare => $Parent.
+// Each can forward to the shared parent; each has its own action handler.
+//
+// C port uses per-handler int counters instead of a list log.
+
+@@system HSMMultiChildren {
+    interface:
+        start_a(): void
+        start_b(): void
+        start_c(): void
+        do_action(): void
+        forward_action(): void
+        get_parent_fwd(): int
+        get_a_action(): int
+        get_b_action(): int
+        get_c_action(): int
+        get_a_fwd(): int
+        get_b_fwd(): int
+        get_c_fwd(): int
+        get_state(): char*
+
+    machine:
+        $ChildA => $Parent {
+            start_a() {}
+            start_b() { -> $ChildB }
+            start_c() { -> $ChildC }
+            do_action() { self->a_action = self->a_action + 1; }
+            forward_action() {
+                self->a_fwd = self->a_fwd + 1;
+                => $^
+            }
+            get_parent_fwd(): int { @@:(self->parent_fwd) return; }
+            get_a_action(): int { @@:(self->a_action) return; }
+            get_b_action(): int { @@:(self->b_action) return; }
+            get_c_action(): int { @@:(self->c_action) return; }
+            get_a_fwd(): int { @@:(self->a_fwd) return; }
+            get_b_fwd(): int { @@:(self->b_fwd) return; }
+            get_c_fwd(): int { @@:(self->c_fwd) return; }
+            get_state(): char* { @@:("ChildA") return; }
+        }
+
+        $ChildB => $Parent {
+            start_a() { -> $ChildA }
+            start_b() {}
+            start_c() { -> $ChildC }
+            do_action() { self->b_action = self->b_action + 1; }
+            forward_action() {
+                self->b_fwd = self->b_fwd + 1;
+                => $^
+            }
+            get_parent_fwd(): int { @@:(self->parent_fwd) return; }
+            get_a_action(): int { @@:(self->a_action) return; }
+            get_b_action(): int { @@:(self->b_action) return; }
+            get_c_action(): int { @@:(self->c_action) return; }
+            get_a_fwd(): int { @@:(self->a_fwd) return; }
+            get_b_fwd(): int { @@:(self->b_fwd) return; }
+            get_c_fwd(): int { @@:(self->c_fwd) return; }
+            get_state(): char* { @@:("ChildB") return; }
+        }
+
+        $ChildC => $Parent {
+            start_a() { -> $ChildA }
+            start_b() { -> $ChildB }
+            start_c() {}
+            do_action() { self->c_action = self->c_action + 1; }
+            forward_action() {
+                self->c_fwd = self->c_fwd + 1;
+                => $^
+            }
+            get_parent_fwd(): int { @@:(self->parent_fwd) return; }
+            get_a_action(): int { @@:(self->a_action) return; }
+            get_b_action(): int { @@:(self->b_action) return; }
+            get_c_action(): int { @@:(self->c_action) return; }
+            get_a_fwd(): int { @@:(self->a_fwd) return; }
+            get_b_fwd(): int { @@:(self->b_fwd) return; }
+            get_c_fwd(): int { @@:(self->c_fwd) return; }
+            get_state(): char* { @@:("ChildC") return; }
+        }
+
+        $Parent {
+            forward_action() { self->parent_fwd = self->parent_fwd + 1; }
+            get_parent_fwd(): int { @@:(self->parent_fwd) return; }
+            get_a_action(): int { @@:(self->a_action) return; }
+            get_b_action(): int { @@:(self->b_action) return; }
+            get_c_action(): int { @@:(self->c_action) return; }
+            get_a_fwd(): int { @@:(self->a_fwd) return; }
+            get_b_fwd(): int { @@:(self->b_fwd) return; }
+            get_c_fwd(): int { @@:(self->c_fwd) return; }
+            get_state(): char* { @@:("Parent") return; }
+        }
+    domain:
+        parent_fwd : int
+        a_action   : int
+        b_action   : int
+        c_action   : int
+        a_fwd      : int
+        b_fwd      : int
+        c_fwd      : int
+}
+
+int main() {
+    printf("=== Test 43: HSM Multiple Children ===\n");
+    HSMMultiChildren* s = @@HSMMultiChildren();
+
+    if (strcmp(HSMMultiChildren_get_state(s), "ChildA") != 0) {
+        printf("FAIL: initial state expected ChildA\n"); return 1;
+    }
+
+    // TC1.3.2: ChildA forwards to parent
+    HSMMultiChildren_forward_action(s);
+    if (HSMMultiChildren_get_a_fwd(s) != 1 || HSMMultiChildren_get_parent_fwd(s) != 1) {
+        printf("FAIL: A_fwd/parent_fwd expected 1/1, got %d/%d\n",
+               HSMMultiChildren_get_a_fwd(s), HSMMultiChildren_get_parent_fwd(s));
+        return 1;
+    }
+    printf("TC1.3.2: ChildA forwards to parent - PASS\n");
+
+    // TC1.3.3: Transition to ChildB, ChildB forwards to same parent
+    HSMMultiChildren_start_b(s);
+    if (strcmp(HSMMultiChildren_get_state(s), "ChildB") != 0) {
+        printf("FAIL: expected ChildB after transition\n"); return 1;
+    }
+    HSMMultiChildren_forward_action(s);
+    if (HSMMultiChildren_get_b_fwd(s) != 1 || HSMMultiChildren_get_parent_fwd(s) != 2) {
+        printf("FAIL: B_fwd/parent_fwd expected 1/2\n"); return 1;
+    }
+    printf("TC1.3.4: ChildB forwards to same parent (parent_fwd=2) - PASS\n");
+
+    // TC1.3.5: Transition to ChildC, forward
+    HSMMultiChildren_start_c(s);
+    HSMMultiChildren_forward_action(s);
+    if (HSMMultiChildren_get_c_fwd(s) != 1 || HSMMultiChildren_get_parent_fwd(s) != 3) {
+        printf("FAIL: C_fwd/parent_fwd expected 1/3\n"); return 1;
+    }
+    printf("TC1.3.5: ChildC forwards to same parent (parent_fwd=3) - PASS\n");
+
+    // TC1.3.6: each sibling has independent do_action
+    HSMMultiChildren_start_a(s);
+    HSMMultiChildren_do_action(s);
+    HSMMultiChildren_start_b(s);
+    HSMMultiChildren_do_action(s);
+    HSMMultiChildren_start_c(s);
+    HSMMultiChildren_do_action(s);
+    if (HSMMultiChildren_get_a_action(s) != 1
+     || HSMMultiChildren_get_b_action(s) != 1
+     || HSMMultiChildren_get_c_action(s) != 1) {
+        printf("FAIL: a/b/c_action expected 1/1/1, got %d/%d/%d\n",
+               HSMMultiChildren_get_a_action(s),
+               HSMMultiChildren_get_b_action(s),
+               HSMMultiChildren_get_c_action(s));
+        return 1;
+    }
+    printf("TC1.3.6: Each sibling has independent handlers - PASS\n");
+
+    printf("PASS: HSM multiple children work correctly\n");
+    HSMMultiChildren_destroy(s);
+    return 0;
+}

@@ -1,0 +1,164 @@
+@@target python_3
+
+# Cookbook 98: Quadrature Encoder Decoder — Mealy Machine
+# Four states (S00, S01, S10, S11) for the four (A,B) pairs. Each
+# transition produces a +1/-1 output depending on direction.
+# Illegal transitions (two-bit changes) increment an error counter.
+
+@@system QuadratureDecoder {
+    operations:
+        count(): int { return self.count_val }
+        direction(): str { return self.last_dir }
+        errors_count(): int { return self.errors }
+        reset() {
+            self.count_val = 0
+            self.errors = 0
+            self.last_dir = "none"
+        }
+
+    interface:
+        signal(a: int, b: int): int
+
+    machine:
+        $S00 {
+            signal(a: int, b: int): int {
+                if a == 0 and b == 0: @@:(0)
+                elif a == 1 and b == 0:
+                    self.count_val = self.count_val + 1
+                    self.last_dir = "fwd"
+                    @@:(1)
+                    -> $S10
+                elif a == 0 and b == 1:
+                    self.count_val = self.count_val - 1
+                    self.last_dir = "rev"
+                    @@:(-1)
+                    -> $S01
+                else:
+                    self.errors = self.errors + 1
+                    @@:(0)
+            }
+        }
+
+        $S10 {
+            signal(a: int, b: int): int {
+                if a == 1 and b == 0: @@:(0)
+                elif a == 1 and b == 1:
+                    self.count_val = self.count_val + 1
+                    self.last_dir = "fwd"
+                    @@:(1)
+                    -> $S11
+                elif a == 0 and b == 0:
+                    self.count_val = self.count_val - 1
+                    self.last_dir = "rev"
+                    @@:(-1)
+                    -> $S00
+                else:
+                    self.errors = self.errors + 1
+                    @@:(0)
+            }
+        }
+
+        $S11 {
+            signal(a: int, b: int): int {
+                if a == 1 and b == 1: @@:(0)
+                elif a == 0 and b == 1:
+                    self.count_val = self.count_val + 1
+                    self.last_dir = "fwd"
+                    @@:(1)
+                    -> $S01
+                elif a == 1 and b == 0:
+                    self.count_val = self.count_val - 1
+                    self.last_dir = "rev"
+                    @@:(-1)
+                    -> $S10
+                else:
+                    self.errors = self.errors + 1
+                    @@:(0)
+            }
+        }
+
+        $S01 {
+            signal(a: int, b: int): int {
+                if a == 0 and b == 1: @@:(0)
+                elif a == 0 and b == 0:
+                    self.count_val = self.count_val + 1
+                    self.last_dir = "fwd"
+                    @@:(1)
+                    -> $S00
+                elif a == 1 and b == 1:
+                    self.count_val = self.count_val - 1
+                    self.last_dir = "rev"
+                    @@:(-1)
+                    -> $S11
+                else:
+                    self.errors = self.errors + 1
+                    @@:(0)
+            }
+        }
+
+    domain:
+        count_val: int = 0
+        errors: int = 0
+        last_dir: str = "none"
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    q = @@QuadratureDecoder()
+    check("initial count 0", q.count(), 0)
+    check("initial direction", q.direction(), "none")
+    check("initial errors 0", q.errors_count(), 0)
+
+    # Idle pulse: (0,0) when at S00 returns 0, no count change.
+    check("idle 00", q.signal(0, 0), 0)
+    check("no count change on idle", q.count(), 0)
+
+    # Forward rotation: 00 -> 10 -> 11 -> 01 -> 00
+    check("00->10 fwd", q.signal(1, 0), 1)
+    check("10->11 fwd", q.signal(1, 1), 1)
+    check("11->01 fwd", q.signal(0, 1), 1)
+    check("01->00 fwd", q.signal(0, 0), 1)
+
+    check("four fwd ticks", q.count(), 4)
+    check("direction fwd", q.direction(), "fwd")
+
+    # Reverse rotation: 00 -> 01 -> 11 -> 10 -> 00
+    check("00->01 rev", q.signal(0, 1), -1)
+    check("01->11 rev", q.signal(1, 1), -1)
+    check("11->10 rev", q.signal(1, 0), -1)
+    check("10->00 rev", q.signal(0, 0), -1)
+
+    check("net count 0", q.count(), 0)
+    check("direction rev", q.direction(), "rev")
+
+    # Illegal two-bit transition from $S00: (1,1) is not adjacent to (0,0).
+    # Increments errors, output 0.
+    check("illegal 00->11", q.signal(1, 1), 0)
+    check("error counted", q.errors_count(), 1)
+
+    # State didn't change — still in S00 after illegal transition.
+    # Next valid input goes fwd normally.
+    check("still at 00", q.signal(1, 0), 1)
+
+    # Reset via operation — clears domain counters but does NOT
+    # transition. State stays wherever the last valid signal() put
+    # it (here: $S10 after the prior q.signal(1, 0)).
+    q.reset()
+    check("count reset", q.count(), 0)
+    check("direction reset", q.direction(), "none")
+    check("errors reset", q.errors_count(), 0)
+
+    # From $S10, drive forward through a complete cycle plus another:
+    # (1,0) is idle at S10, so 8 signals produce 7 forward edges.
+    q.signal(1, 0); q.signal(1, 1); q.signal(0, 1); q.signal(0, 0)
+    q.signal(1, 0); q.signal(1, 1); q.signal(0, 1); q.signal(0, 0)
+    check("8 signals starting idle = 7 fwd edges", q.count(), 7)
+
+    print("PASS: quadrature")

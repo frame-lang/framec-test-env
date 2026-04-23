@@ -1,0 +1,134 @@
+@@target python_3
+
+# Cookbook 91: Noise Protocol XX Handshake (Initiator)
+# Strict 3-message ordering: msg1 (start) -> AwaitingMsg2 ->
+# AwaitingAck -> Transport. send()/recv() available only in
+# $Transport. Everywhere else they return interface defaults
+# (not_ready / empty).
+#
+# Instead of bytes we model payloads as int codes to keep the test
+# portable: msg2_valid=1 means processed cleanly.
+
+@@system NoiseXxInitiator {
+    interface:
+        start(remote_endpoint: str)
+        msg2_received(valid: int)
+        msg3_ack()
+        send(plaintext: str): str = "not_ready"
+        recv(ciphertext: str): str = ""
+        timeout()
+        get_status(): str = "idle"
+
+    machine:
+        $Idle {
+            start(remote_endpoint: str) {
+                self.remote = remote_endpoint
+                -> $AwaitingMsg2
+            }
+            get_status(): str { @@:("idle") }
+        }
+
+        $AwaitingMsg2 {
+            msg2_received(valid: int) {
+                if valid == 1:
+                    -> $AwaitingAck
+                else:
+                    -> $Aborted
+            }
+            timeout() { -> $Aborted }
+            get_status(): str { @@:("awaiting_msg2") }
+        }
+
+        $AwaitingAck {
+            msg3_ack() { -> $Transport }
+            timeout() { -> $Aborted }
+            get_status(): str { @@:("awaiting_ack") }
+        }
+
+        $Transport {
+            send(plaintext: str): str { @@:("sent") }
+            recv(ciphertext: str): str { @@:("decrypted") }
+            get_status(): str { @@:("transport") }
+        }
+
+        $Aborted {
+            get_status(): str { @@:("aborted") }
+        }
+
+    domain:
+        remote: str = ""
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    n = @@NoiseXxInitiator()
+    check("idle", n.get_status(), "idle")
+
+    # Transport gate in $Idle
+    check("idle send default", n.send("hi"), "not_ready")
+    check("idle recv default", n.recv("ct"), "")
+
+    # Out-of-order: msg2 and msg3 have no handlers in $Idle
+    n.msg2_received(1)
+    check("idle absorbs msg2", n.get_status(), "idle")
+    n.msg3_ack()
+    check("idle absorbs msg3_ack", n.get_status(), "idle")
+
+    n.start("peer")
+    check("awaiting msg2", n.get_status(), "awaiting_msg2")
+    check("awaiting_msg2 send default", n.send("hi"), "not_ready")
+
+    # Wrong message: msg3_ack in $AwaitingMsg2 — silently absorbed
+    n.msg3_ack()
+    check("awaiting_msg2 absorbs msg3_ack", n.get_status(), "awaiting_msg2")
+
+    n.msg2_received(1)
+    check("awaiting ack", n.get_status(), "awaiting_ack")
+    check("awaiting_ack send default", n.send("hi"), "not_ready")
+
+    # Wrong message at awaiting_ack: msg2 absorbed
+    n.msg2_received(1)
+    check("awaiting_ack absorbs msg2", n.get_status(), "awaiting_ack")
+
+    n.msg3_ack()
+    check("transport", n.get_status(), "transport")
+
+    # Transport lets send/recv work
+    check("transport sends", n.send("hi"), "sent")
+    check("transport recvs", n.recv("ct"), "decrypted")
+
+    # Invalid msg2 path
+    n2 = @@NoiseXxInitiator()
+    n2.start("peer")
+    n2.msg2_received(0)
+    check("invalid msg2 -> aborted", n2.get_status(), "aborted")
+    check("aborted send default", n2.send("hi"), "not_ready")
+    check("aborted recv default", n2.recv("ct"), "")
+
+    # Timeout at awaiting_msg2
+    n3 = @@NoiseXxInitiator()
+    n3.start("peer")
+    n3.timeout()
+    check("timeout at msg2 -> aborted", n3.get_status(), "aborted")
+
+    # Timeout at awaiting_ack
+    n4 = @@NoiseXxInitiator()
+    n4.start("peer")
+    n4.msg2_received(1)
+    n4.timeout()
+    check("timeout at ack -> aborted", n4.get_status(), "aborted")
+
+    # Aborted absorbs everything — partial handshake cannot resume
+    n4.start("peer")
+    n4.msg2_received(1)
+    n4.msg3_ack()
+    check("aborted absorbs all", n4.get_status(), "aborted")
+
+    print("PASS: noise_xx")

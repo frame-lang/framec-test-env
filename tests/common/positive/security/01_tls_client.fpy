@@ -1,0 +1,214 @@
+@@target python_3
+
+# Cookbook 86: TLS 1.3 Handshake (Client Side)
+# Linear mandatory sequence. send_app_data has a real handler only
+# in $Established; other states return the interface default
+# "not_ready" — application data cannot leak before handshake
+# completion.
+#
+# server_random downgrade sentinel is modelled here as an int flag
+# (0 = clean, 1 = downgrade detected) to keep the test backend-neutral.
+
+@@system TlsClient {
+    interface:
+        connect(server_name: str)
+        server_hello_received(supported_versions_ext: int, downgrade_flag: int, cipher: str)
+        encrypted_extensions_received()
+        certificate_received(cert_valid: int)
+        cert_verify_received(sig_valid: int)
+        server_finished_received(mac_valid: int)
+        send_app_data(data: str): str = "not_ready"
+        close()
+        timeout()
+        get_status(): str = "idle"
+
+    machine:
+        $Idle {
+            connect(server_name: str) {
+                self.server_name = server_name
+                -> $WaitingServerHello
+            }
+            get_status(): str { @@:("idle") }
+        }
+
+        $WaitingServerHello {
+            server_hello_received(supported_versions_ext: int, downgrade_flag: int, cipher: str) {
+                if supported_versions_ext != 772:
+                    -> $Aborted
+                elif downgrade_flag != 0:
+                    -> $Aborted
+                elif cipher == "RC4":
+                    -> $Aborted
+                else:
+                    -> $WaitingEncryptedExtensions
+            }
+            timeout() { -> $Aborted }
+            get_status(): str { @@:("waiting server_hello") }
+        }
+
+        $WaitingEncryptedExtensions {
+            encrypted_extensions_received() { -> $WaitingCertificate }
+            timeout() { -> $Aborted }
+            get_status(): str { @@:("waiting ee") }
+        }
+
+        $WaitingCertificate {
+            certificate_received(cert_valid: int) {
+                if cert_valid == 1:
+                    -> $WaitingCertVerify
+                else:
+                    -> $Aborted
+            }
+            timeout() { -> $Aborted }
+            get_status(): str { @@:("waiting cert") }
+        }
+
+        $WaitingCertVerify {
+            cert_verify_received(sig_valid: int) {
+                if sig_valid == 1:
+                    -> $WaitingServerFinished
+                else:
+                    -> $Aborted
+            }
+            timeout() { -> $Aborted }
+            get_status(): str { @@:("waiting cert_verify") }
+        }
+
+        $WaitingServerFinished {
+            server_finished_received(mac_valid: int) {
+                if mac_valid == 1:
+                    -> $Established
+                else:
+                    -> $Aborted
+            }
+            timeout() { -> $Aborted }
+            get_status(): str { @@:("waiting server_finished") }
+        }
+
+        $Established {
+            send_app_data(data: str): str {
+                @@:("sent")
+            }
+            close() { -> $Closed }
+            get_status(): str { @@:("established") }
+        }
+
+        $Aborted {
+            get_status(): str { @@:("aborted") }
+        }
+
+        $Closed {
+            get_status(): str { @@:("closed") }
+        }
+
+    domain:
+        server_name: str = ""
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    # Successful full handshake
+    c = @@TlsClient()
+    check("start idle", c.get_status(), "idle")
+
+    # Gate 1: send_app_data default return everywhere but Established.
+    # 0x0304 == 772 (TLS 1.3 version in supported_versions extension).
+    check("idle app_data denied", c.send_app_data("hello"), "not_ready")
+
+    c.connect("example.com")
+    check("waiting SH", c.get_status(), "waiting server_hello")
+    check("waiting SH app_data denied", c.send_app_data("hello"), "not_ready")
+
+    # TLS 1.3 version, no downgrade, strong cipher
+    c.server_hello_received(772, 0, "AES-GCM")
+    check("waiting EE", c.get_status(), "waiting ee")
+    check("waiting EE app_data denied", c.send_app_data("hello"), "not_ready")
+
+    c.encrypted_extensions_received()
+    check("waiting cert", c.get_status(), "waiting cert")
+
+    c.certificate_received(1)
+    check("waiting cert_verify", c.get_status(), "waiting cert_verify")
+
+    c.cert_verify_received(1)
+    check("waiting finished", c.get_status(), "waiting server_finished")
+    check("still denied pre-finished", c.send_app_data("hello"), "not_ready")
+
+    c.server_finished_received(1)
+    check("established", c.get_status(), "established")
+
+    # Now send_app_data works
+    check("app_data allowed", c.send_app_data("hello"), "sent")
+
+    c.close()
+    check("closed", c.get_status(), "closed")
+    # After close, app_data fallback returns "not_ready" again
+    check("closed denies app_data", c.send_app_data("hello"), "not_ready")
+
+    # Downgrade detection: sentinel flag set
+    c2 = @@TlsClient()
+    c2.connect("example.com")
+    c2.server_hello_received(772, 1, "AES-GCM")   # downgrade_flag=1
+    check("downgrade aborts", c2.get_status(), "aborted")
+    check("aborted denies app_data", c2.send_app_data("hello"), "not_ready")
+
+    # Version mismatch: TLS 1.2 = 0x0303 = 771
+    c3 = @@TlsClient()
+    c3.connect("example.com")
+    c3.server_hello_received(771, 0, "AES-GCM")
+    check("version mismatch aborts", c3.get_status(), "aborted")
+
+    # Weak cipher
+    c4 = @@TlsClient()
+    c4.connect("example.com")
+    c4.server_hello_received(772, 0, "RC4")
+    check("weak cipher aborts", c4.get_status(), "aborted")
+
+    # Cert chain validation failure
+    c5 = @@TlsClient()
+    c5.connect("example.com")
+    c5.server_hello_received(772, 0, "AES-GCM")
+    c5.encrypted_extensions_received()
+    c5.certificate_received(0)  # invalid
+    check("cert fail aborts", c5.get_status(), "aborted")
+
+    # Cert-verify signature failure
+    c6 = @@TlsClient()
+    c6.connect("example.com")
+    c6.server_hello_received(772, 0, "AES-GCM")
+    c6.encrypted_extensions_received()
+    c6.certificate_received(1)
+    c6.cert_verify_received(0)
+    check("sig fail aborts", c6.get_status(), "aborted")
+
+    # Finished MAC failure — last gate
+    c7 = @@TlsClient()
+    c7.connect("example.com")
+    c7.server_hello_received(772, 0, "AES-GCM")
+    c7.encrypted_extensions_received()
+    c7.certificate_received(1)
+    c7.cert_verify_received(1)
+    c7.server_finished_received(0)  # bad MAC
+    check("mac fail aborts", c7.get_status(), "aborted")
+    check("failed mac denies app_data", c7.send_app_data("hello"), "not_ready")
+
+    # Timeout from any waiting state reaches Aborted
+    c8 = @@TlsClient()
+    c8.connect("example.com")
+    c8.timeout()
+    check("timeout from SH", c8.get_status(), "aborted")
+
+    c9 = @@TlsClient()
+    c9.connect("example.com")
+    c9.server_hello_received(772, 0, "AES-GCM")
+    c9.timeout()
+    check("timeout from EE", c9.get_status(), "aborted")
+
+    print("PASS: tls_client")

@@ -1,0 +1,113 @@
+@@target python_3
+
+# Cookbook 78: Virus Infection Lifecycle (SIR)
+# Compositional modelling: one Person FSM, run 200 of them together.
+# Epidemic curve emerges from individual S → I → R transitions.
+
+import random
+
+@@system Person(p_infect: float, recovery_days: int) {
+    interface:
+        expose()
+        tick()
+        status(): str
+
+    machine:
+        $Susceptible {
+            expose() {
+                if random.random() < self.p:
+                    self.days_infected = 0
+                    -> $Infected
+            }
+            status(): str { @@:("S") }
+        }
+
+        $Infected {
+            expose() { }
+            tick() {
+                self.days_infected = self.days_infected + 1
+                if self.days_infected >= self.rec_days:
+                    -> $Recovered
+            }
+            status(): str { @@:("I") }
+        }
+
+        $Recovered {
+            expose() { }
+            status(): str { @@:("R") }
+        }
+
+    domain:
+        p = p_infect
+        rec_days = recovery_days
+        days_infected: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    # Single-person coverage first: each transition, each no-op handler.
+    p = @@Person(1.0, 3)       # infect on first expose, recover in 3 days
+    check("start S", p.status(), "S")
+    p.expose()
+    check("infected", p.status(), "I")
+    # expose() in $Infected is a no-op (explicit empty handler)
+    p.expose()
+    check("still I on re-expose", p.status(), "I")
+    p.tick()
+    check("day 1 still I", p.status(), "I")
+    p.tick()
+    check("day 2 still I", p.status(), "I")
+    p.tick()
+    check("day 3 recovered", p.status(), "R")
+    # expose() in $Recovered is also a no-op
+    p.expose()
+    check("R absorbs expose", p.status(), "R")
+    # tick() has no handler in $Recovered; silently ignored.
+    p.tick()
+    check("R absorbs tick", p.status(), "R")
+
+    # Immunity: p_infect = 0 → Susceptible absorbs expose with no effect
+    p2 = @@Person(0.0, 3)
+    p2.expose()
+    check("p=0 stays S", p2.status(), "S")
+
+    # Epidemic emergence with seeded RNG. Population of 200, 1 initially
+    # infected, ticks for 30 days with random expose edges. The final
+    # S/I/R counts under seed=3 act as the compositional signature.
+    random.seed(3)
+    pop = []
+    i = 0
+    while i < 200:
+        pop.append(@@Person(0.4, 7))
+        i = i + 1
+    pop[0].expose()
+
+    day = 0
+    while day < 30:
+        for person in pop:
+            if person.status() == "I":
+                pop[random.randint(0, len(pop) - 1)].expose()
+        for person in pop:
+            person.tick()
+        day = day + 1
+
+    s = sum(1 for x in pop if x.status() == "S")
+    i = sum(1 for x in pop if x.status() == "I")
+    r = sum(1 for x in pop if x.status() == "R")
+    check("S + I + R == 200", s + i + r, 200)
+
+    # Classical SIR: epidemic ends with I -> 0 eventually. After
+    # 30 days with recovery_days=7, most of the population has passed
+    # through infection.
+    check("epidemic ran", s < 200, True)
+    check("mostly recovered", r > s, True)
+
+    print(f"day 30: S={s} I={i} R={r}")
+    print("PASS: sir_epidemic")

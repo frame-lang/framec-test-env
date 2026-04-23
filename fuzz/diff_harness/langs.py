@@ -441,6 +441,259 @@ def _erlang_selfcall_escript(meta: dict) -> str:
     )
 
 
+# --- Phase 4: HSM parent-semantics renderers ---
+#
+# Identical to the selfcall renderers plus one extra TRACE line for
+# `parent_count()` so the fuzz asserts that the parent's handler ran
+# the expected number of times across the `=> $^` event-forward. The
+# child caller's interface is still `drive()`; observation methods
+# are `status()`, `trace()`, `parent_count()`.
+
+
+def py_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nif __name__ == '__main__':\n"
+        f"    inst = @@{sys_name}()\n"
+        f"    inst.drive()\n"
+        f'    print("TRACE: drive")\n'
+        f'    print(f"TRACE: status {{inst.status()}}")\n'
+        f'    print(f"TRACE: trace {{inst.trace()}}")\n'
+        f'    print(f"TRACE: parent_count {{inst.parent_count()}}")\n'
+        f'    print("TRACE: done")\n'
+    )
+
+
+def js_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nconst inst = new {sys_name}();\n"
+        f"inst.drive();\n"
+        f'console.log("TRACE: drive");\n'
+        f'console.log("TRACE: status " + inst.status());\n'
+        f'console.log("TRACE: trace " + inst.trace());\n'
+        f'console.log("TRACE: parent_count " + inst.parent_count());\n'
+        f'console.log("TRACE: done");\n'
+    )
+
+
+def ruby_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\ninst = {sys_name}.new\n"
+        f"inst.drive\n"
+        f'puts "TRACE: drive"\n'
+        f'puts "TRACE: status #{{inst.status}}"\n'
+        f'puts "TRACE: trace #{{inst.trace}}"\n'
+        f'puts "TRACE: parent_count #{{inst.parent_count}}"\n'
+        f'puts "TRACE: done"\n'
+    )
+
+
+def go_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nfunc main() {{\n"
+        f"    inst := New{sys_name}()\n"
+        f"    inst.Drive()\n"
+        f'    fmt.Println("TRACE: drive")\n'
+        f'    fmt.Printf("TRACE: status %s\\n", inst.Status())\n'
+        f'    fmt.Printf("TRACE: trace %d\\n", inst.Trace())\n'
+        f'    fmt.Printf("TRACE: parent_count %d\\n", inst.Parent_count())\n'
+        f'    fmt.Println("TRACE: done")\n'
+        f"}}\n"
+    )
+
+
+def dart_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nvoid main() {{\n"
+        f"    var inst = {sys_name}();\n"
+        f"    inst.drive();\n"
+        f'    print("TRACE: drive");\n'
+        f'    print("TRACE: status ${{inst.status()}}");\n'
+        f'    print("TRACE: trace ${{inst.trace()}}");\n'
+        f'    print("TRACE: parent_count ${{inst.parent_count()}}");\n'
+        f'    print("TRACE: done");\n'
+        f"}}\n"
+    )
+
+
+def swift_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nlet inst = {sys_name}()\n"
+        f"inst.drive()\n"
+        f'print("TRACE: drive")\n'
+        r'print("TRACE: status \(inst.status())")' "\n"
+        r'print("TRACE: trace \(inst.trace())")' "\n"
+        r'print("TRACE: parent_count \(inst.parent_count())")' "\n"
+        f'print("TRACE: done")\n'
+    )
+
+
+def csharp_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\npublic class CanaryMain {{\n"
+        f"    public static void Main() {{\n"
+        f"        var inst = new {sys_name}();\n"
+        f"        inst.drive();\n"
+        f'        System.Console.WriteLine("TRACE: drive");\n'
+        f'        System.Console.WriteLine("TRACE: status " + inst.status());\n'
+        f'        System.Console.WriteLine("TRACE: trace " + inst.trace());\n'
+        f'        System.Console.WriteLine("TRACE: parent_count " + inst.parent_count());\n'
+        f'        System.Console.WriteLine("TRACE: done");\n'
+        f"    }}\n"
+        f"}}\n"
+    )
+
+
+def rust_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nfn main() {{\n"
+        f"    let mut inst = {sys_name}::new();\n"
+        f"    inst.drive();\n"
+        f'    println!("TRACE: drive");\n'
+        f'    println!("TRACE: status {{}}", inst.status());\n'
+        f'    println!("TRACE: trace {{}}", inst.trace());\n'
+        f'    println!("TRACE: parent_count {{}}", inst.parent_count());\n'
+        f'    println!("TRACE: done");\n'
+        f"}}\n"
+    )
+
+
+def php_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\n$inst = new {sys_name}();\n"
+        f"$inst->drive();\n"
+        f'echo "TRACE: drive" . PHP_EOL;\n'
+        f'echo "TRACE: status " . $inst->status() . PHP_EOL;\n'
+        f'echo "TRACE: trace " . $inst->trace() . PHP_EOL;\n'
+        f'echo "TRACE: parent_count " . $inst->parent_count() . PHP_EOL;\n'
+        f'echo "TRACE: done" . PHP_EOL;\n'
+    )
+
+
+def java_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nclass {sys_name}Main {{\n"
+        f"    public static void main(String[] args) {{\n"
+        f"        {sys_name} inst = new {sys_name}();\n"
+        f"        inst.drive();\n"
+        f'        System.out.println("TRACE: drive");\n'
+        f'        System.out.println("TRACE: status " + inst.status());\n'
+        f'        System.out.println("TRACE: trace " + inst.trace());\n'
+        f'        System.out.println("TRACE: parent_count " + inst.parent_count());\n'
+        f'        System.out.println("TRACE: done");\n'
+        f"    }}\n"
+        f"}}\n"
+    )
+
+
+def kotlin_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nfun main() {{\n"
+        f"    val inst = {sys_name}()\n"
+        f"    inst.drive()\n"
+        f'    println("TRACE: drive")\n'
+        f'    println("TRACE: status ${{inst.status()}}")\n'
+        f'    println("TRACE: trace ${{inst.trace()}}")\n'
+        f'    println("TRACE: parent_count ${{inst.parent_count()}}")\n'
+        f'    println("TRACE: done")\n'
+        f"}}\n"
+    )
+
+
+def cpp_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nint main() {{\n"
+        f"    {sys_name} inst;\n"
+        f"    inst.drive();\n"
+        f'    std::cout << "TRACE: drive" << std::endl;\n'
+        f'    std::cout << "TRACE: status " << std::any_cast<std::string>(inst.status()) << std::endl;\n'
+        f'    std::cout << "TRACE: trace " << std::any_cast<int>(inst.trace()) << std::endl;\n'
+        f'    std::cout << "TRACE: parent_count " << std::any_cast<int>(inst.parent_count()) << std::endl;\n'
+        f'    std::cout << "TRACE: done" << std::endl;\n'
+        f"    return 0;\n"
+        f"}}\n"
+    )
+
+
+def lua_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nlocal inst = {sys_name}:new()\n"
+        f"inst:drive()\n"
+        f'print("TRACE: drive")\n'
+        f'print("TRACE: status " .. inst:status())\n'
+        f'print("TRACE: trace " .. string.format("%d", inst:trace()))\n'
+        f'print("TRACE: parent_count " .. string.format("%d", inst:parent_count()))\n'
+        f'print("TRACE: done")\n'
+    )
+
+
+def c_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nint main(void) {{\n"
+        f"    {sys_name}* inst = @@{sys_name}();\n"
+        f"    {sys_name}_drive(inst);\n"
+        f'    printf("TRACE: drive\\n");\n'
+        f'    printf("TRACE: status %s\\n", {sys_name}_status(inst));\n'
+        f'    printf("TRACE: trace %d\\n", {sys_name}_trace(inst));\n'
+        f'    printf("TRACE: parent_count %d\\n", {sys_name}_parent_count(inst));\n'
+        f'    printf("TRACE: done\\n");\n'
+        f"    {sys_name}_destroy(inst);\n"
+        f"    return 0;\n"
+        f"}}\n"
+    )
+
+
+def gdscript_hsm(meta: dict) -> str:
+    sys_name = meta["sys_name"]
+    return (
+        f"\nfunc _init():\n"
+        f"    var inst = @@{sys_name}()\n"
+        f"    inst.drive()\n"
+        f'    print("TRACE: drive")\n'
+        f'    print("TRACE: status " + str(inst.status()))\n'
+        f'    print("TRACE: trace " + str(inst.trace()))\n'
+        f'    print("TRACE: parent_count " + str(inst.parent_count()))\n'
+        f'    print("TRACE: done")\n'
+        f"    quit()\n"
+    )
+
+
+def _erlang_hsm_escript(meta: dict) -> str:
+    """Escript driver for HSM parent-semantics fuzz — emitted by
+    `erlang_run_custom` when `meta["harness_kind"] == "hsm"`."""
+    sys_name = meta["sys_name"]
+    module = _erlang_module_name(sys_name)
+    return (
+        "#!/usr/bin/env escript\n"
+        "main(_) ->\n"
+        '    code:add_patha("."),\n'
+        f"    {{ok, Pid}} = {module}:start_link(),\n"
+        f"    _ = {module}:drive(Pid),\n"
+        '    io:format("TRACE: drive~n"),\n'
+        f"    Status = {module}:status(Pid),\n"
+        '    io:format("TRACE: status ~s~n", [Status]),\n'
+        f"    Trace = {module}:trace(Pid),\n"
+        '    io:format("TRACE: trace ~p~n", [Trace]),\n'
+        f"    Pc = {module}:parent_count(Pid),\n"
+        '    io:format("TRACE: parent_count ~p~n", [Pc]),\n'
+        '    io:format("TRACE: done~n"),\n'
+        "    init:stop().\n"
+    )
+
+
 def js_canary(_: str) -> str:
     return """
 const inst = new Canary();
@@ -1287,6 +1540,7 @@ def _erlang_persist_escript(meta: dict) -> str:
 _ERLANG_ESCRIPT_BY_KIND = {
     "persist": lambda meta: _erlang_persist_escript(meta),
     "selfcall": lambda meta: _erlang_selfcall_escript(meta),
+    "hsm": lambda meta: _erlang_hsm_escript(meta),
 }
 
 
@@ -1295,16 +1549,19 @@ def erlang_case_supported(meta: dict) -> bool:
     `if ( ) { }` — each arm is an expression returning a value, the
     binding flows through `DataN` record-update chains, and statements
     are `,`-separated rather than `;`-terminated. Phase-3 selfcall's
-    `if_guarded` / `if_both_arms` post-structures would need a proper
-    Erlang if-to-case transform before they can round-trip. Until
-    that's built, we only run the `linear` post-structure on Erlang.
+    `if_guarded` / `if_both_arms` post-structures (and the same two
+    in Phase-4 HSM) would need a proper Erlang if-to-case transform
+    before they can round-trip. Until that's built, we only run the
+    `linear` post-structure on Erlang.
 
-    Other harness kinds don't emit language-neutral `if` blocks
-    (persist has none; future kinds are evaluated when added), so
-    this filter is narrowly scoped."""
-    if meta.get("harness_kind") != "selfcall":
-        return True
-    return meta.get("axes", {}).get("post_structure") == "linear"
+    Persist has no language-neutral `if` blocks, so it's unaffected."""
+    kind = meta.get("harness_kind")
+    axes = meta.get("axes", {})
+    if kind == "selfcall":
+        return axes.get("post_structure") == "linear"
+    if kind == "hsm":
+        return axes.get("post_forward_structure") == "linear"
+    return True
 
 
 def erlang_run_custom(emitted: Path, out_dir: Path, meta: dict, ctx: dict) -> tuple:
@@ -2064,7 +2321,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=py_canary,
-        renderers={'persist': py_persist, 'selfcall': py_selfcall},
+        renderers={'persist': py_persist, 'selfcall': py_selfcall, 'hsm': py_hsm},
         rewrite_trace=_py_passthrough,
         notes="Pickle blob. staticmethod restore_state. Oracle reference.",
     ),
@@ -2076,7 +2333,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=js_canary,
-        renderers={'persist': js_persist, 'selfcall': js_selfcall},
+        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm},
         rewrite_trace=_js_trace,
         notes="JSON string blob. camelCase methods. Requires .mjs for ESM.",
     ),
@@ -2088,7 +2345,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=ts_canary,
-        renderers={'persist': js_persist, 'selfcall': js_selfcall},  # JS & TS share persist harness text
+        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm},  # JS & TS share persist harness text
         rewrite_trace=_js_trace,  # same syntax as JS
         notes="JSON string blob. Same method names as JavaScript.",
     ),
@@ -2100,7 +2357,7 @@ LANGS = {
         save_method="SaveState",
         restore_call="Restore{S}({B})",  # package-level function
         render_canary=go_canary,
-        renderers={'persist': go_persist, 'selfcall': go_selfcall},
+        renderers={'persist': go_persist, 'selfcall': go_selfcall, 'hsm': go_hsm},
         rewrite_trace=_go_trace,
         prolog='package main\n\nimport (\n\t"encoding/json"\n\t"fmt"\n)\n\nvar _ = json.Marshal\n',
         notes="JSON blob. PascalCase methods. Restore is pkg-level `RestoreP()`.",
@@ -2113,7 +2370,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=ruby_canary,
-        renderers={'persist': ruby_persist, 'selfcall': ruby_selfcall},
+        renderers={'persist': ruby_persist, 'selfcall': ruby_selfcall, 'hsm': ruby_hsm},
         rewrite_trace=_ruby_trace,
         prolog="require 'json'\n",
         notes="JSON blob. snake_case methods, classmethod restore_state.",
@@ -2126,7 +2383,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=lua_canary,
-        renderers={'persist': lua_persist, 'selfcall': lua_selfcall},
+        renderers={'persist': lua_persist, 'selfcall': lua_selfcall, 'hsm': lua_hsm},
         rewrite_trace=_lua_trace,
         docker_image="docker-lua",
         notes=(
@@ -2140,7 +2397,7 @@ LANGS = {
         out_ext="gd",
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
-        renderers={'persist': gdscript_persist, 'selfcall': gdscript_selfcall},
+        renderers={'persist': gdscript_persist, 'selfcall': gdscript_selfcall, 'hsm': gdscript_hsm},
         run_custom=gdscript_run_custom,
         rewrite_trace=_gdscript_trace,
         docker_image="docker-gdscript",  # informational; custom hook wraps itself
@@ -2160,7 +2417,7 @@ LANGS = {
         run=run_c,
         save_method="save_state",
         restore_call="{S}_restore_state({B})",
-        renderers={'persist': c_persist, 'selfcall': c_selfcall},
+        renderers={'persist': c_persist, 'selfcall': c_selfcall, 'hsm': c_hsm},
         rewrite_trace=_c_trace,
         docker_image="docker-c",
         # framec's C codegen uses cJSON and bool; user-supplied includes
@@ -2206,7 +2463,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=rust_canary,
-        renderers={'persist': rust_persist, 'selfcall': rust_selfcall},
+        renderers={'persist': rust_persist, 'selfcall': rust_selfcall, 'hsm': rust_hsm},
         rewrite_trace=_rust_trace,
         notes="JSON string. save_state(&mut self), restore_state(json: String).",
     ),
@@ -2218,7 +2475,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=php_canary,
-        renderers={'persist': php_persist, 'selfcall': php_selfcall},
+        renderers={'persist': php_persist, 'selfcall': php_selfcall, 'hsm': php_hsm},
         rewrite_trace=_php_trace,
         prolog="<?php\n",
         notes="JSON string blob. static restore_state. New() fires constructor.",
@@ -2231,7 +2488,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=dart_canary,
-        renderers={'persist': dart_persist, 'selfcall': dart_selfcall},
+        renderers={'persist': dart_persist, 'selfcall': dart_selfcall, 'hsm': dart_hsm},
         rewrite_trace=_dart_trace,
         prolog="import 'dart:convert';\n",
         notes="JSON string. camelCase methods (saveState/restoreState).",
@@ -2245,7 +2502,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=java_canary,
-        renderers={'persist': java_persist, 'selfcall': java_selfcall},
+        renderers={'persist': java_persist, 'selfcall': java_selfcall, 'hsm': java_hsm},
         rewrite_trace=_java_trace,
         docker_image="docker-java",
         notes=(
@@ -2263,7 +2520,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=kotlin_canary,
-        renderers={'persist': kotlin_persist, 'selfcall': kotlin_selfcall},
+        renderers={'persist': kotlin_persist, 'selfcall': kotlin_selfcall, 'hsm': kotlin_hsm},
         rewrite_trace=_kotlin_trace,
         docker_image="docker-kotlin",
         # kotlinc -J-Xmx2g: 2GB heap per invocation. At --jobs=14 that's
@@ -2283,7 +2540,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=swift_canary,
-        renderers={'persist': swift_persist, 'selfcall': swift_selfcall},
+        renderers={'persist': swift_persist, 'selfcall': swift_selfcall, 'hsm': swift_hsm},
         rewrite_trace=_swift_trace,
         notes="JSON string. camelCase methods. swiftc produces single binary.",
     ),
@@ -2296,7 +2553,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=cpp_canary,
-        renderers={'persist': cpp_persist, 'selfcall': cpp_selfcall},
+        renderers={'persist': cpp_persist, 'selfcall': cpp_selfcall, 'hsm': cpp_hsm},
         rewrite_trace=_cpp_trace,
         docker_image="docker-cpp",
         # Framec's C++ codegen references `nlohmann::json` in
@@ -2319,7 +2576,7 @@ LANGS = {
         save_method="SaveState",
         restore_call="{S}.RestoreState({B})",
         render_canary=csharp_canary,
-        renderers={'persist': csharp_persist, 'selfcall': csharp_selfcall},
+        renderers={'persist': csharp_persist, 'selfcall': csharp_selfcall, 'hsm': csharp_hsm},
         rewrite_trace=_csharp_trace,
         notes="JSON string. PascalCase methods. dotnet csproj + build+run.",
     ),

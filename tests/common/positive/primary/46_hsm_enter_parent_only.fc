@@ -1,0 +1,77 @@
+@@target c
+
+// Test 46: HSM Enter in Parent Only
+// Parent has $>(); child does not. Parent enter must NOT auto-fire
+// when child is entered — only on direct transition to parent.
+
+@@system HSMEnterParentOnly {
+    interface:
+        go_to_child(): void
+        go_to_parent(): void
+        get_parent_enter(): int
+        get_state(): char*
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_parent_enter(): int { @@:(self->parent_enter) return; }
+            get_state(): char* { @@:("Start") return; }
+        }
+
+        $Child => $Parent {
+            go_to_parent() { -> $Parent }
+            get_parent_enter(): int { @@:(self->parent_enter) return; }
+            get_state(): char* { @@:("Child") return; }
+        }
+
+        $Parent {
+            $>() { self->parent_enter = self->parent_enter + 1; }
+            go_to_child() { -> $Child }
+            get_parent_enter(): int { @@:(self->parent_enter) return; }
+            get_state(): char* { @@:("Parent") return; }
+        }
+    domain:
+        parent_enter : int
+}
+
+int main() {
+    printf("=== Test 46: HSM Enter in Parent Only ===\n");
+    HSMEnterParentOnly* s = @@HSMEnterParentOnly();
+
+    // TC2.2.1: Child entry runs without error, no implicit parent enter
+    HSMEnterParentOnly_go_to_child(s);
+    if (strcmp(HSMEnterParentOnly_get_state(s), "Child") != 0) {
+        printf("FAIL: expected Child\n"); return 1;
+    }
+    if (HSMEnterParentOnly_get_parent_enter(s) != 0) {
+        printf("FAIL: parent_enter should be 0 after child entry, got %d\n",
+               HSMEnterParentOnly_get_parent_enter(s));
+        return 1;
+    }
+    printf("TC2.2.1+2: Child enters, parent enter NOT auto-fired - PASS\n");
+
+    // TC2.2.3: Direct to parent fires its enter
+    HSMEnterParentOnly_go_to_parent(s);
+    if (strcmp(HSMEnterParentOnly_get_state(s), "Parent") != 0
+        || HSMEnterParentOnly_get_parent_enter(s) != 1) {
+        printf("FAIL: direct parent transition: state=%s, parent_enter=%d\n",
+               HSMEnterParentOnly_get_state(s),
+               HSMEnterParentOnly_get_parent_enter(s));
+        return 1;
+    }
+    printf("TC2.2.3: Parent enter fires on direct transition - PASS\n");
+
+    // TC2.2.4: Back to child; parent_enter unchanged
+    HSMEnterParentOnly_go_to_child(s);
+    if (HSMEnterParentOnly_get_parent_enter(s) != 1) {
+        printf("FAIL: parent_enter changed on child re-entry, got %d\n",
+               HSMEnterParentOnly_get_parent_enter(s));
+        return 1;
+    }
+    printf("TC2.2.4: Re-entering child leaves parent_enter at 1 - PASS\n");
+
+    printf("PASS: HSM enter in parent only works correctly\n");
+    HSMEnterParentOnly_destroy(s);
+    return 0;
+}

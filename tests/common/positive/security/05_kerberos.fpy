@@ -1,0 +1,209 @@
+@@target python_3
+
+# Cookbook 90: Kerberos Ticket Lifecycle
+# HSM: $HasValidTgt is an abstract parent that centralizes tick()
+# (TGT expiry) and logout(). $HasTgt/$AwaitingServiceTicket/
+# $HasServiceTicket are its children. $HasServiceTicket overrides
+# tick() to also check the shorter ST expiry.
+
+@@system KerberosClient {
+    interface:
+        authenticate(user: str, password: str)
+        preauth_accepted(tgt: str, session_key: str, expiry: int)
+        preauth_rejected(reason: str)
+        request_service(spn: str)
+        service_ticket_received(st: str, expiry: int)
+        service_ticket_rejected(reason: str)
+        tick(now: int)
+        logout()
+        get_status(): str = ""
+        get_tgt(): str
+        get_service_ticket(): str
+
+    machine:
+        $Idle {
+            authenticate(user: str, password: str) {
+                self.user = user
+                -> $AwaitingTgt
+            }
+            get_status(): str { @@:("idle") }
+            get_tgt(): str { @@:(self.tgt) }
+            get_service_ticket(): str { @@:(self.service_ticket) }
+        }
+
+        $AwaitingTgt {
+            preauth_accepted(tgt: str, session_key: str, expiry: int) {
+                self.tgt = tgt
+                self.session_key = session_key
+                self.tgt_expiry = expiry
+                -> $HasTgt
+            }
+            preauth_rejected(reason: str) { -> $Failed }
+            get_status(): str { @@:("awaiting_tgt") }
+            get_tgt(): str { @@:(self.tgt) }
+            get_service_ticket(): str { @@:(self.service_ticket) }
+        }
+
+        $HasValidTgt {
+            tick(now: int) {
+                if now >= self.tgt_expiry:
+                    self.tgt = ""
+                    self.session_key = ""
+                    self.tgt_expiry = 0
+                    self.service_ticket = ""
+                    self.st_expiry = 0
+                    -> $Idle
+            }
+            logout() {
+                self.tgt = ""
+                self.session_key = ""
+                self.tgt_expiry = 0
+                self.service_ticket = ""
+                self.st_expiry = 0
+                -> $Idle
+            }
+            get_tgt(): str { @@:(self.tgt) }
+            get_service_ticket(): str { @@:(self.service_ticket) }
+        }
+
+        $HasTgt => $HasValidTgt {
+            request_service(spn: str) { -> $AwaitingServiceTicket }
+            get_status(): str { @@:("has_tgt") }
+            => $^
+        }
+
+        $AwaitingServiceTicket => $HasValidTgt {
+            service_ticket_received(st: str, expiry: int) {
+                self.service_ticket = st
+                self.st_expiry = expiry
+                -> $HasServiceTicket
+            }
+            service_ticket_rejected(reason: str) { -> $HasTgt }
+            get_status(): str { @@:("awaiting_st") }
+            => $^
+        }
+
+        $HasServiceTicket => $HasValidTgt {
+            tick(now: int) {
+                if now >= self.tgt_expiry:
+                    self.tgt = ""
+                    self.session_key = ""
+                    self.tgt_expiry = 0
+                    self.service_ticket = ""
+                    self.st_expiry = 0
+                    -> $Idle
+                elif now >= self.st_expiry:
+                    self.service_ticket = ""
+                    -> $HasTgt
+            }
+            request_service(spn: str) { -> $AwaitingServiceTicket }
+            get_status(): str { @@:("has_st") }
+            => $^
+        }
+
+        $Failed {
+            get_status(): str { @@:("failed") }
+            get_tgt(): str { @@:(self.tgt) }
+            get_service_ticket(): str { @@:(self.service_ticket) }
+        }
+
+    domain:
+        user: str = ""
+        tgt: str = ""
+        session_key: str = ""
+        tgt_expiry: int = 0
+        service_ticket: str = ""
+        st_expiry: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    k = @@KerberosClient()
+    check("idle", k.get_status(), "idle")
+
+    # request_service has no handler in $Idle — silently absorbed.
+    k.request_service("HTTP/web")
+    check("idle absorbs request_service", k.get_status(), "idle")
+    check("no service ticket in idle", k.get_service_ticket(), "")
+
+    k.authenticate("alice", "pw")
+    check("awaiting tgt", k.get_status(), "awaiting_tgt")
+
+    # Again — request_service has no handler here.
+    k.request_service("HTTP/web")
+    check("awaiting absorbs request_service", k.get_status(), "awaiting_tgt")
+
+    k.preauth_accepted("TGT-abc", "K-123", 100)
+    check("has tgt", k.get_status(), "has_tgt")
+    check("tgt stored", k.get_tgt(), "TGT-abc")
+
+    # Tick before expiry: no-op via HSM parent's tick handler
+    k.tick(50)
+    check("still has tgt pre-expiry", k.get_status(), "has_tgt")
+
+    # Request a service ticket
+    k.request_service("HTTP/web")
+    check("awaiting st", k.get_status(), "awaiting_st")
+
+    k.service_ticket_received("ST-xyz", 80)
+    check("has st", k.get_status(), "has_st")
+    check("st stored", k.get_service_ticket(), "ST-xyz")
+
+    # ST expires before TGT -> falls back to $HasTgt
+    k.tick(85)
+    check("ST expired -> has_tgt", k.get_status(), "has_tgt")
+    check("st cleared", k.get_service_ticket(), "")
+    check("tgt still there", k.get_tgt(), "TGT-abc")
+
+    # Re-request another ST
+    k.request_service("HTTP/web")
+    k.service_ticket_received("ST-2", 95)
+    check("has st 2", k.get_status(), "has_st")
+
+    # TGT expires -> everything wiped, back to $Idle
+    k.tick(100)
+    check("tgt expired -> idle", k.get_status(), "idle")
+    check("tgt zeroed", k.get_tgt(), "")
+    check("st zeroed", k.get_service_ticket(), "")
+
+    # Logout from $HasTgt clears secrets (via HSM parent)
+    k2 = @@KerberosClient()
+    k2.authenticate("alice", "pw")
+    k2.preauth_accepted("TGT-xx", "K-yy", 200)
+    k2.logout()
+    check("logout from has_tgt -> idle", k2.get_status(), "idle")
+    check("logout cleared tgt", k2.get_tgt(), "")
+
+    # Logout from $HasServiceTicket also clears (inherited from parent)
+    k3 = @@KerberosClient()
+    k3.authenticate("alice", "pw")
+    k3.preauth_accepted("TGT-1", "K-1", 500)
+    k3.request_service("spn")
+    k3.service_ticket_received("ST-1", 300)
+    k3.logout()
+    check("logout from has_st -> idle", k3.get_status(), "idle")
+    check("logout cleared st", k3.get_service_ticket(), "")
+
+    # Pre-auth rejection
+    k4 = @@KerberosClient()
+    k4.authenticate("bob", "wrong")
+    k4.preauth_rejected("invalid_password")
+    check("preauth rejected", k4.get_status(), "failed")
+
+    # Service ticket rejection returns to $HasTgt (keeping session)
+    k5 = @@KerberosClient()
+    k5.authenticate("alice", "pw")
+    k5.preauth_accepted("TGT-q", "K-q", 500)
+    k5.request_service("deny_me")
+    k5.service_ticket_rejected("no_access")
+    check("st rejected -> has_tgt", k5.get_status(), "has_tgt")
+    check("tgt retained", k5.get_tgt(), "TGT-q")
+
+    print("PASS: kerberos")

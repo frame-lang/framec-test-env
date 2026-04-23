@@ -1,0 +1,220 @@
+@@target python_3
+
+# Cookbook 97: Servo Homing Sequence
+# Pipeline: SeekingLimit -> BackingOff -> FindingIndex -> Homed.
+# Retry via state re-entry (SeekingLimit -> SeekingLimit) increments
+# attempts. fault() centralized at $Homing HSM parent.
+
+@@system ServoHoming {
+    interface:
+        home()
+        tick()
+        limit_hit()
+        index_pulse()
+        fault(reason: str)
+        status(): str
+        get_attempts(): int
+
+    machine:
+        $Unhomed {
+            home() {
+                self.attempts = 0
+                -> $SeekingLimit
+            }
+            status(): str { @@:("unhomed") }
+            get_attempts(): int { @@:(self.attempts) }
+        }
+
+        $Active {
+            get_attempts(): int { @@:(self.attempts) }
+        }
+
+        $Homing => $Active {
+            fault(reason: str) {
+                self.fault_reason = reason
+                -> $Fault
+            }
+            => $^
+        }
+
+        $SeekingLimit => $Homing {
+            $>() {
+                self.attempts = self.attempts + 1
+                self.travel = 0
+            }
+
+            tick() {
+                self.travel = self.travel + self.seek_speed
+                if self.travel > self.max_travel:
+                    if self.attempts >= self.max_attempts:
+                        @@:self.fault("limit not found")
+                    else:
+                        -> $SeekingLimit
+            }
+
+            limit_hit() { -> $BackingOff }
+
+            status(): str { @@:("seeking limit") }
+            => $^
+        }
+
+        $BackingOff => $Homing {
+            $>() {
+                self.backoff_remaining = self.backoff_distance
+            }
+
+            tick() {
+                self.backoff_remaining = self.backoff_remaining - self.seek_speed
+                if self.backoff_remaining <= 0:
+                    -> $FindingIndex
+            }
+
+            status(): str { @@:("backing off") }
+            => $^
+        }
+
+        $FindingIndex => $Homing {
+            $>() { self.index_travel = 0 }
+
+            tick() {
+                self.index_travel = self.index_travel + self.index_speed
+                if self.index_travel > self.index_window:
+                    @@:self.fault("index pulse missing")
+            }
+
+            index_pulse() {
+                self.position = 0
+                -> $Homed
+            }
+
+            status(): str { @@:("finding index") }
+            => $^
+        }
+
+        $Homed {
+            home() {
+                self.attempts = 0
+                -> $SeekingLimit
+            }
+            status(): str { @@:("homed") }
+            get_attempts(): int { @@:(self.attempts) }
+        }
+
+        $Fault {
+            home() {
+                self.attempts = 0
+                self.fault_reason = ""
+                -> $SeekingLimit
+            }
+            status(): str { @@:("fault") }
+            get_attempts(): int { @@:(self.attempts) }
+        }
+
+    domain:
+        attempts: int = 0
+        max_attempts: int = 3
+        travel: int = 0
+        max_travel: int = 100
+        backoff_remaining: int = 0
+        backoff_distance: int = 10
+        index_travel: int = 0
+        index_window: int = 30
+        seek_speed: int = 5
+        index_speed: int = 1
+        position: int = 0
+        fault_reason: str = ""
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    # Happy-path homing sequence.
+    s = @@ServoHoming()
+    check("unhomed", s.status(), "unhomed")
+
+    s.home()
+    check("seeking limit", s.status(), "seeking limit")
+    check("1 attempt", s.get_attempts(), 1)
+
+    # Hit limit switch early (within max_travel=100)
+    i = 0
+    while i < 3:
+        s.tick()
+        i = i + 1
+    s.limit_hit()
+    check("backing off", s.status(), "backing off")
+
+    # Back off covers backoff_distance(10)/seek_speed(5) = 2 ticks
+    s.tick()
+    s.tick()
+    check("finding index", s.status(), "finding index")
+
+    # Find the index pulse within index_window=30
+    s.index_pulse()
+    check("homed", s.status(), "homed")
+
+    # Re-home from Homed
+    s.home()
+    check("re-homing from homed", s.status(), "seeking limit")
+    check("attempts reset on re-home", s.get_attempts(), 1)
+
+    # Retry path: overtravel up to max_attempts=3 then fault.
+    s2 = @@ServoHoming()
+    s2.home()
+    # Drive past max_travel to force retry — max_travel=100, seek_speed=5
+    # -> 21 ticks to overtravel (travel becomes 105 > 100)
+    i = 0
+    while i < 21:
+        s2.tick()
+        i = i + 1
+    # First overtravel: attempts=1 < max_attempts=3, retry
+    check("retry after overtravel", s2.status(), "seeking limit")
+    check("retry attempt 2", s2.get_attempts(), 2)
+
+    # Second overtravel
+    i = 0
+    while i < 21:
+        s2.tick()
+        i = i + 1
+    check("retry 3", s2.get_attempts(), 3)
+
+    # Third overtravel — attempts == max_attempts, fault.
+    i = 0
+    while i < 21:
+        s2.tick()
+        i = i + 1
+    check("fault after max attempts", s2.status(), "fault")
+
+    # Fault -> home() re-initialises
+    s2.home()
+    check("fault cleared by home", s2.status(), "seeking limit")
+    check("attempts reset on clear", s2.get_attempts(), 1)
+
+    # Index pulse missing path: find index but overflow window.
+    s3 = @@ServoHoming()
+    s3.home()
+    s3.limit_hit()       # go to BackingOff
+    s3.tick(); s3.tick() # complete backoff -> FindingIndex
+    check("in find index", s3.status(), "finding index")
+
+    # Tick past index_window=30 with index_speed=1: 31 ticks needed
+    i = 0
+    while i < 31:
+        s3.tick()
+        i = i + 1
+    check("index missing -> fault", s3.status(), "fault")
+
+    # Stray events are silently absorbed in states that don't handle them.
+    s4 = @@ServoHoming()
+    s4.limit_hit()
+    check("unhomed absorbs limit_hit", s4.status(), "unhomed")
+    s4.index_pulse()
+    check("unhomed absorbs index_pulse", s4.status(), "unhomed")
+
+    print("PASS: servo_homing")

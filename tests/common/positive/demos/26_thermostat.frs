@@ -1,0 +1,92 @@
+@@target rust
+
+@@system Thermostat {
+    interface:
+        set_temp(target: i32)
+        tick()
+        status(): String
+
+    machine:
+        $Off {
+            set_temp(target: i32) {
+                self.target = target;
+                -> $LowHeat
+            }
+            status(): String { @@:(String::from("off")) }
+        }
+        $LowHeat => $On {
+            $>() { self.heat_rate = 1; }
+            status(): String { @@:(format!("low heat ({} -> {})", self.current, self.target)) }
+            => $^
+        }
+        $HighHeat => $On {
+            $>() { self.heat_rate = 2; }
+            status(): String { @@:(format!("high heat ({} -> {})", self.current, self.target)) }
+            => $^
+        }
+        $On {
+            tick() {
+                self.current = self.current + self.heat_rate;
+                if self.current >= self.target {
+                    self.current = self.target;
+                    -> $Cooling
+                } else if self.target - self.current > 5 {
+                    if self.heat_rate < 2 {
+                        -> $HighHeat
+                    }
+                } else if self.target - self.current <= 3 {
+                    if self.heat_rate > 1 {
+                        -> $LowHeat
+                    }
+                }
+            }
+            set_temp(target: i32) { self.target = target; }
+        }
+        $Cooling {
+            $>() { self.heat_rate = 0; }
+            tick() {
+                self.current = self.current - 1;
+                if self.current <= self.target {
+                    -> $Off
+                }
+            }
+            status(): String { @@:(format!("cooling ({} -> {})", self.current, self.target)) }
+        }
+
+    domain:
+        current: i32 = 65
+        target: i32 = 65
+        heat_rate: i32 = 0
+}
+
+fn main() {
+    let mut t = @@Thermostat();
+    let mut failures = 0;
+
+    if t.status() != "off" {
+        println!("FAIL: initial status");
+        failures += 1;
+    }
+
+    t.set_temp(75);
+    let mut cooled = false;
+    let mut i = 0;
+    while i < 20 {
+        t.tick();
+        let s = t.status();
+        if s.contains("cooling") || s == "off" {
+            cooled = true;
+        }
+        i += 1;
+    }
+    if !cooled {
+        println!("FAIL: never cooled");
+        failures += 1;
+    }
+
+    if failures > 0 {
+        println!("FAIL: thermostat ({})", failures);
+        std::process::exit(1);
+    }
+    println!("PASS: thermostat");
+}

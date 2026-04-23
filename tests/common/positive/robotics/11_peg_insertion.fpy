@@ -1,0 +1,213 @@
+@@target python_3
+
+# Cookbook 106: Force-Controlled Insertion — Peg-in-Hole
+# Pipeline: Approaching -> Searching -> Inserting -> Seated.
+# Contact, hole-found, jam detection all gated on force readings.
+# Abort from any operation state -> Retracting.
+
+@@system PegInsertion {
+    interface:
+        start(target_depth: float)
+        force_reading(fz: float)
+        tick()
+        abort()
+        retracted()
+        status(): str
+        current_depth(): float
+        get_retries(): int
+
+    machine:
+        $Idle {
+            start(target_depth: float) {
+                self.target_depth = target_depth
+                self.depth = 0.0
+                self.retry_count = 0
+                -> $Approaching
+            }
+            status(): str { @@:("idle") }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+        $Operation {
+            abort() { -> $Retracting }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+        $Approaching => $Operation {
+            force_reading(fz: float) {
+                if fz > self.contact_threshold:
+                    -> $Searching
+            }
+            status(): str { @@:("approaching") }
+            => $^
+        }
+
+        $Searching => $Operation {
+            $>() { self.search_ticks = 0 }
+            force_reading(fz: float) {
+                if fz < self.hole_threshold:
+                    -> $Inserting
+            }
+            tick() {
+                self.search_ticks = self.search_ticks + 1
+                if self.search_ticks > self.search_timeout:
+                    -> $Retreating
+            }
+            status(): str { @@:("searching") }
+            => $^
+        }
+
+        $Inserting => $Operation {
+            force_reading(fz: float) {
+                if fz > self.jam_threshold:
+                    -> $Jammed
+            }
+            tick() {
+                self.depth = self.depth + self.insert_velocity * 0.01
+                if self.depth >= self.target_depth:
+                    -> $Seated
+            }
+            status(): str { @@:("inserting") }
+            => $^
+        }
+
+        $Jammed => $Operation {
+            $>() { self.retry_count = self.retry_count + 1 }
+            tick() {
+                if self.retry_count >= self.max_retries:
+                    -> $Failed
+                else:
+                    -> $Retreating
+            }
+            status(): str { @@:("jammed") }
+            => $^
+        }
+
+        $Retreating => $Operation {
+            tick() {
+                # Retreat lifts back to near-surface, then restart search
+                -> $Searching
+            }
+            status(): str { @@:("retreating") }
+            => $^
+        }
+
+        $Seated {
+            status(): str { @@:("seated") }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+        $Retracting {
+            retracted() { -> $Idle }
+            status(): str { @@:("retracting") }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+        $Failed {
+            start(target_depth: float) {
+                self.target_depth = target_depth
+                self.depth = 0.0
+                self.retry_count = 0
+                -> $Approaching
+            }
+            status(): str { @@:("failed") }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+    domain:
+        target_depth: float = 10.0
+        depth: float = 0.0
+        retry_count: int = 0
+        max_retries: int = 2
+        search_ticks: int = 0
+        search_timeout: int = 30
+        contact_threshold: float = 1.0
+        hole_threshold: float = 0.2
+        jam_threshold: float = 10.0
+        insert_velocity: float = 5.0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    p = @@PegInsertion()
+    check("idle", p.status(), "idle")
+
+    p.start(10.0)
+    check("approaching", p.status(), "approaching")
+
+    # Contact detected (Fz rose)
+    p.force_reading(2.0)
+    check("searching", p.status(), "searching")
+
+    # Hole found (Fz dropped)
+    p.force_reading(0.05)
+    check("inserting", p.status(), "inserting")
+
+    # Tick to full depth: need 10.0 / (5.0 * 0.01) = 200 ticks
+    i = 0
+    while i < 220:
+        p.tick()
+        if p.status() == "seated":
+            break
+        i = i + 1
+    check("seated", p.status(), "seated")
+    check("depth reached", p.current_depth() >= 10.0, True)
+
+    # Jam detection path
+    p2 = @@PegInsertion()
+    p2.start(10.0)
+    p2.force_reading(2.0)   # contact
+    p2.force_reading(0.05)  # hole
+    p2.force_reading(15.0)  # jam
+    check("jammed", p2.status(), "jammed")
+    check("retry counted", p2.get_retries(), 1)
+
+    # After jam, tick transitions to retreating then searching
+    p2.tick()
+    check("retreating", p2.status(), "retreating")
+    p2.tick()
+    check("back to searching", p2.status(), "searching")
+
+    # Second jam within retry budget
+    p2.force_reading(0.05)   # find hole again
+    check("re-inserting", p2.status(), "inserting")
+    p2.force_reading(15.0)
+    check("jammed again", p2.status(), "jammed")
+    p2.tick()
+    check("exhausted -> failed", p2.status(), "failed")
+
+    # Search timeout -> retreating then retry
+    p3 = @@PegInsertion()
+    p3.start(10.0)
+    p3.force_reading(2.0)   # -> searching
+    i = 0
+    while i < 35:
+        p3.tick()
+        if p3.status() != "searching":
+            break
+        i = i + 1
+    check("search timeout -> retreating", p3.status(), "retreating")
+
+    # Abort from any operation state
+    p4 = @@PegInsertion()
+    p4.start(10.0)
+    p4.force_reading(2.0)
+    p4.force_reading(0.05)   # inserting
+    p4.abort()
+    check("abort -> retracting", p4.status(), "retracting")
+    p4.retracted()
+    check("retracted -> idle", p4.status(), "idle")
+
+    print("PASS: peg_insertion")

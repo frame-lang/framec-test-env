@@ -1,0 +1,151 @@
+@@target c
+
+// Test 50: HSM Omitted Handlers - Forwarding Behavior
+// Two systems test:
+//   HSMOmittedHandlers: explicit => $^ vs no forward
+//   HSMDefaultForward:  state-level => $^ forwards all unhandled events
+
+@@system HSMOmittedHandlers {
+    interface:
+        handled_by_child(): void
+        forwarded_explicitly(): void
+        unhandled_no_forward(): void
+        get_child_handled(): int
+        get_parent_handled_by_child(): int
+        get_parent_forwarded_explicitly(): int
+        get_parent_unhandled_no_forward(): int
+        get_child_before_forward(): int
+
+    machine:
+        $Child => $Parent {
+            handled_by_child() { self->child_handled = self->child_handled + 1; }
+            forwarded_explicitly() {
+                self->child_before_forward = self->child_before_forward + 1;
+                => $^
+            }
+            // no handler for unhandled_no_forward — silently dropped
+
+            get_child_handled(): int { @@:(self->child_handled) return; }
+            get_parent_handled_by_child(): int { @@:(self->parent_handled_by_child) return; }
+            get_parent_forwarded_explicitly(): int { @@:(self->parent_forwarded_explicitly) return; }
+            get_parent_unhandled_no_forward(): int { @@:(self->parent_unhandled_no_forward) return; }
+            get_child_before_forward(): int { @@:(self->child_before_forward) return; }
+        }
+
+        $Parent {
+            handled_by_child() { self->parent_handled_by_child = self->parent_handled_by_child + 1; }
+            forwarded_explicitly() { self->parent_forwarded_explicitly = self->parent_forwarded_explicitly + 1; }
+            unhandled_no_forward() { self->parent_unhandled_no_forward = self->parent_unhandled_no_forward + 1; }
+            get_child_handled(): int { @@:(self->child_handled) return; }
+            get_parent_handled_by_child(): int { @@:(self->parent_handled_by_child) return; }
+            get_parent_forwarded_explicitly(): int { @@:(self->parent_forwarded_explicitly) return; }
+            get_parent_unhandled_no_forward(): int { @@:(self->parent_unhandled_no_forward) return; }
+            get_child_before_forward(): int { @@:(self->child_before_forward) return; }
+        }
+    domain:
+        child_handled                : int
+        child_before_forward         : int
+        parent_handled_by_child      : int
+        parent_forwarded_explicitly  : int
+        parent_unhandled_no_forward  : int
+}
+
+@@system HSMDefaultForward {
+    interface:
+        child_handled(): void
+        parent_handled(): void
+        both_respond(): void
+        get_c_child_handled(): int
+        get_p_child_handled(): int
+        get_p_parent_handled(): int
+        get_p_both_respond(): int
+
+    machine:
+        $Child => $Parent {
+            child_handled() { self->c_child_handled = self->c_child_handled + 1; }
+            get_c_child_handled(): int { @@:(self->c_child_handled) return; }
+            get_p_child_handled(): int { @@:(self->p_child_handled) return; }
+            get_p_parent_handled(): int { @@:(self->p_parent_handled) return; }
+            get_p_both_respond(): int { @@:(self->p_both_respond) return; }
+            => $^
+        }
+
+        $Parent {
+            child_handled() { self->p_child_handled = self->p_child_handled + 1; }
+            parent_handled() { self->p_parent_handled = self->p_parent_handled + 1; }
+            both_respond() { self->p_both_respond = self->p_both_respond + 1; }
+            get_c_child_handled(): int { @@:(self->c_child_handled) return; }
+            get_p_child_handled(): int { @@:(self->p_child_handled) return; }
+            get_p_parent_handled(): int { @@:(self->p_parent_handled) return; }
+            get_p_both_respond(): int { @@:(self->p_both_respond) return; }
+        }
+    domain:
+        c_child_handled   : int
+        p_child_handled   : int
+        p_parent_handled  : int
+        p_both_respond    : int
+}
+
+int main() {
+    printf("=== Test 50: HSM Omitted Handlers ===\n");
+
+    // Part 1: Explicit forward vs no-forward
+    HSMOmittedHandlers* s1 = @@HSMOmittedHandlers();
+
+    HSMOmittedHandlers_handled_by_child(s1);
+    if (HSMOmittedHandlers_get_child_handled(s1) != 1
+        || HSMOmittedHandlers_get_parent_handled_by_child(s1) != 0) {
+        printf("FAIL: handled_by_child: child=%d parent=%d\n",
+               HSMOmittedHandlers_get_child_handled(s1),
+               HSMOmittedHandlers_get_parent_handled_by_child(s1));
+        return 1;
+    }
+    printf("TC2.6.1: Handled by child, not forwarded - PASS\n");
+
+    HSMOmittedHandlers_forwarded_explicitly(s1);
+    if (HSMOmittedHandlers_get_child_before_forward(s1) != 1
+        || HSMOmittedHandlers_get_parent_forwarded_explicitly(s1) != 1) {
+        printf("FAIL: forwarded_explicitly\n"); return 1;
+    }
+    printf("TC2.6.2: Explicitly forwarded to parent - PASS\n");
+
+    HSMOmittedHandlers_unhandled_no_forward(s1);
+    if (HSMOmittedHandlers_get_parent_unhandled_no_forward(s1) != 0) {
+        printf("FAIL: parent_unhandled_no_forward should be 0, got %d\n",
+               HSMOmittedHandlers_get_parent_unhandled_no_forward(s1));
+        return 1;
+    }
+    printf("TC2.6.3: Unhandled (no forward) silently ignored - PASS\n");
+
+    HSMOmittedHandlers_destroy(s1);
+
+    // Part 2: State-level default forward
+    HSMDefaultForward* s2 = @@HSMDefaultForward();
+
+    HSMDefaultForward_child_handled(s2);
+    if (HSMDefaultForward_get_c_child_handled(s2) != 1
+        || HSMDefaultForward_get_p_child_handled(s2) != 0) {
+        printf("FAIL: child_handled: c=%d p=%d\n",
+               HSMDefaultForward_get_c_child_handled(s2),
+               HSMDefaultForward_get_p_child_handled(s2));
+        return 1;
+    }
+    printf("TC2.6.4: Child handles, not forwarded - PASS\n");
+
+    HSMDefaultForward_parent_handled(s2);
+    if (HSMDefaultForward_get_p_parent_handled(s2) != 1) {
+        printf("FAIL: p_parent_handled expected 1\n"); return 1;
+    }
+    printf("TC2.6.5: Unhandled forwarded via state-level => $^ - PASS\n");
+
+    HSMDefaultForward_both_respond(s2);
+    if (HSMDefaultForward_get_p_both_respond(s2) != 1) {
+        printf("FAIL: p_both_respond expected 1\n"); return 1;
+    }
+    printf("TC2.6.6: Default forward works for multiple events - PASS\n");
+
+    HSMDefaultForward_destroy(s2);
+
+    printf("PASS: HSM omitted handlers work correctly\n");
+    return 0;
+}

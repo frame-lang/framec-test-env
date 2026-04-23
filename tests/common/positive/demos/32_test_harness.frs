@@ -1,0 +1,123 @@
+@@target rust
+
+// Test Harness -- @@:system.state in operations (Rust)
+
+@@system TestHarness {
+    operations:
+        current_state(): String {
+            return @@:system.state;
+        }
+
+    interface:
+        run()
+        pass_test()
+        fail(reason: String)
+        get_state(): String
+        get_result(): String
+
+    machine:
+        $Ready {
+            $.ticks: i32 = 0
+
+            run() {
+                self.result = String::from("");
+                -> $Running
+            }
+            get_state(): String { @@:(String::from("ready")) }
+            get_result(): String { @@:(self.result.clone()) }
+        }
+        $Running {
+            $.ticks: i32 = 0
+
+            pass_test() {
+                self.result = String::from("pass");
+                -> $Passed
+            }
+            fail(reason: String) {
+                self.result = reason;
+                -> $Failed
+            }
+            get_state(): String { @@:(String::from("running")) }
+            get_result(): String { @@:(String::from("")) }
+        }
+        $Passed {
+            run() {
+                self.result = String::from("");
+                -> $Running
+            }
+            get_state(): String { @@:(String::from("passed")) }
+            get_result(): String { @@:(self.result.clone()) }
+        }
+        $Failed {
+            run() {
+                self.result = String::from("");
+                -> $Running
+            }
+            get_state(): String { @@:(String::from("failed")) }
+            get_result(): String { @@:(self.result.clone()) }
+        }
+
+    domain:
+        result: String = String::from("")
+}
+
+fn main() {
+    let mut th = @@TestHarness();
+    let mut failures = 0;
+
+    if th.get_state() != "ready" {
+        println!("FAIL: expected ready");
+        failures += 1;
+    }
+
+    let cs1 = th.current_state();
+    if cs1 != "Ready" {
+        println!("FAIL: current_state expected Ready, got {}", cs1);
+        failures += 1;
+    }
+
+    th.run();
+    if th.get_state() != "running" {
+        println!("FAIL: expected running");
+        failures += 1;
+    }
+
+    let cs2 = th.current_state();
+    if cs2 != "Running" {
+        println!("FAIL: current_state expected Running, got {}", cs2);
+        failures += 1;
+    }
+
+    th.pass_test();
+    if th.get_state() != "passed" {
+        println!("FAIL: expected passed");
+        failures += 1;
+    }
+    if th.get_result() != "pass" {
+        println!("FAIL: result expected pass");
+        failures += 1;
+    }
+
+    th.run();
+    th.fail(String::from("timeout"));
+    if th.get_state() != "failed" {
+        println!("FAIL: expected failed");
+        failures += 1;
+    }
+    if th.get_result() != "timeout" {
+        println!("FAIL: result expected timeout");
+        failures += 1;
+    }
+
+    let cs3 = th.current_state();
+    if cs3 != "Failed" {
+        println!("FAIL: current_state expected Failed, got {}", cs3);
+        failures += 1;
+    }
+
+    if failures > 0 {
+        println!("FAIL: test_harness ({} failures)", failures);
+        std::process::exit(1);
+    }
+    println!("PASS: test_harness");
+}

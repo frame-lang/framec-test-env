@@ -1,0 +1,111 @@
+@@target python_3
+
+# Cookbook 74: Radioactive Decay Chain
+# U-238 → Th-234 → Pa-234 → U-234 → Pb-206 (stable).
+# Probabilistic transitions per tick; each nuclide owns its own law.
+
+import random
+
+@@system DecayChain {
+    interface:
+        tick()
+        nuclide(): str
+        ticks_elapsed(): int
+
+    machine:
+        $U238 {
+            tick() {
+                self.ticks = self.ticks + 1
+                if random.random() < 0.08:
+                    -> $Th234
+            }
+            nuclide(): str { @@:("U-238") }
+            ticks_elapsed(): int { @@:(self.ticks) }
+        }
+        $Th234 {
+            tick() {
+                self.ticks = self.ticks + 1
+                if random.random() < 0.3:
+                    -> $Pa234
+            }
+            nuclide(): str { @@:("Th-234") }
+            ticks_elapsed(): int { @@:(self.ticks) }
+        }
+        $Pa234 {
+            tick() {
+                self.ticks = self.ticks + 1
+                if random.random() < 0.5:
+                    -> $U234
+            }
+            nuclide(): str { @@:("Pa-234") }
+            ticks_elapsed(): int { @@:(self.ticks) }
+        }
+        $U234 {
+            tick() {
+                self.ticks = self.ticks + 1
+                if random.random() < 0.05:
+                    -> $Pb206
+            }
+            nuclide(): str { @@:("U-234") }
+            ticks_elapsed(): int { @@:(self.ticks) }
+        }
+        $Pb206 {
+            nuclide(): str { @@:("Pb-206 (stable)") }
+            ticks_elapsed(): int { @@:(self.ticks) }
+        }
+
+    domain:
+        ticks: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    # Under a fixed seed, the trajectory through the chain is
+    # deterministic and reproducible. The exact tick counts act as
+    # the test's signature for stochastic transitions — any change
+    # in how framec threads random.random() calls, or in the
+    # state-level handler binding, would shift them.
+    random.seed(1)
+    n = @@DecayChain()
+
+    check("start", n.nuclide(), "U-238")
+
+    # Drive until a stable terminal or a cap. Collect transitions.
+    trajectory = [("U-238", 0)]
+    for _ in range(2000):
+        n.tick()
+        name = n.nuclide()
+        if name != trajectory[-1][0]:
+            trajectory.append((name, n.ticks_elapsed()))
+        if name == "Pb-206 (stable)":
+            break
+
+    # Terminal state reached within the cap
+    check("reached stable", n.nuclide(), "Pb-206 (stable)")
+
+    # Full cascade: every nuclide in order. If any link fires out of
+    # order (e.g. U238 → Pa234) or a state is skipped, this fails.
+    expected_path = ["U-238", "Th-234", "Pa-234", "U-234", "Pb-206 (stable)"]
+    actual_path = [name for (name, _) in trajectory]
+    check("full cascade", actual_path, expected_path)
+
+    # Deterministic tick counts under seed=1. If these drift, either
+    # the seed is being applied differently or random.random() is
+    # being called a different number of times inside handlers.
+    expected_ticks = [0, 10, 14, 15, 20]
+    actual_ticks = [t for (_, t) in trajectory]
+    check("deterministic ticks", actual_ticks, expected_ticks)
+
+    # Ticks in $Pb206 don't increment (no tick() handler defined)
+    stable_ticks = n.ticks_elapsed()
+    n.tick()  # silently ignored in $Pb206
+    check("stable absorbs tick", n.ticks_elapsed(), stable_ticks)
+
+    print("PASS: decay_chain")

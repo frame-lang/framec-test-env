@@ -1,0 +1,163 @@
+@@target python_3
+
+# Cookbook 84: ACLS Cardiac Arrest Algorithm
+# HSM: $Coding catches rosc_achieved/pronounce across all active
+# coding states. Rhythm branches into CPR_Shockable / CPR_NonShockable.
+# Each CPR cycle returns to Analyzing for reassessment.
+
+@@system ACLS {
+    interface:
+        start_code()
+        rhythm_check(rhythm: str)
+        cpr_cycle_complete()
+        give_epinephrine()
+        rosc_achieved()
+        pronounce()
+        phase(): str
+        shocks_given(): int
+        cpr_cycles_done(): int
+
+    machine:
+        $PreArrest {
+            start_code() {
+                self.shocks = 0
+                self.cpr_cycles = 0
+                -> $Analyzing
+            }
+            phase(): str { @@:("pre-arrest") }
+            shocks_given(): int { @@:(self.shocks) }
+            cpr_cycles_done(): int { @@:(self.cpr_cycles) }
+        }
+
+        $Coding {
+            rosc_achieved() { -> $ROSC }
+            pronounce() { -> $Terminated }
+            shocks_given(): int { @@:(self.shocks) }
+            cpr_cycles_done(): int { @@:(self.cpr_cycles) }
+        }
+
+        $Analyzing => $Coding {
+            rhythm_check(rhythm: str) {
+                self.last_rhythm = rhythm
+                if rhythm == "VF" or rhythm == "pulseless_VT":
+                    self.shocks = self.shocks + 1
+                    -> $CPR_Shockable
+                else:
+                    -> $CPR_NonShockable
+            }
+            phase(): str { @@:("analyzing") }
+            => $^
+        }
+
+        $CPR_Shockable => $Coding {
+            give_epinephrine() { }
+            cpr_cycle_complete() {
+                self.cpr_cycles = self.cpr_cycles + 1
+                -> $Analyzing
+            }
+            phase(): str { @@:("cpr shockable") }
+            => $^
+        }
+
+        $CPR_NonShockable => $Coding {
+            give_epinephrine() { }
+            cpr_cycle_complete() {
+                self.cpr_cycles = self.cpr_cycles + 1
+                -> $Analyzing
+            }
+            phase(): str { @@:("cpr non-shockable") }
+            => $^
+        }
+
+        $ROSC {
+            phase(): str { @@:("rosc") }
+            shocks_given(): int { @@:(self.shocks) }
+            cpr_cycles_done(): int { @@:(self.cpr_cycles) }
+        }
+
+        $Terminated {
+            phase(): str { @@:("terminated") }
+            shocks_given(): int { @@:(self.shocks) }
+            cpr_cycles_done(): int { @@:(self.cpr_cycles) }
+        }
+
+    domain:
+        last_rhythm: str = ""
+        shocks: int = 0
+        cpr_cycles: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    c = @@ACLS()
+    check("pre-arrest", c.phase(), "pre-arrest")
+
+    # Events from wrong states are silently ignored — PreArrest has no
+    # rhythm_check, cpr_cycle_complete, rosc_achieved, etc.
+    c.rhythm_check("VF")
+    c.cpr_cycle_complete()
+    c.rosc_achieved()
+    check("pre-arrest absorbs", c.phase(), "pre-arrest")
+
+    c.start_code()
+    check("analyzing", c.phase(), "analyzing")
+
+    # Shockable rhythm: shocks +1, CPR_Shockable
+    c.rhythm_check("VF")
+    check("cpr shockable", c.phase(), "cpr shockable")
+    check("1 shock", c.shocks_given(), 1)
+
+    # Epinephrine is a no-op here (documented in ACLS as recorded but
+    # state-independent).
+    c.give_epinephrine()
+    check("epi no-op", c.phase(), "cpr shockable")
+
+    # Complete CPR cycle: back to Analyzing
+    c.cpr_cycle_complete()
+    check("back to analyzing", c.phase(), "analyzing")
+    check("1 cycle done", c.cpr_cycles_done(), 1)
+
+    # Non-shockable rhythm: no shock, CPR_NonShockable
+    c.rhythm_check("asystole")
+    check("non-shockable cpr", c.phase(), "cpr non-shockable")
+    check("still 1 shock", c.shocks_given(), 1)
+
+    c.cpr_cycle_complete()
+    check("2 cycles done", c.cpr_cycles_done(), 2)
+
+    # Another shockable pass
+    c.rhythm_check("pulseless_VT")
+    check("shockable via VT", c.phase(), "cpr shockable")
+    check("2 shocks", c.shocks_given(), 2)
+
+    # ROSC from any CPR state (HSM parent handles it)
+    c.rosc_achieved()
+    check("rosc reached", c.phase(), "rosc")
+
+    # ROSC is terminal for the coding algorithm. No handlers advance.
+    c.rhythm_check("VF")
+    c.cpr_cycle_complete()
+    c.rosc_achieved()
+    check("rosc absorbs all", c.phase(), "rosc")
+    check("final shock count", c.shocks_given(), 2)
+
+    # Second code with pronounce path
+    c2 = @@ACLS()
+    c2.start_code()
+    c2.rhythm_check("asystole")
+    c2.pronounce()
+    check("pronounced", c2.phase(), "terminated")
+
+    # Terminated is also absorbing.
+    c2.rosc_achieved()
+    c2.rhythm_check("VF")
+    check("terminated absorbs", c2.phase(), "terminated")
+
+    print("PASS: acls")

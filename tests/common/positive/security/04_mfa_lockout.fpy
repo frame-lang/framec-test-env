@@ -1,0 +1,173 @@
+@@target python_3
+
+# Cookbook 89: MFA with Lockout
+# Password cannot be skipped (submit_second_factor has no handler
+# in $Idle or $AwaitingPassword). 2FA cannot be skipped (the only
+# path to $Authenticated goes through $AwaitingSecondFactor with a
+# valid code). $Locked absorbs all credential events — only
+# cooldown_elapsed advances.
+#
+# For the test, verify_password/verify_second_factor use simple
+# equality (u=="alice"&&p=="hunter2", code=="123456") and
+# failure_count is a real domain counter.
+
+@@system MfaAuth {
+    interface:
+        submit_username(u: str)
+        submit_password(p: str)
+        submit_second_factor(code: str)
+        cooldown_elapsed()
+        logout()
+        get_status(): str = ""
+        get_failures(): int
+
+    machine:
+        $Idle {
+            submit_username(u: str) {
+                self.username = u
+                -> $AwaitingPassword
+            }
+            get_status(): str { @@:("idle") }
+            get_failures(): int { @@:(self.failures) }
+        }
+
+        $AwaitingPassword {
+            submit_password(p: str) {
+                if self.username == "alice" and p == "hunter2":
+                    -> $AwaitingSecondFactor
+                else:
+                    self.failures = self.failures + 1
+                    if self.failures >= self.lockout_threshold:
+                        -> $Locked
+            }
+            get_status(): str { @@:("awaiting_password") }
+            get_failures(): int { @@:(self.failures) }
+        }
+
+        $AwaitingSecondFactor {
+            $.attempts: int = 0
+
+            submit_second_factor(code: str) {
+                $.attempts = $.attempts + 1
+                if code == "123456":
+                    self.failures = 0
+                    -> $Authenticated
+                elif $.attempts >= 3:
+                    self.failures = self.failures + 1
+                    if self.failures >= self.lockout_threshold:
+                        -> $Locked
+                    else:
+                        -> $AwaitingPassword
+            }
+            get_status(): str { @@:("awaiting_2fa") }
+            get_failures(): int { @@:(self.failures) }
+        }
+
+        $Authenticated {
+            logout() { -> $Idle }
+            get_status(): str { @@:("authenticated") }
+            get_failures(): int { @@:(self.failures) }
+        }
+
+        $Locked {
+            cooldown_elapsed() {
+                # Partial reset: drop to lockout_threshold - 1 so an
+                # attacker who returns after cooldown gets exactly one
+                # more try before re-lock.
+                self.failures = self.lockout_threshold - 1
+                -> $Idle
+            }
+            get_status(): str { @@:("locked") }
+            get_failures(): int { @@:(self.failures) }
+        }
+
+    domain:
+        username: str = ""
+        failures: int = 0
+        lockout_threshold: int = 5
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    # Happy path
+    m = @@MfaAuth()
+    check("idle", m.get_status(), "idle")
+
+    # 2FA cannot be submitted in $Idle — no handler.
+    m.submit_second_factor("123456")
+    check("idle absorbs 2fa", m.get_status(), "idle")
+
+    m.submit_username("alice")
+    check("awaiting password", m.get_status(), "awaiting_password")
+
+    # 2FA cannot be submitted in $AwaitingPassword either — structural.
+    m.submit_second_factor("123456")
+    check("awaiting_password absorbs 2fa", m.get_status(), "awaiting_password")
+
+    m.submit_password("hunter2")
+    check("awaiting 2fa", m.get_status(), "awaiting_2fa")
+    check("no failures on correct password", m.get_failures(), 0)
+
+    m.submit_second_factor("123456")
+    check("authenticated", m.get_status(), "authenticated")
+    check("failure counter reset on success", m.get_failures(), 0)
+
+    m.logout()
+    check("logged out", m.get_status(), "idle")
+
+    # Wrong password bumps failure counter but stays at awaiting_password
+    # until lockout_threshold reached.
+    m2 = @@MfaAuth()
+    m2.submit_username("alice")
+    m2.submit_password("wrong")
+    check("1 failure", m2.get_failures(), 1)
+    check("still awaiting password", m2.get_status(), "awaiting_password")
+
+    m2.submit_password("wrong")
+    m2.submit_password("wrong")
+    m2.submit_password("wrong")
+    check("4 failures", m2.get_failures(), 4)
+
+    # 5th failure triggers lockout
+    m2.submit_password("wrong")
+    check("locked", m2.get_status(), "locked")
+    check("5 failures", m2.get_failures(), 5)
+
+    # Locked absorbs all credential submission events
+    m2.submit_username("alice")
+    m2.submit_password("hunter2")
+    m2.submit_second_factor("123456")
+    check("locked absorbs all", m2.get_status(), "locked")
+
+    # Cooldown frees
+    m2.cooldown_elapsed()
+    check("back to idle after cooldown", m2.get_status(), "idle")
+    check("partial reset to threshold-1", m2.get_failures(), 4)
+
+    # Wrong 2FA three times -> bump failure -> back to awaiting_password
+    m3 = @@MfaAuth()
+    m3.submit_username("alice")
+    m3.submit_password("hunter2")
+    check("2fa active", m3.get_status(), "awaiting_2fa")
+
+    m3.submit_second_factor("bad1")
+    check("2fa after 1 wrong still active", m3.get_status(), "awaiting_2fa")
+    m3.submit_second_factor("bad2")
+    m3.submit_second_factor("bad3")
+    check("2fa gave up", m3.get_status(), "awaiting_password")
+    check("one failure bumped", m3.get_failures(), 1)
+
+    # Attempts counter is state-scoped — resets on re-entering $AwaitingSecondFactor
+    m3.submit_password("hunter2")
+    m3.submit_second_factor("bad")
+    # Only 1 attempt this pass; still awaiting_2fa
+    check("new session, new attempts counter", m3.get_status(), "awaiting_2fa")
+
+    print("PASS: mfa_lockout")

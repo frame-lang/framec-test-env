@@ -1,0 +1,145 @@
+@@target python_3
+
+# Cookbook 80: PCR Thermal Cycler
+# HSM parent $Running groups Denature/Anneal/Extend.
+# Extend branches to Denature (next cycle) or FinalHold (terminal).
+
+@@system PCRCycler(total_cycles: int) {
+    interface:
+        start()
+        tick_minute()
+        temperature(): float
+        current_cycle(): int
+        phase(): str
+
+    machine:
+        $Idle {
+            start() {
+                self.cycle = 0
+                -> $Denature
+            }
+            temperature(): float { @@:(25.0) }
+            current_cycle(): int { @@:(self.cycle) }
+            phase(): str { @@:("idle") }
+        }
+
+        $Running {
+            current_cycle(): int { @@:(self.cycle) }
+        }
+
+        $Denature => $Running {
+            $>() {
+                self.cycle = self.cycle + 1
+                self.phase_min = 0
+            }
+            tick_minute() {
+                self.phase_min = self.phase_min + 1
+                if self.phase_min >= 1:
+                    -> $Anneal
+            }
+            temperature(): float { @@:(95.0) }
+            phase(): str { @@:("denature") }
+            => $^
+        }
+
+        $Anneal => $Running {
+            $>() { self.phase_min = 0 }
+            tick_minute() {
+                self.phase_min = self.phase_min + 1
+                if self.phase_min >= 1:
+                    -> $Extend
+            }
+            temperature(): float { @@:(55.0) }
+            phase(): str { @@:("anneal") }
+            => $^
+        }
+
+        $Extend => $Running {
+            $>() { self.phase_min = 0 }
+            tick_minute() {
+                self.phase_min = self.phase_min + 1
+                if self.phase_min >= 2:
+                    if self.cycle >= self.target:
+                        -> $FinalHold
+                    else:
+                        -> $Denature
+            }
+            temperature(): float { @@:(72.0) }
+            phase(): str { @@:("extend") }
+            => $^
+        }
+
+        $FinalHold {
+            temperature(): float { @@:(4.0) }
+            current_cycle(): int { @@:(self.cycle) }
+            phase(): str { @@:("final hold") }
+        }
+
+    domain:
+        target = total_cycles
+        cycle: int = 0
+        phase_min: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    p = @@PCRCycler(3)
+    check("idle", p.phase(), "idle")
+    check("idle temperature", p.temperature(), 25.0)
+    check("idle cycle", p.current_cycle(), 0)
+
+    # tick_minute in Idle is silently ignored.
+    p.tick_minute()
+    check("idle absorbs tick", p.phase(), "idle")
+
+    p.start()
+    check("denature 1", p.phase(), "denature")
+    check("cycle 1", p.current_cycle(), 1)
+    check("95C", p.temperature(), 95.0)
+
+    # 1 minute: Denature -> Anneal
+    p.tick_minute()
+    check("anneal 1", p.phase(), "anneal")
+    check("55C", p.temperature(), 55.0)
+
+    # 1 minute: Anneal -> Extend
+    p.tick_minute()
+    check("extend 1", p.phase(), "extend")
+    check("72C", p.temperature(), 72.0)
+
+    # 2 minutes in Extend, still cycle < target -> Denature
+    p.tick_minute()
+    check("extend partway", p.phase(), "extend")
+    p.tick_minute()
+    check("denature 2", p.phase(), "denature")
+    check("cycle 2", p.current_cycle(), 2)
+
+    # Drive through cycle 2 and cycle 3
+    p.tick_minute(); check("anneal 2", p.phase(), "anneal")
+    p.tick_minute(); check("extend 2", p.phase(), "extend")
+    p.tick_minute(); p.tick_minute()
+    check("denature 3", p.phase(), "denature")
+    check("cycle 3", p.current_cycle(), 3)
+
+    p.tick_minute(); p.tick_minute(); p.tick_minute()
+    # After 2 min of Extend on cycle 3, target reached -> FinalHold
+    p.tick_minute()
+    check("final hold", p.phase(), "final hold")
+    check("4C", p.temperature(), 4.0)
+
+    # FinalHold has no tick_minute handler -> silently ignored
+    p.tick_minute()
+    check("hold absorbs tick", p.phase(), "final hold")
+
+    # start() has no handler in FinalHold either (no retrigger)
+    p.start()
+    check("hold absorbs start", p.phase(), "final hold")
+
+    print("PASS: pcr_cycler")
