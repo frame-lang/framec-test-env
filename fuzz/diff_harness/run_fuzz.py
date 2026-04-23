@@ -91,18 +91,104 @@ def build_source(lang: Lang, system_block: str, meta: dict) -> str:
     return body
 
 
-def _docker_wrap(cmd: list[str], host_workdir: Path, image: str) -> list[str]:
-    """Wrap `cmd` (an argv list expected to run inside `image`) with a
-    `docker run --rm -v <host_workdir>:/work -w /work <image> <cmd>`
-    invocation. The caller's command should reference paths under
-    `/work` (the bind-mount's mount point)."""
+# ─── Persistent-container pool for docker-backed backends ────────────
+#
+# Previously each `_docker_wrap` invocation fired `docker run --rm …`,
+# starting a fresh container per case per stage (compile + run).
+# For Phase-2 at 81 cases × ~6 docker backends × 2 stages = ~1000
+# container cold starts (≈ 0.5-2 s each) that's minutes of overhead
+# before a single test runs.
+#
+# The new model: bring up ONE container per backend at fuzz start,
+# bind-mount the whole fuzz workdir at `/fuzz_work`, sleep it as
+# `pid 1`, and run each case via `docker exec` into that same
+# container. A single `docker rm -f` tears down at the end (registered
+# via atexit so we clean up on Ctrl-C too).
+#
+# The containers themselves are named `fuzz-<lang>` so parallel runs
+# in separate workdirs can be distinguished; on collision we reuse.
+
+_POOL_CONTAINERS: dict[str, str] = {}  # lang_name → container_id
+_POOL_WORKDIR: Optional[Path] = None
+
+
+def _container_name(lang_name: str, workdir: Path) -> str:
+    # Include a short workdir hash so two fuzz runs in different
+    # workdirs don't collide on the same container name.
+    import hashlib
+    wd_hash = hashlib.sha1(str(workdir).encode()).hexdigest()[:8]
+    return f"fuzz-{lang_name}-{wd_hash}"
+
+
+def _ensure_pool(lang: Lang, workdir: Path) -> str:
+    """Start (or reuse) a long-running container for `lang.docker_image`
+    bind-mounting `workdir` at `/fuzz_work`. Returns the container
+    name; subsequent `docker exec` calls use it."""
+    if lang.name in _POOL_CONTAINERS:
+        return _POOL_CONTAINERS[lang.name]
+    assert lang.docker_image is not None
+    name = _container_name(lang.name, workdir)
+    # Remove any stale container with this name (e.g. previous run
+    # interrupted before atexit fired).
+    subprocess.run(["docker", "rm", "-f", name],
+                   capture_output=True, check=False)
+    proc = subprocess.run(
+        [
+            "docker", "run", "-d", "--name", name,
+            "-v", f"{workdir}:/fuzz_work",
+            "--entrypoint", "sleep",
+            lang.docker_image,
+            "infinity",
+        ],
+        capture_output=True, text=True, timeout=60,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"docker run -d failed for {lang.docker_image}: "
+            f"{(proc.stderr or proc.stdout).strip()}"
+        )
+    _POOL_CONTAINERS[lang.name] = name
+    return name
+
+
+def _teardown_pool() -> None:
+    """Tear down all persistent fuzz containers. Registered via
+    atexit so interrupted runs don't leak containers."""
+    for name in _POOL_CONTAINERS.values():
+        subprocess.run(["docker", "rm", "-f", name],
+                       capture_output=True, check=False)
+    _POOL_CONTAINERS.clear()
+
+
+import atexit
+atexit.register(_teardown_pool)
+
+
+def _docker_wrap(cmd: list[str], host_workdir: Path, lang: Lang,
+                 fuzz_workdir: Path) -> list[str]:
+    """Wrap `cmd` (an argv list expected to run inside `lang`'s
+    container) as a `docker exec` into the persistent per-lang
+    container. The caller's command should reference paths under
+    `/work` (the case's output dir, mounted indirectly under
+    `/fuzz_work/<case_id>/<lang>/out/`).
+
+    `host_workdir` is the case's output directory on the host; we
+    map that to the container's `/work` via the fuzz-wide bind mount
+    at `/fuzz_work`."""
+    container = _ensure_pool(lang, fuzz_workdir)
+    # Translate host path → container path via /fuzz_work prefix.
+    try:
+        rel = host_workdir.relative_to(fuzz_workdir)
+    except ValueError:
+        raise RuntimeError(
+            f"host workdir {host_workdir} not under fuzz workdir {fuzz_workdir}"
+        )
+    container_wd = f"/fuzz_work/{rel}"
     return [
-        "docker", "run", "--rm",
-        "-v", f"{host_workdir}:/work",
-        "-w", "/work",
-        "--entrypoint", cmd[0],
-        image,
-        *cmd[1:],
+        "docker", "exec",
+        "-w", container_wd,
+        container,
+        *cmd,
     ]
 
 
@@ -141,25 +227,35 @@ def run_one(lang: Lang, case_path: Path, meta: dict, workdir: Path) -> CaseResul
     # If the language supplies a custom runner (Erlang, GDScript, …),
     # bypass the standard compile+run flow.
     if lang.run_custom is not None:
-        stage, rc, output = lang.run_custom(emitted, out_dir, meta)
+        # Build the per-case context: the fuzz workdir plus a closure
+        # that wraps a cmd as `docker exec` into the persistent
+        # container. Custom hooks use this instead of firing their
+        # own `docker run --rm` per case.
+        def _docker_exec_in(cmd: list[str], host_cwd: Path) -> list[str]:
+            return _docker_wrap(cmd, host_cwd, lang, workdir)
+        ctx = {"fuzz_workdir": workdir, "docker_exec": _docker_exec_in}
+        stage, rc, output = lang.run_custom(emitted, out_dir, meta, ctx)
         if rc != 0:
             return CaseResult(case_id, lang.name, stage, False, [],
                               stderr=output[:500])
         trace = [l for l in output.splitlines() if l.startswith("TRACE: ")]
         return CaseResult(case_id, lang.name, "run", True, trace)
 
-    # For docker-backed langs, compile/run callables receive a path
-    # rooted at `/work/<filename>` — the container's view of the bind
-    # mount — rather than the host path.
+    # For docker-backed langs, compile/run callables receive the
+    # bare emitted filename — the persistent container is exec'd with
+    # `-w` set to the case's output directory (via the fuzz-wide
+    # `/fuzz_work` bind mount), so relative paths resolve correctly
+    # inside the container. Historically we passed `/work/<name>`;
+    # the pool's cwd-based model is cleaner.
     if lang.docker_image:
-        path_for_cmd = Path("/work") / emitted.name
+        path_for_cmd = Path(emitted.name)
     else:
         path_for_cmd = emitted
 
     if lang.compile:
         cc = lang.compile(path_for_cmd)
         if lang.docker_image:
-            cc = _docker_wrap(cc, out_dir, lang.docker_image)
+            cc = _docker_wrap(cc, out_dir, lang, workdir)
         proc = subprocess.run(cc, capture_output=True, text=True, cwd=out_dir, timeout=180)
         if proc.returncode != 0:
             return CaseResult(case_id, lang.name, "compile", False, [],
@@ -170,7 +266,7 @@ def run_one(lang: Lang, case_path: Path, meta: dict, workdir: Path) -> CaseResul
         return CaseResult(case_id, lang.name, "run", False, [],
                           stderr=f"no run command configured for {lang.name}")
     if lang.docker_image:
-        run_cmd = _docker_wrap(run_cmd, out_dir, lang.docker_image)
+        run_cmd = _docker_wrap(run_cmd, out_dir, lang, workdir)
     try:
         proc = subprocess.run(run_cmd, capture_output=True, text=True,
                               timeout=60, cwd=out_dir)

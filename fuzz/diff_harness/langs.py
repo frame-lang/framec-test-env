@@ -71,9 +71,16 @@ class Lang:
     # (e.g. Erlang renames the emitted file to match `-module(...)` and
     # wraps execution in an escript; GDScript invokes Godot with a
     # driver script) can supply a custom handler here. Signature:
-    #   (emitted: Path, out_dir: Path, meta: dict) -> (stage, returncode, output)
+    #   (emitted, out_dir, meta, ctx) -> (stage, returncode, output)
+    # where `ctx` is a dict with:
+    #   "fuzz_workdir": Path — root of the fuzz run's bind mount
+    #   "docker_exec":  Callable[[list[str], Path], list[str]]
+    #                   — wraps a cmd to run via `docker exec` in the
+    #                     lang's persistent container at the given host
+    #                     working directory (which MUST be under
+    #                     fuzz_workdir so it maps to /fuzz_work).
     # When set, the default compile/run path is bypassed entirely.
-    run_custom: Optional[Callable[[Path, Path, dict], tuple]] = None
+    run_custom: Optional[Callable[[Path, Path, dict, dict], tuple]] = None
     # Per-backend case filter. Returns True if the case described by
     # `meta` is runnable on this backend, False to skip (distinct from
     # pass/fail). Use for axis values the backend can't express — e.g.
@@ -1182,20 +1189,19 @@ def gdscript_persist(meta: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
-def gdscript_run_custom(emitted: Path, out_dir: Path, meta: dict) -> tuple:
+def gdscript_run_custom(emitted: Path, out_dir: Path, meta: dict, ctx: dict) -> tuple:
     """Run the emitted .gd through Godot headless inside the
-    docker-gdscript container.
+    docker-gdscript container. Uses the persistent container pool
+    (via `ctx["docker_exec"]`) so each case is a `docker exec`, not a
+    new container.
 
     Godot prints "Godot Engine vX.Y ..." on startup which we filter
     out of stdout — the oracle trace doesn't include it."""
     import subprocess
-    cmd = [
-        "docker", "run", "--rm",
-        "-v", f"{out_dir}:/work", "-w", "/work",
-        "--entrypoint", "godot",
-        "docker-gdscript",
-        "--headless", "--script", emitted.name,
-    ]
+    cmd = ctx["docker_exec"](
+        ["godot", "--headless", "--script", emitted.name],
+        out_dir,
+    )
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
     except subprocess.TimeoutExpired:
@@ -1294,13 +1300,14 @@ def erlang_case_supported(meta: dict) -> bool:
     return meta.get("axes", {}).get("post_structure") == "linear"
 
 
-def erlang_run_custom(emitted: Path, out_dir: Path, meta: dict) -> tuple:
-    """End-to-end Erlang compile + run in a Docker container:
+def erlang_run_custom(emitted: Path, out_dir: Path, meta: dict, ctx: dict) -> tuple:
+    """End-to-end Erlang compile + run via the persistent-container
+    pool:
       1. Rename the emitted `.erl` to `<module>.erl` so erlc is happy.
-      2. erlc → `<module>.beam`.
+      2. `docker exec … erlc …` → `<module>.beam`.
       3. Write the escript driver built from `meta` (selected by
          `meta["harness_kind"]`).
-      4. escript-run the driver.
+      4. `docker exec … escript …` to run it.
     Returns `(stage, returncode, output)`."""
     import subprocess
     sys_name = meta["sys_name"]
@@ -1309,14 +1316,8 @@ def erlang_run_custom(emitted: Path, out_dir: Path, meta: dict) -> tuple:
     # Step 1: rename.
     if emitted != target_erl:
         emitted.rename(target_erl)
-    # Step 2: compile via docker.
-    compile_cmd = [
-        "docker", "run", "--rm",
-        "-v", f"{out_dir}:/work", "-w", "/work",
-        "--entrypoint", "erlc",
-        "docker-erlang",
-        f"{module}.erl",
-    ]
+    # Step 2: compile via the persistent container (`docker exec`).
+    compile_cmd = ctx["docker_exec"](["erlc", f"{module}.erl"], out_dir)
     proc = subprocess.run(compile_cmd, capture_output=True, text=True, timeout=180)
     if proc.returncode != 0:
         return ("compile", proc.returncode, proc.stdout + proc.stderr)
@@ -1329,13 +1330,7 @@ def erlang_run_custom(emitted: Path, out_dir: Path, meta: dict) -> tuple:
     driver.write_text(driver_fn(meta))
     driver.chmod(0o755)
     # Step 4: execute.
-    run_cmd = [
-        "docker", "run", "--rm",
-        "-v", f"{out_dir}:/work", "-w", "/work",
-        "--entrypoint", "escript",
-        "docker-erlang",
-        "run_test.escript",
-    ]
+    run_cmd = ctx["docker_exec"](["escript", "run_test.escript"], out_dir)
     try:
         proc = subprocess.run(run_cmd, capture_output=True, text=True, timeout=60)
     except subprocess.TimeoutExpired:
@@ -1515,7 +1510,12 @@ def run_lua(p: Path) -> List[str]:
     # Inside docker-lua the binary is `lua5.4`. On the host we fall
     # back to `lua` if 5.4 isn't on PATH (fuzz for Lua is docker-backed
     # because the cjson dependency isn't typically installed on macOS).
-    if str(p).startswith("/work/") or _which("lua5.4"):
+    # The runner passes a BARE filename (relative to the container's
+    # cwd) when `lang.docker_image` is set, so we can't look for a
+    # `/work/` prefix anymore — detect docker-mode by absence of a
+    # parent path component.
+    in_container = p.parent == Path('') or str(p) == p.name
+    if in_container or _which("lua5.4"):
         return ["lua5.4", str(p)]
     return ["lua", str(p)]
 
@@ -1536,7 +1536,15 @@ def compile_c(p: Path) -> List[str]:
 
 
 def run_c(p: Path) -> List[str]:
-    return [str(p.with_suffix(""))]
+    # Executable invocation must be path-qualified (shell won't search
+    # PATH for a bare name). When given a bare filename (inside the
+    # docker pool's cwd), prefix `./` to run from cwd; absolute paths
+    # pass through unchanged (host mode).
+    bin_path = p.with_suffix("")
+    bin_str = str(bin_path)
+    if bin_path.is_absolute():
+        return [bin_str]
+    return [f"./{bin_str}"]
 
 
 def compile_java(p: Path) -> List[str]:
@@ -1583,7 +1591,12 @@ def compile_swift(p: Path) -> List[str]:
 
 
 def run_swift(p: Path) -> List[str]:
-    return [str(p.with_suffix(""))]
+    # Prefix `./` for bare filenames (docker pool cwd mode); leave
+    # absolute paths (host mode) alone.
+    bin_path = p.with_suffix("")
+    if bin_path.is_absolute():
+        return [str(bin_path)]
+    return [f"./{bin_path}"]
 
 
 def compile_cpp(p: Path) -> List[str]:
@@ -1592,7 +1605,10 @@ def compile_cpp(p: Path) -> List[str]:
 
 
 def run_cpp(p: Path) -> List[str]:
-    return [str(p.with_suffix(""))]
+    bin_path = p.with_suffix("")
+    if bin_path.is_absolute():
+        return [str(bin_path)]
+    return [f"./{bin_path}"]
 
 
 def compile_csharp(p: Path) -> List[str]:
