@@ -1,0 +1,121 @@
+@@target python_3
+
+# Cookbook 109: Fleet Robot (single-robot half of Fleet Dispatcher)
+# Each robot toggles Available <-> Busy. A full fleet dispatcher that
+# owns multiple FleetRobot instances via system-in-domain is a
+# composition pattern not yet reduced to Python oracle; this port
+# covers the robot's individual state contract.
+
+@@system FleetRobot(robot_id: str) {
+    interface:
+        assign_task(task_id: str)
+        task_complete()
+        task_failed()
+        tick()
+        state_name(): str
+        current_task_id(): str
+        id(): str
+
+    machine:
+        $Available {
+            assign_task(task_id: str) {
+                self.current_task = task_id
+                -> $Busy
+            }
+            state_name(): str { @@:("available") }
+            current_task_id(): str { @@:(self.current_task) }
+            id(): str { @@:(self.rid) }
+        }
+
+        $Busy {
+            $>() { self.work_ticks = 0 }
+            tick() {
+                self.work_ticks = self.work_ticks + 1
+                if self.work_ticks >= self.task_duration:
+                    @@:self.task_complete()
+            }
+            task_complete() {
+                self.completed_count = self.completed_count + 1
+                self.current_task = ""
+                -> $Available
+            }
+            task_failed() {
+                self.failed_count = self.failed_count + 1
+                self.current_task = ""
+                -> $Available
+            }
+            state_name(): str { @@:("busy") }
+            current_task_id(): str { @@:(self.current_task) }
+            id(): str { @@:(self.rid) }
+        }
+
+    domain:
+        rid: str = robot_id
+        current_task: str = ""
+        work_ticks: int = 0
+        task_duration: int = 5
+        completed_count: int = 0
+        failed_count: int = 0
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    r = @@FleetRobot("bot-1")
+    check("available", r.state_name(), "available")
+    check("id preserved", r.id(), "bot-1")
+    check("no task", r.current_task_id(), "")
+
+    # Stray events in Available: task_complete / task_failed absorbed
+    r.task_complete()
+    r.task_failed()
+    check("available absorbs completions", r.state_name(), "available")
+
+    # Assign a task
+    r.assign_task("task-42")
+    check("busy", r.state_name(), "busy")
+    check("task captured", r.current_task_id(), "task-42")
+
+    # Cannot re-assign while busy — assign_task absent in Busy
+    r.assign_task("task-99")
+    check("busy absorbs new assign", r.state_name(), "busy")
+    check("task unchanged", r.current_task_id(), "task-42")
+
+    # Ticks accumulate; after task_duration=5, self-complete fires
+    r.tick()
+    r.tick()
+    check("still busy after 2 ticks", r.state_name(), "busy")
+    r.tick()
+    r.tick()
+    r.tick()
+    check("auto-complete at 5 ticks", r.state_name(), "available")
+    check("task cleared", r.current_task_id(), "")
+
+    # Explicit task_complete via event (different task)
+    r.assign_task("task-43")
+    r.task_complete()
+    check("explicit complete -> available", r.state_name(), "available")
+
+    # Explicit task_failed routes same way
+    r.assign_task("task-44")
+    r.task_failed()
+    check("failed -> available", r.state_name(), "available")
+
+    # A second robot with a different id
+    r2 = @@FleetRobot("bot-2")
+    check("bot-2 id", r2.id(), "bot-2")
+    check("bot-2 independent state", r2.state_name(), "available")
+
+    # Multiple task cycles
+    r.assign_task("t1"); r.task_complete()
+    r.assign_task("t2"); r.task_complete()
+    r.assign_task("t3"); r.task_complete()
+    check("available after 3 cycles", r.state_name(), "available")
+
+    print("PASS: fleet_robot")

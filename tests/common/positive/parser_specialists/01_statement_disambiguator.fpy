@@ -1,0 +1,211 @@
+@@target python_3
+
+# Cookbook 110: Statement Disambiguator — Bounded-Lookahead Oracle
+# Single interface call triggers a chain of enter-handler-driven
+# transitions that walk at most three tokens of lookahead, landing
+# in $Verdict with the classification passed as an enter arg. The
+# result is written to the still-live caller context via @@:,
+# then $Verdict transitions back to $Ready for re-use.
+
+@@system StatementDisambiguator {
+    interface:
+        classify(tokens: list, start: int): str = ""
+        tokens_consumed(): int = 0
+
+    machine:
+        $Ready {
+            classify(tokens: list, start: int): str {
+                self.tokens = tokens
+                self.pos = start
+                self.consumed = 0
+                -> $SeenNothing
+            }
+            tokens_consumed(): int { @@:(self.consumed) }
+        }
+
+        $SeenNothing {
+            $>() {
+                tok = self.peek()
+                self.consumed = self.consumed + 1
+                if tok["kind"] == "IDENT" and self.is_type_name(tok["value"]):
+                    -> $SeenTypeIdent
+                elif tok["kind"] == "IDENT":
+                    -> $SeenPlainIdent
+                else:
+                    -> ("expr") $Verdict
+            }
+        }
+
+        $SeenTypeIdent {
+            $>() {
+                tok = self.peek()
+                self.consumed = self.consumed + 1
+                if tok["value"] == "*":
+                    -> $SeenTypeStar
+                elif tok["kind"] == "IDENT":
+                    -> ("decl") $Verdict
+                else:
+                    -> ("expr") $Verdict
+            }
+        }
+
+        $SeenTypeStar {
+            $>() {
+                tok = self.peek()
+                self.consumed = self.consumed + 1
+                if tok["kind"] == "IDENT":
+                    -> ("decl") $Verdict
+                else:
+                    -> ("expr") $Verdict
+            }
+        }
+
+        $SeenPlainIdent {
+            $>() {
+                tok = self.peek()
+                self.consumed = self.consumed + 1
+                if tok["value"] == "(":
+                    -> ("call") $Verdict
+                else:
+                    -> ("expr") $Verdict
+            }
+        }
+
+        $Verdict {
+            $.result: str = ""
+            $>(r: str) {
+                $.result = r
+                @@:($.result)
+                -> $Ready
+            }
+        }
+
+    actions:
+        peek() {
+            idx = self.pos + self.consumed
+            if idx >= len(self.tokens):
+                return {"kind": "EOF", "value": ""}
+            return self.tokens[idx]
+        }
+        is_type_name(name: str): bool {
+            return name in self.known_types
+        }
+
+    domain:
+        tokens: list = []
+        pos: int = 0
+        consumed: int = 0
+        known_types: set = set()
+}
+
+
+def check(label, actual, expected):
+    if actual != expected:
+        print(f"FAIL: {label} expected '{expected}', got '{actual}'")
+        import sys
+        sys.exit(1)
+
+
+if __name__ == '__main__':
+    d = @@StatementDisambiguator()
+    d.known_types = {"int", "float", "MyType"}
+
+    # TC1: type IDENT followed by IDENT -> declaration (`int x ;`)
+    verdict = d.classify(
+        [{"kind": "IDENT", "value": "int"},
+         {"kind": "IDENT", "value": "x"},
+         {"kind": "PUNCT", "value": ";"}],
+        0,
+    )
+    check("int x ; -> decl", verdict, "decl")
+    check("decl consumed 2 tokens", d.tokens_consumed(), 2)
+
+    # TC2: type IDENT * IDENT -> pointer declaration (`MyType * bar`)
+    verdict = d.classify(
+        [{"kind": "IDENT", "value": "MyType"},
+         {"kind": "PUNCT", "value": "*"},
+         {"kind": "IDENT", "value": "bar"}],
+        0,
+    )
+    check("MyType * bar -> decl", verdict, "decl")
+    check("ptr decl consumed 3 tokens", d.tokens_consumed(), 3)
+
+    # TC3: type IDENT * (non-IDENT) -> expression (error or bare expr)
+    verdict = d.classify(
+        [{"kind": "IDENT", "value": "MyType"},
+         {"kind": "PUNCT", "value": "*"},
+         {"kind": "PUNCT", "value": ";"}],
+        0,
+    )
+    check("MyType * ; -> expr", verdict, "expr")
+
+    # TC4: plain IDENT followed by ( -> function call
+    verdict = d.classify(
+        [{"kind": "IDENT", "value": "foo"},
+         {"kind": "PUNCT", "value": "("},
+         {"kind": "IDENT", "value": "x"}],
+        0,
+    )
+    check("foo ( x -> call", verdict, "call")
+    check("call consumed 2 tokens", d.tokens_consumed(), 2)
+
+    # TC5: plain IDENT followed by non-paren -> expression (`x + y`)
+    verdict = d.classify(
+        [{"kind": "IDENT", "value": "x"},
+         {"kind": "PUNCT", "value": "+"},
+         {"kind": "IDENT", "value": "y"}],
+        0,
+    )
+    check("x + y -> expr", verdict, "expr")
+
+    # TC6: Non-IDENT first token -> expression (`{` begins a block)
+    verdict = d.classify(
+        [{"kind": "PUNCT", "value": "{"}],
+        0,
+    )
+    check("{ -> expr", verdict, "expr")
+    check("brace consumed 1 token", d.tokens_consumed(), 1)
+
+    # TC7: Re-use — after each classification the disambiguator self-
+    # resets to $Ready. Verify multiple successive calls work.
+    verdict = d.classify(
+        [{"kind": "IDENT", "value": "float"},
+         {"kind": "IDENT", "value": "y"}],
+        0,
+    )
+    check("float y -> decl (second call)", verdict, "decl")
+
+    verdict = d.classify(
+        [{"kind": "IDENT", "value": "bar"},
+         {"kind": "PUNCT", "value": "("}],
+        0,
+    )
+    check("bar ( -> call (third call)", verdict, "call")
+
+    # TC8: `start` offset — begin classification mid-stream
+    tokens = [
+        {"kind": "PUNCT", "value": ";"},    # skipped
+        {"kind": "PUNCT", "value": ";"},    # skipped
+        {"kind": "IDENT", "value": "int"},
+        {"kind": "IDENT", "value": "z"},
+    ]
+    verdict = d.classify(tokens, 2)
+    check("offset start -> decl", verdict, "decl")
+
+    # TC9: End-of-token-stream produces a synthetic EOF from peek(),
+    # which has kind="EOF" so it classifies as expr.
+    verdict = d.classify(
+        [{"kind": "IDENT", "value": "int"}],   # no second token
+        0,
+    )
+    check("int alone -> expr (trailing EOF)", verdict, "expr")
+
+    # TC10: Non-type IDENT at EOF -> expr (hits $SeenPlainIdent path
+    # then EOF).
+    verdict = d.classify(
+        [{"kind": "IDENT", "value": "undeclared"}],
+        0,
+    )
+    check("plain ident at EOF -> expr", verdict, "expr")
+
+    print("PASS: statement_disambiguator")
