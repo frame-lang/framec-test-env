@@ -55,7 +55,16 @@ import random
 from pathlib import Path
 
 OUTERS = ["selfcall", "ret_sugar", "ret_set", "svar_set", "dbl_call"]
-INNERS = ["lit", "param", "ret", "sv", "self_dbl", "nest_sc"]
+INNERS = [
+    "lit",
+    "param",
+    "ret",
+    "sv",
+    "self_dbl",
+    "nest_sc",
+    "deep_nest",    # 3-level nested @@:self.echo(@@:self.echo(@@:self.echo(x)))
+    "arith_mixed",  # @@:params.x + @@:params.x — typed-local arithmetic
+]
 
 # Integer probe values — pick distinct so the expected computation
 # can be unambiguously checked against the oracle.
@@ -69,12 +78,14 @@ def inner_expr_and_value(inner: str) -> tuple[str, int]:
     For inners that need prior state (`@@:return`, `$.val`), the
     handler body emits a setup line before the outer construct."""
     return {
-        "lit":      ("42",                                 42),
-        "param":    ("@@:params.x",                        PROBE_X),
-        "ret":      ("@@:return",                          PROBE_X),   # set to x in setup
-        "sv":       ("$.val",                              PROBE_X),   # set to x in setup
-        "self_dbl": ("@@:self.dbl(@@:params.x)",           2 * PROBE_X),
-        "nest_sc":  ("@@:self.echo(@@:params.x)",          PROBE_X),
+        "lit":         ("42",                                       42),
+        "param":       ("@@:params.x",                              PROBE_X),
+        "ret":         ("@@:return",                                PROBE_X),
+        "sv":          ("$.val",                                    PROBE_X),
+        "self_dbl":    ("@@:self.dbl(@@:params.x)",                 2 * PROBE_X),
+        "nest_sc":     ("@@:self.echo(@@:params.x)",                PROBE_X),
+        "deep_nest":   ("@@:self.echo(@@:self.echo(@@:self.echo(@@:params.x)))", PROBE_X),
+        "arith_mixed": ("@@:params.x + @@:params.x",                2 * PROBE_X),
     }[inner]
 
 
@@ -82,11 +93,13 @@ def inner_setup(inner: str) -> list[str]:
     """Frame statements that MUST run before the outer construct so
     the inner expression yields the value the oracle expects."""
     return {
-        "lit":      [],
-        "param":    [],
-        "ret":      ["                @@:return = @@:params.x"],
-        "sv":       ["                $.val = @@:params.x"],
-        "self_dbl": [],
+        "lit":         [],
+        "param":       [],
+        "ret":         ["                @@:return = @@:params.x"],
+        "sv":          ["                $.val = @@:params.x"],
+        "self_dbl":    [],
+        "deep_nest":   [],
+        "arith_mixed": [],
         "nest_sc":  [],
     }[inner]
 
