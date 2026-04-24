@@ -262,6 +262,15 @@ def run_one(lang: Lang, case_path: Path, meta: dict, workdir: Path) -> CaseResul
 
     out_dir = case_dir / "out"
     out_dir.mkdir(exist_ok=True)
+    # Wipe prior-run artifacts so stale files (e.g. a `.erl` left over
+    # from a previous fuzz kind that collided on the same case_id) can't
+    # contaminate candidate lookup below. Observed 2026-04-23 running
+    # hsm fuzz after nested fuzz: out_dir still held `nested0010.erl`,
+    # which `iterdir()` surfaced before the freshly-emitted `hsm0010.erl`
+    # and erlc rejected on module-name mismatch.
+    for stale in out_dir.iterdir():
+        if stale.is_file():
+            stale.unlink()
     proc = subprocess.run(
         [FRAMEC, "compile", "-l", lang.name, "-o", str(out_dir), str(src_file)],
         capture_output=True, text=True, timeout=60,
