@@ -1,5 +1,11 @@
 @@target ruby
 
+# Test 46: HSM Enter Cascade — Parent has $>, Child does not
+#
+# Tests the HSM enter cascade per docs/frame_runtime_introduction.md
+# Step 21+. When entering an HSM child, the kernel fires $> on every
+# layer of the new chain top-down (parent first, child last).
+
 @@system HSMEnterParentOnly {
     interface:
         go_to_child()
@@ -11,59 +17,48 @@
         $Start {
             go_to_child() { -> $Child }
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Start")
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Start") }
         }
 
         $Child => $Parent {
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Child")
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Child") }
         }
 
         $Parent {
             $>() { self.log.push("Parent:enter") }
             go_to_child() { -> $Child }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Parent")
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Parent") }
         }
     domain:
         log: list = []
 }
 
-puts("=== Test 46: HSM Enter in Parent Only ===")
+puts("=== Test 46: HSM Enter Cascade — Parent only ===")
 s = HSMEnterParentOnly.new
 
+# TC1: Entering Child fires Parent's $> via cascade.
 s.go_to_child()
 raise "Expected Child, got #{s.get_state()}" unless s.get_state() == "Child"
 log = s.get_log()
-puts("TC2.2.1: Child enters without error (log: #{log}) - PASS")
+raise "Expected Parent:enter on cascade entry, got #{log}" unless log.include?("Parent:enter")
+puts("TC1: Parent's $> fires on Child entry via cascade - PASS")
 
-raise "Parent:enter should NOT fire for child entry, got #{log}" if log.include?("Parent:enter")
-puts("TC2.2.2: Parent enter NOT auto-fired for child - PASS")
-
+# TC2: Direct entry to Parent fires Parent's $> again.
 s.go_to_parent()
 raise "Expected Parent, got #{s.get_state()}" unless s.get_state() == "Parent"
 log = s.get_log()
-raise "Expected Parent:enter when transitioning to Parent, got #{log}" unless log.include?("Parent:enter")
-puts("TC2.2.3: Parent enter fires when transitioning to Parent - PASS")
+raise "Expected 2 Parent:enter, got #{log.count('Parent:enter')}: #{log}" unless log.count("Parent:enter") == 2
+puts("TC2: Parent's $> fires on direct entry to Parent - PASS")
 
+# TC3: Transitioning back to Child fires Parent's $> again via cascade.
 s.go_to_child()
 raise "Expected Child, got #{s.get_state()}" unless s.get_state() == "Child"
 log = s.get_log()
-raise "Expected exactly 1 Parent:enter, got #{log}" unless log.count("Parent:enter") == 1
-puts("TC2.2.4: Return to child, parent enter count unchanged - PASS")
+raise "Expected 3 Parent:enter total, got #{log.count('Parent:enter')}: #{log}" unless log.count("Parent:enter") == 3
+puts("TC3: Parent's $> fires again on cascade back to Child - PASS")
 
-puts("PASS: HSM enter in parent only works correctly")
+puts("PASS: HSM enter cascade fires ancestor $> correctly")

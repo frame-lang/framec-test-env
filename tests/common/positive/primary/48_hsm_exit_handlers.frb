@@ -1,5 +1,11 @@
 @@target ruby
 
+# Test 48: HSM Exit Cascade
+#
+# Tests the HSM exit cascade per docs/frame_runtime_introduction.md
+# Step 21+. When exiting an HSM child, the kernel fires <$ on every
+# layer of the source chain bottom-up (child first, parent last).
+
 @@system HSMExitHandlers {
     interface:
         go_to_other()
@@ -12,80 +18,77 @@
     machine:
         $Child => $Parent {
             $.child_var: int = 42
+
             $>() { self.log.push("Child:enter") }
-            <$() { val = $.child_var; self.log.push("Child:exit(var=#{val})") }
+
+            <$() {
+                val = $.child_var
+                self.log.push("Child:exit(var=#{val})")
+            }
+
             go_to_other() { -> $Other }
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Child")
-            }
-            get_child_var(): int {
-                @@:($.child_var)
-            }
+
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Child") }
+            get_child_var(): int { @@:($.child_var) }
         }
 
         $Parent {
             $>() { self.log.push("Parent:enter") }
             <$() { self.log.push("Parent:exit") }
+
             go_to_child() { -> $Child }
             go_to_other() { -> $Other }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Parent")
-            }
-            get_child_var(): int {
-                @@:(-1)
-            }
+
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Parent") }
+            get_child_var(): int { @@:(-1) }
         }
 
         $Other {
             $>() { self.log.push("Other:enter") }
+
             go_to_child() { -> $Child }
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Other")
-            }
-            get_child_var(): int {
-                @@:(-1)
-            }
+
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Other") }
+            get_child_var(): int { @@:(-1) }
         }
     domain:
         log: list = []
 }
 
-puts("=== Test 48: HSM Exit Handlers ===")
+puts("=== Test 48: HSM Exit Cascade ===")
 s = HSMExitHandlers.new
 
+# Initial state is Child. Cascade fires Parent.$> then Child.$>.
 log = s.get_log()
+raise "Expected Parent:enter on init cascade, got #{log}" unless log.include?("Parent:enter")
 raise "Expected Child:enter on init, got #{log}" unless log.include?("Child:enter")
 raise "Expected Child, got #{s.get_state()}" unless s.get_state() == "Child"
-puts("TC2.4.0: Initial state is Child with enter - PASS")
+puts("TC1: Initial entry cascades through Parent then Child - PASS")
 
+# TC2: Exiting Child to Other fires Child.<$ then Parent.<$ (bottom-up).
 s.go_to_other()
 log = s.get_log()
-raise "Expected Child:exit, got #{log}" unless log.include?("Child:exit(var=42)")
+raise "Expected Child:exit(var=42), got #{log}" unless log.include?("Child:exit(var=42)")
+raise "Expected Parent:exit (cascade), got #{log}" unless log.include?("Parent:exit")
 raise "Expected Other:enter, got #{log}" unless log.include?("Other:enter")
-puts("TC2.4.1: Child exit fires when transitioning out - PASS")
+child_exit_idx = log.index("Child:exit(var=42)")
+parent_exit_idx = log.index("Parent:exit")
+raise "Child:exit must precede Parent:exit (bottom-up), got #{log}" unless child_exit_idx < parent_exit_idx
+puts("TC2: Child:exit fires before Parent:exit (bottom-up cascade) - PASS")
 
-raise "Parent:exit should NOT fire for child exit, got #{log}" if log.include?("Parent:exit")
-puts("TC2.4.2: Parent exit NOT fired for child exit - PASS")
-puts("TC2.4.3: Exit handler accesses state var (var=42) - PASS")
+# TC3: Exit handler can access child's state variables (verified by var=42 in log).
+puts("TC3: Exit handler accesses state var (var=42) - PASS")
 
-s.go_to_parent()
+# TC4: Re-entering child fires the entry cascade again.
+s.go_to_child()
 log = s.get_log()
-raise "Expected Parent:enter, got #{log}" unless log.include?("Parent:enter")
+raise "Expected 2 Parent:enter, got #{log.count('Parent:enter')}" unless log.count("Parent:enter") == 2
+raise "Expected 2 Child:enter, got #{log.count('Child:enter')}" unless log.count("Child:enter") == 2
+puts("TC4: Re-entering Child cascades Parent.$> then Child.$> - PASS")
 
-s.go_to_other()
-log = s.get_log()
-raise "Expected Parent:exit, got #{log}" unless log.include?("Parent:exit")
-puts("TC2.4.4: Parent exit fires when leaving parent - PASS")
-
-puts("PASS: HSM exit handlers work correctly")
+puts("PASS: HSM exit cascade fires Child.<$ then Parent.<$")
