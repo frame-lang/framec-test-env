@@ -2,6 +2,12 @@
 
 import java.util.*;
 
+// Test 48: HSM Exit Cascade
+//
+// Tests the HSM exit cascade per docs/frame_runtime_introduction.md
+// Step 21+. When exiting an HSM child, the kernel fires <$ on every
+// layer of the source chain bottom-up (child first, parent last).
+
 @@system HSMExitHandlers {
     interface:
         go_to_other()
@@ -24,28 +30,11 @@ import java.util.*;
                 this.log.add("Child:exit(var=" + val + ")");
             }
 
-            go_to_other() {
-                -> $Other
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): ArrayList {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): String {
-                @@:("Child")
-                return;
-            }
-
-            get_child_var(): int {
-                @@:($.child_var)
-                return;
-            }
+            go_to_other() { -> $Other }
+            go_to_parent() { -> $Parent }
+            get_log(): ArrayList { @@:(this.log) }
+            get_state(): String { @@:("Child") }
+            get_child_var(): int { @@:($.child_var) }
         }
 
         $Parent {
@@ -57,118 +46,66 @@ import java.util.*;
                 this.log.add("Parent:exit");
             }
 
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_other() {
-                -> $Other
-            }
-
-            get_log(): ArrayList {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): String {
-                @@:("Parent")
-                return;
-            }
-
-            get_child_var(): int {
-                @@:(-1)
-                return;
-            }
+            go_to_child() { -> $Child }
+            go_to_other() { -> $Other }
+            get_log(): ArrayList { @@:(this.log) }
+            get_state(): String { @@:("Parent") }
+            get_child_var(): int { @@:(-1) }
         }
 
         $Other {
             $>() {
                 this.log.add("Other:enter");
             }
-
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): ArrayList {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): String {
-                @@:("Other")
-                return;
-            }
-
-            get_child_var(): int {
-                @@:(-1)
-                return;
-            }
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): ArrayList { @@:(this.log) }
+            get_state(): String { @@:("Other") }
+            get_child_var(): int { @@:(-1) }
         }
     domain:
         log : ArrayList = new ArrayList()
 }
 
 class Main {
+    static int countOf(ArrayList log, String v) {
+        int n = 0;
+        for (Object item : log) if (item.equals(v)) n++;
+        return n;
+    }
+    static int indexOf(ArrayList log, String v) {
+        for (int i = 0; i < log.size(); i++) if (log.get(i).equals(v)) return i;
+        return -1;
+    }
+
     public static void main(String[] args) {
-        System.out.println("=== Test 48: HSM Exit Handlers ===");
+        System.out.println("=== Test 48: HSM Exit Cascade ===");
         var s = @@HSMExitHandlers();
 
-        // Initial state is Child
         ArrayList log = s.get_log();
-        if (!log.contains("Child:enter")) {
-            System.out.println("FAIL: Expected Child:enter on init, got " + log);
-            System.exit(1);
-        }
-        if (!s.get_state().equals("Child")) {
-            System.out.println("FAIL: Expected Child, got " + s.get_state());
-            System.exit(1);
-        }
-        System.out.println("TC2.4.0: Initial state is Child with enter - PASS");
-
-        // TC2.4.1: Child exit fires when transitioning out of child
-        s.go_to_other();
-        log = s.get_log();
-        if (!log.contains("Child:exit(var=42)")) {
-            System.out.println("FAIL: Expected Child:exit, got " + log);
-            System.exit(1);
-        }
-        if (!log.contains("Other:enter")) {
-            System.out.println("FAIL: Expected Other:enter, got " + log);
-            System.exit(1);
-        }
-        System.out.println("TC2.4.1: Child exit fires when transitioning out - PASS");
-
-        // TC2.4.2: Parent exit does NOT fire when transitioning out of child
-        if (log.contains("Parent:exit")) {
-            System.out.println("FAIL: Parent:exit should NOT fire for child exit, got " + log);
-            System.exit(1);
-        }
-        System.out.println("TC2.4.2: Parent exit NOT fired for child exit - PASS");
-
-        // TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
-        System.out.println("TC2.4.3: Exit handler accesses state var (var=42) - PASS");
-
-        // TC2.4.4: Parent exit fires when transitioning out of Parent
-        s.go_to_parent();
-        log = s.get_log();
-        if (!log.contains("Parent:enter")) {
-            System.out.println("FAIL: Expected Parent:enter, got " + log);
-            System.exit(1);
-        }
+        if (!log.contains("Parent:enter")) { System.out.println("FAIL: Expected Parent:enter on init cascade"); System.exit(1); }
+        if (!log.contains("Child:enter")) { System.out.println("FAIL: Expected Child:enter on init"); System.exit(1); }
+        if (!s.get_state().equals("Child")) { System.out.println("FAIL"); System.exit(1); }
+        System.out.println("TC1: Initial entry cascades through Parent then Child - PASS");
 
         s.go_to_other();
         log = s.get_log();
-        if (!log.contains("Parent:exit")) {
-            System.out.println("FAIL: Expected Parent:exit, got " + log);
-            System.exit(1);
-        }
-        System.out.println("TC2.4.4: Parent exit fires when leaving parent - PASS");
+        if (!log.contains("Child:exit(var=42)")) { System.out.println("FAIL: Expected Child:exit(var=42)"); System.exit(1); }
+        if (!log.contains("Parent:exit")) { System.out.println("FAIL: Expected Parent:exit (cascade)"); System.exit(1); }
+        if (!log.contains("Other:enter")) { System.out.println("FAIL: Expected Other:enter"); System.exit(1); }
+        int cei = indexOf(log, "Child:exit(var=42)");
+        int pei = indexOf(log, "Parent:exit");
+        if (cei >= pei) { System.out.println("FAIL: Child:exit must precede Parent:exit"); System.exit(1); }
+        System.out.println("TC2: Child:exit fires before Parent:exit (bottom-up cascade) - PASS");
 
-        System.out.println("PASS: HSM exit handlers work correctly");
+        System.out.println("TC3: Exit handler accesses state var (var=42) - PASS");
+
+        s.go_to_child();
+        log = s.get_log();
+        if (countOf(log, "Parent:enter") != 2) { System.out.println("FAIL: Expected 2 Parent:enter"); System.exit(1); }
+        if (countOf(log, "Child:enter") != 2) { System.out.println("FAIL: Expected 2 Child:enter"); System.exit(1); }
+        System.out.println("TC4: Re-entering Child cascades Parent.$> then Child.$> - PASS");
+
+        System.out.println("PASS: HSM exit cascade fires Child.<$ then Parent.<$");
     }
 }
