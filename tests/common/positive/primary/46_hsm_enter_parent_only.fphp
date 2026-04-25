@@ -1,6 +1,14 @@
 <?php
 @@target php
 
+// Test 46: HSM Enter Cascade — Parent has $>, Child does not
+//
+// Tests the HSM enter cascade per docs/frame_runtime_introduction.md
+// Step 21+. When entering an HSM child, the kernel fires $> on every
+// layer of the new chain top-down (parent first, child last). The child
+// may have no $> handler — the cascade simply skips that layer and
+// continues.
+
 @@system HSMEnterParentOnly {
     interface:
         go_to_child()
@@ -12,60 +20,45 @@
         $Start {
             go_to_child() { -> $Child }
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:($this->log)
-            }
-            get_state(): str {
-                @@:("Start")
-            }
+            get_log(): list { @@:($this->log) }
+            get_state(): str { @@:("Start") }
         }
 
         $Child => $Parent {
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:($this->log)
-            }
-            get_state(): str {
-                @@:("Child")
-            }
+            get_log(): list { @@:($this->log) }
+            get_state(): str { @@:("Child") }
         }
 
         $Parent {
             $>() { $this->log[] = "Parent:enter"; }
             go_to_child() { -> $Child }
-            get_log(): list {
-                @@:($this->log)
-            }
-            get_state(): str {
-                @@:("Parent")
-            }
+            get_log(): list { @@:($this->log) }
+            get_state(): str { @@:("Parent") }
         }
     domain:
         log = []
 }
 
-echo "=== Test 46: HSM Enter in Parent Only ===" . "\n";
+echo "=== Test 46: HSM Enter Cascade — Parent only ===\n";
 $s = new HSMEnterParentOnly();
 
 $s->go_to_child();
 if ($s->get_state() !== "Child") { echo "FAIL\n"; exit(1); }
 $log = $s->get_log();
-echo "TC2.2.1: Child enters without error - PASS" . "\n";
-
-if (in_array("Parent:enter", $log)) { echo "FAIL: Parent:enter should NOT fire for child entry\n"; exit(1); }
-echo "TC2.2.2: Parent enter NOT auto-fired for child - PASS" . "\n";
+if (!in_array("Parent:enter", $log)) { echo "FAIL: Expected Parent:enter on cascade\n"; exit(1); }
+echo "TC1: Parent's \$> fires on cascade entry to Child - PASS\n";
 
 $s->go_to_parent();
-if ($s->get_state() !== "Parent") { echo "FAIL\n"; exit(1); }
 $log = $s->get_log();
-if (!in_array("Parent:enter", $log)) { echo "FAIL\n"; exit(1); }
-echo "TC2.2.3: Parent enter fires when transitioning to Parent - PASS" . "\n";
+$count = count(array_filter($log, function($v) { return $v === "Parent:enter"; }));
+if ($count !== 2) { echo "FAIL: Expected 2 Parent:enter, got $count\n"; exit(1); }
+echo "TC2: Parent's \$> fires again when transitioning directly to Parent - PASS\n";
 
 $s->go_to_child();
-if ($s->get_state() !== "Child") { echo "FAIL\n"; exit(1); }
 $log = $s->get_log();
-$parent_enter_count = count(array_filter($log, function($v) { return $v === "Parent:enter"; }));
-if ($parent_enter_count !== 1) { echo "FAIL\n"; exit(1); }
-echo "TC2.2.4: Return to child, parent enter count unchanged - PASS" . "\n";
+$count = count(array_filter($log, function($v) { return $v === "Parent:enter"; }));
+if ($count !== 3) { echo "FAIL: Expected 3 Parent:enter, got $count\n"; exit(1); }
+echo "TC3: Re-entering Child cascades through Parent again - PASS\n";
 
-echo "PASS: HSM enter in parent only works correctly" . "\n";
+echo "PASS: HSM enter cascade fires Parent's \$> on child entry\n";

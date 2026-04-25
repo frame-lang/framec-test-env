@@ -1,6 +1,12 @@
 <?php
 @@target php
 
+// Test 47: HSM Enter Cascade — Both Parent and Child have $>
+//
+// Tests the HSM enter cascade per docs/frame_runtime_introduction.md
+// Step 21+. When entering an HSM child, the kernel fires $> on every
+// layer of the new chain top-down (parent first, child last).
+
 @@system HSMEnterBoth {
     interface:
         go_to_child()
@@ -12,65 +18,54 @@
         $Start {
             go_to_child() { -> $Child }
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:($this->log)
-            }
-            get_state(): str {
-                @@:("Start")
-            }
+            get_log(): list { @@:($this->log) }
+            get_state(): str { @@:("Start") }
         }
 
         $Child => $Parent {
             $>() { $this->log[] = "Child:enter"; }
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:($this->log)
-            }
-            get_state(): str {
-                @@:("Child")
-            }
+            get_log(): list { @@:($this->log) }
+            get_state(): str { @@:("Child") }
         }
 
         $Parent {
             $>() { $this->log[] = "Parent:enter"; }
             go_to_child() { -> $Child }
-            get_log(): list {
-                @@:($this->log)
-            }
-            get_state(): str {
-                @@:("Parent")
-            }
+            get_log(): list { @@:($this->log) }
+            get_state(): str { @@:("Parent") }
         }
     domain:
         log = []
 }
 
-echo "=== Test 47: HSM Enter in Both ===" . "\n";
+echo "=== Test 47: HSM Enter Cascade — Both ===\n";
 $s = new HSMEnterBoth();
 
 $s->go_to_child();
 $log = $s->get_log();
-if (!in_array("Child:enter", $log)) { echo "FAIL\n"; exit(1); }
-if (in_array("Parent:enter", $log)) { echo "FAIL: Parent:enter should NOT fire when entering child\n"; exit(1); }
-echo "TC2.3.1: Only child's enter fires when entering child - PASS" . "\n";
+if ($s->get_state() !== "Child") { echo "FAIL\n"; exit(1); }
+$pi = array_search("Parent:enter", $log);
+$ci = array_search("Child:enter", $log);
+if ($pi === false) { echo "FAIL: Expected Parent:enter\n"; exit(1); }
+if ($ci === false) { echo "FAIL: Expected Child:enter\n"; exit(1); }
+if ($pi >= $ci) { echo "FAIL: Parent:enter must precede Child:enter (top-down)\n"; exit(1); }
+echo "TC1: Parent's \$> fires before Child's \$> on cascade entry - PASS\n";
 
 $s->go_to_parent();
 $log = $s->get_log();
-if (!in_array("Parent:enter", $log)) { echo "FAIL\n"; exit(1); }
-echo "TC2.3.2: Parent's enter fires when transitioning to parent - PASS" . "\n";
-
-$child_enter_count = count(array_filter($log, function($v) { return $v === "Child:enter"; }));
-$parent_enter_count = count(array_filter($log, function($v) { return $v === "Parent:enter"; }));
-if ($child_enter_count !== 1) { echo "FAIL\n"; exit(1); }
-if ($parent_enter_count !== 1) { echo "FAIL\n"; exit(1); }
-echo "TC2.3.3: No implicit cascading of enter handlers - PASS" . "\n";
+$pcount = count(array_filter($log, function($v) { return $v === "Parent:enter"; }));
+$ccount = count(array_filter($log, function($v) { return $v === "Child:enter"; }));
+if ($pcount !== 2) { echo "FAIL: Expected 2 Parent:enter, got $pcount\n"; exit(1); }
+if ($ccount !== 1) { echo "FAIL: Expected still 1 Child:enter, got $ccount\n"; exit(1); }
+echo "TC2: Direct Parent entry fires only Parent's \$> - PASS\n";
 
 $s->go_to_child();
 $log = $s->get_log();
-$child_enter_count = count(array_filter($log, function($v) { return $v === "Child:enter"; }));
-$parent_enter_count = count(array_filter($log, function($v) { return $v === "Parent:enter"; }));
-if ($child_enter_count !== 2) { echo "FAIL\n"; exit(1); }
-if ($parent_enter_count !== 1) { echo "FAIL\n"; exit(1); }
-echo "TC2.3.4: Re-entering child fires child enter again - PASS" . "\n";
+$pcount = count(array_filter($log, function($v) { return $v === "Parent:enter"; }));
+$ccount = count(array_filter($log, function($v) { return $v === "Child:enter"; }));
+if ($pcount !== 3) { echo "FAIL: Expected 3 Parent:enter, got $pcount\n"; exit(1); }
+if ($ccount !== 2) { echo "FAIL: Expected 2 Child:enter, got $ccount\n"; exit(1); }
+echo "TC3: Re-entering Child cascades through Parent again - PASS\n";
 
-echo "PASS: HSM enter in both works correctly" . "\n";
+echo "PASS: HSM enter cascade fires both layers top-down\n";

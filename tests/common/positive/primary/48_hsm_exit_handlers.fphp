@@ -1,6 +1,12 @@
 <?php
 @@target php
 
+// Test 48: HSM Exit Cascade
+//
+// Tests the HSM exit cascade per docs/frame_runtime_introduction.md
+// Step 21+. When exiting an HSM child, the kernel fires <$ on every
+// layer of the source chain bottom-up (child first, parent last).
+
 @@system HSMExitHandlers {
     interface:
         go_to_other()
@@ -17,15 +23,9 @@
             <$() { $val = $.child_var; $this->log[] = "Child:exit(var={$val})"; }
             go_to_other() { -> $Other }
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:($this->log)
-            }
-            get_state(): str {
-                @@:("Child")
-            }
-            get_child_var(): int {
-                @@:($.child_var)
-            }
+            get_log(): list { @@:($this->log) }
+            get_state(): str { @@:("Child") }
+            get_child_var(): int { @@:($.child_var) }
         }
 
         $Parent {
@@ -33,59 +33,50 @@
             <$() { $this->log[] = "Parent:exit"; }
             go_to_child() { -> $Child }
             go_to_other() { -> $Other }
-            get_log(): list {
-                @@:($this->log)
-            }
-            get_state(): str {
-                @@:("Parent")
-            }
-            get_child_var(): int {
-                @@:(-1)
-            }
+            get_log(): list { @@:($this->log) }
+            get_state(): str { @@:("Parent") }
+            get_child_var(): int { @@:(-1) }
         }
 
         $Other {
             $>() { $this->log[] = "Other:enter"; }
             go_to_child() { -> $Child }
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:($this->log)
-            }
-            get_state(): str {
-                @@:("Other")
-            }
-            get_child_var(): int {
-                @@:(-1)
-            }
+            get_log(): list { @@:($this->log) }
+            get_state(): str { @@:("Other") }
+            get_child_var(): int { @@:(-1) }
         }
     domain:
         log = []
 }
 
-echo "=== Test 48: HSM Exit Handlers ===" . "\n";
+echo "=== Test 48: HSM Exit Cascade ===\n";
 $s = new HSMExitHandlers();
 
 $log = $s->get_log();
-if (!in_array("Child:enter", $log)) { echo "FAIL\n"; exit(1); }
-echo "TC2.4.0: Initial state is Child with enter - PASS" . "\n";
+if (!in_array("Parent:enter", $log)) { echo "FAIL: Expected Parent:enter on init cascade\n"; exit(1); }
+if (!in_array("Child:enter", $log)) { echo "FAIL: Expected Child:enter on init\n"; exit(1); }
+if ($s->get_state() !== "Child") { echo "FAIL\n"; exit(1); }
+echo "TC1: Initial entry cascades through Parent then Child - PASS\n";
 
 $s->go_to_other();
 $log = $s->get_log();
-if (!in_array("Child:exit(var=42)", $log)) { echo "FAIL\n"; exit(1); }
-if (!in_array("Other:enter", $log)) { echo "FAIL\n"; exit(1); }
-echo "TC2.4.1: Child exit fires when transitioning out - PASS" . "\n";
+if (!in_array("Child:exit(var=42)", $log)) { echo "FAIL: Expected Child:exit(var=42)\n"; exit(1); }
+if (!in_array("Parent:exit", $log)) { echo "FAIL: Expected Parent:exit (cascade)\n"; exit(1); }
+if (!in_array("Other:enter", $log)) { echo "FAIL: Expected Other:enter\n"; exit(1); }
+$cei = array_search("Child:exit(var=42)", $log);
+$pei = array_search("Parent:exit", $log);
+if ($cei >= $pei) { echo "FAIL: Child:exit must precede Parent:exit (bottom-up)\n"; exit(1); }
+echo "TC2: Child:exit fires before Parent:exit (bottom-up cascade) - PASS\n";
 
-if (in_array("Parent:exit", $log)) { echo "FAIL: Parent:exit should NOT fire for child exit\n"; exit(1); }
-echo "TC2.4.2: Parent exit NOT fired for child exit - PASS" . "\n";
-echo "TC2.4.3: Exit handler accesses state var (var=42) - PASS" . "\n";
+echo "TC3: Exit handler accesses state var (var=42) - PASS\n";
 
-$s->go_to_parent();
+$s->go_to_child();
 $log = $s->get_log();
-if (!in_array("Parent:enter", $log)) { echo "FAIL\n"; exit(1); }
+$pcount = count(array_filter($log, function($v) { return $v === "Parent:enter"; }));
+$ccount = count(array_filter($log, function($v) { return $v === "Child:enter"; }));
+if ($pcount !== 2) { echo "FAIL: Expected 2 Parent:enter, got $pcount\n"; exit(1); }
+if ($ccount !== 2) { echo "FAIL: Expected 2 Child:enter, got $ccount\n"; exit(1); }
+echo "TC4: Re-entering Child cascades Parent.\$> then Child.\$> - PASS\n";
 
-$s->go_to_other();
-$log = $s->get_log();
-if (!in_array("Parent:exit", $log)) { echo "FAIL\n"; exit(1); }
-echo "TC2.4.4: Parent exit fires when leaving parent - PASS" . "\n";
-
-echo "PASS: HSM exit handlers work correctly" . "\n";
+echo "PASS: HSM exit cascade fires Child.<\$ then Parent.<\$\n";
