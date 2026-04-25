@@ -1,111 +1,68 @@
 @@target gdscript
 extends SceneTree
 
-# Test 46: HSM Enter in Parent Only
+# Test 46: HSM Enter Cascade — Parent has $>, Child does not
 #
-# Tests enter handler in parent only:
-# - Parent has $>(), child does not
-# - Child enters without error (no enter handler)
-# - Parent's enter does NOT auto-fire when child is entered
-# - Parent enter only fires when transitioning directly TO parent
+# Tests the HSM enter cascade per docs/frame_runtime_introduction.md
+# Step 21+. When entering an HSM child, the kernel fires $> on every
+# layer of the new chain top-down (parent first, child last). The child
+# may have no $> handler — the cascade simply skips that layer and
+# continues.
 
 @@system HSMEnterParentOnly {
     interface:
         go_to_child()
         go_to_parent()
         get_log(): list
-        get_state(): String
+        get_state(): str
 
     machine:
         $Start {
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): list {
-                @@:(self.log)
-                return
-            }
-
-            get_state(): String {
-                @@:("Start")
-                return
-            }
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Start") }
         }
 
         $Child => $Parent {
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): list {
-                @@:(self.log)
-                return
-            }
-
-            get_state(): String {
-                @@:("Child")
-                return
-            }
+            go_to_parent() { -> $Parent }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Child") }
         }
 
         $Parent {
             $>() {
                 self.log.append("Parent:enter")
             }
-
-            go_to_child() {
-                -> $Child
-            }
-
-            get_log(): list {
-                @@:(self.log)
-                return
-            }
-
-            get_state(): String {
-                @@:("Parent")
-                return
-            }
+            go_to_child() { -> $Child }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Parent") }
         }
     domain:
         log: list = []
 }
 
 func main():
-    print("=== Test 46: HSM Enter in Parent Only ===")
+    print("=== Test 46: HSM Enter Cascade — Parent only ===")
     var s = @@HSMEnterParentOnly()
 
-    # TC2.2.1: Child enters without error (no enter handler)
     s.go_to_child()
-    assert(s.get_state() == "Child", "Expected Child, got " + str(s.get_state()))
+    assert(s.get_state() == "Child", "Expected Child")
     var log = s.get_log()
-    print("TC2.2.1: Child enters without error (log: " + str(log) + ") - PASS")
+    assert("Parent:enter" in log, "Expected Parent:enter on cascade entry")
+    print("TC1: Parent's $> fires on cascade entry to Child - PASS")
 
-    # TC2.2.2: Parent's enter does NOT auto-fire when child is entered
-    assert("Parent:enter" not in log, "Parent:enter should NOT fire for child entry, got " + str(log))
-    print("TC2.2.2: Parent enter NOT auto-fired for child - PASS")
-
-    # TC2.2.3: Parent enter only fires when transitioning directly TO parent
     s.go_to_parent()
-    assert(s.get_state() == "Parent", "Expected Parent, got " + str(s.get_state()))
     log = s.get_log()
-    assert("Parent:enter" in log, "Expected Parent:enter when transitioning to Parent, got " + str(log))
-    print("TC2.2.3: Parent enter fires when transitioning to Parent - PASS")
+    assert(log.count("Parent:enter") == 2, "Expected 2 Parent:enter")
+    print("TC2: Parent's $> fires again when transitioning directly to Parent - PASS")
 
-    # TC2.2.4: Going back to child from parent
     s.go_to_child()
-    assert(s.get_state() == "Child", "Expected Child, got " + str(s.get_state()))
     log = s.get_log()
-    # Parent enter should have fired only once (when we went to Parent)
-    assert(log.count("Parent:enter") == 1, "Expected exactly 1 Parent:enter, got " + str(log))
-    print("TC2.2.4: Return to child, parent enter count unchanged - PASS")
+    assert(log.count("Parent:enter") == 3, "Expected 3 Parent:enter")
+    print("TC3: Re-entering Child cascades through Parent again - PASS")
 
-    print("PASS: HSM enter in parent only works correctly")
+    print("PASS: HSM enter cascade fires Parent's $> on child entry")
 
 func _init():
     main()

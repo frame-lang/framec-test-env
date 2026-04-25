@@ -1,12 +1,11 @@
 @@target gdscript
 extends SceneTree
 
-# Test 48: HSM Exit Handlers
+# Test 48: HSM Exit Cascade
 #
-# Tests exit handlers in HSM context:
-# - Child exit fires when transitioning out of child
-# - Parent exit does NOT fire when transitioning out of child
-# - Exit handler can access child's state variables
+# Tests the HSM exit cascade per docs/frame_runtime_introduction.md
+# Step 21+. When exiting an HSM child, the kernel fires <$ on every
+# layer of the source chain bottom-up (child first, parent last).
 
 @@system HSMExitHandlers {
     interface:
@@ -14,7 +13,7 @@ extends SceneTree
         go_to_parent()
         go_to_child()
         get_log(): list
-        get_state(): String
+        get_state(): str
         get_child_var(): int
 
     machine:
@@ -30,28 +29,11 @@ extends SceneTree
                 self.log.append("Child:exit(var=" + str(val) + ")")
             }
 
-            go_to_other() {
-                -> $Other
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): list {
-                @@:(self.log)
-                return
-            }
-
-            get_state(): String {
-                @@:("Child")
-                return
-            }
-
-            get_child_var(): int {
-                @@:($.child_var)
-                return
-            }
+            go_to_other() { -> $Other }
+            go_to_parent() { -> $Parent }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Child") }
+            get_child_var(): int { @@:($.child_var) }
         }
 
         $Parent {
@@ -63,28 +45,11 @@ extends SceneTree
                 self.log.append("Parent:exit")
             }
 
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_other() {
-                -> $Other
-            }
-
-            get_log(): list {
-                @@:(self.log)
-                return
-            }
-
-            get_state(): String {
-                @@:("Parent")
-                return
-            }
-
-            get_child_var(): int {
-                @@:(-1)
-                return
-            }
+            go_to_child() { -> $Child }
+            go_to_other() { -> $Other }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Parent") }
+            get_child_var(): int { @@:(-1) }
         }
 
         $Other {
@@ -92,68 +57,45 @@ extends SceneTree
                 self.log.append("Other:enter")
             }
 
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): list {
-                @@:(self.log)
-                return
-            }
-
-            get_state(): String {
-                @@:("Other")
-                return
-            }
-
-            get_child_var(): int {
-                @@:(-1)
-                return
-            }
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Other") }
+            get_child_var(): int { @@:(-1) }
         }
     domain:
         log: list = []
 }
 
 func main():
-    print("=== Test 48: HSM Exit Handlers ===")
+    print("=== Test 48: HSM Exit Cascade ===")
     var s = @@HSMExitHandlers()
 
-    # Initial state is Child
     var log = s.get_log()
-    assert("Child:enter" in log, "Expected Child:enter on init, got " + str(log))
-    assert(s.get_state() == "Child", "Expected Child, got " + str(s.get_state()))
-    print("TC2.4.0: Initial state is Child with enter - PASS")
-
-    # TC2.4.1: Child exit fires when transitioning out of child
-    s.go_to_other()
-    log = s.get_log()
-    assert("Child:exit(var=42)" in log, "Expected Child:exit, got " + str(log))
-    assert("Other:enter" in log, "Expected Other:enter, got " + str(log))
-    print("TC2.4.1: Child exit fires when transitioning out - PASS")
-
-    # TC2.4.2: Parent exit does NOT fire when transitioning out of child
-    assert("Parent:exit" not in log, "Parent:exit should NOT fire for child exit, got " + str(log))
-    print("TC2.4.2: Parent exit NOT fired for child exit - PASS")
-
-    # TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
-    print("TC2.4.3: Exit handler accesses state var (var=42) - PASS")
-
-    # TC2.4.4: Parent exit fires when transitioning out of Parent
-    s.go_to_parent()
-    log = s.get_log()
-    assert("Parent:enter" in log, "Expected Parent:enter, got " + str(log))
+    assert("Parent:enter" in log, "Expected Parent:enter on init cascade")
+    assert("Child:enter" in log, "Expected Child:enter on init")
+    assert(s.get_state() == "Child", "Expected Child")
+    print("TC1: Initial entry cascades through Parent then Child - PASS")
 
     s.go_to_other()
     log = s.get_log()
-    assert("Parent:exit" in log, "Expected Parent:exit, got " + str(log))
-    print("TC2.4.4: Parent exit fires when leaving parent - PASS")
+    assert("Child:exit(var=42)" in log, "Expected Child:exit(var=42)")
+    assert("Parent:exit" in log, "Expected Parent:exit (cascade)")
+    assert("Other:enter" in log, "Expected Other:enter")
+    var cei = log.find("Child:exit(var=42)")
+    var pei = log.find("Parent:exit")
+    assert(cei < pei, "Child:exit must precede Parent:exit (bottom-up)")
+    print("TC2: Child:exit fires before Parent:exit (bottom-up cascade) - PASS")
 
-    print("PASS: HSM exit handlers work correctly")
+    print("TC3: Exit handler accesses state var (var=42) - PASS")
+
+    s.go_to_child()
+    log = s.get_log()
+    assert(log.count("Parent:enter") == 2, "Expected 2 Parent:enter")
+    assert(log.count("Child:enter") == 2, "Expected 2 Child:enter")
+    print("TC4: Re-entering Child cascades Parent.$> then Child.$> - PASS")
+
+    print("PASS: HSM exit cascade fires Child.<$ then Parent.<$")
 
 func _init():
     main()
