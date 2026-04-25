@@ -1,20 +1,19 @@
 @@target javascript
 
-// Test 48: HSM Exit Handlers
+// Test 48: HSM Exit Cascade
 //
-// Tests exit handlers in HSM context:
-// - Child exit fires when transitioning out of child
-// - Parent exit does NOT fire when transitioning out of child
-// - Exit handler can access child's state variables
+// Tests the HSM exit cascade per docs/frame_runtime_introduction.md
+// Step 21+. When exiting an HSM child, the kernel fires <$ on every
+// layer of the source chain bottom-up (child first, parent last).
 
 @@system HSMExitHandlers {
     interface:
         go_to_other()
         go_to_parent()
         go_to_child()
-        get_log(): string[]
-        get_state(): str
-        get_child_var(): int
+        get_log()
+        get_state()
+        get_child_var()
 
     machine:
         $Child => $Parent {
@@ -37,17 +36,17 @@
                 -> $Parent
             }
 
-            get_log(): list {
+            get_log() {
                 @@:(this.log)
                 return;
             }
 
-            get_state(): str {
+            get_state() {
                 @@:("Child")
                 return;
             }
 
-            get_child_var(): int {
+            get_child_var() {
                 @@:($.child_var)
                 return;
             }
@@ -70,17 +69,17 @@
                 -> $Other
             }
 
-            get_log(): list {
+            get_log() {
                 @@:(this.log)
                 return;
             }
 
-            get_state(): str {
+            get_state() {
                 @@:("Parent")
                 return;
             }
 
-            get_child_var(): int {
+            get_child_var() {
                 @@:(-1)
                 return;
             }
@@ -99,17 +98,17 @@
                 -> $Parent
             }
 
-            get_log(): list {
+            get_log() {
                 @@:(this.log)
                 return;
             }
 
-            get_state(): str {
+            get_state() {
                 @@:("Other")
                 return;
             }
 
-            get_child_var(): int {
+            get_child_var() {
                 @@:(-1)
                 return;
             }
@@ -119,40 +118,40 @@
 }
 
 function main() {
-    console.log("=== Test 48: HSM Exit Handlers ===");
+    console.log("=== Test 48: HSM Exit Cascade ===");
     const s = @@HSMExitHandlers();
 
-    // Initial state is Child
+    // Initial state is Child. Cascade fires Parent.$> then Child.$>.
     let log = s.get_log();
+    if (!log.includes("Parent:enter")) throw new Error(`Expected Parent:enter on init cascade, got ${JSON.stringify(log)}`);
     if (!log.includes("Child:enter")) throw new Error(`Expected Child:enter on init, got ${JSON.stringify(log)}`);
     if (s.get_state() !== "Child") throw new Error(`Expected Child, got ${s.get_state()}`);
-    console.log("TC2.4.0: Initial state is Child with enter - PASS");
+    console.log("TC1: Initial entry cascades through Parent then Child - PASS");
 
-    // TC2.4.1: Child exit fires when transitioning out of child
+    // TC2: Exiting Child to Other fires Child.<$ then Parent.<$ (bottom-up).
     s.go_to_other();
     log = s.get_log();
-    if (!log.includes("Child:exit(var=42)")) throw new Error(`Expected Child:exit, got ${JSON.stringify(log)}`);
+    if (!log.includes("Child:exit(var=42)")) throw new Error(`Expected Child:exit(var=42), got ${JSON.stringify(log)}`);
+    if (!log.includes("Parent:exit")) throw new Error(`Expected Parent:exit (cascade), got ${JSON.stringify(log)}`);
     if (!log.includes("Other:enter")) throw new Error(`Expected Other:enter, got ${JSON.stringify(log)}`);
-    console.log("TC2.4.1: Child exit fires when transitioning out - PASS");
+    const childExitIdx = log.indexOf("Child:exit(var=42)");
+    const parentExitIdx = log.indexOf("Parent:exit");
+    if (childExitIdx >= parentExitIdx) throw new Error(`Child:exit should fire BEFORE Parent:exit (bottom-up), got ${JSON.stringify(log)}`);
+    console.log("TC2: Child:exit fires before Parent:exit (bottom-up cascade) - PASS");
 
-    // TC2.4.2: Parent exit does NOT fire when transitioning out of child
-    if (log.includes("Parent:exit")) throw new Error(`Parent:exit should NOT fire for child exit, got ${JSON.stringify(log)}`);
-    console.log("TC2.4.2: Parent exit NOT fired for child exit - PASS");
+    // TC3: Exit handler can access child's state variables (verified by var=42 in log).
+    console.log("TC3: Exit handler accesses state var (var=42) - PASS");
 
-    // TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
-    console.log("TC2.4.3: Exit handler accesses state var (var=42) - PASS");
-
-    // TC2.4.4: Parent exit fires when transitioning out of Parent
-    s.go_to_parent();
+    // TC4: Re-entering child fires the entry cascade again.
+    s.go_to_child();
     log = s.get_log();
-    if (!log.includes("Parent:enter")) throw new Error(`Expected Parent:enter, got ${JSON.stringify(log)}`);
+    const parentEnterCount = log.filter((x) => x === "Parent:enter").length;
+    const childEnterCount = log.filter((x) => x === "Child:enter").length;
+    if (parentEnterCount !== 2) throw new Error(`Expected 2 Parent:enter, got ${parentEnterCount}: ${JSON.stringify(log)}`);
+    if (childEnterCount !== 2) throw new Error(`Expected 2 Child:enter, got ${childEnterCount}: ${JSON.stringify(log)}`);
+    console.log("TC4: Re-entering Child cascades Parent.$> then Child.$> - PASS");
 
-    s.go_to_other();
-    log = s.get_log();
-    if (!log.includes("Parent:exit")) throw new Error(`Expected Parent:exit, got ${JSON.stringify(log)}`);
-    console.log("TC2.4.4: Parent exit fires when leaving parent - PASS");
-
-    console.log("PASS: HSM exit handlers work correctly");
+    console.log("PASS: HSM exit cascade fires Child.<$ then Parent.<$");
 }
 
 main();

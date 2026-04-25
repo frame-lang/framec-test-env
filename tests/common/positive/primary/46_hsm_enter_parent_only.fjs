@@ -1,19 +1,20 @@
 @@target javascript
 
-// Test 46: HSM Enter in Parent Only
+// Test 46: HSM Enter Cascade — Parent has $>, Child does not
 //
-// Tests enter handler in parent only:
-// - Parent has $>(), child does not
-// - Child enters without error (no enter handler)
-// - Parent's enter does NOT auto-fire when child is entered
-// - Parent enter only fires when transitioning directly TO parent
+// Tests the HSM enter cascade per docs/frame_runtime_introduction.md
+// Step 21+. When entering an HSM child, the kernel fires $> on every
+// layer of the new chain top-down (parent first, child last).
+//
+// In this system, only Parent declares $>, so entering Child fires
+// Parent's $> exactly once via the cascade.
 
 @@system HSMEnterParentOnly {
     interface:
         go_to_child()
         go_to_parent()
-        get_log(): string[]
-        get_state(): str
+        get_log()
+        get_state()
 
     machine:
         $Start {
@@ -25,12 +26,12 @@
                 -> $Parent
             }
 
-            get_log(): list {
+            get_log() {
                 @@:(this.log)
                 return;
             }
 
-            get_state(): str {
+            get_state() {
                 @@:("Start")
                 return;
             }
@@ -41,12 +42,12 @@
                 -> $Parent
             }
 
-            get_log(): list {
+            get_log() {
                 @@:(this.log)
                 return;
             }
 
-            get_state(): str {
+            get_state() {
                 @@:("Child")
                 return;
             }
@@ -61,12 +62,12 @@
                 -> $Child
             }
 
-            get_log(): list {
+            get_log() {
                 @@:(this.log)
                 return;
             }
 
-            get_state(): str {
+            get_state() {
                 @@:("Parent")
                 return;
             }
@@ -76,36 +77,34 @@
 }
 
 function main() {
-    console.log("=== Test 46: HSM Enter in Parent Only ===");
+    console.log("=== Test 46: HSM Enter Cascade — Parent only ===");
     const s = @@HSMEnterParentOnly();
 
-    // TC2.2.1: Child enters without error (no enter handler)
+    // TC1: Entering Child fires Parent's $> via cascade.
     s.go_to_child();
     if (s.get_state() !== "Child") throw new Error(`Expected Child, got ${s.get_state()}`);
     let log = s.get_log();
-    console.log(`TC2.2.1: Child enters without error (log: ${JSON.stringify(log)}) - PASS`);
+    if (!log.includes("Parent:enter")) throw new Error(`Expected Parent:enter on cascade entry to Child, got ${JSON.stringify(log)}`);
+    console.log("TC1: Parent's $> fires on Child entry via cascade - PASS");
 
-    // TC2.2.2: Parent's enter does NOT auto-fire when child is entered
-    if (log.includes("Parent:enter")) throw new Error(`Parent:enter should NOT fire for child entry, got ${JSON.stringify(log)}`);
-    console.log("TC2.2.2: Parent enter NOT auto-fired for child - PASS");
-
-    // TC2.2.3: Parent enter only fires when transitioning directly TO parent
+    // TC2: Transitioning from Child directly to Parent fires Parent's $>
+    // again (Child's chain exits, then Parent's enter cascade fires Parent.$>).
     s.go_to_parent();
     if (s.get_state() !== "Parent") throw new Error(`Expected Parent, got ${s.get_state()}`);
     log = s.get_log();
-    if (!log.includes("Parent:enter")) throw new Error(`Expected Parent:enter when transitioning to Parent, got ${JSON.stringify(log)}`);
-    console.log("TC2.2.3: Parent enter fires when transitioning to Parent - PASS");
+    let count = log.filter((x) => x === "Parent:enter").length;
+    if (count !== 2) throw new Error(`Expected 2 Parent:enter (one cascade + one direct), got ${count}: ${JSON.stringify(log)}`);
+    console.log("TC2: Parent's $> fires on direct entry to Parent - PASS");
 
-    // TC2.2.4: Going back to child from parent
+    // TC3: Transitioning back to Child fires Parent's $> again via cascade.
     s.go_to_child();
     if (s.get_state() !== "Child") throw new Error(`Expected Child, got ${s.get_state()}`);
     log = s.get_log();
-    // Parent enter should have fired only once (when we went to Parent)
-    const count = log.filter(x => x === "Parent:enter").length;
-    if (count !== 1) throw new Error(`Expected exactly 1 Parent:enter, got ${JSON.stringify(log)}`);
-    console.log("TC2.2.4: Return to child, parent enter count unchanged - PASS");
+    count = log.filter((x) => x === "Parent:enter").length;
+    if (count !== 3) throw new Error(`Expected 3 Parent:enter total, got ${count}: ${JSON.stringify(log)}`);
+    console.log("TC3: Parent's $> fires again on cascade back to Child - PASS");
 
-    console.log("PASS: HSM enter in parent only works correctly");
+    console.log("PASS: HSM enter cascade fires ancestor $> correctly");
 }
 
 main();

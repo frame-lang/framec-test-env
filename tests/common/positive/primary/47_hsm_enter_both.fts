@@ -1,11 +1,10 @@
 @@target typescript
 
-// Test 47: HSM Enter in Both Child and Parent
+// Test 47: HSM Enter Cascade — Both Parent and Child have $>
 //
-// Tests enter handler in both levels:
-// - Only child's enter fires when entering child
-// - Parent's enter fires only when transitioning to parent
-// - No implicit cascading of enter handlers
+// Tests the HSM enter cascade per docs/frame_runtime_introduction.md
+// Step 21+. When entering an HSM child, the kernel fires $> on every
+// layer of the new chain top-down (parent first, child last).
 
 @@system HSMEnterBoth {
     interface:
@@ -79,41 +78,41 @@
 }
 
 function main() {
-    console.log("=== Test 47: HSM Enter in Both ===");
+    console.log("=== Test 47: HSM Enter Cascade — Both ===");
     const s = @@HSMEnterBoth();
 
-    // TC2.3.1: Only child's enter fires when entering child
+    // TC1: Entering Child fires Parent's $> first (top-down cascade),
+    // then Child's $>.
     s.go_to_child();
     let log = s.get_log();
-    if (!log.includes("Child:enter")) throw new Error(`Expected Child:enter, got ${JSON.stringify(log)}`);
-    if (log.includes("Parent:enter")) throw new Error(`Parent:enter should NOT fire when entering child, got ${JSON.stringify(log)}`);
     if (s.get_state() !== "Child") throw new Error(`Expected Child, got ${s.get_state()}`);
-    console.log("TC2.3.1: Only child's enter fires when entering child - PASS");
+    if (!log.includes("Parent:enter")) throw new Error(`Expected Parent:enter (cascade), got ${JSON.stringify(log)}`);
+    if (!log.includes("Child:enter")) throw new Error(`Expected Child:enter, got ${JSON.stringify(log)}`);
+    const parentIdx = log.indexOf("Parent:enter");
+    const childIdx = log.indexOf("Child:enter");
+    if (parentIdx >= childIdx) throw new Error(`Parent:enter should fire BEFORE Child:enter (top-down), got ${JSON.stringify(log)}`);
+    console.log("TC1: Parent's $> fires before Child's $> on cascade entry - PASS");
 
-    // TC2.3.2: Parent's enter fires only when transitioning to parent
+    // TC2: Direct entry to Parent fires Parent's $> only.
     s.go_to_parent();
     log = s.get_log();
-    if (!log.includes("Parent:enter")) throw new Error(`Expected Parent:enter, got ${JSON.stringify(log)}`);
     if (s.get_state() !== "Parent") throw new Error(`Expected Parent, got ${s.get_state()}`);
-    console.log("TC2.3.2: Parent's enter fires when transitioning to parent - PASS");
+    let parentCount = log.filter((x: string) => x === "Parent:enter").length;
+    let childCount = log.filter((x: string) => x === "Child:enter").length;
+    if (parentCount !== 2) throw new Error(`Expected 2 Parent:enter (cascade + direct), got ${parentCount}: ${JSON.stringify(log)}`);
+    if (childCount !== 1) throw new Error(`Expected still 1 Child:enter, got ${childCount}: ${JSON.stringify(log)}`);
+    console.log("TC2: Direct Parent entry fires only Parent's $> - PASS");
 
-    // TC2.3.3: No implicit cascading - counts should be exactly 1 each
-    const childCount = log.filter((x: string) => x === "Child:enter").length;
-    const parentCount = log.filter((x: string) => x === "Parent:enter").length;
-    if (childCount !== 1) throw new Error(`Expected exactly 1 Child:enter, got ${JSON.stringify(log)}`);
-    if (parentCount !== 1) throw new Error(`Expected exactly 1 Parent:enter, got ${JSON.stringify(log)}`);
-    console.log("TC2.3.3: No implicit cascading of enter handlers - PASS");
-
-    // TC2.3.4: Going back to child fires child enter again
+    // TC3: Transitioning back to Child fires both cascades.
     s.go_to_child();
     log = s.get_log();
-    const childCount2 = log.filter((x: string) => x === "Child:enter").length;
-    const parentCount2 = log.filter((x: string) => x === "Parent:enter").length;
-    if (childCount2 !== 2) throw new Error(`Expected 2 Child:enter, got ${JSON.stringify(log)}`);
-    if (parentCount2 !== 1) throw new Error(`Expected still 1 Parent:enter, got ${JSON.stringify(log)}`);
-    console.log("TC2.3.4: Re-entering child fires child enter again - PASS");
+    parentCount = log.filter((x: string) => x === "Parent:enter").length;
+    childCount = log.filter((x: string) => x === "Child:enter").length;
+    if (parentCount !== 3) throw new Error(`Expected 3 Parent:enter total, got ${parentCount}: ${JSON.stringify(log)}`);
+    if (childCount !== 2) throw new Error(`Expected 2 Child:enter total, got ${childCount}: ${JSON.stringify(log)}`);
+    console.log("TC3: Re-entering Child cascades through Parent again - PASS");
 
-    console.log("PASS: HSM enter in both works correctly");
+    console.log("PASS: HSM enter cascade fires both layers top-down");
 }
 
 main();
