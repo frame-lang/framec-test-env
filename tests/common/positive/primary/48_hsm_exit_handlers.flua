@@ -1,4 +1,11 @@
 @@target lua
+
+-- Test 48: HSM Exit Cascade
+--
+-- Tests the HSM exit cascade per docs/frame_runtime_introduction.md
+-- Step 21+. When exiting an HSM child, the kernel fires <$ on every
+-- layer of the source chain bottom-up (child first, parent last).
+
 @@system HSMExitHandlers {
     interface:
         go_to_other()
@@ -12,100 +19,88 @@
         $Child => $Parent {
             $.child_var: int = 42
 
-            $>() {
-                self.log[#self.log + 1] = "Child:enter"
-            }
+            $>() { table.insert(self.log, "Child:enter") }
 
             <$() {
-                val = $.child_var
-                self.log[#self.log + 1] = "Child:exit(var=" .. tostring(val) .. ")"
+                local val = $.child_var
+                table.insert(self.log, "Child:exit(var=" .. tostring(val) .. ")")
             }
 
-            go_to_other() {
-                -> $Other
-            }
+            go_to_other() { -> $Other }
+            go_to_parent() { -> $Parent }
 
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): list {
-                @@:(self.log)
-                return
-            }
-
-            get_state(): str {
-                @@:("Child")
-                return
-            }
-
-            get_child_var(): int {
-                @@:($.child_var)
-                return
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Child") }
+            get_child_var(): int { @@:($.child_var) }
         }
 
         $Parent {
-            $>() {
-                self.log[#self.log + 1] = "Parent:enter"
-            }
+            $>() { table.insert(self.log, "Parent:enter") }
+            <$() { table.insert(self.log, "Parent:exit") }
 
-            <$() {
-                self.log[#self.log + 1] = "Parent:exit"
-            }
+            go_to_child() { -> $Child }
+            go_to_other() { -> $Other }
 
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_other() {
-                -> $Other
-            }
-
-            get_log(): list {
-                @@:(self.log)
-                return
-            }
-
-            get_state(): str {
-                @@:("Parent")
-                return
-            }
-
-            get_child_var(): int {
-                @@:(-1)
-                return
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Parent") }
+            get_child_var(): int { @@:(-1) }
         }
 
         $Other {
-            $>() {
-                self.log[#self.log + 1] = "Other:enter"
-            }
+            $>() { table.insert(self.log, "Other:enter") }
 
-            go_to_child() {
-                -> $Child
-            }
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
 
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): list {
-                @@:(self.log)
-                return
-            }
-
-            get_state(): str {
-                @@:("Other")
-                return
-            }
-
-            get_child_var(): int {
-                @@:(-1)
-                return
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Other") }
+            get_child_var(): int { @@:(-1) }
         }
     domain:
-        log: list = []
+        log: list = {}
 }
+
+local function count(t, v)
+    local n = 0
+    for i = 1, #t do if t[i] == v then n = n + 1 end end
+    return n
+end
+
+local function index_of(t, v)
+    for i = 1, #t do if t[i] == v then return i end end
+    return nil
+end
+
+local function contains(t, v)
+    for i = 1, #t do if t[i] == v then return true end end
+    return false
+end
+
+print("=== Test 48: HSM Exit Cascade ===")
+local s = HSMExitHandlers.new()
+
+local log = s:get_log()
+assert(contains(log, "Parent:enter"), "Expected Parent:enter on init cascade")
+assert(contains(log, "Child:enter"), "Expected Child:enter on init")
+assert(s:get_state() == "Child", "Expected Child")
+print("TC1: Initial entry cascades through Parent then Child - PASS")
+
+s:go_to_other()
+log = s:get_log()
+assert(contains(log, "Child:exit(var=42)"), "Expected Child:exit(var=42)")
+assert(contains(log, "Parent:exit"), "Expected Parent:exit (cascade)")
+assert(contains(log, "Other:enter"), "Expected Other:enter")
+local cei = index_of(log, "Child:exit(var=42)")
+local pei = index_of(log, "Parent:exit")
+assert(cei < pei, "Child:exit must precede Parent:exit (bottom-up)")
+print("TC2: Child:exit fires before Parent:exit (bottom-up cascade) - PASS")
+
+print("TC3: Exit handler accesses state var (var=42) - PASS")
+
+s:go_to_child()
+log = s:get_log()
+assert(count(log, "Parent:enter") == 2, "Expected 2 Parent:enter")
+assert(count(log, "Child:enter") == 2, "Expected 2 Child:enter")
+print("TC4: Re-entering Child cascades Parent.$> then Child.$> - PASS")
+
+print("PASS: HSM exit cascade fires Child.<$ then Parent.<$")

@@ -1,4 +1,11 @@
 @@target lua
+
+-- Test 47: HSM Enter Cascade — Both Parent and Child have $>
+--
+-- Tests the HSM enter cascade per docs/frame_runtime_introduction.md
+-- Step 21+. When entering an HSM child, the kernel fires $> on every
+-- layer of the new chain top-down (parent first, child last).
+
 @@system HSMEnterBoth {
     interface:
         go_to_child()
@@ -8,64 +15,64 @@
 
     machine:
         $Start {
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): list {
-                @@:(self.log)
-                return
-            }
-
-            get_state(): str {
-                @@:("Start")
-                return
-            }
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Start") }
         }
 
         $Child => $Parent {
-            $>() {
-                self.log[#self.log + 1] = "Child:enter"
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): list {
-                @@:(self.log)
-                return
-            }
-
-            get_state(): str {
-                @@:("Child")
-                return
-            }
+            $>() { table.insert(self.log, "Child:enter") }
+            go_to_parent() { -> $Parent }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Child") }
         }
 
         $Parent {
-            $>() {
-                self.log[#self.log + 1] = "Parent:enter"
-            }
-
-            go_to_child() {
-                -> $Child
-            }
-
-            get_log(): list {
-                @@:(self.log)
-                return
-            }
-
-            get_state(): str {
-                @@:("Parent")
-                return
-            }
+            $>() { table.insert(self.log, "Parent:enter") }
+            go_to_child() { -> $Child }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Parent") }
         }
     domain:
-        log: list = []
+        log: list = {}
 }
+
+local function count(t, v)
+    local n = 0
+    for i = 1, #t do if t[i] == v then n = n + 1 end end
+    return n
+end
+
+local function index_of(t, v)
+    for i = 1, #t do if t[i] == v then return i end end
+    return nil
+end
+
+print("=== Test 47: HSM Enter Cascade — Both ===")
+local s = HSMEnterBoth.new()
+
+s:go_to_child()
+local log = s:get_log()
+assert(s:get_state() == "Child", "Expected Child")
+local pi = index_of(log, "Parent:enter")
+local ci = index_of(log, "Child:enter")
+assert(pi ~= nil, "Expected Parent:enter")
+assert(ci ~= nil, "Expected Child:enter")
+assert(pi < ci, "Parent:enter must precede Child:enter (top-down)")
+print("TC1: Parent's $> fires before Child's $> on cascade entry - PASS")
+
+s:go_to_parent()
+log = s:get_log()
+assert(s:get_state() == "Parent", "Expected Parent")
+assert(count(log, "Parent:enter") == 2, "Expected 2 Parent:enter")
+assert(count(log, "Child:enter") == 1, "Expected still 1 Child:enter")
+print("TC2: Direct Parent entry fires only Parent's $> - PASS")
+
+s:go_to_child()
+log = s:get_log()
+assert(count(log, "Parent:enter") == 3, "Expected 3 Parent:enter total")
+assert(count(log, "Child:enter") == 2, "Expected 2 Child:enter total")
+print("TC3: Re-entering Child cascades through Parent again - PASS")
+
+print("PASS: HSM enter cascade fires both layers top-down")
