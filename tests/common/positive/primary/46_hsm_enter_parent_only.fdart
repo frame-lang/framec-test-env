@@ -1,12 +1,13 @@
 @@target dart
 import 'dart:convert';
-// Test 46: HSM Enter in Parent Only
+
+// Test 46: HSM Enter Cascade — Parent has $>, Child does not
 //
-// Tests enter handler in parent only:
-// - Parent has $>(), child does not
-// - Child enters without error (no enter handler)
-// - Parent's enter does NOT auto-fire when child is entered
-// - Parent enter only fires when transitioning directly TO parent
+// Tests the HSM enter cascade per docs/frame_runtime_introduction.md
+// Step 21+. When entering an HSM child, the kernel fires $> on every
+// layer of the new chain top-down (parent first, child last). The child
+// may have no $> handler — the cascade simply skips that layer and
+// continues.
 
 @@system HSMEnterParentOnly {
     interface:
@@ -17,94 +18,51 @@ import 'dart:convert';
 
     machine:
         $Start {
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): list {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): str {
-                @@:("Start")
-                return;
-            }
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): list { @@:(this.log) }
+            get_state(): str { @@:("Start") }
         }
 
         $Child => $Parent {
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): list {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): str {
-                @@:("Child")
-                return;
-            }
+            go_to_parent() { -> $Parent }
+            get_log(): list { @@:(this.log) }
+            get_state(): str { @@:("Child") }
         }
 
         $Parent {
             $>() {
                 this.log.add("Parent:enter");
             }
-
-            go_to_child() {
-                -> $Child
-            }
-
-            get_log(): list {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): str {
-                @@:("Parent")
-                return;
-            }
+            go_to_child() { -> $Child }
+            get_log(): list { @@:(this.log) }
+            get_state(): str { @@:("Parent") }
         }
     domain:
         log : List<String> = []
 }
 
 void main() {
-    print("== Test 46: HSM Enter in Parent Only ==");
+    print("=== Test 46: HSM Enter Cascade — Parent only ===");
     final s = @@HSMEnterParentOnly();
 
-    // TC2.2.1: Child enters without error (no enter handler)
     s.go_to_child();
-    if (s.get_state() != "Child") throw Exception("Expected Child, got ${s.get_state()}");
+    if (s.get_state() != "Child") throw Exception("Expected Child");
     var log = s.get_log();
-    print("TC2.2.1: Child enters without error (log: ${jsonEncode(log)}) - PASS");
+    if (!log.contains("Parent:enter")) throw Exception("Expected Parent:enter on cascade");
+    print("TC1: Parent's \$> fires on cascade entry to Child - PASS");
 
-    // TC2.2.2: Parent's enter does NOT auto-fire when child is entered
-    if (log.contains("Parent:enter")) throw Exception("Parent:enter should NOT fire for child entry, got ${jsonEncode(log)}");
-    print("TC2.2.2: Parent enter NOT auto-fired for child - PASS");
-
-    // TC2.2.3: Parent enter only fires when transitioning directly TO parent
     s.go_to_parent();
-    if (s.get_state() != "Parent") throw Exception("Expected Parent, got ${s.get_state()}");
     log = s.get_log();
-    if (!log.contains("Parent:enter")) throw Exception("Expected Parent:enter when transitioning to Parent, got ${jsonEncode(log)}");
-    print("TC2.2.3: Parent enter fires when transitioning to Parent - PASS");
+    var count = log.where((x) => x == "Parent:enter").length;
+    if (count != 2) throw Exception("Expected 2 Parent:enter, got $count");
+    print("TC2: Parent's \$> fires again when transitioning directly to Parent - PASS");
 
-    // TC2.2.4: Going back to child from parent
     s.go_to_child();
-    if (s.get_state() != "Child") throw Exception("Expected Child, got ${s.get_state()}");
     log = s.get_log();
-    // Parent enter should have fired only once (when we went to Parent)
-    final count = log.where((x) => x == "Parent:enter").length;
-    if (count != 1) throw Exception("Expected exactly 1 Parent:enter, got ${jsonEncode(log)}");
-    print("TC2.2.4: Return to child, parent enter count unchanged - PASS");
+    count = log.where((x) => x == "Parent:enter").length;
+    if (count != 3) throw Exception("Expected 3 Parent:enter, got $count");
+    print("TC3: Re-entering Child cascades through Parent again - PASS");
 
-    print("PASS: HSM enter in parent only works correctly");
+    print("PASS: HSM enter cascade fires Parent's \$> on child entry");
 }
-
