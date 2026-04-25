@@ -1,6 +1,6 @@
 @@target swift
 
-// Test 47: HSM Enter in Both Child and Parent
+// Test 47: HSM Enter Cascade — Both Parent and Child have $>
 
 @@system HSMEnterBoth {
     interface:
@@ -13,68 +13,52 @@
         $Start {
             go_to_child() { -> $Child }
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Start")
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Start") }
         }
 
         $Child => $Parent {
             $>() { self.log.append("Child:enter") }
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Child")
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Child") }
         }
 
         $Parent {
             $>() { self.log.append("Parent:enter") }
             go_to_child() { -> $Child }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Parent")
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Parent") }
         }
     domain:
         log: string[] = []
 }
 
 // main
-    print("=== Test 47: HSM Enter in Both ===")
+    print("=== Test 47: HSM Enter Cascade — Both ===")
     let s = @@HSMEnterBoth()
 
     s.go_to_child()
     var log = s.get_log()
-    if !log.contains("Child:enter") { fatalError("Expected Child:enter") }
-    if log.contains("Parent:enter") { fatalError("Parent:enter should NOT fire when entering child") }
     if s.get_state() != "Child" { fatalError("Expected Child") }
-    print("TC2.3.1: Only child's enter fires when entering child - PASS")
+    let pi = log.firstIndex(of: "Parent:enter") ?? -1
+    let ci = log.firstIndex(of: "Child:enter") ?? -1
+    if pi == -1 { fatalError("Expected Parent:enter") }
+    if ci == -1 { fatalError("Expected Child:enter") }
+    if pi >= ci { fatalError("Parent:enter must precede Child:enter") }
+    print("TC1: Parent's $> fires before Child's $> on cascade entry - PASS")
 
     s.go_to_parent()
     log = s.get_log()
-    if !log.contains("Parent:enter") { fatalError("Expected Parent:enter") }
     if s.get_state() != "Parent" { fatalError("Expected Parent") }
-    print("TC2.3.2: Parent's enter fires when transitioning to parent - PASS")
-
-    let childCount = log.filter { $0 == "Child:enter" }.count
-    let parentCount = log.filter { $0 == "Parent:enter" }.count
-    if childCount != 1 { fatalError("Expected exactly 1 Child:enter") }
-    if parentCount != 1 { fatalError("Expected exactly 1 Parent:enter") }
-    print("TC2.3.3: No implicit cascading of enter handlers - PASS")
+    if log.filter({ $0 == "Parent:enter" }).count != 2 { fatalError("Expected 2 Parent:enter") }
+    if log.filter({ $0 == "Child:enter" }).count != 1 { fatalError("Expected still 1 Child:enter") }
+    print("TC2: Direct Parent entry fires only Parent's $> - PASS")
 
     s.go_to_child()
     log = s.get_log()
-    let childCount2 = log.filter { $0 == "Child:enter" }.count
-    let parentCount2 = log.filter { $0 == "Parent:enter" }.count
-    if childCount2 != 2 { fatalError("Expected 2 Child:enter") }
-    if parentCount2 != 1 { fatalError("Expected still 1 Parent:enter") }
-    print("TC2.3.4: Re-entering child fires child enter again - PASS")
+    if log.filter({ $0 == "Parent:enter" }).count != 3 { fatalError("Expected 3 Parent:enter") }
+    if log.filter({ $0 == "Child:enter" }).count != 2 { fatalError("Expected 2 Child:enter") }
+    print("TC3: Re-entering Child cascades through Parent again - PASS")
 
-    print("PASS: HSM enter in both works correctly")
+    print("PASS: HSM enter cascade fires both layers top-down")

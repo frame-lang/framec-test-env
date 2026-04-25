@@ -1,6 +1,12 @@
 @@target swift
 
-// Test 46: HSM Enter in Parent Only
+// Test 46: HSM Enter Cascade — Parent has $>, Child does not
+//
+// Tests the HSM enter cascade per docs/frame_runtime_introduction.md
+// Step 21+. When entering an HSM child, the kernel fires $> on every
+// layer of the new chain top-down (parent first, child last). The child
+// may have no $> handler — the cascade simply skips that layer and
+// continues.
 
 @@system HSMEnterParentOnly {
     interface:
@@ -13,61 +19,44 @@
         $Start {
             go_to_child() { -> $Child }
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Start")
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Start") }
         }
 
         $Child => $Parent {
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Child")
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Child") }
         }
 
         $Parent {
             $>() { self.log.append("Parent:enter") }
             go_to_child() { -> $Child }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Parent")
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Parent") }
         }
     domain:
         log: string[] = []
 }
 
 // main
-    print("=== Test 46: HSM Enter in Parent Only ===")
+    print("=== Test 46: HSM Enter Cascade — Parent only ===")
     let s = @@HSMEnterParentOnly()
 
     s.go_to_child()
     if s.get_state() != "Child" { fatalError("Expected Child") }
     var log = s.get_log()
-    print("TC2.2.1: Child enters without error (log: \(String(describing: log))) - PASS")
-
-    if log.contains("Parent:enter") { fatalError("Parent:enter should NOT fire for child entry") }
-    print("TC2.2.2: Parent enter NOT auto-fired for child - PASS")
+    if !log.contains("Parent:enter") { fatalError("Expected Parent:enter on cascade") }
+    print("TC1: Parent's $> fires on cascade entry to Child - PASS")
 
     s.go_to_parent()
-    if s.get_state() != "Parent" { fatalError("Expected Parent") }
     log = s.get_log()
-    if !log.contains("Parent:enter") { fatalError("Expected Parent:enter when transitioning to Parent") }
-    print("TC2.2.3: Parent enter fires when transitioning to Parent - PASS")
+    if log.filter({ $0 == "Parent:enter" }).count != 2 { fatalError("Expected 2 Parent:enter") }
+    print("TC2: Parent's $> fires again when transitioning directly to Parent - PASS")
 
     s.go_to_child()
-    if s.get_state() != "Child" { fatalError("Expected Child") }
     log = s.get_log()
-    let count = log.filter { $0 == "Parent:enter" }.count
-    if count != 1 { fatalError("Expected exactly 1 Parent:enter") }
-    print("TC2.2.4: Return to child, parent enter count unchanged - PASS")
+    if log.filter({ $0 == "Parent:enter" }).count != 3 { fatalError("Expected 3 Parent:enter") }
+    print("TC3: Re-entering Child cascades through Parent again - PASS")
 
-    print("PASS: HSM enter in parent only works correctly")
+    print("PASS: HSM enter cascade fires Parent's $> on child entry")

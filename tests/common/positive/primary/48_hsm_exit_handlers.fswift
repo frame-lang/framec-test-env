@@ -1,6 +1,6 @@
 @@target swift
 
-// Test 48: HSM Exit Handlers
+// Test 48: HSM Exit Cascade
 
 @@system HSMExitHandlers {
     interface:
@@ -18,15 +18,9 @@
             <$() { let val = $.child_var; self.log.append("Child:exit(var=\(val))") }
             go_to_other() { -> $Other }
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Child")
-            }
-            get_child_var(): int {
-                @@:($.child_var)
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Child") }
+            get_child_var(): int { @@:($.child_var) }
         }
 
         $Parent {
@@ -34,62 +28,49 @@
             <$() { self.log.append("Parent:exit") }
             go_to_child() { -> $Child }
             go_to_other() { -> $Other }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Parent")
-            }
-            get_child_var(): int {
-                @@:(-1)
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Parent") }
+            get_child_var(): int { @@:(-1) }
         }
 
         $Other {
             $>() { self.log.append("Other:enter") }
             go_to_child() { -> $Child }
             go_to_parent() { -> $Parent }
-            get_log(): list {
-                @@:(self.log)
-            }
-            get_state(): str {
-                @@:("Other")
-            }
-            get_child_var(): int {
-                @@:(-1)
-            }
+            get_log(): list { @@:(self.log) }
+            get_state(): str { @@:("Other") }
+            get_child_var(): int { @@:(-1) }
         }
     domain:
         log: string[] = []
 }
 
 // main
-    print("=== Test 48: HSM Exit Handlers ===")
+    print("=== Test 48: HSM Exit Cascade ===")
     let s = @@HSMExitHandlers()
 
     var log = s.get_log()
+    if !log.contains("Parent:enter") { fatalError("Expected Parent:enter on init cascade") }
     if !log.contains("Child:enter") { fatalError("Expected Child:enter on init") }
     if s.get_state() != "Child" { fatalError("Expected Child") }
-    print("TC2.4.0: Initial state is Child with enter - PASS")
+    print("TC1: Initial entry cascades through Parent then Child - PASS")
 
     s.go_to_other()
     log = s.get_log()
-    if !log.contains("Child:exit(var=42)") { fatalError("Expected Child:exit") }
+    if !log.contains("Child:exit(var=42)") { fatalError("Expected Child:exit(var=42)") }
+    if !log.contains("Parent:exit") { fatalError("Expected Parent:exit (cascade)") }
     if !log.contains("Other:enter") { fatalError("Expected Other:enter") }
-    print("TC2.4.1: Child exit fires when transitioning out - PASS")
+    let cei = log.firstIndex(of: "Child:exit(var=42)") ?? -1
+    let pei = log.firstIndex(of: "Parent:exit") ?? -1
+    if cei >= pei { fatalError("Child:exit must precede Parent:exit") }
+    print("TC2: Child:exit fires before Parent:exit (bottom-up cascade) - PASS")
 
-    if log.contains("Parent:exit") { fatalError("Parent:exit should NOT fire for child exit") }
-    print("TC2.4.2: Parent exit NOT fired for child exit - PASS")
+    print("TC3: Exit handler accesses state var (var=42) - PASS")
 
-    print("TC2.4.3: Exit handler accesses state var (var=42) - PASS")
-
-    s.go_to_parent()
+    s.go_to_child()
     log = s.get_log()
-    if !log.contains("Parent:enter") { fatalError("Expected Parent:enter") }
+    if log.filter({ $0 == "Parent:enter" }).count != 2 { fatalError("Expected 2 Parent:enter") }
+    if log.filter({ $0 == "Child:enter" }).count != 2 { fatalError("Expected 2 Child:enter") }
+    print("TC4: Re-entering Child cascades Parent.$> then Child.$> - PASS")
 
-    s.go_to_other()
-    log = s.get_log()
-    if !log.contains("Parent:exit") { fatalError("Expected Parent:exit") }
-    print("TC2.4.4: Parent exit fires when leaving parent - PASS")
-
-    print("PASS: HSM exit handlers work correctly")
+    print("PASS: HSM exit cascade fires Child.<$ then Parent.<$")
