@@ -2,6 +2,12 @@
 
 import kotlin.system.exitProcess
 
+// Test 48: HSM Exit Cascade
+//
+// Tests the HSM exit cascade per docs/frame_runtime_introduction.md
+// Step 21+. When exiting an HSM child, the kernel fires <$ on every
+// layer of the source chain bottom-up (child first, parent last).
+
 @@system HSMExitHandlers {
     interface:
         go_to_other()
@@ -24,28 +30,11 @@ import kotlin.system.exitProcess
                 this.log.add("Child:exit(var=" + v + ")")
             }
 
-            go_to_other() {
-                -> $Other
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): MutableList<Any?> {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): String {
-                @@:("Child")
-                return;
-            }
-
-            get_child_var(): Int {
-                @@:($.child_var)
-                return;
-            }
+            go_to_other() { -> $Other }
+            go_to_parent() { -> $Parent }
+            get_log(): MutableList<Any?> { @@:(this.log) }
+            get_state(): String { @@:("Child") }
+            get_child_var(): Int { @@:($.child_var) }
         }
 
         $Parent {
@@ -57,116 +46,64 @@ import kotlin.system.exitProcess
                 this.log.add("Parent:exit")
             }
 
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_other() {
-                -> $Other
-            }
-
-            get_log(): MutableList<Any?> {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): String {
-                @@:("Parent")
-                return;
-            }
-
-            get_child_var(): Int {
-                @@:(-1)
-                return;
-            }
+            go_to_child() { -> $Child }
+            go_to_other() { -> $Other }
+            get_log(): MutableList<Any?> { @@:(this.log) }
+            get_state(): String { @@:("Parent") }
+            get_child_var(): Int { @@:(-1) }
         }
 
         $Other {
             $>() {
                 this.log.add("Other:enter")
             }
-
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): MutableList<Any?> {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): String {
-                @@:("Other")
-                return;
-            }
-
-            get_child_var(): Int {
-                @@:(-1)
-                return;
-            }
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): MutableList<Any?> { @@:(this.log) }
+            get_state(): String { @@:("Other") }
+            get_child_var(): Int { @@:(-1) }
         }
     domain:
         log = mutableListOf<String>()
 }
 
+fun countOf(log: MutableList<*>, v: String): Int {
+    var n = 0
+    for (item in log) if (item == v) n++
+    return n
+}
+fun indexOf(log: MutableList<*>, v: String): Int {
+    for (i in log.indices) if (log[i] == v) return i
+    return -1
+}
+
 fun main() {
-    println("=== Test 48: HSM Exit Handlers ===")
+    println("=== Test 48: HSM Exit Cascade ===")
     val s = @@HSMExitHandlers()
 
-    // Initial state is Child
     var log = s.get_log() as MutableList<*>
-    if (!log.contains("Child:enter")) {
-        println("FAIL: Expected Child:enter on init, got $log")
-        exitProcess(1)
-    }
-    if ((s.get_state() as String) != "Child") {
-        println("FAIL: Expected Child, got ${s.get_state()}")
-        exitProcess(1)
-    }
-    println("TC2.4.0: Initial state is Child with enter - PASS")
-
-    // TC2.4.1: Child exit fires when transitioning out of child
-    s.go_to_other()
-    log = s.get_log() as MutableList<*>
-    if (!log.contains("Child:exit(var=42)")) {
-        println("FAIL: Expected Child:exit, got $log")
-        exitProcess(1)
-    }
-    if (!log.contains("Other:enter")) {
-        println("FAIL: Expected Other:enter, got $log")
-        exitProcess(1)
-    }
-    println("TC2.4.1: Child exit fires when transitioning out - PASS")
-
-    // TC2.4.2: Parent exit does NOT fire when transitioning out of child
-    if (log.contains("Parent:exit")) {
-        println("FAIL: Parent:exit should NOT fire for child exit, got $log")
-        exitProcess(1)
-    }
-    println("TC2.4.2: Parent exit NOT fired for child exit - PASS")
-
-    // TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
-    println("TC2.4.3: Exit handler accesses state var (var=42) - PASS")
-
-    // TC2.4.4: Parent exit fires when transitioning out of Parent
-    s.go_to_parent()
-    log = s.get_log() as MutableList<*>
-    if (!log.contains("Parent:enter")) {
-        println("FAIL: Expected Parent:enter, got $log")
-        exitProcess(1)
-    }
+    if (!log.contains("Parent:enter")) { println("FAIL: Expected Parent:enter on init cascade"); exitProcess(1) }
+    if (!log.contains("Child:enter")) { println("FAIL: Expected Child:enter on init"); exitProcess(1) }
+    if ((s.get_state() as String) != "Child") { println("FAIL"); exitProcess(1) }
+    println("TC1: Initial entry cascades through Parent then Child - PASS")
 
     s.go_to_other()
     log = s.get_log() as MutableList<*>
-    if (!log.contains("Parent:exit")) {
-        println("FAIL: Expected Parent:exit, got $log")
-        exitProcess(1)
-    }
-    println("TC2.4.4: Parent exit fires when leaving parent - PASS")
+    if (!log.contains("Child:exit(var=42)")) { println("FAIL: Expected Child:exit(var=42)"); exitProcess(1) }
+    if (!log.contains("Parent:exit")) { println("FAIL: Expected Parent:exit (cascade)"); exitProcess(1) }
+    if (!log.contains("Other:enter")) { println("FAIL: Expected Other:enter"); exitProcess(1) }
+    val cei = indexOf(log, "Child:exit(var=42)")
+    val pei = indexOf(log, "Parent:exit")
+    if (cei >= pei) { println("FAIL: Child:exit must precede Parent:exit"); exitProcess(1) }
+    println("TC2: Child:exit fires before Parent:exit (bottom-up cascade) - PASS")
 
-    println("PASS: HSM exit handlers work correctly")
+    println("TC3: Exit handler accesses state var (var=42) - PASS")
+
+    s.go_to_child()
+    log = s.get_log() as MutableList<*>
+    if (countOf(log, "Parent:enter") != 2) { println("FAIL: Expected 2 Parent:enter"); exitProcess(1) }
+    if (countOf(log, "Child:enter") != 2) { println("FAIL: Expected 2 Child:enter"); exitProcess(1) }
+    println("TC4: Re-entering Child cascades Parent.\$> then Child.\$> - PASS")
+
+    println("PASS: HSM exit cascade fires Child.<\$ then Parent.<\$")
 }

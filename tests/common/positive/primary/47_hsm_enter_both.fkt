@@ -2,6 +2,12 @@
 
 import kotlin.system.exitProcess
 
+// Test 47: HSM Enter Cascade — Both Parent and Child have $>
+//
+// Tests the HSM enter cascade per docs/frame_runtime_introduction.md
+// Step 21+. When entering an HSM child, the kernel fires $> on every
+// layer of the new chain top-down (parent first, child last).
+
 @@system HSMEnterBoth {
     interface:
         go_to_child()
@@ -11,137 +17,69 @@ import kotlin.system.exitProcess
 
     machine:
         $Start {
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): MutableList<Any?> {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): String {
-                @@:("Start")
-                return;
-            }
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): MutableList<Any?> { @@:(this.log) }
+            get_state(): String { @@:("Start") }
         }
 
         $Child => $Parent {
             $>() {
                 this.log.add("Child:enter")
             }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): MutableList<Any?> {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): String {
-                @@:("Child")
-                return;
-            }
+            go_to_parent() { -> $Parent }
+            get_log(): MutableList<Any?> { @@:(this.log) }
+            get_state(): String { @@:("Child") }
         }
 
         $Parent {
             $>() {
                 this.log.add("Parent:enter")
             }
-
-            go_to_child() {
-                -> $Child
-            }
-
-            get_log(): MutableList<Any?> {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): String {
-                @@:("Parent")
-                return;
-            }
+            go_to_child() { -> $Child }
+            get_log(): MutableList<Any?> { @@:(this.log) }
+            get_state(): String { @@:("Parent") }
         }
     domain:
         log = mutableListOf<String>()
 }
 
+fun countOf(log: MutableList<*>, v: String): Int {
+    var n = 0
+    for (item in log) if (item == v) n++
+    return n
+}
+fun indexOf(log: MutableList<*>, v: String): Int {
+    for (i in log.indices) if (log[i] == v) return i
+    return -1
+}
+
 fun main() {
-    println("=== Test 47: HSM Enter in Both ===")
+    println("=== Test 47: HSM Enter Cascade — Both ===")
     val s = @@HSMEnterBoth()
 
-    // TC2.3.1: Only child's enter fires when entering child
     s.go_to_child()
     var log = s.get_log() as MutableList<*>
-    if (!log.contains("Child:enter")) {
-        println("FAIL: Expected Child:enter, got $log")
-        exitProcess(1)
-    }
-    if (log.contains("Parent:enter")) {
-        println("FAIL: Parent:enter should NOT fire when entering child, got $log")
-        exitProcess(1)
-    }
-    if ((s.get_state() as String) != "Child") {
-        println("FAIL: Expected Child, got ${s.get_state()}")
-        exitProcess(1)
-    }
-    println("TC2.3.1: Only child's enter fires when entering child - PASS")
+    if ((s.get_state() as String) != "Child") { println("FAIL"); exitProcess(1) }
+    val pi = indexOf(log, "Parent:enter")
+    val ci = indexOf(log, "Child:enter")
+    if (pi == -1) { println("FAIL: Expected Parent:enter"); exitProcess(1) }
+    if (ci == -1) { println("FAIL: Expected Child:enter"); exitProcess(1) }
+    if (pi >= ci) { println("FAIL: Parent:enter must precede Child:enter"); exitProcess(1) }
+    println("TC1: Parent's \$> fires before Child's \$> on cascade entry - PASS")
 
-    // TC2.3.2: Parent's enter fires only when transitioning to parent
     s.go_to_parent()
     log = s.get_log() as MutableList<*>
-    if (!log.contains("Parent:enter")) {
-        println("FAIL: Expected Parent:enter, got $log")
-        exitProcess(1)
-    }
-    if ((s.get_state() as String) != "Parent") {
-        println("FAIL: Expected Parent, got ${s.get_state()}")
-        exitProcess(1)
-    }
-    println("TC2.3.2: Parent's enter fires when transitioning to parent - PASS")
+    if ((s.get_state() as String) != "Parent") { println("FAIL"); exitProcess(1) }
+    if (countOf(log, "Parent:enter") != 2) { println("FAIL: Expected 2 Parent:enter"); exitProcess(1) }
+    if (countOf(log, "Child:enter") != 1) { println("FAIL: Expected still 1 Child:enter"); exitProcess(1) }
+    println("TC2: Direct Parent entry fires only Parent's \$> - PASS")
 
-    // TC2.3.3: No implicit cascading - counts should be exactly 1 each
-    var childCount = 0
-    var parentCount = 0
-    for (item in log) {
-        if (item == "Child:enter") childCount++
-        if (item == "Parent:enter") parentCount++
-    }
-    if (childCount != 1) {
-        println("FAIL: Expected exactly 1 Child:enter, got $log")
-        exitProcess(1)
-    }
-    if (parentCount != 1) {
-        println("FAIL: Expected exactly 1 Parent:enter, got $log")
-        exitProcess(1)
-    }
-    println("TC2.3.3: No implicit cascading of enter handlers - PASS")
-
-    // TC2.3.4: Going back to child fires child enter again
     s.go_to_child()
     log = s.get_log() as MutableList<*>
-    var childCount2 = 0
-    var parentCount2 = 0
-    for (item in log) {
-        if (item == "Child:enter") childCount2++
-        if (item == "Parent:enter") parentCount2++
-    }
-    if (childCount2 != 2) {
-        println("FAIL: Expected 2 Child:enter, got $log")
-        exitProcess(1)
-    }
-    if (parentCount2 != 1) {
-        println("FAIL: Expected still 1 Parent:enter, got $log")
-        exitProcess(1)
-    }
-    println("TC2.3.4: Re-entering child fires child enter again - PASS")
+    if (countOf(log, "Parent:enter") != 3) { println("FAIL: Expected 3 Parent:enter"); exitProcess(1) }
+    if (countOf(log, "Child:enter") != 2) { println("FAIL: Expected 2 Child:enter"); exitProcess(1) }
+    println("TC3: Re-entering Child cascades through Parent again - PASS")
 
-    println("PASS: HSM enter in both works correctly")
+    println("PASS: HSM enter cascade fires both layers top-down")
 }

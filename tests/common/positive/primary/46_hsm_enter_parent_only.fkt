@@ -2,6 +2,14 @@
 
 import kotlin.system.exitProcess
 
+// Test 46: HSM Enter Cascade — Parent has $>, Child does not
+//
+// Tests the HSM enter cascade per docs/frame_runtime_introduction.md
+// Step 21+. When entering an HSM child, the kernel fires $> on every
+// layer of the new chain top-down (parent first, child last). The child
+// may have no $> handler — the cascade simply skips that layer and
+// continues.
+
 @@system HSMEnterParentOnly {
     interface:
         go_to_child()
@@ -11,113 +19,55 @@ import kotlin.system.exitProcess
 
     machine:
         $Start {
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): MutableList<Any?> {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): String {
-                @@:("Start")
-                return;
-            }
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): MutableList<Any?> { @@:(this.log) }
+            get_state(): String { @@:("Start") }
         }
 
         $Child => $Parent {
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): MutableList<Any?> {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): String {
-                @@:("Child")
-                return;
-            }
+            go_to_parent() { -> $Parent }
+            get_log(): MutableList<Any?> { @@:(this.log) }
+            get_state(): String { @@:("Child") }
         }
 
         $Parent {
             $>() {
                 this.log.add("Parent:enter")
             }
-
-            go_to_child() {
-                -> $Child
-            }
-
-            get_log(): MutableList<Any?> {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): String {
-                @@:("Parent")
-                return;
-            }
+            go_to_child() { -> $Child }
+            get_log(): MutableList<Any?> { @@:(this.log) }
+            get_state(): String { @@:("Parent") }
         }
     domain:
         log = mutableListOf<String>()
 }
 
+fun countOf(log: MutableList<*>, v: String): Int {
+    var n = 0
+    for (item in log) if (item == v) n++
+    return n
+}
+
 fun main() {
-    println("=== Test 46: HSM Enter in Parent Only ===")
+    println("=== Test 46: HSM Enter Cascade — Parent only ===")
     val s = @@HSMEnterParentOnly()
 
-    // TC2.2.1: Child enters without error (no enter handler)
     s.go_to_child()
-    if ((s.get_state() as String) != "Child") {
-        println("FAIL: Expected Child, got ${s.get_state()}")
-        exitProcess(1)
-    }
+    if ((s.get_state() as String) != "Child") { println("FAIL"); exitProcess(1) }
     var log = s.get_log() as MutableList<*>
-    println("TC2.2.1: Child enters without error (log: $log) - PASS")
+    if (!log.contains("Parent:enter")) { println("FAIL: Expected Parent:enter on cascade"); exitProcess(1) }
+    println("TC1: Parent's \$> fires on cascade entry to Child - PASS")
 
-    // TC2.2.2: Parent's enter does NOT auto-fire when child is entered
-    if (log.contains("Parent:enter")) {
-        println("FAIL: Parent:enter should NOT fire for child entry, got $log")
-        exitProcess(1)
-    }
-    println("TC2.2.2: Parent enter NOT auto-fired for child - PASS")
-
-    // TC2.2.3: Parent enter only fires when transitioning directly TO parent
     s.go_to_parent()
-    if ((s.get_state() as String) != "Parent") {
-        println("FAIL: Expected Parent, got ${s.get_state()}")
-        exitProcess(1)
-    }
     log = s.get_log() as MutableList<*>
-    if (!log.contains("Parent:enter")) {
-        println("FAIL: Expected Parent:enter when transitioning to Parent, got $log")
-        exitProcess(1)
-    }
-    println("TC2.2.3: Parent enter fires when transitioning to Parent - PASS")
+    if (countOf(log, "Parent:enter") != 2) { println("FAIL: Expected 2 Parent:enter"); exitProcess(1) }
+    println("TC2: Parent's \$> fires again when transitioning directly to Parent - PASS")
 
-    // TC2.2.4: Going back to child from parent
     s.go_to_child()
-    if ((s.get_state() as String) != "Child") {
-        println("FAIL: Expected Child, got ${s.get_state()}")
-        exitProcess(1)
-    }
     log = s.get_log() as MutableList<*>
-    var count = 0
-    for (item in log) {
-        if (item == "Parent:enter") count++
-    }
-    if (count != 1) {
-        println("FAIL: Expected exactly 1 Parent:enter, got $log")
-        exitProcess(1)
-    }
-    println("TC2.2.4: Return to child, parent enter count unchanged - PASS")
+    if (countOf(log, "Parent:enter") != 3) { println("FAIL: Expected 3 Parent:enter"); exitProcess(1) }
+    println("TC3: Re-entering Child cascades through Parent again - PASS")
 
-    println("PASS: HSM enter in parent only works correctly")
+    println("PASS: HSM enter cascade fires Parent's \$> on child entry")
 }
