@@ -111,9 +111,27 @@ endef
 # Generate test-<lang> for all languages (including GDScript, now native ARM64)
 $(foreach lang,$(LANGS),$(eval $(call LANG_TEST_RULE,$(lang))))
 
+# Per-container parallelism cap when running the full matrix.
+# Each batch script defaults to nproc internally (correct for solo
+# `make test-<lang>` runs that own the whole host). With ~7 heavy
+# compilers running concurrently on a 12-core host, the default-nproc
+# setting produces ~84 parallel jobs competing for 12 cores — ~7x
+# oversubscription that thrashes the scheduler and page cache.
+# Pinning each parallel-stage container to MATRIX_JOBS brings total
+# concurrency down to ~28 (~2.3x oversubscription) without losing
+# meaningful intra-container parallelism. Override on the make line
+# if you want a different cap.
+MATRIX_JOBS ?= 4
+
 test: $(STAMP_DIR)/framec-native build
 	@echo "=== Running all tests in parallel ($(words $(LANGS)) languages) ==="
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
+	 CPP_COMPILE_JOBS=$(MATRIX_JOBS) \
+	 DART_COMPILE_JOBS=$(MATRIX_JOBS) \
+	 ERLANG_TEST_JOBS=$(MATRIX_JOBS) \
+	 GO_COMPILE_JOBS=$(MATRIX_JOBS) \
+	 RUST_EXEC_JOBS=$(MATRIX_JOBS) \
+	 SWIFT_COMPILE_JOBS=$(MATRIX_JOBS) \
 	 $(COMPOSE) up -d $(LANGS)
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
 	 ./collect-results.sh $(LANGS)
