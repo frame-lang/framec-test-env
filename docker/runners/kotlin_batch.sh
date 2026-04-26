@@ -166,12 +166,19 @@ try_kotlinc() {
     local files
     files=$(find "$COMPILE_DIR" -name "*.kt" 2>/dev/null | tr '\n' ' ')
     [ -z "$files" ] && return 0
-    # -J-Xmx2g: kotlinc's default max heap (~320 MB) is exhausted by a
+    # -J-Xmx4g: kotlinc's default max heap (~320 MB) is exhausted by a
     # batch compile of the full test corpus (200+ .kt files) with
     # -include-runtime — the compiler OOMs holding ASTs, symbol tables,
-    # and bytecode simultaneously. 2 GB has ample margin at current size.
+    # and bytecode simultaneously. Bumped from 2g → 4g after the HSM
+    # cascade migration added ~100 lines of generated machinery per
+    # file (hsm_chain, __prepareEnter, __prepareExit, __route_to_state,
+    # two cascade helpers, transition loop). At 214 test files that's
+    # ~21k extra lines of bytecode the compiler holds in-memory, which
+    # tipped kotlinc over the old 2g ceiling under heavy parallel
+    # matrix load (host OOM-killer SIGKILL'd the JVM, marking every
+    # test as `kotlinc failed`).
     # shellcheck disable=SC2086
-    kotlinc -J-Xmx2g $kt_cp $files -include-runtime -d "$ALL_JAR" 2>/tmp/kotlinc_err
+    kotlinc -J-Xmx4g $kt_cp $files -include-runtime -d "$ALL_JAR" 2>/tmp/kotlinc_err
 }
 
 kt_mass_fail() {
