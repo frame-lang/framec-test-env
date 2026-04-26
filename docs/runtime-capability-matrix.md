@@ -31,6 +31,7 @@ spec). Generated from a manual audit on 2026-04-26.
 | Context data (`@@:data`)                                 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | System parameters (`@@system Foo(args)`)                 | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Self calls (`self.method(...)`)                          | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Self-call transition guard (post-call early return)      | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅[i] |
 | Push / pop state stack                                   | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Step 21–24: HSM**                                      |
 | HSM child–parent declaration (`$Child => $Parent`)       | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
@@ -84,13 +85,32 @@ spec). Generated from a manual audit on 2026-04-26.
 [h] **Erlang** — actor model + selective receive replaces async/await;
     "one-color" in the same sense as Go. Async tests skip.
 
+[i] **Erlang** — the self-call transition guard is implemented via
+    `gen_statem`'s native state-machine semantics rather than the
+    `_transitioned` flag the other 16 backends use. After
+    `frame_dispatch__`, generated code wraps the post-call
+    statements in a `case Data#data.frame_current_state of
+    <pre-call-state> -> [post-call code]; _ -> {next_state, ...}
+    end` short-circuit. Functional contract identical (post-call
+    code does not run after a transitioning self-call); structurally
+    divergent (no `_transitioned` flag, no
+    `if _context_stack[-1]._transitioned: return` shape).
+    Implemented in `erlang_wrap_self_call_guards`
+    (`framec/.../erlang_system.rs:1411-1589`); codegen's
+    `generate_self_call_guard` returns empty for Erlang
+    (`framec/.../frame_expansion.rs:4752`). The divergence is
+    intentional — keeping `gen_statem` idioms is preferred over
+    structural sameness. See `docs/erlang_alignment_requirements.md`
+    in the framepiler repo for the path-to-alignment if structural
+    consistency becomes a requirement.
+
 ## Summary
 
 | Bucket | Conformance |
 |---|---|
 | Languages fully conformant to v4 spec | 16 / 17 (all except Erlang) |
 | Languages with HSM cascade implemented | 16 / 17 |
-| Known divergence | Erlang HSM cascade ([d]) |
+| Known divergence | Erlang HSM cascade ([d]); Erlang self-call guard mechanism ([i], functional contract still met) |
 | Language-natural skips | C, Go, PHP, Ruby, Lua, Erlang on async |
 
 ## Test corpus coverage
