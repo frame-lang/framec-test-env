@@ -1,8 +1,7 @@
 @@target c
 
-// Test 46: HSM Enter in Parent Only
-// Parent has $>(); child does not. Parent enter must NOT auto-fire
-// when child is entered — only on direct transition to parent.
+// Test 46: HSM Enter Cascade — Parent has $>, Child does not.
+// Cascade fires Parent's $> top-down on child entry.
 
 @@system HSMEnterParentOnly {
     interface:
@@ -36,42 +35,37 @@
 }
 
 int main() {
-    printf("=== Test 46: HSM Enter in Parent Only ===\n");
+    printf("=== Test 46: HSM Enter Cascade — Parent only ===\n");
     HSMEnterParentOnly* s = @@HSMEnterParentOnly();
 
-    // TC2.2.1: Child entry runs without error, no implicit parent enter
     HSMEnterParentOnly_go_to_child(s);
     if (strcmp(HSMEnterParentOnly_get_state(s), "Child") != 0) {
         printf("FAIL: expected Child\n"); return 1;
     }
-    if (HSMEnterParentOnly_get_parent_enter(s) != 0) {
-        printf("FAIL: parent_enter should be 0 after child entry, got %d\n",
-               HSMEnterParentOnly_get_parent_enter(s));
-        return 1;
-    }
-    printf("TC2.2.1+2: Child enters, parent enter NOT auto-fired - PASS\n");
-
-    // TC2.2.3: Direct to parent fires its enter
-    HSMEnterParentOnly_go_to_parent(s);
-    if (strcmp(HSMEnterParentOnly_get_state(s), "Parent") != 0
-        || HSMEnterParentOnly_get_parent_enter(s) != 1) {
-        printf("FAIL: direct parent transition: state=%s, parent_enter=%d\n",
-               HSMEnterParentOnly_get_state(s),
-               HSMEnterParentOnly_get_parent_enter(s));
-        return 1;
-    }
-    printf("TC2.2.3: Parent enter fires on direct transition - PASS\n");
-
-    // TC2.2.4: Back to child; parent_enter unchanged
-    HSMEnterParentOnly_go_to_child(s);
     if (HSMEnterParentOnly_get_parent_enter(s) != 1) {
-        printf("FAIL: parent_enter changed on child re-entry, got %d\n",
+        printf("FAIL: expected 1 Parent:enter on cascade, got %d\n",
                HSMEnterParentOnly_get_parent_enter(s));
         return 1;
     }
-    printf("TC2.2.4: Re-entering child leaves parent_enter at 1 - PASS\n");
+    printf("TC1: Parent's $> fires on cascade entry to Child - PASS\n");
 
-    printf("PASS: HSM enter in parent only works correctly\n");
+    HSMEnterParentOnly_go_to_parent(s);
+    if (HSMEnterParentOnly_get_parent_enter(s) != 2) {
+        printf("FAIL: expected 2 Parent:enter, got %d\n",
+               HSMEnterParentOnly_get_parent_enter(s));
+        return 1;
+    }
+    printf("TC2: Parent's $> fires again when transitioning directly to Parent - PASS\n");
+
+    HSMEnterParentOnly_go_to_child(s);
+    if (HSMEnterParentOnly_get_parent_enter(s) != 3) {
+        printf("FAIL: expected 3 Parent:enter, got %d\n",
+               HSMEnterParentOnly_get_parent_enter(s));
+        return 1;
+    }
+    printf("TC3: Re-entering Child cascades through Parent again - PASS\n");
+
+    printf("PASS: HSM enter cascade fires Parent's $> on child entry\n");
     HSMEnterParentOnly_destroy(s);
     return 0;
 }
