@@ -1,0 +1,96 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <vector>
+#include <algorithm>
+
+// Test 53: Self-call transition guard
+//
+// Verifies the automatic transition guard contract: when a handler
+// self-calls a method that triggers a transition, code after the
+// self-call must NOT execute. The trace must equal exactly
+// ["run:before-self-call", "do_transition:body", "Done:enter"].
+
+@@system TransitionGuard {
+
+    interface:
+        run()
+        do_transition()
+        get_trace(): std::vector<std::string>
+
+    machine:
+        $Active {
+            run() {
+                trace.push_back(std::string("run:before-self-call"));
+                @@:self.do_transition();
+                trace.push_back(std::string("run:after-self-call"));
+            }
+
+            do_transition() {
+                trace.push_back(std::string("do_transition:body"));
+                -> $Done
+            }
+
+            get_trace(): std::vector<std::string> {
+                @@:(trace)
+                return;
+            }
+        }
+
+        $Done {
+            $>() {
+                trace.push_back(std::string("Done:enter"));
+            }
+
+            get_trace(): std::vector<std::string> {
+                @@:(trace)
+                return;
+            }
+        }
+
+    domain:
+        trace : std::vector<std::string> = {}
+}
+
+int main() {
+    printf("=== Test 53: Self-call transition guard ===\n");
+    TransitionGuard t;
+    t.run();
+    auto trace = t.get_trace();
+
+    if (std::find(trace.begin(), trace.end(), "run:before-self-call") == trace.end()) {
+        printf("FAIL TC1: pre-call statement must execute\n");
+        return 1;
+    }
+    printf("TC1: pre-call statement executed - PASS\n");
+
+    if (std::find(trace.begin(), trace.end(), "do_transition:body") == trace.end()) {
+        printf("FAIL TC2: self-called handler body must execute\n");
+        return 1;
+    }
+    printf("TC2: self-called handler body executed - PASS\n");
+
+    if (std::find(trace.begin(), trace.end(), "Done:enter") == trace.end()) {
+        printf("FAIL TC3: cascade enter on transition target must fire\n");
+        return 1;
+    }
+    printf("TC3: target state $> handler fired - PASS\n");
+
+    if (std::find(trace.begin(), trace.end(), "run:after-self-call") != trace.end()) {
+        printf("FAIL TC4: post-call statement MUST NOT execute (transition guard)\n");
+        return 1;
+    }
+    printf("TC4: post-call statement suppressed by automatic guard - PASS\n");
+
+    std::vector<std::string> expected = {"run:before-self-call", "do_transition:body", "Done:enter"};
+    if (trace != expected) {
+        printf("FAIL TC5: trace order must match expected\n");
+        return 1;
+    }
+    printf("TC5: trace order is exactly [before, body, enter] - PASS\n");
+
+    printf("PASS: automatic transition guard suppresses post-self-call code\n");
+    return 0;
+}

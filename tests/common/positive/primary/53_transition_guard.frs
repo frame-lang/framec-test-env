@@ -1,0 +1,78 @@
+@@target rust
+
+// Test 53: Self-call transition guard
+//
+// Verifies the automatic transition guard contract: when a handler
+// self-calls a method that triggers a transition, code after the
+// self-call must NOT execute. The trace must equal exactly
+// ["run:before-self-call", "do_transition:body", "Done:enter"].
+
+@@system TransitionGuard {
+
+    interface:
+        run()
+        do_transition()
+        get_trace(): Vec<String>
+
+    machine:
+        $Active {
+            run() {
+                self.trace.push("run:before-self-call".to_string());
+                @@:self.do_transition()
+                self.trace.push("run:after-self-call".to_string());
+            }
+
+            do_transition() {
+                self.trace.push("do_transition:body".to_string());
+                -> $Done
+            }
+
+            get_trace(): Vec<String> {
+                @@:(self.trace.clone())
+                return;
+            }
+        }
+
+        $Done {
+            $>() {
+                self.trace.push("Done:enter".to_string());
+            }
+
+            get_trace(): Vec<String> {
+                @@:(self.trace.clone())
+                return;
+            }
+        }
+
+    domain:
+        trace: Vec<String>
+}
+
+fn main() {
+    println!("=== Test 53: Self-call transition guard ===");
+    let mut t = @@TransitionGuard();
+    t.run();
+    let trace = t.get_trace();
+
+    assert!(trace.contains(&"run:before-self-call".to_string()), "TC1: pre-call statement must execute, trace={:?}", trace);
+    println!("TC1: pre-call statement executed - PASS");
+
+    assert!(trace.contains(&"do_transition:body".to_string()), "TC2: self-called handler body must execute, trace={:?}", trace);
+    println!("TC2: self-called handler body executed - PASS");
+
+    assert!(trace.contains(&"Done:enter".to_string()), "TC3: cascade enter on transition target must fire, trace={:?}", trace);
+    println!("TC3: target state $> handler fired - PASS");
+
+    assert!(!trace.contains(&"run:after-self-call".to_string()), "TC4: post-call statement MUST NOT execute (transition guard), trace={:?}", trace);
+    println!("TC4: post-call statement suppressed by automatic guard - PASS");
+
+    let expected: Vec<String> = vec![
+        "run:before-self-call".to_string(),
+        "do_transition:body".to_string(),
+        "Done:enter".to_string(),
+    ];
+    assert!(trace == expected, "TC5: trace order must match expected, got {:?}, expected {:?}", trace, expected);
+    println!("TC5: trace order is exactly [before, body, enter] - PASS");
+
+    println!("PASS: automatic transition guard suppresses post-self-call code");
+}

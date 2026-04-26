@@ -1,0 +1,96 @@
+@@target java
+
+import java.util.*;
+
+// Test 53: Self-call transition guard
+//
+// Verifies the automatic transition guard contract: when a handler
+// self-calls a method that triggers a transition, code after the
+// self-call must NOT execute. The trace must equal exactly
+// ["run:before-self-call", "do_transition:body", "Done:enter"].
+
+@@system TransitionGuard {
+
+    interface:
+        run()
+        do_transition()
+        get_trace(): ArrayList
+
+    machine:
+        $Active {
+            run() {
+                this.trace.add("run:before-self-call");
+                @@:self.do_transition();
+                this.trace.add("run:after-self-call");
+            }
+
+            do_transition() {
+                this.trace.add("do_transition:body");
+                -> $Done
+            }
+
+            get_trace(): ArrayList {
+                @@:(this.trace)
+                return;
+            }
+        }
+
+        $Done {
+            $>() {
+                this.trace.add("Done:enter");
+            }
+
+            get_trace(): ArrayList {
+                @@:(this.trace)
+                return;
+            }
+        }
+
+    domain:
+        trace : ArrayList = new ArrayList()
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 53: Self-call transition guard ===");
+        var t = @@TransitionGuard();
+        t.run();
+        ArrayList trace = t.get_trace();
+
+        if (!trace.contains("run:before-self-call")) {
+            System.out.println("FAIL TC1: pre-call statement must execute, trace=" + trace);
+            System.exit(1);
+        }
+        System.out.println("TC1: pre-call statement executed - PASS");
+
+        if (!trace.contains("do_transition:body")) {
+            System.out.println("FAIL TC2: self-called handler body must execute, trace=" + trace);
+            System.exit(1);
+        }
+        System.out.println("TC2: self-called handler body executed - PASS");
+
+        if (!trace.contains("Done:enter")) {
+            System.out.println("FAIL TC3: cascade enter on transition target must fire, trace=" + trace);
+            System.exit(1);
+        }
+        System.out.println("TC3: target state $> handler fired - PASS");
+
+        if (trace.contains("run:after-self-call")) {
+            System.out.println("FAIL TC4: post-call statement MUST NOT execute (transition guard), trace=" + trace);
+            System.exit(1);
+        }
+        System.out.println("TC4: post-call statement suppressed by automatic guard - PASS");
+
+        ArrayList expected = new ArrayList();
+        expected.add("run:before-self-call");
+        expected.add("do_transition:body");
+        expected.add("Done:enter");
+        if (!trace.equals(expected)) {
+            System.out.println("FAIL TC5: trace order must match expected, got " + trace + ", expected " + expected);
+            System.exit(1);
+        }
+        System.out.println("TC5: trace order is exactly [before, body, enter] - PASS");
+
+        System.out.println("PASS: automatic transition guard suppresses post-self-call code");
+    }
+}

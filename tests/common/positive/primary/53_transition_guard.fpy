@@ -1,0 +1,94 @@
+@@target python_3
+
+# Test 53: Self-call transition guard
+#
+# Verifies docs/frame_runtime.md Step 19's automatic transition
+# guard contract: when a handler self-calls a method that triggers
+# a transition, code after the self-call is short-circuited by the
+# codegen-emitted guard. The trace must lack "run:after-self-call".
+#
+# Mechanism (15/17 backends): kernel sets _transitioned=True on
+# every stacked context after processing a transition; codegen
+# emits `if _context_stack[-1]._transitioned: return` after every
+# @@:self.method(...) call site.
+#
+# Mechanism (Erlang): gen_statem case-expression on
+# Data#data.frame_current_state short-circuits via
+# {next_state, ...} when the state changed.
+#
+# Black-box assertion is the same in both: the trace order is
+# [before-self-call, do_transition:body, Done:enter] with NO
+# after-self-call entry.
+
+@@system TransitionGuard {
+
+    interface:
+        run()
+        do_transition()
+        get_trace(): list
+
+    machine:
+        $Active {
+            run() {
+                self.trace.append("run:before-self-call")
+                @@:self.do_transition()
+                self.trace.append("run:after-self-call")
+            }
+
+            do_transition() {
+                self.trace.append("do_transition:body")
+                -> $Done
+            }
+
+            get_trace(): list {
+                @@:(self.trace)
+                return
+            }
+        }
+
+        $Done {
+            $>() {
+                self.trace.append("Done:enter")
+            }
+
+            get_trace(): list {
+                @@:(self.trace)
+                return
+            }
+        }
+
+    domain:
+        trace: list = []
+}
+
+def main():
+    print("=== Test 53: Self-call transition guard ===")
+    t = @@TransitionGuard()
+    t.run()
+    trace = t.get_trace()
+
+    assert "run:before-self-call" in trace, \
+        f"TC1: pre-call statement must execute, trace={trace}"
+    print("TC1: pre-call statement executed - PASS")
+
+    assert "do_transition:body" in trace, \
+        f"TC2: self-called handler body must execute, trace={trace}"
+    print("TC2: self-called handler body executed - PASS")
+
+    assert "Done:enter" in trace, \
+        f"TC3: cascade enter on transition target must fire, trace={trace}"
+    print("TC3: target state $> handler fired - PASS")
+
+    assert "run:after-self-call" not in trace, \
+        f"TC4: post-call statement MUST NOT execute (transition guard), trace={trace}"
+    print("TC4: post-call statement suppressed by automatic guard - PASS")
+
+    expected = ["run:before-self-call", "do_transition:body", "Done:enter"]
+    assert trace == expected, \
+        f"TC5: trace order must match expected, got {trace}, expected {expected}"
+    print("TC5: trace order is exactly [before, body, enter] - PASS")
+
+    print("PASS: automatic transition guard suppresses post-self-call code")
+
+if __name__ == '__main__':
+    main()

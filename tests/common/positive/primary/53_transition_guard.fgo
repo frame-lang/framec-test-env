@@ -1,0 +1,104 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+import "reflect"
+
+// Test 53: Self-call transition guard
+//
+// Verifies the automatic transition guard contract: when a handler
+// self-calls a method that triggers a transition, code after the
+// self-call must NOT execute. The trace must equal exactly
+// ["run:before-self-call", "do_transition:body", "Done:enter"].
+
+@@system TransitionGuard {
+
+    interface:
+        Run()
+        DoTransition()
+        GetTrace(): []string
+
+    machine:
+        $Active {
+            Run() {
+                s.trace = append(s.trace, "run:before-self-call")
+                @@:self.DoTransition()
+                s.trace = append(s.trace, "run:after-self-call")
+            }
+
+            DoTransition() {
+                s.trace = append(s.trace, "do_transition:body")
+                -> $Done
+            }
+
+            GetTrace(): []string {
+                @@:(s.trace)
+                return;
+            }
+        }
+
+        $Done {
+            $>() {
+                s.trace = append(s.trace, "Done:enter")
+            }
+
+            GetTrace(): []string {
+                @@:(s.trace)
+                return;
+            }
+        }
+
+    domain:
+        trace : []string
+}
+
+func contains(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func main() {
+	fmt.Println("=== Test 53: Self-call transition guard ===")
+	t := @@TransitionGuard()
+	t.Run()
+	trace := t.GetTrace()
+
+	if !contains(trace, "run:before-self-call") {
+		fmt.Printf("FAIL TC1: pre-call statement must execute, trace=%v\n", trace)
+		os.Exit(1)
+	}
+	fmt.Println("TC1: pre-call statement executed - PASS")
+
+	if !contains(trace, "do_transition:body") {
+		fmt.Printf("FAIL TC2: self-called handler body must execute, trace=%v\n", trace)
+		os.Exit(1)
+	}
+	fmt.Println("TC2: self-called handler body executed - PASS")
+
+	if !contains(trace, "Done:enter") {
+		fmt.Printf("FAIL TC3: cascade enter on transition target must fire, trace=%v\n", trace)
+		os.Exit(1)
+	}
+	fmt.Println("TC3: target state $> handler fired - PASS")
+
+	if contains(trace, "run:after-self-call") {
+		fmt.Printf("FAIL TC4: post-call statement MUST NOT execute (transition guard), trace=%v\n", trace)
+		os.Exit(1)
+	}
+	fmt.Println("TC4: post-call statement suppressed by automatic guard - PASS")
+
+	expected := []string{"run:before-self-call", "do_transition:body", "Done:enter"}
+	if !reflect.DeepEqual(trace, expected) {
+		fmt.Printf("FAIL TC5: trace order must match expected, got %v, expected %v\n", trace, expected)
+		os.Exit(1)
+	}
+	fmt.Println("TC5: trace order is exactly [before, body, enter] - PASS")
+
+	fmt.Println("PASS: automatic transition guard suppresses post-self-call code")
+}

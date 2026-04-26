@@ -1,0 +1,100 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+// Test 53: Self-call transition guard
+//
+// Verifies the automatic transition guard contract: when a handler
+// self-calls a method that triggers a transition, code after the
+// self-call must NOT execute. The trace must equal exactly
+// ["run:before-self-call", "do_transition:body", "Done:enter"].
+
+@@system TransitionGuard {
+
+    interface:
+        run()
+        do_transition()
+        get_trace(): List<object>
+
+    machine:
+        $Active {
+            run() {
+                this.trace.Add("run:before-self-call");
+                @@:self.do_transition();
+                this.trace.Add("run:after-self-call");
+            }
+
+            do_transition() {
+                this.trace.Add("do_transition:body");
+                -> $Done
+            }
+
+            get_trace(): List<object> {
+                @@:(this.trace)
+                return;
+            }
+        }
+
+        $Done {
+            $>() {
+                this.trace.Add("Done:enter");
+            }
+
+            get_trace(): List<object> {
+                @@:(this.trace)
+                return;
+            }
+        }
+
+    domain:
+        trace : List<object> = new List<object>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 53: Self-call transition guard ===");
+        var t = @@TransitionGuard();
+        t.run();
+        var trace = (List<object>)t.get_trace();
+
+        if (!trace.Contains("run:before-self-call")) {
+            Console.WriteLine("FAIL TC1: pre-call statement must execute, trace=" + string.Join(", ", trace));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC1: pre-call statement executed - PASS");
+
+        if (!trace.Contains("do_transition:body")) {
+            Console.WriteLine("FAIL TC2: self-called handler body must execute, trace=" + string.Join(", ", trace));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC2: self-called handler body executed - PASS");
+
+        if (!trace.Contains("Done:enter")) {
+            Console.WriteLine("FAIL TC3: cascade enter on transition target must fire, trace=" + string.Join(", ", trace));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC3: target state $> handler fired - PASS");
+
+        if (trace.Contains("run:after-self-call")) {
+            Console.WriteLine("FAIL TC4: post-call statement MUST NOT execute (transition guard), trace=" + string.Join(", ", trace));
+            Environment.Exit(1);
+        }
+        Console.WriteLine("TC4: post-call statement suppressed by automatic guard - PASS");
+
+        var expected = new List<object> { "run:before-self-call", "do_transition:body", "Done:enter" };
+        if (trace.Count != expected.Count) {
+            Console.WriteLine("FAIL TC5: trace size mismatch, got " + trace.Count + ", expected " + expected.Count);
+            Environment.Exit(1);
+        }
+        for (int i = 0; i < trace.Count; i++) {
+            if (!trace[i].Equals(expected[i])) {
+                Console.WriteLine("FAIL TC5: trace[" + i + "] mismatch, got " + trace[i] + ", expected " + expected[i]);
+                Environment.Exit(1);
+            }
+        }
+        Console.WriteLine("TC5: trace order is exactly [before, body, enter] - PASS");
+
+        Console.WriteLine("PASS: automatic transition guard suppresses post-self-call code");
+    }
+}

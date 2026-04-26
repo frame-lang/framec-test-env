@@ -1,0 +1,76 @@
+@@target javascript
+
+// Test 53: Self-call transition guard
+//
+// Verifies the automatic transition guard contract: when a handler
+// self-calls a method that triggers a transition, code after the
+// self-call must NOT execute. The trace must equal exactly
+// ["run:before-self-call", "do_transition:body", "Done:enter"].
+
+@@system TransitionGuard {
+
+    interface:
+        run()
+        do_transition()
+        get_trace(): string[]
+
+    machine:
+        $Active {
+            run() {
+                this.trace.push("run:before-self-call")
+                @@:self.do_transition()
+                this.trace.push("run:after-self-call")
+            }
+
+            do_transition() {
+                this.trace.push("do_transition:body")
+                -> $Done
+            }
+
+            get_trace(): list {
+                @@:(this.trace)
+                return;
+            }
+        }
+
+        $Done {
+            $>() {
+                this.trace.push("Done:enter")
+            }
+
+            get_trace(): list {
+                @@:(this.trace)
+                return;
+            }
+        }
+
+    domain:
+        trace = []
+}
+
+function main() {
+    console.log("=== Test 53: Self-call transition guard ===");
+    const t = @@TransitionGuard();
+    t.run();
+    const trace = t.get_trace();
+
+    if (!trace.includes("run:before-self-call")) throw new Error(`TC1: pre-call statement must execute, trace=${JSON.stringify(trace)}`);
+    console.log("TC1: pre-call statement executed - PASS");
+
+    if (!trace.includes("do_transition:body")) throw new Error(`TC2: self-called handler body must execute, trace=${JSON.stringify(trace)}`);
+    console.log("TC2: self-called handler body executed - PASS");
+
+    if (!trace.includes("Done:enter")) throw new Error(`TC3: cascade enter on transition target must fire, trace=${JSON.stringify(trace)}`);
+    console.log("TC3: target state $> handler fired - PASS");
+
+    if (trace.includes("run:after-self-call")) throw new Error(`TC4: post-call statement MUST NOT execute (transition guard), trace=${JSON.stringify(trace)}`);
+    console.log("TC4: post-call statement suppressed by automatic guard - PASS");
+
+    const expected = ["run:before-self-call", "do_transition:body", "Done:enter"];
+    if (JSON.stringify(trace) !== JSON.stringify(expected)) throw new Error(`TC5: trace order must match expected, got ${JSON.stringify(trace)}, expected ${JSON.stringify(expected)}`);
+    console.log("TC5: trace order is exactly [before, body, enter] - PASS");
+
+    console.log("PASS: automatic transition guard suppresses post-self-call code");
+}
+
+main();

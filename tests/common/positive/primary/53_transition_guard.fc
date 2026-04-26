@@ -1,0 +1,99 @@
+@@target c
+
+#include <stdio.h>
+#include <string.h>
+
+// Test 53: Self-call transition guard
+//
+// Verifies the automatic transition guard contract: when a handler
+// self-calls a method that triggers a transition, code after the
+// self-call must NOT execute.
+//
+// C variant uses a bitmask trace (one bit per phase) since C has no
+// native list type:
+//   bit 0 (0x01): run:before-self-call
+//   bit 1 (0x02): do_transition:body
+//   bit 2 (0x04): Done:enter
+//   bit 3 (0x08): run:after-self-call (MUST NOT be set — guard suppresses)
+
+@@system TransitionGuard {
+
+    interface:
+        run()
+        do_transition()
+        get_trace(): int
+
+    machine:
+        $Active {
+            run() {
+                self->trace = self->trace | 0x01;    // run:before-self-call
+                @@:self.do_transition();
+                self->trace = self->trace | 0x08;    // run:after-self-call (guarded)
+            }
+
+            do_transition() {
+                self->trace = self->trace | 0x02;    // do_transition:body
+                -> $Done
+            }
+
+            get_trace(): int { @@:(self->trace) return; }
+        }
+
+        $Done {
+            $>() {
+                self->trace = self->trace | 0x04;    // Done:enter
+            }
+
+            get_trace(): int { @@:(self->trace) return; }
+        }
+
+    domain:
+        trace: int = 0
+}
+
+int main() {
+    printf("=== Test 53: Self-call transition guard ===\n");
+    TransitionGuard* t = @@TransitionGuard();
+    TransitionGuard_run(t);
+    int trace = TransitionGuard_get_trace(t);
+
+    if ((trace & 0x01) == 0) {
+        printf("FAIL TC1: pre-call statement must execute, trace=0x%x\n", trace);
+        TransitionGuard_destroy(t);
+        return 1;
+    }
+    printf("TC1: pre-call statement executed - PASS\n");
+
+    if ((trace & 0x02) == 0) {
+        printf("FAIL TC2: self-called handler body must execute, trace=0x%x\n", trace);
+        TransitionGuard_destroy(t);
+        return 1;
+    }
+    printf("TC2: self-called handler body executed - PASS\n");
+
+    if ((trace & 0x04) == 0) {
+        printf("FAIL TC3: cascade enter on transition target must fire, trace=0x%x\n", trace);
+        TransitionGuard_destroy(t);
+        return 1;
+    }
+    printf("TC3: target state $> handler fired - PASS\n");
+
+    if ((trace & 0x08) != 0) {
+        printf("FAIL TC4: post-call statement MUST NOT execute (transition guard), trace=0x%x\n", trace);
+        TransitionGuard_destroy(t);
+        return 1;
+    }
+    printf("TC4: post-call statement suppressed by automatic guard - PASS\n");
+
+    int expected = 0x01 | 0x02 | 0x04;
+    if (trace != expected) {
+        printf("FAIL TC5: trace mask must equal 0x%x, got 0x%x\n", expected, trace);
+        TransitionGuard_destroy(t);
+        return 1;
+    }
+    printf("TC5: trace mask is exactly [before|body|enter] - PASS\n");
+
+    printf("PASS: automatic transition guard suppresses post-self-call code\n");
+    TransitionGuard_destroy(t);
+    return 0;
+}

@@ -1,0 +1,86 @@
+@@target gdscript
+extends SceneTree
+
+# Test 53: Self-call transition guard
+#
+# Verifies the automatic transition guard contract: when a handler
+# self-calls a method that triggers a transition, code after the
+# self-call must NOT execute. The trace must equal exactly
+# ["run:before-self-call", "do_transition:body", "Done:enter"].
+
+@@system TransitionGuard {
+
+    interface:
+        run()
+        do_transition()
+        get_trace(): list
+
+    machine:
+        $Active {
+            run() {
+                self.trace.append("run:before-self-call")
+                @@:self.do_transition()
+                self.trace.append("run:after-self-call")
+            }
+
+            do_transition() {
+                self.trace.append("do_transition:body")
+                -> $Done
+            }
+
+            get_trace(): list {
+                @@:(self.trace)
+                return
+            }
+        }
+
+        $Done {
+            $>() {
+                self.trace.append("Done:enter")
+            }
+
+            get_trace(): list {
+                @@:(self.trace)
+                return
+            }
+        }
+
+    domain:
+        trace: list = []
+}
+
+func arrays_equal(a, b):
+    if a.size() != b.size():
+        return false
+    for i in range(a.size()):
+        if a[i] != b[i]:
+            return false
+    return true
+
+func main():
+    print("=== Test 53: Self-call transition guard ===")
+    var t = @@TransitionGuard()
+    t.run()
+    var trace = t.get_trace()
+
+    assert("run:before-self-call" in trace, "TC1: pre-call statement must execute, got " + str(trace))
+    print("TC1: pre-call statement executed - PASS")
+
+    assert("do_transition:body" in trace, "TC2: self-called handler body must execute, got " + str(trace))
+    print("TC2: self-called handler body executed - PASS")
+
+    assert("Done:enter" in trace, "TC3: cascade enter on transition target must fire, got " + str(trace))
+    print("TC3: target state $> handler fired - PASS")
+
+    assert(not ("run:after-self-call" in trace), "TC4: post-call statement MUST NOT execute (transition guard), got " + str(trace))
+    print("TC4: post-call statement suppressed by automatic guard - PASS")
+
+    var expected = ["run:before-self-call", "do_transition:body", "Done:enter"]
+    assert(arrays_equal(trace, expected), "TC5: trace order must match expected, got " + str(trace) + ", expected " + str(expected))
+    print("TC5: trace order is exactly [before, body, enter] - PASS")
+
+    print("PASS: automatic transition guard suppresses post-self-call code")
+
+func _init():
+    main()
+    quit()
