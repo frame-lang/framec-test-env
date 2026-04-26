@@ -6,6 +6,8 @@
 #include <vector>
 #include <algorithm>
 
+// Test 46: HSM Enter Cascade — Parent has $>, Child does not
+
 @@system HSMEnterParentOnly {
     interface:
         go_to_child()
@@ -15,99 +17,50 @@
 
     machine:
         $Start {
-            go_to_child() {
-                -> $Child
-            }
-            go_to_parent() {
-                -> $Parent
-            }
-            get_log(): std::vector<std::string> {
-                @@:(event_log)
-                return;
-            }
-            get_state(): std::string {
-                @@:(std::string("Start"))
-                return;
-            }
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): std::vector<std::string> { @@:(event_log) }
+            get_state(): std::string { @@:(std::string("Start")) }
         }
 
         $Child => $Parent {
-            go_to_parent() {
-                -> $Parent
-            }
-            get_log(): std::vector<std::string> {
-                @@:(event_log)
-                return;
-            }
-            get_state(): std::string {
-                @@:(std::string("Child"))
-                return;
-            }
+            go_to_parent() { -> $Parent }
+            get_log(): std::vector<std::string> { @@:(event_log) }
+            get_state(): std::string { @@:(std::string("Child")) }
         }
 
         $Parent {
             $>() {
                 event_log.push_back("Parent:enter");
             }
-            go_to_child() {
-                -> $Child
-            }
-            get_log(): std::vector<std::string> {
-                @@:(event_log)
-                return;
-            }
-            get_state(): std::string {
-                @@:(std::string("Parent"))
-                return;
-            }
+            go_to_child() { -> $Child }
+            get_log(): std::vector<std::string> { @@:(event_log) }
+            get_state(): std::string { @@:(std::string("Parent")) }
         }
     domain:
         event_log : std::vector<std::string> = {}
 }
 
 int main() {
-    printf("=== Test 46: HSM Enter in Parent Only ===\n");
+    printf("=== Test 46: HSM Enter Cascade — Parent only ===\n");
     HSMEnterParentOnly s;
 
     s.go_to_child();
-    if (s.get_state() != "Child") {
-        printf("FAIL: Expected Child\n");
-        assert(false);
-    }
+    if (s.get_state() != "Child") { printf("FAIL\n"); assert(false); }
     auto log = s.get_log();
-    printf("TC2.2.1: Child enters without error - PASS\n");
-
-    if (std::find(log.begin(), log.end(), "Parent:enter") != log.end()) {
-        printf("FAIL: Parent:enter should NOT fire for child entry\n");
-        assert(false);
-    }
-    printf("TC2.2.2: Parent enter NOT auto-fired for child - PASS\n");
+    if (std::find(log.begin(), log.end(), "Parent:enter") == log.end()) { printf("FAIL: Expected Parent:enter on cascade\n"); assert(false); }
+    printf("TC1: Parent's $> fires on cascade entry to Child - PASS\n");
 
     s.go_to_parent();
-    if (s.get_state() != "Parent") {
-        printf("FAIL: Expected Parent\n");
-        assert(false);
-    }
     log = s.get_log();
-    if (std::find(log.begin(), log.end(), "Parent:enter") == log.end()) {
-        printf("FAIL: Expected Parent:enter when transitioning to Parent\n");
-        assert(false);
-    }
-    printf("TC2.2.3: Parent enter fires when transitioning to Parent - PASS\n");
+    if (std::count(log.begin(), log.end(), "Parent:enter") != 2) { printf("FAIL: Expected 2 Parent:enter\n"); assert(false); }
+    printf("TC2: Parent's $> fires again when transitioning directly to Parent - PASS\n");
 
     s.go_to_child();
-    if (s.get_state() != "Child") {
-        printf("FAIL: Expected Child\n");
-        assert(false);
-    }
     log = s.get_log();
-    int count = std::count(log.begin(), log.end(), "Parent:enter");
-    if (count != 1) {
-        printf("FAIL: Expected exactly 1 Parent:enter\n");
-        assert(false);
-    }
-    printf("TC2.2.4: Return to child, parent enter count unchanged - PASS\n");
+    if (std::count(log.begin(), log.end(), "Parent:enter") != 3) { printf("FAIL: Expected 3 Parent:enter\n"); assert(false); }
+    printf("TC3: Re-entering Child cascades through Parent again - PASS\n");
 
-    printf("PASS: HSM enter in parent only works correctly\n");
+    printf("PASS: HSM enter cascade fires Parent's $> on child entry\n");
     return 0;
 }

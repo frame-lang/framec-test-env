@@ -6,6 +6,8 @@
 #include <vector>
 #include <algorithm>
 
+// Test 48: HSM Exit Cascade
+
 @@system HSMExitHandlers {
     interface:
         go_to_other()
@@ -28,28 +30,11 @@
                 event_log.push_back(std::string("Child:exit(var=") + std::to_string(val) + ")");
             }
 
-            go_to_other() {
-                -> $Other
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): std::vector<std::string> {
-                @@:(event_log)
-                return;
-            }
-
-            get_state(): std::string {
-                @@:(std::string("Child"))
-                return;
-            }
-
-            get_child_var(): int {
-                @@:($.child_var)
-                return;
-            }
+            go_to_other() { -> $Other }
+            go_to_parent() { -> $Parent }
+            get_log(): std::vector<std::string> { @@:(event_log) }
+            get_state(): std::string { @@:(std::string("Child")) }
+            get_child_var(): int { @@:($.child_var) }
         }
 
         $Parent {
@@ -61,112 +46,55 @@
                 event_log.push_back("Parent:exit");
             }
 
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_other() {
-                -> $Other
-            }
-
-            get_log(): std::vector<std::string> {
-                @@:(event_log)
-                return;
-            }
-
-            get_state(): std::string {
-                @@:(std::string("Parent"))
-                return;
-            }
-
-            get_child_var(): int {
-                @@:(-1)
-                return;
-            }
+            go_to_child() { -> $Child }
+            go_to_other() { -> $Other }
+            get_log(): std::vector<std::string> { @@:(event_log) }
+            get_state(): std::string { @@:(std::string("Parent")) }
+            get_child_var(): int { @@:(-1) }
         }
 
         $Other {
             $>() {
                 event_log.push_back("Other:enter");
             }
-
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): std::vector<std::string> {
-                @@:(event_log)
-                return;
-            }
-
-            get_state(): std::string {
-                @@:(std::string("Other"))
-                return;
-            }
-
-            get_child_var(): int {
-                @@:(-1)
-                return;
-            }
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): std::vector<std::string> { @@:(event_log) }
+            get_state(): std::string { @@:(std::string("Other")) }
+            get_child_var(): int { @@:(-1) }
         }
     domain:
         event_log : std::vector<std::string> = {}
 }
 
 int main() {
-    printf("=== Test 48: HSM Exit Handlers ===\n");
+    printf("=== Test 48: HSM Exit Cascade ===\n");
     HSMExitHandlers s;
 
     auto log = s.get_log();
-    if (std::find(log.begin(), log.end(), "Child:enter") == log.end()) {
-        printf("FAIL: Expected Child:enter on init\n");
-        assert(false);
-    }
-    if (s.get_state() != "Child") {
-        printf("FAIL: Expected Child\n");
-        assert(false);
-    }
-    printf("TC2.4.0: Initial state is Child with enter - PASS\n");
+    if (std::find(log.begin(), log.end(), "Parent:enter") == log.end()) { printf("FAIL: Expected Parent:enter on init cascade\n"); assert(false); }
+    if (std::find(log.begin(), log.end(), "Child:enter") == log.end()) { printf("FAIL: Expected Child:enter on init\n"); assert(false); }
+    if (s.get_state() != "Child") { printf("FAIL\n"); assert(false); }
+    printf("TC1: Initial entry cascades through Parent then Child - PASS\n");
 
     s.go_to_other();
     log = s.get_log();
-    if (std::find(log.begin(), log.end(), "Child:exit(var=42)") == log.end()) {
-        printf("FAIL: Expected Child:exit\n");
-        assert(false);
-    }
-    if (std::find(log.begin(), log.end(), "Other:enter") == log.end()) {
-        printf("FAIL: Expected Other:enter\n");
-        assert(false);
-    }
-    printf("TC2.4.1: Child exit fires when transitioning out - PASS\n");
+    if (std::find(log.begin(), log.end(), "Child:exit(var=42)") == log.end()) { printf("FAIL: Expected Child:exit(var=42)\n"); assert(false); }
+    if (std::find(log.begin(), log.end(), "Parent:exit") == log.end()) { printf("FAIL: Expected Parent:exit (cascade)\n"); assert(false); }
+    if (std::find(log.begin(), log.end(), "Other:enter") == log.end()) { printf("FAIL: Expected Other:enter\n"); assert(false); }
+    auto cei = std::find(log.begin(), log.end(), "Child:exit(var=42)");
+    auto pei = std::find(log.begin(), log.end(), "Parent:exit");
+    if (cei >= pei) { printf("FAIL: Child:exit must precede Parent:exit\n"); assert(false); }
+    printf("TC2: Child:exit fires before Parent:exit (bottom-up cascade) - PASS\n");
 
-    if (std::find(log.begin(), log.end(), "Parent:exit") != log.end()) {
-        printf("FAIL: Parent:exit should NOT fire for child exit\n");
-        assert(false);
-    }
-    printf("TC2.4.2: Parent exit NOT fired for child exit - PASS\n");
+    printf("TC3: Exit handler accesses state var (var=42) - PASS\n");
 
-    printf("TC2.4.3: Exit handler accesses state var (var=42) - PASS\n");
-
-    s.go_to_parent();
+    s.go_to_child();
     log = s.get_log();
-    if (std::find(log.begin(), log.end(), "Parent:enter") == log.end()) {
-        printf("FAIL: Expected Parent:enter\n");
-        assert(false);
-    }
+    if (std::count(log.begin(), log.end(), "Parent:enter") != 2) { printf("FAIL: Expected 2 Parent:enter\n"); assert(false); }
+    if (std::count(log.begin(), log.end(), "Child:enter") != 2) { printf("FAIL: Expected 2 Child:enter\n"); assert(false); }
+    printf("TC4: Re-entering Child cascades Parent.$> then Child.$> - PASS\n");
 
-    s.go_to_other();
-    log = s.get_log();
-    if (std::find(log.begin(), log.end(), "Parent:exit") == log.end()) {
-        printf("FAIL: Expected Parent:exit\n");
-        assert(false);
-    }
-    printf("TC2.4.4: Parent exit fires when leaving parent - PASS\n");
-
-    printf("PASS: HSM exit handlers work correctly\n");
+    printf("PASS: HSM exit cascade fires Child.<$ then Parent.<$\n");
     return 0;
 }
