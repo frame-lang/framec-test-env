@@ -1,0 +1,109 @@
+@@target rust
+
+// Test 52: HSM state-arg propagation across chain layers.
+//
+// Verifies docs/frame_runtime.md Step 22 ("How propagation works in
+// the runtime"): when a transition supplies state-args to a leaf
+// state, every ancestor in the destination chain receives the same
+// args because the spec mandates signature-match across layers.
+//
+// Specifically: transitioning to $Heating(72) populates $Heating's
+// state-context AND $Active's state-context with setpoint=72.
+// Reading the setpoint via either layer's handler returns 72.
+
+@@system HSMStateArgPropagation {
+    interface:
+        switch_to_heating(temp: i32)
+        get_active_setpoint(): i32
+        get_heating_setpoint(): i32
+        get_log(): Vec<String>
+
+    machine:
+        $Off {
+            switch_to_heating(temp: i32) {
+                -> $Heating(temp)
+            }
+
+            get_active_setpoint(): i32 {
+                @@:(0)
+                return;
+            }
+            get_heating_setpoint(): i32 {
+                @@:(0)
+                return;
+            }
+            get_log(): Vec<String> {
+                @@:(self.log.clone())
+                return;
+            }
+        }
+
+        $Active(setpoint: i32) {
+            $>() {
+                let s = setpoint;
+                self.log.push(format!("Active:enter(setpoint={})", s));
+            }
+
+            // Reading the parent's state-arg via fall-through from a
+            // child requires the chain-walk binding fix in
+            // state_dispatch.rs — without it, this would return 0
+            // because self.__compartment is the leaf.
+            get_active_setpoint(): i32 {
+                @@:(setpoint)
+                return;
+            }
+
+            // get_log lives on the parent so a child's `=> $^` falls
+            // through here to read the shared domain log.
+            get_log(): Vec<String> {
+                @@:(self.log.clone())
+                return;
+            }
+        }
+
+        $Heating => $Active(setpoint: i32) {
+            $>() {
+                let s = setpoint;
+                self.log.push(format!("Heating:enter(setpoint={})", s));
+            }
+
+            get_heating_setpoint(): i32 {
+                @@:(setpoint)
+                return;
+            }
+
+            => $^
+        }
+    domain:
+        log: Vec<String>
+}
+
+fn main() {
+    println!("=== Test 52: HSM state-arg propagation ===");
+    let mut s = @@HSMStateArgPropagation();
+
+    s.switch_to_heating(72);
+
+    let log = s.get_log();
+    assert!(
+        log.contains(&"Active:enter(setpoint=72)".to_string()),
+        "Active.$> should see setpoint=72 (propagated), got log {:?}",
+        log
+    );
+    assert!(
+        log.contains(&"Heating:enter(setpoint=72)".to_string()),
+        "Heating.$> should see setpoint=72, got log {:?}",
+        log
+    );
+    println!("TC1: cascade enter sees propagated state args - PASS");
+
+    let active_sp = s.get_active_setpoint();
+    assert_eq!(active_sp, 72, "$Active.get_active_setpoint() must read 72 from Active's state-context layer (chain-walk binding)");
+    println!("TC2: parent handler reads its own layer's state-arg - PASS");
+
+    let heating_sp = s.get_heating_setpoint();
+    assert_eq!(heating_sp, 72, "$Heating.get_heating_setpoint() reads 72 from leaf");
+    println!("TC3: leaf handler reads its own layer's state-arg - PASS");
+
+    println!("PASS: HSM state-arg propagation works correctly");
+}
