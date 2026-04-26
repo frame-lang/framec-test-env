@@ -1,11 +1,6 @@
 @@target rust
 
-// Test 48: HSM Exit Handlers
-//
-// Tests exit handlers in HSM context:
-// - Child exit fires when transitioning out of child
-// - Parent exit does NOT fire when transitioning out of child
-// - Exit handler can access child's state variables
+// Test 48: HSM Exit Cascade
 
 @@system HSMExitHandlers {
     interface:
@@ -29,28 +24,11 @@
                 self.log.push(format!("Child:exit(var={})", val));
             }
 
-            go_to_other() {
-                -> $Other
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): Vec<String> {
-                @@:(self.log.clone())
-                return;
-            }
-
-            get_state(): String {
-                @@:("Child".to_string())
-                return;
-            }
-
-            get_child_var(): i32 {
-                @@:($.child_var)
-                return;
-            }
+            go_to_other() { -> $Other }
+            go_to_parent() { -> $Parent }
+            get_log(): Vec<String> { @@:(self.log.clone()) }
+            get_state(): String { @@:("Child".to_string()) }
+            get_child_var(): i32 { @@:($.child_var) }
         }
 
         $Parent {
@@ -62,95 +40,54 @@
                 self.log.push("Parent:exit".to_string());
             }
 
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_other() {
-                -> $Other
-            }
-
-            get_log(): Vec<String> {
-                @@:(self.log.clone())
-                return;
-            }
-
-            get_state(): String {
-                @@:("Parent".to_string())
-                return;
-            }
-
-            get_child_var(): i32 {
-                @@:(-1)
-                return;
-            }
+            go_to_child() { -> $Child }
+            go_to_other() { -> $Other }
+            get_log(): Vec<String> { @@:(self.log.clone()) }
+            get_state(): String { @@:("Parent".to_string()) }
+            get_child_var(): i32 { @@:(-1) }
         }
 
         $Other {
             $>() {
                 self.log.push("Other:enter".to_string());
             }
-
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): Vec<String> {
-                @@:(self.log.clone())
-                return;
-            }
-
-            get_state(): String {
-                @@:("Other".to_string())
-                return;
-            }
-
-            get_child_var(): i32 {
-                @@:(-1)
-                return;
-            }
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): Vec<String> { @@:(self.log.clone()) }
+            get_state(): String { @@:("Other".to_string()) }
+            get_child_var(): i32 { @@:(-1) }
         }
     domain:
         log: Vec<String>
 }
 
 fn main() {
-    println!("=== Test 48: HSM Exit Handlers ===");
+    println!("=== Test 48: HSM Exit Cascade ===");
     let mut s = @@HSMExitHandlers();
 
-    // Initial state is Child
     let log = s.get_log();
-    assert!(log.contains(&"Child:enter".to_string()), "Expected Child:enter on init, got {:?}", log);
-    assert!(s.get_state() == "Child", "Expected Child, got {}", s.get_state());
-    println!("TC2.4.0: Initial state is Child with enter - PASS");
-
-    // TC2.4.1: Child exit fires when transitioning out of child
-    s.go_to_other();
-    let log = s.get_log();
-    assert!(log.contains(&"Child:exit(var=42)".to_string()), "Expected Child:exit, got {:?}", log);
-    assert!(log.contains(&"Other:enter".to_string()), "Expected Other:enter, got {:?}", log);
-    println!("TC2.4.1: Child exit fires when transitioning out - PASS");
-
-    // TC2.4.2: Parent exit does NOT fire when transitioning out of child
-    assert!(!log.contains(&"Parent:exit".to_string()), "Parent:exit should NOT fire for child exit, got {:?}", log);
-    println!("TC2.4.2: Parent exit NOT fired for child exit - PASS");
-
-    // TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
-    println!("TC2.4.3: Exit handler accesses state var (var=42) - PASS");
-
-    // TC2.4.4: Parent exit fires when transitioning out of Parent
-    s.go_to_parent();
-    let log = s.get_log();
-    assert!(log.contains(&"Parent:enter".to_string()), "Expected Parent:enter, got {:?}", log);
+    assert!(log.contains(&"Parent:enter".to_string()), "Expected Parent:enter on init cascade");
+    assert!(log.contains(&"Child:enter".to_string()), "Expected Child:enter on init");
+    assert!(s.get_state() == "Child", "Expected Child");
+    println!("TC1: Initial entry cascades through Parent then Child - PASS");
 
     s.go_to_other();
     let log = s.get_log();
-    assert!(log.contains(&"Parent:exit".to_string()), "Expected Parent:exit, got {:?}", log);
-    println!("TC2.4.4: Parent exit fires when leaving parent - PASS");
+    assert!(log.contains(&"Child:exit(var=42)".to_string()), "Expected Child:exit(var=42)");
+    assert!(log.contains(&"Parent:exit".to_string()), "Expected Parent:exit (cascade)");
+    assert!(log.contains(&"Other:enter".to_string()), "Expected Other:enter");
+    let cei = log.iter().position(|x| x == "Child:exit(var=42)").unwrap();
+    let pei = log.iter().position(|x| x == "Parent:exit").unwrap();
+    assert!(cei < pei, "Child:exit must precede Parent:exit (bottom-up)");
+    println!("TC2: Child:exit fires before Parent:exit (bottom-up cascade) - PASS");
 
-    println!("PASS: HSM exit handlers work correctly");
+    println!("TC3: Exit handler accesses state var (var=42) - PASS");
+
+    s.go_to_child();
+    let log = s.get_log();
+    assert!(log.iter().filter(|x| *x == "Parent:enter").count() == 2, "Expected 2 Parent:enter");
+    assert!(log.iter().filter(|x| *x == "Child:enter").count() == 2, "Expected 2 Child:enter");
+    println!("TC4: Re-entering Child cascades Parent.$> then Child.$> - PASS");
+
+    println!("PASS: HSM exit cascade fires Child.<$ then Parent.<$");
 }
