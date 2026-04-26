@@ -3,6 +3,8 @@
 using System;
 using System.Collections.Generic;
 
+// Test 46: HSM Enter Cascade — Parent has $>, Child does not
+
 @@system HSMEnterParentOnly {
     interface:
         go_to_child()
@@ -12,115 +14,57 @@ using System.Collections.Generic;
 
     machine:
         $Start {
-            go_to_child() {
-                -> $Child
-            }
-
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): List<object> {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): string {
-                @@:("Start")
-                return;
-            }
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): List<object> { @@:(this.log) }
+            get_state(): string { @@:("Start") }
         }
 
         $Child => $Parent {
-            go_to_parent() {
-                -> $Parent
-            }
-
-            get_log(): List<object> {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): string {
-                @@:("Child")
-                return;
-            }
+            go_to_parent() { -> $Parent }
+            get_log(): List<object> { @@:(this.log) }
+            get_state(): string { @@:("Child") }
         }
 
         $Parent {
             $>() {
                 this.log.Add("Parent:enter");
             }
-
-            go_to_child() {
-                -> $Child
-            }
-
-            get_log(): List<object> {
-                @@:(this.log)
-                return;
-            }
-
-            get_state(): string {
-                @@:("Parent")
-                return;
-            }
+            go_to_child() { -> $Child }
+            get_log(): List<object> { @@:(this.log) }
+            get_state(): string { @@:("Parent") }
         }
     domain:
         log : List<object> = new List<object>()
 }
 
 class Program {
+    static int CountOf(List<object> log, string v) {
+        int n = 0;
+        foreach (var item in log) if (item.Equals(v)) n++;
+        return n;
+    }
+
     static void Main(string[] args) {
-        Console.WriteLine("=== Test 46: HSM Enter in Parent Only ===");
+        Console.WriteLine("=== Test 46: HSM Enter Cascade — Parent only ===");
         var s = @@HSMEnterParentOnly();
 
-        // TC2.2.1: Child enters without error (no enter handler)
         s.go_to_child();
-        if ((string)s.get_state() != "Child") {
-            Console.WriteLine("FAIL: Expected Child, got " + s.get_state());
-            Environment.Exit(1);
-        }
+        if ((string)s.get_state() != "Child") { Console.WriteLine("FAIL"); Environment.Exit(1); }
         var log = (List<object>)s.get_log();
-        Console.WriteLine("TC2.2.1: Child enters without error (log: [" + string.Join(", ", log) + "]) - PASS");
+        if (!log.Contains("Parent:enter")) { Console.WriteLine("FAIL: Expected Parent:enter on cascade"); Environment.Exit(1); }
+        Console.WriteLine("TC1: Parent's $> fires on cascade entry to Child - PASS");
 
-        // TC2.2.2: Parent's enter does NOT auto-fire when child is entered
-        if (log.Contains("Parent:enter")) {
-            Console.WriteLine("FAIL: Parent:enter should NOT fire for child entry, got " + string.Join(", ", log));
-            Environment.Exit(1);
-        }
-        Console.WriteLine("TC2.2.2: Parent enter NOT auto-fired for child - PASS");
-
-        // TC2.2.3: Parent enter only fires when transitioning directly TO parent
         s.go_to_parent();
-        if ((string)s.get_state() != "Parent") {
-            Console.WriteLine("FAIL: Expected Parent, got " + s.get_state());
-            Environment.Exit(1);
-        }
         log = (List<object>)s.get_log();
-        if (!log.Contains("Parent:enter")) {
-            Console.WriteLine("FAIL: Expected Parent:enter when transitioning to Parent, got " + string.Join(", ", log));
-            Environment.Exit(1);
-        }
-        Console.WriteLine("TC2.2.3: Parent enter fires when transitioning to Parent - PASS");
+        if (CountOf(log, "Parent:enter") != 2) { Console.WriteLine("FAIL: Expected 2 Parent:enter"); Environment.Exit(1); }
+        Console.WriteLine("TC2: Parent's $> fires again when transitioning directly to Parent - PASS");
 
-        // TC2.2.4: Going back to child from parent
         s.go_to_child();
-        if ((string)s.get_state() != "Child") {
-            Console.WriteLine("FAIL: Expected Child, got " + s.get_state());
-            Environment.Exit(1);
-        }
         log = (List<object>)s.get_log();
-        int count = 0;
-        foreach (var item in log) {
-            if (item.Equals("Parent:enter")) count++;
-        }
-        if (count != 1) {
-            Console.WriteLine("FAIL: Expected exactly 1 Parent:enter, got " + string.Join(", ", log));
-            Environment.Exit(1);
-        }
-        Console.WriteLine("TC2.2.4: Return to child, parent enter count unchanged - PASS");
+        if (CountOf(log, "Parent:enter") != 3) { Console.WriteLine("FAIL: Expected 3 Parent:enter"); Environment.Exit(1); }
+        Console.WriteLine("TC3: Re-entering Child cascades through Parent again - PASS");
 
-        Console.WriteLine("PASS: HSM enter in parent only works correctly");
+        Console.WriteLine("PASS: HSM enter cascade fires Parent's $> on child entry");
     }
 }
