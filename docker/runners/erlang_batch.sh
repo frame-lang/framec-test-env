@@ -94,11 +94,10 @@ for test_file in $tests; do
         mv "$out_file" "$target_erl"
     fi
 
-    # erlc in-place — produces <module>.beam in work_dir.
-    if ! erlc -o "$work_dir" "$target_erl" 2>/tmp/erlc_err; then
-        printf '%s\tCOMPILE_FAIL\t%s\n' "$test_num" "$test_name" >> "$MANIFEST"
-        continue
-    fi
+    # Defer erlc — collect targets here, compile in parallel after the
+    # loop. erlc cold start (~500 ms × 217 tests) was the dominant
+    # serial cost; xargs -P drops it to ~total/cores.
+    printf '%s\t%s\t%s\n' "$test_num" "$work_dir" "$target_erl" >> "$WORK_ROOT/erlc_jobs.tsv"
 
     # ---- escript generation (logic preserved from runner.sh) ----
     start_link_arity=$(grep "^-export" "$target_erl" | head -1 | grep -oE 'start_link/[0-9]+' | sed 's|start_link/||')
@@ -177,6 +176,39 @@ ESCRIPT
 
     printf '%s\tRUN\t%s\t%s\n' "$test_num" "$test_name" "$sanitized" >> "$MANIFEST"
 done
+
+# ---- Parallel erlc compile (deferred from per-test loop) ----
+# Each test's deferred erlc target was logged to erlc_jobs.tsv. Compile
+# them in parallel; failures get marked COMPILE_FAIL by patching the
+# MANIFEST after.
+if [ -s "$WORK_ROOT/erlc_jobs.tsv" ]; then
+    erlc_one() {
+        local num="$1"
+        local work_dir="$2"
+        local target_erl="$3"
+        if erlc -o "$work_dir" "$target_erl" 2>"$work_dir/erlc_err"; then
+            echo 0 > "$work_dir/erlc_rc"
+        else
+            echo 1 > "$work_dir/erlc_rc"
+        fi
+    }
+    export -f erlc_one
+    awk -F'\t' '{print $1; print $2; print $3}' "$WORK_ROOT/erlc_jobs.tsv" | \
+        xargs -n 3 -P "$JOBS" bash -c 'erlc_one "$@"' _
+
+    # Mark COMPILE_FAIL for any test whose erlc returned non-zero.
+    while IFS=$'\t' read -r num work_dir target_erl; do
+        if [ "$(cat "$work_dir/erlc_rc" 2>/dev/null)" != "0" ]; then
+            test_name=$(awk -F'\t' -v n="$num" '$1 == n {print $3}' "$MANIFEST")
+            # Replace the RUN row with COMPILE_FAIL.
+            tmp=$(mktemp)
+            awk -F'\t' -v n="$num" -v name="$test_name" 'BEGIN{OFS="\t"}
+                $1 == n { print n, "COMPILE_FAIL", name; next }
+                { print }' "$MANIFEST" > "$tmp"
+            mv "$tmp" "$MANIFEST"
+        fi
+    done < "$WORK_ROOT/erlc_jobs.tsv"
+fi
 
 if [ "$COMPILE_ONLY" = "true" ]; then
     pass=0; fail=0; skip=0
