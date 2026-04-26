@@ -181,6 +181,18 @@ try_kotlinc() {
     kotlinc -J-Xmx4g $kt_cp $files -include-runtime -d "$ALL_JAR" 2>/tmp/kotlinc_err
 }
 
+# OOM-detection: kotlinc-Killed-by-OOM looks different from compile
+# error. The JVM exits with the wrapper's translation of SIGKILL
+# (often 137, sometimes 1 with no useful message), and /tmp/kotlinc_err
+# typically contains a single line like
+#   "/usr/local/bin/kotlinc: line N: PID Killed ..."
+# rather than `error: ...` lines that point at source files. Detect
+# that signature and surface it so callers can choose to retry.
+kt_was_oom_killed() {
+    [ -s /tmp/kotlinc_err ] || return 1
+    grep -qE "Killed|SIGKILL|java.lang.OutOfMemoryError" /tmp/kotlinc_err
+}
+
 kt_mass_fail() {
     tmp_manifest="${MANIFEST}.tmp"
     awk -F'\t' 'BEGIN{OFS="\t"} {
@@ -192,6 +204,19 @@ kt_mass_fail() {
 
 if [ -n "$kt_files" ]; then
     if ! try_kotlinc; then
+        # OOM retry — kotlinc lost the SIGKILL lottery to another
+        # heavyweight process competing for host RAM. Wait briefly
+        # for memory pressure to ease, then retry once. Defense-in-
+        # depth even with -Xmx4g; only kicks in when /tmp/kotlinc_err
+        # carries the OOM signature, so this never masks real compile
+        # errors.
+        if kt_was_oom_killed; then
+            echo "# kotlinc OOM-killed — retrying after 5s" >&2
+            sleep 5
+            try_kotlinc || true
+        fi
+    fi
+    if [ ! -f "$ALL_JAR" ]; then
         # kotlinc echoes source paths with or without leading /, so match
         # on the directory-suffix regardless.
         dir_suffix="${COMPILE_DIR#/}"
