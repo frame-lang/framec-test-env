@@ -22,17 +22,58 @@ def run_one(module_path):
     result = {"exc": None}
 
     def target():
+        # Strip .py — pickle treats `.` as a submodule separator,
+        # so a module name like `frametest_foo.py` makes pickle's
+        # reverse-lookup `import frametest_foo.py` fail with
+        # "import of module ... failed".
+        base = os.path.splitext(os.path.basename(module_path))[0]
+        module_name = f"frametest_{base}"
+        # Save state we'll restore in finally.
+        saved_main_module = sys.modules.get("__main__")
         try:
-            spec = importlib.util.spec_from_file_location(
-                f"frametest_{os.path.basename(module_path)}", module_path,
+            with open(module_path, encoding="utf-8") as f:
+                source = f.read()
+            code = compile(source, module_path, "exec")
+            # Tests authored as standalone scripts use both patterns:
+            #   1. `def main(): ...` + `if __name__ == "__main__": main()`
+            #   2. inline `if __name__ == "__main__": <test logic>`
+            # Both rely on `__name__` being `"__main__"`. We exec with
+            # `__name__ = "__main__"` so both patterns fire naturally
+            # (matches `python3 <file.py>` semantics).
+            #
+            # For pickle support: classes defined during exec get
+            # `__module__ = "__main__"`. pickle.dumps stores that name;
+            # pickle.loads imports `__main__` from sys.modules. We
+            # register a proxy module under `__main__` whose namespace
+            # IS the exec namespace, then restore the original
+            # `__main__` (the harness's own) in finally.
+            ns = {
+                "__name__": "__main__",
+                "__file__": module_path,
+                "__builtins__": __builtins__,
+            }
+            proxy = importlib.util.module_from_spec(
+                importlib.util.spec_from_loader("__main__", loader=None)
             )
-            mod = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(mod)
+            proxy.__dict__.update(ns)
+            sys.modules["__main__"] = proxy
+            # Also register under frametest_<base> so any code that
+            # imports the test by file-derived name still resolves.
+            sys.modules[module_name] = proxy
+            try:
+                exec(code, proxy.__dict__)
+            finally:
+                sys.modules.pop(module_name, None)
         except SystemExit as e:
             if e.code not in (0, None):
                 result["exc"] = e
         except BaseException as e:
             result["exc"] = e
+        finally:
+            if saved_main_module is not None:
+                sys.modules["__main__"] = saved_main_module
+            else:
+                sys.modules.pop("__main__", None)
 
     saved_out, saved_err = sys.stdout, sys.stderr
     sys.stdout = buf
