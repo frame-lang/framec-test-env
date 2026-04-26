@@ -119,40 +119,40 @@
 }
 
 def main():
-    print("=== Test 48: HSM Exit Handlers ===")
+    print("=== Test 48: HSM Exit Cascade ===")
     s = @@HSMExitHandlers()
 
-    # Initial state is Child
+    # Initial state is Child. Cascade fires Parent.$> then Child.$>.
     log = s.get_log()
+    assert "Parent:enter" in log, f"Expected Parent:enter on init cascade, got {log}"
     assert "Child:enter" in log, f"Expected Child:enter on init, got {log}"
     assert s.get_state() == "Child", f"Expected Child, got {s.get_state()}"
-    print(f"TC2.4.0: Initial state is Child with enter - PASS")
+    print("TC1: Initial entry cascades through Parent then Child - PASS")
 
-    # TC2.4.1: Child exit fires when transitioning out of child
+    # TC2: Exiting Child to Other fires Child.<$ then Parent.<$ (bottom-up).
     s.go_to_other()
     log = s.get_log()
-    assert "Child:exit(var=42)" in log, f"Expected Child:exit, got {log}"
+    assert "Child:exit(var=42)" in log, f"Expected Child:exit(var=42), got {log}"
+    assert "Parent:exit" in log, f"Expected Parent:exit (cascade), got {log}"
     assert "Other:enter" in log, f"Expected Other:enter, got {log}"
-    print(f"TC2.4.1: Child exit fires when transitioning out - PASS")
+    child_exit_idx = log.index("Child:exit(var=42)")
+    parent_exit_idx = log.index("Parent:exit")
+    assert child_exit_idx < parent_exit_idx, f"Child:exit should fire BEFORE Parent:exit (bottom-up), got {log}"
+    print("TC2: Child:exit fires before Parent:exit (bottom-up cascade) - PASS")
 
-    # TC2.4.2: Parent exit does NOT fire when transitioning out of child
-    assert "Parent:exit" not in log, f"Parent:exit should NOT fire for child exit, got {log}"
-    print(f"TC2.4.2: Parent exit NOT fired for child exit - PASS")
+    # TC3: Exit handler can access child's state variables (verified by var=42 in log).
+    print("TC3: Exit handler accesses state var (var=42) - PASS")
 
-    # TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
-    print(f"TC2.4.3: Exit handler accesses state var (var=42) - PASS")
-
-    # TC2.4.4: Parent exit fires when transitioning out of Parent
-    s.go_to_parent()
+    # TC4: Re-entering child fires the entry cascade again.
+    s.go_to_child()
     log = s.get_log()
-    assert "Parent:enter" in log, f"Expected Parent:enter, got {log}"
+    parent_enter_count = log.count("Parent:enter")
+    child_enter_count = log.count("Child:enter")
+    assert parent_enter_count == 2, f"Expected 2 Parent:enter, got {parent_enter_count}: {log}"
+    assert child_enter_count == 2, f"Expected 2 Child:enter, got {child_enter_count}: {log}"
+    print("TC4: Re-entering Child cascades Parent.$> then Child.$> - PASS")
 
-    s.go_to_other()
-    log = s.get_log()
-    assert "Parent:exit" in log, f"Expected Parent:exit, got {log}"
-    print(f"TC2.4.4: Parent exit fires when leaving parent - PASS")
-
-    print("PASS: HSM exit handlers work correctly")
+    print("PASS: HSM exit cascade fires Child.<$ then Parent.<$")
 
 if __name__ == '__main__':
     main()
