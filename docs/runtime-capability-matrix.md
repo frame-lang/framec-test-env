@@ -36,7 +36,7 @@ spec). Generated from a manual audit on 2026-04-26.
 | HSM child–parent declaration (`$Child => $Parent`)       | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **HSM cascade enter (top-down `$>`)**                    | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌[d] |
 | **HSM cascade exit (bottom-up `<$`)**                    | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌[d] |
-| HSM parameter propagation (signature-match)              | ✅ | ✅ | ✅ | ⚠️[e] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️[d] |
+| HSM parameter propagation (signature-match)              | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️[d] |
 | Event forwarding (`=> $^`)                               | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Forward transition (`-> => $State`)                      | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️[d] |
 | **Step 25: persistence**                                 |
@@ -72,13 +72,6 @@ spec). Generated from a manual audit on 2026-04-26.
     on the destination but don't re-dispatch it through a cascade
     — only the leaf's handler sees the forwarded event.
 
-[e] **Rust** — state args propagate to the leaf compartment only;
-    the typed `StateContext` enum has different variants per state
-    so the generic write-into-every-layer pattern other targets use
-    doesn't fit. Enter args propagate to all layers via `enter_args:
-    Vec<String>` (untyped). Tracked in
-    `framec/.../rust_system.rs` near `rust_expand_transition`.
-
 [f] **Java** — Frame async lowers to `CompletableFuture` in
     principle but isn't fully wired (`make_system_async` has a
     placeholder for Java). Existing Java tests don't exercise async.
@@ -97,7 +90,7 @@ spec). Generated from a manual audit on 2026-04-26.
 |---|---|
 | Languages fully conformant to v4 spec | 16 / 17 (all except Erlang) |
 | Languages with HSM cascade implemented | 16 / 17 |
-| Known divergence | Erlang HSM cascade ([d]); Rust state-arg propagation across layers ([e]) |
+| Known divergence | Erlang HSM cascade ([d]) |
 | Language-natural skips | C, Go, PHP, Ruby, Lua, Erlang on async |
 
 ## Test corpus coverage
@@ -107,9 +100,10 @@ under `tests/common/positive/`. The matrix-runner enforces these
 across every language at every commit; see `make test` from
 `docker/`.
 
-The cascade tests (46–48) and the parameter-propagation test (49) are
-the canonical conformance gates for the HSM additions in v4. Erlang's
-versions of these are smoke-test stand-ins (verify the system runs,
-log contains expected strings) rather than ordering assertions, since
-the underlying `gen_statem` runtime can't satisfy the spec without a
-substantial rewrite of `frame_transition__`.
+The cascade tests (46–48), parameter-propagation test (49), and the
+HSM state-arg propagation test (52) are the canonical conformance
+gates for the HSM additions in v4. Erlang's versions of these are
+smoke-test stand-ins (verify the system runs, log contains expected
+strings) rather than ordering assertions, since the underlying
+`gen_statem` runtime can't satisfy the spec without a substantial
+rewrite of `frame_transition__`.
