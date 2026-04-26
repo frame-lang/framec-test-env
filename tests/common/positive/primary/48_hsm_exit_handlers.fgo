@@ -5,6 +5,8 @@ package main
 import "fmt"
 import "os"
 
+// Test 48: HSM Exit Cascade
+
 @@system HSMExitHandlers {
     interface:
         GoToOther()
@@ -27,28 +29,11 @@ import "os"
                 s.log = append(s.log, fmt.Sprintf("Child:exit(var=%d)", val))
             }
 
-            GoToOther() {
-                -> $Other
-            }
-
-            GoToParent() {
-                -> $Parent
-            }
-
-            GetLog(): []string {
-                @@:(s.log)
-                return;
-            }
-
-            GetState(): string {
-                @@:("Child")
-                return;
-            }
-
-            GetChildVar(): int {
-                @@:($.child_var)
-                return;
-            }
+            GoToOther() { -> $Other }
+            GoToParent() { -> $Parent }
+            GetLog(): []string { @@:(s.log) }
+            GetState(): string { @@:("Child") }
+            GetChildVar(): int { @@:($.child_var) }
         }
 
         $Parent {
@@ -60,57 +45,22 @@ import "os"
                 s.log = append(s.log, "Parent:exit")
             }
 
-            GoToChild() {
-                -> $Child
-            }
-
-            GoToOther() {
-                -> $Other
-            }
-
-            GetLog(): []string {
-                @@:(s.log)
-                return;
-            }
-
-            GetState(): string {
-                @@:("Parent")
-                return;
-            }
-
-            GetChildVar(): int {
-                @@:(-1)
-                return;
-            }
+            GoToChild() { -> $Child }
+            GoToOther() { -> $Other }
+            GetLog(): []string { @@:(s.log) }
+            GetState(): string { @@:("Parent") }
+            GetChildVar(): int { @@:(-1) }
         }
 
         $Other {
             $>() {
                 s.log = append(s.log, "Other:enter")
             }
-
-            GoToChild() {
-                -> $Child
-            }
-
-            GoToParent() {
-                -> $Parent
-            }
-
-            GetLog(): []string {
-                @@:(s.log)
-                return;
-            }
-
-            GetState(): string {
-                @@:("Other")
-                return;
-            }
-
-            GetChildVar(): int {
-                @@:(-1)
-                return;
-            }
+            GoToChild() { -> $Child }
+            GoToParent() { -> $Parent }
+            GetLog(): []string { @@:(s.log) }
+            GetState(): string { @@:("Other") }
+            GetChildVar(): int { @@:(-1) }
         }
     domain:
         log : []string
@@ -125,60 +75,52 @@ func contains(slice []string, item string) bool {
 	return false
 }
 
+func indexOf(slice []string, item string) int {
+	for i, v := range slice {
+		if v == item {
+			return i
+		}
+	}
+	return -1
+}
+
+func countOccurrences(slice []string, item string) int {
+	count := 0
+	for _, v := range slice {
+		if v == item {
+			count++
+		}
+	}
+	return count
+}
+
 func main() {
-	fmt.Println("=== Test 48: HSM Exit Handlers ===")
+	fmt.Println("=== Test 48: HSM Exit Cascade ===")
 	sm := @@HSMExitHandlers()
 
-	// Initial state is Child
 	log := sm.GetLog()
-	if !contains(log, "Child:enter") {
-		fmt.Printf("FAIL: Expected Child:enter on init, got %v\n", log)
-		os.Exit(1)
-	}
-	if sm.GetState() != "Child" {
-		fmt.Printf("FAIL: Expected Child, got %s\n", sm.GetState())
-		os.Exit(1)
-	}
-	fmt.Println("TC2.4.0: Initial state is Child with enter - PASS")
-
-	// TC2.4.1: Child exit fires when transitioning out of child
-	sm.GoToOther()
-	log = sm.GetLog()
-	if !contains(log, "Child:exit(var=42)") {
-		fmt.Printf("FAIL: Expected Child:exit, got %v\n", log)
-		os.Exit(1)
-	}
-	if !contains(log, "Other:enter") {
-		fmt.Printf("FAIL: Expected Other:enter, got %v\n", log)
-		os.Exit(1)
-	}
-	fmt.Println("TC2.4.1: Child exit fires when transitioning out - PASS")
-
-	// TC2.4.2: Parent exit does NOT fire when transitioning out of child
-	if contains(log, "Parent:exit") {
-		fmt.Printf("FAIL: Parent:exit should NOT fire for child exit, got %v\n", log)
-		os.Exit(1)
-	}
-	fmt.Println("TC2.4.2: Parent exit NOT fired for child exit - PASS")
-
-	// TC2.4.3: Exit handler can access child's state variables (verified by var=42 in log)
-	fmt.Println("TC2.4.3: Exit handler accesses state var (var=42) - PASS")
-
-	// TC2.4.4: Parent exit fires when transitioning out of Parent
-	sm.GoToParent()
-	log = sm.GetLog()
-	if !contains(log, "Parent:enter") {
-		fmt.Printf("FAIL: Expected Parent:enter, got %v\n", log)
-		os.Exit(1)
-	}
+	if !contains(log, "Parent:enter") { fmt.Println("FAIL: Expected Parent:enter on init cascade"); os.Exit(1) }
+	if !contains(log, "Child:enter") { fmt.Println("FAIL: Expected Child:enter on init"); os.Exit(1) }
+	if sm.GetState() != "Child" { fmt.Println("FAIL"); os.Exit(1) }
+	fmt.Println("TC1: Initial entry cascades through Parent then Child - PASS")
 
 	sm.GoToOther()
 	log = sm.GetLog()
-	if !contains(log, "Parent:exit") {
-		fmt.Printf("FAIL: Expected Parent:exit, got %v\n", log)
-		os.Exit(1)
-	}
-	fmt.Println("TC2.4.4: Parent exit fires when leaving parent - PASS")
+	if !contains(log, "Child:exit(var=42)") { fmt.Println("FAIL: Expected Child:exit(var=42)"); os.Exit(1) }
+	if !contains(log, "Parent:exit") { fmt.Println("FAIL: Expected Parent:exit (cascade)"); os.Exit(1) }
+	if !contains(log, "Other:enter") { fmt.Println("FAIL: Expected Other:enter"); os.Exit(1) }
+	cei := indexOf(log, "Child:exit(var=42)")
+	pei := indexOf(log, "Parent:exit")
+	if cei >= pei { fmt.Println("FAIL: Child:exit must precede Parent:exit"); os.Exit(1) }
+	fmt.Println("TC2: Child:exit fires before Parent:exit (bottom-up cascade) - PASS")
 
-	fmt.Println("PASS: HSM exit handlers work correctly")
+	fmt.Println("TC3: Exit handler accesses state var (var=42) - PASS")
+
+	sm.GoToChild()
+	log = sm.GetLog()
+	if countOccurrences(log, "Parent:enter") != 2 { fmt.Println("FAIL: Expected 2 Parent:enter"); os.Exit(1) }
+	if countOccurrences(log, "Child:enter") != 2 { fmt.Println("FAIL: Expected 2 Child:enter"); os.Exit(1) }
+	fmt.Println("TC4: Re-entering Child cascades Parent.$> then Child.$> - PASS")
+
+	fmt.Println("PASS: HSM exit cascade fires Child.<$ then Parent.<$")
 }

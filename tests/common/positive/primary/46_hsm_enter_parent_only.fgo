@@ -5,6 +5,8 @@ package main
 import "fmt"
 import "os"
 
+// Test 46: HSM Enter Cascade — Parent has $>, Child does not
+
 @@system HSMEnterParentOnly {
     interface:
         GoToChild()
@@ -14,59 +16,25 @@ import "os"
 
     machine:
         $Start {
-            GoToChild() {
-                -> $Child
-            }
-
-            GoToParent() {
-                -> $Parent
-            }
-
-            GetLog(): []string {
-                @@:(s.log)
-                return;
-            }
-
-            GetState(): string {
-                @@:("Start")
-                return;
-            }
+            GoToChild() { -> $Child }
+            GoToParent() { -> $Parent }
+            GetLog(): []string { @@:(s.log) }
+            GetState(): string { @@:("Start") }
         }
 
         $Child => $Parent {
-            GoToParent() {
-                -> $Parent
-            }
-
-            GetLog(): []string {
-                @@:(s.log)
-                return;
-            }
-
-            GetState(): string {
-                @@:("Child")
-                return;
-            }
+            GoToParent() { -> $Parent }
+            GetLog(): []string { @@:(s.log) }
+            GetState(): string { @@:("Child") }
         }
 
         $Parent {
             $>() {
                 s.log = append(s.log, "Parent:enter")
             }
-
-            GoToChild() {
-                -> $Child
-            }
-
-            GetLog(): []string {
-                @@:(s.log)
-                return;
-            }
-
-            GetState(): string {
-                @@:("Parent")
-                return;
-            }
+            GoToChild() { -> $Child }
+            GetLog(): []string { @@:(s.log) }
+            GetState(): string { @@:("Parent") }
         }
     domain:
         log : []string
@@ -92,51 +60,24 @@ func countOccurrences(slice []string, item string) int {
 }
 
 func main() {
-	fmt.Println("=== Test 46: HSM Enter in Parent Only ===")
+	fmt.Println("=== Test 46: HSM Enter Cascade — Parent only ===")
 	sm := @@HSMEnterParentOnly()
 
-	// TC2.2.1: Child enters without error (no enter handler)
 	sm.GoToChild()
-	if sm.GetState() != "Child" {
-		fmt.Printf("FAIL: Expected Child, got %s\n", sm.GetState())
-		os.Exit(1)
-	}
+	if sm.GetState() != "Child" { fmt.Println("FAIL"); os.Exit(1) }
 	log := sm.GetLog()
-	fmt.Printf("TC2.2.1: Child enters without error (log: %v) - PASS\n", log)
+	if !contains(log, "Parent:enter") { fmt.Println("FAIL: Expected Parent:enter on cascade"); os.Exit(1) }
+	fmt.Println("TC1: Parent's $> fires on cascade entry to Child - PASS")
 
-	// TC2.2.2: Parent's enter does NOT auto-fire when child is entered
-	if contains(log, "Parent:enter") {
-		fmt.Printf("FAIL: Parent:enter should NOT fire for child entry, got %v\n", log)
-		os.Exit(1)
-	}
-	fmt.Println("TC2.2.2: Parent enter NOT auto-fired for child - PASS")
-
-	// TC2.2.3: Parent enter only fires when transitioning directly TO parent
 	sm.GoToParent()
-	if sm.GetState() != "Parent" {
-		fmt.Printf("FAIL: Expected Parent, got %s\n", sm.GetState())
-		os.Exit(1)
-	}
 	log = sm.GetLog()
-	if !contains(log, "Parent:enter") {
-		fmt.Printf("FAIL: Expected Parent:enter when transitioning to Parent, got %v\n", log)
-		os.Exit(1)
-	}
-	fmt.Println("TC2.2.3: Parent enter fires when transitioning to Parent - PASS")
+	if countOccurrences(log, "Parent:enter") != 2 { fmt.Println("FAIL: Expected 2 Parent:enter"); os.Exit(1) }
+	fmt.Println("TC2: Parent's $> fires again when transitioning directly to Parent - PASS")
 
-	// TC2.2.4: Going back to child from parent
 	sm.GoToChild()
-	if sm.GetState() != "Child" {
-		fmt.Printf("FAIL: Expected Child, got %s\n", sm.GetState())
-		os.Exit(1)
-	}
 	log = sm.GetLog()
-	count := countOccurrences(log, "Parent:enter")
-	if count != 1 {
-		fmt.Printf("FAIL: Expected exactly 1 Parent:enter, got %v\n", log)
-		os.Exit(1)
-	}
-	fmt.Println("TC2.2.4: Return to child, parent enter count unchanged - PASS")
+	if countOccurrences(log, "Parent:enter") != 3 { fmt.Println("FAIL: Expected 3 Parent:enter"); os.Exit(1) }
+	fmt.Println("TC3: Re-entering Child cascades through Parent again - PASS")
 
-	fmt.Println("PASS: HSM enter in parent only works correctly")
+	fmt.Println("PASS: HSM enter cascade fires Parent's $> on child entry")
 }

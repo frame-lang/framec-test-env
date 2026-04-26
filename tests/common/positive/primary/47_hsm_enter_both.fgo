@@ -5,6 +5,8 @@ package main
 import "fmt"
 import "os"
 
+// Test 47: HSM Enter Cascade — Both Parent and Child have $>
+
 @@system HSMEnterBoth {
     interface:
         GoToChild()
@@ -14,75 +16,40 @@ import "os"
 
     machine:
         $Start {
-            GoToChild() {
-                -> $Child
-            }
-
-            GoToParent() {
-                -> $Parent
-            }
-
-            GetLog(): []string {
-                @@:(s.log)
-                return;
-            }
-
-            GetState(): string {
-                @@:("Start")
-                return;
-            }
+            GoToChild() { -> $Child }
+            GoToParent() { -> $Parent }
+            GetLog(): []string { @@:(s.log) }
+            GetState(): string { @@:("Start") }
         }
 
         $Child => $Parent {
             $>() {
                 s.log = append(s.log, "Child:enter")
             }
-
-            GoToParent() {
-                -> $Parent
-            }
-
-            GetLog(): []string {
-                @@:(s.log)
-                return;
-            }
-
-            GetState(): string {
-                @@:("Child")
-                return;
-            }
+            GoToParent() { -> $Parent }
+            GetLog(): []string { @@:(s.log) }
+            GetState(): string { @@:("Child") }
         }
 
         $Parent {
             $>() {
                 s.log = append(s.log, "Parent:enter")
             }
-
-            GoToChild() {
-                -> $Child
-            }
-
-            GetLog(): []string {
-                @@:(s.log)
-                return;
-            }
-
-            GetState(): string {
-                @@:("Parent")
-                return;
-            }
+            GoToChild() { -> $Child }
+            GetLog(): []string { @@:(s.log) }
+            GetState(): string { @@:("Parent") }
         }
     domain:
         log : []string
 }
 
-func contains(slice []string, item string) bool {
-	for _, v := range slice {
+func indexOf(slice []string, item string) int {
+	for i, v := range slice {
 		if v == item {
-			return true
+			return i
 		}
 	}
-	return false
+	return -1
 }
 
 func countOccurrences(slice []string, item string) int {
@@ -96,66 +63,31 @@ func countOccurrences(slice []string, item string) int {
 }
 
 func main() {
-	fmt.Println("=== Test 47: HSM Enter in Both ===")
+	fmt.Println("=== Test 47: HSM Enter Cascade — Both ===")
 	sm := @@HSMEnterBoth()
 
-	// TC2.3.1: Only child's enter fires when entering child
 	sm.GoToChild()
 	log := sm.GetLog()
-	if !contains(log, "Child:enter") {
-		fmt.Printf("FAIL: Expected Child:enter, got %v\n", log)
-		os.Exit(1)
-	}
-	if contains(log, "Parent:enter") {
-		fmt.Printf("FAIL: Parent:enter should NOT fire when entering child, got %v\n", log)
-		os.Exit(1)
-	}
-	if sm.GetState() != "Child" {
-		fmt.Printf("FAIL: Expected Child, got %s\n", sm.GetState())
-		os.Exit(1)
-	}
-	fmt.Println("TC2.3.1: Only child's enter fires when entering child - PASS")
+	if sm.GetState() != "Child" { fmt.Println("FAIL"); os.Exit(1) }
+	pi := indexOf(log, "Parent:enter")
+	ci := indexOf(log, "Child:enter")
+	if pi == -1 { fmt.Println("FAIL: Expected Parent:enter"); os.Exit(1) }
+	if ci == -1 { fmt.Println("FAIL: Expected Child:enter"); os.Exit(1) }
+	if pi >= ci { fmt.Println("FAIL: Parent:enter must precede Child:enter"); os.Exit(1) }
+	fmt.Println("TC1: Parent's $> fires before Child's $> on cascade entry - PASS")
 
-	// TC2.3.2: Parent's enter fires only when transitioning to parent
 	sm.GoToParent()
 	log = sm.GetLog()
-	if !contains(log, "Parent:enter") {
-		fmt.Printf("FAIL: Expected Parent:enter, got %v\n", log)
-		os.Exit(1)
-	}
-	if sm.GetState() != "Parent" {
-		fmt.Printf("FAIL: Expected Parent, got %s\n", sm.GetState())
-		os.Exit(1)
-	}
-	fmt.Println("TC2.3.2: Parent's enter fires when transitioning to parent - PASS")
+	if sm.GetState() != "Parent" { fmt.Println("FAIL"); os.Exit(1) }
+	if countOccurrences(log, "Parent:enter") != 2 { fmt.Println("FAIL: Expected 2 Parent:enter"); os.Exit(1) }
+	if countOccurrences(log, "Child:enter") != 1 { fmt.Println("FAIL: Expected still 1 Child:enter"); os.Exit(1) }
+	fmt.Println("TC2: Direct Parent entry fires only Parent's $> - PASS")
 
-	// TC2.3.3: No implicit cascading - counts should be exactly 1 each
-	childCount := countOccurrences(log, "Child:enter")
-	parentCount := countOccurrences(log, "Parent:enter")
-	if childCount != 1 {
-		fmt.Printf("FAIL: Expected exactly 1 Child:enter, got %v\n", log)
-		os.Exit(1)
-	}
-	if parentCount != 1 {
-		fmt.Printf("FAIL: Expected exactly 1 Parent:enter, got %v\n", log)
-		os.Exit(1)
-	}
-	fmt.Println("TC2.3.3: No implicit cascading of enter handlers - PASS")
-
-	// TC2.3.4: Going back to child fires child enter again
 	sm.GoToChild()
 	log = sm.GetLog()
-	childCount2 := countOccurrences(log, "Child:enter")
-	parentCount2 := countOccurrences(log, "Parent:enter")
-	if childCount2 != 2 {
-		fmt.Printf("FAIL: Expected 2 Child:enter, got %v\n", log)
-		os.Exit(1)
-	}
-	if parentCount2 != 1 {
-		fmt.Printf("FAIL: Expected still 1 Parent:enter, got %v\n", log)
-		os.Exit(1)
-	}
-	fmt.Println("TC2.3.4: Re-entering child fires child enter again - PASS")
+	if countOccurrences(log, "Parent:enter") != 3 { fmt.Println("FAIL: Expected 3 Parent:enter"); os.Exit(1) }
+	if countOccurrences(log, "Child:enter") != 2 { fmt.Println("FAIL: Expected 2 Child:enter"); os.Exit(1) }
+	fmt.Println("TC3: Re-entering Child cascades through Parent again - PASS")
 
-	fmt.Println("PASS: HSM enter in both works correctly")
+	fmt.Println("PASS: HSM enter cascade fires both layers top-down")
 }
