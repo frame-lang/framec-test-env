@@ -37,13 +37,15 @@ main(_) ->
     "init,childA_enter:starting,childA_exit:leaving_a,childB_enter:from_a"
         = h_s_m_enter_exit_params:get_log(Pid),
 
-    %% Step 3: ChildB → ChildA via goBack. ChildB has no <$ handler so
-    %% the "leaving_b" reason is silently dropped (Frame allows the
-    %% caller to declare exit args even when the target state has no
-    %% matching handler). ChildA's $> fires with "returning".
+    %% Step 3: ChildB → ChildA via goBack. Cascade: ChildB's <$ fires
+    %% with "leaving_b", then ChildA's $> fires with "returning".
+    %% (Earlier versions of this fixture omitted ChildB's <$ handler,
+    %% which silently dropped the exit arg. v4 framec rejects that
+    %% as E419 — exit args without a matching `<$()` receiver are an
+    %% error — so the handler is now declared.)
     h_s_m_enter_exit_params:go_back(Pid),
     "ChildA" = h_s_m_enter_exit_params:get_state(Pid),
-    "init,childA_enter:starting,childA_exit:leaving_a,childB_enter:from_a,childA_enter:returning"
+    "init,childA_enter:starting,childA_exit:leaving_a,childB_enter:from_a,childB_exit:leaving_b,childA_enter:returning"
         = h_s_m_enter_exit_params:get_log(Pid),
 
     io:format("ok 1 - 49_hsm_enter_exit_params~n").

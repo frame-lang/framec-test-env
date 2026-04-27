@@ -395,12 +395,29 @@ HANDLER_INDENT = "                "  # 16 spaces — handler-body level
 
 
 def gen_handler_body(idx, n_states, handler_kind, ret_type, spec,
-                     use_push=False, use_enter_args=False, is_child=False):
+                     use_push=False, use_enter_args=False, is_child=False,
+                     hsm_depth=0, use_enter_exit=False):
     """Produce target-valid handler-body text with HANDLER_INDENT (16 spaces)
     baked into every line including the first. Callers append the returned
     string verbatim — no additional indent prefix.
+
+    `hsm_depth` is the system's HSM child-count (states with idx in
+    (0, hsm_depth] are children). `use_enter_exit` mirrors gen_system's
+    `use_ee` flag — without it, no state declares an `$>(...)` handler
+    at all, so any `(args) ->` would be feeding a missing receiver.
+    Both gates are needed because framec's E417 (enter args without a
+    matching `$>()`) is now reachable via the v4 scanner enrichment.
     """
-    next_state = f"$S{(idx + 1) % n_states}"
+    next_idx = (idx + 1) % n_states
+    next_state = f"$S{next_idx}"
+    # The target accepts an enter arg iff (1) the system uses enter/exit
+    # handlers at all, (2) the target is a non-start state (i > 0 in
+    # gen_system's loop), and (3) the target is a child — only children
+    # get `$>(arg0: int)`; non-children get `$>()`.
+    next_is_child = hsm_depth > 0 and 0 < next_idx <= hsm_depth
+    target_accepts_enter_arg = (
+        use_enter_exit and use_enter_args and next_idx > 0 and next_is_child
+    )
     ret = _return_stmt(spec, ret_type, idx)
     leaf = _leaf_stmt(spec, ret_type, idx)
     ind = HANDLER_INDENT
@@ -408,7 +425,7 @@ def gen_handler_body(idx, n_states, handler_kind, ret_type, spec,
     # push$/pop$ variant on simple handlers — only when 2+ states.
     if handler_kind == "simple" and use_push and idx % 2 == 0 and n_states >= 2:
         if idx + 1 < n_states:
-            enter_arg = "(42) " if (use_enter_args and is_child) else ""
+            enter_arg = "(42) " if target_accepts_enter_arg else ""
             if ret:
                 return f"{ind}{ret}\n{ind}push$\n{ind}-> {enter_arg}{next_state}\n"
             return f"{ind}push$\n{ind}-> {enter_arg}{next_state}\n"
@@ -565,6 +582,8 @@ def gen_system(case_id, params, spec):
                 n, effective_hnd, rt, spec,
                 use_push=use_push, use_enter_args=use_ea,
                 is_child=has_parent,
+                hsm_depth=hsm_depth,
+                use_enter_exit=use_ee,
             )
             lines.append(f"            evt_{j}(){ret_ann} {{")
             # `body` carries its own 16-space indent; append verbatim.
