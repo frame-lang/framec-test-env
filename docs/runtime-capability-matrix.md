@@ -123,13 +123,14 @@ across every language at every commit; see `make test` from
 The cascade tests (46–48), parameter-propagation test (49), the
 HSM state-arg propagation test (52), and the forward-transition
 tests (19, 29) are the canonical conformance gates for the HSM
-additions in v4. Erlang's `.ferl` variants are smoke-test
-stand-ins — they verify the system runs and that expected strings
-appear in the domain log, but don't assert exact trace ordering.
-The underlying cascade and forward-re-dispatch are implemented
-per spec (`framec_native_codegen/erlang_system.rs`:
-`frame_enter__<state>` helpers, `frame_exit_dispatch__` chain
-walk, `frame_forward_transition__` with `next_event`-action
-re-dispatch); upgrading the `.ferl` tests to assert ordering
-would require a per-test escript driver convention that the
-matrix runner doesn't currently support.
+additions in v4. Erlang's `.ferl` variants run through a sidecar
+driver convention (commit 5786312, 2026-04-27): if a
+`<test>.driver.escript` exists alongside `<test>.ferl`,
+`erlang_batch.sh` copies it to `run_test.escript` and uses it
+instead of the auto-generated smoke-test driver. Tests 39, 47,
+48, 49, 53 currently ship assertion-based drivers covering
+self-call return-value propagation, HSM enter/exit cascade order
+with parameter propagation, sibling transition under shared
+parent, and the post-self-call transition guard. Tests without a
+sidecar fall back to the smoke-test driver (call every export,
+no ordering check).
