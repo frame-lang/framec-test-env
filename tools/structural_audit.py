@@ -109,6 +109,18 @@ LOCAL_VAR_NAMES = {
     "__result", "__result_ctx", "__rv", "__return_val",
     "__frame_event", "__skipInitialEnter",
     "__Event", "__ReturnVal_1",                # Erlang locals
+    # Rust scratch locals (transition expansion, state-var write-through).
+    "__c", "__cursor", "__rhs", "__rs_tmp_arg", "__sv_comp",
+    "__ctx_event",
+    # Persist serialize/deserialize locals — these are private helper
+    # variables inside the @@persist-emitted serialization code and
+    # vary by backend (each backend uses its own naming idioms for
+    # local cursors, intermediate values, JSON document handles, etc).
+    # Not part of the cross-backend structural shape.
+    "__cj", "__sc", "__ser", "__deser", "__sv", "__doc", "__opts",
+    "__root", "__name", "__value", "__instance", "__j", "__stack",
+    "__SerComp", "__DeserComp", "__ser_comp", "__deser_comp",
+    "__serComp", "__deserComp",
 }
 
 
@@ -192,11 +204,25 @@ def extract_names(source: str) -> Set[str]:
     return names - LANGUAGE_IDIOMS - LOCAL_VAR_NAMES
 
 
+# Patterns that should appear in any non-trivial framec emission.
+# If NONE of these appear in the output, the @@system block was almost
+# certainly NOT compiled — the source passed through as native code.
+# This happens when the fixture contains target-language-incompatible
+# syntax in its prolog/epilog (e.g., apostrophes in Python `#` comments
+# confusing the TS/Rust/etc. unified scanner's string-mode tracking,
+# which then silently consumes the @@system block as "string content").
+COMPILE_SUCCESS_MARKERS = re.compile(
+    r"(_state_\w+|__kernel|__router|__transition|frame_dispatch__|"
+    r"\w+_kernel\b|\w+_router\b)"
+)
+
+
 def compile_fixture(framec: Path, fixture: Path, out_dir: Path) -> Dict[str, Path]:
     """Run framec for each lang. Returns lang → list of output files
     (or empty list if the compile failed)."""
     out_dir.mkdir(parents=True, exist_ok=True)
     lang_outputs: Dict[str, List[Path]] = {}
+    fixture_size = fixture.stat().st_size
     for lang in LANG_EXTS:
         lang_dir = out_dir / lang
         if lang_dir.exists():
@@ -217,9 +243,31 @@ def compile_fixture(framec: Path, fixture: Path, out_dir: Path) -> Dict[str, Pat
         if not files:
             print(f"  {lang}: NO OUTPUT", file=sys.stderr)
             lang_outputs[lang] = []
-        else:
-            lang_outputs[lang] = files
-            print(f"  {lang}: {len(files)} file(s), {sum(f.stat().st_size for f in files)} bytes")
+            continue
+        # Sanity: detect silent-passthrough where the @@system block
+        # was treated as native code. If the output contains no framec
+        # internal marker (kernel/router/per-state dispatcher), the
+        # backend's unified scanner mis-segmented the source — flag
+        # as compile-failed rather than letting it skew the audit.
+        # Common cause: apostrophes in source-language `#` comments
+        # outside the @@system block confuse the target's unified
+        # scanner string-mode (TS/Rust/C/etc. treat `'` as a string
+        # opener), which then consumes the @@system block as
+        # "string content".
+        combined = "\n".join(f.read_text(errors="replace") for f in files)
+        out_size = sum(f.stat().st_size for f in files)
+        if not COMPILE_SUCCESS_MARKERS.search(combined):
+            print(
+                f"  {lang}: SILENT PASSTHROUGH (no framec markers in "
+                f"{out_size}B output; fixture's native code likely "
+                f"confused the {lang} unified scanner — pick a fixture "
+                f"with no apostrophes in source-language comments)",
+                file=sys.stderr,
+            )
+            lang_outputs[lang] = []
+            continue
+        lang_outputs[lang] = files
+        print(f"  {lang}: {len(files)} file(s), {out_size} bytes")
     return lang_outputs
 
 
@@ -277,11 +325,21 @@ def main() -> int:
 
     all_langs = set(LANG_EXTS.keys())
 
+    # Backends that failed to compile this fixture (transpile error,
+    # no output, or silent passthrough). Exclude them from the
+    # "missing" calculation — a divergence flagged because Java
+    # couldn't transpile the fixture isn't a codegen alignment bug,
+    # it's a fixture-feature/backend mismatch that's reported
+    # separately as the per-backend identifier count of 0.
+    failed_compile_langs = {
+        lang for lang, files in lang_outputs.items() if not files
+    }
+
     # Subtract the intentionally-divergent backends from the "universal"
     # check so we measure alignment across the 15 backends that share
     # the standard kernel-and-dispatcher shape.
     intentional_divergent = set(KNOWN_INTENTIONAL_DIVERGENCES.keys())
-    standard_langs = all_langs - intentional_divergent
+    standard_langs = all_langs - intentional_divergent - failed_compile_langs
 
     universal_names = sorted(
         n for n, langs in name_to_langs.items() if langs == all_langs
@@ -295,6 +353,18 @@ def main() -> int:
         n for n, langs in name_to_langs.items()
         if langs == {"erlang"}
     )
+    # Rust elides synthetic empty enter/exit handlers — when a state
+    # has no `$>(…)` or `<$(…)` declared, Rust skips emitting the
+    # `_s_<S>_hdl_frame_enter` / `_s_<S>_hdl_frame_exit` method
+    # entirely (the cascade dispatcher checks for the variant before
+    # calling). Other backends emit a no-op method placeholder. Both
+    # produce equivalent runtime behavior; it's a per-backend code-
+    # size optimization. Treat any `_s_<S>_hdl_frame_enter|exit` that
+    # is "missing only from Rust" as a documented rename, not a bug.
+    rust_elides_synthetic_handler = re.compile(
+        r"^_s_\w+_hdl_frame_(enter|exit)$"
+    )
+
     real_divergences: List = []
     documented_renames: List = []
     for n, langs in name_to_langs.items():
@@ -304,8 +374,19 @@ def main() -> int:
             continue
         if langs == {"erlang"} or langs == {"c"}:
             continue
-        # Filter: is the missing-from set fully explained by KNOWN_RENAMES?
         missing = standard_langs - langs
+        # Rust elides synthetic empty enter/exit handlers (see comment
+        # above). Treat as documented rename when the only backend
+        # missing the name is Rust AND the name matches the synthetic
+        # handler pattern.
+        if missing == {"rust"} and rust_elides_synthetic_handler.match(n):
+            documented_renames.append((n, langs, {
+                "rust": "Rust elides synthetic empty enter/exit handlers; "
+                        "the cascade dispatcher checks for the variant before "
+                        "calling. Other backends emit a no-op method placeholder.",
+            }))
+            continue
+        # Filter: is the missing-from set fully explained by KNOWN_RENAMES?
         rename_info = KNOWN_RENAMES.get(n, {})
         if rename_info and missing.issubset(set(rename_info.keys())):
             documented_renames.append((n, langs, rename_info))
@@ -333,12 +414,19 @@ def main() -> int:
                  "verify the alignment after codegen changes.")
     lines.append("")
     lines.append(f"## Summary\n")
-    lines.append(f"- Backends compiled: **{sum(1 for v in lang_outputs.values() if v)} / {len(LANG_EXTS)}**")
-    lines.append(f"- Standard backends (kernel-and-dispatcher shape): **{len(standard_langs)}** ({', '.join(sorted(standard_langs))})")
+    n_compiled = sum(1 for v in lang_outputs.values() if v)
+    lines.append(f"- Backends compiled: **{n_compiled} / {len(LANG_EXTS)}**")
+    if failed_compile_langs:
+        lines.append(
+            f"- Backends that did NOT compile this fixture: "
+            f"**{len(failed_compile_langs)}** ({', '.join(sorted(failed_compile_langs))}) "
+            f"— excluded from divergence calculation."
+        )
+    lines.append(f"- Standard backends (kernel-and-dispatcher shape, compiled OK): **{len(standard_langs)}** ({', '.join(sorted(standard_langs))})")
     lines.append(f"- Intentionally-divergent backends: **{len(intentional_divergent)}** ({', '.join(sorted(intentional_divergent))})")
     lines.append("")
     lines.append(f"- Universal across all 17 backends: **{len(universal_names)}**")
-    lines.append(f"- Universal across the 15 standard backends: **{len(universal_in_standard)}**")
+    lines.append(f"- Universal across the {len(standard_langs)} compiled standard backends: **{len(universal_in_standard)}**")
     lines.append(f"- Erlang-only (gen_statem-native): **{len(erlang_specific)}**")
     lines.append(f"- C-only (system-prefix-named): **{len(c_specific)}** _(role-completeness verified separately)_")
     lines.append(f"- Documented language-style renames (Rust/Go/etc): **{len(documented_renames)}**")
@@ -365,10 +453,11 @@ def main() -> int:
                      "since C and Erlang use different naming conventions)_")
     lines.append("")
 
-    lines.append("## Universal names across the 15 standard backends\n")
+    lines.append(f"## Universal names across the {len(standard_langs)} compiled standard backends\n")
     lines.append("These exist in every backend that uses the kernel-and-dispatcher shape "
-                 "(C and Erlang excluded — C uses `<SystemName>_<role>` prefix; Erlang is "
-                 "gen_statem-native).")
+                 "and successfully compiled this fixture (C and Erlang excluded — C uses "
+                 "`<SystemName>_<role>` prefix; Erlang is gen_statem-native; backends that "
+                 "failed to compile or silently passed-through the fixture are also excluded).")
     lines.append("")
     if universal_in_standard:
         for n in universal_in_standard:
