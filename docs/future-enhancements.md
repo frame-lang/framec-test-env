@@ -103,20 +103,9 @@ RUST_EXEC_JOBS=8
 The right numbers come from a 5-run average per setting, not from
 intuition.
 
-### 3. ccache for cpp / c
-**Effort:** small · **Expected payoff:** 30–50 s on warm runs, 0 on
-cold.
+<!-- Item 3 (ccache for cpp / c) shipped 2026-04-26 in `2e83816`. See
+the "Closed" section for the actual numbers. -->
 
-`framec_cached` already memoises Frame source → target source. The
-next stage (target source → object file) isn't cached. Wrapping g++
-and gcc in ccache caches that step too. CI runs that don't share
-state across jobs see no benefit; a developer iterating locally
-sees big speedups.
-
-Implementation: `apt-get install ccache` in the cpp / c Dockerfiles
-and prefix the compiler invocation in `cpp_batch.sh` and the C
-runner. Persist `~/.ccache` via a docker volume so cache survives
-container restarts.
 
 ### 4. Single-go-build across tests
 **Effort:** medium · **Expected payoff:** ~30 s (go: ~90 s → ~60 s).
@@ -196,3 +185,9 @@ becomes a bottleneck for the project (currently it isn't).
 - ✅ Per-container `MATRIX_JOBS=4` cap in matrix mode (`6d7dc22`)
 - ✅ `framec_cached` source-hash cache (pre-existing)
 - ✅ Per-language `_batch.sh` runners with parallel stages (pre-existing)
+- ✅ ccache for cpp / c (`2e83816`, 2026-04-26) — split compile/link
+  + framec_cached on c. Matrix wall-clock 128 s → 103 s on warm runs.
+- ✅ Deterministic C codegen (framepiler `72f3ea5`, 2026-04-26) —
+  iterate `machine.states` (Vec) instead of `arcanum.get_enhanced_states()`
+  (HashMap) and sort handlers by event name. ccache hit rate 69% → 76%
+  on c/cpp warm runs.
