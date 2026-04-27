@@ -7,6 +7,13 @@
 
 set -uo pipefail
 
+# Source-hash cache for `framec compile` — identical Frame source →
+# identical generated output across runs (see framec_cached.sh).
+# Required for downstream caches (ccache, dotnet build cache, etc.)
+# to hit on warm runs even when framec output ordering is technically
+# nondeterministic.
+. /framec_cached.sh
+
 LANG="${1:?Usage: runner.sh <language>}"
 OUTPUT="/output"
 COMPILE_DIR="/tmp/out"
@@ -139,8 +146,14 @@ for test_file in $tests; do
     # Clean compile dir before each test
     rm -f "$COMPILE_DIR"/*.${out_ext} "$COMPILE_DIR"/*.class 2>/dev/null
 
-    # Transpile
-    if ! framec compile -l "$target" -o "$COMPILE_DIR" "$test_file" 2>/tmp/compile_err; then
+    # Transpile via framec_cached so identical Frame source → identical
+    # generated output across runs. The underlying framec binary has
+    # nondeterministic HashMap iteration in some places (e.g. forward-
+    # decl ordering in C/C++ codegen), which would otherwise miss
+    # ccache and similar downstream caches. The cache key is
+    # (framec_binary_hash, target, source_hash) so a framec rebuild
+    # invalidates the cache as expected.
+    if ! framec_cached "$target" "$COMPILE_DIR" "$test_file" /tmp/compile_err; then
         # Check if this is a transpile-error test (expected to fail)
         if echo "$test_file" | grep -q "transpile-error"; then
             echo "ok $test_num - $test_name # correctly rejected by transpiler"
@@ -199,9 +212,16 @@ for test_file in $tests; do
             ;;
         c)
             c_bin="$COMPILE_DIR/${test_name}"
-            if gcc -o "$c_bin" "$out_file" -lcjson 2>&1; then
+            c_obj="${c_bin}.o"
+            # Split compile + link so ccache can hit on the compile
+            # step (ccache only caches `-c` invocations). Link step
+            # is fast — one .o + libcjson.
+            if gcc -c -o "$c_obj" "$out_file" 2>&1 \
+                && gcc -o "$c_bin" "$c_obj" -lcjson 2>&1; then
+                rm -f "$c_obj"
                 run_output=$("$c_bin" 2>&1) || run_status=$?
             else
+                rm -f "$c_obj"
                 run_status=1
                 run_output="gcc failed"
             fi

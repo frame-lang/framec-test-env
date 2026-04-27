@@ -123,8 +123,20 @@ compile_one() {
     local bin="$2"
     local name
     name=$(basename "$bin")
-    if g++ -std=c++23 -O0 -o "$bin" "$src" 2> "$STATUS_DIR/${name}.err"; then
-        echo 0 > "$STATUS_DIR/${name}.rc"
+    # Split compile + link so ccache can hit on the compile step
+    # (ccache only caches `-c` compile-only invocations; a single
+    # `g++ -o exec src` compile-and-link step is uncacheable). The
+    # link step is cheap (single .o, no libraries beyond stdc++)
+    # so the extra invocation cost is well below the cache saving
+    # on the second-and-subsequent runs.
+    local obj="${bin}.o"
+    if g++ -std=c++23 -O0 -c "$src" -o "$obj" 2> "$STATUS_DIR/${name}.err"; then
+        if g++ "$obj" -o "$bin" 2>> "$STATUS_DIR/${name}.err"; then
+            echo 0 > "$STATUS_DIR/${name}.rc"
+        else
+            echo 1 > "$STATUS_DIR/${name}.rc"
+        fi
+        rm -f "$obj"
     else
         echo 1 > "$STATUS_DIR/${name}.rc"
     fi
