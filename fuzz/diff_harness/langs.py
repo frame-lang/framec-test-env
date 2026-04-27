@@ -493,13 +493,13 @@ fn main() {{
 
 
 def rust_async_supported(meta: dict) -> bool:
-    """Skip `two_awaits` on Rust. Frame's `@@:(self.tmp_a + self.tmp_b)`
-    passes through to Rust verbatim, where `String + String` is a type
-    error (Rust requires `String + &String`). Other backends accept
-    the bare `+` for string concat. A target-aware rewrite of `+`
-    inside `@@:(...)` is feasible but out of scope for Phase 6 first
-    cut. Once that lands, drop this filter."""
-    return meta.get("axes", {}).get("pattern") != "two_awaits"
+    """All async patterns are now supported on Rust. The historical
+    skip on `two_awaits` was due to `String + String` being a type
+    error in Rust (Rust requires `String + &String` — Add consumes
+    the LHS and borrows the RHS); `_rust_trace` now rewrites the
+    `self.X + self.Y` byte sequence to the borrowing form."""
+    _ = meta  # signature retained for run_fuzz dispatch
+    return True
 
 
 def dart_multisys(meta: dict) -> str:
@@ -3340,6 +3340,24 @@ def _rust_trace(src: str) -> str:
     src = re.sub(
         r'\bawait\s+([a-zA-Z_]\w*)\("([^"]*)"\)',
         r'\1("\2").await',
+        src,
+    )
+    # Rust `String + String` is a type error: the `Add` impl on `String`
+    # requires `String + &str` (the LHS is consumed, the RHS borrowed).
+    # The async generator's `two_awaits` pattern emits
+    # `@@:(self.tmp_a + self.tmp_b)` which framec passes through to
+    # `self.tmp_a + self.tmp_b` — fine in every dynamic target and
+    # `String + String`-friendly typed targets, but not Rust.
+    #
+    # Rewrite the specific pattern `self.X + self.Y` to
+    # `self.X.clone() + &self.Y`. The clone keeps `self.X` alive for
+    # any subsequent reads (the generator doesn't have any, but the
+    # safer form is also the more readable one). Targeting this
+    # pattern narrowly — `self.<ident> + self.<ident>` — keeps the
+    # rewrite from misfiring on integer additions or other shapes.
+    src = re.sub(
+        r'\bself\.([a-zA-Z_]\w*)\s*\+\s*self\.([a-zA-Z_]\w*)\b',
+        r'self.\1.clone() + &self.\2',
         src,
     )
     src = _py_if_to_c_family(src)
