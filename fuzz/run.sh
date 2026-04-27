@@ -191,7 +191,23 @@ compile_check() {
     esac
 }
 
-run_case() {
+# Languages whose compile-check we batch into a single tool invocation.
+# Per-file cold start dominates wall-clock for these (kotlin, tsc, javac,
+# dotnet build all pay 0.5-5s of JVM/.NET/TS startup each). Each tool
+# accepts a list of source files and produces error lines that include
+# the file path, so we can parse per-file pass/fail from one
+# whole-corpus invocation.
+is_batchable() {
+    case "$1" in
+        kotlin|typescript|java|csharp) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+# Transpile one case via framec. Writes the genfile path to stdout on
+# success (so the caller can collect it). Writes a TRANSPILE_FAIL or
+# NO_OUTPUT row to summary_file on failure and returns 1.
+transpile_case() {
     local lang=$1
     local case_file=$2
     local case_id=$(basename "$case_file" | sed 's/\.f[a-z]*$//')
@@ -211,6 +227,20 @@ run_case() {
         printf "%s\t%s\ttranspile\tNO_OUTPUT\t\n" "$lang" "$case_id" >> "$summary_file"
         return 1
     fi
+    echo "$genfile"
+    return 0
+}
+
+# Per-case compile-check (used for non-batchable languages).
+run_case() {
+    local lang=$1
+    local case_file=$2
+    local case_id=$(basename "$case_file" | sed 's/\.f[a-z]*$//')
+    local out="$OUT_DIR/$lang/$case_id"
+    local errlog="$LOG_DIR/$lang-$case_id.err"
+
+    local genfile
+    genfile=$(transpile_case "$lang" "$case_file") || return 1
 
     if [ "$TRANSPILE_ONLY" = "1" ]; then
         printf "%s\t%s\ttranspile\tPASS\t\n" "$lang" "$case_id" >> "$summary_file"
@@ -232,6 +262,142 @@ run_case() {
     return 0
 }
 
+# Run a single batch compile-check for a language. genfiles is a
+# newline-separated list of transpiled output paths. Writes a
+# per-case row to summary_file for each genfile based on whether
+# the batch errlog mentions that file path.
+run_batch() {
+    local lang=$1
+    local genfiles_list=$2  # newline-separated paths
+    local batch_errlog="$LOG_DIR/$lang-batch.err"
+
+    if [ -z "$genfiles_list" ]; then
+        return 0
+    fi
+
+    # Run the language-appropriate batched compile.
+    case "$lang" in
+        kotlin)
+            if ! command -v kotlinc >/dev/null 2>&1; then
+                echo "$lang: SKIP (no kotlinc)"
+                while IFS= read -r f; do
+                    [ -z "$f" ] && continue
+                    local cid=$(basename "$f" | sed 's/\.[a-z]*$//')
+                    printf "%s\t%s\tcompile\tSKIP_NO_TOOLCHAIN\t\n" "$lang" "$cid" >> "$summary_file"
+                done <<< "$genfiles_list"
+                return 0
+            fi
+            mkdir -p "$OUT_DIR/_kotlin_classes"
+            # Pass all files; kotlinc treats them as one compilation unit
+            # (each file has its own top-level class, so no symbol
+            # collisions). Errors are: <file>:<line>:<col>: error: <msg>
+            echo "$genfiles_list" | xargs kotlinc -d "$OUT_DIR/_kotlin_classes" \
+                > "$batch_errlog" 2>&1
+            ;;
+        typescript)
+            if ! command -v tsc >/dev/null 2>&1; then
+                echo "$lang: SKIP (no tsc)"
+                while IFS= read -r f; do
+                    [ -z "$f" ] && continue
+                    local cid=$(basename "$f" | sed 's/\.[a-z]*$//')
+                    printf "%s\t%s\tcompile\tSKIP_NO_TOOLCHAIN\t\n" "$lang" "$cid" >> "$summary_file"
+                done <<< "$genfiles_list"
+                return 0
+            fi
+            # tsc emits errors as: <file>(line,col): error TS<n>: <msg>
+            echo "$genfiles_list" | xargs tsc --noEmit --skipLibCheck \
+                --target es2020 --module es2020 \
+                --strict false --noImplicitAny false --allowJs \
+                > "$batch_errlog" 2>&1
+            ;;
+        java)
+            if ! command -v javac >/dev/null 2>&1; then
+                echo "$lang: SKIP (no javac)"
+                while IFS= read -r f; do
+                    [ -z "$f" ] && continue
+                    local cid=$(basename "$f" | sed 's/\.[a-z]*$//')
+                    printf "%s\t%s\tcompile\tSKIP_NO_TOOLCHAIN\t\n" "$lang" "$cid" >> "$summary_file"
+                done <<< "$genfiles_list"
+                return 0
+            fi
+            mkdir -p "$OUT_DIR/_java_classes"
+            # javac error format: <file>:<line>: error: <msg>
+            echo "$genfiles_list" | xargs javac -d "$OUT_DIR/_java_classes" \
+                2> "$batch_errlog"
+            ;;
+        csharp)
+            if ! command -v dotnet >/dev/null 2>&1; then
+                echo "$lang: SKIP (no dotnet)"
+                while IFS= read -r f; do
+                    [ -z "$f" ] && continue
+                    local cid=$(basename "$f" | sed 's/\.[a-z]*$//')
+                    printf "%s\t%s\tcompile\tSKIP_NO_TOOLCHAIN\t\n" "$lang" "$cid" >> "$summary_file"
+                done <<< "$genfiles_list"
+                return 0
+            fi
+            local pdir="$OUT_DIR/_csharp_probe"
+            if [ ! -f "$pdir/fuzz_probe.csproj" ]; then
+                mkdir -p "$pdir"
+                (cd "$pdir" && dotnet new classlib -o . --force >/dev/null 2>&1) \
+                    || { echo "dotnet new failed" > "$batch_errlog"; return 1; }
+                rm -f "$pdir/Class1.cs"
+                dotnet build "$pdir" --nologo -v q > /dev/null 2>&1 || true
+            fi
+            # Wipe previous batch's files and copy all fresh ones in.
+            find "$pdir" -maxdepth 1 -name "*.cs" -delete 2>/dev/null || true
+            while IFS= read -r f; do
+                [ -z "$f" ] && continue
+                cp "$f" "$pdir/$(basename "$f")"
+            done <<< "$genfiles_list"
+            # dotnet error format: <file>(line,col): error CS<n>: <msg>
+            dotnet build "$pdir" --nologo -v q --no-restore > "$batch_errlog" 2>&1
+            # Clean up so the next batch starts fresh.
+            find "$pdir" -maxdepth 1 -name "*.cs" -delete 2>/dev/null || true
+            ;;
+    esac
+
+    # Filter the batch errlog down to *error* lines only. Compilers
+    # emit warnings on the same per-file format, but we only fail a
+    # case when the compiler emits a real error for it (matches the
+    # per-case behavior, which used the compiler's exit code).
+    local filtered_errlog="$batch_errlog.errors"
+    case "$lang" in
+        kotlin)
+            # `<file>:<line>:<col>: error: <msg>`
+            grep -E ': error: ' "$batch_errlog" > "$filtered_errlog" 2>/dev/null
+            ;;
+        typescript)
+            # `<file>(line,col): error TS<n>: <msg>`
+            grep -E '\): error TS' "$batch_errlog" > "$filtered_errlog" 2>/dev/null
+            ;;
+        java)
+            # `<file>:<line>: error: <msg>`
+            grep -E ': error: ' "$batch_errlog" > "$filtered_errlog" 2>/dev/null
+            ;;
+        csharp)
+            # `<file>(line,col): error CS<n>: <msg>` — warnings use
+            # `warning CS<n>` and must not flag a case as failed.
+            grep -E '\): error CS' "$batch_errlog" > "$filtered_errlog" 2>/dev/null
+            ;;
+    esac
+
+    # Parse per-file results from the filtered errlog. A file failed
+    # if any error line mentions its basename; otherwise it passed.
+    while IFS= read -r genfile; do
+        [ -z "$genfile" ] && continue
+        local case_id=$(basename "$(dirname "$genfile")")
+        local genbase=$(basename "$genfile")
+        if [ -s "$filtered_errlog" ] && grep -qF "$genbase" "$filtered_errlog"; then
+            local err
+            err=$(grep -F "$genbase" "$filtered_errlog" \
+                  | head -3 | tr '\n' '|' | head -c 220)
+            printf "%s\t%s\tcompile\tFAIL\t%s\n" "$lang" "$case_id" "$err" >> "$summary_file"
+        else
+            printf "%s\t%s\tok\tPASS\t\n" "$lang" "$case_id" >> "$summary_file"
+        fi
+    done <<< "$genfiles_list"
+}
+
 for lang in $LANGS; do
     ext=$(lang_to_ext "$lang")
     if [ -z "$ext" ]; then
@@ -245,9 +411,29 @@ for lang in $LANGS; do
         continue
     fi
     echo "=== $lang ($total cases) ==="
-    for case_file in $cases; do
-        run_case "$lang" "$case_file" >/dev/null
-    done
+
+    if is_batchable "$lang" && [ "$TRANSPILE_ONLY" != "1" ]; then
+        # Phase 1: transpile every case (per-case framec invocation —
+        # framec is fast). Collect successful genfiles for batch
+        # compile-check.
+        genfiles=""
+        for case_file in $cases; do
+            genfile=$(transpile_case "$lang" "$case_file") || continue
+            if [ -n "$genfiles" ]; then
+                genfiles="$genfiles
+$genfile"
+            else
+                genfiles="$genfile"
+            fi
+        done
+        # Phase 2: one batched compile-check across all transpiled outputs.
+        run_batch "$lang" "$genfiles"
+    else
+        for case_file in $cases; do
+            run_case "$lang" "$case_file" >/dev/null
+        done
+    fi
+
     pass=$(awk -v L="$lang" -F'\t' '$1==L && $4=="PASS"{n++} END{print n+0}' "$summary_file")
     fail=$(awk -v L="$lang" -F'\t' '$1==L && $4=="FAIL"{n++} END{print n+0}' "$summary_file")
     skip=$(awk -v L="$lang" -F'\t' '$1==L && $4 ~ /SKIP/{n++} END{print n+0}' "$summary_file")
