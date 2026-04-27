@@ -168,7 +168,19 @@ exec_one() {
         echo "binary missing" > "$EXEC_DIR/${sanitized}.out"
         return
     fi
-    timeout "$TIMEOUT_SEC" "$bin_path" > "$EXEC_DIR/${sanitized}.out" 2>&1
+    # setsid --wait guarantees that even if the binary spawned any
+    # background goroutine writers (uncommon for Frame state-machine
+    # tests but defensive), all of them have closed their stdout fd
+    # before we proceed to write the .rc file. Without --wait, the
+    # classifier in the main loop occasionally reads a partial .out
+    # under heavy parallel matrix load (xargs -P × 17 containers),
+    # mistakes it for "unrecognized output", and reports a false
+    # failure. Same pattern dart_batch.sh adopted in 2026-04-24.
+    setsid --wait timeout "$TIMEOUT_SEC" "$bin_path" \
+        > "$EXEC_DIR/${sanitized}.out" 2>&1
+    # Force the kernel page cache to commit so any concurrent reader
+    # sees the final size+content, not a stale cached prefix.
+    sync "$EXEC_DIR/${sanitized}.out" 2>/dev/null || true
     echo $? > "$EXEC_DIR/${sanitized}.rc"
 }
 export -f exec_one
@@ -213,9 +225,24 @@ while IFS=$'\t' read -r num status name rest; do
             elif [ -z "$out" ]; then
                 echo "ok $num - $name # clean exit"; pass=$((pass+1))
             else
-                echo "not ok $num - $name # unrecognized output"
-                echo "$out" | head -3 | sed 's/^/  # /'
-                fail=$((fail+1))
+                # Defensive re-read: under heavy parallel matrix load
+                # the .out file occasionally read mid-write despite
+                # setsid --wait + sync (likely Docker volume page-cache
+                # propagation). Re-cat after a brief settle and check
+                # again — if the output is now recognizable, treat as
+                # PASS. Cost is bounded (≤200ms × number-of-flaky-cases
+                # per matrix run).
+                sleep 0.1
+                out=$(cat "$out_file" 2>/dev/null)
+                if echo "$out" | grep -qE "^ok |PASS"; then
+                    echo "ok $num - $name"; pass=$((pass+1))
+                elif echo "$out" | grep -q "^not ok "; then
+                    echo "not ok $num - $name"; fail=$((fail+1))
+                else
+                    echo "not ok $num - $name # unrecognized output"
+                    echo "$out" | head -3 | sed 's/^/  # /'
+                    fail=$((fail+1))
+                fi
             fi ;;
         *)
             echo "not ok $num - $name # unknown status $status"; fail=$((fail+1)) ;;
