@@ -3239,6 +3239,18 @@ def _lua_trace(src: str) -> str:
             f'self:{op_name}(',
             src,
         )
+    # Phase-7 multi-system: a chained call like `self.inner.bump()`
+    # has the same Lua method-vs-field problem one level deeper.
+    # The trailing `.<lower_ident>(` must be `:<lower_ident>(` so
+    # `self` is passed as the first arg (the inner system uses `:`
+    # method dispatch internally). Pattern matches `.<f1>.<f2>(`
+    # and rewrites the second dot only — the first stays as field
+    # access on `self`.
+    src = _sub_outside_strings(
+        r'(\.[a-zA-Z_]\w*)\.([a-z_]\w*)\(',
+        r'\1:\2(',
+        src,
+    )
     src = _py_if_to_lua(src)
     return _lower_bool(src)
 
@@ -3567,12 +3579,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=lua_canary,
-        # NOTE: 'multisys' renderer (lua_multisys) is implemented but
-        # unwired — framec's Lua codegen for cross-system method
-        # calls binds `self` to nil at the inner-method call site
-        # (`attempt to index a nil value (local 'self')`). Real
-        # framec gap; tracked as Phase 7 follow-up.
-        renderers={'persist': lua_persist, 'selfcall': lua_selfcall, 'hsm': lua_hsm, 'operations': lua_operations, 'nested': lua_nested},
+        renderers={'persist': lua_persist, 'selfcall': lua_selfcall, 'hsm': lua_hsm, 'operations': lua_operations, 'nested': lua_nested, 'multisys': lua_multisys},
         rewrite_trace=_lua_trace,
         docker_image="docker-lua",
         notes=(
