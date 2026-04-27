@@ -100,6 +100,20 @@ for test_file in $tests; do
     printf '%s\t%s\t%s\n' "$test_num" "$work_dir" "$target_erl" >> "$WORK_ROOT/erlc_jobs.tsv"
 
     # ---- escript generation (logic preserved from runner.sh) ----
+    # Sidecar driver convention: if `<test>.driver.escript` exists
+    # alongside `<test>.ferl`, copy it to `run_test.escript` and skip
+    # the generic export-walking driver. Lets a test author assertions
+    # (pattern matches, io:format("ok …"), exit-on-mismatch) instead of
+    # relying on the smoke-test driver that just calls every export.
+    sidecar="${test_file%.ferl}.driver.escript"
+    if [ -f "$sidecar" ]; then
+        escript_path="$work_dir/run_test.escript"
+        cp "$sidecar" "$escript_path"
+        chmod +x "$escript_path"
+        printf '%s\tRUN\t%s\t%s\n' "$test_num" "$test_name" "$sanitized" >> "$MANIFEST"
+        continue
+    fi
+
     start_link_arity=$(grep "^-export" "$target_erl" | head -1 | grep -oE 'start_link/[0-9]+' | sed 's|start_link/||')
     start_link_arity=${start_link_arity:-0}
 
