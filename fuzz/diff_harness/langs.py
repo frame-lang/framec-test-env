@@ -240,6 +240,24 @@ if __name__ == '__main__':
 """
 
 
+def c_multisys(meta: dict) -> str:
+    """C counterpart of `py_multisys`. Pointer ABI: `<Sys>_new()`
+    constructs and returns a `<Sys>*`; methods are free functions
+    `<Sys>_<method>(self, ...)`."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+int main(void) {{
+    {sys_name}* s = {sys_name}_new();
+    printf("TRACE: CALL run\\n");
+    {sys_name}_run(s);
+    printf("TRACE: CALL get_total\\n");
+    printf("TRACE: total %d\\n", {sys_name}_get_total(s));
+    return 0;
+}}
+"""
+
+
 def cpp_multisys(meta: dict) -> str:
     """C++ counterpart of `py_multisys`. Driver is stack-allocated;
     the inner Counter is held as `std::shared_ptr<Counter>` (per
@@ -3505,6 +3523,24 @@ def _c_trace(src: str) -> str:
                 rf'{sys_name}_{op_name}(self, \1)',
                 src,
             )
+    # Phase-7 multi-system: cross-system call goes through
+    # `self.inner.<method>()` where `inner` is a `Counter*` field.
+    # C dispatch is free-function: `Counter_<method>(self->inner, ...)`.
+    # Fuzz cases hardcode the inner system name as `Counter`, so
+    # this rewrite is fixed to that. Extending the harness to other
+    # multi-system shapes would key off the `inner` field type
+    # (which the generator currently fixes to `Counter`). No-arg
+    # form first, then with-args form.
+    src = _sub_outside_strings(
+        r'\bself\.inner\.([a-z_]\w*)\(\)',
+        r'Counter_\1(self->inner)',
+        src,
+    )
+    src = _sub_outside_strings(
+        r'\bself\.inner\.([a-z_]\w*)\(([^)]+)\)',
+        r'Counter_\1(self->inner, \2)',
+        src,
+    )
     src = _rewrite_self(src, 'self->')
     src = _sub_outside_strings(r'(?<=:\s)str\b', 'char*', src)
     src = _py_if_to_c_family(src)
@@ -3660,7 +3696,7 @@ LANGS = {
         run=run_c,
         save_method="save_state",
         restore_call="{S}_restore_state({B})",
-        renderers={'persist': c_persist, 'selfcall': c_selfcall, 'hsm': c_hsm, 'operations': c_operations, 'nested': c_nested},
+        renderers={'persist': c_persist, 'selfcall': c_selfcall, 'hsm': c_hsm, 'operations': c_operations, 'nested': c_nested, 'multisys': c_multisys},
         rewrite_trace=_c_trace,
         docker_image="docker-c",
         # framec's C codegen uses cJSON and bool; user-supplied includes
