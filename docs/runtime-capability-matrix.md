@@ -46,7 +46,7 @@ spec). Generated from a manual audit on 2026-04-26.
 | `async` interface methods                                | ✅ | ✅ | ✅ | ✅ | 🚫 | ✅ | ✅ | ✅[f] | 🚫[g] | 🚫 | ✅ | ✅ | 🚫 | 🚫 | ✅ | ✅ | 🚫[h] |
 | **Multi-feature surface (where target shape constrains)**|
 | Multi-system per file (multiple `@@system`s in one file) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🚫[j] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🚫[k] |
-| Cross-system field instantiation (`x = @@Other()`)       | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅[j] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🚫[k] |
+| Cross-system field instantiation (`x = @@Other()`)       | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅[j] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅[k] |
 | Native list type for domain fields                       | ✅ | ✅ | ✅ | ✅ | ✅[l] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `while` loop in handler bodies (native passthrough)      | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🚫[m] |
 | State-flow loop (self-transition + forward + push)       | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅[n] |
@@ -120,14 +120,21 @@ spec). Generated from a manual audit on 2026-04-26.
 
 [k] **Erlang** — Erlang requires one module per file, so a file
     with multiple `@@system` declarations is rejected by framec
-    with E431. Cross-system field instantiation isn't currently
-    wired for Erlang either: a `level = @@Other()` field would
-    need a `gen_statem:start_link/{1,3}` invocation in the parent
-    module's init, plus PID-based message routing instead of
-    direct method calls. Phase 7's multi-system fuzz harness
-    excludes Erlang for the same reason. Demos 20, 28, 29, 33
-    and frame_machines/state_var_parser carry `@@skip` for
-    `.ferl` and are exercised on the other 15 backends.
+    with E431. Multi-system test fixtures in the matrix split
+    one `@@system` per `.ferl` (or carry `@@skip` when the
+    matrix harness lacks the multi-file-per-case convention).
+    *Cross-system field instantiation IS now fully wired*:
+    `level = @@Other()` lowers to
+    `level = element(2, other:start_link())` (unwraps the
+    `{ok, Pid}` returned by `gen_statem:start_link/3` so the
+    field stores a bare Pid), and `self.level.bump()` rewrites
+    to `other:bump(Data#data.level)` (module-qualified call,
+    receiver as first arg). The user-facing `start_link/N`
+    keeps the OTP-conventional `{ok, Pid}` shape so external
+    drivers / supervisors / smoke tests pattern-match it
+    normally. Phase 7's multi-system fuzz harness can adopt
+    Erlang once the harness supports multi-file-per-case;
+    framec's side is closed.
 
 [l] **C** — C has no built-in list/vector. Frame's domain
     syntax (`name : type = init`) doesn't fit C's interleaved
