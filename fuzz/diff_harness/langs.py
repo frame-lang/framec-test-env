@@ -3242,16 +3242,22 @@ def _rust_trace(src: str) -> str:
         r'return "\1".to_string();',
         src,
     )
-    # Python prefix `await EXPR` → Rust postfix `EXPR.await`. The
-    # generator emits Python-canonical `self.tmp_a = await op(key)`;
-    # Rust requires `op(&key).await` (op takes `&str`, key is owned
-    # `String` in the dispatched handler signature). The rewrite
-    # both flips await position AND prepends `&` to the bare-ident
-    # arg so the borrow checker is happy on repeated calls (the
-    # `two_awaits` pattern fires `op(key)` twice).
+    # Python prefix `await EXPR` → Rust postfix `EXPR.await`. Two
+    # call shapes from the async fuzz generator:
+    #   `await op(key)`        — bare identifier arg (handler param)
+    #   `await op("literal")`  — string literal arg (two_phase_init)
+    # The first form needs the `&` prefix so the owned `String` key
+    # parameter can be re-borrowed across multiple awaits in
+    # `two_awaits`. The literal form takes `&str` directly without
+    # the prefix.
     src = re.sub(
         r'\bawait\s+([a-zA-Z_]\w*)\(([a-zA-Z_]\w*)\)',
         r'\1(&\2).await',
+        src,
+    )
+    src = re.sub(
+        r'\bawait\s+([a-zA-Z_]\w*)\("([^"]*)"\)',
+        r'\1("\2").await',
         src,
     )
     src = _py_if_to_c_family(src)
@@ -3306,10 +3312,17 @@ def _java_trace(src: str) -> str:
     # blocking accessor; `.get()` would force the handler to declare
     # `throws ExecutionException, InterruptedException` and the
     # framec-generated signature can't be tweaked from the harness).
-    # Same single-arg ident match as Rust's await rewrite.
+    # Two call shapes, same as Rust:
+    #   `await op(<ident>)`    → bare-ident arg (handler param)
+    #   `await op("<literal>")` → string-literal arg (two_phase_init)
     src = re.sub(
         r'\bawait\s+([a-zA-Z_]\w*)\(([a-zA-Z_]\w*)\)',
         r'\1(\2).join()',
+        src,
+    )
+    src = re.sub(
+        r'\bawait\s+([a-zA-Z_]\w*)\("([^"]*)"\)',
+        r'\1("\2").join()',
         src,
     )
     # `op` is a static method on the `Helpers` companion class (same

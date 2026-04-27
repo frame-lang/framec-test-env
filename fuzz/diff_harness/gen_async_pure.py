@@ -38,7 +38,13 @@ import json
 import random
 from pathlib import Path
 
-PATTERNS = ["single_await", "two_awaits", "await_then_trans"]
+PATTERNS = [
+    "single_await",
+    "two_awaits",
+    "await_then_trans",
+    "await_then_mutate_domain",
+    "two_phase_init",
+]
 STATE_COUNTS = [2, 3]
 HSM_DEPTHS = [0, 1]
 
@@ -59,7 +65,11 @@ def gen_handler_body(pattern: str, n: int) -> list[str]:
     `EXPR.get()`).
 
     `op` is a placeholder name; the renderer prepends its definition
-    in the case's prolog so framec sees a real symbol pass through."""
+    in the case's prolog so framec sees a real symbol pass through.
+
+    `two_phase_init` doesn't append fetch-body content; the heavy
+    lifting moves into `gen_enter_body` (the start-state's `$>`
+    handler awaits and stores the result, verified via `status()`)."""
     out = []
     if pattern == "single_await":
         out.append('                self.tmp_a = await op(key);')
@@ -77,9 +87,33 @@ def gen_handler_body(pattern: str, n: int) -> list[str]:
         out.append('                self.tmp_a = await op(key);')
         out.append('                @@:(self.tmp_a)')
         out.append(f'                -> {next_state}')
+    elif pattern == "await_then_mutate_domain":
+        # Await, then write the result to a domain field. The
+        # `tmp_a` field is itself the domain field, so the await
+        # already mutates state — but reading it back via `status()`
+        # in the test driver verifies the mutation persisted across
+        # the dispatch boundary.
+        out.append('                self.tmp_a = await op(key);')
+        out.append('                @@:(self.tmp_a)')
+    elif pattern == "two_phase_init":
+        # Fetch handler is a no-op; the assertion shape moves into
+        # the start-state $> handler (see gen_enter_body). Driver
+        # calls fetch() after init; the trace's TRACE: status line
+        # reflects whatever the $> handler stashed.
+        out.append('                @@:("done")')
     else:
         raise ValueError(f"unknown pattern {pattern}")
     return out
+
+
+def gen_enter_body(pattern: str) -> list[str]:
+    """Start-state `$>` handler body. For `two_phase_init`, this is
+    where the await fires — exercising async-enter-during-init."""
+    if pattern == "two_phase_init":
+        return [
+            '                self.tmp_a = await op("init");',
+        ]
+    return []
 
 
 def gen_system(case_id: int, params: dict) -> tuple[str, str]:
@@ -97,15 +131,25 @@ def gen_system(case_id: int, params: dict) -> tuple[str, str]:
     lines.append("        status(): str")
     lines.append("")
     lines.append("    machine:")
+    enter_body = gen_enter_body(pattern)
     for i in range(n):
         st = state_name(i)
         has_parent = depth > 0 and 0 < i <= depth
         lines.append(f"        {st}{' => $S0' if has_parent else ''} {{")
         if i == 0:
+            if enter_body:
+                lines.append("            $>() {")
+                lines.extend(enter_body)
+                lines.append("            }")
             lines.append("            fetch(key: str): str {")
             lines.extend(gen_handler_body(pattern, n))
             lines.append("            }")
-            lines.append(f'            status(): str {{ @@:("s{i}") }}')
+            # `two_phase_init` reports the awaited value via status() so
+            # the driver's `TRACE: status` line proves the $> handler ran.
+            if pattern == "two_phase_init":
+                lines.append('            status(): str { @@:(self.tmp_a) }')
+            else:
+                lines.append(f'            status(): str {{ @@:("s{i}") }}')
         else:
             # Non-start states: fetch/status return a fixed string so
             # the post-transition fetch in `await_then_trans` produces
@@ -154,6 +198,17 @@ def gen_meta(case_id: int, sys_name: str, params: dict) -> dict:
     elif pattern == "await_then_trans":
         expected_value = "value_for_k"
         expected_state = f"s{1 % n}"
+    elif pattern == "await_then_mutate_domain":
+        # Same trace shape as single_await; the assertion shifts to the
+        # status line (which reports `s0` here, not the mutated tmp_a —
+        # the value is verified through the RET trace).
+        expected_value = "value_for_k"
+        expected_state = "s0"
+    elif pattern == "two_phase_init":
+        # fetch() returns the constant "done"; status() reports
+        # whatever the $> handler stashed (tmp_a = "value_for_init").
+        expected_value = "done"
+        expected_state = "value_for_init"
     else:
         raise ValueError(f"unknown pattern {pattern}")
 
