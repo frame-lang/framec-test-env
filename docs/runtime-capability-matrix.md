@@ -111,7 +111,7 @@ spec). Generated from a manual audit on 2026-04-26.
 
 [j] **Java** — Java requires one public class per file, so a
     file with multiple `@@system` declarations is rejected by
-    framec with E407. Cross-system field instantiation
+    framec with E430. Cross-system field instantiation
     (`level = @@Other()`) works fine when each `@@system` lives
     in its own file. Multi-system test fixtures (demos 20, 28,
     29, 33; primary 39, 50, 52) carry `@@skip` for `.fjava` and
@@ -119,7 +119,7 @@ spec). Generated from a manual audit on 2026-04-26.
 
 [k] **Erlang** — Erlang requires one module per file, so a file
     with multiple `@@system` declarations is rejected by framec
-    with E406. Cross-system field instantiation isn't currently
+    with E431. Cross-system field instantiation isn't currently
     wired for Erlang either: a `level = @@Other()` field would
     need a `gen_statem:start_link/{1,3}` invocation in the parent
     module's init, plus PID-based message routing instead of

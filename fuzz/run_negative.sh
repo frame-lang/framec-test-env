@@ -42,7 +42,13 @@ OUT_DIR=$SCRIPT_DIR/out_negative
 LOG_DIR=$SCRIPT_DIR/logs_negative
 mkdir -p "$OUT_DIR" "$LOG_DIR"
 
-if [ ! -d "$CASES_DIR" ] || ! ls "$CASES_DIR"/*.fpy >/dev/null 2>&1; then
+# Each fixture declares its own `@@target <lang>` directive (and the
+# runner reads it back via `read_case_target` below), so the file
+# extension is just for editor convenience. Accept any `f<ext>` —
+# `.fpy`, `.fjava`, `.frs`, `.fts`, `.fcpp`, etc.
+shopt -s nullglob 2>/dev/null || true
+all_cases=("$CASES_DIR"/*.f*)
+if [ ! -d "$CASES_DIR" ] || [ ${#all_cases[@]} -eq 0 ]; then
     echo "no cases under $CASES_DIR" >&2
     exit 0
 fi
@@ -70,8 +76,10 @@ read_case_target() {
 }
 
 pass=0; fail=0
-for case_file in "$CASES_DIR"/*.fpy; do
-    case_id=$(basename "$case_file" .fpy)
+for case_file in "${all_cases[@]}"; do
+    base=$(basename "$case_file")
+    # Strip the trailing `.f<ext>` for the case id.
+    case_id="${base%.*}"
     case_target=$(read_case_target "$case_file")
     target_lang=${case_target:-$LANG}
     out=$OUT_DIR/$target_lang/$case_id

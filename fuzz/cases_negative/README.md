@@ -40,13 +40,43 @@ direct.
 ## Coverage
 
 Currently covers (sorted): E111, E113, E114, E116, E117, E400, E401,
-E402, E403, E405, E410, E413, E416, E417, E418, E419, E420, E421,
-E501, E601, E602, E603, E604, E605, E614, E615.
+E402, E403, E405, E407, E410, E413, E416, E417, E418, E419, E420,
+E421, E501, E601, E602, E603, E604, E605, E614, E615.
 
-`run_negative.sh` honors each fixture's own `@@target` directive when
-present (falls back to CLI `-l <lang>`). E605 needs a static target
-(Java in our fixture) since the check only fires for backends without
-type inference.
+`run_negative.sh` discovers any `cases_negative/*.f<ext>` fixture,
+honors each one's `@@target` directive, and falls back to the CLI's
+`-l <lang>` value otherwise. The runner glob accepts arbitrary Frame
+extensions (`.fpy`, `.fjava`, `.frs`, `.fts`, etc.) so per-language
+fixtures are first-class. E605 needs a static target (Java in our
+fixture) since the check only fires for backends without type
+inference. E407 ships per-language fixtures because each backend
+implements `skip_nested_scope` against its own closure syntax.
+
+### E407 — Frame statement inside nested function scope
+
+Fires from the unified scanner via the per-backend `skip_nested_scope`
+implementation. Each backend's fixture exercises the closure syntax
+specific to that language:
+
+| File                                          | Closure shape       |
+|-----------------------------------------------|---------------------|
+| `e407_java_lambda.fjava`                      | `() -> { ... }`     |
+| `e407_typescript_arrow.fts`                   | `() => { ... }`     |
+| `e407_javascript_arrow.fjs`                   | `() => { ... }`     |
+| `e407_csharp_lambda.fcs`                      | `() => { ... }`     |
+| `e407_rust_closure.frs`                       | `\|\| { ... }`        |
+| `e407_cpp_lambda.fcpp`                        | `[](){ ... }`       |
+| `e407_go_func.fgo`                            | `func() { ... }`    |
+| `e407_php_closure.fphp`                       | `function() {...}`  |
+| `e407_lua_function.flua`                      | `function() ... end`|
+| `e407_kotlin_lambda.fkt`                      | `{ x -> ... }`      |
+| `e407_swift_closure.fswift`                   | `{ x in ... }`      |
+
+Python (lambda body is expression-only, can't host Frame statements),
+Ruby (multiple ambiguous forms), Dart (`(args) { body }` is identical
+to `if (cond) { body }`), and GDScript (no native closure syntax)
+default-return `None` from `skip_nested_scope` and so don't ship
+E407 fixtures. C has no closures at all.
 
 ### Transition-arg arity codes (E405, E417 transition form, E419)
 
@@ -86,12 +116,15 @@ parse and validate. That makes the existing arity code reachable.
   `e607_state_args_on_pop.fpy` covers it in spirit through the
   pop$ branch of `validate_transition` — promote a dedicated
   fixture if a regression ever slips through.
-- **E407 (Frame statement in nested function scope)**. Only the
-  Erlang `SyntaxSkipper` implements `skip_nested_scope`; the other
-  16 skippers default-return `None`, so E407 fires only on Erlang
-  sources. A reachable fixture would need `@@target erlang` plus
-  Erlang-syntax nested clause; out of scope for the current cross-
-  target negative suite.
 - **E000, E408**. Less common — only fire under combinations the
   existing cases already approximate. Add as needed when authoring
   fixtures that touch them.
+- **E407 on Python / Ruby / Dart / GDScript**. These backends'
+  `skip_nested_scope` returns `None` by design — Python lambda
+  bodies are expression-only (no statement-level Frame markers
+  possible), Ruby has too many closure forms to detect cleanly,
+  Dart's `(args) { body }` is byte-identical to `if (cond) { body }`,
+  and GDScript closures rely on indentation. Frame source
+  authored against these targets is not protected against the
+  silent-corruption hazard for those specific patterns; the
+  validator has no scope-detection there.
