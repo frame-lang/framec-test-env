@@ -39,7 +39,7 @@ spec). Generated from a manual audit on 2026-04-26.
 | **HSM cascade exit (bottom-up `<$`)**                    | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | HSM parameter propagation (signature-match)              | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Event forwarding (`=> $^`)                               | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
-| Forward transition (`-> => $State`)                      | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️[d] |
+| Forward transition (`-> => $State`)                      | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Step 25: persistence**                                 |
 | `@@persist` save / restore                               | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Async**                                                |
@@ -61,15 +61,6 @@ spec). Generated from a manual audit on 2026-04-26.
     and calls each layer's `frame_exit__<state>` helper, so child
     `<$` handlers fire and receive their declared params via
     positional extraction from the args map.
-
-[d] **Erlang** — forward transitions (`-> => $State`) leave a
-    `forward_event` on the destination compartment but don't
-    re-dispatch it through the HSM enter cascade — only the leaf's
-    handler sees the forwarded event. The HSM enter/exit cascades
-    themselves (parent's `$>` top-down, child's `<$` bottom-up)
-    and parameter propagation are now implemented per spec — see
-    `framec_native_codegen/erlang_system.rs` `frame_enter__<state>`
-    helpers and `frame_exit_dispatch__` chain walk.
 
 [f] **Java** — Frame async lowers to `CompletableFuture` in
     principle but isn't fully wired (`make_system_async` has a
@@ -108,7 +99,7 @@ spec). Generated from a manual audit on 2026-04-26.
 |---|---|
 | Languages fully conformant to v4 spec | 17 / 17 |
 | Languages with HSM cascade implemented | 17 / 17 |
-| Known divergence | Erlang forward-transition re-dispatch ([d], cascade fires but the forwarded event reaches only the leaf); Erlang self-call guard mechanism ([i], functional contract still met) |
+| Known divergence | Erlang self-call guard mechanism ([i], structurally divergent but functional contract met) |
 | Language-natural skips | C, Go, PHP, Ruby, Lua, Erlang on async |
 
 ## Test corpus coverage
@@ -118,14 +109,16 @@ under `tests/common/positive/`. The matrix-runner enforces these
 across every language at every commit; see `make test` from
 `docker/`.
 
-The cascade tests (46–48), parameter-propagation test (49), and the
-HSM state-arg propagation test (52) are the canonical conformance
-gates for the HSM additions in v4. Erlang's `.ferl` variants are
-smoke-test stand-ins — they verify the system runs and that
-expected strings appear in the domain log, but don't assert exact
-trace ordering. The underlying cascade is now implemented per
-spec (`framec_native_codegen/erlang_system.rs` `frame_enter__<state>`
-helpers + `frame_exit_dispatch__` chain walk); upgrading the
-`.ferl` tests to assert ordering would require a per-test escript
-driver convention that the matrix runner doesn't currently
-support.
+The cascade tests (46–48), parameter-propagation test (49), the
+HSM state-arg propagation test (52), and the forward-transition
+tests (19, 29) are the canonical conformance gates for the HSM
+additions in v4. Erlang's `.ferl` variants are smoke-test
+stand-ins — they verify the system runs and that expected strings
+appear in the domain log, but don't assert exact trace ordering.
+The underlying cascade and forward-re-dispatch are implemented
+per spec (`framec_native_codegen/erlang_system.rs`:
+`frame_enter__<state>` helpers, `frame_exit_dispatch__` chain
+walk, `frame_forward_transition__` with `next_event`-action
+re-dispatch); upgrading the `.ferl` tests to assert ordering
+would require a per-test escript driver convention that the
+matrix runner doesn't currently support.
