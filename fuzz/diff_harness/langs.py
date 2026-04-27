@@ -334,6 +334,57 @@ def rust_async_supported(meta: dict) -> bool:
     return meta.get("axes", {}).get("pattern") != "two_awaits"
 
 
+def dart_async(meta: dict) -> str:
+    """Dart counterpart of `py_async`. `dart compile kernel` with
+    Dart's null-safety mode requires explicit types. `op` is a
+    top-level `Future<String>` async function; main is
+    `Future<void> main() async`."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+Future<String> op(String key) async {{
+    return "value_for_" + key;
+}}
+
+Future<void> main() async {{
+    final s = {sys_name}();
+    await s.init();
+    print("TRACE: CALL fetch");
+    final r = await s.fetch("k");
+    print("TRACE: RET " + r);
+    print("TRACE: status " + (await s.status()));
+}}
+"""
+
+
+def csharp_async(meta: dict) -> str:
+    """C# counterpart of `py_async`. The csproj hardcodes
+    `<StartupObject>CanaryMain</StartupObject>`, so the entry point
+    has to live on a class named `CanaryMain`. `op` lives on the
+    same class as a static method; `_csharp_trace` qualifies bare
+    `op(...)` calls inside handler bodies as `CanaryMain.op(...)`
+    so the cross-class reference resolves."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+public class CanaryMain {{
+    public static async Task<string> op(string key) {{
+        await Task.Yield();
+        return "value_for_" + key;
+    }}
+
+    public static async Task Main() {{
+        var s = new {sys_name}();
+        await s.init();
+        System.Console.WriteLine("TRACE: CALL fetch");
+        var r = await s.fetch("k");
+        System.Console.WriteLine("TRACE: RET " + r);
+        System.Console.WriteLine("TRACE: status " + (await s.status()));
+    }}
+}}
+"""
+
+
 # --- Phase-3 @@:self fuzz harnesses ---
 #
 # Each renderer produces the same normalized trace against the oracle:
@@ -3041,6 +3092,16 @@ def _csharp_trace(src: str) -> str:
     # time (see backends/csharp.rs::emit_field), so the harness no
     # longer needs `_map_str_type`.
     src = re.sub(r'\bprint\(("[^"]*")\)', r'System.Console.WriteLine(\1);', src)
+    # Async fuzz: `op` is a static method on `CanaryMain` (the entry-
+    # point class). Inside Async<NNNN>.<handler> bodies, bare
+    # `op(key)` doesn't resolve. Qualify the call site with the
+    # class name. Idempotent — already-qualified `CanaryMain.op(...)`
+    # is left alone.
+    src = _sub_outside_strings(
+        r'(?<!\.)\bop\(',
+        r'CanaryMain.op(',
+        src,
+    )
     src = _rewrite_self(src, "this.")
     src = _py_if_to_c_family(src)
     return _lower_bool(src)
@@ -3223,7 +3284,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=dart_canary,
-        renderers={'persist': dart_persist, 'selfcall': dart_selfcall, 'hsm': dart_hsm, 'operations': dart_operations, 'nested': dart_nested},
+        renderers={'persist': dart_persist, 'selfcall': dart_selfcall, 'hsm': dart_hsm, 'operations': dart_operations, 'nested': dart_nested, 'async': dart_async},
         rewrite_trace=_dart_trace,
         prolog="import 'dart:convert';\n",
         notes="JSON string. camelCase methods (saveState/restoreState).",
@@ -3311,7 +3372,7 @@ LANGS = {
         save_method="SaveState",
         restore_call="{S}.RestoreState({B})",
         render_canary=csharp_canary,
-        renderers={'persist': csharp_persist, 'selfcall': csharp_selfcall, 'hsm': csharp_hsm, 'operations': csharp_operations, 'nested': csharp_nested},
+        renderers={'persist': csharp_persist, 'selfcall': csharp_selfcall, 'hsm': csharp_hsm, 'operations': csharp_operations, 'nested': csharp_nested, 'async': csharp_async},
         rewrite_trace=_csharp_trace,
         notes="JSON string. PascalCase methods. dotnet csproj + build+run.",
     ),
