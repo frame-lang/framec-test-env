@@ -128,12 +128,22 @@ spec). Generated from a manual audit on 2026-04-26.
     and frame_machines/state_var_parser carry `@@skip` for
     `.ferl` and are exercised on the other 15 backends.
 
-[l] **C** — C has no native list/vector type. Frame's domain
-    fields with `: list` annotations require a runtime list
-    helper that framec doesn't currently ship for C. Demo 21
-    (worker_pool) skips on `.fc` because the source uses
-    `self.pending: list`. The other 16 backends use their
-    native list/array type.
+[l] **C** — C has no native list/vector type, and Frame's
+    domain syntax (`name : type = init`) doesn't naturally
+    express C's array declarator (`char* arr[N]`). Closing
+    this gap properly needs one of:
+      - A cross-target Frame stdlib `: list` semantics
+        (what does `list` mean abstractly? what ops are
+        canonical?) plus a C runtime helper shipped per
+        system (similar to how `<Sys>_FrameDict` is
+        emitted inline today).
+      - Type-aware method-call codegen so `.append(x)` /
+        `len(...)` / `.clear()` on list-typed values
+        dispatch to the helper.
+    Both paths are language-design changes affecting all
+    17 backends, not a C-only fix. Demo 21 (worker_pool)
+    keeps `@@skip` on `.fc` until that design lands. The
+    other 16 backends use their native list/array type.
 
 [m] **Erlang** — Frame's `while` keyword is target-language
     native passthrough; framec emits the keyword verbatim into
