@@ -357,22 +357,60 @@ Future<void> main() async {{
 """
 
 
+def java_async(meta: dict) -> str:
+    """Java counterpart of `py_async`. Java has no `async`/`await`
+    keywords; framec lowers `async fetch(): String` to a method
+    returning `CompletableFuture<String>` and leaves sync interface
+    methods (`status(): str`) as plain returns. The driver `.join()`s
+    each async call (unchecked-exception variant of `.get()`) and
+    treats `status()` as a sync return.
+
+    Java's runner naming convention: the file is `<sys_name>.java`
+    and the main class is `<sys_name>Main` (the runner runs
+    `java <stem>Main`). `op` lives on a separate `Helpers` static
+    class so the in-handler `op(key)` reference (rewritten to
+    `Helpers.op(key)` by `_java_trace`) is per-class-stable across
+    cases."""
+    sys_name = meta["sys_name"]
+    main_cls = f"{sys_name}Main"
+    return f"""
+
+class Helpers {{
+    public static java.util.concurrent.CompletableFuture<String> op(String key) {{
+        return java.util.concurrent.CompletableFuture.completedFuture("value_for_" + key);
+    }}
+}}
+
+class {main_cls} {{
+    public static void main(String[] args) {{
+        {sys_name} s = new {sys_name}();
+        System.out.println("TRACE: CALL fetch");
+        String r = s.fetch("k").join();
+        System.out.println("TRACE: RET " + r);
+        System.out.println("TRACE: status " + s.status());
+    }}
+}}
+"""
+
+
 def csharp_async(meta: dict) -> str:
     """C# counterpart of `py_async`. The csproj hardcodes
     `<StartupObject>CanaryMain</StartupObject>`, so the entry point
-    has to live on a class named `CanaryMain`. `op` lives on the
-    same class as a static method; `_csharp_trace` qualifies bare
-    `op(...)` calls inside handler bodies as `CanaryMain.op(...)`
-    so the cross-class reference resolves."""
+    has to live on a class named `CanaryMain`. `op` lives on a
+    `Helpers` companion class — bare `op(...)` calls inside handler
+    bodies are rewritten to `Helpers.op(...)` by `_csharp_trace`,
+    matching the same convention as Java."""
     sys_name = meta["sys_name"]
     return f"""
 
-public class CanaryMain {{
+public static class Helpers {{
     public static async Task<string> op(string key) {{
         await Task.Yield();
         return "value_for_" + key;
     }}
+}}
 
+public class CanaryMain {{
     public static async Task Main() {{
         var s = new {sys_name}();
         await s.init();
@@ -2995,6 +3033,25 @@ def _java_trace(src: str) -> str:
     src = _sub_outside_strings(r'\bprint\(("[^"]*")\)', r'System.out.println(\1);', src)
     src = _rewrite_self(src, 'this.')
     src = _py_if_to_c_family(src)
+    # Async fuzz: Python prefix `await op(key)` → Java
+    # `op(key).join()` (CompletableFuture's unchecked-exception
+    # blocking accessor; `.get()` would force the handler to declare
+    # `throws ExecutionException, InterruptedException` and the
+    # framec-generated signature can't be tweaked from the harness).
+    # Same single-arg ident match as Rust's await rewrite.
+    src = re.sub(
+        r'\bawait\s+([a-zA-Z_]\w*)\(([a-zA-Z_]\w*)\)',
+        r'\1(\2).join()',
+        src,
+    )
+    # `op` is a static method on the `Helpers` companion class (same
+    # convention as C#'s async fuzz). Bare `op(...)` inside Async<NNNN>
+    # handlers doesn't resolve across classes; qualify the call site.
+    src = _sub_outside_strings(
+        r'(?<!\.)\bop\(',
+        r'Helpers.op(',
+        src,
+    )
     return _lower_bool(src)
 
 
@@ -3092,14 +3149,14 @@ def _csharp_trace(src: str) -> str:
     # time (see backends/csharp.rs::emit_field), so the harness no
     # longer needs `_map_str_type`.
     src = re.sub(r'\bprint\(("[^"]*")\)', r'System.Console.WriteLine(\1);', src)
-    # Async fuzz: `op` is a static method on `CanaryMain` (the entry-
-    # point class). Inside Async<NNNN>.<handler> bodies, bare
-    # `op(key)` doesn't resolve. Qualify the call site with the
-    # class name. Idempotent — already-qualified `CanaryMain.op(...)`
-    # is left alone.
+    # Async fuzz: `op` is a static method on the `Helpers` companion
+    # class (matches Java's convention). Inside Async<NNNN>.<handler>
+    # bodies, bare `op(key)` doesn't resolve across classes —
+    # qualify the call site. Idempotent (already-qualified calls
+    # have a `.` before `op` and are skipped via the lookbehind).
     src = _sub_outside_strings(
         r'(?<!\.)\bop\(',
-        r'CanaryMain.op(',
+        r'Helpers.op(',
         src,
     )
     src = _rewrite_self(src, "this.")
@@ -3298,7 +3355,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=java_canary,
-        renderers={'persist': java_persist, 'selfcall': java_selfcall, 'hsm': java_hsm, 'operations': java_operations, 'nested': java_nested},
+        renderers={'persist': java_persist, 'selfcall': java_selfcall, 'hsm': java_hsm, 'operations': java_operations, 'nested': java_nested, 'async': java_async},
         rewrite_trace=_java_trace,
         docker_image="docker-java",
         notes=(
