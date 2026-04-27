@@ -219,6 +219,27 @@ def py_persist(meta: dict) -> str:
 # `op` + driver shape in their respective async syntax.
 
 
+def py_multisys(meta: dict) -> str:
+    """Python oracle for the multi-system fuzz. Instantiates only
+    the outer Driver — the inner Counter is constructed transitively
+    via the outer's `domain:` initializer. Trace contract:
+
+        TRACE: CALL run
+        TRACE: CALL get_total
+        TRACE: total <N>
+
+    Where <N> is `expected.total`."""
+    sys_name = meta["sys_name"]
+    return f"""
+if __name__ == '__main__':
+    s = @@{sys_name}()
+    print("TRACE: CALL run")
+    s.run()
+    print("TRACE: CALL get_total")
+    print(f"TRACE: total {{s.get_total()}}")
+"""
+
+
 def py_async(meta: dict) -> str:
     """Python oracle for the async fuzz. The native helper `op` is the
     awaited callable that the generated handler body references; the
@@ -245,6 +266,21 @@ async def main():
 
 if __name__ == '__main__':
     asyncio.run(main())
+"""
+
+
+def js_multisys(meta: dict) -> str:
+    """JS counterpart of `py_multisys`. The outer Driver constructs
+    the inner Counter via its domain-init; the driver only news-up
+    the Driver."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+const s = new {sys_name}();
+console.log("TRACE: CALL run");
+s.run();
+console.log("TRACE: CALL get_total");
+console.log(`TRACE: total ${{s.get_total()}}`);
 """
 
 
@@ -324,6 +360,23 @@ fn main() {{
 """
 
 
+def rust_multisys(meta: dict) -> str:
+    """Rust counterpart of `py_multisys`. Inner Counter is held by
+    value in the outer Driver's domain; framec emits a struct-init
+    with `Counter::new()` for the `inner` field."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+fn main() {{
+    let mut s = {sys_name}::new();
+    println!("TRACE: CALL run");
+    s.run();
+    println!("TRACE: CALL get_total");
+    println!("TRACE: total {{}}", s.get_total());
+}}
+"""
+
+
 def rust_async_supported(meta: dict) -> bool:
     """Skip `two_awaits` on Rust. Frame's `@@:(self.tmp_a + self.tmp_b)`
     passes through to Rust verbatim, where `String + String` is a type
@@ -332,6 +385,21 @@ def rust_async_supported(meta: dict) -> bool:
     inside `@@:(...)` is feasible but out of scope for Phase 6 first
     cut. Once that lands, drop this filter."""
     return meta.get("axes", {}).get("pattern") != "two_awaits"
+
+
+def dart_multisys(meta: dict) -> str:
+    """Dart counterpart of `py_multisys`. Top-level `void main()`."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+void main() {{
+    final s = {sys_name}();
+    print("TRACE: CALL run");
+    s.run();
+    print("TRACE: CALL get_total");
+    print("TRACE: total " + s.get_total().toString());
+}}
+"""
 
 
 def dart_async(meta: dict) -> str:
@@ -384,6 +452,22 @@ Task {{
     __sem.signal()
 }}
 __sem.wait()
+"""
+
+
+def gdscript_multisys(meta: dict) -> str:
+    """GDScript counterpart of `py_multisys`. Driver runs inside
+    `SceneTree._init()` via the `extends SceneTree` prolog."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+func _init():
+    var s = {sys_name}.new()
+    print("TRACE: CALL run")
+    s.run()
+    print("TRACE: CALL get_total")
+    print("TRACE: total " + str(s.get_total()))
+    quit()
 """
 
 
@@ -445,6 +529,25 @@ fun main() = kotlinx.coroutines.runBlocking {{
 """
 
 
+def java_multisys(meta: dict) -> str:
+    """Java counterpart of `py_multisys`. Main lives on
+    `<sys_name>Main` (matches the runner's `<stem>Main` convention)."""
+    sys_name = meta["sys_name"]
+    main_cls = f"{sys_name}Main"
+    return f"""
+
+class {main_cls} {{
+    public static void main(String[] args) {{
+        {sys_name} s = new {sys_name}();
+        System.out.println("TRACE: CALL run");
+        s.run();
+        System.out.println("TRACE: CALL get_total");
+        System.out.println("TRACE: total " + s.get_total());
+    }}
+}}
+"""
+
+
 def java_async(meta: dict) -> str:
     """Java counterpart of `py_async`. Java has no `async`/`await`
     keywords; framec lowers `async fetch(): String` to a method
@@ -476,6 +579,24 @@ class {main_cls} {{
         String r = s.fetch("k").join();
         System.out.println("TRACE: RET " + r);
         System.out.println("TRACE: status " + s.status());
+    }}
+}}
+"""
+
+
+def csharp_multisys(meta: dict) -> str:
+    """C# counterpart of `py_multisys`. Driver lives on `CanaryMain`
+    (csproj-hardcoded entry point)."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+public class CanaryMain {{
+    public static void Main() {{
+        var s = new {sys_name}();
+        System.Console.WriteLine("TRACE: CALL run");
+        s.run();
+        System.Console.WriteLine("TRACE: CALL get_total");
+        System.Console.WriteLine("TRACE: total " + s.get_total());
     }}
 }}
 """
@@ -3280,7 +3401,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=py_canary,
-        renderers={'persist': py_persist, 'selfcall': py_selfcall, 'hsm': py_hsm, 'operations': py_operations, 'nested': py_nested, 'async': py_async},
+        renderers={'persist': py_persist, 'selfcall': py_selfcall, 'hsm': py_hsm, 'operations': py_operations, 'nested': py_nested, 'async': py_async, 'multisys': py_multisys},
         rewrite_trace=_py_passthrough,
         notes="Pickle blob. staticmethod restore_state. Oracle reference.",
     ),
@@ -3292,7 +3413,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=js_canary,
-        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm, 'operations': js_operations, 'nested': js_nested, 'async': js_async},
+        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm, 'operations': js_operations, 'nested': js_nested, 'async': js_async, 'multisys': js_multisys},
         rewrite_trace=_js_trace,
         notes="JSON string blob. camelCase methods. Requires .mjs for ESM.",
     ),
@@ -3304,7 +3425,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=ts_canary,
-        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm, 'operations': ts_operations, 'nested': ts_nested, 'async': ts_async},  # JS & TS share persist harness text
+        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm, 'operations': ts_operations, 'nested': ts_nested, 'async': ts_async, 'multisys': js_multisys},  # JS & TS share persist harness text
         rewrite_trace=_js_trace,  # same syntax as JS
         notes="JSON string blob. Same method names as JavaScript.",
     ),
@@ -3356,7 +3477,7 @@ LANGS = {
         out_ext="gd",
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
-        renderers={'persist': gdscript_persist, 'selfcall': gdscript_selfcall, 'hsm': gdscript_hsm, 'operations': gdscript_operations, 'nested': gdscript_nested, 'async': gdscript_async},
+        renderers={'persist': gdscript_persist, 'selfcall': gdscript_selfcall, 'hsm': gdscript_hsm, 'operations': gdscript_operations, 'nested': gdscript_nested, 'async': gdscript_async, 'multisys': gdscript_multisys},
         run_custom=gdscript_run_custom,
         rewrite_trace=_gdscript_trace,
         docker_image="docker-gdscript",  # informational; custom hook wraps itself
@@ -3422,7 +3543,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=rust_canary,
-        renderers={'persist': rust_persist, 'selfcall': rust_selfcall, 'hsm': rust_hsm, 'operations': rust_operations, 'nested': rust_nested, 'async': rust_async},
+        renderers={'persist': rust_persist, 'selfcall': rust_selfcall, 'hsm': rust_hsm, 'operations': rust_operations, 'nested': rust_nested, 'async': rust_async, 'multisys': rust_multisys},
         case_supported=rust_async_supported,
         rewrite_trace=_rust_trace,
         notes="JSON string. save_state(&mut self), restore_state(json: String).",
@@ -3448,7 +3569,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=dart_canary,
-        renderers={'persist': dart_persist, 'selfcall': dart_selfcall, 'hsm': dart_hsm, 'operations': dart_operations, 'nested': dart_nested, 'async': dart_async},
+        renderers={'persist': dart_persist, 'selfcall': dart_selfcall, 'hsm': dart_hsm, 'operations': dart_operations, 'nested': dart_nested, 'async': dart_async, 'multisys': dart_multisys},
         rewrite_trace=_dart_trace,
         prolog="import 'dart:convert';\n",
         notes="JSON string. camelCase methods (saveState/restoreState).",
@@ -3462,6 +3583,10 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=java_canary,
+        # NOTE: 'multisys' renderer is implemented but unwired —
+        # framec emits E407 ("Java allows only one public class per
+        # file") for multi-system files. Per FUZZ_PLAN.md Phase 7
+        # Java is excluded alongside Erlang for the same reason.
         renderers={'persist': java_persist, 'selfcall': java_selfcall, 'hsm': java_hsm, 'operations': java_operations, 'nested': java_nested, 'async': java_async},
         rewrite_trace=_java_trace,
         docker_image="docker-java",
@@ -3549,7 +3674,7 @@ LANGS = {
         save_method="SaveState",
         restore_call="{S}.RestoreState({B})",
         render_canary=csharp_canary,
-        renderers={'persist': csharp_persist, 'selfcall': csharp_selfcall, 'hsm': csharp_hsm, 'operations': csharp_operations, 'nested': csharp_nested, 'async': csharp_async},
+        renderers={'persist': csharp_persist, 'selfcall': csharp_selfcall, 'hsm': csharp_hsm, 'operations': csharp_operations, 'nested': csharp_nested, 'async': csharp_async, 'multisys': csharp_multisys},
         rewrite_trace=_csharp_trace,
         notes="JSON string. PascalCase methods. dotnet csproj + build+run.",
     ),
