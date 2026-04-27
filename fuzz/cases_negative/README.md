@@ -40,8 +40,8 @@ direct.
 ## Coverage
 
 Currently covers (sorted): E111, E113, E114, E116, E117, E400, E401,
-E402, E403, E410, E413, E418, E420, E421, E601, E602, E603, E604,
-E605, E614, E615.
+E402, E403, E410, E413, E416, E417, E418, E420, E421, E501, E601,
+E602, E603, E604, E605, E614, E615.
 
 `run_negative.sh` honors each fixture's own `@@target` directive when
 present (falls back to CLI `-l <lang>`). E605 needs a static target
@@ -56,7 +56,12 @@ type inference.
   and the framec implementations defer to the target compiler. A V5
   lexer split could re-enable these checks; until then there's no
   reachable fixture.
-- **E000, E407, E408, E416, E417, E419, E501**. Less common — narrow
-  target-specific (E501 GDScript) or only fire under combinations
+- **E407 (Frame statement in nested function scope)**. Only the
+  Erlang `SyntaxSkipper` implements `skip_nested_scope`; the other
+  16 skippers default-return `None`, so E407 fires only on Erlang
+  sources. A reachable fixture would need `@@target erlang` plus
+  Erlang-syntax nested clause; out of scope for the current cross-
+  target negative suite.
+- **E000, E408, E419**. Less common — only fire under combinations
   the existing cases already approximate. Add as needed when
   authoring fixtures that touch them.
