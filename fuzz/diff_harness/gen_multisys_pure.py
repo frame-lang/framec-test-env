@@ -86,7 +86,7 @@ from pathlib import Path
 
 PATTERNS = ["simple_call", "multi_call", "transition_call"]
 STATE_COUNTS = [2, 3]
-HSM_DEPTHS = [0]
+HSM_DEPTHS = [0, 1]
 
 
 def state_name(i: int) -> str:
