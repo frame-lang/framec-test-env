@@ -48,30 +48,34 @@ def state_name(i: int) -> str:
 
 
 def gen_handler_body(pattern: str, n: int) -> list[str]:
-    """Emit the `fetch(key: str): str` handler body in Python-canonical
-    syntax. Renderers for non-Python backends rewrite the embedded
-    native code (e.g. `result = await op(key)`) per their async
-    primitives — Python `await op(key)` becomes JS `await op(key)`,
-    Rust `op(key).await`, Java `op(key).get()`, etc.
+    """Emit the `fetch(key: str): str` handler body in target-portable
+    syntax. The generator uses `self.<tmp>` for intermediates instead
+    of bare names so every C-family backend (Rust, Java, JS, etc.)
+    accepts the assignment without a `let`/`var`/`const` declaration.
+    `;` terminator is included; Python ignores it.
+
+    `await EXPR` is Python-prefix; per-target rewriters in `langs.py`
+    flip to postfix where required (Rust `EXPR.await`, Java
+    `EXPR.get()`).
 
     `op` is a placeholder name; the renderer prepends its definition
     in the case's prolog so framec sees a real symbol pass through."""
     out = []
     if pattern == "single_await":
-        out.append('                result = await op(key)')
-        out.append('                @@:(result)')
+        out.append('                self.tmp_a = await op(key);')
+        out.append('                @@:(self.tmp_a)')
     elif pattern == "two_awaits":
-        out.append('                a = await op(key)')
-        out.append('                b = await op(key)')
-        out.append('                @@:(a + b)')
+        out.append('                self.tmp_a = await op(key);')
+        out.append('                self.tmp_b = await op(key);')
+        out.append('                @@:(self.tmp_a + self.tmp_b)')
     elif pattern == "await_then_trans":
         # Transition after the await. Per Frame semantics the post-
         # transition `@@:(...)` still sets the return slot — the
         # interface caller awaits the wrapper which reads the slot
         # after the transition completes.
         next_state = state_name(1 % n)
-        out.append('                result = await op(key)')
-        out.append('                @@:(result)')
+        out.append('                self.tmp_a = await op(key);')
+        out.append('                @@:(self.tmp_a)')
         out.append(f'                -> {next_state}')
     else:
         raise ValueError(f"unknown pattern {pattern}")
@@ -113,6 +117,14 @@ def gen_system(case_id: int, params: dict) -> tuple[str, str]:
         if has_parent:
             lines.append("            => $^")
         lines.append("        }")
+    lines.append("")
+    # Domain holds the await-result intermediaries. Static targets
+    # (Rust, Java, C++, C#, Go) need the field declared with a type so
+    # codegen can pick a struct slot; dynamic targets (Python, JS,
+    # Lua, Ruby, GDScript) tolerate the type annotation as a hint.
+    lines.append("    domain:")
+    lines.append('        tmp_a: str = ""')
+    lines.append('        tmp_b: str = ""')
     lines.append("}")
     return "\n".join(lines) + "\n", sys_name
 

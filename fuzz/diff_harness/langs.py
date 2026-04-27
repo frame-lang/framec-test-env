@@ -295,6 +295,45 @@ main();
 """
 
 
+def rust_async(meta: dict) -> str:
+    """Rust counterpart of `py_async`. Uses `futures::executor::block_on`
+    instead of a full tokio runtime — the cases' awaited helper is
+    trivially-resolvable, so a single-threaded poller suffices.
+
+    `op` takes `&str` rather than `String` so the same parameter can
+    be re-borrowed across multiple awaits in `two_awaits`. The
+    `_rust_trace` rewriter inserts the `&` prefix on the call sites
+    (Python-canonical `op(key)` → `op(&key).await`)."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+async fn op(key: &str) -> String {{
+    format!("value_for_{{}}", key)
+}}
+
+fn main() {{
+    futures::executor::block_on(async {{
+        let mut s = {sys_name}::new();
+        s.init().await;
+        println!("TRACE: CALL fetch");
+        let r = s.fetch(String::from("k")).await;
+        println!("TRACE: RET {{}}", r);
+        println!("TRACE: status {{}}", s.status().await);
+    }});
+}}
+"""
+
+
+def rust_async_supported(meta: dict) -> bool:
+    """Skip `two_awaits` on Rust. Frame's `@@:(self.tmp_a + self.tmp_b)`
+    passes through to Rust verbatim, where `String + String` is a type
+    error (Rust requires `String + &String`). Other backends accept
+    the bare `+` for string concat. A target-aware rewrite of `+`
+    inside `@@:(...)` is feasible but out of scope for Phase 6 first
+    cut. Once that lands, drop this filter."""
+    return meta.get("axes", {}).get("pattern") != "two_awaits"
+
+
 # --- Phase-3 @@:self fuzz harnesses ---
 #
 # Each renderer produces the same normalized trace against the oracle:
@@ -2527,6 +2566,11 @@ _RUST_CARGO_TOML = (
     "\n"
     "[dependencies]\n"
     "serde_json = \"1\"\n"
+    # `futures` provides `executor::block_on` — the smallest dep
+    # that lets the async fuzz cases drive a `Future` to completion
+    # without dragging in a full runtime (tokio, async-std). Cases
+    # without `await` ignore the dep; cargo still resolves it.
+    "futures = \"0.3\"\n"
     "\n"
     "[profile.dev]\n"
     "debug = false\n"
@@ -2841,6 +2885,18 @@ def _rust_trace(src: str) -> str:
         r'return "\1".to_string();',
         src,
     )
+    # Python prefix `await EXPR` → Rust postfix `EXPR.await`. The
+    # generator emits Python-canonical `self.tmp_a = await op(key)`;
+    # Rust requires `op(&key).await` (op takes `&str`, key is owned
+    # `String` in the dispatched handler signature). The rewrite
+    # both flips await position AND prepends `&` to the bare-ident
+    # arg so the borrow checker is happy on repeated calls (the
+    # `two_awaits` pattern fires `op(key)` twice).
+    src = re.sub(
+        r'\bawait\s+([a-zA-Z_]\w*)\(([a-zA-Z_]\w*)\)',
+        r'\1(&\2).await',
+        src,
+    )
     src = _py_if_to_c_family(src)
     return _lower_bool(src)
 
@@ -3141,7 +3197,8 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=rust_canary,
-        renderers={'persist': rust_persist, 'selfcall': rust_selfcall, 'hsm': rust_hsm, 'operations': rust_operations, 'nested': rust_nested},
+        renderers={'persist': rust_persist, 'selfcall': rust_selfcall, 'hsm': rust_hsm, 'operations': rust_operations, 'nested': rust_nested, 'async': rust_async},
+        case_supported=rust_async_supported,
         rewrite_trace=_rust_trace,
         notes="JSON string. save_state(&mut self), restore_state(json: String).",
     ),
