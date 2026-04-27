@@ -9,6 +9,12 @@
 # where stage is "transpile" or "compile" and result is PASS, FAIL, or
 # SKIP_NO_TOOLCHAIN.
 #
+# Negative cases (Phase 8): a case file whose prolog contains
+#   # @@expect-error: E113
+# is expected to be REJECTED by framec with that error code. Mismatch
+# (transpile succeeded, or wrong code) is FAIL; matching rejection is
+# PASS. Phase 8 cases skip the language-toolchain compile step.
+#
 # Usage:
 #   ./run.sh                         # all languages
 #   ./run.sh python_3 rust           # a subset
@@ -204,9 +210,31 @@ is_batchable() {
     esac
 }
 
+# Read the per-case `# @@expect-error: <CODE>` directive (Phase 8
+# negative-test convention). Returns the bare code (e.g. E113) on
+# stdout, or empty if the case is positive (no directive). Looks
+# only at the first 10 lines so the prolog scan is cheap. Uses
+# POSIX bracket classes ([[:space:]]) since `\s` isn't portable to
+# BSD sed (macOS dev hosts).
+read_expected_error() {
+    local case_file=$1
+    head -10 "$case_file" 2>/dev/null \
+        | grep -m1 -oE '@@expect-error:[[:space:]]*E[0-9]+' \
+        | sed 's/.*expect-error:[[:space:]]*//'
+}
+
 # Transpile one case via framec. Writes the genfile path to stdout on
 # success (so the caller can collect it). Writes a TRANSPILE_FAIL or
 # NO_OUTPUT row to summary_file on failure and returns 1.
+#
+# Negative-test convention: if the case's prolog declares
+# `# @@expect-error: <CODE>`, transpile is expected to fail with that
+# code. Inverted classification:
+#   transpile-FAIL with matching code     → PASS  (return 2 = positive_done)
+#   transpile-FAIL with different code    → FAIL  (wrong error)
+#   transpile succeeds                    → FAIL  (expected rejection)
+# Return 2 signals "case fully handled, do NOT continue to compile-check"
+# so the caller skips the language-toolchain step.
 transpile_case() {
     local lang=$1
     local case_file=$2
@@ -216,9 +244,32 @@ transpile_case() {
     mkdir -p "$out"
     local errlog="$LOG_DIR/$lang-$case_id.err"
 
+    local expected_err
+    expected_err=$(read_expected_error "$case_file")
+
     if ! "$FRAMEC" compile -l "$lang" -o "$out" "$case_file" > "$errlog" 2>&1; then
         local err=$(head -3 "$errlog" | grep -v frame_runtime | tr '\n' '|' | head -c 220)
+        if [ -n "$expected_err" ]; then
+            # Negative case: a transpile failure is expected.
+            if grep -qE "\b${expected_err}\b" "$errlog"; then
+                printf "%s\t%s\ttranspile\tPASS\texpected %s\n" \
+                    "$lang" "$case_id" "$expected_err" >> "$summary_file"
+                return 2
+            fi
+            printf "%s\t%s\ttranspile\tFAIL\texpected %s, got: %s\n" \
+                "$lang" "$case_id" "$expected_err" "$err" >> "$summary_file"
+            return 1
+        fi
         printf "%s\t%s\ttranspile\tFAIL\t%s\n" "$lang" "$case_id" "$err" >> "$summary_file"
+        return 1
+    fi
+    if [ -n "$expected_err" ]; then
+        # Negative case but transpile succeeded — the expected
+        # rejection didn't happen. That's a regression in the
+        # validator (E... no longer fires) or the case generator
+        # is wrong. Either way, fail loudly.
+        printf "%s\t%s\ttranspile\tFAIL\texpected %s but transpile succeeded\n" \
+            "$lang" "$case_id" "$expected_err" >> "$summary_file"
         return 1
     fi
     local genfile
@@ -240,7 +291,16 @@ run_case() {
     local errlog="$LOG_DIR/$lang-$case_id.err"
 
     local genfile
-    genfile=$(transpile_case "$lang" "$case_file") || return 1
+    genfile=$(transpile_case "$lang" "$case_file")
+    local trc=$?
+    # Return code 2 = negative-case classified as PASS by transpile_case;
+    # there's no genfile to compile-check, so we're done.
+    if [ $trc -eq 2 ]; then
+        return 0
+    fi
+    if [ $trc -ne 0 ]; then
+        return 1
+    fi
 
     if [ "$TRANSPILE_ONLY" = "1" ]; then
         printf "%s\t%s\ttranspile\tPASS\t\n" "$lang" "$case_id" >> "$summary_file"
@@ -415,10 +475,17 @@ for lang in $LANGS; do
     if is_batchable "$lang" && [ "$TRANSPILE_ONLY" != "1" ]; then
         # Phase 1: transpile every case (per-case framec invocation —
         # framec is fast). Collect successful genfiles for batch
-        # compile-check.
+        # compile-check. Negative cases (rc=2) are already recorded
+        # by transpile_case and shouldn't enter the batch.
         genfiles=""
         for case_file in $cases; do
-            genfile=$(transpile_case "$lang" "$case_file") || continue
+            genfile=$(transpile_case "$lang" "$case_file")
+            local trc=$?
+            if [ $trc -ne 0 ]; then
+                # rc=1 → already-recorded failure; rc=2 → negative-case
+                # PASS already recorded. Either way, no genfile.
+                continue
+            fi
             if [ -n "$genfiles" ]; then
                 genfiles="$genfiles
 $genfile"
