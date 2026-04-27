@@ -269,6 +269,32 @@ console.log(`TRACE: status ${{await s.status()}}`);
 """
 
 
+def ts_async(meta: dict) -> str:
+    """TypeScript counterpart of `js_async`. The fuzz runner invokes
+    `tsx` which compiles to CJS by default; CJS rejects top-level
+    `await`, so the driver is wrapped in an immediately-invoked
+    `async function main()`."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+async function op(key: string): Promise<string> {{
+    await Promise.resolve();
+    return `value_for_${{key}}`;
+}}
+
+async function main() {{
+    const s = new {sys_name}();
+    await s.init();
+    console.log("TRACE: CALL fetch");
+    const r = await s.fetch("k");
+    console.log(`TRACE: RET ${{r}}`);
+    console.log(`TRACE: status ${{await s.status()}}`);
+}}
+
+main();
+"""
+
+
 # --- Phase-3 @@:self fuzz harnesses ---
 #
 # Each renderer produces the same normalized trace against the oracle:
@@ -2997,7 +3023,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=ts_canary,
-        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm, 'operations': ts_operations, 'nested': ts_nested},  # JS & TS share persist harness text
+        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm, 'operations': ts_operations, 'nested': ts_nested, 'async': ts_async},  # JS & TS share persist harness text
         rewrite_trace=_js_trace,  # same syntax as JS
         notes="JSON string blob. Same method names as JavaScript.",
     ),
