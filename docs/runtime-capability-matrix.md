@@ -47,7 +47,7 @@ spec). Generated from a manual audit on 2026-04-26.
 | **Multi-feature surface (where target shape constrains)**|
 | Multi-system per file (multiple `@@system`s in one file) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🚫[j] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🚫[k] |
 | Cross-system field instantiation (`x = @@Other()`)       | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅[j] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🚫[k] |
-| Native list type for domain fields                       | ✅ | ✅ | ✅ | ✅ | 🚫[l] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Native list type for domain fields                       | ✅ | ✅ | ✅ | ✅ | ✅[l] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `while` loop in handler bodies (native passthrough)      | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🚫[m] |
 
 ## Footnotes
@@ -128,22 +128,18 @@ spec). Generated from a manual audit on 2026-04-26.
     and frame_machines/state_var_parser carry `@@skip` for
     `.ferl` and are exercised on the other 15 backends.
 
-[l] **C** — C has no native list/vector type, and Frame's
-    domain syntax (`name : type = init`) doesn't naturally
-    express C's array declarator (`char* arr[N]`). Closing
-    this gap properly needs one of:
-      - A cross-target Frame stdlib `: list` semantics
-        (what does `list` mean abstractly? what ops are
-        canonical?) plus a C runtime helper shipped per
-        system (similar to how `<Sys>_FrameDict` is
-        emitted inline today).
-      - Type-aware method-call codegen so `.append(x)` /
-        `len(...)` / `.clear()` on list-typed values
-        dispatch to the helper.
-    Both paths are language-design changes affecting all
-    17 backends, not a C-only fix. Demo 21 (worker_pool)
-    keeps `@@skip` on `.fc` until that design lands. The
-    other 16 backends use their native list/array type.
+[l] **C** — C has no built-in list/vector. Frame's domain
+    syntax (`name : type = init`) doesn't fit C's interleaved
+    array declarator (`char* arr[N]`), so user code uses a
+    `typedef` in the prolog (`typedef char* JobSlots[8];`)
+    and the domain field reduces to `pending : JobSlots = {0}`.
+    framec's C codegen recognises brace-initialised compound
+    types and emits the constructor assignment as a
+    `memcpy` from a typed compound literal — direct
+    `arr = {0};` is illegal in C. Demo 21 (worker_pool)
+    exercises this end-to-end. There is no Frame stdlib
+    `: list` abstraction; the user controls native syntax
+    (which is the Oceans Model contract).
 
 [m] **Erlang** — Frame's `while` keyword is target-language
     native passthrough; framec emits the keyword verbatim into
@@ -166,7 +162,6 @@ spec). Generated from a manual audit on 2026-04-26.
 | Known divergence | Erlang self-call guard mechanism ([i], structurally divergent but functional contract met) |
 | Language-natural skips (async) | C, Go, PHP, Ruby, Lua, Erlang |
 | Language-shape skips (multi-system per file) | Java, Erlang |
-| Language-shape skips (native list type) | C |
 | Language-shape skips (`while` keyword) | Erlang |
 
 ## Test corpus coverage
