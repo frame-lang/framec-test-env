@@ -202,6 +202,52 @@ def py_persist(meta: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+# --- Phase-6 async fuzz harnesses ---
+#
+# Each renderer prepends a target-language async helper named `op` and
+# appends a driver. The trace contract (every backend identical):
+#
+#   TRACE: CALL fetch
+#   TRACE: RET <value>
+#   TRACE: status <sN>
+#
+# Where <value> is the case's `expected.value` from gen_async_pure.py
+# (e.g. "value_for_k" for single_await, "value_for_kvalue_for_k" for
+# two_awaits) and <sN> is `expected.state`. Only Python is wired in
+# initially; other 10 async backends (TS, JS, Rust, C++, C#, Java,
+# Kotlin, Swift, Dart, GDScript) are TODO and would mirror the same
+# `op` + driver shape in their respective async syntax.
+
+
+def py_async(meta: dict) -> str:
+    """Python oracle for the async fuzz. The native helper `op` is the
+    awaited callable that the generated handler body references; the
+    driver runs the start-state cascade via `await s.init()` then
+    invokes `s.fetch("k")` once and prints the trace.
+
+    `asyncio.sleep(0)` inside `op` yields once to the event loop so
+    the await is genuinely asynchronous (not a sync return)."""
+    sys_name = meta["sys_name"]
+    return f"""
+import asyncio
+
+async def op(key):
+    await asyncio.sleep(0)
+    return f"value_for_{{key}}"
+
+async def main():
+    s = @@{sys_name}()
+    await s.init()
+    print("TRACE: CALL fetch")
+    r = await s.fetch("k")
+    print(f"TRACE: RET {{r}}")
+    print(f"TRACE: status {{await s.status()}}")
+
+if __name__ == '__main__':
+    asyncio.run(main())
+"""
+
+
 # --- Phase-3 @@:self fuzz harnesses ---
 #
 # Each renderer produces the same normalized trace against the oracle:
@@ -2895,7 +2941,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=py_canary,
-        renderers={'persist': py_persist, 'selfcall': py_selfcall, 'hsm': py_hsm, 'operations': py_operations, 'nested': py_nested},
+        renderers={'persist': py_persist, 'selfcall': py_selfcall, 'hsm': py_hsm, 'operations': py_operations, 'nested': py_nested, 'async': py_async},
         rewrite_trace=_py_passthrough,
         notes="Pickle blob. staticmethod restore_state. Oracle reference.",
     ),
