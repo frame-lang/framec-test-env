@@ -248,6 +248,27 @@ if __name__ == '__main__':
 """
 
 
+def js_async(meta: dict) -> str:
+    """JS counterpart of `py_async`. Trace must byte-match the Python
+    oracle. Node.js / ESM target — the runner uses `node --import .mjs`
+    so top-level `await` is allowed."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+async function op(key) {{
+    await Promise.resolve();
+    return `value_for_${{key}}`;
+}}
+
+const s = new {sys_name}();
+await s.init();
+console.log("TRACE: CALL fetch");
+const r = await s.fetch("k");
+console.log(`TRACE: RET ${{r}}`);
+console.log(`TRACE: status ${{await s.status()}}`);
+"""
+
+
 # --- Phase-3 @@:self fuzz harnesses ---
 #
 # Each renderer produces the same normalized trace against the oracle:
@@ -2724,6 +2745,17 @@ def _js_trace(src: str) -> str:
     src = _sub_outside_strings(r'\bprint\((.*?)\)', r'console.log(\1);', src)
     src = _rewrite_self(src, "this.")
     src = _py_if_to_c_family(src)
+    # Bare `name = await foo(...)` — JS strict mode (.mjs default)
+    # rejects assignment to an undeclared identifier. Prepend `let `
+    # so the generator can keep emitting Python-canonical bodies.
+    # Anchored on a preceding newline (statement boundary) since
+    # `_sub_outside_strings` compiles without MULTILINE; only matches
+    # when the LHS isn't already qualified (`this.`, `let `, etc.).
+    src = _sub_outside_strings(
+        r'(\n\s*)([a-zA-Z_]\w*)\s*=\s*await\s+',
+        r'\1let \2 = await ',
+        src,
+    )
     return _lower_bool(src)
 
 
@@ -2953,7 +2985,7 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=js_canary,
-        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm, 'operations': js_operations, 'nested': js_nested},
+        renderers={'persist': js_persist, 'selfcall': js_selfcall, 'hsm': js_hsm, 'operations': js_operations, 'nested': js_nested, 'async': js_async},
         rewrite_trace=_js_trace,
         notes="JSON string blob. camelCase methods. Requires .mjs for ESM.",
     ),
