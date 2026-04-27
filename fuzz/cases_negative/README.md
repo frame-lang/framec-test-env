@@ -62,6 +62,12 @@ type inference.
   sources. A reachable fixture would need `@@target erlang` plus
   Erlang-syntax nested clause; out of scope for the current cross-
   target negative suite.
-- **E000, E408, E419**. Less common — only fire under combinations
-  the existing cases already approximate. Add as needed when
-  authoring fixtures that touch them.
+- **E419 (exit args mismatch)**. Documented in `frame_validator.rs`'s
+  module preamble but never actually emitted (no `"E419"` literal
+  in the codebase as of 2026-04-27). The exit-handler parameter
+  count is fetched in `arcanum.rs::get_exit_handler_param_count`
+  but isn't compared against transition exit args. If/when the
+  check is wired up, add a fixture similar to E417's enter form.
+- **E000, E408**. Less common — only fire under combinations the
+  existing cases already approximate. Add as needed when authoring
+  fixtures that touch them.
