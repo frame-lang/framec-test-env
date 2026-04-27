@@ -58,42 +58,55 @@ read_expected_error() {
         | sed 's/.*expect-error:[[:space:]]*//'
 }
 
+# Read the case file's `@@target <lang>` directive. Used to honor a
+# per-case target — important for codes that fire only on a subset
+# of backends (E605 fires for static targets only). Falls back to
+# the CLI-provided -l value when the directive is absent.
+read_case_target() {
+    local case_file=$1
+    head -10 "$case_file" 2>/dev/null \
+        | grep -m1 -oE '@@target[[:space:]]+[a-zA-Z_0-9]+' \
+        | sed 's/@@target[[:space:]]*//'
+}
+
 pass=0; fail=0
 for case_file in "$CASES_DIR"/*.fpy; do
     case_id=$(basename "$case_file" .fpy)
-    out=$OUT_DIR/$LANG/$case_id
+    case_target=$(read_case_target "$case_file")
+    target_lang=${case_target:-$LANG}
+    out=$OUT_DIR/$target_lang/$case_id
     rm -rf "$out" 2>/dev/null
     mkdir -p "$out"
-    errlog=$LOG_DIR/$LANG-$case_id.err
+    errlog=$LOG_DIR/$target_lang-$case_id.err
 
     expected=$(read_expected_error "$case_file")
     if [ -z "$expected" ]; then
         printf "%s\t%s\ttranspile\tFAIL\tno @@expect-error directive\n" \
-            "$LANG" "$case_id" >> "$summary_file"
+            "$target_lang" "$case_id" >> "$summary_file"
         fail=$((fail+1))
         echo "  FAIL  $case_id  (no @@expect-error directive)"
         continue
     fi
 
-    if "$FRAMEC" compile -l "$LANG" -o "$out" "$case_file" > "$errlog" 2>&1; then
+    if "$FRAMEC" compile -l "$target_lang" -o "$out" "$case_file" > "$errlog" 2>&1; then
         printf "%s\t%s\ttranspile\tFAIL\texpected %s but transpile succeeded\n" \
-            "$LANG" "$case_id" "$expected" >> "$summary_file"
+            "$target_lang" "$case_id" "$expected" >> "$summary_file"
         fail=$((fail+1))
-        echo "  FAIL  $case_id  (expected $expected but transpile succeeded)"
+        echo "  FAIL  $case_id  ($target_lang: expected $expected but transpile succeeded)"
         continue
     fi
 
     if grep -qE "\b${expected}\b" "$errlog"; then
         printf "%s\t%s\ttranspile\tPASS\texpected %s\n" \
-            "$LANG" "$case_id" "$expected" >> "$summary_file"
+            "$target_lang" "$case_id" "$expected" >> "$summary_file"
         pass=$((pass+1))
-        echo "  ok    $case_id  ($expected)"
+        echo "  ok    $case_id  ($target_lang: $expected)"
     else
         actual=$(grep -oE 'E[0-9]+' "$errlog" | head -1)
         printf "%s\t%s\ttranspile\tFAIL\texpected %s, got %s\n" \
-            "$LANG" "$case_id" "$expected" "$actual" >> "$summary_file"
+            "$target_lang" "$case_id" "$expected" "$actual" >> "$summary_file"
         fail=$((fail+1))
-        echo "  FAIL  $case_id  (expected $expected, got ${actual:-no error code})"
+        echo "  FAIL  $case_id  ($target_lang: expected $expected, got ${actual:-no error code})"
     fi
 done
 

@@ -40,19 +40,23 @@ direct.
 ## Coverage
 
 Currently covers (sorted): E111, E113, E114, E116, E117, E400, E401,
-E402, E403, E410, E413, E418, E601, E602, E603, E604, E614, E615.
+E402, E403, E410, E413, E418, E420, E421, E601, E602, E603, E604,
+E605, E614, E615.
+
+`run_negative.sh` honors each fixture's own `@@target` directive when
+present (falls back to CLI `-l <lang>`). E605 needs a static target
+(Java in our fixture) since the check only fires for backends without
+type inference.
 
 ## Codes intentionally not covered
 
-- **E405 (state parameter arity mismatch)**. The V4 lexer conflates
-  `-> $State(args)` arg expressions into `Expression::NativeExpr`
-  blobs that the validator can't introspect by arity, so E405 is
-  skipped at validation time and the target language compiler
-  catches the mismatch instead. Documented in
-  `frame_validator.rs:501-510`. A V5 lexer split could re-enable
-  this check; until then there's no reachable fixture.
-- **E000, E407, E408, E416, E417, E419, E420, E421, E501, E605,
-  E607**. Less common; either narrow target-specific (E501 GDScript,
-  E605 static targets) or only fire under combinations the existing
-  cases already approximate. Add as needed when authoring fixtures
-  that touch them.
+- **E405 (state parameter arity mismatch)** and **E607 (state args on
+  pop$)**. The V4 lexer conflates the relevant arg expressions into
+  `Expression::NativeExpr` blobs so the validator can't see arity,
+  and the framec implementations defer to the target compiler. A V5
+  lexer split could re-enable these checks; until then there's no
+  reachable fixture.
+- **E000, E407, E408, E416, E417, E419, E501**. Less common — narrow
+  target-specific (E501 GDScript) or only fire under combinations
+  the existing cases already approximate. Add as needed when
+  authoring fixtures that touch them.
