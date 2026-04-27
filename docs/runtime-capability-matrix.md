@@ -44,6 +44,11 @@ spec). Generated from a manual audit on 2026-04-26.
 | `@@persist` save / restore                               | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Async**                                                |
 | `async` interface methods                                | ✅ | ✅ | ✅ | ✅ | 🚫 | ✅ | ✅ | ✅[f] | 🚫[g] | 🚫 | ✅ | ✅ | 🚫 | 🚫 | ✅ | ✅ | 🚫[h] |
+| **Multi-feature surface (where target shape constrains)**|
+| Multi-system per file (multiple `@@system`s in one file) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🚫[j] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🚫[k] |
+| Cross-system field instantiation (`x = @@Other()`)       | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅[j] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🚫[k] |
+| Native list type for domain fields                       | ✅ | ✅ | ✅ | ✅ | 🚫[l] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| `while` loop in handler bodies (native passthrough)      | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🚫[m] |
 
 ## Footnotes
 
@@ -104,6 +109,44 @@ spec). Generated from a manual audit on 2026-04-26.
     in the framepiler repo for the path-to-alignment if structural
     consistency becomes a requirement.
 
+[j] **Java** — Java requires one public class per file, so a
+    file with multiple `@@system` declarations is rejected by
+    framec with E407. Cross-system field instantiation
+    (`level = @@Other()`) works fine when each `@@system` lives
+    in its own file. Multi-system test fixtures (demos 20, 28,
+    29, 33; primary 39, 50, 52) carry `@@skip` for `.fjava` and
+    are exercised on the other 15 backends instead.
+
+[k] **Erlang** — Erlang requires one module per file, so a file
+    with multiple `@@system` declarations is rejected by framec
+    with E406. Cross-system field instantiation isn't currently
+    wired for Erlang either: a `level = @@Other()` field would
+    need a `gen_statem:start_link/{1,3}` invocation in the parent
+    module's init, plus PID-based message routing instead of
+    direct method calls. Phase 7's multi-system fuzz harness
+    excludes Erlang for the same reason. Demos 20, 28, 29, 33
+    and frame_machines/state_var_parser carry `@@skip` for
+    `.ferl` and are exercised on the other 15 backends.
+
+[l] **C** — C has no native list/vector type. Frame's domain
+    fields with `: list` annotations require a runtime list
+    helper that framec doesn't currently ship for C. Demo 21
+    (worker_pool) skips on `.fc` because the source uses
+    `self.pending: list`. The other 16 backends use their
+    native list/array type.
+
+[m] **Erlang** — Frame's `while` keyword is target-language
+    native passthrough; framec emits the keyword verbatim into
+    handler bodies. Erlang has no `while` keyword (functional
+    language; iteration uses recursion or list comprehensions),
+    so a Frame source written with `while cond { ... }` won't
+    compile under Erlang. The 4 control_flow / systems while-
+    loop fixtures (`while_forward_then_native.ferl`,
+    `while_forward_then_transition_exec.ferl`,
+    `while_inline_forward_then_transition_exec.ferl`,
+    `while_inline_forward_stack_then_transition_exec.ferl`)
+    skip on `.ferl`.
+
 ## Summary
 
 | Bucket | Conformance |
@@ -111,7 +154,10 @@ spec). Generated from a manual audit on 2026-04-26.
 | Languages fully conformant to v4 spec | 17 / 17 |
 | Languages with HSM cascade implemented | 17 / 17 |
 | Known divergence | Erlang self-call guard mechanism ([i], structurally divergent but functional contract met) |
-| Language-natural skips | C, Go, PHP, Ruby, Lua, Erlang on async |
+| Language-natural skips (async) | C, Go, PHP, Ruby, Lua, Erlang |
+| Language-shape skips (multi-system per file) | Java, Erlang |
+| Language-shape skips (native list type) | C |
+| Language-shape skips (`while` keyword) | Erlang |
 
 ## Test corpus coverage
 
