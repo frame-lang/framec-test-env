@@ -492,6 +492,38 @@ fn main() {{
 """
 
 
+def cpp_async(meta: dict) -> str:
+    """C++ counterpart of `py_async`. framec emits async handlers as
+    C++20 coroutines returning `FrameTask<T>` (definition included in
+    the generated source — see `framec/.../runtime.rs`'s C++ branch).
+    The user-facing helper `op` is defined as a coroutine returning
+    `FrameTask<std::string>`. main() drives the system synchronously
+    via `FrameTask::get()` (which resumes-to-completion and unwraps).
+
+    The async handler body contains framec-passed-through `await
+    op(key);` — C++ has no `await` keyword (uses `co_await`). The
+    `_cpp_trace` rewriter replaces the prefix at the source-text
+    level after framec emits."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+FrameTask<std::string> op(std::string key) {{
+    co_return std::string("value_for_") + key;
+}}
+
+int main() {{
+    {sys_name} sys;
+    sys.init().get();
+    std::cout << "TRACE: CALL fetch" << std::endl;
+    auto r = sys.fetch(std::string("k")).get();
+    std::cout << "TRACE: RET " << std::any_cast<std::string>(r) << std::endl;
+    auto s = sys.status().get();
+    std::cout << "TRACE: status " << std::any_cast<std::string>(s) << std::endl;
+    return 0;
+}}
+"""
+
+
 def rust_async_supported(meta: dict) -> bool:
     """All async patterns are now supported on Rust. The historical
     skip on `two_awaits` was due to `String + String` being a type
@@ -3574,6 +3606,12 @@ def _cpp_trace(src: str) -> str:
     src = _rewrite_self(src, 'this->')
     src = _map_str_type(src, "std::string")
     src = _py_if_to_c_family(src)
+    # Async fuzz: framec passes the Frame source's `await op(key)`
+    # through to C++ verbatim. C++ has no `await` keyword — coroutines
+    # use `co_await`. Rewrite the prefix; the rest of the call site
+    # stays as-is (unlike Rust, the C++ awaitable is positional and
+    # doesn't need argument-level reborrowing).
+    src = re.sub(r'\bawait\s+([a-zA-Z_])', r'co_await \1', src)
     # Chained member-call dispatch on a `std::shared_ptr<T>` field —
     # cross-system fuzz emits `self.inner.bump()` which `_rewrite_self`
     # turns into `this->inner.bump()`. With the shared_ptr field type
@@ -3869,7 +3907,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=cpp_canary,
-        renderers={'persist': cpp_persist, 'selfcall': cpp_selfcall, 'hsm': cpp_hsm, 'operations': cpp_operations, 'nested': cpp_nested, 'multisys': cpp_multisys},
+        renderers={'persist': cpp_persist, 'selfcall': cpp_selfcall, 'hsm': cpp_hsm, 'operations': cpp_operations, 'nested': cpp_nested, 'multisys': cpp_multisys, 'async': cpp_async},
         rewrite_trace=_cpp_trace,
         docker_image="docker-cpp",
         # Framec's C++ codegen references `nlohmann::json` in
@@ -3877,7 +3915,23 @@ LANGS = {
         # user is expected to supply it in the prolog (matches what
         # the existing matrix tests do). `<iostream>` is for the
         # persist harness's `std::cout` calls.
-        prolog="#include <iostream>\n#include <nlohmann/json.hpp>\n",
+        # `<iostream>`/`<nlohmann/json.hpp>` are used by the
+        # persist + canary harnesses. `<string>` is needed for the
+        # forward declaration of `op`. The `template <typename T>
+        # struct FrameTask;` forward decl is compatible with framec's
+        # later full definition (a forward declaration of a class
+        # template is allowed before the full one); it lets the
+        # generated system class reference `FrameTask<std::string>
+        # op(...)` as a return type without requiring the full
+        # FrameTask body. The epilog (`cpp_async`) defines `op` as
+        # a coroutine after framec's FrameTask is fully declared.
+        prolog=(
+            "#include <iostream>\n"
+            "#include <string>\n"
+            "#include <nlohmann/json.hpp>\n"
+            "template <typename T> struct FrameTask;\n"
+            "FrameTask<std::string> op(std::string key);\n"
+        ),
         notes=(
             "JSON string (std::string). Requires C++23. Uses docker-cpp "
             "image (g++ 14+) since macOS Apple clang is typically older."
