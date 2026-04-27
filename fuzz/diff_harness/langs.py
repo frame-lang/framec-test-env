@@ -3302,6 +3302,21 @@ def _php_trace(src: str) -> str:
     src = _rewrite_self(src, '$this->')
     src = _sub_outside_strings(r'=\s*v\s*;', '= $v;', src)
     src = _py_if_to_c_family(src)
+    # Chained member access: `_rewrite_self` only converts the
+    # leading `self.X`, leaving `$this->inner.bump()`. PHP uses
+    # `->` for every method/field access — convert any
+    # `.<ident>(` (chained method call) to `-><ident>(`. This is
+    # specifically needed for the multi-system fuzz where the
+    # generator emits `self.inner.bump()` to call into a sibling
+    # system.
+    # Exclude `@@:self.<method>(` — that's framec syntax (Frame
+    # self-call), not a native chained access; framec parses the
+    # `.method` itself and emits the right per-target form.
+    src = _sub_outside_strings(
+        r'(?<!@@:self)\.([a-z_]\w*)\(',
+        r'->\1(',
+        src,
+    )
     return _lower_bool(src)
 
 
@@ -3650,11 +3665,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=php_canary,
-        # NOTE: 'multisys' renderer (php_multisys) is implemented but
-        # unwired — framec emits `new {{name}}()` in a context PHP's
-        # parser rejects ("New expressions are not supported in this
-        # context"). Real framec gap; tracked as Phase 7 follow-up.
-        renderers={'persist': php_persist, 'selfcall': php_selfcall, 'hsm': php_hsm, 'operations': php_operations, 'nested': php_nested},
+        renderers={'persist': php_persist, 'selfcall': php_selfcall, 'hsm': php_hsm, 'operations': php_operations, 'nested': php_nested, 'multisys': php_multisys},
         rewrite_trace=_php_trace,
         prolog="<?php\n",
         notes="JSON string blob. static restore_state. New() fires constructor.",
