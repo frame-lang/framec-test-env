@@ -2925,13 +2925,16 @@ def run_java(p: Path) -> List[str]:
 
 
 def compile_kotlin(p: Path) -> List[str]:
-    # kotlinc writes a jar. org.json is shipped at /lib/json.jar in
-    # docker-kotlin; the persist save_state/restore_state code imports
-    # it, so it's needed at compile AND run time. -J-Xmx2g mirrors the
-    # Kotlin docker runner which OOMs with the default heap.
+    # kotlinc writes a jar. /lib/json.jar is org.json (used by
+    # persist save/restore); /lib/kotlinx-coroutines-core-jvm.jar
+    # provides `runBlocking` for the async harness's main(). Both
+    # are pulled into docker-kotlin at image build time. Pass them
+    # at compile and run time. -J-Xmx2g mirrors the docker runner
+    # which OOMs with the default heap.
     jar = p.with_suffix(".jar")
+    cp = "/lib/json.jar:/lib/kotlinx-coroutines-core-jvm.jar"
     return [
-        "kotlinc", "-J-Xmx2g", "-cp", "/lib/json.jar",
+        "kotlinc", "-J-Xmx2g", "-cp", cp,
         str(p), "-include-runtime", "-d", str(jar),
     ]
 
@@ -2941,8 +2944,9 @@ def run_kotlin(p: Path) -> List[str]:
     # source filename and appending `Kt`, e.g. `case.kt` → `CaseKt`.
     jar = p.with_suffix(".jar")
     main_class = p.stem[:1].upper() + p.stem[1:] + "Kt"
+    cp = f"/lib/json.jar:/lib/kotlinx-coroutines-core-jvm.jar:{jar}"
     return [
-        "java", "-cp", f"/lib/json.jar:{jar}",
+        "java", "-cp", cp,
         main_class,
     ]
 
@@ -3494,14 +3498,21 @@ def _kotlin_trace(src: str) -> str:
     src = _map_str_type(src, "String")
     src = _map_bool_type(src, "Boolean")
     src = _py_if_to_c_family(src)
-    # Async fuzz: Python `await op(key)` → Kotlin bare `Helpers.op(key)`.
+    # Async fuzz: Python `await op(...)` → Kotlin bare `Helpers.op(...)`.
     # Kotlin's `suspend fun` calls don't need explicit `await` when in a
     # coroutine context (the framec dispatch chain runs inside
     # `runBlocking { ... }`). Drop the `await ` keyword and qualify
-    # the call.
+    # the call. Two arg shapes from the async generator:
+    #   `await op(key)`        — bare identifier (handler param)
+    #   `await op("literal")`  — string literal (two_phase_init)
     src = re.sub(
         r'\bawait\s+([a-zA-Z_]\w*)\(([a-zA-Z_]\w*)\)',
         r'Helpers.\1(\2)',
+        src,
+    )
+    src = re.sub(
+        r'\bawait\s+([a-zA-Z_]\w*)\("([^"]*)"\)',
+        r'Helpers.\1("\2")',
         src,
     )
     return _lower_bool(src)
@@ -3860,15 +3871,12 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=kotlin_canary,
-        # NOTE: 'async' renderer (kotlin_async) is implemented but not
-        # wired in — the harness's docker-kotlin image only ships
-        # `/lib/json.jar` on the kotlinc classpath; kotlinx.coroutines
-        # isn't available so `runBlocking` doesn't resolve. Adding the
-        # coroutines jar to the docker image (or vendoring it under
-        # /lib/) would unblock Kotlin async fuzz; tracked as Phase 6
-        # follow-up in `memory/phase6_async_2026_04_27.md`.
-        # 'multisys' is sync, so it works without the coroutines jar.
-        renderers={'persist': kotlin_persist, 'selfcall': kotlin_selfcall, 'hsm': kotlin_hsm, 'operations': kotlin_operations, 'nested': kotlin_nested, 'multisys': kotlin_multisys},
+        # docker-kotlin's Dockerfile pulls
+        # `kotlinx-coroutines-core-jvm-1.8.1.jar` into `/lib/` and
+        # `kotlin_batch.sh` adds it to the classpath, so async fuzz
+        # is now wireable. The earlier "not wired" note in this slot
+        # was stale (the jar landed when docker-kotlin was rebuilt).
+        renderers={'persist': kotlin_persist, 'selfcall': kotlin_selfcall, 'hsm': kotlin_hsm, 'operations': kotlin_operations, 'nested': kotlin_nested, 'multisys': kotlin_multisys, 'async': kotlin_async},
         rewrite_trace=_kotlin_trace,
         docker_image="docker-kotlin",
         # kotlinc -J-Xmx2g: 2GB heap per invocation. At --jobs=14 that's
@@ -3888,14 +3896,12 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=swift_canary,
-        # NOTE: 'async' renderer (swift_async) is implemented but not
-        # wired in — local Swift toolchain on macOS dev hosts is
-        # 5.3.2 (pre-async/await; Swift 5.5+ required). Docker
-        # docker-swift has a recent Swift; wiring requires routing
-        # the async fuzz through that image. Tracked as Phase 6
-        # follow-up in `memory/phase6_async_2026_04_27.md`.
-        renderers={'persist': swift_persist, 'selfcall': swift_selfcall, 'hsm': swift_hsm, 'operations': swift_operations, 'nested': swift_nested},
+        # docker-swift ships Swift 5.10 (well past the 5.5 async/await
+        # cutoff). Wiring `docker_image` here routes the async fuzz
+        # through that container so swiftc is recent enough.
+        renderers={'persist': swift_persist, 'selfcall': swift_selfcall, 'hsm': swift_hsm, 'operations': swift_operations, 'nested': swift_nested, 'async': swift_async},
         rewrite_trace=_swift_trace,
+        docker_image="docker-swift",
         notes="JSON string. camelCase methods. swiftc produces single binary.",
     ),
     "cpp": Lang(
