@@ -240,6 +240,23 @@ if __name__ == '__main__':
 """
 
 
+def kotlin_multisys(meta: dict) -> str:
+    """Kotlin counterpart of `py_multisys`. Sync — no coroutines
+    needed for Phase 7 so the kotlinx.coroutines classpath blocker
+    that gates Phase 6 async doesn't apply here."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+fun main() {{
+    val s = {sys_name}()
+    println("TRACE: CALL run")
+    s.run()
+    println("TRACE: CALL get_total")
+    println("TRACE: total " + s.get_total())
+}}
+"""
+
+
 def ruby_multisys(meta: dict) -> str:
     """Ruby counterpart of `py_multisys`."""
     sys_name = meta["sys_name"]
@@ -3728,7 +3745,8 @@ LANGS = {
         # coroutines jar to the docker image (or vendoring it under
         # /lib/) would unblock Kotlin async fuzz; tracked as Phase 6
         # follow-up in `memory/phase6_async_2026_04_27.md`.
-        renderers={'persist': kotlin_persist, 'selfcall': kotlin_selfcall, 'hsm': kotlin_hsm, 'operations': kotlin_operations, 'nested': kotlin_nested},
+        # 'multisys' is sync, so it works without the coroutines jar.
+        renderers={'persist': kotlin_persist, 'selfcall': kotlin_selfcall, 'hsm': kotlin_hsm, 'operations': kotlin_operations, 'nested': kotlin_nested, 'multisys': kotlin_multisys},
         rewrite_trace=_kotlin_trace,
         docker_image="docker-kotlin",
         # kotlinc -J-Xmx2g: 2GB heap per invocation. At --jobs=14 that's
