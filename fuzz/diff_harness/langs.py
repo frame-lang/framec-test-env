@@ -357,6 +357,94 @@ Future<void> main() async {{
 """
 
 
+def swift_async(meta: dict) -> str:
+    """Swift counterpart of `py_async`. Swift uses native `async`/
+    `await` (Swift 5.5+). The driver wraps in a `Task { ... }` and
+    blocks via `DispatchSemaphore` so the script doesn't exit before
+    awaits resolve. Swift's `init` is reserved for constructors;
+    framec renames the API-parity helper to `initAsync` for Swift —
+    see test_env demos/19_async_http_client.fswift."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+import Foundation
+
+func op(_ key: String) async -> String {{
+    return "value_for_" + key
+}}
+
+let __sem = DispatchSemaphore(value: 0)
+Task {{
+    let s = {sys_name}()
+    await s.initAsync()
+    print("TRACE: CALL fetch")
+    let r = await s.fetch("k")
+    print("TRACE: RET " + r)
+    print("TRACE: status " + (await s.status()))
+    __sem.signal()
+}}
+__sem.wait()
+"""
+
+
+def gdscript_async(meta: dict) -> str:
+    """GDScript counterpart of `py_async`. Godot 4 supports native
+    `await` (syntax matches Python). Driver runs inside
+    `SceneTree._init()` which the `extends SceneTree` prolog
+    already configures. `op` lives on a `Helpers` inner class as a
+    static method — bare `op(...)` inside Async<NNNN> handler
+    bodies doesn't resolve cross-class, so `_gdscript_trace`
+    qualifies the call as `Helpers.op(...)`."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+class Helpers:
+    static func op(key: String) -> String:
+        return "value_for_" + key
+
+func _init():
+    var s = {sys_name}.new()
+    await s.init()
+    print("TRACE: CALL fetch")
+    var r = await s.fetch("k")
+    print("TRACE: RET " + r)
+    print("TRACE: status " + await s.status())
+    quit()
+"""
+
+
+def kotlin_async(meta: dict) -> str:
+    """Kotlin counterpart of `py_async`. Kotlin uses `suspend fun`
+    + `runBlocking { ... }` — `op` is a suspend function declared
+    on a `Helpers` companion object, and `main()` opens a
+    `runBlocking` block. `_kotlin_trace` drops the `await` keyword
+    and qualifies `op(key)` as `Helpers.op(key)` since Kotlin's
+    suspend calls don't need explicit await in a coroutine context.
+
+    Kotlin imports must be at the top of the file but this renderer
+    appends to the bottom; using the fully-qualified
+    `kotlinx.coroutines.runBlocking` reference keeps the renderer
+    self-contained without needing to wire a prolog."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+object Helpers {{
+    suspend fun op(key: String): String {{
+        return "value_for_" + key
+    }}
+}}
+
+fun main() = kotlinx.coroutines.runBlocking {{
+    val s = {sys_name}()
+    s.init()
+    println("TRACE: CALL fetch")
+    val r = s.fetch("k")
+    println("TRACE: RET " + r)
+    println("TRACE: status " + s.status())
+}}
+"""
+
+
 def java_async(meta: dict) -> str:
     """Java counterpart of `py_async`. Java has no `async`/`await`
     keywords; framec lowers `async fetch(): String` to a method
@@ -3066,6 +3154,16 @@ def _kotlin_trace(src: str) -> str:
     src = _map_str_type(src, "String")
     src = _map_bool_type(src, "Boolean")
     src = _py_if_to_c_family(src)
+    # Async fuzz: Python `await op(key)` → Kotlin bare `Helpers.op(key)`.
+    # Kotlin's `suspend fun` calls don't need explicit `await` when in a
+    # coroutine context (the framec dispatch chain runs inside
+    # `runBlocking { ... }`). Drop the `await ` keyword and qualify
+    # the call.
+    src = re.sub(
+        r'\bawait\s+([a-zA-Z_]\w*)\(([a-zA-Z_]\w*)\)',
+        r'Helpers.\1(\2)',
+        src,
+    )
     return _lower_bool(src)
 
 
@@ -3081,6 +3179,15 @@ def _swift_trace(src: str) -> str:
 def _gdscript_trace(src: str) -> str:
     # GDScript uses `true`/`false` lowercase and `self.x` natively.
     # `print(...)` is valid as-is.
+    # Async fuzz: `op` lives on the `Helpers` inner class (cross-
+    # class scoping — see `gdscript_async`). Qualify bare `op(`
+    # calls inside Async<NNNN> handlers; idempotent via the `(?<!\.)`
+    # lookbehind on already-qualified calls.
+    src = _sub_outside_strings(
+        r'(?<!\.)\bop\(',
+        r'Helpers.op(',
+        src,
+    )
     return _lower_bool(src)
 
 
@@ -3249,7 +3356,7 @@ LANGS = {
         out_ext="gd",
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
-        renderers={'persist': gdscript_persist, 'selfcall': gdscript_selfcall, 'hsm': gdscript_hsm, 'operations': gdscript_operations, 'nested': gdscript_nested},
+        renderers={'persist': gdscript_persist, 'selfcall': gdscript_selfcall, 'hsm': gdscript_hsm, 'operations': gdscript_operations, 'nested': gdscript_nested, 'async': gdscript_async},
         run_custom=gdscript_run_custom,
         rewrite_trace=_gdscript_trace,
         docker_image="docker-gdscript",  # informational; custom hook wraps itself
@@ -3373,6 +3480,13 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=kotlin_canary,
+        # NOTE: 'async' renderer (kotlin_async) is implemented but not
+        # wired in — the harness's docker-kotlin image only ships
+        # `/lib/json.jar` on the kotlinc classpath; kotlinx.coroutines
+        # isn't available so `runBlocking` doesn't resolve. Adding the
+        # coroutines jar to the docker image (or vendoring it under
+        # /lib/) would unblock Kotlin async fuzz; tracked as Phase 6
+        # follow-up in `memory/phase6_async_2026_04_27.md`.
         renderers={'persist': kotlin_persist, 'selfcall': kotlin_selfcall, 'hsm': kotlin_hsm, 'operations': kotlin_operations, 'nested': kotlin_nested},
         rewrite_trace=_kotlin_trace,
         docker_image="docker-kotlin",
@@ -3393,6 +3507,12 @@ LANGS = {
         save_method="saveState",
         restore_call="{S}.restoreState({B})",
         render_canary=swift_canary,
+        # NOTE: 'async' renderer (swift_async) is implemented but not
+        # wired in — local Swift toolchain on macOS dev hosts is
+        # 5.3.2 (pre-async/await; Swift 5.5+ required). Docker
+        # docker-swift has a recent Swift; wiring requires routing
+        # the async fuzz through that image. Tracked as Phase 6
+        # follow-up in `memory/phase6_async_2026_04_27.md`.
         renderers={'persist': swift_persist, 'selfcall': swift_selfcall, 'hsm': swift_hsm, 'operations': swift_operations, 'nested': swift_nested},
         rewrite_trace=_swift_trace,
         notes="JSON string. camelCase methods. swiftc produces single binary.",
