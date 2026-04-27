@@ -501,3 +501,70 @@ one-class-per-file in Java, etc.) → mark `✗` in matrix and skip. Never
 Start Phase 1.1: the applicability smoke run. That's 10 minutes of
 bash to fill in the `?` cells before we design wrappers for backends
 that might not support the feature at all.
+
+## TODO: per-language guides — idiomatic Frame for each backend
+
+Frame's "Oceans Model" (native code passes through to the target)
+gives each backend its own idiomatic surface. Some patterns work
+universally (Frame state machines, transitions, `@@:return`) but
+others are target-specific in non-obvious ways:
+
+- **Loop idioms** — Frame has two: (1) imperative `while cond { ... }`
+  via native passthrough (only works on backends with a `while`
+  keyword: every C-family + Python, but not Erlang); (2) state-flow
+  loop where iteration is a state-machine self-transition (works
+  everywhere). Erlang practitioners reach for idiom 2 by reflex
+  because `gen_statem` already implements its state semantics via
+  tail-position recursion. C-family practitioners default to idiom
+  1 because it matches their loops. Same applies to recursion in
+  general — Erlang programmers expect helper-level recursion in
+  the prolog passthrough; C-family expect for/while inside handler
+  bodies.
+- **Async** — Frame async lowers to `await EXPR.method()` in
+  Rust, `co_await EXPR.method()` in C++, `EXPR.method()` (suspend
+  function) in Kotlin. The Frame source uses `await EXPR` and
+  framec / harness rewrite per-target. Documenting which Frame
+  source shapes are portable vs. need per-target rewriting is
+  high-value.
+- **Domain field types** — `: list` works on dynamic targets but
+  needs a `typedef` workaround on C and a `Vec<T>` on Rust. The
+  Frame source for C uses `typedef char* JobSlots[8];` in the
+  prolog and `pending: JobSlots` in domain. This is non-obvious
+  — would benefit from a guide.
+- **Multi-system per file** — Java requires one public class per
+  file; Erlang requires one module per file. Frame source with
+  multiple `@@system` blocks must be split for those targets.
+  Currently surfaced via `@@skip` on multi-system fixtures; a
+  guide would pre-empt the issue.
+- **String concat** — Python/JS/Java accept `String + String`
+  natively; Rust requires `String + &String` (`.clone() + &`).
+  The diff harness already rewrites `self.X + self.Y` for Rust
+  (see `_rust_trace`); the equivalent rewrite for Frame source
+  written by humans would be documented per-target.
+- **String interpolation** — Python `f"…"`, JS template literals
+  ``` `…${expr}…` ```, Erlang `io_lib:format/2`, C `snprintf`.
+  Each is target-specific; the universal Frame syntax is
+  `@@:(expr)` for return values + native string concat.
+- **Return-type inference** — strongly-typed targets (TS / Java /
+  Kotlin / Swift / C# / Dart / C / C++ / Go / Rust) emit
+  `return …;` only when the source declares `(): type`; dynamic
+  targets always emit a return. Already documented in
+  `frame_runtime.md`'s "Return values across target languages"
+  but a per-target cheat-sheet would surface the contract.
+
+**Action:** create `docs/per_language_guides/<lang>.md` for each
+of the 17 backends. Each file documents the target's idiomatic
+Frame patterns, common gotchas, and the framec / harness
+behaviours the user needs to know. Start with Erlang and Rust —
+their idioms diverge most sharply from the C-family default and
+they're the most common source of "framec doesn't do what I
+expect" friction.
+
+Cross-references:
+- `docs/runtime-capability-matrix.md` for the per-backend
+  capability table.
+- `docs/erlang_alignment_requirements.md` for the existing
+  Erlang-divergence catalogue (self-call guard mechanism).
+- Frame source examples at
+  `tests/common/positive/control_flow/while_*.ferl` for the
+  state-flow loop idiom in Erlang.

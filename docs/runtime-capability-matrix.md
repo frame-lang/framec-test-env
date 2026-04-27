@@ -49,6 +49,7 @@ spec). Generated from a manual audit on 2026-04-26.
 | Cross-system field instantiation (`x = @@Other()`)       | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅[j] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🚫[k] |
 | Native list type for domain fields                       | ✅ | ✅ | ✅ | ✅ | ✅[l] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | `while` loop in handler bodies (native passthrough)      | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | 🚫[m] |
+| State-flow loop (self-transition + forward + push)       | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅[n] |
 
 ## Footnotes
 
@@ -146,12 +147,24 @@ spec). Generated from a manual audit on 2026-04-26.
     handler bodies. Erlang has no `while` keyword (functional
     language; iteration uses recursion or list comprehensions),
     so a Frame source written with `while cond { ... }` won't
-    compile under Erlang. The 4 control_flow / systems while-
-    loop fixtures (`while_forward_then_native.ferl`,
-    `while_forward_then_transition_exec.ferl`,
-    `while_inline_forward_then_transition_exec.ferl`,
-    `while_inline_forward_stack_then_transition_exec.ferl`)
-    skip on `.ferl`.
+    compile under Erlang. The 4 control_flow / systems
+    while-loop fixtures originally skipped on `.ferl`, but have
+    been re-expressed in the **state-flow loop** idiom (footnote
+    [n]) — they now run cleanly across all 17 backends and the
+    `@@skip` directives have been removed.
+
+[n] **State-flow loop** — Frame has two loop idioms. (1) The
+    imperative `while cond { ... }` inside a handler body, which
+    is target-native passthrough and therefore only works on
+    backends that have a `while` keyword. (2) The state-flow
+    loop, where iteration is a state-machine self-transition:
+    the handler emits `push$` / `=> $^` / `-> $Next` and the
+    next iteration is the next dispatch. Idiom (2) compiles
+    cleanly on every backend, including Erlang's `gen_statem`
+    which already implements its state semantics via tail-
+    position recursion. Per-language guidance for choosing
+    between the two idioms is tracked in
+    `docs/per_language_guides/` (TODO — see roadmap).
 
 ## Summary
 
@@ -162,7 +175,7 @@ spec). Generated from a manual audit on 2026-04-26.
 | Known divergence | Erlang self-call guard mechanism ([i], structurally divergent but functional contract met) |
 | Language-natural skips (async) | C, Go, PHP, Ruby, Lua, Erlang |
 | Language-shape skips (multi-system per file) | Java, Erlang |
-| Language-shape skips (`while` keyword) | Erlang |
+| Language-shape skips (`while` keyword, idiom-1 only) | Erlang |
 
 ## Test corpus coverage
 
