@@ -240,6 +240,24 @@ if __name__ == '__main__':
 """
 
 
+def cpp_multisys(meta: dict) -> str:
+    """C++ counterpart of `py_multisys`. Driver is stack-allocated;
+    the inner Counter is held as `std::shared_ptr<Counter>` (per
+    framec's cross-system field translation in `cpp.rs::emit_field`)."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+int main() {{
+    {sys_name} s;
+    std::cout << "TRACE: CALL run" << std::endl;
+    s.run();
+    std::cout << "TRACE: CALL get_total" << std::endl;
+    std::cout << "TRACE: total " << s.get_total() << std::endl;
+    return 0;
+}}
+"""
+
+
 def kotlin_multisys(meta: dict) -> str:
     """Kotlin counterpart of `py_multisys`. Sync — no coroutines
     needed for Phase 7 so the kotlinx.coroutines classpath blocker
@@ -3502,6 +3520,18 @@ def _cpp_trace(src: str) -> str:
     src = _rewrite_self(src, 'this->')
     src = _map_str_type(src, "std::string")
     src = _py_if_to_c_family(src)
+    # Chained member-call dispatch on a `std::shared_ptr<T>` field —
+    # cross-system fuzz emits `self.inner.bump()` which `_rewrite_self`
+    # turns into `this->inner.bump()`. With the shared_ptr field type
+    # (framec/.../codegen/backends/cpp.rs::emit_field), the trailing
+    # `.bump()` must be `->bump()`. Same shape as PHP's chained-call
+    # rewrite, gated on a `(?<!@@:self)` lookbehind so framec
+    # self-call syntax stays intact.
+    src = _sub_outside_strings(
+        r'(?<!@@:self)\.([a-z_]\w*)\(',
+        r'->\1(',
+        src,
+    )
     return _lower_bool(src)
 
 
@@ -3785,7 +3815,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=cpp_canary,
-        renderers={'persist': cpp_persist, 'selfcall': cpp_selfcall, 'hsm': cpp_hsm, 'operations': cpp_operations, 'nested': cpp_nested},
+        renderers={'persist': cpp_persist, 'selfcall': cpp_selfcall, 'hsm': cpp_hsm, 'operations': cpp_operations, 'nested': cpp_nested, 'multisys': cpp_multisys},
         rewrite_trace=_cpp_trace,
         docker_image="docker-cpp",
         # Framec's C++ codegen references `nlohmann::json` in
