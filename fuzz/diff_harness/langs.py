@@ -240,6 +240,65 @@ if __name__ == '__main__':
 """
 
 
+def ruby_multisys(meta: dict) -> str:
+    """Ruby counterpart of `py_multisys`."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+s = {sys_name}.new
+puts "TRACE: CALL run"
+s.run
+puts "TRACE: CALL get_total"
+puts "TRACE: total #{{s.get_total}}"
+"""
+
+
+def lua_multisys(meta: dict) -> str:
+    """Lua counterpart of `py_multisys`. Lua method dispatch is
+    `:` (passes self). Frame's `self.inner.bump()` becomes
+    `self:inner:bump()` in Lua — but that's already handled by
+    `_lua_trace` for sync calls. Driver creates the outer with
+    `:new()` and calls methods with `:`."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+local s = {sys_name}:new()
+print("TRACE: CALL run")
+s:run()
+print("TRACE: CALL get_total")
+print("TRACE: total " .. s:get_total())
+"""
+
+
+def php_multisys(meta: dict) -> str:
+    """PHP counterpart of `py_multisys`."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+$s = new {sys_name}();
+echo "TRACE: CALL run" . PHP_EOL;
+$s->run();
+echo "TRACE: CALL get_total" . PHP_EOL;
+echo "TRACE: total " . $s->get_total() . PHP_EOL;
+"""
+
+
+def go_multisys(meta: dict) -> str:
+    """Go counterpart of `py_multisys`. Note framec's Go backend
+    uses `New<System>()` package-level constructor."""
+    sys_name = meta["sys_name"]
+    return f"""
+
+func main() {{
+    s := New{sys_name}()
+    fmt.Println("TRACE: CALL run")
+    s.Run()
+    fmt.Println("TRACE: CALL get_total")
+    fmt.Println("TRACE: total", s.GetTotal())
+}}
+"""
+
+
 def py_async(meta: dict) -> str:
     """Python oracle for the async fuzz. The native helper `op` is the
     awaited callable that the generated handler body references; the
@@ -3437,6 +3496,11 @@ LANGS = {
         save_method="SaveState",
         restore_call="Restore{S}({B})",  # package-level function
         render_canary=go_canary,
+        # NOTE: 'multisys' renderer (go_multisys) is implemented but
+        # unwired — framec's Go backend emits `NewCounter()` returning
+        # `*Counter` but types the domain field as `Counter` (by
+        # value), so the assignment fails type-check. Real framec gap;
+        # tracked as Phase 7 follow-up.
         renderers={'persist': go_persist, 'selfcall': go_selfcall, 'hsm': go_hsm, 'operations': go_operations, 'nested': go_nested},
         rewrite_trace=_go_trace,
         prolog='package main\n\nimport (\n\t"encoding/json"\n\t"fmt"\n)\n\nvar _ = json.Marshal\n',
@@ -3450,7 +3514,7 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=ruby_canary,
-        renderers={'persist': ruby_persist, 'selfcall': ruby_selfcall, 'hsm': ruby_hsm, 'operations': ruby_operations, 'nested': ruby_nested},
+        renderers={'persist': ruby_persist, 'selfcall': ruby_selfcall, 'hsm': ruby_hsm, 'operations': ruby_operations, 'nested': ruby_nested, 'multisys': ruby_multisys},
         rewrite_trace=_ruby_trace,
         prolog="require 'json'\n",
         notes="JSON blob. snake_case methods, classmethod restore_state.",
@@ -3463,6 +3527,11 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}.restore_state({B})",
         render_canary=lua_canary,
+        # NOTE: 'multisys' renderer (lua_multisys) is implemented but
+        # unwired — framec's Lua codegen for cross-system method
+        # calls binds `self` to nil at the inner-method call site
+        # (`attempt to index a nil value (local 'self')`). Real
+        # framec gap; tracked as Phase 7 follow-up.
         renderers={'persist': lua_persist, 'selfcall': lua_selfcall, 'hsm': lua_hsm, 'operations': lua_operations, 'nested': lua_nested},
         rewrite_trace=_lua_trace,
         docker_image="docker-lua",
@@ -3556,6 +3625,10 @@ LANGS = {
         save_method="save_state",
         restore_call="{S}::restore_state({B})",
         render_canary=php_canary,
+        # NOTE: 'multisys' renderer (php_multisys) is implemented but
+        # unwired — framec emits `new {{name}}()` in a context PHP's
+        # parser rejects ("New expressions are not supported in this
+        # context"). Real framec gap; tracked as Phase 7 follow-up.
         renderers={'persist': php_persist, 'selfcall': php_selfcall, 'hsm': php_hsm, 'operations': php_operations, 'nested': php_nested},
         rewrite_trace=_php_trace,
         prolog="<?php\n",
