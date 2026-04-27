@@ -284,8 +284,11 @@ echo "TRACE: total " . $s->get_total() . PHP_EOL;
 
 
 def go_multisys(meta: dict) -> str:
-    """Go counterpart of `py_multisys`. Note framec's Go backend
-    uses `New<System>()` package-level constructor."""
+    """Go counterpart of `py_multisys`. framec's Go backend uses
+    `New<System>()` package-level constructor and capitalizes only
+    the first letter of method names (preserving underscores), so
+    `get_total` emits as `Get_total` — not idiomatic Go but matches
+    the canary/persist conventions in this harness."""
     sys_name = meta["sys_name"]
     return f"""
 
@@ -294,7 +297,7 @@ func main() {{
     fmt.Println("TRACE: CALL run")
     s.Run()
     fmt.Println("TRACE: CALL get_total")
-    fmt.Println("TRACE: total", s.GetTotal())
+    fmt.Println("TRACE: total", s.Get_total())
 }}
 """
 
@@ -3196,6 +3199,20 @@ def _go_trace(src: str) -> str:
     # inside framec itself (see frame_expansion.rs Go branches).
     src = _rewrite_self(src, "s.")
     src = _py_if_to_c_family(src)
+    # Multi-system fuzz: cross-system method calls go through a
+    # domain-stored sibling system. framec's Go backend exports
+    # methods with a capitalized first letter (`bump` → `Bump`,
+    # `get_n` → `Get_n`); the Frame source uses the lowercase form
+    # (the generator emits Python-canonical names). Rewrite
+    # `.<lower>(` to `.<Cap>(` only when preceded by `.<ident>.`
+    # (i.e., a chained access like `s.inner.bump()`) so we don't
+    # accidentally capitalize the receiver-level call (`s.run()`
+    # — that's framec's responsibility, already correct).
+    src = re.sub(
+        r'(\.[a-zA-Z_]\w*\.)([a-z])(\w*)\(',
+        lambda m: m.group(1) + m.group(2).upper() + m.group(3) + '(',
+        src,
+    )
     return _lower_bool(src)
 
 
@@ -3509,12 +3526,7 @@ LANGS = {
         save_method="SaveState",
         restore_call="Restore{S}({B})",  # package-level function
         render_canary=go_canary,
-        # NOTE: 'multisys' renderer (go_multisys) is implemented but
-        # unwired — framec's Go backend emits `NewCounter()` returning
-        # `*Counter` but types the domain field as `Counter` (by
-        # value), so the assignment fails type-check. Real framec gap;
-        # tracked as Phase 7 follow-up.
-        renderers={'persist': go_persist, 'selfcall': go_selfcall, 'hsm': go_hsm, 'operations': go_operations, 'nested': go_nested},
+        renderers={'persist': go_persist, 'selfcall': go_selfcall, 'hsm': go_hsm, 'operations': go_operations, 'nested': go_nested, 'multisys': go_multisys},
         rewrite_trace=_go_trace,
         prolog='package main\n\nimport (\n\t"encoding/json"\n\t"fmt"\n)\n\nvar _ = json.Marshal\n',
         notes="JSON blob. PascalCase methods. Restore is pkg-level `RestoreP()`.",
