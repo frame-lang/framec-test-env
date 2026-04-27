@@ -43,7 +43,7 @@ spec). Generated from a manual audit on 2026-04-26.
 | **Step 25: persistence**                                 |
 | `@@persist` save / restore                               | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Async**                                                |
-| `async` interface methods                                | ✅ | ✅ | ✅ | ✅ | 🚫 | ✅ | ✅ | 🚫[f] | 🚫[g] | 🚫 | ✅ | ✅ | 🚫 | 🚫 | ✅ | ✅ | 🚫[h] |
+| `async` interface methods                                | ✅ | ✅ | ✅ | ✅ | 🚫 | ✅ | ✅ | ✅[f] | 🚫[g] | 🚫 | ✅ | ✅ | 🚫 | 🚫 | ✅ | ✅ | 🚫[h] |
 
 ## Footnotes
 
@@ -62,9 +62,20 @@ spec). Generated from a manual audit on 2026-04-26.
     `<$` handlers fire and receive their declared params via
     positional extraction from the args map.
 
-[f] **Java** — Frame async lowers to `CompletableFuture` in
-    principle but isn't fully wired (`make_system_async` has a
-    placeholder for Java). Existing Java tests don't exercise async.
+[f] **Java** — async-typed interface methods return
+    `CompletableFuture<T>`, with bodies wrapping their result via
+    `.completedFuture(...)`. The internal dispatch chain stays
+    synchronous (the constructor fires the start-state's `$>`
+    cascade directly, since two-phase init buys nothing on a
+    sync runtime). Users `.get()` at the interface boundary.
+    Implementation is `make_java_interface_async` in
+    `framec_native_codegen/system_codegen.rs`. An `init()` method
+    is also emitted for cross-language API parity (callers can
+    write `system.init().get()` portably) — its body is a no-op
+    completed-future, since the constructor already drove
+    initialization. Tested by
+    `tests/java/positive/async_basic.fjava` and
+    `tests/common/positive/demos/19_async_http_client.fjava`.
 
 [g] **Go** — async goroutines aren't supported via `@@async`;
     Go's concurrency model is goroutines + channels, which doesn't

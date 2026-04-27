@@ -1,0 +1,52 @@
+@@target java
+
+import java.util.concurrent.ExecutionException;
+
+// Java async basic — async-typed interface methods + portable init().
+//
+// Java's async approximation: `make_java_interface_async` in
+// system_codegen.rs marks interface methods async (return type wraps
+// in CompletableFuture<T>; body wraps result via .completedFuture(...)).
+// Constructor fires the start-state's $> synchronously; init() is an
+// API-parity no-op so the same call sequence works across languages.
+
+@@system AsyncBasic {
+    interface:
+        async fetch(): String
+        async getState(): String
+
+    machine:
+        $Ready {
+            fetch(): String { @@:("hello") }
+            getState(): String { @@:("Ready") }
+        }
+}
+
+class Main {
+    public static void main(String[] args) throws InterruptedException, ExecutionException {
+        AsyncBasic s = new AsyncBasic();
+
+        // init() is a no-op for Java but exists for API parity with
+        // Python/TS/Rust/etc. — same call sequence works portably.
+        s.init().get();
+
+        String result = s.fetch().get();
+        if (!"hello".equals(result)) {
+            throw new RuntimeException("Expected 'hello', got '" + result + "'");
+        }
+
+        String state = s.getState().get();
+        if (!"Ready".equals(state)) {
+            throw new RuntimeException("Expected 'Ready', got '" + state + "'");
+        }
+
+        // init() should be idempotent (no-op on subsequent calls).
+        s.init().get();
+        String result2 = s.fetch().get();
+        if (!"hello".equals(result2)) {
+            throw new RuntimeException("Expected 'hello' after second init, got '" + result2 + "'");
+        }
+
+        System.out.println("PASS: java async basic — init() + async interface methods");
+    }
+}
