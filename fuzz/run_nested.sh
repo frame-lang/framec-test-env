@@ -14,7 +14,13 @@ OUT_DIR=$SCRIPT_DIR/out_nested
 LOG_DIR=$SCRIPT_DIR/logs_nested
 mkdir -p "$OUT_DIR" "$LOG_DIR"
 
-LANGS=${@:-"python_3 javascript erlang"}
+LANGS=${@:-"python_3 javascript typescript ruby lua php dart erlang"}
+# Rust / Go / Swift have working transpile + run paths in this
+# script (run with `--langs rust go swift`) but expose an unfixed
+# framec codegen defect on patterns p1/p3/p4/p7 — `@@:return` as
+# arg to a typed-int method emits `Box<dyn Any>` / `any` / `Any?`
+# without a downcast. Excluded from default to keep the green
+# signal honest.
 summary=$LOG_DIR/summary.tsv
 : > "$summary"
 printf "lang\tcase\tstage\tresult\terror\n" >> "$summary"
@@ -23,6 +29,14 @@ lang_to_ext() {
     case "$1" in
         python_3)   echo fpy ;;
         javascript) echo fjs ;;
+        typescript) echo fts ;;
+        ruby)       echo frb ;;
+        lua)        echo flua ;;
+        php)        echo fphp ;;
+        dart)       echo fdart ;;
+        rust)       echo frs ;;
+        go)         echo fgo ;;
+        swift)      echo fswift ;;
         erlang)     echo ferl ;;
         *)          echo unknown ;;
     esac
@@ -61,6 +75,49 @@ run_one() {
             local mjs="${gen%.js}.mjs"
             cp "$gen" "$mjs"
             result=$(node "$mjs" 2>&1)
+            rc=$?
+            ;;
+        typescript)
+            # `tsx` runs TS sources directly without a separate compile step.
+            # Allow loose typing so the runtime's `Object`-typed return slots
+            # don't trip the assignment to `_n: number` — the test driver
+            # already checks the value at runtime.
+            result=$(tsx "$gen" 2>&1)
+            rc=$?
+            ;;
+        ruby)
+            result=$(ruby "$gen" 2>&1)
+            rc=$?
+            ;;
+        lua)
+            result=$(lua "$gen" 2>&1)
+            rc=$?
+            ;;
+        php)
+            result=$(php "$gen" 2>&1)
+            rc=$?
+            ;;
+        dart)
+            result=$(dart run "$gen" 2>&1)
+            rc=$?
+            ;;
+        rust)
+            local bin="$out/bin"
+            if ! rustc -o "$bin" "$gen" 2>"$errlog"; then
+                local e
+                e=$(head -3 "$errlog" | tr '\n' '|' | head -c 220)
+                printf "%s\t%s\tcompile\tFAIL\t%s\n" "$lang" "$case_id" "$e" >> "$summary"
+                return 1
+            fi
+            result=$("$bin" 2>&1)
+            rc=$?
+            ;;
+        go)
+            result=$(go run "$gen" 2>&1)
+            rc=$?
+            ;;
+        swift)
+            result=$(swift "$gen" 2>&1)
             rc=$?
             ;;
         erlang)

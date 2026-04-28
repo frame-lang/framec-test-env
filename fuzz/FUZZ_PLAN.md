@@ -367,8 +367,21 @@ is expanded recursively at framec's segmentation / expansion stage
 
 **Current status:** Phase 9 harness landed. Defect #10 was closed
 (framec recursively expands nested Frame syntax via
-`expand_expression` in `frame_expansion.rs`). Initial harness ships
-**7 patterns × 3 backends = 21 cases**, all passing:
+`expand_expression` in `frame_expansion.rs`). Harness covers
+**7 patterns × 8 backends (default) = 56 cases**, all passing:
+python_3, javascript, typescript, ruby, lua, php, dart, erlang.
+
+Three additional backends (rust, go, swift) are wired up in
+gen_nested.py + run_nested.sh but are NOT in the default langs
+list — they expose an unfixed framec codegen defect: when
+`@@:return` is passed as an arg to a typed-int method, the
+generated code passes the un-downcast type-erased return slot
+(`Box<dyn Any>` / `any` / `Any?`) to a method expecting `i64` /
+`int` / `Int`. Patterns p1, p3, p4, p7 fail; p2, p5, p6 pass.
+Run explicitly with `./run_nested.sh rust go swift` to
+reproduce. Tracked separately as a framec codegen task.
+
+The 7 patterns:
 
   - P1  `@@:self.foo(@@:return)`          — `@@:return` as arg
   - P2  `@@:self.foo(@@:params.x)`        — `@@:params` as arg
@@ -378,13 +391,15 @@ is expanded recursively at framec's segmentation / expansion stage
   - P6  `@@:self.absorb(self.peek())`     — op-call as arg
   - P7  `@@:self.foo(@@:self.bar(@@:r))`  — two-level nest
 
-Each case is self-checking (Python/JS via inline drivers; Erlang
-via an external escript that reads `%% FUZZ_EXPECTED_N:`).
-Generator + runner: `gen_nested.py` / `run_nested.sh`. Expanding
-to the remaining 14 backends + ~50 more pattern variations (HSM
-parents, transitions inside nested args, push/pop interactions)
-follows the same shape — bring up one backend at a time, assert
-against the same expected-N contract.
+Each case is self-checking (Python/JS/TS/Ruby/Lua/PHP/Dart via
+inline drivers; Erlang via an external escript that reads
+`%% FUZZ_EXPECTED_N:`). Generator + runner: `gen_nested.py` /
+`run_nested.sh`. Expanding to the remaining backends (csharp,
+java, kotlin, c, cpp, gdscript) + the rust/go/swift defect fix +
+~50 more pattern variations (HSM parents, transitions inside
+nested args, push/pop interactions) follows the same shape —
+bring up one backend at a time, assert against the same
+expected-N contract.
 
 ### Phase 8 — Negative (passthrough-error) fuzz
 
@@ -462,7 +477,7 @@ should: at the native compiler.
 | 6     |    ~1,100  |   ~18,933  | 11-backend subset                   |
 | 7     |    ~2,400  |   ~21,333  | 16-backend subset                   |
 | 8     |      ~850  |   ~22,183  | negative passthrough — after 5–7    |
-| 9     |        21  |    ~21,354 | **harness landed** (7 patterns × 3 backends; expand) |
+| 9     |        56  |    ~21,389 | **harness landed** (7 patterns × 8 backends; rust/go/swift expose framec @@:return-typed-arg defect) |
 
 Well under 50k — tight enough that a full fuzz run fits in a coffee-
 break, loose enough that it's catching real bugs per phase.

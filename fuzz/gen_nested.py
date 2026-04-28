@@ -54,11 +54,13 @@ PATTERNS = [
 
 class LangSpec:
     __slots__ = ("target", "ext", "stmt_end", "self_word",
+                 "field_op", "method_op", "param_prefix",
                  "println_pass", "fail_exit_def")
 
     def __init__(self, **kw):
+        defaults = {"field_op": ".", "method_op": ".", "param_prefix": ""}
         for k in self.__slots__:
-            setattr(self, k, kw.get(k, ""))
+            setattr(self, k, kw.get(k, defaults.get(k, "")))
 
 
 def _build_specs():
@@ -95,6 +97,96 @@ function _fail(msg) { console.log("FAIL: " + msg); process.exit(1); }
         println_pass="",  # external escript driver
         fail_exit_def="",
     )
+    specs["typescript"] = LangSpec(
+        target="typescript", ext="fts",
+        stmt_end=";",
+        self_word="this",
+        println_pass='console.log("PASS: nested-frame");',
+        fail_exit_def='''
+function _fail(msg: string): never { console.log("FAIL: " + msg); process.exit(1); }
+''',
+    )
+    specs["ruby"] = LangSpec(
+        target="ruby", ext="frb",
+        stmt_end="",
+        self_word="self",
+        println_pass='puts("PASS: nested-frame")',
+        fail_exit_def='''
+def _fail(msg)
+  puts("FAIL: #{msg}")
+  exit(1)
+end
+''',
+    )
+    specs["lua"] = LangSpec(
+        target="lua", ext="flua",
+        stmt_end="",
+        self_word="self",
+        # Lua method calls use `:` (auto-passes `self`); field access
+        # uses `.`.
+        method_op=":",
+        println_pass='print("PASS: nested-frame")',
+        fail_exit_def='''
+function _fail(msg)
+    print("FAIL: " .. msg)
+    os.exit(1)
+end
+''',
+    )
+    specs["php"] = LangSpec(
+        target="php", ext="fphp",
+        stmt_end=";",
+        self_word="$this",
+        # PHP uses `->` for both field access and method calls.
+        field_op="->",
+        method_op="->",
+        # PHP variables (incl. parameters) carry a `$` prefix.
+        param_prefix="$",
+        println_pass='echo "PASS: nested-frame\\n";',
+        fail_exit_def='''
+function _fail($msg) { echo "FAIL: $msg\\n"; exit(1); }
+''',
+    )
+    specs["dart"] = LangSpec(
+        target="dart", ext="fdart",
+        stmt_end=";",
+        self_word="this",
+        println_pass='print("PASS: nested-frame");',
+        fail_exit_def='''
+void _fail(String msg) { print("FAIL: $msg"); throw Exception(msg); }
+''',
+    )
+    specs["rust"] = LangSpec(
+        target="rust", ext="frs",
+        stmt_end=";",
+        self_word="self",
+        println_pass='println!("PASS: nested-frame");',
+        # Rust assertion uses panic, which carries a non-zero exit
+        # naturally. The `_fail` helper formats a fatal-panic message.
+        fail_exit_def='''
+fn _fail(msg: &str) -> ! { panic!("FAIL: {}", msg); }
+''',
+    )
+    specs["go"] = LangSpec(
+        target="go", ext="fgo",
+        stmt_end="",
+        # Go's generated handler signature uses `s` as the receiver
+        # name; `self.X` would be a free-variable reference.
+        self_word="s",
+        println_pass='fmt.Println("PASS: nested-frame")',
+        fail_exit_def='''
+func _fail(msg string) { fmt.Println("FAIL: " + msg); os.Exit(1) }
+''',
+    )
+    specs["swift"] = LangSpec(
+        target="swift", ext="fswift",
+        stmt_end="",
+        self_word="self",
+        println_pass='print("PASS: nested-frame")',
+        fail_exit_def='''
+func _fail(_ msg: String) -> Never { fatalError("FAIL: \\(msg)") }
+''',
+    )
     return specs
 
 
@@ -127,12 +219,12 @@ def gen_case(lang, pattern):
         ]
         expected_n = 7
     elif pattern == "p3_op_in_return":
-        # @@:return = 4; @@:(<self>.add_one(@@:return)) → return is 5,
+        # @@:return = 4; @@:(<self><method_op>add_one(@@:return)) → return is 5,
         # then absorb with @@:return adds 5 to n.
         # Expected: n == 5.
         body = [
             f"                @@:return = 4{spec.stmt_end}",
-            f"                @@:({spec.self_word}.add_one(@@:return))",
+            f"                @@:({spec.self_word}{spec.method_op}add_one(@@:return))",
             f"                @@:self.absorb(@@:return)",
         ]
         expected_n = 5
@@ -156,15 +248,15 @@ def gen_case(lang, pattern):
         # state, keeping the fixture compact.
         # Expected: n == 9.
         body = [
-            f"                {spec.self_word}.cache = @@:self.compute(){spec.stmt_end}",
+            f"                {spec.self_word}{spec.field_op}cache = @@:self.compute(){spec.stmt_end}",
             f"                @@:self.absorb_cache()",
         ]
         expected_n = 9
     elif pattern == "p6_op_arg":
-        # @@:self.absorb(<self>.peek()) — peek returns 3.
+        # @@:self.absorb(<self><method_op>peek()) — peek returns 3.
         # Expected: n == 3.
         body = [
-            f"                @@:self.absorb({spec.self_word}.peek())",
+            f"                @@:self.absorb({spec.self_word}{spec.method_op}peek())",
         ]
         expected_n = 3
     elif pattern == "p7_two_level":
@@ -184,6 +276,11 @@ def gen_case(lang, pattern):
 
     lines: list[str] = []
     lines.append(f"@@target {spec.target}")
+    # PHP requires the `<?php` opener at the very top of the source —
+    # without it the generated file is treated as literal HTML. The
+    # other backends pass through the prolog cleanly.
+    if lang == "php":
+        lines.append("<?php")
     lines.append("")
     lines.append(f"@@system {sys_name} {{")
     lines.append("    interface:")
@@ -201,12 +298,16 @@ def gen_case(lang, pattern):
     lines.append(f"            {drive_sig} {{")
     lines.append("\n".join(body))
     lines.append("            }")
-    self_n = f"{spec.self_word}.n"
-    self_cache = f"{spec.self_word}.cache"
-    lines.append(f"            absorb(v: int) {{ {self_n} = {self_n} + v{spec.stmt_end} }}")
+    self_n = f"{spec.self_word}{spec.field_op}n"
+    self_cache = f"{spec.self_word}{spec.field_op}cache"
+    # Parameter-name references in handler bodies. PHP needs `$v` /
+    # `$x`; everything else takes the bare name.
+    p_v = f"{spec.param_prefix}v"
+    p_x = f"{spec.param_prefix}x"
+    lines.append(f"            absorb(v: int) {{ {self_n} = {self_n} + {p_v}{spec.stmt_end} }}")
     lines.append(f"            absorb_cache() {{ {self_n} = {self_n} + {self_cache}{spec.stmt_end} }}")
-    lines.append(f"            add_one(x: int): int {{ @@:(x + 1) }}")
-    lines.append(f"            add_two(x: int): int {{ @@:(x + 2) }}")
+    lines.append(f"            add_one(x: int): int {{ @@:({p_x} + 1) }}")
+    lines.append(f"            add_two(x: int): int {{ @@:({p_x} + 2) }}")
     lines.append(f"            compute(): int {{ @@:(9) }}")
     lines.append(f"            peek(): int {{ @@:(3) }}")
     lines.append(f"            get_n(): int {{ @@:({self_n}) }}")
@@ -221,14 +322,13 @@ def gen_case(lang, pattern):
     # Inline test driver per language. Erlang uses the external
     # escript driver authored by run_nested.sh — embedded comments
     # carry the expected value.
+    drive_arg_str = "7" if pattern == "p2_params_arg" else ""
+
     if lang == "python_3":
         lines.append("# Inline test driver — runs at module load.")
         lines.append(spec.fail_exit_def)
         lines.append(f"_inst = {sys_name}()")
-        if pattern == "p2_params_arg":
-            lines.append("_inst.drive(7)")
-        else:
-            lines.append("_inst.drive()")
+        lines.append(f"_inst.drive({drive_arg_str})")
         lines.append(f"_n = _inst.get_n()")
         lines.append(f"if _n != {expected_n}:")
         lines.append(f"    _fail(f\"expected n={expected_n}, got {{_n}}\")")
@@ -237,12 +337,90 @@ def gen_case(lang, pattern):
         lines.append("// Inline test driver — runs immediately.")
         lines.append(spec.fail_exit_def)
         lines.append(f"const _inst = new {sys_name}();")
-        if pattern == "p2_params_arg":
-            lines.append("_inst.drive(7);")
-        else:
-            lines.append("_inst.drive();")
+        lines.append(f"_inst.drive({drive_arg_str});")
         lines.append(f"const _n = _inst.get_n();")
         lines.append(f"if (_n !== {expected_n}) {{ _fail(\"expected n={expected_n}, got \" + _n); }}")
+        lines.append(spec.println_pass)
+    elif lang == "typescript":
+        lines.append("// Inline test driver.")
+        lines.append(spec.fail_exit_def)
+        lines.append(f"const _inst = new {sys_name}();")
+        lines.append(f"_inst.drive({drive_arg_str});")
+        lines.append(f"const _n: number = _inst.get_n();")
+        lines.append(f"if (_n !== {expected_n}) {{ _fail(\"expected n={expected_n}, got \" + _n); }}")
+        lines.append(spec.println_pass)
+    elif lang == "ruby":
+        lines.append("# Inline test driver.")
+        lines.append(spec.fail_exit_def)
+        lines.append(f"_inst = {sys_name}.new")
+        lines.append(f"_inst.drive({drive_arg_str})")
+        lines.append(f"_n = _inst.get_n")
+        lines.append(f"_fail(\"expected n={expected_n}, got #{{_n}}\") unless _n == {expected_n}")
+        lines.append(spec.println_pass)
+    elif lang == "lua":
+        lines.append("-- Inline test driver.")
+        lines.append(spec.fail_exit_def)
+        lines.append(f"local _inst = {sys_name}.new()")
+        lines.append(f"_inst:drive({drive_arg_str})")
+        lines.append(f"local _n = _inst:get_n()")
+        lines.append(f"if _n ~= {expected_n} then _fail(\"expected n={expected_n}, got \" .. tostring(_n)) end")
+        lines.append(spec.println_pass)
+    elif lang == "php":
+        lines.append("// Inline test driver.")
+        lines.append(spec.fail_exit_def)
+        lines.append(f"$_inst = new {sys_name}();")
+        lines.append(f"$_inst->drive({drive_arg_str});")
+        lines.append(f"$_n = $_inst->get_n();")
+        lines.append(f"if ($_n !== {expected_n}) {{ _fail(\"expected n={expected_n}, got \" . $_n); }}")
+        lines.append(spec.println_pass)
+    elif lang == "dart":
+        lines.append("// Inline test driver — wrapped in main() per Dart convention.")
+        lines.append(spec.fail_exit_def)
+        lines.append("void main() {")
+        lines.append(f"    final _inst = {sys_name}();")
+        lines.append(f"    _inst.drive({drive_arg_str});")
+        lines.append(f"    final _n = _inst.get_n();")
+        lines.append(f"    if (_n != {expected_n}) {{ _fail(\"expected n={expected_n}, got $_n\"); }}")
+        lines.append(f"    {spec.println_pass}")
+        lines.append("}")
+    elif lang == "rust":
+        lines.append("// Inline test driver — Rust requires a fn main().")
+        lines.append(spec.fail_exit_def)
+        lines.append("fn main() {")
+        lines.append(f"    let mut _inst = {sys_name}::new();")
+        lines.append(f"    _inst.drive({drive_arg_str});")
+        lines.append(f"    let _n = _inst.get_n();")
+        lines.append(f"    if _n != {expected_n} {{ _fail(&format!(\"expected n={expected_n}, got {{}}\", _n)); }}")
+        lines.append(f"    {spec.println_pass}")
+        lines.append("}")
+    elif lang == "go":
+        # Go needs `package main` + `import` for fmt/os in the prolog.
+        # The Frame source's prolog (above @@system) is the place;
+        # framec passes it through. Emit those at the very top of
+        # the file by splicing before the @@system. The generated
+        # method receivers use `s` — matches our self_word.
+        lines.insert(2, "package main")
+        lines.insert(3, "")
+        lines.insert(4, 'import "fmt"')
+        lines.insert(5, 'import "os"')
+        lines.insert(6, "")
+        lines.append("// Inline test driver.")
+        lines.append(spec.fail_exit_def)
+        lines.append("func main() {")
+        lines.append(f"    sm := New{sys_name}()")
+        lines.append(f"    sm.Drive({drive_arg_str})")
+        lines.append(f"    n := sm.Get_n()")
+        lines.append(f"    if n != {expected_n} {{ _fail(fmt.Sprintf(\"expected n={expected_n}, got %d\", n)) }}")
+        lines.append(f"    {spec.println_pass}")
+        lines.append("}")
+    elif lang == "swift":
+        # Swift accepts top-level code in a single .swift file.
+        lines.append("// Inline test driver.")
+        lines.append(spec.fail_exit_def)
+        lines.append(f"let _inst = {sys_name}()")
+        lines.append(f"_inst.drive({drive_arg_str})")
+        lines.append(f"let _n = _inst.get_n()")
+        lines.append(f"if _n != {expected_n} {{ _fail(\"expected n={expected_n}, got \\(_n)\") }}")
         lines.append(spec.println_pass)
     elif lang == "erlang":
         # Stash expected value as a Frame comment so the runner can read it.
@@ -260,7 +438,17 @@ def main():
     parser.add_argument("--out-dir",
                         default=str(Path(__file__).parent / "cases_nested"))
     parser.add_argument("--langs", nargs="+",
-                        default=["python_3", "javascript", "erlang"])
+                        default=["python_3", "javascript", "typescript",
+                                 "ruby", "lua", "php", "dart", "erlang"])
+    # Rust/Go/Swift LangSpecs ship in this generator but are NOT
+    # included in the default langs list because they expose an
+    # unfixed framec codegen defect: when `@@:return` is passed
+    # as an arg to a typed-int method, the framec output passes
+    # `Option<&Box<dyn Any>>` (Rust) / `any` (Go) / `Any?` (Swift)
+    # to a method expecting `i64` / `int` / `Int` without inserting
+    # the downcast. Patterns p1, p3, p4, p7 fail; p2, p5, p6 pass.
+    # Run explicitly with `--langs rust go swift` to reproduce
+    # the defect for diagnosis.
     args = parser.parse_args()
 
     out = Path(args.out_dir)
