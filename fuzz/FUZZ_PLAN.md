@@ -365,9 +365,26 @@ is expanded recursively at framec's segmentation / expansion stage
 
 **Expected:** ~60 cases × 17 backends = **~1,020 cases**.
 
-**Current status:** defect #10 in `_scratch/defect_tracker_cookbook_port.md`
-— one-level nesting already fails (the inner segment passes through
-verbatim). Phase 9 is gated on that defect's fix.
+**Current status:** Phase 9 harness landed. Defect #10 was closed
+(framec recursively expands nested Frame syntax via
+`expand_expression` in `frame_expansion.rs`). Initial harness ships
+**7 patterns × 3 backends = 21 cases**, all passing:
+
+  - P1  `@@:self.foo(@@:return)`          — `@@:return` as arg
+  - P2  `@@:self.foo(@@:params.x)`        — `@@:params` as arg
+  - P3  `@@:(self.add_one(@@:return))`    — op-call with `@@:return`
+  - P4  `@@:return = @@:self.compute()`   — self-call as `@@:=` RHS
+  - P5  `self.cache = @@:self.compute()`  — self-call as field assign
+  - P6  `@@:self.absorb(self.peek())`     — op-call as arg
+  - P7  `@@:self.foo(@@:self.bar(@@:r))`  — two-level nest
+
+Each case is self-checking (Python/JS via inline drivers; Erlang
+via an external escript that reads `%% FUZZ_EXPECTED_N:`).
+Generator + runner: `gen_nested.py` / `run_nested.sh`. Expanding
+to the remaining 14 backends + ~50 more pattern variations (HSM
+parents, transitions inside nested args, push/pop interactions)
+follows the same shape — bring up one backend at a time, assert
+against the same expected-N contract.
 
 ### Phase 8 — Negative (passthrough-error) fuzz
 
@@ -445,7 +462,7 @@ should: at the native compiler.
 | 6     |    ~1,100  |   ~18,933  | 11-backend subset                   |
 | 7     |    ~2,400  |   ~21,333  | 16-backend subset                   |
 | 8     |      ~850  |   ~22,183  | negative passthrough — after 5–7    |
-| 9     |    ~1,020  |   ~23,203  | nested frame syntax — gated on defect #10 |
+| 9     |        21  |    ~21,354 | **harness landed** (7 patterns × 3 backends; expand) |
 
 Well under 50k — tight enough that a full fuzz run fits in a coffee-
 break, loose enough that it's catching real bugs per phase.
