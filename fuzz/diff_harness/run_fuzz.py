@@ -378,6 +378,14 @@ def main() -> int:
                     help="Comma-separated. Default: every backend that can run this kind.")
     ap.add_argument("--max", type=int, default=None,
                     help="Limit to first N cases (by case_id sort).")
+    ap.add_argument("--tier", default="full", choices=("smoke", "core", "full"),
+                    help="smoke = curated subset (~50 cases), core = phase essentials, "
+                         "full = complete corpus. Selection reads `tags` field from "
+                         "each case's .meta file (smoke ⊆ core ⊆ full).")
+    ap.add_argument("--tag", default=None,
+                    help="Comma-separated AND-of-tags filter (e.g. --tag=hsm,depth-2). "
+                         "Cases must contain ALL listed tags in their .meta `tags` "
+                         "field. See TAG_VOCABULARY.md for available tags.")
     ap.add_argument("--workdir", type=Path, default=Path("/tmp/fuzz_work"))
     ap.add_argument(
         "--jobs", "-j", type=int,
@@ -417,6 +425,48 @@ def main() -> int:
         return 2
 
     cases = cases_sorted
+
+    # Tier + tag filter (read each case's .meta `tags` list).
+    # smoke ⊆ core ⊆ full implicit expansion: a case tagged `core`
+    # is ALSO in the smoke result of --tier=core (smoke = match
+    # smoke OR core OR full hierarchy). Implementation: --tier=smoke
+    # matches cases with `smoke` in tags; --tier=core matches `smoke`
+    # OR `core`; --tier=full matches everything.
+    requested_tags = (
+        [t.strip() for t in args.tag.split(",") if t.strip()]
+        if args.tag else []
+    )
+
+    def case_passes_filter(case_path):
+        meta_path = case_path.with_suffix(".meta")
+        try:
+            meta = json.loads(meta_path.read_text())
+        except Exception:
+            return True  # malformed meta — keep case (fail loud later)
+        case_tags = set(meta.get("tags", []))
+        # Tier filter: meta cases without tier tags fall through as
+        # `full` so the migration is non-breaking — phases that
+        # haven't been retro-tagged still run when --tier=full.
+        if args.tier == "smoke":
+            if "smoke" not in case_tags:
+                return False
+        elif args.tier == "core":
+            if not (case_tags & {"smoke", "core"}):
+                return False
+        # --tier=full: no tier filter
+        # Tag filter: AND-of-tags
+        for t in requested_tags:
+            if t not in case_tags:
+                return False
+        return True
+
+    if args.tier != "full" or requested_tags:
+        before = len(cases)
+        cases = [c for c in cases if case_passes_filter(c)]
+        print(f"tier/tag filter: {before} → {len(cases)} cases "
+              f"(--tier={args.tier}"
+              f"{', --tag=' + args.tag if args.tag else ''})")
+
     if args.max:
         cases = cases[:args.max]
     if not cases:

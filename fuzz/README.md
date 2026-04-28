@@ -7,6 +7,24 @@ flow, return type — then transpiles and syntax-checks each across every
 target backend. Failures surface codegen bugs the hand-written test
 matrix doesn't exercise.
 
+## Top-level meta-runner (`run_all.sh`)
+
+Iterates all configured phases (2-10) with a shared
+`--tier=smoke|core|full`, `--tag=<comma-list>`, `--lang=<name>` flag
+contract. See `TEST_INFRA_ROADMAP.md` for the contract design and
+`TAG_VOCABULARY.md` for available tags.
+
+```bash
+./run_all.sh --tier=smoke                  # cross-phase smoke
+./run_all.sh --tier=full --lang=python_3   # one-lang full
+./run_all.sh --tier=smoke --phases=9,10    # subset
+./run_all.sh --tag=hsm                     # cross-section
+```
+
+Phases 2-7 use `diff_harness/run_fuzz.py` (case + .meta files).
+Phases 8/9/10 use shell runners. The meta-runner delegates with
+flag passthrough.
+
 ## Usage
 
 ```bash
