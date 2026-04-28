@@ -398,7 +398,18 @@ def gen_case(lang, case_id_str, smoke_tag, expected, frame_expr,
         lines.append(f"if _ret != {expected} {{ _fail(\"expected ret={expected}, got \\(_ret)\") }}")
         lines.append(spec.println_pass.replace("nested-frame", "perm-fuzz"))
     elif lang == "java":
-        lines.append("class Main {")
+        # Per-case package isolation. Can't put `package nf_<id>;` in
+        # the Frame prolog because framec emits `import java.util.*;`
+        # before user prolog → invalid Java order. Instead, batch_java
+        # in run_perm.sh prepends `package nf_<id>;` to the framec
+        # .java output via sed. Keeps the source source-clean and the
+        # batch logic localized to the runner.
+        # `class Driver` is package-private (NOT public) so it can
+        # live in a file named after the framec-emitted system class.
+        # The JVM dispatches `java <pkg>.Driver` regardless of source
+        # file name; only `public class` triggers the source-name
+        # constraint.
+        lines.append(f"class Driver {{")
         lines.append(f"    public static void main(String[] args) {{")
         lines.append(f"        var _inst = new {sys_name}();")
         if lhs.drive_returns:

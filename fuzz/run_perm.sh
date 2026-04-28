@@ -146,6 +146,25 @@ run_one() {
         return 1
     fi
 
+    # Java batched fast path. Each test source has `package nf_<id>;`
+    # so a single javac invocation compiles all tests at once into
+    # `JAVA_BATCH_CLASSES/nf_<id>/Driver.class`. Per-test execution
+    # is `java -cp <classes> nf_<id>.Driver`.
+    if [ "$lang" = "java" ] && [ -n "${JAVA_BATCH_CLASSES:-}" ]; then
+        local main_class="nf_${case_id}.Driver"
+        local result rc=0
+        result=$(java -cp "$JAVA_BATCH_CLASSES" "$main_class" 2>&1)
+        rc=$?
+        if [ $rc -eq 0 ] && echo "$result" | grep -q "^PASS"; then
+            printf "%s\t%s\trun\tPASS\t\n" "$lang" "$case_id" >> "$summary"
+            return 0
+        fi
+        local e
+        e=$(echo "$result" | head -3 | tr '\n' '|' | head -c 220)
+        printf "%s\t%s\trun\tFAIL\t%s\n" "$lang" "$case_id" "$e" >> "$summary"
+        return 1
+    fi
+
     rm -rf "$out" 2>/dev/null
     mkdir -p "$out"
 
@@ -195,14 +214,21 @@ run_one() {
         swift)
             result=$(swift "$gen" 2>&1); rc=$? ;;
         java)
+            # Per-case fallback path (used when batch_java didn't run
+            # or failed to set JAVA_BATCH_CLASSES). Inject
+            # `package nf_<id>;` at the top of the framec .java output
+            # — same workaround as batch_java for the framec import-
+            # before-prolog ordering issue.
             local target_java="${gen%.java}.java"
+            local tmp="$target_java.tmp"
+            { printf "package nf_%s;\n\n" "$case_id"; cat "$target_java"; } > "$tmp" && mv "$tmp" "$target_java"
             if ! (cd "$out" && javac "$target_java") 2>"$errlog"; then
                 local e
                 e=$(head -3 "$errlog" | tr '\n' '|' | head -c 220)
                 printf "%s\t%s\tcompile\tFAIL\t%s\n" "$lang" "$case_id" "$e" >> "$summary"
                 return 1
             fi
-            result=$(cd "$out" && java Main 2>&1); rc=$? ;;
+            result=$(cd "$out" && java "nf_${case_id}.Driver" 2>&1); rc=$? ;;
         kotlin)
             local jar="$out/test.jar"
             if ! kotlinc "$gen" -include-runtime -d "$jar" 2>"$errlog"; then
@@ -376,6 +402,75 @@ batch_kotlin() {
     fi
 }
 
+# Java batched compile. Each test source has `package nf_<id>;` so a
+# single javac invocation produces `<classes>/nf_<id>/Driver.class`
+# for every test. Per-test execution then needs only one javac startup
+# total (vs ~700ms × N for the per-case path).
+#
+# Iterative drop-and-retry mirrors batch_kotlin: when a test source
+# has a codegen bug (e.g., D1 cascade) javac fails. Parse stderr for
+# failing files, drop them, retry. Capped at 5 iterations.
+batch_java() {
+    local java_files=""
+    for case_file in "$CASES_DIR"/*.fjava; do
+        [ -f "$case_file" ] || continue
+        should_run_case java "$case_file" || continue
+        local case_id
+        case_id=$(basename "$case_file" .fjava)
+        local out="$OUT_DIR/java/$case_id"
+        rm -rf "$out" 2>/dev/null
+        mkdir -p "$out"
+        if ! "$FRAMEC" compile -l java -o "$out" "$case_file" >"$LOG_DIR/java-$case_id.transpile" 2>&1; then
+            local e
+            e=$(head -3 "$LOG_DIR/java-$case_id.transpile" | tr '\n' '|' | head -c 220)
+            printf "java\t%s\ttranspile\tFAIL\t%s\n" "$case_id" "$e" >> "$summary"
+            continue
+        fi
+        local jv
+        jv=$(ls "$out"/*.java 2>/dev/null | head -1)
+        if [ -n "$jv" ]; then
+            # Inject `package nf_<id>;` at the top of the framec .java
+            # output. Java requires `package` to be the first non-
+            # comment statement; framec emits `import java.util.*;`
+            # before any user prolog so we can't route this through
+            # the Frame source. sed-prepend is local to batch_java.
+            local tmp="$jv.tmp"
+            { printf "package nf_%s;\n\n" "$case_id"; cat "$jv"; } > "$tmp" && mv "$tmp" "$jv"
+            java_files="$java_files $jv"
+        fi
+    done
+    if [ -n "$java_files" ]; then
+        local classes_dir="$OUT_DIR/java/_batch/classes"
+        rm -rf "$classes_dir" 2>/dev/null
+        mkdir -p "$classes_dir"
+        local err_log="$LOG_DIR/java-batch.err"
+        local iter=0
+        while [ "$iter" -lt 5 ]; do
+            # shellcheck disable=SC2086
+            if javac -d "$classes_dir" $java_files >"$err_log" 2>&1; then
+                export JAVA_BATCH_CLASSES="$classes_dir"
+                break
+            fi
+            local failed
+            failed=$(grep -oE "$OUT_DIR/java/[^/]+/[^.]+\.java" "$err_log" | sort -u)
+            if [ -z "$failed" ]; then
+                break
+            fi
+            local new_java_files=""
+            for f in $java_files; do
+                if ! echo "$failed" | grep -qF "$f"; then
+                    new_java_files="$new_java_files $f"
+                fi
+            done
+            if [ "$new_java_files" = "$java_files" ]; then
+                break
+            fi
+            java_files=$new_java_files
+            iter=$((iter + 1))
+        done
+    fi
+}
+
 batch_csharp() {
     local proj_dir="$OUT_DIR/csharp/_batch/proj"
     rm -rf "$proj_dir" 2>/dev/null
@@ -516,6 +611,7 @@ process_lang() {
     ext=$(lang_to_ext "$lang")
     if [ "$lang" = "kotlin" ]; then batch_kotlin; fi
     if [ "$lang" = "csharp" ]; then batch_csharp; fi
+    if [ "$lang" = "java" ]; then batch_java; fi
     for case_file in "$CASES_DIR"/*."$ext"; do
         [ -f "$case_file" ] || continue
         should_run_case "$lang" "$case_file" || continue
@@ -523,6 +619,7 @@ process_lang() {
     done
     if [ "$lang" = "kotlin" ]; then unset KOTLIN_BATCH_JAR; fi
     if [ "$lang" = "csharp" ]; then unset CSHARP_BATCH_OUT; fi
+    if [ "$lang" = "java" ]; then unset JAVA_BATCH_CLASSES; fi
 }
 
 # Parallelization policy:
