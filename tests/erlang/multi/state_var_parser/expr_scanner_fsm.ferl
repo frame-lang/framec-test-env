@@ -1,0 +1,66 @@
+@@target erlang
+
+%% ExprScannerFsm — scans an expression body until it finds a
+%% top-level `;` or `\n` (depth-aware, string-aware). Used by
+%% StateVarParserFsm when it detects a `$.var = expr;`
+%% assignment.
+
+expr_scan_loop(_Bs, I, End, _Depth, _InString) when I >= End ->
+    I;
+expr_scan_loop(Bs, I, End, Depth, InString) when InString >= 0 ->
+    B = binary:at(Bs, I),
+    if
+        B =:= $\\ andalso I + 1 < End ->
+            expr_scan_loop(Bs, I + 2, End, Depth, InString);
+        B =:= InString ->
+            expr_scan_loop(Bs, I + 1, End, Depth, -1);
+        true ->
+            expr_scan_loop(Bs, I + 1, End, Depth, InString)
+    end;
+expr_scan_loop(Bs, I, End, Depth, _InString) ->
+    B = binary:at(Bs, I),
+    if
+        B =:= $" orelse B =:= $' ->
+            expr_scan_loop(Bs, I + 1, End, Depth, B);
+        B =:= $( orelse B =:= $[ orelse B =:= ${ ->
+            expr_scan_loop(Bs, I + 1, End, Depth + 1, -1);
+        B =:= $) orelse B =:= $] orelse B =:= $} ->
+            expr_scan_loop(Bs, I + 1, End, max(Depth - 1, 0), -1);
+        B =:= $; andalso Depth =:= 0 ->
+            I + 1;
+        B =:= $\n andalso Depth =:= 0 ->
+            I;
+        true ->
+            expr_scan_loop(Bs, I + 1, End, Depth, -1)
+    end.
+
+@@system ExprScannerFsm {
+    interface:
+        setup(input_bytes: binary, start: int, length: int)
+        do_scan()
+        get_result(): int
+
+    machine:
+        $Init {
+            setup(input_bytes: binary, start: int, length: int) {
+                self.bytes = input_bytes
+                self.pos = start
+                self.scan_end = length
+            }
+            do_scan() { -> $Scanning }
+            get_result(): int { @@:(self.result_end) }
+        }
+
+        $Scanning {
+            $>() {
+                self.result_end = expr_scan_loop(Data#data.bytes, Data#data.pos, Data#data.scan_end, 0, -1)
+            }
+            get_result(): int { @@:(self.result_end) }
+        }
+
+    domain:
+        bytes = <<>>
+        pos = 0
+        scan_end = 0
+        result_end = 0
+}

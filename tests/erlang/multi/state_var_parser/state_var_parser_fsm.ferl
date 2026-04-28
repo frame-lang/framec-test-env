@@ -1,0 +1,126 @@
+@@target erlang
+
+%% StateVarParserFsm — orchestrating FSM that parses Frame's
+%% `$.varName` and `$.varName = expr` syntax. Translated from
+%% framec's native_region_scanner/state_var_parser.frs.
+
+scan_ident_loop(_Bs, I, End) when I >= End ->
+    I;
+scan_ident_loop(Bs, I, End) ->
+    B = binary:at(Bs, I),
+    IsAlnum = (B >= $a andalso B =< $z) orelse
+              (B >= $A andalso B =< $Z) orelse
+              (B >= $0 andalso B =< $9) orelse
+              B =:= $_,
+    case IsAlnum of
+        true -> scan_ident_loop(Bs, I + 1, End);
+        false -> I
+    end.
+
+skip_ws(_Bs, J, End) when J >= End ->
+    J;
+skip_ws(Bs, J, End) ->
+    B = binary:at(Bs, J),
+    case B of
+        $\s -> skip_ws(Bs, J + 1, End);
+        $\t -> skip_ws(Bs, J + 1, End);
+        _ -> J
+    end.
+
+probe_assign_op(_Bs, J, End) when J >= End ->
+    false;
+probe_assign_op(Bs, J, End) ->
+    B = binary:at(Bs, J),
+    case B of
+        $= ->
+            Next = J + 1,
+            if
+                Next >= End ->
+                    {true, Next};
+                true ->
+                    B2 = binary:at(Bs, Next),
+                    case B2 of
+                        $= -> false;
+                        $< -> false;
+                        $> -> false;
+                        _ -> {true, Next}
+                    end
+            end;
+        _ -> false
+    end.
+
+@@system StateVarParserFsm {
+    interface:
+        setup(input_bytes: binary, start: int, length: int)
+        do_parse()
+        get_result_end(): int
+        get_is_assignment(): bool
+
+    machine:
+        $Init {
+            setup(input_bytes: binary, start: int, length: int) {
+                self.bytes = input_bytes
+                self.pos = start
+                self.parse_end = length
+            }
+            do_parse() { -> $ScanIdent }
+            get_result_end(): int { @@:(self.result_end) }
+            get_is_assignment(): bool { @@:(self.is_assignment) }
+        }
+
+        $ScanIdent {
+            $>() {
+                I = scan_ident_loop(Data#data.bytes, Data#data.pos + 2, Data#data.parse_end),
+                self.ident_end = I
+                -> $CheckAssign
+            }
+            get_result_end(): int { @@:(self.result_end) }
+            get_is_assignment(): bool { @@:(self.is_assignment) }
+        }
+
+        $CheckAssign {
+            $>() {
+                J = skip_ws(Data#data.bytes, Data#data.ident_end, Data#data.parse_end),
+                case probe_assign_op(Data#data.bytes, J, Data#data.parse_end) of
+                    {true, J2} ->
+                        self.pos = J2,
+                        self.is_assignment = true,
+                        -> $ScanExpr;
+                    false ->
+                        self.result_end = Data#data.ident_end,
+                        self.is_assignment = false,
+                        -> $Done
+                end
+            }
+            get_result_end(): int { @@:(self.result_end) }
+            get_is_assignment(): bool { @@:(self.is_assignment) }
+        }
+
+        $ScanExpr {
+            $>() {
+                {ok, ExprPid} = expr_scanner_fsm:start_link(),
+                expr_scanner_fsm:setup(ExprPid, Data#data.bytes, Data#data.pos, Data#data.parse_end),
+                expr_scanner_fsm:do_scan(ExprPid),
+                ResultEnd = expr_scanner_fsm:get_result(ExprPid),
+                self.result_end = ResultEnd
+                -> $Done
+            }
+            get_result_end(): int { @@:(self.result_end) }
+            get_is_assignment(): bool { @@:(self.is_assignment) }
+        }
+
+        $Done {
+            $>() {
+            }
+            get_result_end(): int { @@:(self.result_end) }
+            get_is_assignment(): bool { @@:(self.is_assignment) }
+        }
+
+    domain:
+        bytes = <<>>
+        pos = 0
+        parse_end = 0
+        ident_end = 0
+        result_end = 0
+        is_assignment = false
+}
