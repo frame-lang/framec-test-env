@@ -48,6 +48,26 @@ run_one() {
     case_id=$(basename "$case_file" | sed 's/\.f[a-z]*$//')
     local out="$OUT_DIR/$lang/$case_id"
     local errlog="$LOG_DIR/$lang-$case_id.err"
+
+    # When a batch pre-pass has populated the work_dir + compiled
+    # the test (Kotlin's KOTLIN_BATCH_JAR path), skip the
+    # per-test transpile + rm. The batched run_one branch only
+    # needs the case_id to construct the main-class name.
+    if [ "$lang" = "kotlin" ] && [ -n "${KOTLIN_BATCH_JAR:-}" ]; then
+        local main_class="nf_${case_id}.Driver"
+        local result rc=0
+        result=$(java -classpath "$KOTLIN_BATCH_JAR" "$main_class" 2>&1)
+        rc=$?
+        if [ $rc -eq 0 ] && echo "$result" | grep -q "^PASS"; then
+            printf "%s\t%s\trun\tPASS\t\n" "$lang" "$case_id" >> "$summary"
+            return 0
+        fi
+        local e
+        e=$(echo "$result" | head -3 | tr '\n' '|' | head -c 220)
+        printf "%s\t%s\trun\tFAIL\t%s\n" "$lang" "$case_id" "$e" >> "$summary"
+        return 1
+    fi
+
     rm -rf "$out" 2>/dev/null
     mkdir -p "$out"
 
@@ -136,15 +156,27 @@ run_one() {
             rc=$?
             ;;
         kotlin)
-            local jar="$out/test.jar"
-            if ! kotlinc "$gen" -include-runtime -d "$jar" 2>"$errlog"; then
-                local e
-                e=$(head -3 "$errlog" | tr '\n' '|' | head -c 220)
-                printf "%s\t%s\tcompile\tFAIL\t%s\n" "$lang" "$case_id" "$e" >> "$summary"
-                return 1
+            # Per-test branch — also reachable on partial runs.
+            # The batched fast path lives at the top of the per-lang
+            # loop further down (kicks in when `KOTLIN_BATCH_JAR` is
+            # set by the orchestrator). When that env is set we use
+            # `java -classpath $KOTLIN_BATCH_JAR nf_<pattern>.Driver`
+            # to skip per-test kotlinc startup.
+            if [ -n "${KOTLIN_BATCH_JAR:-}" ]; then
+                local main_class="nf_${case_id}.Driver"
+                result=$(java -classpath "$KOTLIN_BATCH_JAR" "$main_class" 2>&1)
+                rc=$?
+            else
+                local jar="$out/test.jar"
+                if ! kotlinc "$gen" -include-runtime -d "$jar" 2>"$errlog"; then
+                    local e
+                    e=$(head -3 "$errlog" | tr '\n' '|' | head -c 220)
+                    printf "%s\t%s\tcompile\tFAIL\t%s\n" "$lang" "$case_id" "$e" >> "$summary"
+                    return 1
+                fi
+                result=$(java -jar "$jar" 2>&1)
+                rc=$?
             fi
-            result=$(java -jar "$jar" 2>&1)
-            rc=$?
             ;;
         csharp)
             # Build a single-file .NET project around the .cs file.
@@ -265,8 +297,46 @@ ESCRIPT
 
 total=0
 passed=0
+
+# Per-language pre-pass for batch compilation. Kotlin's `kotlinc`
+# startup dominates wall-time when invoked once per test (~7s
+# each on this host); a single batch-compile for all cases drops
+# 50s+ off the run. The batched JAR's path is exported through
+# KOTLIN_BATCH_JAR; the kotlin branch in run_one() picks it up
+# and skips per-test kotlinc.
+batch_kotlin() {
+    local kt_files=""
+    for case_file in "$CASES_DIR"/*.fkt; do
+        [ -f "$case_file" ] || continue
+        local case_id
+        case_id=$(basename "$case_file" .fkt)
+        local out="$OUT_DIR/kotlin/$case_id"
+        rm -rf "$out" 2>/dev/null
+        mkdir -p "$out"
+        if ! "$FRAMEC" compile -l kotlin -o "$out" "$case_file" >"$LOG_DIR/kotlin-$case_id.transpile" 2>&1; then
+            local e
+            e=$(head -3 "$LOG_DIR/kotlin-$case_id.transpile" | tr '\n' '|' | head -c 220)
+            printf "kotlin\t%s\ttranspile\tFAIL\t%s\n" "$case_id" "$e" >> "$summary"
+            continue
+        fi
+        local kt
+        kt=$(ls "$out"/*.kt 2>/dev/null | head -1)
+        [ -n "$kt" ] && kt_files="$kt_files $kt"
+    done
+    if [ -n "$kt_files" ]; then
+        local jar="$OUT_DIR/kotlin/all.jar"
+        # shellcheck disable=SC2086
+        if kotlinc $kt_files -include-runtime -d "$jar" >"$LOG_DIR/kotlin-batch.err" 2>&1; then
+            export KOTLIN_BATCH_JAR="$jar"
+        fi
+    fi
+}
+
 for lang in $LANGS; do
     ext=$(lang_to_ext "$lang")
+    if [ "$lang" = "kotlin" ]; then
+        batch_kotlin
+    fi
     for case_file in "$CASES_DIR"/*."$ext"; do
         [ -f "$case_file" ] || continue
         total=$((total + 1))
@@ -274,6 +344,9 @@ for lang in $LANGS; do
             passed=$((passed + 1))
         fi
     done
+    if [ "$lang" = "kotlin" ]; then
+        unset KOTLIN_BATCH_JAR
+    fi
 done
 
 echo ""

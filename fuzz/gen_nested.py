@@ -551,6 +551,16 @@ def gen_case(lang, pattern):
         lines.append("    }")
         lines.append("}")
     elif lang == "kotlin":
+        # Each test gets a unique package + JvmName so `kotlinc` can
+        # batch-compile all tests in one invocation without
+        # top-level main() collisions. The runner picks each test's
+        # `nf_<pattern>.Driver` main as a separate classpath entry.
+        # Source insertion at idx 1 puts these BEFORE the @@target
+        # line so framec's segmenter doesn't see them as part of
+        # the system body.
+        lines.insert(1, f"@file:JvmName(\"Driver\")")
+        lines.insert(2, f"package nf_{pattern}")
+        lines.insert(3, "")
         lines.append("// Inline test driver.")
         lines.append(spec.fail_exit_def)
         lines.append("fun main() {")
