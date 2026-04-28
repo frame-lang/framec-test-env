@@ -368,9 +368,8 @@ is expanded recursively at framec's segmentation / expansion stage
 **Current status:** Phase 9 harness landed. Defect #10 was closed
 (framec recursively expands nested Frame syntax via
 `expand_expression` in `frame_expansion.rs`). Harness covers
-**7 patterns × 16 backends = 112 cases**, all passing:
-python_3, javascript, typescript, ruby, lua, php, dart, rust,
-go, swift, java, kotlin, csharp, cpp, gdscript, erlang.
+**7 patterns × 17 backends = 119 cases**, all passing across
+the entire matrix.
 
 Lessons learned through the bring-up:
 - drive() must return `int` for patterns that emit `@@:return`
@@ -384,15 +383,11 @@ Lessons learned through the bring-up:
   capitalised form so framec's E601 case-match doesn't reject.
 - Lua uses `:` for method dispatch (auto-self), `.` for field
   access; PHP uses `->` for both and `$` prefix on params.
-
-C is wired up in gen_nested.py + run_nested.sh but is NOT in
-the default langs list. C lacks struct-method dispatch, so the
-bare `self.method()` shape used in patterns p3/p6 doesn't
-translate (framec emits `Nested_<sys>_method(self, args)`
-free-function syntax). Run with `--langs c` to see which
-patterns translate to C's free-function shape — it's a
-fundamentally different pattern surface that warrants a
-separate suite if needed.
+- C lacks struct-method dispatch — bare `self.method()` in
+  passthrough doesn't translate. The `op_call(lang, ...)`
+  helper switches between language-native dot-call syntax and
+  C's `<Sys>_<method>(self, args)` free-function form per
+  backend.
 
 The 7 patterns:
 
@@ -490,7 +485,7 @@ should: at the native compiler.
 | 6     |    ~1,100  |   ~18,933  | 11-backend subset                   |
 | 7     |    ~2,400  |   ~21,333  | 16-backend subset                   |
 | 8     |      ~850  |   ~22,183  | negative passthrough — after 5–7    |
-| 9     |       112  |    ~21,445 | **harness landed** (7 patterns × 16 backends; c excluded — different syntax model) |
+| 9     |       119  |    ~21,452 | **harness landed** (7 patterns × 17 backends — full matrix coverage) |
 
 Well under 50k — tight enough that a full fuzz run fits in a coffee-
 break, loose enough that it's catching real bugs per phase.

@@ -14,8 +14,7 @@ OUT_DIR=$SCRIPT_DIR/out_nested
 LOG_DIR=$SCRIPT_DIR/logs_nested
 mkdir -p "$OUT_DIR" "$LOG_DIR"
 
-LANGS=${@:-"python_3 javascript typescript ruby lua php dart rust go swift java kotlin csharp cpp gdscript erlang"}
-# C is wired but not in default — see gen_nested.py default-langs comment.
+LANGS=${@:-"python_3 javascript typescript ruby lua php dart rust go swift java kotlin csharp c cpp gdscript erlang"}
 summary=$LOG_DIR/summary.tsv
 : > "$summary"
 printf "lang\tcase\tstage\tresult\terror\n" >> "$summary"

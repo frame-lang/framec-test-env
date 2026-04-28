@@ -257,6 +257,19 @@ def method_name(lang, name):
     return name
 
 
+def op_call(lang, sys_name, spec, method, args=""):
+    """Native passthrough call to a same-system method. C lacks
+    struct-method dispatch and uses framec's free-function shape
+    `<Sys>_<method>(self[, args])`; everything else uses the
+    language-native `<self><op>method([args])` form."""
+    cased = method_name(lang, method)
+    if lang == "c":
+        if args:
+            return f"{sys_name}_{cased}(self, {args})"
+        return f"{sys_name}_{cased}(self)"
+    return f"{spec.self_word}{spec.method_op}{cased}({args})"
+
+
 def gen_case(lang, pattern):
     """Emit one .f<ext> source for a (language, pattern) pair.
     The body is small (~30 lines) — one system, one $S0 state with
@@ -296,16 +309,16 @@ def gen_case(lang, pattern):
         ]
         expected_n = 7
     elif pattern == "p3_op_in_return":
-        # @@:return = 4; @@:(<self><method_op>add_one(@@:return)) → return is 5,
+        # @@:return = 4; @@:(<op_call_add_one>(@@:return)) → return is 5,
         # then absorb with @@:return adds 5 to n.
         # Expected: n == 5.
-        # Go capitalises interface method exports — for Go targets the
-        # method names in the body must use the capitalised form
-        # (`Add_one`) to match what framec emits. method_name() does
-        # the per-language capitalisation.
+        # op_call() handles per-language native call syntax: dot-call
+        # for method-dispatch backends, free-function `<Sys>_<m>(self,
+        # args)` for C. Go uses capitalised method names per its
+        # export convention.
         body = [
             f"                @@:return = 4{spec.stmt_end}",
-            f"                @@:({spec.self_word}{spec.method_op}{method_name(lang, 'add_one')}(@@:return))",
+            f"                @@:({op_call(lang, sys_name, spec, 'add_one', '@@:return')})",
             f"                @@:self.{m_absorb}(@@:return)",
         ]
         expected_n = 5
@@ -334,10 +347,10 @@ def gen_case(lang, pattern):
         ]
         expected_n = 9
     elif pattern == "p6_op_arg":
-        # @@:self.{m_absorb}(<self><method_op>peek()) — peek returns 3.
+        # @@:self.absorb(<op_call_peek>) — peek returns 3.
         # Expected: n == 3.
         body = [
-            f"                @@:self.{m_absorb}({spec.self_word}{spec.method_op}{method_name(lang, 'peek')}())",
+            f"                @@:self.{m_absorb}({op_call(lang, sys_name, spec, 'peek')})",
         ]
         expected_n = 3
     elif pattern == "p7_two_level":
@@ -639,14 +652,8 @@ def main():
                                  "ruby", "lua", "php", "dart",
                                  "rust", "go", "swift",
                                  "java", "kotlin", "csharp",
-                                 "cpp", "gdscript",
+                                 "c", "cpp", "gdscript",
                                  "erlang"])
-    # `c` is wired up in gen_nested.py + run_nested.sh but is NOT in
-    # the default langs list. C lacks struct-method dispatch so the
-    # bare `self.method()` shape used in patterns p3/p6 doesn't
-    # translate (framec emits `Nested_<sys>_method(self, args)` as
-    # the call syntax). Run explicitly with `--langs c` to see
-    # which patterns translate to C's free-function shape.
     args = parser.parse_args()
 
     out = Path(args.out_dir)
