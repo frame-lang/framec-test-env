@@ -14,7 +14,8 @@ OUT_DIR=$SCRIPT_DIR/out_nested
 LOG_DIR=$SCRIPT_DIR/logs_nested
 mkdir -p "$OUT_DIR" "$LOG_DIR"
 
-LANGS=${@:-"python_3 javascript typescript ruby lua php dart rust go swift erlang"}
+LANGS=${@:-"python_3 javascript typescript ruby lua php dart rust go swift java kotlin csharp cpp gdscript erlang"}
+# C is wired but not in default — see gen_nested.py default-langs comment.
 summary=$LOG_DIR/summary.tsv
 : > "$summary"
 printf "lang\tcase\tstage\tresult\terror\n" >> "$summary"
@@ -31,6 +32,12 @@ lang_to_ext() {
         rust)       echo frs ;;
         go)         echo fgo ;;
         swift)      echo fswift ;;
+        java)       echo fjava ;;
+        kotlin)     echo fkt ;;
+        csharp)     echo fcs ;;
+        c)          echo fc ;;
+        cpp)        echo fcpp ;;
+        gdscript)   echo fgd ;;
         erlang)     echo ferl ;;
         *)          echo unknown ;;
     esac
@@ -112,6 +119,83 @@ run_one() {
             ;;
         swift)
             result=$(swift "$gen" 2>&1)
+            rc=$?
+            ;;
+        java)
+            # framec emits a public class named after the @@system.
+            # The test driver's `class Main` is in the same .java
+            # file. javac places .class files in the same dir;
+            # we run the Main class.
+            local target_java="${gen%.java}.java"
+            if ! (cd "$out" && javac "$target_java") 2>"$errlog"; then
+                local e
+                e=$(head -3 "$errlog" | tr '\n' '|' | head -c 220)
+                printf "%s\t%s\tcompile\tFAIL\t%s\n" "$lang" "$case_id" "$e" >> "$summary"
+                return 1
+            fi
+            result=$(cd "$out" && java Main 2>&1)
+            rc=$?
+            ;;
+        kotlin)
+            local jar="$out/test.jar"
+            if ! kotlinc "$gen" -include-runtime -d "$jar" 2>"$errlog"; then
+                local e
+                e=$(head -3 "$errlog" | tr '\n' '|' | head -c 220)
+                printf "%s\t%s\tcompile\tFAIL\t%s\n" "$lang" "$case_id" "$e" >> "$summary"
+                return 1
+            fi
+            result=$(java -jar "$jar" 2>&1)
+            rc=$?
+            ;;
+        csharp)
+            # Build a single-file .NET project around the .cs file.
+            # `dotnet run` requires `dotnet restore` to have produced
+            # the assets file first. Run them in sequence and only
+            # surface failures from the actual program execution.
+            local proj_dir="$out/proj"
+            mkdir -p "$proj_dir"
+            cp "$gen" "$proj_dir/Program.cs"
+            cat > "$proj_dir/test.csproj" << CSPROJ
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>NestedFuzz</RootNamespace>
+    <StartupObject>_NestedTestDriver</StartupObject>
+  </PropertyGroup>
+</Project>
+CSPROJ
+            (cd "$proj_dir" && dotnet restore -v q >"$errlog" 2>&1) || true
+            result=$(cd "$proj_dir" && dotnet run -v q 2>&1)
+            rc=$?
+            ;;
+        c)
+            local bin="$out/bin"
+            if ! gcc -o "$bin" "$gen" 2>"$errlog"; then
+                local e
+                e=$(head -3 "$errlog" | tr '\n' '|' | head -c 220)
+                printf "%s\t%s\tcompile\tFAIL\t%s\n" "$lang" "$case_id" "$e" >> "$summary"
+                return 1
+            fi
+            result=$("$bin" 2>&1)
+            rc=$?
+            ;;
+        cpp)
+            local bin="$out/bin"
+            if ! g++ -std=c++17 -o "$bin" "$gen" 2>"$errlog"; then
+                local e
+                e=$(head -3 "$errlog" | tr '\n' '|' | head -c 220)
+                printf "%s\t%s\tcompile\tFAIL\t%s\n" "$lang" "$case_id" "$e" >> "$summary"
+                return 1
+            fi
+            result=$("$bin" 2>&1)
+            rc=$?
+            ;;
+        gdscript)
+            # Headless Godot: --script <file> --headless --quit-after 1
+            # The script's `_init()` runs and `quit()` exits cleanly.
+            result=$(godot --headless --script "$gen" --quit-after 1 2>&1)
             rc=$?
             ;;
         erlang)

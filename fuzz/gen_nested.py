@@ -187,6 +187,60 @@ func _fail(msg string) { fmt.Println("FAIL: " + msg); os.Exit(1) }
 func _fail(_ msg: String) -> Never { fatalError("FAIL: \\(msg)") }
 ''',
     )
+    specs["java"] = LangSpec(
+        target="java", ext="fjava",
+        stmt_end=";",
+        self_word="this",
+        println_pass='System.out.println("PASS: nested-frame");',
+        fail_exit_def='',  # static helper inside Main class instead
+    )
+    specs["kotlin"] = LangSpec(
+        target="kotlin", ext="fkt",
+        stmt_end="",
+        self_word="this",
+        println_pass='println("PASS: nested-frame")',
+        fail_exit_def='''
+fun _fail(msg: String): Nothing { throw RuntimeException("FAIL: " + msg) }
+''',
+    )
+    specs["csharp"] = LangSpec(
+        target="csharp", ext="fcs",
+        stmt_end=";",
+        self_word="this",
+        println_pass='System.Console.WriteLine("PASS: nested-frame");',
+        fail_exit_def='',
+    )
+    specs["c"] = LangSpec(
+        target="c", ext="fc",
+        stmt_end=";",
+        # framec C codegen uses `self->field` member access on a
+        # pointer-receiver shape.
+        self_word="self",
+        field_op="->",
+        method_op="->",
+        println_pass='printf("PASS: nested-frame\\n");',
+        fail_exit_def='',
+    )
+    specs["cpp"] = LangSpec(
+        target="cpp_17", ext="fcpp",
+        stmt_end=";",
+        self_word="this",
+        field_op="->",
+        method_op="->",
+        println_pass='std::cout << "PASS: nested-frame" << std::endl;',
+        fail_exit_def='',
+    )
+    specs["gdscript"] = LangSpec(
+        target="gdscript", ext="fgd",
+        stmt_end="",
+        self_word="self",
+        println_pass='print("PASS: nested-frame")',
+        fail_exit_def='''
+func _fail(msg):
+    print("FAIL: " + msg)
+    quit(1)
+''',
+    )
     return specs
 
 
@@ -298,16 +352,23 @@ def gen_case(lang, pattern):
     else:
         raise ValueError(f"unknown pattern {pattern}")
 
-    # Drive event signature varies by pattern (only p2 takes a param).
-    # All drive() variants return `int` even when the test driver
-    # discards the return — typed-language backends use the
-    # handler's declared return type to drive the @@:return downcast
-    # at read sites. A `drive()` (void) leaves the slot type
-    # unknown to framec, so passing `@@:return` to a typed-int arg
-    # becomes a type-error in Rust/Go/Swift. Declaring `: int`
-    # gives the codegen the hint it needs.
-    drive_sig = ("drive(x: int): int" if pattern == "p2_params_arg"
-                 else "drive(): int")
+    # Drive event signature varies per pattern:
+    # - Patterns that use `@@:return` as a typed-int arg (p1, p3, p4, p7)
+    #   need `: int` so framec's typed backends know to downcast the
+    #   slot. Without the hint, rust/go/swift would emit type-errored
+    #   code at the call site.
+    # - Patterns that DON'T set @@:return (p2, p5, p6) keep drive()
+    #   as void — declaring `: int` here makes Java's wrapper
+    #   extract a never-set _return slot and NPE on the cast.
+    needs_int_return = pattern in {"p1_return_arg", "p3_op_in_return",
+                                    "p4_selfcall_in_return",
+                                    "p7_two_level"}
+    if pattern == "p2_params_arg":
+        drive_sig = "drive(x: int)"
+    elif needs_int_return:
+        drive_sig = "drive(): int"
+    else:
+        drive_sig = "drive()"
 
     drive_decl = drive_sig.replace("drive", m_drive)
 
@@ -459,6 +520,105 @@ def gen_case(lang, pattern):
         lines.append(f"let _n = _inst.get_n()")
         lines.append(f"if _n != {expected_n} {{ _fail(\"expected n={expected_n}, got \\(_n)\") }}")
         lines.append(spec.println_pass)
+    elif lang == "java":
+        # Java requires the test driver inside a Main class with a
+        # `public static void main` entry point. framec's Java
+        # backend emits the system as a public class; Main lives
+        # alongside in a non-public class in the same .java file.
+        lines.append("class Main {")
+        lines.append(f"    public static void main(String[] args) {{")
+        lines.append(f"        var _inst = new {sys_name}();")
+        lines.append(f"        _inst.drive({drive_arg_str});")
+        lines.append(f"        int _n = (int) _inst.get_n();")
+        lines.append(f"        if (_n != {expected_n}) {{")
+        lines.append(f"            System.out.println(\"FAIL: expected n={expected_n}, got \" + _n);")
+        lines.append(f"            System.exit(1);")
+        lines.append(f"        }}")
+        lines.append(f"        {spec.println_pass}")
+        lines.append("    }")
+        lines.append("}")
+    elif lang == "kotlin":
+        lines.append("// Inline test driver.")
+        lines.append(spec.fail_exit_def)
+        lines.append("fun main() {")
+        lines.append(f"    val _inst = {sys_name}()")
+        lines.append(f"    _inst.drive({drive_arg_str})")
+        lines.append(f"    val _n = _inst.get_n() as Int")
+        lines.append(f"    if (_n != {expected_n}) {{ _fail(\"expected n={expected_n}, got $_n\") }}")
+        lines.append(f"    {spec.println_pass}")
+        lines.append("}")
+    elif lang == "csharp":
+        # C# top-level statements (since C# 9) — simpler than the
+        # full class-with-main shape. Available via the .NET SDK
+        # `dotnet script` runner or a Program.cs target. Here we
+        # rely on `dotnet run` over a single-file project that the
+        # run_nested.sh harness sets up at exec time.
+        lines.append("// Inline test driver.")
+        lines.append("public class _NestedTestDriver {")
+        lines.append("    public static void Main() {")
+        lines.append(f"        var _inst = new {sys_name}();")
+        lines.append(f"        _inst.drive({drive_arg_str});")
+        lines.append(f"        int _n = (int) _inst.get_n();")
+        lines.append(f"        if (_n != {expected_n}) {{")
+        lines.append(f"            System.Console.WriteLine(\"FAIL: expected n={expected_n}, got \" + _n);")
+        lines.append(f"            System.Environment.Exit(1);")
+        lines.append(f"        }}")
+        lines.append(f"        {spec.println_pass}")
+        lines.append("    }")
+        lines.append("}")
+    elif lang == "c":
+        # C needs a main(). framec's C backend emits a heap-allocated
+        # `<Sys>* <sys>_new()` constructor + free-standing
+        # `<Sys>_<method>(<Sys>* self, ...)` functions.
+        lines.append("// Inline test driver.")
+        lines.append("#include <stdio.h>")
+        lines.append("#include <stdlib.h>")
+        lines.append("int main(void) {")
+        lines.append(f"    {sys_name}* _inst = {sys_name}_new();")
+        # framec's C convention is upper-snake of the method:
+        # `Sys_method(self, args)`. The method names in our
+        # interface are lowercase; framec expects them lowercase
+        # in the generated function names too.
+        if pattern == "p2_params_arg":
+            lines.append(f"    {sys_name}_drive(_inst, 7);")
+        else:
+            lines.append(f"    {sys_name}_drive(_inst);")
+        lines.append(f"    int _n = (int)(intptr_t){sys_name}_get_n(_inst);")
+        lines.append(f"    if (_n != {expected_n}) {{")
+        lines.append(f"        printf(\"FAIL: expected n={expected_n}, got %d\\n\", _n);")
+        lines.append(f"        return 1;")
+        lines.append(f"    }}")
+        lines.append(f"    {spec.println_pass}")
+        lines.append("    return 0;")
+        lines.append("}")
+    elif lang == "cpp":
+        lines.append("// Inline test driver.")
+        lines.append("#include <iostream>")
+        lines.append("int main() {")
+        lines.append(f"    {sys_name} _inst;")
+        lines.append(f"    _inst.drive({drive_arg_str});")
+        lines.append(f"    int _n = std::any_cast<int>(_inst.get_n());")
+        lines.append(f"    if (_n != {expected_n}) {{")
+        lines.append(f"        std::cerr << \"FAIL: expected n={expected_n}, got \" << _n << std::endl;")
+        lines.append(f"        return 1;")
+        lines.append(f"    }}")
+        lines.append(f"    {spec.println_pass}")
+        lines.append("    return 0;")
+        lines.append("}")
+    elif lang == "gdscript":
+        # GDScript headless runner needs `extends SceneTree` +
+        # `_init()` as the entry point.
+        lines.insert(2, "extends SceneTree")
+        lines.insert(3, "")
+        lines.append(spec.fail_exit_def)
+        lines.append("func _init():")
+        lines.append(f"    var _inst = {sys_name}.new()")
+        lines.append(f"    _inst.drive({drive_arg_str})")
+        lines.append(f"    var _n = _inst.get_n()")
+        lines.append(f"    if _n != {expected_n}:")
+        lines.append(f"        _fail(\"expected n={expected_n}, got \" + str(_n))")
+        lines.append(f"    {spec.println_pass}")
+        lines.append("    quit()")
     elif lang == "erlang":
         # Stash expected value as a Frame comment so the runner can read it.
         # Erlang Frame source's comment leader is `%`. The runner picks up
@@ -478,7 +638,15 @@ def main():
                         default=["python_3", "javascript", "typescript",
                                  "ruby", "lua", "php", "dart",
                                  "rust", "go", "swift",
+                                 "java", "kotlin", "csharp",
+                                 "cpp", "gdscript",
                                  "erlang"])
+    # `c` is wired up in gen_nested.py + run_nested.sh but is NOT in
+    # the default langs list. C lacks struct-method dispatch so the
+    # bare `self.method()` shape used in patterns p3/p6 doesn't
+    # translate (framec emits `Nested_<sys>_method(self, args)` as
+    # the call syntax). Run explicitly with `--langs c` to see
+    # which patterns translate to C's free-function shape.
     args = parser.parse_args()
 
     out = Path(args.out_dir)
