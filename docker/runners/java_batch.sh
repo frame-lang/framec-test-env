@@ -30,13 +30,24 @@ mkdir -p "$SRC_ROOT" "$CLASSES_DIR"
 : > "$MANIFEST"
 
 tests=$(find /tests/common/positive -name "*.$ext" 2>/dev/null | sort)
-lang_tests=$(find /tests/java -name "*.$ext" 2>/dev/null | sort)
+# Exclude /tests/java/multi/ — those are processed by the multi-source
+# sweep below as one logical TAP test per directory.
+lang_tests=$(find /tests/java -name "*.$ext" -not -path '*/multi/*' 2>/dev/null | sort)
 if [ -n "$lang_tests" ]; then
     tests="$tests
 $lang_tests"
 fi
 
-test_count=$(echo "$tests" | grep -c . || echo 0)
+# Multi-source cases: each tests/java/multi/<case>/ directory is one
+# logical test that contains N .fjava files (one @@system each, since
+# Java requires one public class per file) plus a Main.java driver
+# with `public static void main(String[] args)`. All N+1 sources land
+# in the same generated package so they can call each other without
+# qualification.
+multi_dirs=$(find /tests/java/multi -mindepth 1 -maxdepth 1 -type d 2>/dev/null | sort)
+multi_count=$(echo "$multi_dirs" | grep -c . || echo 0)
+single_count=$(echo "$tests" | grep -c . || echo 0)
+test_count=$((single_count + multi_count))
 if [ "$test_count" -eq 0 ]; then
     echo "TAP version 14"
     echo "1..0 # SKIP no java tests found"
@@ -106,6 +117,88 @@ for test_file in $tests; do
     java_files="$java_files $src_java"
 done
 
+# ---- Multi-source sweep ----
+# Each tests/java/multi/<case>/ dir is one logical TAP test. The dir
+# contains N .fjava sources (one @@system each → one public class per
+# file) plus a Main.java driver. We transpile each .fjava, prepend
+# the package declaration to every .java in the dir (incl. Main.java),
+# and let the batch javac downstream pick them all up.
+for case_dir in $multi_dirs; do
+    test_num=$((test_num + 1))
+    case_name=$(basename "$case_dir")
+
+    # Per-case @@skip in any .fjava skips the whole dir.
+    if grep -q "@@skip\|@skip" "$case_dir"/*.fjava 2>/dev/null; then
+        printf '%s\tSKIP\t%s\n' "$test_num" "$case_name" >> "$MANIFEST"
+        continue
+    fi
+
+    sanitized="t${test_num}_$(printf '%s' "$case_name" | sed 's/[^A-Za-z0-9_]/_/g')"
+    pkg="frametest.${sanitized}"
+    test_src_dir="$SRC_ROOT/${sanitized}"
+    rm -rf "$test_src_dir" 2>/dev/null
+    mkdir -p "$test_src_dir"
+
+    transpile_failed=false
+    for fjava in "$case_dir"/*.fjava; do
+        [ -f "$fjava" ] || continue
+        tmp_out=$(mktemp -d)
+        if ! framec_cached "$target" "$tmp_out" "$fjava" /tmp/compile_err; then
+            err_line=$(head -5 /tmp/compile_err 2>/dev/null | tr '\n' '\\' | sed 's/\\$//' | sed 's/\\/\\n/g')
+            printf '%s\tTRANSPILE_FAIL\t%s\t\t%s\n' "$test_num" "$case_name" "$err_line" >> "$MANIFEST"
+            transpile_failed=true
+            break
+        fi
+        # framec emits exactly one .java per .fjava, named after the
+        # public class. Move it into the case's package dir.
+        out_java=$(ls "$tmp_out"/*.java 2>/dev/null | head -1)
+        if [ -z "$out_java" ]; then
+            printf '%s\tNO_OUTPUT\t%s\n' "$test_num" "$case_name" >> "$MANIFEST"
+            transpile_failed=true
+            break
+        fi
+        mv "$out_java" "$test_src_dir/"
+    done
+    if [ "$transpile_failed" = "true" ]; then
+        continue
+    fi
+
+    # Driver: <case>/Main.java is required. Copy as-is — we will
+    # prepend the package declaration in the unified pass below.
+    if [ ! -f "$case_dir/Main.java" ]; then
+        printf '%s\tNO_DRIVER\t%s\n' "$test_num" "$case_name" >> "$MANIFEST"
+        continue
+    fi
+    cp "$case_dir/Main.java" "$test_src_dir/Main.java"
+
+    if [ "$COMPILE_ONLY" = "true" ]; then
+        printf '%s\tCOMPILE_ONLY\t%s\n' "$test_num" "$case_name" >> "$MANIFEST"
+    fi
+
+    # Prepend `package <pkg>;` to every .java in the case dir.
+    # Strip any leading `package ...;` line the driver may already
+    # have (a hand-written Main.java is allowed to declare one for
+    # standalone editor use, but ours overrides for matrix isolation).
+    for j in "$test_src_dir"/*.java; do
+        [ -f "$j" ] || continue
+        tmp_java=$(mktemp)
+        # Strip any existing package declaration on line 1.
+        if head -1 "$j" | grep -qE '^[[:space:]]*package[[:space:]]'; then
+            tail -n +2 "$j" > "$tmp_java.body"
+        else
+            cp "$j" "$tmp_java.body"
+        fi
+        printf 'package %s;\n\n' "$pkg" > "$tmp_java"
+        cat "$tmp_java.body" >> "$tmp_java"
+        mv "$tmp_java" "$j"
+        rm -f "$tmp_java.body"
+        java_files="$java_files $j"
+    done
+
+    main_class="${pkg}.Main"
+    printf '%s\tRUN\t%s\t%s\n' "$test_num" "$case_name" "$main_class" >> "$MANIFEST"
+done
+
 if [ "$COMPILE_ONLY" = "true" ]; then
     pass=0; fail=0; skip=0
     while IFS=$'\t' read -r num status name rest; do
@@ -114,6 +207,7 @@ if [ "$COMPILE_ONLY" = "true" ]; then
             TRANSPILE_ERROR_OK)     echo "ok $num - $name # correctly rejected by transpiler";  pass=$((pass+1)) ;;
             TRANSPILE_FAIL)         echo "not ok $num - $name # transpile failed";              fail=$((fail+1)) ;;
             NO_OUTPUT)              echo "not ok $num - $name # no output file";                fail=$((fail+1)) ;;
+            NO_DRIVER)              echo "not ok $num - $name # multi-source case missing Main.java"; fail=$((fail+1)) ;;
             COMPILE_ONLY|RUN)       echo "ok $num - $name # transpiled";                        pass=$((pass+1)) ;;
         esac
     done < "$MANIFEST"

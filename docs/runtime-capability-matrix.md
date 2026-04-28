@@ -112,11 +112,28 @@ spec). Generated from a manual audit on 2026-04-26.
 
 [j] **Java** — Java requires one public class per file, so a
     file with multiple `@@system` declarations is rejected by
-    framec with E430. Cross-system field instantiation
-    (`level = @@Other()`) works fine when each `@@system` lives
-    in its own file. Multi-system test fixtures (demos 20, 28,
-    29, 33; primary 39, 50, 52) carry `@@skip` for `.fjava` and
-    are exercised on the other 15 backends instead.
+    framec with E430. The matrix harness now supports a
+    multi-source convention: each `tests/java/multi/<case>/`
+    directory is one logical TAP test containing N `.fjava`
+    files (one `@@system` each, each producing one
+    `public class`) plus a `Main.java` driver with
+    `public static void main(String[] args)`. The
+    `java_batch.sh` runner discovers these dirs alongside the
+    standard single-source `.fjava` sweep, transpiles each
+    file, places every output (plus the driver) in the same
+    generated package so cross-class calls work without
+    qualification, and routes the case through the same
+    batch javac + reflective `Main.main()` dispatch as
+    single-source tests. Cross-system field instantiation
+    (`level = @@Other()`) works as expected: framec emits a
+    typed field with `new <Other>()` initialisation, and
+    `self.level.bump()` lowers to `this.level.bump()`. See
+    `tests/java/multi/counter_pair/` for the canonical
+    layout. Legacy multi-system fixtures (demos 20, 28, 29,
+    33; primary 39) still carry `@@skip` for `.fjava` until
+    they are ported to the new directory layout — they
+    continue to be exercised on the other 15 backends in
+    the meantime.
 
 [k] **Erlang** — Erlang requires one module per file, so a file
     with multiple `@@system` declarations is rejected by framec

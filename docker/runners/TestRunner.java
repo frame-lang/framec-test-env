@@ -79,6 +79,10 @@ public class TestRunner {
                         TAP_OUT.println("not ok " + testNum + " - " + testName + " # no output file");
                         fail++;
                         break;
+                    case "NO_DRIVER":
+                        TAP_OUT.println("not ok " + testNum + " - " + testName + " # multi-source case missing Main.java");
+                        fail++;
+                        break;
                     case "COMPILE_ONLY":
                         TAP_OUT.println("ok " + testNum + " - " + testName + " # transpiled");
                         pass++;
