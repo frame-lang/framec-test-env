@@ -129,11 +129,15 @@ spec). Generated from a manual audit on 2026-04-26.
     typed field with `new <Other>()` initialisation, and
     `self.level.bump()` lowers to `this.level.bump()`. See
     `tests/java/multi/counter_pair/` for the canonical
-    layout. Legacy multi-system fixtures (demos 20, 28, 29,
-    33; primary 39) still carry `@@skip` for `.fjava` until
-    they are ported to the new directory layout — they
-    continue to be exercised on the other 15 backends in
-    the meantime.
+    layout. The five legacy `.fjava` fixtures (demos 20
+    `multi_system_composition`, 28 `auth_flow`, 29
+    `game_level`, 33 `ai_agent`; primary 39
+    `tagged_instantiation`) have been ported to the new
+    layout and now exercise multi-system Frame on Java
+    end-to-end. The originals at
+    `tests/common/positive/{demos,primary}/<n>_…fjava`
+    remain `@@skip`'d as documentation of the in-file form
+    framec rejects on Java.
 
 [k] **Erlang** — Erlang requires one module per file, so a file
     with multiple `@@system` declarations is rejected by framec
