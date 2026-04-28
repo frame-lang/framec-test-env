@@ -1,14 +1,8 @@
 @@target erlang
 
-%% EnemySpawner — bumps a counter and returns "enemy_spawned" until
-%% the cap is hit, then returns "no_more_enemies". Module name
+%% EnemySpawner — tracks how many enemies have been spawned and
+%% transitions to $Exhausted when the cap is reached. Module name
 %% lowers to `enemy_spawner`.
-%%
-%% Single-state design (vs the Java port's $Ready/$Exhausted) sidesteps
-%% a framec Erlang codegen gap: the `@@:return` value is dropped on
-%% any handler arm that also calls frame_transition__/6 (the runtime
-%% helper hardcodes `ok` as the reply). Returning the difference via
-%% a value-only branch avoids the buggy combo.
 
 @@system EnemySpawner {
     interface:
@@ -16,16 +10,19 @@
         status(): str
 
     machine:
-        $Active {
+        $Ready {
             spawn(): str {
+                self.spawned = self.spawned + 1
+                @@:("enemy_spawned")
                 if self.spawned >= self.max_enemies {
-                    @@:("no_more_enemies")
-                } else {
-                    self.spawned = self.spawned + 1
-                    @@:("enemy_spawned")
+                    -> $Exhausted
                 }
             }
-            status(): str { @@:("active") }
+            status(): str { @@:("ready") }
+        }
+        $Exhausted {
+            spawn(): str { @@:("no_more_enemies") }
+            status(): str { @@:("exhausted") }
         }
 
     domain:

@@ -3,9 +3,9 @@
 %%
 %% Tests cross-system auth-result delegation: AuthApp.authenticate
 %% delegates to LoginManager.login through the embedded auth field.
-%% The transition to $Authenticated is split into a separate
-%% commit_auth/0 call to avoid the framec @@:return + transition
-%% combo that drops the return value on Erlang.
+%% Good credentials transition the LoginManager to $LoggedIn AND
+%% return "ok" — the same handler combines both, exercising the
+%% framec frame_transition__/7 reply-value preservation.
 
 main(_) ->
     code:add_patha("."),
@@ -16,14 +16,12 @@ main(_) ->
 
     %% Bad credentials → "denied", state stays $Unauthenticated.
     "denied" = auth_app:authenticate(Pid, "user", "wrong"),
-    _ = auth_app:commit_auth(Pid),
     "unauthenticated" = auth_app:app_status(Pid),
 
-    %% Good credentials → "ok", state stays $Unauthenticated until
-    %% commit_auth fires the cross-system transition cascade.
+    %% Good credentials → "ok" AND transitions to $Authenticated
+    %% via the same call. The frame_transition__/7 reply value
+    %% preserves the @@:return through the transition.
     "ok" = auth_app:authenticate(Pid, "admin", "secret"),
-    "unauthenticated" = auth_app:app_status(Pid),
-    _ = auth_app:commit_auth(Pid),
     "authenticated" = auth_app:app_status(Pid),
 
     %% In $Authenticated, further authenticate calls return
