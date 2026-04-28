@@ -1,0 +1,89 @@
+@@target erlang
+
+%% Agent — orchestrates a workflow: Idle → Planning → AwaitingApproval
+%% → Coding → Testing → Complete. Embeds a ToolRunner. Module name
+%% lowers to `agent`.
+%%
+%% This Erlang port simplifies the Java demo's HSM (no $Active
+%% superstate) and moves $Coding's per-step work from the enter
+%% handler into the step/0 handler. Reason: gen_statem `state_enter`
+%% callbacks don't always re-fire when transitioning to the same
+%% state from itself, so the Java pattern of `-> $Coding` from
+%% inside $Coding to bump a counter doesn't work the same way on
+%% Erlang. Each step/0 call now does one tool execution and either
+%% stays put or transitions, with no self-reentry.
+
+@@system Agent {
+    interface:
+        task(description: str)
+        approve()
+        step()
+        status(): str
+
+    machine:
+        $Idle {
+            task(description: str) {
+                self.task_desc = description
+                -> $Planning
+            }
+            status(): str { @@:("idle") }
+        }
+
+        $Planning {
+            $>() {
+                self.plan_len = 2
+            }
+            step() {
+                -> $AwaitingApproval
+            }
+            status(): str { @@:("planning") }
+        }
+
+        $AwaitingApproval {
+            approve() {
+                self.step_idx = 0
+                -> $Coding
+            }
+            status(): str { @@:("awaiting_approval") }
+        }
+
+        $Coding {
+            step() {
+                %% Single if/else avoids the consecutive-if codegen
+                %% pattern that framec's Erlang case-block analysis
+                %% currently miscompiles (treats two sequential cases
+                %% as one merged block).
+                if self.step_idx == 0 {
+                    self.tool_result = self.tool_runner.execute("read_file")
+                    self.step_idx = self.step_idx + 1
+                } else {
+                    self.tool_result = self.tool_runner.execute("write_file")
+                    self.step_idx = self.step_idx + 1
+                    -> $Testing
+                }
+            }
+            status(): str { @@:("coding") }
+        }
+
+        $Testing {
+            $>() {
+                self.tool_result = self.tool_runner.execute("run_terminal")
+            }
+            step() {
+                -> $Complete
+            }
+            status(): str { @@:("testing") }
+        }
+
+        $Complete {
+            $>() { }
+            status(): str { @@:("complete") }
+        }
+
+    domain:
+        task_desc: str = ""
+        plan_len: int = 0
+        step_idx: int = 0
+        tool_runner: ToolRunner = @@ToolRunner()
+        tool_result: str = ""
+}

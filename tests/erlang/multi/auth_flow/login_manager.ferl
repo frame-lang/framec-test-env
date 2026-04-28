@@ -1,0 +1,50 @@
+@@target erlang
+
+%% LoginManager — checks credentials and tracks current_user.
+%% Renamed from Java's LoginManager → snake_case `login_manager`
+%% Erlang module.
+%%
+%% Note: this Erlang port intentionally separates the credential
+%% check (login/2) from the transition (commit_login/0). On Java
+%% the original demo combines both into one `login` method that
+%% sets a return value AND fires `-> $LoggedIn`. Framec's Erlang
+%% codegen drops the @@:return value when the handler also
+%% transitions (the case-true branch calls frame_transition__/6
+%% which replies with the `ok` atom; the @@:return("ok") is lost).
+%% See ../auth_flow/README.md or the harness commit message for
+%% details.
+
+@@system LoginManager {
+    interface:
+        login(user: str, pass: str): str
+        commit_login()
+        status(): str
+
+    machine:
+        $LoggedOut {
+            login(user: str, pass: str): str {
+                if user == "admin" andalso pass == "secret" {
+                    self.current_user = user
+                    @@:("ok")
+                } else {
+                    @@:("denied")
+                }
+            }
+            commit_login() {
+                if self.current_user == "" {
+                    @@:return(ok)
+                } else {
+                    -> $LoggedIn
+                }
+            }
+            status(): str { @@:("logged_out") }
+        }
+        $LoggedIn {
+            login(user: str, pass: str): str { @@:("already_logged_in") }
+            commit_login() {}
+            status(): str { @@:("logged_in") }
+        }
+
+    domain:
+        current_user: str = ""
+}
