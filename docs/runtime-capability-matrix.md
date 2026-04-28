@@ -120,21 +120,24 @@ spec). Generated from a manual audit on 2026-04-26.
 
 [k] **Erlang** — Erlang requires one module per file, so a file
     with multiple `@@system` declarations is rejected by framec
-    with E431. Multi-system test fixtures in the matrix split
-    one `@@system` per `.ferl` (or carry `@@skip` when the
-    matrix harness lacks the multi-file-per-case convention).
-    *Cross-system field instantiation IS now fully wired*:
-    `level = @@Other()` lowers to
-    `level = element(2, other:start_link())` (unwraps the
-    `{ok, Pid}` returned by `gen_statem:start_link/3` so the
+    with E431. The matrix harness now supports a multi-source
+    convention: each `tests/erlang/multi/<case>/` directory is
+    one logical TAP test containing N `.ferl` files (one
+    `@@system` each) plus a `driver.escript` that pattern-matches
+    across modules. The `erlang_batch.sh` runner discovers these
+    dirs alongside the standard single-source `.ferl` sweep,
+    transpiles each file, `erlc`-compiles them all into the
+    work_dir together, then executes the driver. Cross-system
+    field instantiation works end-to-end: `level = @@Other()`
+    lowers to `level = element(2, other:start_link())` (unwraps
+    the `{ok, Pid}` returned by `gen_statem:start_link/3` so the
     field stores a bare Pid), and `self.level.bump()` rewrites
     to `other:bump(Data#data.level)` (module-qualified call,
     receiver as first arg). The user-facing `start_link/N`
     keeps the OTP-conventional `{ok, Pid}` shape so external
     drivers / supervisors / smoke tests pattern-match it
-    normally. Phase 7's multi-system fuzz harness can adopt
-    Erlang once the harness supports multi-file-per-case;
-    framec's side is closed.
+    normally. See `tests/erlang/multi/counter_pair/` for the
+    canonical layout.
 
 [l] **C** — C has no built-in list/vector. Frame's domain
     syntax (`name : type = init`) doesn't fit C's interleaved
