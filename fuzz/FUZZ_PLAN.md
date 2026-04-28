@@ -368,18 +368,18 @@ is expanded recursively at framec's segmentation / expansion stage
 **Current status:** Phase 9 harness landed. Defect #10 was closed
 (framec recursively expands nested Frame syntax via
 `expand_expression` in `frame_expansion.rs`). Harness covers
-**7 patterns × 8 backends (default) = 56 cases**, all passing:
-python_3, javascript, typescript, ruby, lua, php, dart, erlang.
+**7 patterns × 11 backends = 77 cases**, all passing:
+python_3, javascript, typescript, ruby, lua, php, dart, rust,
+go, swift, erlang.
 
-Three additional backends (rust, go, swift) are wired up in
-gen_nested.py + run_nested.sh but are NOT in the default langs
-list — they expose an unfixed framec codegen defect: when
-`@@:return` is passed as an arg to a typed-int method, the
-generated code passes the un-downcast type-erased return slot
-(`Box<dyn Any>` / `any` / `Any?`) to a method expecting `i64` /
-`int` / `Int`. Patterns p1, p3, p4, p7 fail; p2, p5, p6 pass.
-Run explicitly with `./run_nested.sh rust go swift` to
-reproduce. Tracked separately as a framec codegen task.
+Earlier failures on rust/go/swift turned out to be fixture
+issues: drive() declared void left framec without a return-type
+hint for the @@:return downcast at typed-arg sites; declaring
+drive(): int + capitalising Go method names per the export
+convention sidesteps both. Remaining 6 backends (csharp, java,
+kotlin, c, cpp, gdscript) need additional run-harness wiring
+(compile + run for build-toolchain langs, headless Godot for
+GDScript).
 
 The 7 patterns:
 
@@ -477,7 +477,7 @@ should: at the native compiler.
 | 6     |    ~1,100  |   ~18,933  | 11-backend subset                   |
 | 7     |    ~2,400  |   ~21,333  | 16-backend subset                   |
 | 8     |      ~850  |   ~22,183  | negative passthrough — after 5–7    |
-| 9     |        56  |    ~21,389 | **harness landed** (7 patterns × 8 backends; rust/go/swift expose framec @@:return-typed-arg defect) |
+| 9     |        77  |    ~21,410 | **harness landed** (7 patterns × 11 backends; csharp/java/kotlin/c/cpp/gdscript pending) |
 
 Well under 50k — tight enough that a full fuzz run fits in a coffee-
 break, loose enough that it's catching real bugs per phase.

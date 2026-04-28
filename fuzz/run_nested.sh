@@ -14,13 +14,7 @@ OUT_DIR=$SCRIPT_DIR/out_nested
 LOG_DIR=$SCRIPT_DIR/logs_nested
 mkdir -p "$OUT_DIR" "$LOG_DIR"
 
-LANGS=${@:-"python_3 javascript typescript ruby lua php dart erlang"}
-# Rust / Go / Swift have working transpile + run paths in this
-# script (run with `--langs rust go swift`) but expose an unfixed
-# framec codegen defect on patterns p1/p3/p4/p7 — `@@:return` as
-# arg to a typed-int method emits `Box<dyn Any>` / `any` / `Any?`
-# without a downcast. Excluded from default to keep the green
-# signal honest.
+LANGS=${@:-"python_3 javascript typescript ruby lua php dart rust go swift erlang"}
 summary=$LOG_DIR/summary.tsv
 : > "$summary"
 printf "lang\tcase\tstage\tresult\terror\n" >> "$summary"

@@ -193,6 +193,16 @@ func _fail(_ msg: String) -> Never { fatalError("FAIL: \\(msg)") }
 LANGS = _build_specs()
 
 
+def method_name(lang, name):
+    """Per-language method-name casing. Go capitalises interface
+    methods to mark them exported; framec's Go backend emits
+    `Add_one` for a Frame source `Add_one`. Other backends use
+    lowercase as written."""
+    if lang == "go":
+        return name[:1].upper() + name[1:]
+    return name
+
+
 def gen_case(lang, pattern):
     """Emit one .f<ext> source for a (language, pattern) pair.
     The body is small (~30 lines) — one system, one $S0 state with
@@ -201,31 +211,48 @@ def gen_case(lang, pattern):
     spec = LANGS[lang]
     sys_name = f"Nested_{pattern}"
 
+    # Per-language method-name casing for interface declarations
+    # and handlers — Go capitalises (`Absorb`, `Get_n`); everything
+    # else takes lowercase. Defined here so the per-pattern body
+    # templates below can reference them.
+    m_drive = method_name(lang, "drive")
+    m_absorb = method_name(lang, "absorb")
+    m_absorb_cache = method_name(lang, "absorb_cache")
+    m_add_one = method_name(lang, "add_one")
+    m_add_two = method_name(lang, "add_two")
+    m_compute = method_name(lang, "compute")
+    m_peek = method_name(lang, "peek")
+    m_get_n = method_name(lang, "get_n")
+
     # Per-pattern: drive() body + expected final n value.
     # n starts at 0 and gets bumped via the patterns.
     if pattern == "p1_return_arg":
-        # @@:return = 5; @@:self.absorb(@@:return) → absorb adds the arg to n.
+        # @@:return = 5; @@:self.{m_absorb}(@@:return) → absorb adds the arg to n.
         # Expected: n == 5.
         body = [
             f"                @@:return = 5{spec.stmt_end}",
-            f"                @@:self.absorb(@@:return)",
+            f"                @@:self.{m_absorb}(@@:return)",
         ]
         expected_n = 5
     elif pattern == "p2_params_arg":
-        # drive(x: int) → @@:self.absorb(@@:params.x). Caller passes 7.
+        # drive(x: int) → @@:self.{m_absorb}(@@:params.x). Caller passes 7.
         # Expected: n == 7.
         body = [
-            f"                @@:self.absorb(@@:params.x)",
+            f"                @@:self.{m_absorb}(@@:params.x)",
         ]
         expected_n = 7
     elif pattern == "p3_op_in_return":
         # @@:return = 4; @@:(<self><method_op>add_one(@@:return)) → return is 5,
         # then absorb with @@:return adds 5 to n.
         # Expected: n == 5.
+        # Go capitalises interface method exports — for Go targets the
+        # method names in the body must use the capitalised form
+        # (`Add_one`) to match what framec emits. method_name() does
+        # the per-language capitalisation.
         body = [
             f"                @@:return = 4{spec.stmt_end}",
-            f"                @@:({spec.self_word}{spec.method_op}add_one(@@:return))",
-            f"                @@:self.absorb(@@:return)",
+            f"                @@:({spec.self_word}{spec.method_op}{method_name(lang, 'add_one')}(@@:return))",
+            f"                @@:self.{m_absorb}(@@:return)",
         ]
         expected_n = 5
     elif pattern == "p4_selfcall_in_return":
@@ -233,8 +260,8 @@ def gen_case(lang, pattern):
         # by compute. After drive: absorb with @@:return adds 9 to n.
         # Expected: n == 9.
         body = [
-            f"                @@:return = @@:self.compute()",
-            f"                @@:self.absorb(@@:return)",
+            f"                @@:return = @@:self.{m_compute}()",
+            f"                @@:self.{m_absorb}(@@:return)",
         ]
         expected_n = 9
     elif pattern == "p5_selfcall_in_statevar":
@@ -248,31 +275,41 @@ def gen_case(lang, pattern):
         # state, keeping the fixture compact.
         # Expected: n == 9.
         body = [
-            f"                {spec.self_word}{spec.field_op}cache = @@:self.compute(){spec.stmt_end}",
-            f"                @@:self.absorb_cache()",
+            f"                {spec.self_word}{spec.field_op}cache = @@:self.{m_compute}(){spec.stmt_end}",
+            f"                @@:self.{m_absorb_cache}()",
         ]
         expected_n = 9
     elif pattern == "p6_op_arg":
-        # @@:self.absorb(<self><method_op>peek()) — peek returns 3.
+        # @@:self.{m_absorb}(<self><method_op>peek()) — peek returns 3.
         # Expected: n == 3.
         body = [
-            f"                @@:self.absorb({spec.self_word}{spec.method_op}peek())",
+            f"                @@:self.{m_absorb}({spec.self_word}{spec.method_op}{method_name(lang, 'peek')}())",
         ]
         expected_n = 3
     elif pattern == "p7_two_level":
-        # @@:return = 2; @@:self.absorb(@@:self.add_two(@@:return))
+        # @@:return = 2; @@:self.{m_absorb}(@@:self.add_two(@@:return))
         # add_two returns input + 2 = 4, absorb adds 4 to n.
         # Expected: n == 4.
         body = [
             f"                @@:return = 2{spec.stmt_end}",
-            f"                @@:self.absorb(@@:self.add_two(@@:return))",
+            f"                @@:self.{m_absorb}(@@:self.{m_add_two}(@@:return))",
         ]
         expected_n = 4
     else:
         raise ValueError(f"unknown pattern {pattern}")
 
     # Drive event signature varies by pattern (only p2 takes a param).
-    drive_sig = "drive(x: int)" if pattern == "p2_params_arg" else "drive()"
+    # All drive() variants return `int` even when the test driver
+    # discards the return — typed-language backends use the
+    # handler's declared return type to drive the @@:return downcast
+    # at read sites. A `drive()` (void) leaves the slot type
+    # unknown to framec, so passing `@@:return` to a typed-int arg
+    # becomes a type-error in Rust/Go/Swift. Declaring `: int`
+    # gives the codegen the hint it needs.
+    drive_sig = ("drive(x: int): int" if pattern == "p2_params_arg"
+                 else "drive(): int")
+
+    drive_decl = drive_sig.replace("drive", m_drive)
 
     lines: list[str] = []
     lines.append(f"@@target {spec.target}")
@@ -284,18 +321,18 @@ def gen_case(lang, pattern):
     lines.append("")
     lines.append(f"@@system {sys_name} {{")
     lines.append("    interface:")
-    lines.append(f"        {drive_sig}")
-    lines.append("        absorb(v: int)")
-    lines.append("        absorb_cache()")
-    lines.append("        add_one(x: int): int")
-    lines.append("        add_two(x: int): int")
-    lines.append("        compute(): int")
-    lines.append("        peek(): int")
-    lines.append("        get_n(): int")
+    lines.append(f"        {drive_decl}")
+    lines.append(f"        {m_absorb}(v: int)")
+    lines.append(f"        {m_absorb_cache}()")
+    lines.append(f"        {m_add_one}(x: int): int")
+    lines.append(f"        {m_add_two}(x: int): int")
+    lines.append(f"        {m_compute}(): int")
+    lines.append(f"        {m_peek}(): int")
+    lines.append(f"        {m_get_n}(): int")
     lines.append("")
     lines.append("    machine:")
     lines.append("        $S0 {")
-    lines.append(f"            {drive_sig} {{")
+    lines.append(f"            {drive_decl} {{")
     lines.append("\n".join(body))
     lines.append("            }")
     self_n = f"{spec.self_word}{spec.field_op}n"
@@ -304,13 +341,13 @@ def gen_case(lang, pattern):
     # `$x`; everything else takes the bare name.
     p_v = f"{spec.param_prefix}v"
     p_x = f"{spec.param_prefix}x"
-    lines.append(f"            absorb(v: int) {{ {self_n} = {self_n} + {p_v}{spec.stmt_end} }}")
-    lines.append(f"            absorb_cache() {{ {self_n} = {self_n} + {self_cache}{spec.stmt_end} }}")
-    lines.append(f"            add_one(x: int): int {{ @@:({p_x} + 1) }}")
-    lines.append(f"            add_two(x: int): int {{ @@:({p_x} + 2) }}")
-    lines.append(f"            compute(): int {{ @@:(9) }}")
-    lines.append(f"            peek(): int {{ @@:(3) }}")
-    lines.append(f"            get_n(): int {{ @@:({self_n}) }}")
+    lines.append(f"            {m_absorb}(v: int) {{ {self_n} = {self_n} + {p_v}{spec.stmt_end} }}")
+    lines.append(f"            {m_absorb_cache}() {{ {self_n} = {self_n} + {self_cache}{spec.stmt_end} }}")
+    lines.append(f"            {m_add_one}(x: int): int {{ @@:({p_x} + 1) }}")
+    lines.append(f"            {m_add_two}(x: int): int {{ @@:({p_x} + 2) }}")
+    lines.append(f"            {m_compute}(): int {{ @@:(9) }}")
+    lines.append(f"            {m_peek}(): int {{ @@:(3) }}")
+    lines.append(f"            {m_get_n}(): int {{ @@:({self_n}) }}")
     lines.append("        }")
     lines.append("")
     lines.append("    domain:")
@@ -439,16 +476,9 @@ def main():
                         default=str(Path(__file__).parent / "cases_nested"))
     parser.add_argument("--langs", nargs="+",
                         default=["python_3", "javascript", "typescript",
-                                 "ruby", "lua", "php", "dart", "erlang"])
-    # Rust/Go/Swift LangSpecs ship in this generator but are NOT
-    # included in the default langs list because they expose an
-    # unfixed framec codegen defect: when `@@:return` is passed
-    # as an arg to a typed-int method, the framec output passes
-    # `Option<&Box<dyn Any>>` (Rust) / `any` (Go) / `Any?` (Swift)
-    # to a method expecting `i64` / `int` / `Int` without inserting
-    # the downcast. Patterns p1, p3, p4, p7 fail; p2, p5, p6 pass.
-    # Run explicitly with `--langs rust go swift` to reproduce
-    # the defect for diagnosis.
+                                 "ruby", "lua", "php", "dart",
+                                 "rust", "go", "swift",
+                                 "erlang"])
     args = parser.parse_args()
 
     out = Path(args.out_dir)
