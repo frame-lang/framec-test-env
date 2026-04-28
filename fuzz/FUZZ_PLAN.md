@@ -368,8 +368,25 @@ is expanded recursively at framec's segmentation / expansion stage
 **Current status:** Phase 9 harness landed. Defect #10 was closed
 (framec recursively expands nested Frame syntax via
 `expand_expression` in `frame_expansion.rs`). Harness covers
-**7 patterns × 17 backends = 119 cases**, all passing across
-the entire matrix.
+**11 patterns × 17 backends = 184 cases passing / 3 known
+codegen defects surfaced** for follow-up:
+
+- `dart/p11_statevar_lhs` — Dart's typed-lowering of
+  `self.n + $.scache` emits `state_vars["scache"]` (dynamic)
+  without an `as int` cast; `int + dynamic = num` fails the
+  assignment back to `int n`.
+- `erlang/p9_return_plus_transition` — `@@:return = N;
+  @@:self.absorb(@@:return); -> $Done` produces an Erlang
+  syntax error at the trailing semicolon. The transition-guard
+  wrapping interacts badly with the explicit `-> $Done`.
+- `erlang/p13_selfcall_arithmetic` — `@@:return =
+  @@:self.compute() + 1` evaluates to 9 instead of 10. The
+  Erlang codegen loses the `+ 1` arithmetic when the LHS of
+  the operator is a `@@:self.method()` call.
+
+Each is a concrete codegen finding. None are present in the
+matrix (which uses explicit intermediates) — Phase 9 is
+literally what surfaces them.
 
 Lessons learned through the bring-up:
 - drive() must return `int` for patterns that emit `@@:return`
@@ -398,6 +415,12 @@ The 7 patterns:
   - P5  `self.cache = @@:self.compute()`  — self-call as field assign
   - P6  `@@:self.absorb(self.peek())`     — op-call as arg
   - P7  `@@:self.foo(@@:self.bar(@@:r))`  — two-level nest
+  - P8  `@@:self.a(@@:self.b(@@:self.c(@@:r)))`  — three-level
+  - P9  `@@:return = N; @@:self.absorb(@@:r); -> $Done` —
+        return + transition same handler
+  - P11 `$.scache = @@:self.compute()` — state-var as LHS
+  - P13 `@@:return = @@:self.compute() + 1` — selfcall in
+        native arithmetic
 
 Each case is self-checking (Python/JS/TS/Ruby/Lua/PHP/Dart via
 inline drivers; Erlang via an external escript that reads
@@ -485,7 +508,7 @@ should: at the native compiler.
 | 6     |    ~1,100  |   ~18,933  | 11-backend subset                   |
 | 7     |    ~2,400  |   ~21,333  | 16-backend subset                   |
 | 8     |      ~850  |   ~22,183  | negative passthrough — after 5–7    |
-| 9     |       119  |    ~21,452 | **harness landed** (7 patterns × 17 backends — full matrix coverage) |
+| 9     |       184  |    ~21,517 | **harness expanded** (11 patterns × 17 backends; 3 cases surface real codegen defects for follow-up) |
 
 Well under 50k — tight enough that a full fuzz run fits in a coffee-
 break, loose enough that it's catching real bugs per phase.

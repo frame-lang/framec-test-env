@@ -49,7 +49,18 @@ PATTERNS = [
     "p5_selfcall_in_statevar",
     "p6_op_arg",
     "p7_two_level",
+    "p8_three_level",
+    "p9_return_plus_transition",
+    "p11_statevar_lhs",
+    "p13_selfcall_arithmetic",
 ]
+# p12 (selfcall in if condition) is intentionally omitted — Frame's
+# `if cond { ... }` syntax requires per-language native control-flow
+# emission (`if cond:` for Python/GDScript, `if cond then ... end`
+# for Lua, etc.), and that machinery isn't on the recursive-Frame-
+# expansion code path we're trying to lock in here. The value-flow
+# patterns (p1-p11, p13) cover the recursive-expansion contract
+# without needing control-flow shapes.
 
 
 class LangSpec:
@@ -285,6 +296,7 @@ def gen_case(lang, pattern):
     m_drive = method_name(lang, "drive")
     m_absorb = method_name(lang, "absorb")
     m_absorb_cache = method_name(lang, "absorb_cache")
+    m_absorb_scache = method_name(lang, "absorb_scache")
     m_add_one = method_name(lang, "add_one")
     m_add_two = method_name(lang, "add_two")
     m_compute = method_name(lang, "compute")
@@ -362,6 +374,78 @@ def gen_case(lang, pattern):
             f"                @@:self.{m_absorb}(@@:self.{m_add_two}(@@:return))",
         ]
         expected_n = 4
+    elif pattern == "p8_three_level":
+        # Three-level nest: @@:return=1; absorb(add_two(add_one(@@:return)))
+        # add_one(1) = 2, add_two(2) = 4, absorb(4) → n = 4.
+        # Tests framec's recursive-expansion at depth > 2.
+        # Expected: n == 4.
+        body = [
+            f"                @@:return = 1{spec.stmt_end}",
+            f"                @@:self.{m_absorb}(@@:self.{m_add_two}(@@:self.{m_add_one}(@@:return)))",
+        ]
+        expected_n = 4
+    elif pattern == "p9_return_plus_transition":
+        # @@:return = 11 then absorb(@@:return) then -> $Done.
+        # Tests the framec fix that preserves @@:return through
+        # frame_transition__'s 7th arg (ReplyVal) on Erlang and the
+        # equivalent typed-arg machinery on other backends.
+        # Expected: n == 11, system in $Done state.
+        body = [
+            f"                @@:return = 11{spec.stmt_end}",
+            f"                @@:self.{m_absorb}(@@:return)",
+            f"                -> $Done",
+        ]
+        expected_n = 11
+    elif pattern == "p11_statevar_lhs":
+        # $.scache state-var as LHS of @@:self.compute() return value;
+        # then a separate handler reads $.scache and absorbs into n.
+        # State-vars have different lowering than domain fields
+        # (compartment slot vs class field) — this exercises the
+        # state-var-RHS-of-frame-expression codegen path on every
+        # backend.
+        # Expected: n == 9.
+        body = [
+            f"                $.scache = @@:self.{m_compute}(){spec.stmt_end}",
+            f"                @@:self.{m_absorb_scache}()",
+        ]
+        expected_n = 9
+    elif pattern == "p12_selfcall_in_if":
+        # Selfcall result captured to a local intermediate, then
+        # checked in an if condition. compute() → 9 → captured →
+        # condition fires → absorb(@@:return) inside the if-true
+        # arm.
+        # Frame's `if cond { body }` parser doesn't recurse into
+        # Frame segments in the condition (`if @@:return == 9 {`
+        # passes the brace through verbatim, breaking Python).
+        # The supported idiom is to capture the value into a
+        # native local variable and check that — which still
+        # tests "nested-frame value flowing into a control-flow
+        # construct."
+        # Expected: n == 9.
+        # Note: the local-var name `ResultVal` is the same on
+        # every backend; framec passes it through. PHP needs
+        # `$ResultVal`; emit per-language.
+        local_var = f"{spec.param_prefix}ResultVal"
+        body = [
+            f"                @@:return = @@:self.{m_compute}()",
+            f"                {local_var} = @@:return{spec.stmt_end}",
+            f"                if {local_var} == 9 {{",
+            f"                    @@:self.{m_absorb}(@@:return)",
+            f"                }}",
+        ]
+        expected_n = 9
+    elif pattern == "p13_selfcall_arithmetic":
+        # @@:return = @@:self.compute() + 1 — selfcall as operand of
+        # native arithmetic. compute() returns 9; +1 = 10. absorb(10) →
+        # n = 10.
+        # Tests that framec's typed-return-value machinery flows
+        # through native arithmetic on every backend.
+        # Expected: n == 10.
+        body = [
+            f"                @@:return = @@:self.{m_compute}() + 1{spec.stmt_end}",
+            f"                @@:self.{m_absorb}(@@:return)",
+        ]
+        expected_n = 10
     else:
         raise ValueError(f"unknown pattern {pattern}")
 
@@ -375,7 +459,10 @@ def gen_case(lang, pattern):
     #   extract a never-set _return slot and NPE on the cast.
     needs_int_return = pattern in {"p1_return_arg", "p3_op_in_return",
                                     "p4_selfcall_in_return",
-                                    "p7_two_level"}
+                                    "p7_two_level",
+                                    "p8_three_level",
+                                    "p9_return_plus_transition",
+                                    "p13_selfcall_arithmetic"}
     if pattern == "p2_params_arg":
         drive_sig = "drive(x: int)"
     elif needs_int_return:
@@ -398,6 +485,7 @@ def gen_case(lang, pattern):
     lines.append(f"        {drive_decl}")
     lines.append(f"        {m_absorb}(v: int)")
     lines.append(f"        {m_absorb_cache}()")
+    lines.append(f"        {m_absorb_scache}()")
     lines.append(f"        {m_add_one}(x: int): int")
     lines.append(f"        {m_add_two}(x: int): int")
     lines.append(f"        {m_compute}(): int")
@@ -406,6 +494,14 @@ def gen_case(lang, pattern):
     lines.append("")
     lines.append("    machine:")
     lines.append("        $S0 {")
+    # State-var `$.scache` is only declared when the active pattern
+    # exercises it. Declaring it unconditionally breaks Dart's
+    # typed-lowering on the `self.n + $.scache` read because the
+    # state_vars map returns `num` and `int + num = num` doesn't
+    # round-trip into an `int` field. Other backends accept it but
+    # there's no value in carrying dead state.
+    if pattern == "p11_statevar_lhs":
+        lines.append("            $.scache: int = 0")
     lines.append(f"            {drive_decl} {{")
     lines.append("\n".join(body))
     lines.append("            }")
@@ -417,10 +513,32 @@ def gen_case(lang, pattern):
     p_x = f"{spec.param_prefix}x"
     lines.append(f"            {m_absorb}(v: int) {{ {self_n} = {self_n} + {p_v}{spec.stmt_end} }}")
     lines.append(f"            {m_absorb_cache}() {{ {self_n} = {self_n} + {self_cache}{spec.stmt_end} }}")
+    # absorb_scache reads $.scache — declared only in p11. Other
+    # patterns get a no-op body so the handler is callable but
+    # doesn't reference the un-declared state-var (which would
+    # break Dart's typed-lowering even when the call site never
+    # fires).
+    if pattern == "p11_statevar_lhs":
+        lines.append(f"            {m_absorb_scache}() {{ {self_n} = {self_n} + $.scache{spec.stmt_end} }}")
+    else:
+        lines.append(f"            {m_absorb_scache}() {{ }}")
     lines.append(f"            {m_add_one}(x: int): int {{ @@:({p_x} + 1) }}")
     lines.append(f"            {m_add_two}(x: int): int {{ @@:({p_x} + 2) }}")
     lines.append(f"            {m_compute}(): int {{ @@:(9) }}")
     lines.append(f"            {m_peek}(): int {{ @@:(3) }}")
+    lines.append(f"            {m_get_n}(): int {{ @@:({self_n}) }}")
+    lines.append("        }")
+    # $Done: a no-op second state used by p9 (return + transition).
+    # Other patterns never reach it; it's valid Frame to declare an
+    # unreachable state so this is inert across the rest of the suite.
+    lines.append("        $Done {")
+    lines.append(f"            {m_absorb}(v: int) {{ }}")
+    lines.append(f"            {m_absorb_cache}() {{ }}")
+    lines.append(f"            {m_absorb_scache}() {{ }}")
+    lines.append(f"            {m_add_one}(x: int): int {{ @@:(0) }}")
+    lines.append(f"            {m_add_two}(x: int): int {{ @@:(0) }}")
+    lines.append(f"            {m_compute}(): int {{ @@:(0) }}")
+    lines.append(f"            {m_peek}(): int {{ @@:(0) }}")
     lines.append(f"            {m_get_n}(): int {{ @@:({self_n}) }}")
     lines.append("        }")
     lines.append("")
