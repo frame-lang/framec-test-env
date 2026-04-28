@@ -571,22 +571,25 @@ def gen_case(lang, pattern):
         lines.append(f"    {spec.println_pass}")
         lines.append("}")
     elif lang == "csharp":
-        # C# top-level statements (since C# 9) — simpler than the
-        # full class-with-main shape. Available via the .NET SDK
-        # `dotnet script` runner or a Program.cs target. Here we
-        # rely on `dotnet run` over a single-file project that the
-        # run_nested.sh harness sets up at exec time.
+        # Each test gets a unique namespace so a single dotnet
+        # project can host all tests' Driver classes side-by-side.
+        # The fuzz runner's batch_csharp() pre-pass copies every
+        # .cs into a shared project, builds once, and runs one
+        # dispatcher that invokes each test's Driver.Main via
+        # reflection — skipping the per-test dotnet restore + run
+        # cycle that dominated wall-time.
         lines.append("// Inline test driver.")
-        lines.append("public class _NestedTestDriver {")
-        lines.append("    public static void Main() {")
-        lines.append(f"        var _inst = new {sys_name}();")
-        lines.append(f"        _inst.drive({drive_arg_str});")
-        lines.append(f"        int _n = (int) _inst.get_n();")
-        lines.append(f"        if (_n != {expected_n}) {{")
-        lines.append(f"            System.Console.WriteLine(\"FAIL: expected n={expected_n}, got \" + _n);")
-        lines.append(f"            System.Environment.Exit(1);")
-        lines.append(f"        }}")
-        lines.append(f"        {spec.println_pass}")
+        lines.append(f"namespace nf_{pattern} {{")
+        lines.append("    public class Driver {")
+        lines.append("        public static void Main() {")
+        lines.append(f"            var _inst = new {sys_name}();")
+        lines.append(f"            _inst.drive({drive_arg_str});")
+        lines.append(f"            int _n = (int) _inst.get_n();")
+        lines.append(f"            if (_n != {expected_n}) {{")
+        lines.append(f"                throw new System.Exception(\"FAIL: expected n={expected_n}, got \" + _n);")
+        lines.append(f"            }}")
+        lines.append(f"            {spec.println_pass}")
+        lines.append("        }")
         lines.append("    }")
         lines.append("}")
     elif lang == "c":

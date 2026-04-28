@@ -68,6 +68,19 @@ run_one() {
         return 1
     fi
 
+    # C# batched path: dispatcher already ran in batch_csharp().
+    # Look for `DISP_<case_id>: OK` in the cached output.
+    if [ "$lang" = "csharp" ] && [ -n "${CSHARP_BATCH_OUT:-}" ]; then
+        if grep -q "^DISP_${case_id}: OK" "$CSHARP_BATCH_OUT"; then
+            printf "%s\t%s\trun\tPASS\t\n" "$lang" "$case_id" >> "$summary"
+            return 0
+        fi
+        local e
+        e=$(grep "^DISP_${case_id}:" "$CSHARP_BATCH_OUT" | head -1 | head -c 220)
+        printf "%s\t%s\trun\tFAIL\t%s\n" "$lang" "$case_id" "$e" >> "$summary"
+        return 1
+    fi
+
     rm -rf "$out" 2>/dev/null
     mkdir -p "$out"
 
@@ -332,10 +345,85 @@ batch_kotlin() {
     fi
 }
 
+# C# pre-pass — same idea as Kotlin. dotnet restore + build cold
+# starts dominate; one shared project with all tests as siblings
+# under their own namespaces builds once and dispatches via a
+# generated Program.cs that runs all Driver.Main() calls in
+# try/catch and prints `<id>: PASS` / `<id>: FAIL ...` per test.
+# The C# branch in run_one() detects CSHARP_BATCH_OUT and grep-
+# matches its own case_id in the cached dispatcher output.
+batch_csharp() {
+    local proj_dir="$OUT_DIR/csharp/_batch/proj"
+    local cs_files=""
+    rm -rf "$proj_dir" 2>/dev/null
+    mkdir -p "$proj_dir"
+
+    local case_ids=""
+    for case_file in "$CASES_DIR"/*.fcs; do
+        [ -f "$case_file" ] || continue
+        local case_id
+        case_id=$(basename "$case_file" .fcs)
+        local tmp_out
+        tmp_out=$(mktemp -d)
+        if ! "$FRAMEC" compile -l csharp -o "$tmp_out" "$case_file" >"$LOG_DIR/csharp-$case_id.transpile" 2>&1; then
+            local e
+            e=$(head -3 "$LOG_DIR/csharp-$case_id.transpile" | tr '\n' '|' | head -c 220)
+            printf "csharp\t%s\ttranspile\tFAIL\t%s\n" "$case_id" "$e" >> "$summary"
+            continue
+        fi
+        local cs
+        cs=$(ls "$tmp_out"/*.cs 2>/dev/null | head -1)
+        if [ -n "$cs" ]; then
+            cp "$cs" "$proj_dir/${case_id}.cs"
+            case_ids="$case_ids $case_id"
+        fi
+    done
+    [ -z "$case_ids" ] && return
+
+    cat > "$proj_dir/Dispatcher.cs" <<DISPATCHER
+using System;
+
+public class Dispatcher {
+    public static void Main(string[] args) {
+DISPATCHER
+    for cid in $case_ids; do
+        cat >> "$proj_dir/Dispatcher.cs" <<DISP_TEST
+        try { nf_${cid}.Driver.Main(); Console.WriteLine("DISP_${cid}: OK"); }
+        catch (Exception e) { Console.WriteLine("DISP_${cid}: FAIL: " + e.Message); }
+DISP_TEST
+    done
+    cat >> "$proj_dir/Dispatcher.cs" <<DISPATCHER
+    }
+}
+DISPATCHER
+
+    cat > "$proj_dir/test.csproj" <<CSPROJ
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <RootNamespace>NestedFuzz</RootNamespace>
+    <StartupObject>Dispatcher</StartupObject>
+  </PropertyGroup>
+</Project>
+CSPROJ
+
+    (cd "$proj_dir" && dotnet restore -v q >"$LOG_DIR/csharp-restore.err" 2>&1) || true
+    if (cd "$proj_dir" && dotnet build -v q -c Release >"$LOG_DIR/csharp-build.err" 2>&1); then
+        local dispatcher_out="$OUT_DIR/csharp/_batch/dispatcher.out"
+        (cd "$proj_dir" && dotnet run --no-build -c Release -v q 2>&1) > "$dispatcher_out" || true
+        export CSHARP_BATCH_OUT="$dispatcher_out"
+    fi
+}
+
 for lang in $LANGS; do
     ext=$(lang_to_ext "$lang")
     if [ "$lang" = "kotlin" ]; then
         batch_kotlin
+    fi
+    if [ "$lang" = "csharp" ]; then
+        batch_csharp
     fi
     for case_file in "$CASES_DIR"/*."$ext"; do
         [ -f "$case_file" ] || continue
@@ -346,6 +434,9 @@ for lang in $LANGS; do
     done
     if [ "$lang" = "kotlin" ]; then
         unset KOTLIN_BATCH_JAR
+    fi
+    if [ "$lang" = "csharp" ]; then
+        unset CSHARP_BATCH_OUT
     fi
 done
 
