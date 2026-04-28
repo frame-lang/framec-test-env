@@ -91,3 +91,71 @@ time for marginal additional signal: if the output parses and
 type-checks, the codegen is structurally sound. The existing Docker
 matrix (`docker/make test`) handles runtime validation on hand-written
 fixtures; this fuzzer is its structural complement.
+
+---
+
+## Phase 9: nested-frame fuzz (curated regressions, runtime-asserted)
+
+`gen_nested.py` + `run_nested.sh` — 5 named patterns × 17 backends
+that pin axes the depth-2 cross-product (Phase 10) doesn't reach,
+plus runtime-verified regressions for cross-backend codegen fixes:
+
+- p7: depth-2 nesting (`@@:self.a(@@:self.b(x))`)
+- p8: depth-3 nesting
+- p9: `@@:return = expr`, `@@:self.X()`, then `-> $State` — the
+  return-slot value must survive the transition to be reported back.
+- p11: cross-handler `$.field` round-trip — write in handler A, read in
+  handler B.
+- p14: `self.n = @@:self.foo() + 1` — domain-LHS embedded self-call.
+  Pins the D1 fix (2026-04-28) that defers the transition guard
+  until end-of-statement.
+
+These are runtime-asserted (each generated case asserts a specific
+final domain value), unlike Phase 10's transpile-only structural
+fuzz. ~30s wall clock across all 17 langs.
+
+```bash
+python3 gen_nested.py
+./run_nested.sh
+```
+
+## Phase 10: full-permutation expression fuzz (tiered)
+
+`gen_perm.py` + `run_perm.sh` — single-statement, depth ≤ 2
+cross-product of `LHS × receiver × operator × receiver`. Each case
+is value-asserted (generator simulates Frame execution to compute the
+expected return). 462 cases × 17 langs = 7,854 case-runs at full tier.
+
+Dimensions:
+- LHS targets (3): `@@:return =`, `self.<dom> =`, `$.<sv> =`
+- Receivers (7): two integer literals, domain field read, state-var
+  read, parameter read, two self-call shapes (`@@:self.compute()` and
+  `@@:self.add_one(2)`)
+- Operators (3): `+`, `-`, `*`
+
+```bash
+python3 gen_perm.py                          # generate all 17 langs
+./run_perm.sh --tier=smoke                   # ~90 cases/lang, ~30s matrix
+./run_perm.sh --tier=core                    # delegates to run_nested.sh
+./run_perm.sh --tier=full                    # 462 cases/lang, 20-30 min
+./run_perm.sh --tier=full --lang=python_3    # one lang only
+```
+
+### Tier model
+
+| Tier | Source | Cases / lang | Wall clock | When to run |
+|---|---|---|---|---|
+| smoke | gen_perm.py, one per coarse equiv class | ~30-90 | ~30s matrix | Every iteration |
+| core | gen_nested.py (Phase 9 patterns p7+p8+p9+p11) | 4 | ~20s matrix | Before commit |
+| full | gen_perm.py, all combos | 462 | 20-30 min matrix | Nightly / pre-release |
+| stress | smoke + core + full + Phase 6/7/8 | All | 1hr+ | Pre-release |
+
+### Output
+
+- `cases_perm/_index.tsv` — sidecar (lang, case_id, equiv_class, smoke,
+  expected). Smoke filter reads this; non-Erlang langs don't carry
+  metadata in-source because `# FUZZ_*` would land in JS/Java output
+  where `#` isn't a comment.
+- `logs_perm/per_lang/summary_<lang>.tsv` — per-lang results so
+  concurrent `--lang=X` / `--lang=Y` invocations don't clobber.
+- `logs_perm/summary.tsv` — rebuilt at end-of-run from per-lang files.

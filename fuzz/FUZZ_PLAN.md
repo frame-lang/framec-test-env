@@ -1,21 +1,43 @@
 # Framec Fuzz Plan — Full 17-Backend Runtime Coverage
 
+> **Companion docs:**
+> - `TEST_INFRA_ROADMAP.md` — unified runner contract (tier + tag
+>   filters, top-level meta-runner, smoke / full / cross-sectional
+>   modes). Prerequisite for Phase 11+ work.
+> - `DEFECTS.md` — open and closed framec defects surfaced by the
+>   fuzz suite, including D1 (cross-backend self-call mid-expression
+>   bug, fixed 2026-04-28).
+> - `README.md` — quick-start usage and tier-model summary.
+
 ## Goal
 
 Every Frame semantic feature exercised at runtime against **every backend
 that supports it**. Failures are byte-level trace divergences, not just
-compile errors. Today we have:
+compile errors.
 
-- **2,800** structural cases × 14 backends (compile-only)
-- **324** `@@persist` runtime cases × 2 backends (Python, JS)
-- **486** `@@:self` runtime cases × 3 backends (Python, JS, Erlang)
+**Phases 1-10 status (2026-04-28):**
+
+- Phase 1 (trace harness): shipped.
+- Phase 2 (`@@persist`): 1,377 cases × 17 backends, clean.
+- Phase 3 (`@@:self`): 2,646 cases (16 langs full + Erlang 54 of 162).
+- Phase 4 (HSM parents): 1,377 cases × 17, clean.
+- Phase 5 (Operations): 459 cases × 17, clean.
+- Phase 6 (Async): 220 cases × 11 wired backends.
+- Phase 7 (Multi-system): 168 cases × 14 backends.
+- Phase 8 (Negative): 18 codes × 17 backends.
+- Phase 9 (Nested syntax): 5 patterns × 17 = 85 cases, clean
+  (curated regression tier).
+- Phase 10 (Expression cross-product): v2 = 460 cases × 17 = 7,820
+  cases, clean. D1/D2/D3 closed.
 
 Target end state:
 
-- All runtime fuzzers apply to all applicable backends (~12–17 each).
+- All runtime fuzzers apply to all applicable backends (~11–17 each).
 - Each case is a single Frame source compared across N backends via a
   shared trace oracle — any divergence is a blocker.
-- ~50,000 runtime-semantic cases passing, bug-free.
+- ~30,000 runtime-semantic cases passing, bug-free, partitioned across
+  Frame 4.0 / 4.1 / 4.2 release traunches (see "Release traunching"
+  section below).
 
 ## Core architecture: the differential trace harness
 
@@ -496,22 +518,336 @@ would still pass, because the "fix" makes the bad spec work. Negative
 fuzz locks in the contract that bad Frame specs fail where they
 should: at the native compiler.
 
+### Phase 10 — Full-permutation expression fuzz (shipped 2026-04-28)
+
+**Goal:** exhaustive cross-product of Frame's expression-evaluation
+codegen surface — receivers × operators × LHS targets × statement
+context. Catches the operator-siblings of every spot-check pattern.
+
+**Generator + runner:** `gen_perm.py` + `run_perm.sh`. First fuzz
+phase with the unified tier+tag contract (smoke / core / full).
+
+**Tier model:**
+- Smoke: one case per coarse equivalence class. ~30-90 cases/lang,
+  ~30s matrix wall clock.
+- Core: delegates to `run_nested.sh` (Phase 9's curated patterns).
+- Full: full cross-product. 460 cases/lang, ~20-30 min matrix wall
+  clock at full parallelism.
+
+**v2 axes (shipped):**
+- Receivers (7): two int literals, domain field, state-var, parameter,
+  two self-call shapes (`@@:self.compute()`, `@@:self.add_one(2)`).
+- Operators (3): `+`, `-`, `*`.
+- LHS targets (3): `@@:return =`, `self.<dom> =`, `$.<sv> =`.
+- Depth ≤ 2.
+
+**v3-v5 (deferred to 4.1):** more receivers (`@@:return` read,
+`@@:params["x"]`), comparison operators (`==`, `!=`, `<`, `>`),
+native-local LHS, transition placement, depth-3 nesting. Estimated
+8-12 hours; saturates the expression-evaluation surface.
+
+**Status (2026-04-28):** v2 = 7,820 / 7,820 passing across 17 langs.
+Surfaced D1 (cross-backend mid-expression guard bug, fixed) and
+D3 (Swift self-assign corpus issue, filtered). D2 design decision
+codified in `docs/frame_runtime.md` Step 19: "transition check fires
+at statement boundaries, not within statements."
+
+**Frame feature gate:** none — all 17 langs.
+
+---
+
+### Phase 11 — Statement-pair sequencing (proposed)
+
+**Goal:** Two-statement bodies × cross-product, testing how
+`_transitioned`, `@@:return`, `@@:event`, `@@:params` flow between
+adjacent statements within one handler.
+
+**Axes:**
+- Statement pair shapes: assignment + selfcall, selfcall + transition,
+  selfcall + selfcall, return-write + transition, etc.
+- Receivers and LHS from Phase 10 carried in.
+- Whether statement #1 transitions or not.
+
+**Estimated cases:** ~500 patterns × 17 = ~8,500. Smoke ~50 patterns
+(~850), core curated regressions (~10 patterns), full ~500.
+
+**Value density:** high. Phase 9 p9 + p11 are exactly this shape and
+both surfaced bugs.
+
+**Frame feature gate:** none.
+
+---
+
+### Phase 12 — Control-flow embedding (proposed)
+
+**Goal:** Frame expressions inside `if` / `while` conditions and
+bodies. Tests guard injection in branched code paths.
+
+**Axes:**
+- Expression placement: condition vs. then-body vs. else-body vs.
+  while-body.
+- Embedded self-call vs. domain read vs. literal.
+- Single-statement vs. multi-statement body.
+
+**Estimated cases:** ~1,500 patterns × 17 = ~25,500 if 1-level
+nesting. Smoke ~100 patterns (single-statement, `if` only).
+
+**Value density:** high. Phase 9 p12 was deliberately omitted because
+of `if` / `while` parser interaction — bugs likely there.
+
+**Frame feature gate:** `if` / `while` syntax (already supported).
+
+---
+
+### Phase 13 — Identifier shadowing (proposed)
+
+**Goal:** `self.x` vs `$.x` vs param `x` vs local `x` — does framec
+correctly resolve scope when names collide?
+
+**Axes:**
+- Same name across (domain field, state-var, param, native local).
+- Reading vs. writing each.
+
+**Estimated cases:** ~30 patterns × 17 = ~500. Smoke ~10 patterns.
+
+**Value density:** medium. Likely surfaces 2-3 framec scope bugs.
+
+**Frame feature gate:** none.
+
+---
+
+### Phase 14 — HSM × everything (proposed)
+
+**Goal:** Cross-product of Phase 4 (HSM) with Phases 2/5/6/7/10.
+Tests that each feature behaves correctly under deep HSM hierarchies.
+
+**Axes:**
+- HSM depth: 1, 2, 3.
+- Each feature (persist / operations / async / multi-system /
+  expression) exercised per HSM level.
+
+**Estimated cases:** depth × per-phase 80%-subset. Realistically
+~3,000 × 17 = ~50,000 if fully cross-producted, or ~1,500 × 17 =
+25,500 if capped at depth 2. Smoke ~depth-2 × Phase 5+10 ~500 cases.
+
+**Value density:** medium-high. Each phase's HSM coverage is
+currently shallow.
+
+**Frame feature gate:** HSM (already supported).
+
+---
+
+### Phase 15 — State-arg propagation × everything (proposed)
+
+**Goal:** Phase 4 covers HSM args narrowly. Cross-product with
+Phases 2/5/6/7/10.
+
+**Axes:** state-args declared at each HSM level × feature × passthrough.
+
+**Estimated cases:** ~500 × 17 = ~8,500. Smoke ~50 patterns at 2-level
+HSM.
+
+**Value density:** high (state-arg propagation is a known framec
+hot-spot).
+
+---
+
+### Phase 16 — Comment + whitespace robustness (proposed)
+
+**Goal:** Frame source with embedded comments at every position
+(handler-body, between segments, inside expressions) and unusual
+whitespace. Tests scanner robustness.
+
+**Axes:** comment placement × whitespace variations × per-language
+comment leader.
+
+**Estimated cases:** ~50 patterns × 17 = ~850. Smoke ~10 patterns.
+
+**Value density:** low-medium. Scanner code is well-trodden.
+
+---
+
+### Phase 17 — Multi-event traces (proposed)
+
+**Goal:** Send event A → B → C in sequence; assert compound trace
+ordering. Tests stateful behavior across events.
+
+**Axes:**
+- Event sequence length (2, 3, 5).
+- Mix of transitioning / non-transitioning events.
+- Mix of self-calls, persist saves, async.
+
+**Estimated cases:** ~200 × 17 = ~3,400. Smoke ~30 patterns.
+
+**Value density:** medium.
+
+---
+
+### Phase 18 — Stress / boundary (optional)
+
+**Goal:** Very deep state stacks, many transitions, large state-vars.
+Tests runtime under load.
+
+**Axes:** stack depth (100, 1000), transition count (1k, 10k),
+state-var size (1KB, 1MB), domain size (100, 1000 fields).
+
+**Estimated cases:** ~30 patterns × 17 = ~510. Smoke ~10 patterns.
+
+**Value density:** low (likely surfaces perf issues, not correctness).
+
+---
+
+### Phase 19 — Push/pop modal stack (proposed)
+
+**Goal:** `push$` / `pop$` interactions × everything. Phase 9 p11
+(state-var round-trip) doesn't deeply test the modal stack.
+
+**Axes:** push depth, modal context with state-vars / domain mods,
+pop with explicit transition vs implicit return, push/pop in HSM.
+
+**Estimated cases:** ~150 × 17 = ~2,550. Smoke ~20 patterns.
+
+**Value density:** medium-high (push/pop is less-trodden code path).
+
+---
+
+### Phase 20 — Const fields + `@@:system` access (proposed)
+
+**Goal:** const domain fields, `@@:system.state` reads, system params.
+
+**Axes:** const-field-read at every position, `@@:system.state` in
+handlers / conditions / expressions, system params × state init.
+
+**Estimated cases:** ~100 × 17 = ~1,700. Smoke ~20 patterns.
+
+**Value density:** low. Const fields are simple.
+
+---
+
+### Phase 21 — Type coercion edge cases (optional)
+
+**Goal:** int → float, signed → unsigned, narrowing conversions.
+Per-backend behavior may differ.
+
+**Axes:** type pairs (~15 combinations), coercion direction.
+
+**Estimated cases:** ~50 × 17 = ~850. Smoke ~10 patterns (int ↔ str).
+
+**Value density:** low (but worth a smoke pass; likely surfaces 1-2
+backend-specific bugs).
+
+---
+
+### Phase 22 — Panic / error recovery (optional)
+
+**Goal:** What happens when a handler panics? Each backend has
+different semantics (Rust panic, Java exception, Python raise, etc.).
+
+**Axes:** panic in handler / self-call / transition.
+
+**Estimated cases:** ~30 × 17 = ~510.
+
+**Value density:** low (documents per-backend semantics, not framec
+bugs). Optional.
+
+---
+
+### Phase 23 — Concurrency (optional)
+
+**Goal:** Multiple threads / actors invoking the same system.
+
+**Axes:** 2/4/8-thread dispatch × reads/writes.
+
+**Estimated cases:** ~30 × applicable-langs (≤10).
+
+**Value density:** low for framec correctness (Frame is single-
+threaded by design). High for production-readiness claims.
+
+---
+
+## Wave-based expansion methodology
+
+No upfront release-version traunching. Nothing is feature-deprecated,
+so phases aren't gated by release boundaries. Instead, expansion
+proceeds in waves once the test infra layer
+(`TEST_INFRA_ROADMAP.md`) is in place.
+
+### Wave shape
+
+Each wave adds **+100 new tests per phase touched** (waves can
+target one phase or multiple in parallel). After each wave:
+
+1. Run the smoke tier across all phases — confirm wall clock stays
+   within budget (~2 min target).
+2. Run the full tier on the touched phases — measure bug-finding
+   rate.
+3. Decide next wave's targets based on bug-finding observed.
+
+### Stopping criterion
+
+Empirical, not numeric. We stop investing in a phase when bug-
+finding tails off — the precise threshold is decided wave-by-wave.
+A reasonable working guideline: "0 bugs in 2-3 consecutive waves"
+suggests the phase is saturated for now; reallocate effort to
+phases still finding bugs.
+
+### What this replaces
+
+The earlier Frame 4.0/4.1/4.2 release traunching is dropped.
+Phase planning is now driven by:
+- Test infra prerequisite (Phase 0) ships first.
+- Then waves of +100 tests per phase, in whichever phase is
+  currently producing the most bugs.
+- Phases 11-23 come on-line opportunistically as bandwidth allows;
+  no fixed ship-by-version commitments.
+
+### Prerequisite ordering
+
+1. **Test infra (Phase 0)** must land first — see
+   `TEST_INFRA_ROADMAP.md`. ~55h.
+2. **Existing phases (1-10)** retroactively standardized to the
+   tier+tag contract during infra build (~40h is part of the 55h).
+3. **New phases (11-23)** then come on-line one at a time, each
+   shipping with the standard runner contract.
+
 ## Grand-total projected coverage
 
-| Phase | New cases  | Cumulative | Status                              |
-|-------|------------|------------|-------------------------------------|
-| Now   |     3,610  |     3,610  | legacy baseline                     |
-| 2     |     1,377  |     4,987  | **done** (17 × 81)                  |
-| 3     |     2,646  |     7,633  | **done** (16 × 162 + Erlang 54; 108 Erlang skips) |
-| 4     |    ~6,800  |   ~14,433  | **done** (17 × 81 clean after Erlang post-fwd fix) |
-| 5     |    ~3,400  |   ~17,833  | **done** (17 × 27 clean; 3×3×3 axes MVP) |
-| 6     |    ~1,100  |   ~18,933  | 11-backend subset                   |
-| 7     |    ~2,400  |   ~21,333  | 16-backend subset                   |
-| 8     |      ~850  |   ~22,183  | negative passthrough — after 5–7    |
-| 9     |       184  |    ~21,517 | **harness expanded** (11 patterns × 17 backends; 3 cases surface real codegen defects for follow-up) |
+### Phases 1-10 (shipped)
 
-Well under 50k — tight enough that a full fuzz run fits in a coffee-
-break, loose enough that it's catching real bugs per phase.
+| Phase | Cases passing | Status |
+|---|---|---|
+| 2 | 1,377 (17 × 81) | **done** |
+| 3 | 2,646 (16 × 162 + Erlang 54; 108 Erlang skips) | **done** |
+| 4 | ~6,800 (17 × 81 clean after Erlang post-fwd fix) | **done** |
+| 5 | ~3,400 (17 × 27, 3×3×3 axes MVP) | **done** |
+| 6 | ~220 (11-backend subset) | partial |
+| 7 | ~168 (14 backends) | partial |
+| 8 | ~306 (18 codes × 17) | shipped |
+| 9 | 85 (5 patterns × 17, curated regression tier) | **done** |
+| 10 v2 | 7,820 (460 × 17) | **done** |
+| **Subtotal shipped** | **~22,800** | |
+
+### Phases 11-23 (proposed, full-corpus ceilings)
+
+| Phase | Smoke tier | Full corpus ceiling |
+|---|---|---|
+| 11 stmt-pair | ~850 | ~8,500 |
+| 12 control-flow | ~1,700 | ~25,500 |
+| 13 shadowing | ~170 | ~500 |
+| 14 HSM × all | ~500 | ~25,500+ (depth-3 explodes) |
+| 15 state-args × all | ~850 | ~8,500 |
+| 16 comments | ~170 | ~850 |
+| 17 multi-event | ~510 | ~3,400 |
+| 18 stress | ~170 | ~510 |
+| 19 push/pop | ~340 | ~2,550 |
+| 20 const + @@:system | ~340 | ~1,700 |
+| 21 type coercion | ~170 | ~850 |
+| 22 panic | ~85 | ~510 |
+| 23 concurrency | ~85 | ~300 |
+
+Phases land via wave-based expansion (see "Wave-based expansion
+methodology" above). Smoke tier target wall clock: ~2 min total.
+Full tier target: ~30-45 min total.
 
 ## Operational details
 
@@ -559,11 +895,28 @@ one-class-per-file in Java, etc.) → mark `✗` in matrix and skip. Never
    behavior trace instead. Already the design in the existing
    gen_persist.py; carry forward.
 
-## Immediate next step
+## Immediate next step (updated 2026-04-28)
 
-Start Phase 1.1: the applicability smoke run. That's 10 minutes of
-bash to fill in the `?` cells before we design wrappers for backends
-that might not support the feature at all.
+Phases 1-10 are shipped (see status at top of doc). The next blocking
+work for Frame 4.0 is the **test infra layer** described in
+`TEST_INFRA_ROADMAP.md` — unified runner contract (tier + tag filters,
+top-level meta-runner, smoke / full / cross-sectional modes).
+Without it, the new Phases 11-15 in 4.0 ship with ad-hoc per-phase
+runners and we lock in another release cycle of the cross-cutting-
+runner debt.
+
+Sequence:
+1. Test infra (Phase 0): ~55h.
+2. Phase 11 (statement-pair) smoke: ~13h.
+3. Phase 12 (control-flow) smoke: ~15h.
+4. Phase 14 (HSM × all) smoke: ~15h.
+5. Phase 15 (state-args × all) smoke: ~13h.
+
+Total 4.0 effort: ~110-120h (3 weeks of focused work).
+
+Earlier "next step" note (kept for historical context):
+Phase 1.1 applicability smoke run was the original kickoff — that's
+done; Phases 1-9 used its results.
 
 ## TODO: per-language guides — idiomatic Frame for each backend
 

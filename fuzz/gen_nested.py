@@ -42,25 +42,28 @@ from pathlib import Path
 # the test handlers cumulatively bump; framec's recursive expansion
 # is correct iff the trace matches.
 PATTERNS = [
-    "p1_return_arg",
-    "p2_params_arg",
-    "p3_op_in_return",
-    "p4_selfcall_in_return",
-    "p5_selfcall_in_statevar",
-    "p6_op_arg",
     "p7_two_level",
     "p8_three_level",
     "p9_return_plus_transition",
     "p11_statevar_lhs",
-    "p13_selfcall_arithmetic",
+    "p14_dom_selfcall_arithmetic",
 ]
-# p12 (selfcall in if condition) is intentionally omitted — Frame's
+# Phase 10 retirement: p1, p2, p3, p4, p5, p6, p13 retired because
+# Phase 10's gen_perm.py emits a strict superset of their expression
+# shapes. The 4+1 remaining patterns encode axes Phase 10 doesn't
+# reach OR pin specific cross-backend regressions:
+#   p7, p8 — depth-3 nested @@:self.a(@@:self.b(@@:self.c(x)))
+#   p9    — multi-statement: @@:return + @@:self.X() + transition
+#   p11   — multi-handler state-var write/read round-trip
+#   p14   — domain-LHS embedded self-call + arithmetic (D1 fix
+#           regression, 2026-04-28). The new contract is "embedded
+#           self-calls fire ONE transition guard at end-of-statement";
+#           p14 verifies it on all 17 langs at runtime, complementing
+#           Phase 10's transpile-only structural fuzz.
+#
+# p12 (selfcall in if condition) intentionally omitted — Frame's
 # `if cond { ... }` syntax requires per-language native control-flow
-# emission (`if cond:` for Python/GDScript, `if cond then ... end`
-# for Lua, etc.), and that machinery isn't on the recursive-Frame-
-# expansion code path we're trying to lock in here. The value-flow
-# patterns (p1-p11, p13) cover the recursive-expansion contract
-# without needing control-flow shapes.
+# emission, off the recursive-expansion code path being locked in.
 
 
 class LangSpec:
@@ -444,6 +447,20 @@ def gen_case(lang, pattern):
         body = [
             f"                @@:return = @@:self.{m_compute}() + 1{spec.stmt_end}",
             f"                @@:self.{m_absorb}(@@:return)",
+        ]
+        expected_n = 10
+    elif pattern == "p14_dom_selfcall_arithmetic":
+        # self.n = @@:self.compute() + 1 — domain-LHS embedded
+        # self-call + arithmetic. This is the case shape that
+        # surfaced D1 (the `pending_guard` mid-expression bug). The
+        # D1 fix in frame_expansion.rs (2026-04-28) deferred the
+        # guard until end-of-statement; p14 pins that fix as a
+        # runtime-verified named regression on all 17 langs.
+        # compute() returns 9; n starts at 0; assignment yields
+        # n == 10.
+        # Expected: n == 10.
+        body = [
+            f"                {spec.self_word}{spec.field_op}n = @@:self.{m_compute}() + 1{spec.stmt_end}",
         ]
         expected_n = 10
     else:
