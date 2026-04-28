@@ -506,21 +506,58 @@ DISP_FTR
 total=0
 passed=0
 
-for lang in $LANGS; do
-    summary="$PER_LANG_LOG_DIR/summary_$lang.tsv"
+# Per-lang work as a function so we can fork it for parallel execution.
+# Each invocation is fully self-contained: writes only to its own
+# `summary_$lang.tsv` (per-lang summary infra prevents races).
+process_lang() {
+    local lang=$1
+    local summary="$PER_LANG_LOG_DIR/summary_$lang.tsv"
+    local ext
     ext=$(lang_to_ext "$lang")
     if [ "$lang" = "kotlin" ]; then batch_kotlin; fi
     if [ "$lang" = "csharp" ]; then batch_csharp; fi
     for case_file in "$CASES_DIR"/*."$ext"; do
         [ -f "$case_file" ] || continue
         should_run_case "$lang" "$case_file" || continue
-        total=$((total + 1))
-        if run_one "$lang" "$case_file"; then
-            passed=$((passed + 1))
-        fi
+        run_one "$lang" "$case_file" || true
     done
     if [ "$lang" = "kotlin" ]; then unset KOTLIN_BATCH_JAR; fi
     if [ "$lang" = "csharp" ]; then unset CSHARP_BATCH_OUT; fi
+}
+
+# Parallelization policy:
+#   smoke tier: fork one worker per lang (max ~17 concurrent). Smoke
+#     corpora are small (~30-90 cases/lang) so resource pressure is
+#     bounded. Drops total wall clock from ~10 min serial to ~1-2 min
+#     parallel — the "fast iteration" goal of the smoke tier.
+#   full tier: serial. Full tier has 460+ cases/lang × 17 langs =
+#     7,820+ cases. Running 17 langs concurrent saturates RAM
+#     (kotlinc batch alone can hit 8GB). Serial keeps memory stable
+#     while accepting longer wall clock.
+RUN_PARALLEL="no"
+if [ "$TIER" = "smoke" ] || [ "$TIER" = "core" ]; then
+    RUN_PARALLEL="yes"
+fi
+
+if [ "$RUN_PARALLEL" = "yes" ]; then
+    for lang in $LANGS; do
+        process_lang "$lang" &
+    done
+    wait
+else
+    for lang in $LANGS; do
+        process_lang "$lang"
+    done
+fi
+
+# Tally PASS/FAIL from the per-lang summary files.
+for ln in $LANGS; do
+    f="$PER_LANG_LOG_DIR/summary_$ln.tsv"
+    [ -f "$f" ] || continue
+    while IFS=$'\t' read -r _ _ _ result _; do
+        [ "$result" = "PASS" ] && passed=$((passed + 1))
+        [ "$result" = "PASS" ] || [ "$result" = "FAIL" ] && total=$((total + 1))
+    done < <(tail -n +2 "$f")
 done
 
 # Rebuild aggregate summary.tsv from per-lang files in scope.
