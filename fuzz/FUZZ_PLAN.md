@@ -637,18 +637,42 @@ cond). Wave 2 should target those.
 
 ---
 
-### Phase 13 — Identifier shadowing (proposed)
+### Phase 13 — Identifier shadowing (wave 1 shipped 2026-04-28)
 
-**Goal:** `self.x` vs `$.x` vs param `x` vs local `x` — does framec
-correctly resolve scope when names collide?
+**Goal:** Same identifier `x` declared simultaneously as domain
+field, state-var, and handler param. Framec must resolve `self.x`
+→ domain, `$.x` → state-var, unqualified `x` → param without
+crossing scopes. Cross-slot reads in one expression
+(`self.x + $.x + x`) must compose correctly.
 
-**Axes:**
-- Same name across (domain field, state-var, param, native local).
-- Reading vs. writing each.
+**Axes (wave 1):**
+- 10 read shapes: self_only, sv_only, param_only, params_obj_only,
+  self+sv, self+param, sv+param, all_three, self+lit,
+  self-sv+param.
+- 10 value tuples: (dom_x, sv_x, param_x, lit) chosen to exercise
+  sign/zero edges and minimize coincidental equality.
 
-**Estimated cases:** ~30 patterns × 17 = ~500. Smoke ~10 patterns.
+**Wave 1 shipped:** 10 × 10 = 100 cases × 17 langs = 1,700 case-
+runs. All passing on first run; **zero defects**. Generator:
+`gen_shadow.py`. Runner: `run_shadow.sh`. Smoke: ~25s parallel
+(10 cases/lang). Full: ~7:44 serial.
 
-**Value density:** medium. Likely surfaces 2-3 framec scope bugs.
+**Wave 2 candidates:**
+- Native local `x` shadowing (per-language `var x = ...` /
+  `let x = ...` / `int x = ...`).
+- Write paths (LHS targets) — does `x = K` resolve to which scope?
+  Usually it's an error or shadows the param; per-language semantics.
+- Shadowing × HSM (state-var `$.x` declared in $S0 vs $S1).
+- @@:event / @@:data magic-reference shadowing.
+
+**Value density (post wave 1):** lower than predicted. Plan
+estimated "medium, 2-3 scope bugs likely." Wave 1 found 0 — Frame's
+qualified syntax (`self.`, `$.`) makes scope resolution
+unambiguous; the bugs would be in unqualified `x` resolution
+(param vs domain field), but Frame requires qualification for non-
+local reads, so the ambiguity surface is small. Wave 2 should
+target write paths and per-language locals where the
+disambiguation rules are looser.
 
 **Frame feature gate:** none.
 

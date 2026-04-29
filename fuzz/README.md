@@ -267,3 +267,44 @@ backends. Two generator bugs surfaced and fixed during bring-up:
   Generator now emits only `get_n` (domain read) in $S1 for
   transition cases. This pins a real Frame contract: state-vars
   do not propagate across transitions; only domain fields do.
+
+---
+
+## Phase 13: identifier shadowing fuzz (wave 1)
+
+`gen_shadow.py` + `run_shadow.sh` — same identifier `x` declared
+in three scopes (domain field, state-var, handler param) at once.
+Tests framec's scope resolution.
+
+What this exercises:
+- `self.x` always resolves to the domain field.
+- `$.x` always resolves to the state-var.
+- Unqualified `x` (inside a handler that takes `x` as a param)
+  resolves to the param.
+- `@@:params.x` resolves to the param via the params object.
+- Cross-slot reads in one expression compose correctly:
+  `self.x + $.x + x` returns the sum of all three.
+
+Axes:
+- 10 read shapes: `self_only`, `sv_only`, `param_only`,
+  `params_obj_only`, `self+sv`, `self+param`, `sv+param`,
+  `all_three`, `self+lit`, `self-sv+param`.
+- 10 value tuples — `(dom_x, sv_x, param_x, lit)` per case, chosen
+  to exercise sign/zero edges and minimize coincidental equality.
+- Total: 10 × 10 = 100 cases per lang × 17 langs = 1,700.
+
+Smoke selects one case per shape (first value tuple) → 10 smoke
+cases per lang.
+
+```bash
+python3 gen_shadow.py                          # generate 17 langs
+./run_shadow.sh --tier=smoke                   # ~25s parallel
+./run_shadow.sh --tier=full                    # ~7:44 serial
+./run_shadow.sh --tier=full --lang=python_3    # one lang only
+```
+
+Wave 1 result (2026-04-28): 1,700 / 1,700 passing across all 17
+backends. Zero defects. Frame's qualified syntax (`self.`, `$.`)
+makes scope resolution unambiguous, so this wave largely confirms
+that the qualification contract holds; bugs would more likely
+surface in write paths or native local shadowing (wave 2 axes).

@@ -26,6 +26,7 @@
 #  10  expression       (run_perm.sh)
 #  11  stmt-pair        (run_stmt_pair.sh)
 #  12  ctrl-flow        (run_ctrl_flow.sh)
+#  13  shadow           (run_shadow.sh)
 #
 # Exit code: 0 if all phases pass, nonzero if any phase failed.
 
@@ -52,7 +53,7 @@ while [ $# -gt 0 ]; do
         --help|-h)
             echo "Usage: $0 [--tier=smoke|core|full] [--lang=<name>] [--tag=<comma-list>] [--phases=<comma-list>]"
             echo ""
-            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 (default: all)"
+            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 (default: all)"
             echo "Tiers:  smoke (curated, fast), core (phase essentials), full (complete corpus)"
             exit 0
             ;;
@@ -68,7 +69,7 @@ fi
 
 # Default phase list. Phase 1 is infrastructure-only (no runnable
 # fuzz). Phases 11+ are not yet built.
-ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12"
+ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13"
 PHASES=${PHASES_REQUESTED:-$ALL_PHASES}
 PHASES=$(echo "$PHASES" | tr ',' ' ')
 
@@ -78,6 +79,7 @@ LANG_ARG_NESTED=""
 LANG_ARG_PERM=""
 LANG_ARG_STMT_PAIR=""
 LANG_ARG_CTRL_FLOW=""
+LANG_ARG_SHADOW=""
 LANG_ARG_DIFF=""
 LANG_ARG_NEGATIVE=""
 if [ -n "$LANG" ]; then
@@ -85,6 +87,7 @@ if [ -n "$LANG" ]; then
     LANG_ARG_PERM="--lang=$LANG"               # run_perm.sh
     LANG_ARG_STMT_PAIR="--lang=$LANG"          # run_stmt_pair.sh
     LANG_ARG_CTRL_FLOW="--lang=$LANG"          # run_ctrl_flow.sh
+    LANG_ARG_SHADOW="--lang=$LANG"             # run_shadow.sh
     LANG_ARG_DIFF="--langs=$LANG"              # run_fuzz.py
     LANG_ARG_NEGATIVE="-l $LANG"               # run_negative.sh
 fi
@@ -116,6 +119,7 @@ run_phase() {
         10) run_perm ;;
         11) run_stmt_pair ;;
         12) run_ctrl_flow ;;
+        13) run_shadow ;;
         *)  echo "Phase $phase: unknown" >&2; return 1 ;;
     esac
 }
@@ -133,6 +137,7 @@ phase_name() {
         10) echo "expression" ;;
         11) echo "stmt-pair" ;;
         12) echo "ctrl-flow" ;;
+        13) echo "shadow" ;;
         *) echo "?" ;;
     esac
 }
@@ -184,6 +189,13 @@ run_ctrl_flow() {
     [ -n "$LANG_ARG_CTRL_FLOW" ] && args="$args $LANG_ARG_CTRL_FLOW"
     # shellcheck disable=SC2086
     "$SCRIPT_DIR/run_ctrl_flow.sh" $args
+}
+
+run_shadow() {
+    local args="--tier=$TIER"
+    [ -n "$LANG_ARG_SHADOW" ] && args="$args $LANG_ARG_SHADOW"
+    # shellcheck disable=SC2086
+    "$SCRIPT_DIR/run_shadow.sh" $args
 }
 
 # Iterate phases. Don't bail on first failure — surface every phase
