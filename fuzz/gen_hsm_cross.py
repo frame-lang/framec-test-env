@@ -160,12 +160,15 @@ def _build_p5_child_writes_then_fwd(spec, lang, lit):
 def _build_p6_parent_calls_compute(spec, lang, lit):
     """P6: parent.drive body does `@@:self.compute()` where compute
     is declared at parent scope, but Child does NOT have a default
-    `=> $^` cascade. Pre-init `@@:return = -777` first so the
-    expected value is uniform across all backends (typed langs see
-    0/null/etc for unwritten return slot; dynamic langs see
-    None/nil/empty). With pre-init, every backend sees -777 if
-    compute() is silently dropped, OR COMPUTE_RETURN if the
-    cascade somehow reaches it."""
+    `=> $^` cascade. When `@@:self.compute()` is fired, kernel
+    routes to current state (Child), Child has no compute handler,
+    event is silently dropped — `@@:self.compute()` returns the
+    type default (0 for int). The expected return value is 0
+    across all 17 backends; this pins the Frame contract that
+    interface wrappers MUST return the type default for typed
+    langs (not crash on null unboxing) and the dynamic-lang
+    runtime must coerce dynamic null/nil to the type default
+    when the interface declares a typed return."""
     m_drive = method_name(lang, "drive")
     m_compute = method_name(lang, "compute")
     return [
@@ -174,7 +177,6 @@ def _build_p6_parent_calls_compute(spec, lang, lit):
         f"        }}",
         f"        $Parent {{",
         f"            {m_drive}(): int {{",
-        f"                @@:return = -777{spec.stmt_end}",
         f"                @@:return = @@:self.{m_compute}(){spec.stmt_end}",
         f"            }}",
         f"            {m_compute}(): int {{ @@:({COMPUTE_RETURN}) }}",
@@ -185,14 +187,14 @@ def _build_p6_parent_calls_compute(spec, lang, lit):
 def _build_p7_child_calls_compute(spec, lang, lit):
     """P7: child.drive body does `@@:self.compute()`. Child does
     NOT have a default `=> $^` cascade. compute is declared in
-    parent only. Pre-init return to -777 so backends agree on the
-    no-cascade outcome."""
+    parent only. compute() routed to current state (Child), no
+    handler, event dropped, returns type default 0. Mirror of P6
+    fired from child side."""
     m_drive = method_name(lang, "drive")
     m_compute = method_name(lang, "compute")
     return [
         f"        $Child => $Parent {{",
         f"            {m_drive}(): int {{",
-        f"                @@:return = -777{spec.stmt_end}",
         f"                @@:return = @@:self.{m_compute}(){spec.stmt_end}",
         f"            }}",
         f"        }}",
@@ -273,13 +275,20 @@ PATTERNS = [
             lambda lit, di: lit),
     Pattern("p5_child_writes_then_fwd", _build_p5_child_writes_then_fwd, True, "drive",
             lambda lit, di: lit + 1),
-    # P6/P7 dropped from wave 1: they test the no-cascade contract
-    # for `@@:self.compute()` when the leaf state has no handler
-    # for `compute` and no `=> $^` cascade. The result is
-    # language-divergent — typed langs (Go/Rust/C/etc) return type
-    # default 0; dynamic langs (Python/JS/etc) return None/null;
-    # Java/C# crash on null unboxing. Belongs in a separate phase
-    # that explicitly tests per-language null/zero semantics.
+    # P6/P7 test the no-cascade contract: leaf state has no handler
+    # for `compute` and no trailing `=> $^` cascade. When
+    # `@@:self.compute()` fires, kernel routes to current state, no
+    # match, event silently dropped. The contract should be: every
+    # backend returns the type default (0 for int) — uniform across
+    # both typed and dynamic langs. Frame's interface wrapper for
+    # typed langs MUST return type default when _return is null,
+    # not crash on unboxing (Java/C# bug pre-fix). Dynamic langs
+    # return None/null naturally — but driver expects 0 too, so
+    # framec/runtime must coerce.
+    Pattern("p6_parent_calls_compute", _build_p6_parent_calls_compute, True, "drive",
+            lambda lit, di: 0),
+    Pattern("p7_child_calls_compute", _build_p7_child_calls_compute, True, "drive",
+            lambda lit, di: 0),
     Pattern("p8_child_overrides_compute", _build_p8_child_overrides_compute, True, "drive",
             lambda lit, di: lit),
     Pattern("p9_dom_arith_through_hsm", _build_p9_dom_arith_through_hsm, True, "drive",
