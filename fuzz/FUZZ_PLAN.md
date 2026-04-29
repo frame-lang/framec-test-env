@@ -851,15 +851,32 @@ sequence.
 
 ---
 
-### Phase 18 — Stress / boundary (optional)
+### Phase 18 — Stress / boundary (wave 1 shipped)
 
-**Goal:** Very deep state stacks, many transitions, large state-vars.
-Tests runtime under load.
+**Status (2026-04-29):** Wave 1 generator + runner shipped.
+**3 patterns × 2 tiers × 17 backends = 102 case-runs all green
+on full tier**, 51 on smoke. Zero defects.
 
-**Axes:** stack depth (100, 1000), transition count (1k, 10k),
-state-var size (1KB, 1MB), domain size (100, 1000 fields).
+**Patterns (wave 1):**
+- P1 many_dispatches: bump() handler called N times. Tests
+  event-dispatch loop endurance (no transitions).
+- P2 transition_pingpong: alternating $S0↔$S1 transitions, N
+  cycles. Tests transition-loop endurance — enter/exit cascades
+  fire each call.
+- P3 push_pop_depth: N push$ then N pop$. Tests modal-stack
+  endurance and stack discipline at depth.
 
-**Estimated cases:** ~30 patterns × 17 = ~510. Smoke ~10 patterns.
+**Tier-driven N:** smoke N=10 (sanity), full N=100 (actual stress).
+Capped at 100 to keep test wall-clock under 5s/backend (each call
+is unrolled in the driver, so the file size grows linearly with
+N). For deeper stress, run manually with a higher N or extend
+the generator to use language-native loops.
+
+**Wave 2 candidates (not built):** N≥1000 stress (would require
+loop-based driver emission per language), wide domain (100+
+fields) — tests framec codegen size limits, deep HSM (10+ levels).
+All low-yield per the original plan; Phase 18 is defensive
+endurance coverage, not framec correctness.
 
 **Value density:** low (likely surfaces perf issues, not correctness).
 
@@ -1302,13 +1319,12 @@ Each wave-N candidate noted in its phase's section:
 Per the value-density assessments in the catalog above + reasoning
 documented during the 2026-04-29 wave-1-for-all-phases pass:
 
-- **Phase 18 — Stress / boundary** — DELIBERATE SKIP. Documents
-  runtime perf characteristics, not framec correctness. Building
-  a corpus and running it doesn't surface framec bugs; it
-  surfaces runtime engineering concerns (deep-stack recursion
-  limits, large-domain memory pressure) which are out of framec's
-  scope. Worth running occasionally as a defensive smoke
-  (manual / on-demand); not worth a generator + ongoing CI cost.
+- **Phase 18 — Stress / boundary** — WAVE 1 SHIPPED 2026-04-29.
+  3 patterns × 2 tiers × 17 backends = 102 case-runs green.
+  See § Phase 18 above for details. Wave 2 (N≥1000, wide domain,
+  deep HSM) deferred — wave 1 covers the basic endurance axes;
+  larger N requires language-native loop emission, which is
+  significant generator work for marginal additional yield.
 - **Phase 22 — Error / panic recovery** — DELIBERATE SKIP. The
   test would document per-backend behavior when a handler raises
   (Rust panic, Java exception, Python raise, etc.). Per the plan

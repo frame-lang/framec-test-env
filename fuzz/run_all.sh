@@ -31,6 +31,7 @@
 #  15  state-args       (run_state_args.sh)
 #  16  comments         (run_comments.sh)
 #  17  multievent       (run_multievent.sh)
+#  18  stress           (run_stress.sh)
 #  19  pushpop          (run_pushpop.sh)
 #  20  const-sys        (run_const_sys.sh)
 #  21  arith            (run_arith.sh)
@@ -60,7 +61,7 @@ while [ $# -gt 0 ]; do
         --help|-h)
             echo "Usage: $0 [--tier=smoke|core|full] [--lang=<name>] [--tag=<comma-list>] [--phases=<comma-list>]"
             echo ""
-            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 19 20 21 (default: all)"
+            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 (default: all)"
             echo "Tiers:  smoke (curated, fast), core (phase essentials), full (complete corpus)"
             exit 0
             ;;
@@ -76,7 +77,7 @@ fi
 
 # Default phase list. Phase 1 is infrastructure-only (no runnable
 # fuzz). Phases 11+ are not yet built.
-ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 19 20 21"
+ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21"
 PHASES=${PHASES_REQUESTED:-$ALL_PHASES}
 PHASES=$(echo "$PHASES" | tr ',' ' ')
 
@@ -91,6 +92,7 @@ LANG_ARG_HSM_CROSS=""
 LANG_ARG_STATE_ARGS=""
 LANG_ARG_COMMENTS=""
 LANG_ARG_MULTIEVENT=""
+LANG_ARG_STRESS=""
 LANG_ARG_PUSHPOP=""
 LANG_ARG_CONST_SYS=""
 LANG_ARG_ARITH=""
@@ -106,6 +108,7 @@ if [ -n "$LANG" ]; then
     LANG_ARG_STATE_ARGS="--lang=$LANG"         # run_state_args.sh
     LANG_ARG_COMMENTS="--lang=$LANG"           # run_comments.sh
     LANG_ARG_MULTIEVENT="--lang=$LANG"         # run_multievent.sh
+    LANG_ARG_STRESS="--lang=$LANG"             # run_stress.sh
     LANG_ARG_PUSHPOP="--lang=$LANG"            # run_pushpop.sh
     LANG_ARG_CONST_SYS="--lang=$LANG"          # run_const_sys.sh
     LANG_ARG_ARITH="--lang=$LANG"              # run_arith.sh
@@ -145,6 +148,7 @@ run_phase() {
         15) run_state_args ;;
         16) run_comments ;;
         17) run_multievent ;;
+        18) run_stress ;;
         19) run_pushpop ;;
         20) run_const_sys ;;
         21) run_arith ;;
@@ -170,6 +174,7 @@ phase_name() {
         15) echo "state-args" ;;
         16) echo "comments" ;;
         17) echo "multievent" ;;
+        18) echo "stress" ;;
         19) echo "pushpop" ;;
         20) echo "const-sys" ;;
         21) echo "arith" ;;
@@ -259,6 +264,13 @@ run_multievent() {
     [ -n "$LANG_ARG_MULTIEVENT" ] && args="$args $LANG_ARG_MULTIEVENT"
     # shellcheck disable=SC2086
     "$SCRIPT_DIR/run_multievent.sh" $args
+}
+
+run_stress() {
+    local args="--tier=$TIER"
+    [ -n "$LANG_ARG_STRESS" ] && args="$args $LANG_ARG_STRESS"
+    # shellcheck disable=SC2086
+    "$SCRIPT_DIR/run_stress.sh" $args
 }
 
 run_comments() {

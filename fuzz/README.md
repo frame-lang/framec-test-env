@@ -493,6 +493,40 @@ the Frame `//` leak found during P4 development).
 
 ---
 
+## Phase 18: Stress / boundary fuzz (wave 1)
+
+`gen_stress.py` + `run_stress.sh` — endurance tests for the Frame
+runtime's event-dispatch loop, transition pipeline, and modal-stack
+discipline. Tests are unrolled (no language-native loops in the
+driver) so the case file scales linearly with N — keeping
+language-agnostic.
+
+Patterns (3):
+- `p1_many_dispatches` — bump() called N times. Tests handler
+  dispatch loop endurance.
+- `p2_transition_pingpong` — alternating $S0↔$S1 transitions, N
+  cycles. Tests transition kernel under load.
+- `p3_push_pop_depth` — push$ then pop$ cycle, N times. Tests
+  modal-stack discipline at depth.
+
+Stress levels (tier-driven): smoke N=10, full N=100. Capped at 100
+to keep wall-clock under ~5s/backend; for deeper stress, run
+manually with a higher N or extend the generator with language-
+native loops.
+
+Total: 3 patterns × 2 tiers × 17 langs = 102 case-runs.
+
+```bash
+python3 gen_stress.py
+./run_stress.sh --tier=smoke    # N=10
+./run_stress.sh --tier=full     # N=100
+```
+
+Wave 1 result (2026-04-29): **102 / 102 passing across 17 backends**,
+zero framec defects. Frame runtimes are durable at modest N.
+
+---
+
 ## Phase 21: Arithmetic edge fuzz (wave 1)
 
 `gen_arith.py` + `run_arith.sh` — int arithmetic edge cases. Frame
