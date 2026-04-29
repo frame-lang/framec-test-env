@@ -493,6 +493,40 @@ the Frame `//` leak found during P4 development).
 
 ---
 
+## Phase 21: Arithmetic edge fuzz (wave 1)
+
+`gen_arith.py` + `run_arith.sh` — int arithmetic edge cases. Frame
+has no type system; expressions pass through to the target. Wave 1
+verifies Frame's expression passthrough preserves operator
+precedence, associativity, and explicit parenthesisation across
+17 backends for portable int arithmetic.
+
+Patterns (4):
+- `p1_add_chain` — 4-operator chain (a + b + a + b + a).
+- `p2_precedence` — `a + b * a` (multiplication binds tighter).
+- `p3_subtraction` — `a - b - a` (left-to-right associativity).
+- `p4_paren_grouping` — `(a + b) * a` (explicit parens preserved).
+
+Value tuples: 10 pairs covering simple, negative, zero, mixed-sign
+(values fit in signed-32-bit so results agree across backends).
+
+Total: 4 × 10 = 40 cases per lang × 17 langs = 680.
+
+Wave 1 result (2026-04-29): **680 / 680 passing across 17
+backends**, zero framec defects.
+
+```bash
+python3 gen_arith.py
+./run_arith.sh --tier=smoke
+./run_arith.sh --tier=full
+```
+
+Wave 2 candidates (int ↔ str / float / signed-unsigned coercions)
+were intentionally deferred — those test target-side type behavior,
+not framec.
+
+---
+
 ## Phase 20: Const + @@:system access fuzz (wave 1)
 
 `gen_const_sys.py` + `run_const_sys.sh` — `const` domain fields and

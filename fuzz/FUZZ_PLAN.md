@@ -957,17 +957,36 @@ inside `if`/`while` conditions, system params × state init.
 
 ---
 
-### Phase 21 — Type coercion edge cases (optional)
+### Phase 21 — Type coercion / arithmetic edge (wave 1 shipped)
 
-**Goal:** int → float, signed → unsigned, narrowing conversions.
-Per-backend behavior may differ.
+**Status (2026-04-29):** Wave 1 generator + runner shipped (scope
+restricted to int arithmetic; broader type-coercion deferred).
+**4 patterns × 10 value tuples × 17 backends = 680 case-runs all
+green on full tier**, 68 on smoke. Zero framec defects.
 
-**Axes:** type pairs (~15 combinations), coercion direction.
+**Patterns (wave 1):**
+- P1 add_chain — `a + b + a + b + a` 4-operator chain.
+- P2 precedence — `a + b * a` (multiplication binds tighter).
+- P3 subtraction — `a - b - a` (left-to-right associativity).
+- P4 paren_grouping — `(a + b) * a` (explicit parens preserved).
 
-**Estimated cases:** ~50 × 17 = ~850. Smoke ~10 patterns (int ↔ str).
+**Value tuples:** 10 pairs covering simple, negative, zero, mixed-
+sign — values sized so results fit in signed-32-bit (no platform-
+dependent overflow).
 
-**Value density:** low (but worth a smoke pass; likely surfaces 1-2
-backend-specific bugs).
+**Wave 2 candidates (the original "type coercion" axes, deferred
+because each requires per-backend Frame source — Frame has no
+type system, so the test is essentially the target's idiomatic
+syntax):**
+- int ↔ str (concatenation, parse).
+- int ↔ float (promotion, truncation).
+- signed ↔ unsigned (Rust / C / C++ specific).
+- narrowing conversions (int → byte, etc.).
+
+These are LOW yield because Frame doesn't transform types — it
+passes them through. Bugs would be in framec's expression handling
+(which Phase 21 wave 1 + Phase 10 already cover heavily) or the
+target's own type system (out of framec's control).
 
 ---
 
@@ -1278,22 +1297,35 @@ Each wave-N candidate noted in its phase's section:
   `@@:system.state` inside `if` conditions, Erlang state-name
   atom normalisation (currently skipped).
 
-### Low-yield: Phases 18, 21, 22, 23 (0 coverage)
+### Low-yield: Phases 18, 22, 23 (deliberately skipped)
 
-Per the value-density assessments in the catalog above:
+Per the value-density assessments in the catalog above + reasoning
+documented during the 2026-04-29 wave-1-for-all-phases pass:
 
-- **Phase 18 — Stress / boundary** (low value density, optional).
-  Documents runtime perf, not framec correctness. Skip unless
-  load-testing becomes a concern.
-- **Phase 21 — Type coercion edge cases** (low; might surface 1-2
-  typed-backend bugs). Frame has no type system, so any "coercion"
-  is target-side. Useful as a smoke pass for typed backends.
-- **Phase 22 — Error / panic recovery** (low — documents per-
-  backend semantics, not framec bugs). Optional documentation
-  exercise.
-- **Phase 23 — True concurrency** (low for framec correctness —
-  Frame is single-threaded by design; high for production-
-  readiness claims). Optional.
+- **Phase 18 — Stress / boundary** — DELIBERATE SKIP. Documents
+  runtime perf characteristics, not framec correctness. Building
+  a corpus and running it doesn't surface framec bugs; it
+  surfaces runtime engineering concerns (deep-stack recursion
+  limits, large-domain memory pressure) which are out of framec's
+  scope. Worth running occasionally as a defensive smoke
+  (manual / on-demand); not worth a generator + ongoing CI cost.
+- **Phase 22 — Error / panic recovery** — DELIBERATE SKIP. The
+  test would document per-backend behavior when a handler raises
+  (Rust panic, Java exception, Python raise, etc.). Per the plan
+  comment: "this is documenting per-backend semantics, not finding
+  framec bugs." A per-language guide section covering panic
+  semantics would be more useful than a fuzz corpus.
+- **Phase 23 — True concurrency** — DELIBERATE SKIP. Frame is
+  single-threaded by design — a single system instance dispatches
+  events serially. Multi-threaded access to a single instance is
+  user-application territory (lock externally), not a framec
+  concern. Phase 23 was proposed for "production-readiness claims"
+  but is irrelevant to framec correctness.
+
+- **Phase 21 — Type coercion / arithmetic edge** — Wave 1 SHIPPED
+  (see § Phase 21 above). 680/680 across 17 backends. Wave 2
+  candidates (int ↔ str / float / signed-unsigned) would test
+  target-side type behavior, not framec — also low yield. Deferred.
 
 ### Diagnostic-axis lesson (process improvement)
 
