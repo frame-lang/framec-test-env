@@ -189,6 +189,57 @@ def _build_p7_child_hsm_arg(spec, lang, lit):
     ]
 
 
+def _build_p9_three_level_uniform(spec, lang, lit):
+    """P9: 3-level HSM uniform — all three layers declare their own
+    `(x: int)` so every StateContext variant is tuple-shaped.
+    Frame's parser reads `(x: int)` AFTER a `=> $Parent` clause as
+    the LEFT state's params; the root state declares its params
+    inline. drive() transitions to $Leaf(LIT). Rust's tuple-variant
+    ancestor walk writes at all three depths. Verify via get_x()
+    in $Leaf."""
+    m_drive = method_name(lang, "drive")
+    m_get_x = method_name(lang, "get_x")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                -> $Leaf({lit})",
+        f"            }}",
+        f"        }}",
+        f"        $Leaf => $Mid(x: int) {{",
+        f"            {m_get_x}(): int {{ @@:({spec.param_prefix}x) }}",
+        f"        }}",
+        f"        $Mid => $Root(x: int) {{",
+        f"        }}",
+        f"        $Root(x: int) {{",
+        f"        }}",
+    ]
+
+
+def _build_p10_three_level_mixed(spec, lang, lit):
+    """P10: 3-level HSM mixed-shape — Leaf has args, Mid is unit,
+    Root has args. drive() → $Leaf(LIT). Tests the Rust ancestor
+    walk's conditional skip path: walk past $Mid (unit variant —
+    no `if let StateContext::Mid(...)` would compile, E0532) and
+    write to $Root (tuple variant) at depth 2. Verify via get_x()
+    in $Leaf."""
+    m_drive = method_name(lang, "drive")
+    m_get_x = method_name(lang, "get_x")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                -> $Leaf({lit})",
+        f"            }}",
+        f"        }}",
+        f"        $Leaf => $Mid(x: int) {{",
+        f"            {m_get_x}(): int {{ @@:({spec.param_prefix}x) }}",
+        f"        }}",
+        f"        $Mid => $Root {{",
+        f"        }}",
+        f"        $Root(x: int) {{",
+        f"        }}",
+    ]
+
+
 def _build_p8_arg_in_event(spec, lang, lit):
     """P8: $S1(x: int) declares the arg, but the read happens
     in a regular event handler (not $>). drive() in $S0 transitions
@@ -245,6 +296,12 @@ PATTERNS = [
     # second event name.
     Pattern("p8_arg_in_event", _build_p8_arg_in_event, False, "drive2",
             lambda lit, di: lit),
+    # Wave 2: 3-level HSM cross-product. P9 uniform (all 3 layers
+    # tuple variant), P10 mixed (leaf tuple, mid unit, root tuple).
+    Pattern("p9_three_lvl_uniform", _build_p9_three_level_uniform,
+            False, "get_x", lambda lit, di: lit),
+    Pattern("p10_three_lvl_mixed", _build_p10_three_level_mixed,
+            False, "get_x", lambda lit, di: lit),
 ]
 
 

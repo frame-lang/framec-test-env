@@ -382,7 +382,7 @@ literal arg, domain-field arg, arithmetic, self-call result, multi-
 arg, chained transitions, HSM with parent vs child params, and
 state-arg reads in non-enter handlers.
 
-Patterns (8):
+Patterns (10):
 - `p1_lit_arg` — literal value in `-> $S1(5)`.
 - `p2_dom_arg` — domain field as transition arg.
 - `p3_arith_arg` — arithmetic expression as arg.
@@ -394,9 +394,14 @@ Patterns (8):
   variant, leaf tuple variant) — verifies Rust StateContext enum
   doesn't write to a unit-variant ancestor.
 - `p8_arg_in_event` — non-enter event handler reads the state-arg.
+- `p9_three_lvl_uniform` (wave 2) — 3-level HSM, all three layers
+  tuple variant; ancestor walk writes at every depth.
+- `p10_three_lvl_mixed` (wave 2) — 3-level HSM, leaf + root tuple
+  variant, mid unit; ancestor walk skips mid (E0532 guard) and
+  writes to root.
 
 Value tuples (10): mixed sign + magnitude.
-Total: 8 × 10 = 80 cases per lang × 17 langs = 1,360.
+Total: 10 × 10 = 100 cases per lang × 17 langs = 1,700.
 
 All patterns are **verify-via-getter** — `drive()` triggers the
 transition (void), then `get_x()` reads the state-arg. This sidesteps
@@ -409,6 +414,11 @@ python3 gen_state_args.py                          # generate 17 langs
 ./run_state_args.sh --tier=full                    # ~6 min serial
 ./run_state_args.sh --tier=full --lang=erlang      # one lang only
 ```
+
+Wave 2 result (2026-04-29): **1,700 / 1,700 passing across 17
+backends** with zero new framec defects. The 3-level HSM patterns
+(P9 + P10) confirmed the conditional ancestor walk works for both
+uniform and mixed-shape chains.
 
 Wave 1 result (2026-04-29): **1,360 / 1,360 passing across 17
 backends**, after fixing four real framec defects (committed in

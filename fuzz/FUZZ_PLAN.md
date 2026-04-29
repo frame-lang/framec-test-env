@@ -735,9 +735,16 @@ methodology: feature cross-product axes (HSM × forward × dispatch
 
 ### Phase 15 — State-arg propagation × everything (wave 1 shipped)
 
-**Status (2026-04-29):** Wave 1 generator + runner shipped. **8
-patterns × 10 value tuples × 17 backends = 1,360 case-runs all green
-on full tier**, 136 on smoke.
+**Status (2026-04-29):** Wave 2 shipped. **10 patterns × 10 value
+tuples × 17 backends = 1,700 case-runs all green on full tier**,
+170 on smoke.
+
+Wave 2 added P9 (3-level uniform HSM) and P10 (3-level mixed-shape
+— leaf tuple, mid unit, root tuple). Zero new defects — the
+conditional ancestor walk in Rust handles both layouts correctly.
+
+Wave 1 was 8 patterns × 10 value tuples × 17 backends = 1,360
+case-runs all green on full tier (136 on smoke).
 
 Five framec defects surfaced and fixed during wave 1 bring-up:
 
@@ -770,6 +777,8 @@ Five framec defects surfaced and fixed during wave 1 bring-up:
 - P6 chained transition state-arg
 - P7 child HSM state-arg (parent unit variant)
 - P8 state-arg read in non-enter event handler
+- P9 3-level HSM uniform (all 3 layers tuple variant)
+- P10 3-level HSM mixed-shape (leaf tuple, mid unit, root tuple)
 
 **Verify-via-getter:** All patterns drive transitions then read back
 the state-arg via a getter, sidestepping per-backend transition
@@ -779,9 +788,9 @@ return-value semantics (especially Erlang gen_statem).
 **Runner:** `fuzz/run_state_args.sh` with `--tier=smoke|full`,
 `--lang=<name>`. Wired into `fuzz/run_all.sh` as Phase 15.
 
-**Wave 2 candidates:** more value-shape coverage (negative ints,
-strings, large value), 3-level HSM, transitions with no args at one
-level then args at another (mixed-shape chain).
+**Wave 3 candidates:** typed args beyond `int` (bool, str), state-
+args used as transition args downstream (chained propagation through
+forwards), state-args in HSM with `=> $^` forwards.
 
 ---
 
