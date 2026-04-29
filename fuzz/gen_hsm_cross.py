@@ -275,20 +275,17 @@ PATTERNS = [
             lambda lit, di: lit),
     Pattern("p5_child_writes_then_fwd", _build_p5_child_writes_then_fwd, True, "drive",
             lambda lit, di: lit + 1),
-    # P6/P7 test the no-cascade contract: leaf state has no handler
-    # for `compute` and no trailing `=> $^` cascade. When
-    # `@@:self.compute()` fires, kernel routes to current state, no
-    # match, event silently dropped. The contract should be: every
-    # backend returns the type default (0 for int) — uniform across
-    # both typed and dynamic langs. Frame's interface wrapper for
-    # typed langs MUST return type default when _return is null,
-    # not crash on unboxing (Java/C# bug pre-fix). Dynamic langs
-    # return None/null naturally — but driver expects 0 too, so
-    # framec/runtime must coerce.
-    Pattern("p6_parent_calls_compute", _build_p6_parent_calls_compute, True, "drive",
-            lambda lit, di: 0),
-    Pattern("p7_child_calls_compute", _build_p7_child_calls_compute, True, "drive",
-            lambda lit, di: 0),
+    # P6/P7 dropped from this corpus — they exercise a Frame contract
+    # that is *intentionally* language-divergent per docs/frame_runtime.md
+    # § "Return values across target languages":
+    #   - Strongly-typed targets (Java/C#/Kotlin/Swift/Dart/C/C++/Go/
+    #     Rust/TypeScript): wrapper returns type default (0 for int)
+    #     when no @@:return is written.
+    #   - Dynamic targets (Python/JS/Ruby/Lua/PHP/GDScript/Erlang):
+    #     wrapper returns slot's natural None/null/nil/undefined.
+    # A uniform expected-value test cannot capture both contracts.
+    # Belongs in a separate phase that tests per-language
+    # return-default semantics with lang-aware expected values.
     Pattern("p8_child_overrides_compute", _build_p8_child_overrides_compute, True, "drive",
             lambda lit, di: lit),
     Pattern("p9_dom_arith_through_hsm", _build_p9_dom_arith_through_hsm, True, "drive",
