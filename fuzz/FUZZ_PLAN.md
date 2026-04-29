@@ -1217,3 +1217,95 @@ Cross-references:
 - Frame source examples at
   `tests/common/positive/control_flow/while_*.ferl` for the
   state-flow loop idiom in Erlang.
+
+---
+
+## Remaining roadmap (2026-04-29)
+
+This section aggregates the work items not yet shipped. Ordered
+by expected defect yield (highest first).
+
+### High-yield: cross-phase persist integrations (probed 2026-04-29)
+
+Phase 2 (persist) shipped 1,377 cases × 17 backends but its corpus
+exercises only basic states. State-args, push/pop, and HSM
+extensions (added in Phase 15 / 19 / 14 this session) have NOT
+been crossed with save/restore. Each is a save-then-restore
+boundary that could surface compartment-serialisation bugs
+analogous to the Erlang `frame_stack` defect found in Phase 19
+wave 3.
+
+**Hand-crafted probes 2026-04-29:**
+- ✅ Python persist × state-args + HSM works
+- ✅ JavaScript persist × HSM works (state_args round-trip via JSON
+  parent_compartment chain)
+- ❌ → ✅ Erlang persist × state-args was BROKEN — save_state map
+  literal + load_state record build only included state / domain /
+  frame_stack. Missed `frame_state_args` + `frame_enter_args`.
+  Fixed in framepiler `b8144d1` (added both fields to the
+  serialized list — same shape fix as Phase 19 wave 3 push/pop).
+- ✅ Erlang persist × push/pop works post-fix.
+- ✅ Erlang persist × HSM works post-fix.
+
+**Remaining (low priority):**
+- Typed-language runtime verification (Java/Kotlin/C#/C++/Swift) —
+  all COMPILE persist × HSM + state-args; runtime testing deferred
+  to a Phase 24 generator if/when built.
+- persist × multi-event mid-sequence: drive(A), save, restore,
+  drive(B) — is the full state preserved across the boundary?
+  Untested.
+
+Implementation note: Phase 24 generator would mirror Phase 19's
+structure (drive → save → restore → verify-via-getter), with
+per-backend save/restore method names (camelCase JS, JSON String
+Java/Kotlin/C#/Rust, sys:replace_state Erlang). The probe approach
+(hand-crafted ad-hoc tests) was sufficient to surface the Erlang
+defect — a generator buys breadth not depth.
+
+### Medium-yield: wave 2/3 of existing phases
+
+Each wave-N candidate noted in its phase's section:
+- **Phase 15 wave 3:** typed args (bool / str), state-args carried
+  through `=> $^` forwards (Phase 14 × 15).
+- **Phase 17 wave 2:** re-entrant event sequences (`@@:self.X()`
+  mid-sequence), longer 5-8 event traces, persist save mid-
+  sequence (overlaps with persist × multi-event above).
+- **Phase 19 wave 4:** push depth ≥ 3 stress, push from leaf with
+  pop-back via `=> $^` forward, push chained with self-call
+  dispatch.
+- **Phase 20 wave 2:** const used as transition arg
+  (`-> $S(self.const_k)`), const initialised from a system param,
+  `@@:system.state` inside `if` conditions, Erlang state-name
+  atom normalisation (currently skipped).
+
+### Low-yield: Phases 18, 21, 22, 23 (0 coverage)
+
+Per the value-density assessments in the catalog above:
+
+- **Phase 18 — Stress / boundary** (low value density, optional).
+  Documents runtime perf, not framec correctness. Skip unless
+  load-testing becomes a concern.
+- **Phase 21 — Type coercion edge cases** (low; might surface 1-2
+  typed-backend bugs). Frame has no type system, so any "coercion"
+  is target-side. Useful as a smoke pass for typed backends.
+- **Phase 22 — Error / panic recovery** (low — documents per-
+  backend semantics, not framec bugs). Optional documentation
+  exercise.
+- **Phase 23 — True concurrency** (low for framec correctness —
+  Frame is single-threaded by design; high for production-
+  readiness claims). Optional.
+
+### Diagnostic-axis lesson (process improvement)
+
+Phase 19 wave 3 confirmed: **diagnostic axis-by-axis tests**
+(test ONE invariant in isolation) catch contract bugs that
+compositional cross-products miss. Phase 19 wave 1+2 had 6
+patterns testing push/pop with various state shapes but missed
+the Erlang `frame_stack` serialisation gap because none isolated
+"does push/pop preserve state-arg context?" Wave 3 P7 added
+exactly that single-axis test and the bug surfaced immediately.
+
+Apply this for future waves: for each axis the runtime promises
+to preserve, write at least one test that ONLY exercises that
+axis. Cross-products are useful for catching interaction bugs;
+isolated axes are essential for catching contract bugs.
