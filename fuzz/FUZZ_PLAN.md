@@ -839,11 +839,17 @@ state-var size (1KB, 1MB), domain size (100, 1000 fields).
 
 ---
 
-### Phase 19 — Push/pop modal stack (wave 1 shipped)
+### Phase 19 — Push/pop modal stack (waves 1+2 shipped)
 
-**Status (2026-04-29):** Wave 1 generator + runner shipped.
-**4 patterns × 10 value tuples × 17 backends = 680 case-runs all
-green on full tier**, 68 on smoke. Zero framec defects.
+**Status (2026-04-29):** Waves 1+2 shipped.
+**6 patterns × 10 value tuples × 17 backends = 1,020 case-runs all
+green on full tier**, 102 on smoke. Zero framec defects.
+
+Wave 2 added P5 (push from HSM child — saved compartment retains
+parent_compartment chain) and P6 (push from HSM leaf, transition
+to sibling, pop back, dispatch event on restored Child — verifies
+post-pop HSM dispatch still works). Both clean across all 17
+backends.
 
 **Axes:** push depth (1, 2), domain bump in pushed state, state-
 var round-trip with pop, multi-call sequence after pop.
@@ -856,6 +862,11 @@ var round-trip with pop, multi-call sequence after pop.
   origin with both domain bumps preserved.
 - P4 pop_then_event: state-var on origin restored faithfully after
   push to a state with the same-named state-var.
+- P5 push_from_hsm_child: push from HSM child; saved compartment's
+  parent_compartment chain survives the pop.
+- P6 push_into_hsm_chain: push from HSM leaf, transition to a
+  sibling, pop back; restored leaf's handlers still dispatch
+  correctly (HSM topology preserved).
 
 **Frame-spec note:** `pop$` re-fires the destination's `$>`
 handler (Frame design — state-vars have re-init guards, but

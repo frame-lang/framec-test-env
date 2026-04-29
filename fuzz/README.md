@@ -466,7 +466,7 @@ reference on push and restores it on pop, including state-vars.
 Domain fields are global; their changes during the pushed state
 survive the pop.
 
-Patterns (4):
+Patterns (6):
 - `p1_dom_persists` — push from $S0, bump domain in pushed $S1,
   pop back: domain value preserved.
 - `p2_sv_restored` — both $S0 and $S1 declare $.x; modifying $S1's
@@ -475,9 +475,13 @@ Patterns (4):
   both sticky.
 - `p4_pop_then_event` — state-var on $S0 reads back the original
   default after a push/pop cycle.
+- `p5_push_from_hsm_child` (wave 2) — push from HSM child; saved
+  compartment's parent_compartment chain survives pop.
+- `p6_push_into_hsm_chain` (wave 2) — push from HSM leaf, transition
+  to sibling, pop back; restored leaf's handlers still dispatch.
 
 Value tuples (10): mixed sign + magnitude.
-Total: 4 × 10 = 40 cases per lang × 17 langs = 680.
+Total: 6 × 10 = 60 cases per lang × 17 langs = 1,020.
 
 ```bash
 python3 gen_pushpop.py
@@ -485,6 +489,9 @@ python3 gen_pushpop.py
 ./run_pushpop.sh --tier=full                     # ~3-4 min
 ./run_pushpop.sh --tier=full --lang=erlang       # one lang only
 ```
+
+Wave 2 result (2026-04-29): **1,020 / 1,020 passing across 17
+backends**, zero framec defects. HSM × push/pop confirmed clean.
 
 Wave 1 result (2026-04-29): **680 / 680 passing across 17
 backends**, zero framec defects.

@@ -146,6 +146,76 @@ def _build_p3_depth_two(spec, lang, base, bump):
     ]
 
 
+def _build_p5_push_from_hsm_child(spec, lang, base, bump):
+    """P5: HSM child pushed, then popped back. $S0 push → $Child
+    (which has $Parent as HSM ancestor). $Child.bump_f bumps $.f
+    by BUMP. $Child.back pops back to $S0. The push saves $Child's
+    compartment (with parent_compartment pointing at $Parent's
+    chain layer); pop must restore the whole chain. Verify $.f
+    from $S0: should be BASE + BUMP. Tests that push/pop preserves
+    HSM compartment topology."""
+    m_drive = method_name(lang, "drive")
+    m_bump = method_name(lang, "bump_f")
+    m_back = method_name(lang, "go_back")
+    m_get = method_name(lang, "get_f")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                push$",
+        f"                -> $Child",
+        f"            }}",
+        f"            {m_get}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}",
+        f"        }}",
+        f"        $Child => $Parent {{",
+        f"            {m_bump}() {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {bump}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_back}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+        f"        $Parent {{}}",
+    ]
+
+
+def _build_p6_push_into_hsm_chain(spec, lang, base, bump):
+    """P6: push from HSM leaf; verify push/pop preserves the saved
+    leaf's parent chain. $S0 transitions (no push) to $Child (which
+    has $Parent as ancestor). $Child.go_push pushes the current
+    compartment ($Child with chain → $Parent). $Child.bump_f bumps
+    $.f. $Child.back pops back. Now $Child is restored — verify by
+    calling $Child.bump_f again (proves Child's handlers still
+    dispatch). Final $.f = BASE + BUMP + BUMP."""
+    m_drive = method_name(lang, "drive")
+    m_push = method_name(lang, "go_push")
+    m_bump = method_name(lang, "bump_f")
+    m_back = method_name(lang, "go_back")
+    m_get = method_name(lang, "get_f")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                -> $Child",
+        f"            }}",
+        f"        }}",
+        f"        $Child => $Parent {{",
+        f"            {m_push}() {{",
+        f"                push$",
+        f"                -> $Sibling",
+        f"            }}",
+        f"            {m_bump}() {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {bump}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_get}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}",
+        f"        }}",
+        f"        $Sibling {{",
+        f"            {m_back}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+        f"        $Parent {{}}",
+    ]
+
+
 def _build_p4_pop_then_event(spec, lang, base, bump):
     """P4: After pop, the restored state's handlers respond to
     subsequent events with the saved state-var values. This tests
@@ -197,6 +267,18 @@ PATTERNS = [
             _build_p4_pop_then_event,
             lambda base, bump: base,
             ["drive", "go_back"]),
+    # Wave 2: HSM × push/pop cross-product. P5 push from HSM child
+    # tests that push/pop preserves the HSM parent chain. P6 push
+    # from leaf, transition to sibling, pop back, then bump_f again
+    # — tests Child's handlers still dispatch after restoration.
+    Pattern("p5_push_from_hsm_child",
+            _build_p5_push_from_hsm_child,
+            lambda base, bump: base + bump,
+            ["drive", "bump_f", "go_back"]),
+    Pattern("p6_push_into_hsm_chain",
+            _build_p6_push_into_hsm_chain,
+            lambda base, bump: base + bump + bump,
+            ["drive", "bump_f", "go_push", "go_back", "bump_f"]),
 ]
 
 
@@ -242,7 +324,9 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
     m_get_x = method_name(lang, "get_x")
 
     # Verify method depends on pattern.
-    if pattern.name in ("p1_dom_persists", "p3_depth_two"):
+    if pattern.name in ("p1_dom_persists", "p3_depth_two",
+                        "p5_push_from_hsm_child",
+                        "p6_push_into_hsm_chain"):
         verify = m_get_f
     else:
         verify = m_get_x
