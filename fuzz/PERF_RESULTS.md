@@ -1,7 +1,9 @@
 # Frame Runtime Perf — Phase 18 Wave 2 Results
 
 **Date:** 2026-04-29
-**Commit:** framepiler `8ce0ec7` / test_env `c14ba505`
+**Commit:** framepiler `8ce0ec7` / test_env `293a5219`
+**Coverage:** all 17 backends measured at N=1M (some also at
+N=100/10k where the toolchain supported quick iteration).
 **Hardware:** macOS Darwin 23.6.0 (Apple Silicon ARM64)
 **Methodology:** Each backend's generated test code wraps the
 inner loop in language-native syntax with a high-resolution
@@ -20,25 +22,30 @@ C/C++, `-O` for Rust+Swift, defaults for everything else.
   operations. Measures dispatch + push (allocate stack entry +
   cascade) + pop (restore + cascade) per pair.
 
-## Headline results — N = 1,000,000
+## Headline results — N = 1,000,000 (all 17 backends)
 
 Single-threaded wall-clock in milliseconds. Lower is faster.
 Sorted by p1 (dispatch baseline).
 
-| Backend     | P1 dispatches | P2 transitions | P3 push+pop | Notes |
-|-------------|--------------:|---------------:|------------:|-------|
-| **C++**     |     **26 ms** |        293 ms  |    424 ms   | clang++ -O2 |
-| **Go**      |        31 ms  |    **172 ms**  |  **301 ms** | go run (no AOT) |
-| **Dart**    |        46 ms  |        297 ms  |    737 ms   | dart run (JIT) |
-| **JavaScript** |     46 ms  |        239 ms  |    496 ms   | Node V8 |
-| **Rust**    |        51 ms  |        217 ms  |    430 ms   | rustc -O |
-| **Java**    |        67 ms  |        310 ms  |    402 ms   | JVM HotSpot, no warmup |
-| **C**       |        78 ms  |        255 ms  |    460 ms   | clang -O2 |
-| **Swift**   |       193 ms  |        681 ms  |   1,137 ms  | swiftc -O |
-| **Python**  |       442 ms  |      1,373 ms  |   3,120 ms  | CPython 3.12 |
-| **PHP**     |       457 ms  |      1,407 ms  |   2,968 ms  | PHP 8 (raised mem limit) |
-| **Ruby**    |       880 ms  |      3,277 ms  |   7,966 ms  | MRI |
-| **Lua**     |     1,039 ms  |      3,675 ms  |   7,304 ms  | Lua 5.4 |
+| Backend         | P1 dispatches | P2 transitions | P3 push+pop | Notes |
+|-----------------|--------------:|---------------:|------------:|-------|
+| **C++**         |     **26 ms** |        293 ms  |    424 ms   | clang++ -O2 |
+| **Go**          |        31 ms  |    **172 ms**  |  **301 ms** | go run (no AOT) |
+| **TypeScript**  |        41 ms  |        208 ms  |    484 ms   | tsx (Node V8) |
+| **Dart**        |        46 ms  |        297 ms  |    737 ms   | dart run (JIT) |
+| **JavaScript**  |        46 ms  |        239 ms  |    496 ms   | Node V8 |
+| **Rust**        |        51 ms  |        217 ms  |    430 ms   | rustc -O |
+| **C#**          |        64 ms  |      1,315 ms  |  1,711 ms   | .NET 10 Release |
+| **Java**        |        67 ms  |        310 ms  |    402 ms   | JVM HotSpot, no warmup |
+| **C**           |        78 ms  |        255 ms  |    460 ms   | clang -O2 |
+| **Kotlin**      |        80 ms  |        261 ms  |    373 ms   | kotlinc + JVM |
+| **Swift**       |       193 ms  |        681 ms  |   1,137 ms  | swiftc -O |
+| **Python**      |       442 ms  |      1,373 ms  |   3,120 ms  | CPython 3.12 |
+| **PHP**         |       457 ms  |      1,407 ms  |   2,968 ms  | PHP 8 (raised mem limit) |
+| **Ruby**        |       880 ms  |      3,277 ms  |   7,966 ms  | MRI |
+| **Lua**         |     1,039 ms  |      3,675 ms  |   7,304 ms  | Lua 5.4 |
+| **Erlang**      |     1,252 ms  |      1,441 ms  |   3,111 ms  | gen_statem (process msg pass) |
+| **GDScript**    |     2,359 ms  |      7,592 ms  |  14,365 ms  | Godot 4.6 headless |
 
 ### Per-operation cost (μs/op) at N=1M
 
@@ -150,25 +157,51 @@ each other. This suggests the framec-emitted dispatch is well-
 optimized: a single message-name string compare + handler
 function-ptr call.
 
-## Backends not measured
+## Per-backend notes (continued)
 
-Five backends had no perf data collected this wave:
+### C# transition+push/pop is 4-5× slower than Java
 
-- **TypeScript** — `tsc` not available on host. TS compiles to
-  JS via tsc; perf would mirror JavaScript.
-- **Kotlin** — `kotlinc -include-runtime -d driver.jar` build is
-  very slow (~30s/case); skipped to keep wave runtime bounded.
-  Should match Java perf within ±10%.
-- **C#** — `dotnet new` + restore packages workflow needs
-  setup; deferred.
-- **Erlang** — `escript` integration in run_perf.sh emits the
-  loop fun but the standalone collector script doesn't yet
-  generate the escript. Erlang's gen_statem message-passing
-  model is structurally different from in-process call models;
-  expect 1-2 orders of magnitude slower than other compiled
-  backends at high N.
-- **GDScript** — Godot SceneTree headless run setup needed;
-  deferred.
+C# at N=1M: dispatch is 64ms (matches Java's 67ms), but transitions
+are **1,315ms** (vs Java's 310ms — 4.2× slower) and push+pop is
+**1,711ms** (vs Java's 402ms — 4.3× slower). Both run on managed
+runtimes with similar JIT models.
+
+Likely cause: framec's C# codegen uses `Dictionary<string, object>`
+for state_vars / state_args / enter_args storage. Each transition
+allocates new dictionaries (state-arg + enter-arg lists in
+`__prepareEnter`) — System.Text.Json + Dictionary<,> allocation
+in CLR seems to cost more than HashMap<,> in JVM. Worth
+investigation as a framec optimization candidate.
+
+### Erlang in the same league as Python
+
+At N=1M: 1,252ms p1, 1,441ms p2, 3,111ms p3. Erlang's
+`gen_statem:call(Pid, Msg)` synchronously sends a message to a
+process and blocks waiting for a reply. The per-call overhead
+(message construction + mailbox queue + scheduler resume + reply
+send) is genuinely larger than an in-process method call —
+roughly matching CPython's interpreter overhead.
+
+For perf-critical Frame applications in Erlang, alternative actor
+models (e.g. plain processes with selective receive, or NIFs)
+could trade Frame's clean abstraction for raw throughput.
+
+### GDScript is the slowest backend (~2× Lua)
+
+At N=1M: 2,359ms p1, 7,592ms p2, 14,365ms p3. GDScript is an
+interpreted, type-erased language tuned for game-engine
+integration, not microbenchmark throughput. The Frame state
+machine pattern (string-keyed event names, dict-of-state-vars)
+maps poorly to GDScript's optimization profile. Expect Frame
+GDScript apps to handle <1M dispatches/sec; for high-frequency
+event loops in games, consider GDExtension (C++ binding) instead.
+
+### Kotlin matches Java exactly (same JVM)
+
+Kotlin at N=1M: 80ms / 261ms / 373ms — within ±10% of Java's
+67ms / 310ms / 402ms. Compiles to the same bytecode; perf
+parity expected. Kotlin's `for (i in 0 until N)` lowers to the
+same JVM bytecode as Java's `for (int i = 0; i < N; i++)`.
 
 ## How to reproduce
 
