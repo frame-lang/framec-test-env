@@ -809,19 +809,28 @@ comment leader.
 
 ---
 
-### Phase 17 — Multi-event traces (proposed)
+### Phase 17 — Multi-event traces (wave 1 shipped)
 
-**Goal:** Send event A → B → C in sequence; assert compound trace
-ordering. Tests stateful behavior across events.
+**Status (2026-04-29):** Wave 1 generator + runner shipped.
+**4 patterns × 10 value tuples × 17 backends = 680 case-runs all
+green on full tier**, 68 on smoke. Zero framec defects.
 
-**Axes:**
-- Event sequence length (2, 3, 5).
-- Mix of transitioning / non-transitioning events.
-- Mix of self-calls, persist saves, async.
+**Patterns (wave 1):**
+- P1 three_event_same_state: 3 events fired in sequence on the
+  same state, each bumping $.f. Tests state-mutation accumulation
+  across event invocations within a single state.
+- P2 event_then_transition: A in $S0 transitions to $S1; B in $S1
+  bumps. Tests state-machine identity across event boundaries.
+- P3 chain_three_states: 4-event sequence chaining transitions
+  across $S0 → $S1 → $S2 with bumps in each.
+- P4 event_in_hsm_chain: drive into HSM child; bump direct on
+  child; fwd_bump forwarded to parent (=> $^). Tests mixed
+  direct/forwarded handling across event sequences.
 
-**Estimated cases:** ~200 × 17 = ~3,400. Smoke ~30 patterns.
-
-**Value density:** medium.
+**Wave 2 candidates:** event sequences with `@@:self.X()`
+dispatch (re-entrant), event sequences mixed with push/pop, longer
+sequences (5-8 events), event sequences with persist save mid-
+sequence.
 
 ---
 

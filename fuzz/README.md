@@ -458,6 +458,39 @@ Generator-side: PHP variable references use `{spec.param_prefix}x`
 
 ---
 
+## Phase 17: Multi-event traces fuzz (wave 1)
+
+`gen_multievent.py` + `run_multievent.sh` — event sequences fired
+in order, with/without transitions between, accumulating effects on
+state. Most other phases test ONE event in isolation; multi-event
+surfaces ordering/cascade bugs that single-event tests can't see.
+
+Patterns (4):
+- `p1_three_event_same_state` — 3 events on the same state, each
+  bumping $.f. Tests mutation accumulation.
+- `p2_event_then_transition` — A in $S0 transitions to $S1; B in
+  $S1 bumps. Tests state-identity across event boundaries.
+- `p3_chain_three_states` — 4-event sequence chaining $S0 → $S1
+  → $S2 with bumps in each.
+- `p4_event_in_hsm_chain` — drive into HSM child; bump direct on
+  child; fwd_bump forwarded (=> $^) to parent. Tests mixed
+  direct/forwarded handling across an event sequence.
+
+Value tuples (10): mixed sign + magnitude.
+Total: 4 × 10 = 40 cases per lang × 17 langs = 680.
+
+```bash
+python3 gen_multievent.py
+./run_multievent.sh --tier=smoke                 # ~20s parallel
+./run_multievent.sh --tier=full                  # ~3-4 min
+./run_multievent.sh --tier=full --lang=erlang    # one lang only
+```
+
+Wave 1 result (2026-04-29): **680 / 680 passing across 17
+backends**, zero framec defects.
+
+---
+
 ## Phase 19: Push/pop modal stack fuzz (wave 1)
 
 `gen_pushpop.py` + `run_pushpop.sh` — `push$` / `-> pop$` modal
