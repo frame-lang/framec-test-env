@@ -812,17 +812,13 @@ green on full tier**, 68 on smoke. Zero framec defects.
   Per the Oceans Model, Frame source for a target uses that
   target's comment leader.
 
-**Defect surfaced (parked):** Frame's lexer accepts `//` line
-comments in structural sections regardless of target language
-(see `lexer/mod.rs:1352`), but `system_codegen.rs:1196` emits the
-captured leading comments as NativeBlock verbatim. For non-`//`
-targets (Python, Ruby, Lua, GDScript), this leaks `//` into the
-generated source and breaks compilation. Documented as a
-docs-vs-code inconsistency; the documented design (Oceans Model)
-is target-leader, so Phase 16 wave 1 corpus uses target leaders
-and passes. Fixing the lexer/codegen mismatch is a separate
-task — either strip `//` from non-`//` targets in the codegen
-or remove the lexer's `//` special-case for structural sections.
+**Defect surfaced + fixed (framepiler 22d47a8):** Frame's lexer
+accepts `//` line comments in structural sections regardless of
+target language (see `lexer/mod.rs:1352`). The captured text was
+emitted by codegen verbatim as NativeBlock — for non-`//` targets
+(Python, Ruby, Lua, GDScript) this leaked `//` into the generated
+source. Fixed by translating `//` → target's native leader in
+`capture_section_comment` per the Oceans Model.
 
 **Wave 2 candidates:** comments inside expressions (after `=`),
 multi-line `/* */` block comments where supported, mixed
