@@ -733,18 +733,55 @@ methodology: feature cross-product axes (HSM × forward × dispatch
 
 ---
 
-### Phase 15 — State-arg propagation × everything (proposed)
+### Phase 15 — State-arg propagation × everything (wave 1 shipped)
 
-**Goal:** Phase 4 covers HSM args narrowly. Cross-product with
-Phases 2/5/6/7/10.
+**Status (2026-04-29):** Wave 1 generator + runner shipped. **8
+patterns × 10 value tuples × 17 backends = 1,360 case-runs all green
+on full tier**, 136 on smoke.
 
-**Axes:** state-args declared at each HSM level × feature × passthrough.
+Five framec defects surfaced and fixed during wave 1 bring-up:
 
-**Estimated cases:** ~500 × 17 = ~8,500. Smoke ~50 patterns at 2-level
-HSM.
+1. Erlang `$>` enter handler did not bind `state.params` from
+   `frame_state_args` — state-args declared on `$S(x: int)` were
+   unresolved at enter time.
+2. Erlang chained-transition emitter (state_timeout pattern) parsed
+   only the target from `frame_transition__(...)` and dropped
+   exit/enter/state-args; now parses all 7 args via paren-aware
+   split, emits the full Data record update, and capitalizes
+   state-arg references.
+3. Erlang `frame_transition__(...)` lines containing
+   `self.<iface>(...)` calls inside arg lists fell through to the
+   blanket `self.` → `Data#data.` substitution, emitting invalid
+   `Data#data.method()` syntax. Fixed via a self-call hoisting
+   pre-pass that lifts each call into a preceding
+   `frame_dispatch__` bind.
+4. Rust HSM enum: `rust_system.rs` cascaded state-args to all chain
+   ancestors under "signature-match guarantees uniformity" — wrong
+   when only the leaf has params (parent gets a unit variant, child
+   a tuple variant). Now conditional: write to ancestors only when
+   they declare their own params.
 
-**Value density:** high (state-arg propagation is a known framec
-hot-spot).
+**Patterns covered:**
+- P1 literal arg
+- P2 domain-field arg
+- P3 arithmetic expression arg
+- P4 self-call result as arg
+- P5 multi-arg state
+- P6 chained transition state-arg
+- P7 child HSM state-arg (parent unit variant)
+- P8 state-arg read in non-enter event handler
+
+**Verify-via-getter:** All patterns drive transitions then read back
+the state-arg via a getter, sidestepping per-backend transition
+return-value semantics (especially Erlang gen_statem).
+
+**Generator:** `fuzz/gen_state_args.py` (8 patterns × 10 value tuples).
+**Runner:** `fuzz/run_state_args.sh` with `--tier=smoke|full`,
+`--lang=<name>`. Wired into `fuzz/run_all.sh` as Phase 15.
+
+**Wave 2 candidates:** more value-shape coverage (negative ints,
+strings, large value), 3-level HSM, transitions with no args at one
+level then args at another (mixed-shape chain).
 
 ---
 

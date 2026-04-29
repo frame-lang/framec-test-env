@@ -28,6 +28,7 @@
 #  12  ctrl-flow        (run_ctrl_flow.sh)
 #  13  shadow           (run_shadow.sh)
 #  14  hsm-cross        (run_hsm_cross.sh)
+#  15  state-args       (run_state_args.sh)
 #
 # Exit code: 0 if all phases pass, nonzero if any phase failed.
 
@@ -54,7 +55,7 @@ while [ $# -gt 0 ]; do
         --help|-h)
             echo "Usage: $0 [--tier=smoke|core|full] [--lang=<name>] [--tag=<comma-list>] [--phases=<comma-list>]"
             echo ""
-            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 (default: all)"
+            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 (default: all)"
             echo "Tiers:  smoke (curated, fast), core (phase essentials), full (complete corpus)"
             exit 0
             ;;
@@ -70,7 +71,7 @@ fi
 
 # Default phase list. Phase 1 is infrastructure-only (no runnable
 # fuzz). Phases 11+ are not yet built.
-ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13 14"
+ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13 14 15"
 PHASES=${PHASES_REQUESTED:-$ALL_PHASES}
 PHASES=$(echo "$PHASES" | tr ',' ' ')
 
@@ -82,6 +83,7 @@ LANG_ARG_STMT_PAIR=""
 LANG_ARG_CTRL_FLOW=""
 LANG_ARG_SHADOW=""
 LANG_ARG_HSM_CROSS=""
+LANG_ARG_STATE_ARGS=""
 LANG_ARG_DIFF=""
 LANG_ARG_NEGATIVE=""
 if [ -n "$LANG" ]; then
@@ -91,6 +93,7 @@ if [ -n "$LANG" ]; then
     LANG_ARG_CTRL_FLOW="--lang=$LANG"          # run_ctrl_flow.sh
     LANG_ARG_SHADOW="--lang=$LANG"             # run_shadow.sh
     LANG_ARG_HSM_CROSS="--lang=$LANG"          # run_hsm_cross.sh
+    LANG_ARG_STATE_ARGS="--lang=$LANG"         # run_state_args.sh
     LANG_ARG_DIFF="--langs=$LANG"              # run_fuzz.py
     LANG_ARG_NEGATIVE="-l $LANG"               # run_negative.sh
 fi
@@ -124,6 +127,7 @@ run_phase() {
         12) run_ctrl_flow ;;
         13) run_shadow ;;
         14) run_hsm_cross ;;
+        15) run_state_args ;;
         *)  echo "Phase $phase: unknown" >&2; return 1 ;;
     esac
 }
@@ -143,6 +147,7 @@ phase_name() {
         12) echo "ctrl-flow" ;;
         13) echo "shadow" ;;
         14) echo "hsm-cross" ;;
+        15) echo "state-args" ;;
         *) echo "?" ;;
     esac
 }
@@ -208,6 +213,13 @@ run_hsm_cross() {
     [ -n "$LANG_ARG_HSM_CROSS" ] && args="$args $LANG_ARG_HSM_CROSS"
     # shellcheck disable=SC2086
     "$SCRIPT_DIR/run_hsm_cross.sh" $args
+}
+
+run_state_args() {
+    local args="--tier=$TIER"
+    [ -n "$LANG_ARG_STATE_ARGS" ] && args="$args $LANG_ARG_STATE_ARGS"
+    # shellcheck disable=SC2086
+    "$SCRIPT_DIR/run_state_args.sh" $args
 }
 
 # Iterate phases. Don't bail on first failure — surface every phase

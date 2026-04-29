@@ -371,3 +371,77 @@ This wave produced the highest defect-density of the program so
 far: 2 framec bugs from 100 patterns. Confirms the wave
 methodology — feature-cross-product axes (HSM × dispatch × forward
 × return-write) catch what isolated single-feature axes miss.
+
+---
+
+## Phase 15: State-arg propagation × everything fuzz (wave 1)
+
+`gen_state_args.py` + `run_state_args.sh` — state-args declared on
+states (`$S(x: int) { ... }`) and used at every site Frame allows:
+literal arg, domain-field arg, arithmetic, self-call result, multi-
+arg, chained transitions, HSM with parent vs child params, and
+state-arg reads in non-enter handlers.
+
+Patterns (8):
+- `p1_lit_arg` — literal value in `-> $S1(5)`.
+- `p2_dom_arg` — domain field as transition arg.
+- `p3_arith_arg` — arithmetic expression as arg.
+- `p4_selfcall_arg` — `@@:self.compute()` result as arg.
+- `p5_multi_arg` — two-arg state, both threaded.
+- `p6_chained_transition` — transition-then-transition with state-
+  arg flowing through enter cascade.
+- `p7_child_hsm_arg` — `$Child(x: int) => $Parent` (parent unit
+  variant, leaf tuple variant) — verifies Rust StateContext enum
+  doesn't write to a unit-variant ancestor.
+- `p8_arg_in_event` — non-enter event handler reads the state-arg.
+
+Value tuples (10): mixed sign + magnitude.
+Total: 8 × 10 = 80 cases per lang × 17 langs = 1,360.
+
+All patterns are **verify-via-getter** — `drive()` triggers the
+transition (void), then `get_x()` reads the state-arg. This sidesteps
+per-backend transition-return-value semantics (especially Erlang
+gen_statem's hardcoded `ok` reply on transitions).
+
+```bash
+python3 gen_state_args.py                          # generate 17 langs
+./run_state_args.sh --tier=smoke                   # ~25s parallel
+./run_state_args.sh --tier=full                    # ~6 min serial
+./run_state_args.sh --tier=full --lang=erlang      # one lang only
+```
+
+Wave 1 result (2026-04-29): **1,360 / 1,360 passing across 17
+backends**, after fixing four real framec defects (committed in
+framepiler `2120a1c` + `cc4de80`):
+
+1. **Erlang `$>` enter handler did not bind state-args** — the enter
+   prelude looped only `state.enter_params`, missing the loop over
+   `state.params` that maps positional `frame_state_args` slots to
+   local variables. State-args declared on `$S(x: int)` were
+   unresolved when the enter cascade fired.
+
+2. **Erlang chained-transition emitter dropped state-args** —
+   the state_timeout pattern for sequenced transitions parsed
+   only the target from `frame_transition__(...)` and discarded
+   exit/enter/state-args. Fix: paren-aware split of all 7 args,
+   full Data record update with capitalised state-arg references.
+
+3. **Erlang `frame_transition__(...)` lines containing
+   `self.<iface>(...)` calls** fell through to the blanket
+   `self.` → `Data#data.` substitution, emitting invalid
+   `Data#data.method()` (record-field-call). Fix: a self-call
+   hoisting pre-pass that lifts each call into a preceding
+   `frame_dispatch__` bind and substitutes the result variable
+   back into the transition's arg slot.
+
+4. **Rust HSM enum: state-args written to unit-variant ancestors**
+   — `rust_system.rs` cascaded args to all chain ancestors under
+   "signature-match guarantees uniform args", which is wrong when
+   only the leaf declares params. Fix: condition the ancestor walk
+   on `ctx.state_param_names[ancestor]` non-empty (tuple variant)
+   — skip unit-variant ancestors whose StateContext can't carry
+   args.
+
+Generator-side: PHP variable references use `{spec.param_prefix}x`
+(resolves to `$x`); Erlang section in the runner is conditional on
+`FUZZ_DRIVE_ARG` empty (drive/1) vs present (drive/2 with arg).
