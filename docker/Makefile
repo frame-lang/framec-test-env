@@ -125,6 +125,13 @@ MATRIX_JOBS ?= 4
 
 test: $(STAMP_DIR)/framec-native build
 	@echo "=== Running all tests in parallel ($(words $(LANGS)) languages) ==="
+	@# --force-recreate: collect-results.sh greps `^not ok` lines from
+	@# the container's full log history. Persistent containers from
+	@# prior runs accumulate logs (one suite invocation per run); a
+	@# prior run that failed surfaces its `not ok` lines as if they
+	@# were from the current run. Force-recreate clears that history
+	@# by replacing the containers, so each matrix run sees only its
+	@# own output.
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
 	 CPP_COMPILE_JOBS=$(MATRIX_JOBS) \
 	 DART_COMPILE_JOBS=$(MATRIX_JOBS) \
@@ -132,7 +139,7 @@ test: $(STAMP_DIR)/framec-native build
 	 GO_COMPILE_JOBS=$(MATRIX_JOBS) \
 	 RUST_EXEC_JOBS=$(MATRIX_JOBS) \
 	 SWIFT_COMPILE_JOBS=$(MATRIX_JOBS) \
-	 $(COMPOSE) up -d $(LANGS)
+	 $(COMPOSE) up -d --force-recreate $(LANGS)
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
 	 ./collect-results.sh $(LANGS)
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native $(COMPOSE) down --remove-orphans 2>/dev/null || true
