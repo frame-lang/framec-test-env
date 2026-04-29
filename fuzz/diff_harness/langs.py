@@ -2657,8 +2657,28 @@ def erlang_case_supported(meta: dict) -> bool:
     now active in `_erlang_trace` (2026-04-24), the canonical
     Python-style source is pre-converted to brace form before framec
     sees it, and `erlang_transform_blocks` converts brace-if to
-    `case/of/end`. All post-structures are supported."""
-    _ = meta
+    `case/of/end`. All post-structures are supported.
+
+    Async cases (`harness_kind == "async"`) are skipped: Erlang's
+    concurrency model is process-based via gen_statem messages,
+    not await-style continuations. The .frame source uses the
+    Python-flavored `await op(x)` idiom which framec's Erlang
+    codegen passes through verbatim (`Data#data{tmp = await op(K)}`),
+    yielding invalid Erlang. The right Erlang lowering for async
+    in Frame is a design question, not a bug — skip async cases
+    here and revisit when the design lands.
+
+    Multi-system cases (`harness_kind == "multisys"`) bundle 2+
+    @@system blocks in one .frame file. Erlang's `one module per
+    file` rule (E431) makes this a design exclusion (per Phase 7
+    memo, framepiler 2026-04-27). The Phase 7 wave-1 corpus
+    exclusively uses bundled fixtures, so all multisys cases are
+    gated here."""
+    kind = meta.get("harness_kind")
+    if kind == "async":
+        return False
+    if kind == "multisys":
+        return False
     return True
 
 
