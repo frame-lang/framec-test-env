@@ -1,0 +1,57 @@
+@@target go
+
+package main
+
+import "fmt"
+import "os"
+import "time"
+
+
+@@system Perf_perf_p3_push_pop_depth__smoke {
+    interface:
+        Get_f(): int
+        Go_back()
+        Push_then()
+
+    machine:
+        $S0 {
+            Push_then() {
+                s.f = s.f + 1
+                push$
+                -> $S1
+            }
+            Go_back() {
+                -> pop$
+            }
+            Get_f(): int { @@:(s.f) }
+        }
+        $S1 {
+            Push_then() {
+                s.f = s.f + 1
+                push$
+                -> $S0
+            }
+            Go_back() {
+                -> pop$
+            }
+        }
+
+    domain:
+        f: int = 0
+}
+
+
+func _fail(msg string) { fmt.Println("FAIL: " + msg); os.Exit(1) }
+
+func main() {
+    sm := NewPerf_perf_p3_push_pop_depth__smoke()
+    n := 100
+    start := time.Now()
+    for i := 0; i < n; i++ { sm.Push_then() }
+    for i := 0; i < n; i++ { sm.Go_back() }
+    elapsedMs := float64(time.Since(start).Microseconds()) / 1000.0
+    ret := sm.Get_f()
+    fmt.Printf("PERF: pattern=p3_push_pop_depth lang=go n=%d ms=%.2f result=%d\n", n, elapsedMs, ret)
+    if ret != 100 { _fail(fmt.Sprintf("expected ret=100, got %d", ret)) }
+    fmt.Println("PASS: perf")
+}
