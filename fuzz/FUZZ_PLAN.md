@@ -839,17 +839,34 @@ state-var size (1KB, 1MB), domain size (100, 1000 fields).
 
 ---
 
-### Phase 19 — Push/pop modal stack (proposed)
+### Phase 19 — Push/pop modal stack (wave 1 shipped)
 
-**Goal:** `push$` / `pop$` interactions × everything. Phase 9 p11
-(state-var round-trip) doesn't deeply test the modal stack.
+**Status (2026-04-29):** Wave 1 generator + runner shipped.
+**4 patterns × 10 value tuples × 17 backends = 680 case-runs all
+green on full tier**, 68 on smoke. Zero framec defects.
 
-**Axes:** push depth, modal context with state-vars / domain mods,
-pop with explicit transition vs implicit return, push/pop in HSM.
+**Axes:** push depth (1, 2), domain bump in pushed state, state-
+var round-trip with pop, multi-call sequence after pop.
 
-**Estimated cases:** ~150 × 17 = ~2,550. Smoke ~20 patterns.
+**Patterns:**
+- P1 dom_persists: domain bump in pushed state survives pop.
+- P2 sv_restored: state-var modified in pushed state's compartment
+  isn't visible after pop (saved compartment restored).
+- P3 depth_two: two consecutive pushes; double pop returns to
+  origin with both domain bumps preserved.
+- P4 pop_then_event: state-var on origin restored faithfully after
+  push to a state with the same-named state-var.
 
-**Value density:** medium-high (push/pop is less-trodden code path).
+**Frame-spec note:** `pop$` re-fires the destination's `$>`
+handler (Frame design — state-vars have re-init guards, but
+user-written enter logic should be idempotent if it must survive
+pop). All wave 1 patterns avoid state-mutating `$>` handlers to
+keep test expectations stable.
+
+**Wave 2 candidates:** push from HSM child (cascade exit/enter),
+push with state-args (does push save state-arg context?), pop
+back to HSM parent (which compartment does pop restore?), push
+chained with self-call dispatch.
 
 ---
 

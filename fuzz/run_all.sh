@@ -29,6 +29,7 @@
 #  13  shadow           (run_shadow.sh)
 #  14  hsm-cross        (run_hsm_cross.sh)
 #  15  state-args       (run_state_args.sh)
+#  19  pushpop          (run_pushpop.sh)
 #
 # Exit code: 0 if all phases pass, nonzero if any phase failed.
 
@@ -55,7 +56,7 @@ while [ $# -gt 0 ]; do
         --help|-h)
             echo "Usage: $0 [--tier=smoke|core|full] [--lang=<name>] [--tag=<comma-list>] [--phases=<comma-list>]"
             echo ""
-            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 (default: all)"
+            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 19 (default: all)"
             echo "Tiers:  smoke (curated, fast), core (phase essentials), full (complete corpus)"
             exit 0
             ;;
@@ -71,7 +72,7 @@ fi
 
 # Default phase list. Phase 1 is infrastructure-only (no runnable
 # fuzz). Phases 11+ are not yet built.
-ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13 14 15"
+ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13 14 15 19"
 PHASES=${PHASES_REQUESTED:-$ALL_PHASES}
 PHASES=$(echo "$PHASES" | tr ',' ' ')
 
@@ -84,6 +85,7 @@ LANG_ARG_CTRL_FLOW=""
 LANG_ARG_SHADOW=""
 LANG_ARG_HSM_CROSS=""
 LANG_ARG_STATE_ARGS=""
+LANG_ARG_PUSHPOP=""
 LANG_ARG_DIFF=""
 LANG_ARG_NEGATIVE=""
 if [ -n "$LANG" ]; then
@@ -94,6 +96,7 @@ if [ -n "$LANG" ]; then
     LANG_ARG_SHADOW="--lang=$LANG"             # run_shadow.sh
     LANG_ARG_HSM_CROSS="--lang=$LANG"          # run_hsm_cross.sh
     LANG_ARG_STATE_ARGS="--lang=$LANG"         # run_state_args.sh
+    LANG_ARG_PUSHPOP="--lang=$LANG"            # run_pushpop.sh
     LANG_ARG_DIFF="--langs=$LANG"              # run_fuzz.py
     LANG_ARG_NEGATIVE="-l $LANG"               # run_negative.sh
 fi
@@ -128,6 +131,7 @@ run_phase() {
         13) run_shadow ;;
         14) run_hsm_cross ;;
         15) run_state_args ;;
+        19) run_pushpop ;;
         *)  echo "Phase $phase: unknown" >&2; return 1 ;;
     esac
 }
@@ -148,6 +152,7 @@ phase_name() {
         13) echo "shadow" ;;
         14) echo "hsm-cross" ;;
         15) echo "state-args" ;;
+        19) echo "pushpop" ;;
         *) echo "?" ;;
     esac
 }
@@ -220,6 +225,13 @@ run_state_args() {
     [ -n "$LANG_ARG_STATE_ARGS" ] && args="$args $LANG_ARG_STATE_ARGS"
     # shellcheck disable=SC2086
     "$SCRIPT_DIR/run_state_args.sh" $args
+}
+
+run_pushpop() {
+    local args="--tier=$TIER"
+    [ -n "$LANG_ARG_PUSHPOP" ] && args="$args $LANG_ARG_PUSHPOP"
+    # shellcheck disable=SC2086
+    "$SCRIPT_DIR/run_pushpop.sh" $args
 }
 
 # Iterate phases. Don't bail on first failure — surface every phase

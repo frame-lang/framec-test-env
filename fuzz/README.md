@@ -455,3 +455,43 @@ framepiler `2120a1c` + `cc4de80`):
 Generator-side: PHP variable references use `{spec.param_prefix}x`
 (resolves to `$x`); Erlang section in the runner is conditional on
 `FUZZ_DRIVE_ARG` empty (drive/1) vs present (drive/2 with arg).
+
+---
+
+## Phase 19: Push/pop modal stack fuzz (wave 1)
+
+`gen_pushpop.py` + `run_pushpop.sh` — `push$` / `-> pop$` modal
+stack interactions. Frame's modal stack saves a compartment
+reference on push and restores it on pop, including state-vars.
+Domain fields are global; their changes during the pushed state
+survive the pop.
+
+Patterns (4):
+- `p1_dom_persists` — push from $S0, bump domain in pushed $S1,
+  pop back: domain value preserved.
+- `p2_sv_restored` — both $S0 and $S1 declare $.x; modifying $S1's
+  $.x doesn't leak to $S0 after pop (separate compartments).
+- `p3_depth_two` — two pushes deep, two pops, domain bumps from
+  both sticky.
+- `p4_pop_then_event` — state-var on $S0 reads back the original
+  default after a push/pop cycle.
+
+Value tuples (10): mixed sign + magnitude.
+Total: 4 × 10 = 40 cases per lang × 17 langs = 680.
+
+```bash
+python3 gen_pushpop.py
+./run_pushpop.sh --tier=smoke                    # ~20s parallel
+./run_pushpop.sh --tier=full                     # ~3-4 min
+./run_pushpop.sh --tier=full --lang=erlang       # one lang only
+```
+
+Wave 1 result (2026-04-29): **680 / 680 passing across 17
+backends**, zero framec defects.
+
+**Frame-spec note (relevant for wave 2 design):** `pop$` re-fires
+the saved state's `$>` handler. State-vars have a re-init guard
+("if not in compartment.state_vars" pattern) but user-written
+enter-handler logic is NOT auto-guarded. Any test that relies on
+post-pop state must either avoid state-mutating `$>` handlers or
+make them idempotent.
