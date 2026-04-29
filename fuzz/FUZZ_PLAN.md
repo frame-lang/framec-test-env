@@ -595,24 +595,45 @@ the phase saturated.
 
 ---
 
-### Phase 12 — Control-flow embedding (proposed)
+### Phase 12 — Control-flow embedding (wave 1 shipped 2026-04-28)
 
-**Goal:** Frame expressions inside `if` / `while` conditions and
-bodies. Tests guard injection in branched code paths.
+**Goal:** Frame statements inside native `if cond { body }` (Oceans
+Model — cond and if-syntax are per-target native; body can mix
+native code with Frame statements).
 
-**Axes:**
-- Expression placement: condition vs. then-body vs. else-body vs.
-  while-body.
-- Embedded self-call vs. domain read vs. literal.
-- Single-statement vs. multi-statement body.
+**Axes (wave 1):**
+- Cond (4): `lit_true`, `lit_false`, `dom_eq_hit`, `dom_arith_eq_hit`
+- Body (5): `dom_w`, `sv_w`, `ret_w`, `sc_assign_dom`, `transition`
+- LIT (5): 1, 5, -3, 0, 100
 
-**Estimated cases:** ~1,500 patterns × 17 = ~25,500 if 1-level
-nesting. Smoke ~100 patterns (single-statement, `if` only).
+**Wave 1 shipped:** 4 × 5 × 5 = 100 cases × 16 langs = 1,600 case-
+runs. All passing after fixing two generator bugs found during
+bring-up (Kotlin parens, $S1 cross-state state-var read). Erlang
+excluded for wave 1 — `if X -> body ; true -> body end` syntax is
+too structurally different from the other 16 langs to share a
+renderer. Generator: `gen_ctrl_flow.py`. Runner: `run_ctrl_flow.sh`.
+Smoke: ~32s parallel (20 cases/lang). Full: ~7 min serial.
 
-**Value density:** high. Phase 9 p12 was deliberately omitted because
-of `if` / `while` parser interaction — bugs likely there.
+**Wave 2 candidates:**
+- `else` branch with separate body shape.
+- Erlang renderer (separate `if X -> body ; true -> ... end`
+  pattern).
+- `while cond { body }` (loop placement variation; framec doesn't
+  emit guards inside loops today, so this could surface bugs).
+- Nested if (1-level deep).
+- Self-call inside cond expression (`@@:self.compute() == K` —
+  framec must lower the `@@:self.X()` call inside native cond).
 
-**Frame feature gate:** `if` / `while` syntax (already supported).
+**Value density (post wave 1):** medium. Predicted high due to
+"Phase 9 p12 was omitted — bugs likely there." Wave 1 surfaced
+zero framec defects; the two issues found were generator bugs
+(Kotlin syntax) and a Frame contract clarification (state-vars
+state-scoped). Either framec's if-passthrough is genuinely robust
+because it's just verbatim native code, or the bugs live in axes
+wave 1 doesn't reach (else-branch, while, nested, self-call-in-
+cond). Wave 2 should target those.
+
+**Frame feature gate:** native if-syntax (passthrough).
 
 ---
 

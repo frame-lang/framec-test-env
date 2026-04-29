@@ -220,3 +220,50 @@ reads `self.f`). Per the wave methodology, this signals that
 Phase 11's first wave landed in a healthy state; next-wave work
 either expands Phase 11 axes (transitions, more S1/S2 shapes) or
 moves to a different phase based on bug-finding density.
+
+---
+
+## Phase 12: control-flow embedding fuzz (wave 1)
+
+`gen_ctrl_flow.py` + `run_ctrl_flow.sh` — Frame statements
+embedded inside native `if cond { body }`. Tests that framec
+correctly emits transitions, self-calls, return-writes, and
+domain/state-var writes when nested inside per-target native
+control flow.
+
+What this exercises that earlier phases don't:
+- Frame statements inside native if-bodies.
+- Per-language if-syntax variation: indent (Python/GDScript),
+  braces with parens (JS/TS/Java/C/C++/C#/PHP/Kotlin/Dart),
+  braces without parens (Rust/Go/Swift), end-keyword (Ruby/Lua).
+- Cond expressions reading domain fields.
+
+Axes:
+- Cond (4): `lit_true`, `lit_false`, `dom_eq_hit`, `dom_arith_eq_hit`
+- Body (5): `dom_w`, `sv_w`, `ret_w`, `sc_assign_dom`, `transition`
+- LIT (5): 1, 5, -3, 0, 100
+- Total: 4 × 5 × 5 = 100 cases per lang × 16 langs = 1,600.
+
+Erlang excluded for wave 1 — `if X -> body ; true -> body end` is
+too structurally different from the other 16 langs to share a
+renderer. Wave 2 candidate.
+
+Smoke selects one case per (cond, body) pair (LIT=1) → 20 smoke
+cases per lang.
+
+```bash
+python3 gen_ctrl_flow.py                          # generate 16 langs
+./run_ctrl_flow.sh --tier=smoke                   # ~32s parallel
+./run_ctrl_flow.sh --tier=full                    # ~7 min serial
+./run_ctrl_flow.sh --tier=full --lang=python_3    # one lang only
+```
+
+Wave 1 result (2026-04-28): 1,600 / 1,600 passing across all 16
+backends. Two generator bugs surfaced and fixed during bring-up:
+- Kotlin requires parens around the cond (was rendering as Rust-
+  style); fixed in `IF_RENDERERS["kotlin"]`.
+- State vars are state-scoped — $S1 (transition target) reading
+  `$.s` declared in $S0 emits invalid Rust enum-variant access.
+  Generator now emits only `get_n` (domain read) in $S1 for
+  transition cases. This pins a real Frame contract: state-vars
+  do not propagate across transitions; only domain fields do.
