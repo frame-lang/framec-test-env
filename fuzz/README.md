@@ -579,9 +579,19 @@ Patterns (6):
   compartment's parent_compartment chain survives pop.
 - `p6_push_into_hsm_chain` (wave 2) — push from HSM leaf, transition
   to sibling, pop back; restored leaf's handlers still dispatch.
+- `p7_state_args_round_trip` (wave 3) — push from a state with
+  `(x: int)`; pop; state-arg `x` restored faithfully.
+- `p8_enter_args_round_trip` (wave 3) — push from a state with
+  `$>(a: int)` enter handler; pop; enter-args restored.
+- `p9_combined_args` (wave 3) — both state-args + enter-args
+  together — both contexts must survive a push/pop.
+- `p10_hsm_state_args_push_pop` (wave 3) — HSM × state-args ×
+  push/pop. Push from HSM child carrying state-args, transition
+  to sibling, pop back; both state-args and parent_compartment
+  chain restored.
 
 Value tuples (10): mixed sign + magnitude.
-Total: 6 × 10 = 60 cases per lang × 17 langs = 1,020.
+Total: 10 × 10 = 100 cases per lang × 17 langs = 1,700.
 
 ```bash
 python3 gen_pushpop.py
@@ -589,6 +599,19 @@ python3 gen_pushpop.py
 ./run_pushpop.sh --tier=full                     # ~3-4 min
 ./run_pushpop.sh --tier=full --lang=erlang       # one lang only
 ```
+
+Wave 3 result (2026-04-29): **1,700 / 1,700 passing across 17
+backends** after fixing two framec defects (committed in framepiler
+`3f0cd24`):
+1. **Erlang push/pop discarded state-args + enter-args.** The
+   push side stored only the state atom on `frame_stack`, so pop
+   restored the state name but left the arg lists at the pushed
+   destination's values. Fix: push a 3-tuple
+   `{state_atom, state_args, enter_args}`; pop pattern-matches
+   and restores both lists.
+2. **Rust prepareEnter/prepareExit on negative literals.** Codegen
+   emitted `-3.to_string()` which parses as `-(3.to_string())`
+   (E0600). Fix: wrap as `(-3).to_string()`.
 
 Wave 2 result (2026-04-29): **1,020 / 1,020 passing across 17
 backends**, zero framec defects. HSM × push/pop confirmed clean.

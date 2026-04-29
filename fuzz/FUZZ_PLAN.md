@@ -865,17 +865,37 @@ state-var size (1KB, 1MB), domain size (100, 1000 fields).
 
 ---
 
-### Phase 19 — Push/pop modal stack (waves 1+2 shipped)
+### Phase 19 — Push/pop modal stack (waves 1+2+3 shipped)
 
-**Status (2026-04-29):** Waves 1+2 shipped.
-**6 patterns × 10 value tuples × 17 backends = 1,020 case-runs all
-green on full tier**, 102 on smoke. Zero framec defects.
+**Status (2026-04-29):** Waves 1-3 shipped.
+**10 patterns × 10 value tuples × 17 backends = 1,700 case-runs
+all green on full tier**, 170 on smoke. Wave 3 surfaced + fixed
+2 framec defects.
+
+**Wave 3 added P7-P10 (state-args + enter-args × push/pop):**
+- P7 state_args_round_trip — push from a state with `(x: int)`,
+  pop, verify `x` restored.
+- P8 enter_args_round_trip — push from a state with `$>(a: int)`
+  enter handler, pop, verify enter-args restored.
+- P9 combined_args — both state-args + enter-args together.
+- P10 hsm_state_args_push_pop — HSM child with state-args; push,
+  go to sibling, pop, verify state-args restored AND parent chain
+  intact.
+
+**framec defects fixed (commit 3f0cd24):**
+1. Erlang `push$` saved only the state atom onto `frame_stack`,
+   not `frame_state_args`/`frame_enter_args`. Pop restored the
+   state name but left the arg lists at the pushed-destination
+   values (typically `[]`). Fixed: push saves a 3-tuple
+   `{state_atom, state_args, enter_args}`; pop pattern-matches
+   and restores both arg lists.
+2. Rust enter-arg / exit-arg codegen emitted `<lit>.to_string()`
+   without parens — for negative literals (`-3`), this parses as
+   `-(3.to_string())` (E0600). Fixed: wrap as `(<lit>).to_string()`.
 
 Wave 2 added P5 (push from HSM child — saved compartment retains
 parent_compartment chain) and P6 (push from HSM leaf, transition
-to sibling, pop back, dispatch event on restored Child — verifies
-post-pop HSM dispatch still works). Both clean across all 17
-backends.
+to sibling, pop back, dispatch event on restored Child).
 
 **Axes:** push depth (1, 2), domain bump in pushed state, state-
 var round-trip with pop, multi-call sequence after pop.

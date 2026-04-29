@@ -216,6 +216,145 @@ def _build_p6_push_into_hsm_chain(spec, lang, base, bump):
     ]
 
 
+def _build_p7_state_args_round_trip(spec, lang, base, bump):
+    """P7 (wave 3): state-args × push/pop. drive() in $S0 transitions
+    to $S1(BASE) — $S1 has state-arg `x`. push_then in $S1 saves the
+    compartment (including the state-arg context) and transitions
+    to $S2. go_back in $S2 pops back to $S1. Verify $S1's get_x
+    returns BASE — the saved compartment's state-args were preserved
+    across the push/pop round-trip."""
+    m_drive = method_name(lang, "drive")
+    m_push = method_name(lang, "push_then")
+    m_back = method_name(lang, "go_back")
+    m_get_x = method_name(lang, "get_x")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                -> $S1({base})",
+        f"            }}",
+        f"        }}",
+        f"        $S1(x: int) {{",
+        f"            {m_push}() {{",
+        f"                push$",
+        f"                -> $S2",
+        f"            }}",
+        f"            {m_get_x}(): int {{ @@:({spec.param_prefix}x) }}",
+        f"        }}",
+        f"        $S2 {{",
+        f"            {m_back}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+    ]
+
+
+def _build_p8_enter_args_round_trip(spec, lang, base, bump):
+    """P8 (wave 3): enter-args × push/pop. drive() in $S0 transitions
+    `-> "BASE" $S1` — $S1's $>(a: int) enter handler stores `a` in
+    domain. push_then in $S1 saves the compartment, transitions to
+    $S2. go_back in $S2 pops back. Verify $.f reflects $S1's stored
+    enter-arg (BASE) — enter-args context survives the round trip.
+
+    Distinct from P7: P7 tests state-args persistence; P8 tests
+    enter-args persistence. Both are saved on push (per the fix
+    in framepiler 22d47a8 → next commit) but cover different
+    contract paths."""
+    m_drive = method_name(lang, "drive")
+    m_push = method_name(lang, "push_then")
+    m_back = method_name(lang, "go_back")
+    m_get_f = method_name(lang, "get_f")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                -> ({base}) $S1",
+        f"            }}",
+        f"        }}",
+        f"        $S1 {{",
+        f"            $>(a: int) {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.param_prefix}a{spec.stmt_end}",
+        f"            }}",
+        f"            {m_push}() {{",
+        f"                push$",
+        f"                -> $S2",
+        f"            }}",
+        f"            {m_get_f}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}",
+        f"        }}",
+        f"        $S2 {{",
+        f"            {m_back}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+    ]
+
+
+def _build_p9_combined_state_and_enter_args(spec, lang, base, bump):
+    """P9 (wave 3): combined state-args + enter-args × push/pop.
+    drive() transitions `-> (BUMP) $S1(BASE)` — $S1 has BOTH a
+    state-arg `x: int` AND a $>(a: int) enter handler. Push, go to
+    $S2, pop back. Verify get_x in $S1 returns BASE (state-arg) and
+    domain $.f reflects BUMP (set by enter handler before push).
+    Both contexts must survive together."""
+    m_drive = method_name(lang, "drive")
+    m_push = method_name(lang, "push_then")
+    m_back = method_name(lang, "go_back")
+    m_get_x = method_name(lang, "get_x")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                -> ({bump}) $S1({base})",
+        f"            }}",
+        f"        }}",
+        f"        $S1(x: int) {{",
+        f"            $>(a: int) {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.param_prefix}a{spec.stmt_end}",
+        f"            }}",
+        f"            {m_push}() {{",
+        f"                push$",
+        f"                -> $S2",
+        f"            }}",
+        f"            {m_get_x}(): int {{ @@:({spec.param_prefix}x) }}",
+        f"        }}",
+        f"        $S2 {{",
+        f"            {m_back}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+    ]
+
+
+def _build_p10_hsm_state_args_push_pop(spec, lang, base, bump):
+    """P10 (wave 3): HSM × state-args × push/pop. drive() transitions
+    `-> $Child(BASE)`. $Child inherits from $Parent. push_then in
+    $Child saves the compartment, transitions to $Sibling. go_back
+    in $Sibling pops back to $Child. Verify $Child's get_x returns
+    BASE — the saved compartment's state-args were preserved across
+    push/pop AND the HSM parent_compartment chain was reconstructed."""
+    m_drive = method_name(lang, "drive")
+    m_push = method_name(lang, "push_then")
+    m_back = method_name(lang, "go_back")
+    m_get_x = method_name(lang, "get_x")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                -> $Child({base})",
+        f"            }}",
+        f"        }}",
+        f"        $Child => $Parent(x: int) {{",
+        f"            {m_push}() {{",
+        f"                push$",
+        f"                -> $Sibling",
+        f"            }}",
+        f"            {m_get_x}(): int {{ @@:({spec.param_prefix}x) }}",
+        f"        }}",
+        f"        $Sibling {{",
+        f"            {m_back}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+        f"        $Parent {{}}",
+    ]
+
+
 def _build_p4_pop_then_event(spec, lang, base, bump):
     """P4: After pop, the restored state's handlers respond to
     subsequent events with the saved state-var values. This tests
@@ -279,6 +418,25 @@ PATTERNS = [
             _build_p6_push_into_hsm_chain,
             lambda base, bump: base + bump + bump,
             ["drive", "bump_f", "go_push", "go_back", "bump_f"]),
+    # Wave 3: state-args × push/pop cross-product. Pushed compartment
+    # carries state-args; pop must restore them so subsequent reads
+    # return the original values.
+    Pattern("p7_state_args_round_trip",
+            _build_p7_state_args_round_trip,
+            lambda base, bump: base,
+            ["drive", "push_then", "go_back"]),
+    Pattern("p8_enter_args_round_trip",
+            _build_p8_enter_args_round_trip,
+            lambda base, bump: base,
+            ["drive", "push_then", "go_back"]),
+    Pattern("p9_combined_args",
+            _build_p9_combined_state_and_enter_args,
+            lambda base, bump: base,
+            ["drive", "push_then", "go_back"]),
+    Pattern("p10_hsm_state_args_push_pop",
+            _build_p10_hsm_state_args_push_pop,
+            lambda base, bump: base,
+            ["drive", "push_then", "go_back"]),
 ]
 
 
@@ -326,7 +484,8 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
     # Verify method depends on pattern.
     if pattern.name in ("p1_dom_persists", "p3_depth_two",
                         "p5_push_from_hsm_child",
-                        "p6_push_into_hsm_chain"):
+                        "p6_push_into_hsm_chain",
+                        "p8_enter_args_round_trip"):
         verify = m_get_f
     else:
         verify = m_get_x
