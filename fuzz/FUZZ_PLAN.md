@@ -678,22 +678,56 @@ disambiguation rules are looser.
 
 ---
 
-### Phase 14 — HSM × everything (proposed)
+### Phase 14 — HSM × everything (wave 1 shipped 2026-04-28)
 
-**Goal:** Cross-product of Phase 4 (HSM) with Phases 2/5/6/7/10.
-Tests that each feature behaves correctly under deep HSM hierarchies.
+**Goal:** Frame statements (writes, self-calls, expressions) inside
+HSM hierarchies. Phase 4 covers HSM enter/exit cascades; this phase
+tests the orthogonal axis: do Frame statements behave correctly
+when the state has ancestors and `=> $^` forwarding is in play?
 
-**Axes:**
-- HSM depth: 1, 2, 3.
-- Each feature (persist / operations / async / multi-system /
-  expression) exercised per HSM level.
+**Axes (wave 1):**
+- 8 patterns: p1/p2 (dom_w in child/parent), p3/p4 (ret_w in
+  child/parent), p5 (child writes+forwards, parent reads), p8
+  (child overrides compute, parent dispatches), p9 (dom-arith
+  through HSM), p10 (3-level cascade).
+- 10 (LIT, dom_init) value tuples — sign/zero edges.
 
-**Estimated cases:** depth × per-phase 80%-subset. Realistically
-~3,000 × 17 = ~50,000 if fully cross-producted, or ~1,500 × 17 =
-25,500 if capped at depth 2. Smoke ~depth-2 × Phase 5+10 ~500 cases.
+**Wave 1 shipped:** 8 × 10 = 80 cases × 17 langs = 1,360 case-
+runs. **Surfaced 2 real framec defects, both fixed in framepiler
+commit `5749f44`:**
 
-**Value density:** medium-high. Each phase's HSM coverage is
-currently shallow.
+1. Erlang `=> $^` forward dropped parent's reply value
+   (`frame_unwrap_forward__` was a 2-tuple, hardcoded `[{reply,
+   From, ok}]` after unwrap). Fixed via 3-tuple unwrap +
+   `frame_extract_reply__` helper.
+
+2. Erlang post-dispatch transition guard hardcoded `undefined` in
+   the `_ ->` arm when `@@:self.X()` caused a transition. Fixed
+   via scope-aware variable extraction.
+
+After fix: 1,360 / 1,360 passing. Generator: `gen_hsm_cross.py`.
+Runner: `run_hsm_cross.sh`. Smoke: ~25s parallel (8 cases/lang).
+Full: ~6 min serial.
+
+**Wave 1 design choice (P6/P7 dropped):** Two patterns testing
+"@@:self.X() with no `=> $^` cascade" were dropped because the
+result is inherently per-language divergent (typed langs return
+0, dynamic langs return None, Java/C# crash on null unboxing).
+Belongs in a separate phase that explicitly tests per-language
+default-value semantics.
+
+**Wave 2 candidates:**
+- 3-level HSM × full (currently only p10 reaches depth 3).
+- HSM × persist (Phase 2 cross-product).
+- HSM × async (Phase 6 cross-product).
+- HSM × multi-system (Phase 7 cross-product).
+- Default-cascade `=> $^` in child (currently only explicit
+  forwards).
+
+**Value density (post wave 1):** highest of any phase shipped to
+date. 2 framec defects from 100 patterns. Validates the wave
+methodology: feature cross-product axes (HSM × forward × dispatch
+× return-write) catch what single-feature axes miss.
 
 **Frame feature gate:** HSM (already supported).
 

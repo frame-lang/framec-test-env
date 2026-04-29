@@ -308,3 +308,66 @@ backends. Zero defects. Frame's qualified syntax (`self.`, `$.`)
 makes scope resolution unambiguous, so this wave largely confirms
 that the qualification contract holds; bugs would more likely
 surface in write paths or native local shadowing (wave 2 axes).
+
+---
+
+## Phase 14: HSM × everything fuzz (wave 1)
+
+`gen_hsm_cross.py` + `run_hsm_cross.sh` — depth-2 HSM (parent +
+child) and one depth-3 pattern, with handler bodies that exercise
+`=> $^` forwarding, `@@:self.X()` interface dispatch, and
+domain/return-slot writes. Phase 4 covers HSM enter/exit cascades
+narrowly; this phase tests the orthogonal axis: do Frame
+statements compose correctly when the state has ancestors?
+
+Patterns (8):
+- `p1_child_dom_w` — child handles, writes domain.
+- `p2_parent_dom_w` — child forwards (`=> $^`), parent writes
+  domain.
+- `p3_child_ret_w` — child sets `@@:return = lit`.
+- `p4_parent_ret_w` — child forwards, parent sets `@@:return`.
+- `p5_child_writes_then_fwd` — child writes domain then forwards;
+  parent reads + arithmetic.
+- `p8_child_overrides_compute` — parent declares `compute()`,
+  child overrides; parent's body calls `@@:self.compute()` —
+  dispatch must hit child's override.
+- `p9_dom_arith_through_hsm` — domain arithmetic composes through
+  the cascade (child-write + parent-read).
+- `p10_three_level` — Grandparent / Parent / Child cascade.
+
+Value tuples (10): `(LIT, dom_init)` exercising sign/zero edges.
+Total: 8 × 10 = 80 cases per lang × 17 langs = 1,360.
+
+Smoke selects one case per pattern (first value tuple) → 8 smoke
+cases per lang.
+
+```bash
+python3 gen_hsm_cross.py                          # generate 17 langs
+./run_hsm_cross.sh --tier=smoke                   # ~25s parallel
+./run_hsm_cross.sh --tier=full                    # ~6 min serial
+./run_hsm_cross.sh --tier=full --lang=python_3    # one lang only
+```
+
+Wave 1 result (2026-04-28): 1,360 / 1,360 passing across all 17
+backends, **after fixing two real framec defects** (committed in
+framepiler `5749f44`):
+
+1. **Erlang `=> $^` forward dropped parent's reply value** —
+   `frame_unwrap_forward__` was a 2-tuple, hardcoded `[{reply,
+   From, ok}]` after the unwrap. Fix: 3-tuple including reply
+   value extracted from parent's action list.
+
+2. **Erlang post-dispatch transition guard hardcoded `undefined`
+   in `_ ->` arm** — when `@@:self.X()` caused a transition, the
+   alternative reply was wrong. Fix: scope-aware variable extraction
+   from the matched arm's terminal tuple.
+
+Generator-side: P6/P7 (no `=> $^` cascade in child + `@@:self.X()`)
+were dropped as inherently per-language divergent — they expose
+typed-lang 0 vs dynamic-lang None vs Java/C# NPE for unwritten
+return slot, which can't be a uniform corpus test.
+
+This wave produced the highest defect-density of the program so
+far: 2 framec bugs from 100 patterns. Confirms the wave
+methodology — feature-cross-product axes (HSM × dispatch × forward
+× return-write) catch what isolated single-feature axes miss.
