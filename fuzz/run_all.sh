@@ -29,6 +29,7 @@
 #  13  shadow           (run_shadow.sh)
 #  14  hsm-cross        (run_hsm_cross.sh)
 #  15  state-args       (run_state_args.sh)
+#  16  comments         (run_comments.sh)
 #  17  multievent       (run_multievent.sh)
 #  19  pushpop          (run_pushpop.sh)
 #
@@ -57,7 +58,7 @@ while [ $# -gt 0 ]; do
         --help|-h)
             echo "Usage: $0 [--tier=smoke|core|full] [--lang=<name>] [--tag=<comma-list>] [--phases=<comma-list>]"
             echo ""
-            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 17 19 (default: all)"
+            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 19 (default: all)"
             echo "Tiers:  smoke (curated, fast), core (phase essentials), full (complete corpus)"
             exit 0
             ;;
@@ -73,7 +74,7 @@ fi
 
 # Default phase list. Phase 1 is infrastructure-only (no runnable
 # fuzz). Phases 11+ are not yet built.
-ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13 14 15 17 19"
+ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 19"
 PHASES=${PHASES_REQUESTED:-$ALL_PHASES}
 PHASES=$(echo "$PHASES" | tr ',' ' ')
 
@@ -86,6 +87,7 @@ LANG_ARG_CTRL_FLOW=""
 LANG_ARG_SHADOW=""
 LANG_ARG_HSM_CROSS=""
 LANG_ARG_STATE_ARGS=""
+LANG_ARG_COMMENTS=""
 LANG_ARG_MULTIEVENT=""
 LANG_ARG_PUSHPOP=""
 LANG_ARG_DIFF=""
@@ -98,6 +100,7 @@ if [ -n "$LANG" ]; then
     LANG_ARG_SHADOW="--lang=$LANG"             # run_shadow.sh
     LANG_ARG_HSM_CROSS="--lang=$LANG"          # run_hsm_cross.sh
     LANG_ARG_STATE_ARGS="--lang=$LANG"         # run_state_args.sh
+    LANG_ARG_COMMENTS="--lang=$LANG"           # run_comments.sh
     LANG_ARG_MULTIEVENT="--lang=$LANG"         # run_multievent.sh
     LANG_ARG_PUSHPOP="--lang=$LANG"            # run_pushpop.sh
     LANG_ARG_DIFF="--langs=$LANG"              # run_fuzz.py
@@ -134,6 +137,7 @@ run_phase() {
         13) run_shadow ;;
         14) run_hsm_cross ;;
         15) run_state_args ;;
+        16) run_comments ;;
         17) run_multievent ;;
         19) run_pushpop ;;
         *)  echo "Phase $phase: unknown" >&2; return 1 ;;
@@ -156,6 +160,7 @@ phase_name() {
         13) echo "shadow" ;;
         14) echo "hsm-cross" ;;
         15) echo "state-args" ;;
+        16) echo "comments" ;;
         17) echo "multievent" ;;
         19) echo "pushpop" ;;
         *) echo "?" ;;
@@ -244,6 +249,13 @@ run_multievent() {
     [ -n "$LANG_ARG_MULTIEVENT" ] && args="$args $LANG_ARG_MULTIEVENT"
     # shellcheck disable=SC2086
     "$SCRIPT_DIR/run_multievent.sh" $args
+}
+
+run_comments() {
+    local args="--tier=$TIER"
+    [ -n "$LANG_ARG_COMMENTS" ] && args="$args $LANG_ARG_COMMENTS"
+    # shellcheck disable=SC2086
+    "$SCRIPT_DIR/run_comments.sh" $args
 }
 
 # Iterate phases. Don't bail on first failure — surface every phase

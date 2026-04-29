@@ -458,6 +458,41 @@ Generator-side: PHP variable references use `{spec.param_prefix}x`
 
 ---
 
+## Phase 16: Comments + whitespace robustness fuzz (wave 1)
+
+`gen_comments.py` + `run_comments.sh` — line comments at multiple
+positions in handler bodies and inside the machine block. Frame
+source for a target uses that target's comment leader (Oceans
+Model — `#` for Python/Ruby/GDScript, `//` for C-family/Java/etc.,
+`--` for Lua, `%` for Erlang).
+
+Patterns (4):
+- `p1_comment_before_stmt` — native line comment BEFORE the
+  assignment in a handler body.
+- `p2_comment_after_stmt` — line comment AFTER the assignment,
+  on its own line.
+- `p3_comment_between_stmts` — comment line BETWEEN two native
+  statements (both must still emit).
+- `p4_native_machine_comments` — native-leader comments inside
+  the machine block (between state declarations + between
+  handlers). Tests Frame's section-comment capture round-trips
+  through codegen.
+
+Total: 4 × 10 = 40 cases per lang × 17 langs = 680.
+
+```bash
+python3 gen_comments.py
+./run_comments.sh --tier=smoke
+./run_comments.sh --tier=full
+```
+
+Wave 1 result (2026-04-29): **680 / 680 passing across 17
+backends**, zero framec defects (after target-leader convention
+adopted — see FUZZ_PLAN.md "Defect surfaced (parked)" note for
+the Frame `//` leak found during P4 development).
+
+---
+
 ## Phase 17: Multi-event traces fuzz (wave 1)
 
 `gen_multievent.py` + `run_multievent.sh` — event sequences fired

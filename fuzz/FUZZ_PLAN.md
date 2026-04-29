@@ -794,18 +794,39 @@ forwards), state-args in HSM with `=> $^` forwards.
 
 ---
 
-### Phase 16 — Comment + whitespace robustness (proposed)
+### Phase 16 — Comment + whitespace robustness (wave 1 shipped)
 
-**Goal:** Frame source with embedded comments at every position
-(handler-body, between segments, inside expressions) and unusual
-whitespace. Tests scanner robustness.
+**Status (2026-04-29):** Wave 1 generator + runner shipped.
+**4 patterns × 10 value tuples × 17 backends = 680 case-runs all
+green on full tier**, 68 on smoke. Zero framec defects.
 
-**Axes:** comment placement × whitespace variations × per-language
-comment leader.
+**Patterns (wave 1):**
+- P1 comment_before_stmt: native-leader line comment BEFORE the
+  assignment statement in a handler body.
+- P2 comment_after_stmt: line comment AFTER the assignment, on
+  its own line.
+- P3 comment_between_stmts: comment line BETWEEN two native
+  statements (both must still emit).
+- P4 native_machine_comments: native-leader comments inside the
+  machine block (between state declarations and between handlers).
+  Per the Oceans Model, Frame source for a target uses that
+  target's comment leader.
 
-**Estimated cases:** ~50 patterns × 17 = ~850. Smoke ~10 patterns.
+**Defect surfaced (parked):** Frame's lexer accepts `//` line
+comments in structural sections regardless of target language
+(see `lexer/mod.rs:1352`), but `system_codegen.rs:1196` emits the
+captured leading comments as NativeBlock verbatim. For non-`//`
+targets (Python, Ruby, Lua, GDScript), this leaks `//` into the
+generated source and breaks compilation. Documented as a
+docs-vs-code inconsistency; the documented design (Oceans Model)
+is target-leader, so Phase 16 wave 1 corpus uses target leaders
+and passes. Fixing the lexer/codegen mismatch is a separate
+task — either strip `//` from non-`//` targets in the codegen
+or remove the lexer's `//` special-case for structural sections.
 
-**Value density:** low-medium. Scanner code is well-trodden.
+**Wave 2 candidates:** comments inside expressions (after `=`),
+multi-line `/* */` block comments where supported, mixed
+indentation (tabs + spaces), trailing-whitespace robustness.
 
 ---
 
