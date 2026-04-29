@@ -907,16 +907,33 @@ chained with self-call dispatch.
 
 ---
 
-### Phase 20 — Const fields + `@@:system` access (proposed)
+### Phase 20 — Const fields + `@@:system` access (wave 1 shipped)
 
-**Goal:** const domain fields, `@@:system.state` reads, system params.
+**Status (2026-04-29):** Wave 1 generator + runner shipped.
+**3 patterns × 10 value tuples × 16 backends = 480 case-runs all
+green on full tier**, 48 on smoke. Zero framec defects.
 
-**Axes:** const-field-read at every position, `@@:system.state` in
-handlers / conditions / expressions, system params × state init.
+**Patterns (wave 1):**
+- P1 const_field: `const k: int = LIT` declared in domain block.
+  Read via `get_const(): int { @@:(self.k) }`. Verifies const-
+  field initialization + readback round-trips.
+- P2 sys_state_initial: read `@@:system.state` immediately after
+  construction. Should return `"S0"` (initial state name).
+- P3 sys_state_after_xfer: drive transitions to `$S1`; read
+  `@@:system.state` from $S1's handler. Should return `"S1"` —
+  verifies the runtime updates the state name correctly across
+  transitions.
 
-**Estimated cases:** ~100 × 17 = ~1,700. Smoke ~20 patterns.
+**Erlang skipped:** state names are atoms (`s0`, lowercase) in
+Erlang vs strings (`S0`, source-cased) in other backends. The
+atom-vs-string mismatch on P2/P3 isn't a framec defect — it's
+a representation choice. Cross-backend normalization is a wave-2
+question.
 
-**Value density:** low. Const fields are simple.
+**Wave 2 candidates:** const used in expressions (e.g., as a
+transition arg: `-> $S(self.const_k)`), const fields with
+non-literal initializers (system params), `@@:system.state`
+inside `if`/`while` conditions, system params × state init.
 
 ---
 

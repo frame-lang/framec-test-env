@@ -32,6 +32,7 @@
 #  16  comments         (run_comments.sh)
 #  17  multievent       (run_multievent.sh)
 #  19  pushpop          (run_pushpop.sh)
+#  20  const-sys        (run_const_sys.sh)
 #
 # Exit code: 0 if all phases pass, nonzero if any phase failed.
 
@@ -58,7 +59,7 @@ while [ $# -gt 0 ]; do
         --help|-h)
             echo "Usage: $0 [--tier=smoke|core|full] [--lang=<name>] [--tag=<comma-list>] [--phases=<comma-list>]"
             echo ""
-            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 19 (default: all)"
+            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 19 20 (default: all)"
             echo "Tiers:  smoke (curated, fast), core (phase essentials), full (complete corpus)"
             exit 0
             ;;
@@ -74,7 +75,7 @@ fi
 
 # Default phase list. Phase 1 is infrastructure-only (no runnable
 # fuzz). Phases 11+ are not yet built.
-ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 19"
+ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 19 20"
 PHASES=${PHASES_REQUESTED:-$ALL_PHASES}
 PHASES=$(echo "$PHASES" | tr ',' ' ')
 
@@ -90,6 +91,7 @@ LANG_ARG_STATE_ARGS=""
 LANG_ARG_COMMENTS=""
 LANG_ARG_MULTIEVENT=""
 LANG_ARG_PUSHPOP=""
+LANG_ARG_CONST_SYS=""
 LANG_ARG_DIFF=""
 LANG_ARG_NEGATIVE=""
 if [ -n "$LANG" ]; then
@@ -103,6 +105,7 @@ if [ -n "$LANG" ]; then
     LANG_ARG_COMMENTS="--lang=$LANG"           # run_comments.sh
     LANG_ARG_MULTIEVENT="--lang=$LANG"         # run_multievent.sh
     LANG_ARG_PUSHPOP="--lang=$LANG"            # run_pushpop.sh
+    LANG_ARG_CONST_SYS="--lang=$LANG"          # run_const_sys.sh
     LANG_ARG_DIFF="--langs=$LANG"              # run_fuzz.py
     LANG_ARG_NEGATIVE="-l $LANG"               # run_negative.sh
 fi
@@ -140,6 +143,7 @@ run_phase() {
         16) run_comments ;;
         17) run_multievent ;;
         19) run_pushpop ;;
+        20) run_const_sys ;;
         *)  echo "Phase $phase: unknown" >&2; return 1 ;;
     esac
 }
@@ -163,6 +167,7 @@ phase_name() {
         16) echo "comments" ;;
         17) echo "multievent" ;;
         19) echo "pushpop" ;;
+        20) echo "const-sys" ;;
         *) echo "?" ;;
     esac
 }
@@ -256,6 +261,13 @@ run_comments() {
     [ -n "$LANG_ARG_COMMENTS" ] && args="$args $LANG_ARG_COMMENTS"
     # shellcheck disable=SC2086
     "$SCRIPT_DIR/run_comments.sh" $args
+}
+
+run_const_sys() {
+    local args="--tier=$TIER"
+    [ -n "$LANG_ARG_CONST_SYS" ] && args="$args $LANG_ARG_CONST_SYS"
+    # shellcheck disable=SC2086
+    "$SCRIPT_DIR/run_const_sys.sh" $args
 }
 
 # Iterate phases. Don't bail on first failure — surface every phase
