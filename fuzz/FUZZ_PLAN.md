@@ -556,7 +556,7 @@ at statement boundaries, not within statements."
 
 ---
 
-### Phase 11 — Statement-pair sequencing (proposed)
+### Phase 11 — Statement-pair sequencing (wave 1 shipped 2026-04-28)
 
 **Goal:** Two-statement bodies × cross-product, testing how
 `_transitioned`, `@@:return`, `@@:event`, `@@:params` flow between
@@ -568,11 +568,28 @@ adjacent statements within one handler.
 - Receivers and LHS from Phase 10 carried in.
 - Whether statement #1 transitions or not.
 
-**Estimated cases:** ~500 patterns × 17 = ~8,500. Smoke ~50 patterns
-(~850), core curated regressions (~10 patterns), full ~500.
+**Wave 1 shipped:** 5 S1 × 5 S2 × 4 LIT = 100 cases × 17 langs =
+1,700 case-runs. All passing on first run; no new defects surfaced.
+Generator: `gen_stmt_pair.py`. Runner: `run_stmt_pair.sh`. Smoke:
+~40s parallel (25 cases/lang). Full: ~8 min serial.
 
-**Value density:** high. Phase 9 p9 + p11 are exactly this shape and
-both surfaced bugs.
+S1 kinds: `dom_w`, `sv_w`, `ret_w`, `sc_bare`, `sc_assign_dom`.
+S2 kinds: `dom_to_ret`, `sv_to_ret`, `dom_plus_lit`, `sv_plus_lit`,
+`dom_w_lit`. LITs: 1, 5, -3, 0.
+
+**Wave 2 candidates (not yet shipped):**
+- Add transition-bearing S1 (`-> $S1`) and/or S2.
+- Add HSM × stmt-pair (parent vs sibling vs uncle transitions
+  inside the second statement).
+- Add `@@:event` and `@@:params` reads in S2 to exercise event-
+  metadata flow across statements.
+
+**Value density (post wave 1):** lower than predicted. Wave 1
+expected to find 1-2 bugs based on Phase 9 p9/p11 history; found 0.
+Either the framec defect tracker is closed for this shape, or the
+remaining defects live in axes Wave 1 doesn't reach (transitions,
+HSM, event metadata). Wave 2 should aim at those before declaring
+the phase saturated.
 
 **Frame feature gate:** none.
 

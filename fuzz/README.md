@@ -177,3 +177,46 @@ python3 gen_perm.py                          # generate all 17 langs
 - `logs_perm/per_lang/summary_<lang>.tsv` — per-lang results so
   concurrent `--lang=X` / `--lang=Y` invocations don't clobber.
 - `logs_perm/summary.tsv` — rebuilt at end-of-run from per-lang files.
+
+---
+
+## Phase 11: statement-pair sequencing fuzz (wave 1)
+
+`gen_stmt_pair.py` + `run_stmt_pair.sh` — two-statement handler
+bodies. Each case is `S1; S2;` where the simulator computes the
+post-state and the driver asserts the result.
+
+What this exercises that earlier phases don't:
+- Read-after-write within a single handler (does S2 see S1's
+  domain/sv/return-slot write?).
+- Last-write-wins on the same slot.
+- Self-call result flowing through a domain field into the next
+  statement (`self.f = @@:self.compute()` → `@@:return = self.f + L`).
+- @@:return survival when subsequent statements modify
+  domain/state-var.
+
+Axes:
+- S1 (5): `dom_w`, `sv_w`, `ret_w`, `sc_bare`, `sc_assign_dom`
+- S2 (5): `dom_to_ret`, `sv_to_ret`, `dom_plus_lit`, `sv_plus_lit`,
+  `dom_w_lit`
+- LIT (4): 1, 5, -3, 0
+- Total: 5 × 5 × 4 = 100 cases per lang × 17 langs = 1,700.
+
+Smoke selects one case per (S1, S2) pair (LIT=1) → 25 smoke
+cases per lang.
+
+```bash
+python3 gen_stmt_pair.py                          # generate all 17 langs
+./run_stmt_pair.sh --tier=smoke                   # ~40s parallel
+./run_stmt_pair.sh --tier=full                    # ~8 min
+./run_stmt_pair.sh --tier=full --lang=python_3    # one lang only
+```
+
+Wave 1 result (2026-04-28): 1,700 / 1,700 passing across all 17
+backends. No new defects surfaced — the statement-pair semantics
+hold across every backend, including the cases that previously
+exercised the D1 cross-backend fix (`sc_assign_dom` × any S2 that
+reads `self.f`). Per the wave methodology, this signals that
+Phase 11's first wave landed in a healthy state; next-wave work
+either expands Phase 11 axes (transitions, more S1/S2 shapes) or
+moves to a different phase based on bug-finding density.

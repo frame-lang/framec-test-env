@@ -24,6 +24,7 @@
 #   8  negative         (run_negative.sh)
 #   9  nested-syntax    (run_nested.sh)
 #  10  expression       (run_perm.sh)
+#  11  stmt-pair        (run_stmt_pair.sh)
 #
 # Exit code: 0 if all phases pass, nonzero if any phase failed.
 
@@ -50,7 +51,7 @@ while [ $# -gt 0 ]; do
         --help|-h)
             echo "Usage: $0 [--tier=smoke|core|full] [--lang=<name>] [--tag=<comma-list>] [--phases=<comma-list>]"
             echo ""
-            echo "Phases: 2 3 4 5 6 7 8 9 10 (default: all)"
+            echo "Phases: 2 3 4 5 6 7 8 9 10 11 (default: all)"
             echo "Tiers:  smoke (curated, fast), core (phase essentials), full (complete corpus)"
             exit 0
             ;;
@@ -66,7 +67,7 @@ fi
 
 # Default phase list. Phase 1 is infrastructure-only (no runnable
 # fuzz). Phases 11+ are not yet built.
-ALL_PHASES="2 3 4 5 6 7 8 9 10"
+ALL_PHASES="2 3 4 5 6 7 8 9 10 11"
 PHASES=${PHASES_REQUESTED:-$ALL_PHASES}
 PHASES=$(echo "$PHASES" | tr ',' ' ')
 
@@ -74,11 +75,13 @@ PHASES=$(echo "$PHASES" | tr ',' ' ')
 # pass-through string per backend.
 LANG_ARG_NESTED=""
 LANG_ARG_PERM=""
+LANG_ARG_STMT_PAIR=""
 LANG_ARG_DIFF=""
 LANG_ARG_NEGATIVE=""
 if [ -n "$LANG" ]; then
     LANG_ARG_NESTED="$LANG"                    # run_nested.sh takes positional
     LANG_ARG_PERM="--lang=$LANG"               # run_perm.sh
+    LANG_ARG_STMT_PAIR="--lang=$LANG"          # run_stmt_pair.sh
     LANG_ARG_DIFF="--langs=$LANG"              # run_fuzz.py
     LANG_ARG_NEGATIVE="-l $LANG"               # run_negative.sh
 fi
@@ -108,6 +111,7 @@ run_phase() {
         8)  run_negative ;;
         9)  run_nested ;;
         10) run_perm ;;
+        11) run_stmt_pair ;;
         *)  echo "Phase $phase: unknown" >&2; return 1 ;;
     esac
 }
@@ -123,6 +127,7 @@ phase_name() {
         8) echo "negative" ;;
         9) echo "nested-syntax" ;;
         10) echo "expression" ;;
+        11) echo "stmt-pair" ;;
         *) echo "?" ;;
     esac
 }
@@ -160,6 +165,13 @@ run_perm() {
     [ -n "$LANG_ARG_PERM" ] && args="$args $LANG_ARG_PERM"
     # shellcheck disable=SC2086
     "$SCRIPT_DIR/run_perm.sh" $args
+}
+
+run_stmt_pair() {
+    local args="--tier=$TIER"
+    [ -n "$LANG_ARG_STMT_PAIR" ] && args="$args $LANG_ARG_STMT_PAIR"
+    # shellcheck disable=SC2086
+    "$SCRIPT_DIR/run_stmt_pair.sh" $args
 }
 
 # Iterate phases. Don't bail on first failure — surface every phase
