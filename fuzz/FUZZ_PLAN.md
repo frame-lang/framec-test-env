@@ -154,21 +154,15 @@ Frame source → clean trace-diff" is listed here. Categorized as:
 
 ### [F] Framec codegen bugs still open
 
-- **Kotlin `restore_state` emitted as instance method, not companion
-  static.** Fuzz harness uses the `tmp = Sys(); tmp.restore_state(...)`
-  workaround (same pattern the matrix tests use). Would benefit from
-  framec Kotlin fix to move the method into `companion object { }`.
-  FINDINGS #13 (not yet filed as a separate entry).
-
-- **C#/Java domain type `str` / `bool` not auto-mapped to native
-  `string` / `String` / `boolean`.** Framec emits raw Frame type
-  tokens; harness does `str → string` / `bool → boolean` rewrite.
-  Framec should mirror what it already does for Rust (`str` →
-  `String`) and Go (`str` → `string` — fixed this session).
-  FINDINGS #12 + Java analogue.
+(none currently — see DEFECTS.md for the active log)
 
 ### [F] Framec codegen bugs fixed this session
 
+- Kotlin `restore_state` now emitted as a companion-object static
+  (interface_gen.rs `is_static: true` partition + Kotlin backend's
+  companion-object aggregator at `backends/kotlin.rs:179`).
+- C#/Java domain `str` / `bool` now auto-mapped via `map_type` in
+  each backend's `emit_field` (csharp.rs:580, java.rs:563).
 - Rust `str = ""` domain default ↦ `String::from("")` (`4b225f3`).
 - Rust handler param `v: int` unpacked as String (same commit).
 - Rust `rust_json_extract*` mapped Frame `int` → `i32` instead of `i64`

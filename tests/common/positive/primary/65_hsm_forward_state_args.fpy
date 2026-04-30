@@ -1,0 +1,65 @@
+@@target python_3
+
+# Test 65: HSM × state-args × explicit parent-forward.
+#
+# Frame's `=> $^` forwards an event to the parent state. State-args
+# declared at the cascade arrow `$Active => $Frame(threshold: int)`
+# must remain accessible when the parent's handler runs.
+
+@@system StateArgFwd {
+    interface:
+        configure(t: int)
+        process(): int
+
+    machine:
+        $Idle {
+            configure(t: int) {
+                -> $Active(t)
+            }
+            process(): int {
+                @@:(0)
+                return
+            }
+        }
+
+        $Active => $Frame(threshold: int) {
+            configure(t: int) {
+                -> $Active(t)
+            }
+            process(): int {
+                => $^
+            }
+        }
+
+        $Frame {
+            process(): int {
+                @@:(threshold)
+                return
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+def main():
+    print("=== Test 65: HSM × state-args × parent-forward ===")
+    s = @@StateArgFwd()
+
+    pre = s.process()
+    assert pre == 0, f"Expected 0 in Idle, got {pre}"
+    print(f"1. Idle process = {pre}")
+
+    s.configure(7)
+    r = s.process()
+    assert r == 7, f"Expected 7 from $Frame.process via forward, got {r}"
+    print(f"2. configure(7); process() forwarded = {r}")
+
+    s.configure(42)
+    r2 = s.process()
+    assert r2 == 42, f"Expected 42, got {r2}"
+    print(f"3. configure(42); process() forwarded = {r2}")
+
+    print("PASS: 65_hsm_forward_state_args")
+
+if __name__ == '__main__':
+    main()

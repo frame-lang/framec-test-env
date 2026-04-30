@@ -36,15 +36,40 @@ triage.
 
 ## D4: HSM cascade state-args not visible in parent state's handlers
 
-- Lang: cross-backend (likely all 17, verified python_3)
-- Tier: probe (matrix test 65 pulled before commit)
-- Case: hand-crafted `65_hsm_forward_state_args.fpy`
+- Lang: cross-backend (all 17)
+- Tier: matrix test 65
+- Case: `65_hsm_forward_state_args` (all backends)
 - Tag: state-args, hsm-cascade, forward
 - Failure mode: run (NameError on undefined local in generated handler)
 - Reproducer: see "Probe" below
 - Suspected codegen path: `state_dispatch.rs:1135` (`state_param_names` map)
-- Status: needs-review
+- Status: **fixed 2026-04-30**
 - Surfaced: 2026-04-30 during Phase 15 wave 3 (test 65)
+
+### Fix
+
+`state_dispatch.rs:1135` — when populating `state_param_names`, walk
+all states with a parent and non-empty cascade-arrow params, and
+mirror those param names into the parent's entry. The runtime already
+propagates `state_args` to every compartment in the cascade chain via
+`__prepareEnter`; this aligns the codegen with the runtime so parent
+handlers emit a prefetch (`threshold = compartment.state_args[0]`)
+instead of a bare reference.
+
+Before:
+```python
+def _s_Frame_hdl_user_process(self, __e, compartment):
+    self._context_stack[-1]._return = threshold  # NameError
+```
+
+After:
+```python
+def _s_Frame_hdl_user_process(self, __e, compartment):
+    threshold = compartment.state_args[0]
+    self._context_stack[-1]._return = threshold
+```
+
+Verified with matrix test 65 across all 17 backends.
 
 ### Probe
 
