@@ -34,6 +34,92 @@ triage.
 
 ---
 
+## D4: HSM cascade state-args not visible in parent state's handlers
+
+- Lang: cross-backend (likely all 17, verified python_3)
+- Tier: probe (matrix test 65 pulled before commit)
+- Case: hand-crafted `65_hsm_forward_state_args.fpy`
+- Tag: state-args, hsm-cascade, forward
+- Failure mode: run (NameError on undefined local in generated handler)
+- Reproducer: see "Probe" below
+- Suspected codegen path: `state_dispatch.rs:1135` (`state_param_names` map)
+- Status: needs-review
+- Surfaced: 2026-04-30 during Phase 15 wave 3 (test 65)
+
+### Probe
+
+```frame
+@@system StateArgFwd {
+    interface:
+        configure(t: int)
+        process(): int
+    machine:
+        $Idle {
+            configure(t: int) { -> $Active(t) }
+            process(): int { @@:(0); return }
+        }
+        $Active => $Frame(threshold: int) {
+            process(): int { => $^ }
+        }
+        $Frame {
+            process(): int { @@:(threshold); return }
+        }
+    domain:
+        n: int = 0
+}
+```
+
+### Generated Python (defective)
+
+```python
+def _s_Frame_hdl_user_process(self, __e, compartment):
+    self._context_stack[-1]._return = threshold  # NameError: 'threshold' undefined
+    return
+```
+
+### Diagnosis
+
+- Cascade syntax `$Active => $Frame(threshold: int)` parses `params=[threshold]`
+  onto **$Active** (the child), not $Frame.
+- `state_param_names["Active"] = ["threshold"]` → $Active's handlers get the
+  prefetch.
+- `state_param_names["Frame"] = []` → $Frame's handlers do **not** get the
+  prefetch, even though its handler body references `threshold`.
+- Runtime IS consistent: `__prepareEnter("Active", [t], [])` propagates
+  `state_args = [t]` to **every** compartment in the cascade chain (including
+  Frame's parent_compartment). So the value is available at runtime — the
+  codegen just doesn't read it.
+
+### Why this didn't surface before
+
+Tests 4, 40, 61, 62 all read state-vars (`$.x`) or state-args from the
+**leaf** (the state where the cascade arrow lives). The defect is specific
+to: state-args declared via `=> $Parent(arg: T)` AND read from a handler
+inside `$Parent`'s own body.
+
+### Fix scope (decision needed)
+
+Two options:
+
+**A.** Extend `state_param_names` so $Frame inherits the params declared at
+each child's cascade arrow. Single change in `state_dispatch.rs:1135`.
+Affects all 17 backends symmetrically (they all read `state_param_names`).
+
+**B.** Treat this as a Frame-language semantic restriction: state-args are
+scoped to the leaf only, parent handlers cannot reference them. Add a
+validator error (`E???: state-arg X is not in scope inside $Parent`) and
+update docs.
+
+The runtime already supports option A. Option B would require zeroing out
+the parent compartments' state_args in `__prepareEnter`. Per the existing
+"Phase 15 wave 3 — state-args carried through `=> $^` forwards" plan item,
+the design intent appears to be option A.
+
+Test 65 is parked until this lands. Regenerator-style cross-product testing
+of HSM × state-args would benefit from the wave 3 axis being closed.
+
+---
+
 ## D3: Swift rejects `self.n = self.n` (test corpus issue, not codegen)
 
 - Lang: swift
