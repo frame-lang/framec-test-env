@@ -1,0 +1,63 @@
+@@target swift
+
+import Foundation
+
+@@persist
+@@system PersistMultiEvent {
+    interface:
+        seed(v: int)
+        bump()
+        get_slot(): int
+
+    machine:
+        $Idle {
+            seed(v: int) {
+                -> $Active(v)
+            }
+            bump() {
+                @@:(-1)
+            }
+            get_slot(): int {
+                @@:(-1)
+            }
+        }
+
+        $Active(slot: int) {
+            seed(v: int) {
+                -> $Active(v)
+            }
+            bump() {
+                -> $Active(slot + 100)
+            }
+            get_slot(): int {
+                @@:(slot)
+            }
+        }
+    domain:
+        v : int = 0
+}
+
+print("=== Test 59: Persist × multi-event boundary (Swift) ===")
+let s1 = PersistMultiEvent()
+s1.seed(42)
+let pre = s1.get_slot()
+if pre != 42 { print("FAIL: pre \(pre)"); exit(1) }
+print("1. Pre-save slot=\(pre)")
+
+let snap = s1.saveState()
+let s2 = PersistMultiEvent.restoreState(snap)
+let post = s2.get_slot()
+if post != 42 { print("FAIL: post \(post)"); exit(1) }
+print("2. Post-restore slot=\(post)")
+
+s2.bump()
+let bumped = s2.get_slot()
+if bumped != 142 { print("FAIL: bumped \(bumped)"); exit(1) }
+print("3. After post-restore bump slot=\(bumped)")
+
+s2.bump()
+let twice = s2.get_slot()
+if twice != 242 { print("FAIL: twice \(twice)"); exit(1) }
+print("4. After second bump slot=\(twice)")
+
+print("PASS: 59_persist_multi_event")

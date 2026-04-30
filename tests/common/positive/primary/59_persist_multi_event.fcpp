@@ -1,0 +1,69 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cstdlib>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system PersistMultiEvent {
+    interface:
+        seed(v: int)
+        bump()
+        get_slot(): int
+
+    machine:
+        $Idle {
+            seed(v: int) {
+                -> $Active(v)
+            }
+            bump() {
+                @@:(-1)
+            }
+            get_slot(): int {
+                @@:(-1)
+            }
+        }
+
+        $Active(slot: int) {
+            seed(v: int) {
+                -> $Active(v)
+            }
+            bump() {
+                -> $Active(slot + 100)
+            }
+            get_slot(): int {
+                @@:(slot)
+            }
+        }
+    domain:
+        v : int = 0
+}
+
+int main() {
+    std::cout << "=== Test 59: Persist × multi-event boundary (C++) ===" << std::endl;
+    PersistMultiEvent s1;
+    s1.seed(42);
+    int pre = s1.get_slot();
+    if (pre != 42) { std::cout << "FAIL: pre " << pre << std::endl; return 1; }
+    std::cout << "1. Pre-save slot=" << pre << std::endl;
+
+    std::string snap = s1.save_state();
+    PersistMultiEvent s2 = PersistMultiEvent::restore_state(snap);
+    int post = s2.get_slot();
+    if (post != 42) { std::cout << "FAIL: post " << post << std::endl; return 1; }
+    std::cout << "2. Post-restore slot=" << post << std::endl;
+
+    s2.bump();
+    int bumped = s2.get_slot();
+    if (bumped != 142) { std::cout << "FAIL: bumped " << bumped << std::endl; return 1; }
+    std::cout << "3. After post-restore bump slot=" << bumped << std::endl;
+
+    s2.bump();
+    int twice = s2.get_slot();
+    if (twice != 242) { std::cout << "FAIL: twice " << twice << std::endl; return 1; }
+    std::cout << "4. After second bump slot=" << twice << std::endl;
+
+    std::cout << "PASS: 59_persist_multi_event" << std::endl;
+    return 0;
+}

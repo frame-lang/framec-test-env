@@ -1,0 +1,66 @@
+@@target rust
+
+@@persist
+@@system PersistMultiEvent {
+    interface:
+        seed(v: i32)
+        bump()
+        get_slot(): i32
+
+    machine:
+        $Idle {
+            seed(v: i32) {
+                -> $Active(v)
+            }
+            bump() {
+                @@:(-1)
+                return;
+            }
+            get_slot(): i32 {
+                @@:(-1)
+                return;
+            }
+        }
+
+        $Active(slot: i32) {
+            seed(v: i32) {
+                -> $Active(v)
+            }
+            bump() {
+                -> $Active(slot + 100)
+            }
+            get_slot(): i32 {
+                @@:(slot)
+                return;
+            }
+        }
+    domain:
+        v: i32
+}
+
+fn main() {
+    println!("=== Test 59: Persist × multi-event boundary (Rust) ===");
+    let mut s1 = @@PersistMultiEvent();
+    s1.seed(42);
+    let pre = s1.get_slot();
+    if pre != 42 { println!("FAIL: pre {}", pre); std::process::exit(1); }
+    println!("1. Pre-save slot={}", pre);
+
+    let json = s1.save_state();
+    let mut s2 = PersistMultiEvent::restore_state(&json);
+    let post = s2.get_slot();
+    if post != 42 { println!("FAIL: post {}", post); std::process::exit(1); }
+    println!("2. Post-restore slot={}", post);
+
+    s2.bump();
+    let bumped = s2.get_slot();
+    if bumped != 142 { println!("FAIL: bumped {}", bumped); std::process::exit(1); }
+    println!("3. After post-restore bump slot={}", bumped);
+
+    s2.bump();
+    let twice = s2.get_slot();
+    if twice != 242 { println!("FAIL: twice {}", twice); std::process::exit(1); }
+    println!("4. After second bump slot={}", twice);
+
+    println!("PASS: 59_persist_multi_event");
+}

@@ -1,0 +1,64 @@
+@@target lua
+
+@@persist
+@@system PersistMultiEvent {
+    interface:
+        seed(v: int)
+        bump()
+        get_slot(): int
+
+    machine:
+        $Idle {
+            seed(v: int) {
+                -> $Active(v)
+            }
+            bump() {
+                @@:(-1)
+                return
+            }
+            get_slot(): int {
+                @@:(-1)
+                return
+            }
+        }
+
+        $Active(slot: int) {
+            seed(v: int) {
+                -> $Active(v)
+            }
+            bump() {
+                -> $Active(slot + 100)
+            }
+            get_slot(): int {
+                @@:(slot)
+                return
+            }
+        }
+    domain:
+        v: int = 0
+}
+
+print("=== Test 59: Persist × multi-event boundary (Lua) ===")
+local s1 = PersistMultiEvent.new()
+s1:seed(42)
+local pre = s1:get_slot()
+if pre ~= 42 then error("Expected 42 pre-save, got " .. tostring(pre)) end
+print("1. Pre-save slot=" .. tostring(pre))
+
+local snap = s1:save_state()
+local s2 = PersistMultiEvent.restore_state(snap)
+local post = s2:get_slot()
+if post ~= 42 then error("Expected 42 post-restore, got " .. tostring(post)) end
+print("2. Post-restore slot=" .. tostring(post))
+
+s2:bump()
+local bumped = s2:get_slot()
+if bumped ~= 142 then error("Expected 142 after bump, got " .. tostring(bumped)) end
+print("3. After post-restore bump slot=" .. tostring(bumped))
+
+s2:bump()
+local twice = s2:get_slot()
+if twice ~= 242 then error("Expected 242 after second bump, got " .. tostring(twice)) end
+print("4. After second bump slot=" .. tostring(twice))
+
+print("PASS: 59_persist_multi_event")

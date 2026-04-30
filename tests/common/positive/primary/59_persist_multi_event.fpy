@@ -1,0 +1,86 @@
+@@target python_3
+
+# Test 59: Persist × multi-event boundary
+#
+# Phase 24 wave 4. Tests that the restored state machine is FULLY
+# FUNCTIONAL after restore, not just static-equivalent. Drive event A
+# (seed), save, restore in a fresh instance, drive event B (bump) that
+# reads the state-arg AND uses it to compute the next state-arg.
+#
+# Why: tests 56/57/58 verify state_args round-trip on a snapshot
+# (state preserved). Test 59 verifies that POST-RESTORE event handlers
+# can read the restored state-args + execute transitions that bind
+# new state-args. This is the strongest "regression-net" assertion
+# because it exercises the kernel + dispatcher + transition path on
+# a restored compartment chain.
+
+@@persist
+@@system PersistMultiEvent {
+    interface:
+        seed(v: int)
+        bump()
+        get_slot(): int
+
+    machine:
+        $Idle {
+            seed(v: int) {
+                -> $Active(v)
+            }
+            bump() {
+                @@:(-1)
+                return
+            }
+            get_slot(): int {
+                @@:(-1)
+                return
+            }
+        }
+
+        $Active(slot: int) {
+            seed(v: int) {
+                -> $Active(v)
+            }
+            bump() {
+                -> $Active(slot + 100)
+            }
+            get_slot(): int {
+                @@:(slot)
+                return
+            }
+        }
+    domain:
+        v: int = 0
+}
+
+def main():
+    print("=== Test 59: Persist × multi-event boundary ===")
+    s1 = @@PersistMultiEvent()
+    s1.seed(42)
+    pre = s1.get_slot()
+    assert pre == 42, f"Expected 42 pre-save, got {pre}"
+    print(f"1. Pre-save slot={pre}")
+
+    snap = s1.save_state()
+    s2 = PersistMultiEvent.restore_state(snap)
+    post = s2.get_slot()
+    assert post == 42, f"Expected 42 post-restore, got {post}"
+    print(f"2. Post-restore slot={post}")
+
+    # Critical: drive a NEW event on the restored instance. The bump
+    # handler reads `slot` (post-restore state-arg) and transitions to
+    # $Active(slot + 100), which binds slot=142 at the new compartment.
+    s2.bump()
+    bumped = s2.get_slot()
+    assert bumped == 142, f"Expected 142 after post-restore bump, got {bumped}"
+    print(f"3. After post-restore bump slot={bumped}")
+
+    # Bump again to verify multi-event continuity post-restore.
+    s2.bump()
+    twice = s2.get_slot()
+    assert twice == 242, f"Expected 242 after second bump, got {twice}"
+    print(f"4. After second bump slot={twice}")
+
+    print("PASS: 59_persist_multi_event")
+
+if __name__ == '__main__':
+    main()

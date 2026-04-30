@@ -1,0 +1,65 @@
+<?php
+@@target php
+
+@@persist
+@@system PersistMultiEvent {
+    interface:
+        seed(v: int)
+        bump()
+        get_slot(): int
+
+    machine:
+        $Idle {
+            seed(v: int) {
+                -> $Active(v)
+            }
+            bump() {
+                @@:(-1)
+                return;
+            }
+            get_slot(): int {
+                @@:(-1)
+                return;
+            }
+        }
+
+        $Active(slot: int) {
+            seed(v: int) {
+                -> $Active(v)
+            }
+            bump() {
+                -> $Active($slot + 100)
+            }
+            get_slot(): int {
+                @@:($slot)
+                return;
+            }
+        }
+    domain:
+        v: int = 0
+}
+
+echo "=== Test 59: Persist × multi-event boundary (PHP) ===\n";
+$s1 = new PersistMultiEvent();
+$s1->seed(42);
+$pre = $s1->get_slot();
+if ($pre !== 42) { echo "FAIL: pre $pre\n"; exit(1); }
+echo "1. Pre-save slot=$pre\n";
+
+$snap = $s1->save_state();
+$s2 = PersistMultiEvent::restore_state($snap);
+$post = $s2->get_slot();
+if ($post !== 42) { echo "FAIL: post $post\n"; exit(1); }
+echo "2. Post-restore slot=$post\n";
+
+$s2->bump();
+$bumped = $s2->get_slot();
+if ($bumped !== 142) { echo "FAIL: bumped $bumped\n"; exit(1); }
+echo "3. After post-restore bump slot=$bumped\n";
+
+$s2->bump();
+$twice = $s2->get_slot();
+if ($twice !== 242) { echo "FAIL: twice $twice\n"; exit(1); }
+echo "4. After second bump slot=$twice\n";
+
+echo "PASS: 59_persist_multi_event\n";

@@ -1,0 +1,67 @@
+@@target java
+
+import java.util.*;
+
+@@persist
+@@system PersistMultiEvent {
+    interface:
+        seed(v: int)
+        bump()
+        get_slot(): int
+
+    machine:
+        $Idle {
+            seed(v: int) {
+                -> $Active(v)
+            }
+            bump() {
+                @@:(-1)
+            }
+            get_slot(): int {
+                @@:(-1)
+            }
+        }
+
+        $Active(slot: int) {
+            seed(v: int) {
+                -> $Active(v)
+            }
+            bump() {
+                -> $Active(slot + 100)
+            }
+            get_slot(): int {
+                @@:(slot)
+            }
+        }
+    domain:
+        v : int = 0
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 59: Persist × multi-event boundary (Java) ===");
+        var s1 = new PersistMultiEvent();
+        s1.seed(42);
+        int pre = s1.get_slot();
+        if (pre != 42) { System.out.println("FAIL: pre " + pre); System.exit(1); }
+        System.out.println("1. Pre-save slot=" + pre);
+
+        String snap = s1.save_state();
+        var s2 = PersistMultiEvent.restore_state(snap);
+        int post = s2.get_slot();
+        if (post != 42) { System.out.println("FAIL: post " + post); System.exit(1); }
+        System.out.println("2. Post-restore slot=" + post);
+
+        s2.bump();
+        int bumped = s2.get_slot();
+        if (bumped != 142) { System.out.println("FAIL: bumped " + bumped); System.exit(1); }
+        System.out.println("3. After post-restore bump slot=" + bumped);
+
+        s2.bump();
+        int twice = s2.get_slot();
+        if (twice != 242) { System.out.println("FAIL: twice " + twice); System.exit(1); }
+        System.out.println("4. After second bump slot=" + twice);
+
+        System.out.println("PASS: 59_persist_multi_event");
+    }
+}

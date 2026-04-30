@@ -1,0 +1,76 @@
+@@target go
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+var _ = json.Marshal
+
+@@persist
+@@system PersistMultiEvent {
+    interface:
+        Seed(v: int)
+        Bump()
+        GetSlot(): int
+
+    machine:
+        $Idle {
+            Seed(v: int) {
+                -> $Active(v)
+            }
+            Bump() {
+                @@:(-1)
+                return;
+            }
+            GetSlot(): int {
+                @@:(-1)
+                return;
+            }
+        }
+
+        $Active(slot: int) {
+            Seed(v: int) {
+                -> $Active(v)
+            }
+            Bump() {
+                -> $Active(slot + 100)
+            }
+            GetSlot(): int {
+                @@:(slot)
+                return;
+            }
+        }
+    domain:
+        v: int = 0
+}
+
+func main() {
+    fmt.Println("=== Test 59: Persist × multi-event boundary (Go) ===")
+    s1 := NewPersistMultiEvent()
+    s1.Seed(42)
+    pre := s1.GetSlot()
+    if pre != 42 { fmt.Printf("FAIL: pre %d\n", pre); os.Exit(1) }
+    fmt.Printf("1. Pre-save slot=%d\n", pre)
+
+    snap := s1.SaveState()
+    s2 := RestorePersistMultiEvent(snap)
+    post := s2.GetSlot()
+    if post != 42 { fmt.Printf("FAIL: post %d\n", post); os.Exit(1) }
+    fmt.Printf("2. Post-restore slot=%d\n", post)
+
+    s2.Bump()
+    bumped := s2.GetSlot()
+    if bumped != 142 { fmt.Printf("FAIL: bumped %d\n", bumped); os.Exit(1) }
+    fmt.Printf("3. After post-restore bump slot=%d\n", bumped)
+
+    s2.Bump()
+    twice := s2.GetSlot()
+    if twice != 242 { fmt.Printf("FAIL: twice %d\n", twice); os.Exit(1) }
+    fmt.Printf("4. After second bump slot=%d\n", twice)
+
+    fmt.Println("PASS: 59_persist_multi_event")
+}

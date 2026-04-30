@@ -1,0 +1,64 @@
+@@target javascript
+
+@@persist
+@@system PersistMultiEvent {
+    interface:
+        seed(v: int)
+        bump()
+        get_slot(): int
+
+    machine:
+        $Idle {
+            seed(v: number) {
+                -> $Active(v)
+            }
+            bump() {
+                @@:(-1)
+                return
+            }
+            get_slot(): number {
+                @@:(-1)
+                return
+            }
+        }
+
+        $Active(slot: number) {
+            seed(v: number) {
+                -> $Active(v)
+            }
+            bump() {
+                -> $Active(slot + 100)
+            }
+            get_slot(): number {
+                @@:(slot)
+                return
+            }
+        }
+    domain:
+        v: number = 0
+}
+
+console.log("=== Test 59: Persist × multi-event boundary (JS) ===");
+const s1 = new PersistMultiEvent();
+s1.seed(42);
+const pre = s1.get_slot();
+if (pre !== 42) { console.log("FAIL: pre " + pre); process.exit(1); }
+console.log(`1. Pre-save slot=${pre}`);
+
+const snap = s1.saveState();
+const s2 = PersistMultiEvent.restoreState(snap);
+const post = s2.get_slot();
+if (post !== 42) { console.log("FAIL: post " + post); process.exit(1); }
+console.log(`2. Post-restore slot=${post}`);
+
+s2.bump();
+const bumped = s2.get_slot();
+if (bumped !== 142) { console.log("FAIL: bumped " + bumped); process.exit(1); }
+console.log(`3. After post-restore bump slot=${bumped}`);
+
+s2.bump();
+const twice = s2.get_slot();
+if (twice !== 242) { console.log("FAIL: twice " + twice); process.exit(1); }
+console.log(`4. After second bump slot=${twice}`);
+
+console.log("PASS: 59_persist_multi_event");

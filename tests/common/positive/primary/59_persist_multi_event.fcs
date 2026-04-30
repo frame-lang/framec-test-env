@@ -1,0 +1,67 @@
+@@target csharp
+
+using System;
+
+@@persist
+@@system PersistMultiEvent {
+    interface:
+        seed(v: int)
+        bump()
+        get_slot(): int
+
+    machine:
+        $Idle {
+            seed(v: int) {
+                -> $Active(v)
+            }
+            bump() {
+                @@:(-1)
+            }
+            get_slot(): int {
+                @@:(-1)
+            }
+        }
+
+        $Active(slot: int) {
+            seed(v: int) {
+                -> $Active(v)
+            }
+            bump() {
+                -> $Active(slot + 100)
+            }
+            get_slot(): int {
+                @@:(slot)
+            }
+        }
+    domain:
+        v : int = 0
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 59: Persist × multi-event boundary (C#) ===");
+        var s1 = new PersistMultiEvent();
+        s1.seed(42);
+        int pre = s1.get_slot();
+        if (pre != 42) { Console.WriteLine($"FAIL: pre {pre}"); Environment.Exit(1); }
+        Console.WriteLine($"1. Pre-save slot={pre}");
+
+        var snap = s1.SaveState();
+        var s2 = PersistMultiEvent.RestoreState(snap);
+        int post = s2.get_slot();
+        if (post != 42) { Console.WriteLine($"FAIL: post {post}"); Environment.Exit(1); }
+        Console.WriteLine($"2. Post-restore slot={post}");
+
+        s2.bump();
+        int bumped = s2.get_slot();
+        if (bumped != 142) { Console.WriteLine($"FAIL: bumped {bumped}"); Environment.Exit(1); }
+        Console.WriteLine($"3. After post-restore bump slot={bumped}");
+
+        s2.bump();
+        int twice = s2.get_slot();
+        if (twice != 242) { Console.WriteLine($"FAIL: twice {twice}"); Environment.Exit(1); }
+        Console.WriteLine($"4. After second bump slot={twice}");
+
+        Console.WriteLine("PASS: 59_persist_multi_event");
+    }
+}
