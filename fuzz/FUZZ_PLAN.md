@@ -1305,14 +1305,28 @@ wave 3.
 ### Medium-yield: wave 2/3 of existing phases
 
 Each wave-N candidate noted in its phase's section:
-- **Phase 15 wave 3 — PARTIAL SHIPPED 2026-04-30.** Matrix tests
-  63-66 ship state-args carried through `=> $^` forwards across
-  all 17 backends. Surfaced **D4** (cascade-arrow params not visible
-  in parent handlers — fixed in framepiler `19ba6d3`) and **D5**
-  (typed-cast hardcoded to `int` for 7 typed backends + handler-
-  param shadow break in 5 backends — fixed in framepiler `314e909`).
-  Remaining: bool / float / list typed args (D5 plumbing now in
-  place — drop-in extension).
+- **Phase 15 wave 3 — SHIPPED 2026-04-30 (int/str/bool/float).**
+  Matrix tests 63-68 ship state-args of types int (65), str (66),
+  bool (67), float (68) plus operations × HSM × state-args (64) and
+  HSM × `@@:self` (63). All 17 backends clean. Wave 3 surfaced
+  five framec defects:
+  - **D4** (`19ba6d3`) — HSM cascade-arrow params not visible in
+    parent state's handlers. Cross-backend (all 17).
+  - **D5** (`314e909`) — typed-cast hardcoded to `int` for 7 typed
+    backends + handler-param shadow break in 5 backends.
+  - **D6** (`21a82f4`) — Erlang transition-target atom captured by
+    same-name param (test 67 surfaced via `(active: bool)` colliding
+    with `$Active` state).
+  - **D7** (`5b0934b`) — float/double broke C and C++ at five sites
+    (interface push, state-arg / event-param prefetch, transition
+    push, C++ `emit_params` type map). Now route through
+    `Sys_pack_double` / `Sys_unpack_double` and the shared
+    `cpp_map_type` helper.
+  - **D8** (open) — persist × float fails 8 typed backends (test 69,
+    persist serializer codegen hardcodes integer-width casts).
+    Diagnosis + fix scope in DEFECTS.md. Estimated 1-2hr per
+    backend × 8 = ~16hr session of work. List typed args may
+    surface a similar cluster — defer until D8 closed.
 - **Phase 17 wave 2:** re-entrant event sequences (`@@:self.X()`
   mid-sequence), longer 5-8 event traces, persist save mid-
   sequence (overlaps with persist × multi-event above).
