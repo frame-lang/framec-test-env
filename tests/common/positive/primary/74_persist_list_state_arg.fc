@@ -1,0 +1,52 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@persist
+@@system PersistList {
+    interface:
+        configure(items: list)
+        first_item(): int
+        size(): int
+
+    machine:
+        $Idle {
+            configure(items: list) {
+                -> $Active(items)
+            }
+            first_item(): int { @@:(-1) }
+            size(): int { @@:(0) }
+        }
+        $Active(items: list) {
+            configure(items: list) {
+                -> $Active(items)
+            }
+            first_item(): int { @@:((int)(intptr_t)PersistList_FrameVec_get(items, 0)) }
+            size(): int { @@:(PersistList_FrameVec_size(items)) }
+        }
+    domain:
+        n: int = 0
+}
+
+int main(void) {
+    PersistList* s1 = PersistList_new();
+    PersistList_FrameVec* v = PersistList_FrameVec_new();
+    PersistList_FrameVec_push(v, (void*)(intptr_t)10);
+    PersistList_FrameVec_push(v, (void*)(intptr_t)20);
+    PersistList_FrameVec_push(v, (void*)(intptr_t)30);
+    PersistList_configure(s1, v);
+    if (PersistList_first_item(s1) != 10) { printf("FAIL pre\n"); return 1; }
+
+    char* snap = PersistList_save_state(s1);
+    PersistList* s2 = PersistList_restore_state(snap);
+    if (PersistList_first_item(s2) != 10) { printf("FAIL restored first_item\n"); return 1; }
+    if (PersistList_size(s2) != 3) { printf("FAIL restored size %d\n", PersistList_size(s2)); return 1; }
+    printf("PASS: 74_persist_list_state_arg\n");
+    free(snap);
+    PersistList_destroy(s1);
+    PersistList_destroy(s2);
+    return 0;
+}
