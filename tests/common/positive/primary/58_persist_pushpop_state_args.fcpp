@@ -1,0 +1,72 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cstdlib>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system PersistPushpopStateArgs {
+    interface:
+        push_modal(v: int)
+        pop_modal()
+        get_slot(): int
+
+    machine:
+        $Idle {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_slot(): int {
+                @@:(-99)
+            }
+        }
+
+        $Modal(slot: int) {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_slot(): int {
+                @@:(slot)
+            }
+        }
+    domain:
+        v : int = 0
+}
+
+int main() {
+    std::cout << "=== Test 58: Persist × push/pop × state-args (C++) ===" << std::endl;
+    PersistPushpopStateArgs s1;
+    s1.push_modal(42);
+    s1.push_modal(77);
+    int pre = s1.get_slot();
+    if (pre != 77) { std::cout << "FAIL: pre " << pre << std::endl; return 1; }
+    std::cout << "1. Pre-save top slot=" << pre << std::endl;
+
+    std::string snap = s1.save_state();
+    PersistPushpopStateArgs s2 = PersistPushpopStateArgs::restore_state(snap);
+    int post = s2.get_slot();
+    if (post != 77) { std::cout << "FAIL: post " << post << std::endl; return 1; }
+    std::cout << "2. Post-restore top slot=" << post << std::endl;
+
+    s2.pop_modal();
+    int mid = s2.get_slot();
+    if (mid != 42) { std::cout << "FAIL: mid " << mid << std::endl; return 1; }
+    std::cout << "3. After first pop slot=" << mid << std::endl;
+
+    s2.pop_modal();
+    int bottom = s2.get_slot();
+    if (bottom != -99) { std::cout << "FAIL: bottom " << bottom << std::endl; return 1; }
+    std::cout << "4. After second pop slot=" << bottom << std::endl;
+
+    std::cout << "PASS: 58_persist_pushpop_state_args" << std::endl;
+    return 0;
+}

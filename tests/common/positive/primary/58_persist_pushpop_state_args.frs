@@ -1,0 +1,68 @@
+@@target rust
+
+@@persist
+@@system PersistPushpopStateArgs {
+    interface:
+        push_modal(v: i32)
+        pop_modal()
+        get_slot(): i32
+
+    machine:
+        $Idle {
+            push_modal(v: i32) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_slot(): i32 {
+                @@:(-99)
+                return;
+            }
+        }
+
+        $Modal(slot: i32) {
+            push_modal(v: i32) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_slot(): i32 {
+                @@:(slot)
+                return;
+            }
+        }
+    domain:
+        v: i32
+}
+
+fn main() {
+    println!("=== Test 58: Persist × push/pop × state-args (Rust) ===");
+    let mut s1 = @@PersistPushpopStateArgs();
+    s1.push_modal(42);
+    s1.push_modal(77);
+    let pre = s1.get_slot();
+    if pre != 77 { println!("FAIL: pre {}", pre); std::process::exit(1); }
+    println!("1. Pre-save top slot={}", pre);
+
+    let json = s1.save_state();
+    let mut s2 = PersistPushpopStateArgs::restore_state(&json);
+    let post = s2.get_slot();
+    if post != 77 { println!("FAIL: post {}", post); std::process::exit(1); }
+    println!("2. Post-restore top slot={}", post);
+
+    s2.pop_modal();
+    let mid = s2.get_slot();
+    if mid != 42 { println!("FAIL: mid {}", mid); std::process::exit(1); }
+    println!("3. After first pop slot={}", mid);
+
+    s2.pop_modal();
+    let bottom = s2.get_slot();
+    if bottom != -99 { println!("FAIL: bottom {}", bottom); std::process::exit(1); }
+    println!("4. After second pop slot={}", bottom);
+
+    println!("PASS: 58_persist_pushpop_state_args");
+}

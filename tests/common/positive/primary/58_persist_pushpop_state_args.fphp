@@ -1,0 +1,67 @@
+<?php
+@@target php
+
+@@persist
+@@system PersistPushpopStateArgs {
+    interface:
+        push_modal(v: int)
+        pop_modal()
+        get_slot(): int
+
+    machine:
+        $Idle {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_slot(): int {
+                @@:(-99)
+                return;
+            }
+        }
+
+        $Modal(slot: int) {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_slot(): int {
+                @@:($slot)
+                return;
+            }
+        }
+    domain:
+        v: int = 0
+}
+
+echo "=== Test 58: Persist × push/pop × state-args (PHP) ===\n";
+$s1 = new PersistPushpopStateArgs();
+$s1->push_modal(42);
+$s1->push_modal(77);
+$pre = $s1->get_slot();
+if ($pre !== 77) { echo "FAIL: pre $pre\n"; exit(1); }
+echo "1. Pre-save top slot=$pre\n";
+
+$snap = $s1->save_state();
+$s2 = PersistPushpopStateArgs::restore_state($snap);
+$post = $s2->get_slot();
+if ($post !== 77) { echo "FAIL: post $post\n"; exit(1); }
+echo "2. Post-restore top slot=$post\n";
+
+$s2->pop_modal();
+$mid = $s2->get_slot();
+if ($mid !== 42) { echo "FAIL: mid $mid\n"; exit(1); }
+echo "3. After first pop slot=$mid\n";
+
+$s2->pop_modal();
+$bottom = $s2->get_slot();
+if ($bottom !== -99) { echo "FAIL: bottom $bottom\n"; exit(1); }
+echo "4. After second pop slot=$bottom\n";
+
+echo "PASS: 58_persist_pushpop_state_args\n";

@@ -1,0 +1,84 @@
+@@target python_3
+
+# Test 58: Persist × push/pop modal stack × state-args round-trip
+#
+# Phase 24 wave 4. Combines two high-density bug axes that found
+# defects earlier this session:
+#   - Push/pop modal stack (Phase 19 wave 3 found Erlang frame_stack
+#     missing compartment-context fields).
+#   - Persist save/restore (Phase 24 wave 3 found Ruby/Go/C deserialize
+#     gaps in state_args/enter_args).
+#
+# This test exercises the cross-product. Push depth 2 (two pushes onto
+# the modal stack with distinct state-args), save while stack is full,
+# restore in a fresh instance, pop twice, verify state-args at each
+# level were preserved.
+
+@@persist
+@@system PersistPushpopStateArgs {
+    interface:
+        push_modal(v: int)
+        pop_modal()
+        get_slot(): int
+
+    machine:
+        $Idle {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_slot(): int {
+                @@:(-99)
+                return
+            }
+        }
+
+        $Modal(slot: int) {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_slot(): int {
+                @@:(slot)
+                return
+            }
+        }
+    domain:
+        v: int = 0
+}
+
+def main():
+    print("=== Test 58: Persist × push/pop × state-args ===")
+    s1 = @@PersistPushpopStateArgs()
+    s1.push_modal(42)         # modal stack: [Idle], current: Modal(42)
+    s1.push_modal(77)         # modal stack: [Idle, Modal(42)], current: Modal(77)
+    pre = s1.get_slot()
+    assert pre == 77, f"Expected 77 pre-save (top), got {pre}"
+    print(f"1. Pre-save top slot={pre}")
+
+    snap = s1.save_state()
+    s2 = PersistPushpopStateArgs.restore_state(snap)
+    post = s2.get_slot()
+    assert post == 77, f"Expected 77 post-restore (top), got {post}"
+    print(f"2. Post-restore top slot={post}")
+
+    s2.pop_modal()
+    mid = s2.get_slot()
+    assert mid == 42, f"Expected 42 after first pop (Modal(42) restored from stack), got {mid}"
+    print(f"3. After first pop slot={mid}")
+
+    s2.pop_modal()
+    bottom = s2.get_slot()
+    assert bottom == -99, f"Expected -99 after second pop (Idle restored from stack), got {bottom}"
+    print(f"4. After second pop slot={bottom}")
+
+    print("PASS: 58_persist_pushpop_state_args")
+
+if __name__ == '__main__':
+    main()

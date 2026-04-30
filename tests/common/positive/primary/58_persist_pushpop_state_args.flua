@@ -1,0 +1,66 @@
+@@target lua
+
+@@persist
+@@system PersistPushpopStateArgs {
+    interface:
+        push_modal(v: int)
+        pop_modal()
+        get_slot(): int
+
+    machine:
+        $Idle {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_slot(): int {
+                @@:(-99)
+                return
+            }
+        }
+
+        $Modal(slot: int) {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_slot(): int {
+                @@:(slot)
+                return
+            }
+        }
+    domain:
+        v: int = 0
+}
+
+print("=== Test 58: Persist × push/pop × state-args (Lua) ===")
+local s1 = PersistPushpopStateArgs.new()
+s1:push_modal(42)
+s1:push_modal(77)
+local pre = s1:get_slot()
+if pre ~= 77 then error("Expected 77 pre-save, got " .. tostring(pre)) end
+print("1. Pre-save top slot=" .. tostring(pre))
+
+local snap = s1:save_state()
+local s2 = PersistPushpopStateArgs.restore_state(snap)
+local post = s2:get_slot()
+if post ~= 77 then error("Expected 77 post-restore, got " .. tostring(post)) end
+print("2. Post-restore top slot=" .. tostring(post))
+
+s2:pop_modal()
+local mid = s2:get_slot()
+if mid ~= 42 then error("Expected 42 after first pop, got " .. tostring(mid)) end
+print("3. After first pop slot=" .. tostring(mid))
+
+s2:pop_modal()
+local bottom = s2:get_slot()
+if bottom ~= -99 then error("Expected -99 after second pop, got " .. tostring(bottom)) end
+print("4. After second pop slot=" .. tostring(bottom))
+
+print("PASS: 58_persist_pushpop_state_args")
