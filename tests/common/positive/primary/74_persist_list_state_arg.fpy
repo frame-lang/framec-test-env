@@ -1,0 +1,59 @@
+@@target python_3
+
+# Test 74: Persist × list-typed state-arg round-trip.
+# Companion to test 73 (list pass-through) + test 56 (persist scalar
+# state-args). Probes whether each backend's persist layer handles
+# compound (list/array) types in compartment.state_args.
+
+@@persist
+@@system PersistList {
+    interface:
+        configure(items: list)
+        first_item(): int
+        size(): int
+
+    machine:
+        $Idle {
+            configure(items: list) {
+                -> $Active(items)
+            }
+            first_item(): int {
+                @@:(-1)
+                return
+            }
+            size(): int {
+                @@:(0)
+                return
+            }
+        }
+        $Active(items: list) {
+            configure(items: list) {
+                -> $Active(items)
+            }
+            first_item(): int {
+                @@:(items[0])
+                return
+            }
+            size(): int {
+                @@:(len(items))
+                return
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+def main():
+    s1 = PersistList()
+    s1.configure([10, 20, 30])
+    assert s1.first_item() == 10
+    assert s1.size() == 3
+    snap = s1.save_state()
+
+    s2 = PersistList.restore_state(snap)
+    assert s2.first_item() == 10
+    assert s2.size() == 3
+    print("PASS: 74_persist_list_state_arg")
+
+if __name__ == '__main__':
+    main()
