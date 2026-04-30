@@ -34,6 +34,53 @@ triage.
 
 ---
 
+## D5: Typed state-arg prefetch defaulted to `int`; handler-param shadow
+
+- Lang: cross-backend
+- Tier: matrix test 66
+- Case: `66_hsm_str_state_args` (all 17 backends)
+- Tag: state-args, typed, shadow
+- Failure mode: compile (JS/TS/Go/Dart/GDScript redeclaration), run
+  (Rust shadow-overwrite, C/C++/Java/Kotlin/Swift/C# wrong cast)
+- Suspected codegen path: per-handler emit for C/C++/Java/Kotlin/Swift/
+  C#/Go (typed cast); JS/TS/Go/Dart/GDScript/Rust (shadow check)
+- Status: **fixed 2026-04-30** (framepiler 314e909)
+- Surfaced: 2026-04-30 during Phase 15 wave 3 str-typed test 66
+
+### Diagnosis
+
+Two defect families riding on the same generator path:
+
+1. **Typed cast hardcoded to `int`.** Six typed backends emitted
+   `int x = (intptr_t)compartment->state_args[i]` regardless of
+   the Frame param's declared type. For `(label: str)` the cast
+   produced a corrupted pointer and runtime crashes / build errors.
+2. **Handler-param shadow.** Frame source like
+   `configure(label: str)` matching a state-arg also named `label`
+   forced the prefetch to re-declare the same identifier in scope.
+   `const`/`var`/`final` redeclaration broke JS/TS/Go/Dart/GDScript
+   at compile time; Rust silently shadowed the handler param with
+   the OLD state-arg value, so the next transition wrote the old
+   value back.
+
+### Fix
+
+- New `state_param_types: HashMap<(String, String), String>` map
+  built alongside `state_param_effective_names`. Cascade-aware so
+  ancestor handlers see descendant types.
+- Typed-language per-handler emits (C, C++, Java, Kotlin, Swift,
+  C#, Go) look up the actual Frame type via this map and route
+  through the per-language `*_map_type` helpers.
+- All per-handler emits whose declaration form disallows
+  redeclaration (C, C++, Java, Kotlin, Swift, C#, Rust, JS/TS, Go,
+  Dart, GDScript) now skip the prefetch when a handler param with
+  the same name is in scope. Python/Ruby/Lua/PHP/Erlang need no
+  change — their plain assignment naturally rebinds.
+
+Verified by matrix test 66 across all 17 backends.
+
+---
+
 ## D4: HSM cascade state-args not visible in parent state's handlers
 
 - Lang: cross-backend (all 17)
