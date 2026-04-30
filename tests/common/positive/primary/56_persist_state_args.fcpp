@@ -1,0 +1,57 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cstdlib>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system PersistStateArgs {
+    interface:
+        kick(v: int)
+        get_slot(): int
+
+    machine:
+        $Idle {
+            kick(v: int) {
+                -> $Active(v)
+            }
+            get_slot(): int {
+                @@:(-1)
+            }
+        }
+
+        $Active(slot: int) {
+            kick(v: int) {
+                -> $Active(v)
+            }
+            get_slot(): int {
+                @@:(slot)
+            }
+        }
+    domain:
+        v : int = 0
+}
+
+int main() {
+    std::cout << "=== Test 56: Persist State-Args Round-Trip (C++) ===" << std::endl;
+    PersistStateArgs s1;
+    s1.kick(42);
+    int pre = s1.get_slot();
+    if (pre != 42) { std::cout << "FAIL: pre " << pre << std::endl; return 1; }
+    std::cout << "1. Pre-save slot=" << pre << std::endl;
+
+    std::string snap = s1.save_state();
+    PersistStateArgs s2 = PersistStateArgs::restore_state(snap);
+    int post = s2.get_slot();
+    if (post != 42) { std::cout << "FAIL: post " << post << std::endl; return 1; }
+    std::cout << "2. Post-restore slot=" << post << std::endl;
+
+    s2.kick(99);
+    int post2 = s2.get_slot();
+    if (post2 != 99) { std::cout << "FAIL: post2 " << post2 << std::endl; return 1; }
+    std::cout << "3. Post-restore-kick slot=" << post2 << std::endl;
+
+    std::cout << "PASS: 56_persist_state_args" << std::endl;
+    return 0;
+}

@@ -1,0 +1,63 @@
+@@target python_3
+
+# Test 56: Persist with state-args round-trip
+#
+# Regression net for the 9-backend persist bulk fix shipped 2026-04-29.
+# Verifies that state-args declared via $S(arg: type) round-trip
+# through save_state/restore_state. Without this test, matrix tests
+# 23/24/25/51 (which only exercise domain-vars + state-vars) would
+# pass even if the codegen serializer dropped compartment.state_args.
+
+@@persist
+@@system PersistStateArgs {
+    interface:
+        kick(v: int)
+        get_slot(): int
+
+    machine:
+        $Idle {
+            kick(v: int) {
+                -> $Active(v)
+            }
+            get_slot(): int {
+                @@:(-1)
+                return
+            }
+        }
+
+        $Active(slot: int) {
+            kick(v: int) {
+                -> $Active(v)
+            }
+            get_slot(): int {
+                @@:(slot)
+                return
+            }
+        }
+    domain:
+        v: int = 0
+}
+
+def main():
+    print("=== Test 56: Persist State-Args Round-Trip ===")
+    s1 = @@PersistStateArgs()
+    s1.kick(42)
+    pre = s1.get_slot()
+    assert pre == 42, f"Expected 42 pre-save, got {pre}"
+    print(f"1. Pre-save slot={pre}")
+
+    snap = s1.save_state()
+    s2 = PersistStateArgs.restore_state(snap)
+    post = s2.get_slot()
+    assert post == 42, f"Expected 42 post-restore, got {post}"
+    print(f"2. Post-restore slot={post}")
+
+    s2.kick(99)
+    post2 = s2.get_slot()
+    assert post2 == 99, f"Expected 99 after post-restore kick, got {post2}"
+    print(f"3. Post-restore-kick slot={post2}")
+
+    print("PASS: 56_persist_state_args")
+
+if __name__ == '__main__':
+    main()

@@ -1283,20 +1283,30 @@ wave 3.
 - ✅ Erlang persist × push/pop works post-fix.
 - ✅ Erlang persist × HSM works post-fix.
 
-**Remaining (low priority):**
-- Typed-language runtime verification (Java/Kotlin/C#/C++/Swift) —
-  all COMPILE persist × HSM + state-args; runtime testing deferred
-  to a Phase 24 generator if/when built.
-- persist × multi-event mid-sequence: drive(A), save, restore,
-  drive(B) — is the full state preserved across the boundary?
-  Untested.
-
-Implementation note: Phase 24 generator would mirror Phase 19's
-structure (drive → save → restore → verify-via-getter), with
-per-backend save/restore method names (camelCase JS, JSON String
-Java/Kotlin/C#/Rust, sys:replace_state Erlang). The probe approach
-(hand-crafted ad-hoc tests) was sufficient to surface the Erlang
-defect — a generator buys breadth not depth.
+**Phase 24 — Persist cross-product (wave 1+2 SHIPPED 2026-04-29):**
+- 5 patterns × 5 values × 3 backends (python_3, javascript,
+  typescript) = 75/75 green.
+- Patterns:
+  - P1 state_args — declared state-arg, transition with value,
+    save, restore, verify arg.
+  - P2 enter_args — enter handler with args, transition via
+    `-> (v) $Done`, save, restore, verify enter-arg cached.
+  - P3 hsm_state_args — `$Child => $Parent(x: int)` cascade,
+    state-arg declared at parent, bound by name in child.
+  - P4 push_state_args — push to $Modal(v), save with stack
+    full, restore, pop, verify modal slot.
+  - P5 multi_event — drive(A), save, restore, drive(B) on
+    fresh instance, verify post-restore event correctly
+    transitions and binds new state-args. Tests that the
+    restored state machine is fully functional, not just
+    static-equivalent.
+- Locks in the 9-backend persist bulk fix from this session.
+- Files: `gen_persist_x.py`, `run_persist_x.sh`,
+  `cases_persist_x/`. Wired into `run_all.sh` as Phase 24.
+- Wave 3+ candidates: extend to remaining 14 backends (each
+  has its own JSON serialization shape and toolchain wiring).
+  Rust + Java + Erlang are highest priority — they got the
+  most invasive parts of the bulk fix.
 
 ### Medium-yield: wave 2/3 of existing phases
 

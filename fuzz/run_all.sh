@@ -61,7 +61,7 @@ while [ $# -gt 0 ]; do
         --help|-h)
             echo "Usage: $0 [--tier=smoke|core|full] [--lang=<name>] [--tag=<comma-list>] [--phases=<comma-list>]"
             echo ""
-            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 (default: all)"
+            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 24 (default: all)"
             echo "Tiers:  smoke (curated, fast), core (phase essentials), full (complete corpus)"
             exit 0
             ;;
@@ -77,7 +77,7 @@ fi
 
 # Default phase list. Phase 1 is infrastructure-only (no runnable
 # fuzz). Phases 11+ are not yet built.
-ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21"
+ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 24"
 PHASES=${PHASES_REQUESTED:-$ALL_PHASES}
 PHASES=$(echo "$PHASES" | tr ',' ' ')
 
@@ -152,6 +152,7 @@ run_phase() {
         19) run_pushpop ;;
         20) run_const_sys ;;
         21) run_arith ;;
+        24) run_persist_x ;;
         *)  echo "Phase $phase: unknown" >&2; return 1 ;;
     esac
 }
@@ -178,6 +179,7 @@ phase_name() {
         19) echo "pushpop" ;;
         20) echo "const-sys" ;;
         21) echo "arith" ;;
+        24) echo "persist-x" ;;
         *) echo "?" ;;
     esac
 }
@@ -292,6 +294,20 @@ run_arith() {
     [ -n "$LANG_ARG_ARITH" ] && args="$args $LANG_ARG_ARITH"
     # shellcheck disable=SC2086
     "$SCRIPT_DIR/run_arith.sh" $args
+}
+
+run_persist_x() {
+    # Phase 24: persist cross-product (state-args + enter-args + push/pop
+    # × save/restore). Currently covers python_3 + javascript + typescript.
+    local langs="python_3 javascript typescript"
+    if [ -n "$LANG" ]; then
+        case "$LANG" in
+            python_3|javascript|typescript) langs="$LANG" ;;
+            *) echo "  Phase 24: $LANG not in current scope, skipping"; return 0 ;;
+        esac
+    fi
+    # shellcheck disable=SC2086
+    "$SCRIPT_DIR/run_persist_x.sh" $langs
 }
 
 # Iterate phases. Don't bail on first failure — surface every phase

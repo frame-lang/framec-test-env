@@ -1,0 +1,69 @@
+@@target go
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+var _ = json.Marshal
+
+@@persist
+@@system PersistStateArgs {
+    interface:
+        Kick(v: int)
+        GetSlot(): int
+
+    machine:
+        $Idle {
+            Kick(v: int) {
+                -> $Active(v)
+            }
+            GetSlot(): int {
+                @@:(-1)
+                return;
+            }
+        }
+
+        $Active(slot: int) {
+            Kick(v: int) {
+                -> $Active(v)
+            }
+            GetSlot(): int {
+                @@:(slot)
+                return;
+            }
+        }
+    domain:
+        v: int = 0
+}
+
+func main() {
+    fmt.Println("=== Test 56: Persist State-Args Round-Trip (Go) ===")
+    s1 := NewPersistStateArgs()
+    s1.Kick(42)
+    pre := s1.GetSlot()
+    if pre != 42 {
+        fmt.Printf("FAIL: pre %d\n", pre); os.Exit(1)
+    }
+    fmt.Printf("1. Pre-save slot=%d\n", pre)
+
+    snap := s1.SaveState()
+    s2 := RestorePersistStateArgs(snap)
+    post := s2.GetSlot()
+    if post != 42 {
+        fmt.Printf("FAIL: post %d\n", post); os.Exit(1)
+    }
+    fmt.Printf("2. Post-restore slot=%d\n", post)
+
+    s2.Kick(99)
+    post2 := s2.GetSlot()
+    if post2 != 99 {
+        fmt.Printf("FAIL: post2 %d\n", post2); os.Exit(1)
+    }
+    fmt.Printf("3. Post-restore-kick slot=%d\n", post2)
+
+    fmt.Println("PASS: 56_persist_state_args")
+}
