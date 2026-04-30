@@ -1,0 +1,55 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@persist
+@@system PPushDeep {
+    interface:
+        descend()
+        ascend()
+        get_depth(): int
+
+    machine:
+        $Idle {
+            descend() { push$; -> $Modal1 }
+            get_depth(): int { @@:(0) }
+        }
+        $Modal1 {
+            descend() { push$; -> $Modal2 }
+            ascend() { -> pop$ }
+            get_depth(): int { @@:(1) }
+        }
+        $Modal2 {
+            descend() { push$; -> $Modal3 }
+            ascend() { -> pop$ }
+            get_depth(): int { @@:(2) }
+        }
+        $Modal3 {
+            ascend() { -> pop$ }
+            get_depth(): int { @@:(3) }
+        }
+    domain: n : int = 0
+}
+
+int main(void) {
+    PPushDeep* s = PPushDeep_new();
+    PPushDeep_descend(s); PPushDeep_descend(s); PPushDeep_descend(s);
+    if (PPushDeep_get_depth(s) != 3) { printf("FAIL pre\n"); return 1; }
+    char* snap = PPushDeep_save_state(s);
+    PPushDeep* s2 = PPushDeep_restore_state(snap);
+    if (PPushDeep_get_depth(s2) != 3) { printf("FAIL post %d\n", PPushDeep_get_depth(s2)); return 1; }
+    PPushDeep_ascend(s2);
+    if (PPushDeep_get_depth(s2) != 2) { printf("FAIL a1\n"); return 1; }
+    PPushDeep_ascend(s2);
+    if (PPushDeep_get_depth(s2) != 1) { printf("FAIL a2\n"); return 1; }
+    PPushDeep_ascend(s2);
+    if (PPushDeep_get_depth(s2) != 0) { printf("FAIL a3\n"); return 1; }
+    printf("PASS: 71_persist_push_depth_three\n");
+    free(snap);
+    PPushDeep_destroy(s);
+    PPushDeep_destroy(s2);
+    return 0;
+}

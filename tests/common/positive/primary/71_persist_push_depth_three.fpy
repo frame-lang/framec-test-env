@@ -1,0 +1,59 @@
+@@target python_3
+
+# Test 71: persist × push depth 3.
+# Phase 19 wave 4 × Phase 24. Save state with a 3-deep push stack;
+# restore on a fresh instance; verify state, ascend back through.
+# Exercises persist serialization across multiple state_stack
+# entries with different state names.
+
+@@persist
+
+@@system PPushDeep {
+    interface:
+        descend()
+        ascend()
+        get_depth(): int
+
+    machine:
+        $Idle {
+            descend() {
+                push$
+                -> $Modal1
+            }
+            get_depth(): int { @@:(0); return }
+        }
+        $Modal1 {
+            descend() { push$; -> $Modal2 }
+            ascend() { -> pop$ }
+            get_depth(): int { @@:(1); return }
+        }
+        $Modal2 {
+            descend() { push$; -> $Modal3 }
+            ascend() { -> pop$ }
+            get_depth(): int { @@:(2); return }
+        }
+        $Modal3 {
+            ascend() { -> pop$ }
+            get_depth(): int { @@:(3); return }
+        }
+    domain:
+        n: int = 0
+}
+
+def main():
+    s = @@PPushDeep()
+    s.descend(); s.descend(); s.descend()
+    assert s.get_depth() == 3
+    snap = s.save_state()
+    s2 = PPushDeep.restore_state(snap)
+    assert s2.get_depth() == 3, f"post-restore: {s2.get_depth()}"
+    s2.ascend()
+    assert s2.get_depth() == 2
+    s2.ascend()
+    assert s2.get_depth() == 1
+    s2.ascend()
+    assert s2.get_depth() == 0
+    print("PASS: 71_persist_push_depth_three")
+
+if __name__ == '__main__':
+    main()

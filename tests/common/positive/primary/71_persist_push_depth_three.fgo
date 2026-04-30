@@ -1,0 +1,53 @@
+@@target go
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+var _ = json.Marshal
+
+@@persist
+@@system PPushDeep {
+    interface:
+        Descend()
+        Ascend()
+        GetDepth(): int
+
+    machine:
+        $Idle {
+            Descend() { push$; -> $Modal1 }
+            GetDepth(): int { @@:(0); return; }
+        }
+        $Modal1 {
+            Descend() { push$; -> $Modal2 }
+            Ascend() { -> pop$ }
+            GetDepth(): int { @@:(1); return; }
+        }
+        $Modal2 {
+            Descend() { push$; -> $Modal3 }
+            Ascend() { -> pop$ }
+            GetDepth(): int { @@:(2); return; }
+        }
+        $Modal3 {
+            Ascend() { -> pop$ }
+            GetDepth(): int { @@:(3); return; }
+        }
+    domain: n: int = 0
+}
+
+func main() {
+    s := NewPPushDeep()
+    s.Descend(); s.Descend(); s.Descend()
+    if s.GetDepth() != 3 { fmt.Println("FAIL pre"); os.Exit(1) }
+    snap := s.SaveState()
+    s2 := RestorePPushDeep(snap)
+    if s2.GetDepth() != 3 { fmt.Println("FAIL post"); os.Exit(1) }
+    s2.Ascend(); if s2.GetDepth() != 2 { fmt.Println("FAIL a1"); os.Exit(1) }
+    s2.Ascend(); if s2.GetDepth() != 1 { fmt.Println("FAIL a2"); os.Exit(1) }
+    s2.Ascend(); if s2.GetDepth() != 0 { fmt.Println("FAIL a3"); os.Exit(1) }
+    fmt.Println("PASS: 71_persist_push_depth_three")
+}
