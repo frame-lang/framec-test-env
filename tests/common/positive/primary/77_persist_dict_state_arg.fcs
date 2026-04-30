@@ -1,0 +1,36 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@persist
+@@system PersistDict {
+    interface:
+        configure(m: Dictionary<string, int>)
+        get_v(key: string): int
+
+    machine:
+        $Idle {
+            configure(m: Dictionary<string, int>) { -> $Active(m) }
+            get_v(key: string): int { @@:(-1) }
+        }
+        $Active(m: Dictionary<string, int>) {
+            configure(m: Dictionary<string, int>) { -> $Active(m) }
+            get_v(key: string): int { @@:(m.TryGetValue(key, out int __vv) ? __vv : -1) }
+        }
+    domain:
+        n : int = 0
+}
+
+class Program {
+    static void Main(string[] args) {
+        var s1 = new PersistDict();
+        s1.configure(new Dictionary<string, int> { { "a", 10 }, { "b", 20 } });
+        if (s1.get_v("a") != 10) { Console.WriteLine("FAIL pre"); Environment.Exit(1); }
+        string snap = s1.SaveState();
+        var s2 = PersistDict.RestoreState(snap);
+        if (s2.get_v("a") != 10) { Console.WriteLine("FAIL post a got " + s2.get_v("a")); Environment.Exit(1); }
+        if (s2.get_v("b") != 20) { Console.WriteLine("FAIL post b got " + s2.get_v("b")); Environment.Exit(1); }
+        Console.WriteLine("PASS: 77_persist_dict_state_arg");
+    }
+}

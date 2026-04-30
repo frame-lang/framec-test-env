@@ -1,0 +1,42 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@persist
+@@system DictOfList {
+    interface:
+        configure(m: Dictionary<string, List<int>>)
+        get_at(key: string, idx: int): int
+
+    machine:
+        $Idle {
+            configure(m: Dictionary<string, List<int>>) { -> $Active(m) }
+            get_at(key: string, idx: int): int { @@:(-1) }
+        }
+        $Active(m: Dictionary<string, List<int>>) {
+            configure(m: Dictionary<string, List<int>>) { -> $Active(m) }
+            get_at(key: string, idx: int): int {
+                @@:(m.TryGetValue(key, out var __l) && idx < __l.Count ? __l[idx] : -1)
+            }
+        }
+    domain:
+        n : int = 0
+}
+
+class Program {
+    static void Main(string[] args) {
+        var s1 = new DictOfList();
+        s1.configure(new Dictionary<string, List<int>> {
+            { "a", new List<int> { 10, 20 } },
+            { "b", new List<int> { 30, 40, 50 } }
+        });
+        if (s1.get_at("a", 0) != 10) { Console.WriteLine("FAIL pre"); Environment.Exit(1); }
+        string snap = s1.SaveState();
+        var s2 = DictOfList.RestoreState(snap);
+        if (s2.get_at("a", 0) != 10) { Console.WriteLine("FAIL post a.0"); Environment.Exit(1); }
+        if (s2.get_at("a", 1) != 20) { Console.WriteLine("FAIL post a.1"); Environment.Exit(1); }
+        if (s2.get_at("b", 2) != 50) { Console.WriteLine("FAIL post b.2"); Environment.Exit(1); }
+        Console.WriteLine("PASS: 79_dict_of_list_state_arg");
+    }
+}

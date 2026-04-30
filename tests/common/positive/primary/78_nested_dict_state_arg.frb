@@ -1,0 +1,30 @@
+@@target ruby
+
+@@persist
+@@system NestedDict {
+    interface:
+        configure(m: Hash)
+        get_inner(outer_key: String, inner_key: String): int
+
+    machine:
+        $Idle {
+            configure(m: Hash) { -> $Active(m) }
+            get_inner(outer_key: String, inner_key: String): int { @@:(-1) }
+        }
+        $Active(m: Hash) {
+            configure(m: Hash) { -> $Active(m) }
+            get_inner(outer_key: String, inner_key: String): int { @@:(m.fetch(outer_key, {}).fetch(inner_key, -1)) }
+        }
+    domain:
+        n: int = 0
+}
+
+s1 = NestedDict.new
+s1.configure({"u" => {"x" => 1, "y" => 2}, "v" => {"z" => 3}})
+abort("FAIL pre") unless s1.get_inner("u", "x") == 1
+snap = s1.save_state
+s2 = NestedDict.restore_state(snap)
+abort("FAIL post u.x") unless s2.get_inner("u", "x") == 1
+abort("FAIL post u.y") unless s2.get_inner("u", "y") == 2
+abort("FAIL post v.z") unless s2.get_inner("v", "z") == 3
+puts "PASS: 78_nested_dict_state_arg"

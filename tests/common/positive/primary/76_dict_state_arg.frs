@@ -1,0 +1,43 @@
+@@target rust
+
+use std::collections::HashMap;
+
+@@system DictStateArg {
+    interface:
+        configure(m: HashMap<String, i32>)
+        get_v(key: String): i32
+        size(): i32
+
+    machine:
+        $Idle {
+            configure(m: HashMap<String, i32>) { -> $Active(m) }
+            get_v(key: String): i32 { @@:(-1); return; }
+            size(): i32 { @@:(0); return; }
+        }
+        $Active(m: HashMap<String, i32>) {
+            configure(m: HashMap<String, i32>) { -> $Active(m) }
+            get_v(key: String): i32 { @@:(*m.get(&key).unwrap_or(&-1)); return; }
+            size(): i32 { @@:(m.len() as i32); return; }
+        }
+    domain:
+        n: i32
+}
+
+fn main() {
+    let mut s = @@DictStateArg();
+    if s.get_v("a".to_string()) != -1 { println!("FAIL idle get"); std::process::exit(1); }
+    if s.size() != 0 { println!("FAIL idle size"); std::process::exit(1); }
+    let mut m = HashMap::new();
+    m.insert("a".to_string(), 10);
+    m.insert("b".to_string(), 20);
+    s.configure(m);
+    if s.get_v("a".to_string()) != 10 { println!("FAIL a"); std::process::exit(1); }
+    if s.get_v("b".to_string()) != 20 { println!("FAIL b"); std::process::exit(1); }
+    if s.size() != 2 { println!("FAIL size"); std::process::exit(1); }
+    let mut m2 = HashMap::new();
+    m2.insert("x".to_string(), 99);
+    s.configure(m2);
+    if s.get_v("x".to_string()) != 99 { println!("FAIL x"); std::process::exit(1); }
+    if s.size() != 1 { println!("FAIL size2"); std::process::exit(1); }
+    println!("PASS: 76_dict_state_arg");
+}

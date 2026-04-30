@@ -1,0 +1,50 @@
+@@target go
+
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "os"
+)
+
+var _ = json.Marshal
+
+@@persist
+@@system NestedDict {
+    interface:
+        Configure(m: map[string]map[string]int)
+        GetInner(outer_key: string, inner_key: string): int
+
+    machine:
+        $Idle {
+            Configure(m: map[string]map[string]int) { -> $Active(m) }
+            GetInner(outer_key: string, inner_key: string): int { @@:(-1); return; }
+        }
+        $Active(m: map[string]map[string]int) {
+            Configure(m: map[string]map[string]int) { -> $Active(m) }
+            GetInner(outer_key: string, inner_key: string): int {
+                if inner, ok := m[outer_key]; ok {
+                    if v, ok2 := inner[inner_key]; ok2 { @@:(v); return }
+                }
+                @@:(-1); return;
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+func main() {
+    s1 := NewNestedDict()
+    s1.Configure(map[string]map[string]int{
+        "u": {"x": 1, "y": 2},
+        "v": {"z": 3},
+    })
+    if s1.GetInner("u", "x") != 1 { fmt.Println("FAIL pre"); os.Exit(1) }
+    snap := s1.SaveState()
+    s2 := RestoreNestedDict(snap)
+    if s2.GetInner("u", "x") != 1 { fmt.Println("FAIL post u.x got", s2.GetInner("u", "x")); os.Exit(1) }
+    if s2.GetInner("u", "y") != 2 { fmt.Println("FAIL post u.y"); os.Exit(1) }
+    if s2.GetInner("v", "z") != 3 { fmt.Println("FAIL post v.z"); os.Exit(1) }
+    fmt.Println("PASS: 78_nested_dict_state_arg")
+}

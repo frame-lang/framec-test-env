@@ -1,0 +1,37 @@
+@@target dart
+
+import 'dart:io';
+import 'dart:convert';
+
+@@persist
+@@system NestedDict {
+    interface:
+        configure(m: Map<String, Map<String, int>>)
+        get_inner(outer_key: String, inner_key: String): int
+
+    machine:
+        $Idle {
+            configure(m: Map<String, Map<String, int>>) { -> $Active(m) }
+            get_inner(outer_key: String, inner_key: String): int { @@:(-1) }
+        }
+        $Active(m: Map<String, Map<String, int>>) {
+            configure(m: Map<String, Map<String, int>>) { -> $Active(m) }
+            get_inner(outer_key: String, inner_key: String): int {
+                @@:((m[outer_key] is Map ? ((m[outer_key] as Map)[inner_key] ?? -1) as int : -1))
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+void main() {
+    var s1 = NestedDict();
+    s1.configure({"u": {"x": 1, "y": 2}, "v": {"z": 3}});
+    if (s1.get_inner("u", "x") != 1) { print("FAIL pre"); return; }
+    var snap = s1.saveState();
+    var s2 = NestedDict.restoreState(snap);
+    if (s2.get_inner("u", "x") != 1) { print("FAIL post u.x"); return; }
+    if (s2.get_inner("u", "y") != 2) { print("FAIL post u.y"); return; }
+    if (s2.get_inner("v", "z") != 3) { print("FAIL post v.z"); return; }
+    print("PASS: 78_nested_dict_state_arg");
+}

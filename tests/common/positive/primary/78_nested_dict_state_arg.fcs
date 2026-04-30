@@ -1,0 +1,42 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@persist
+@@system NestedDict {
+    interface:
+        configure(m: Dictionary<string, Dictionary<string, int>>)
+        get_inner(outer_key: string, inner_key: string): int
+
+    machine:
+        $Idle {
+            configure(m: Dictionary<string, Dictionary<string, int>>) { -> $Active(m) }
+            get_inner(outer_key: string, inner_key: string): int { @@:(-1) }
+        }
+        $Active(m: Dictionary<string, Dictionary<string, int>>) {
+            configure(m: Dictionary<string, Dictionary<string, int>>) { -> $Active(m) }
+            get_inner(outer_key: string, inner_key: string): int {
+                @@:(m.TryGetValue(outer_key, out var __inner) && __inner.TryGetValue(inner_key, out int __vv) ? __vv : -1)
+            }
+        }
+    domain:
+        n : int = 0
+}
+
+class Program {
+    static void Main(string[] args) {
+        var s1 = new NestedDict();
+        s1.configure(new Dictionary<string, Dictionary<string, int>> {
+            { "u", new Dictionary<string, int> { { "x", 1 }, { "y", 2 } } },
+            { "v", new Dictionary<string, int> { { "z", 3 } } }
+        });
+        if (s1.get_inner("u", "x") != 1) { Console.WriteLine("FAIL pre"); Environment.Exit(1); }
+        string snap = s1.SaveState();
+        var s2 = NestedDict.RestoreState(snap);
+        if (s2.get_inner("u", "x") != 1) { Console.WriteLine("FAIL post u.x got " + s2.get_inner("u", "x")); Environment.Exit(1); }
+        if (s2.get_inner("u", "y") != 2) { Console.WriteLine("FAIL post u.y"); Environment.Exit(1); }
+        if (s2.get_inner("v", "z") != 3) { Console.WriteLine("FAIL post v.z"); Environment.Exit(1); }
+        Console.WriteLine("PASS: 78_nested_dict_state_arg");
+    }
+}

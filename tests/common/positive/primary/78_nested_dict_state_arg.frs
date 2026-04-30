@@ -1,0 +1,45 @@
+@@target rust
+
+use std::collections::HashMap;
+
+@@persist
+@@system NestedDict {
+    interface:
+        configure(m: HashMap<String, HashMap<String, i32>>)
+        get_inner(outer_key: String, inner_key: String): i32
+
+    machine:
+        $Idle {
+            configure(m: HashMap<String, HashMap<String, i32>>) { -> $Active(m) }
+            get_inner(outer_key: String, inner_key: String): i32 { @@:(-1); return; }
+        }
+        $Active(m: HashMap<String, HashMap<String, i32>>) {
+            configure(m: HashMap<String, HashMap<String, i32>>) { -> $Active(m) }
+            get_inner(outer_key: String, inner_key: String): i32 {
+                @@:(*m.get(&outer_key).and_then(|inner| inner.get(&inner_key)).unwrap_or(&-1));
+                return;
+            }
+        }
+    domain:
+        n: i32
+}
+
+fn main() {
+    let mut s1 = @@NestedDict();
+    let mut m: HashMap<String, HashMap<String, i32>> = HashMap::new();
+    let mut u = HashMap::new();
+    u.insert("x".to_string(), 1);
+    u.insert("y".to_string(), 2);
+    let mut v = HashMap::new();
+    v.insert("z".to_string(), 3);
+    m.insert("u".to_string(), u);
+    m.insert("v".to_string(), v);
+    s1.configure(m);
+    if s1.get_inner("u".to_string(), "x".to_string()) != 1 { println!("FAIL pre"); std::process::exit(1); }
+    let snap = s1.save_state();
+    let mut s2 = NestedDict::restore_state(&snap);
+    if s2.get_inner("u".to_string(), "x".to_string()) != 1 { println!("FAIL post u.x"); std::process::exit(1); }
+    if s2.get_inner("u".to_string(), "y".to_string()) != 2 { println!("FAIL post u.y"); std::process::exit(1); }
+    if s2.get_inner("v".to_string(), "z".to_string()) != 3 { println!("FAIL post v.z"); std::process::exit(1); }
+    println!("PASS: 78_nested_dict_state_arg");
+}

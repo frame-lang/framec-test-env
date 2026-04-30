@@ -1,0 +1,46 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@persist
+@@system PersistDict {
+    interface:
+        configure(m: dict)
+        get_v(key: char*): int
+
+    machine:
+        $Idle {
+            configure(m: dict) { -> $Active(m) }
+            get_v(key: char*): int { @@:(-1) }
+        }
+        $Active(m: dict) {
+            configure(m: dict) { -> $Active(m) }
+            get_v(key: char*): int {
+                @@:((int)(intptr_t)PersistDict_FrameDict_get(m, key))
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+int main(void) {
+    PersistDict* s1 = PersistDict_new();
+    PersistDict_FrameDict* d = PersistDict_FrameDict_new();
+    PersistDict_FrameDict_set(d, "a", (void*)(intptr_t)10);
+    PersistDict_FrameDict_set(d, "b", (void*)(intptr_t)20);
+    PersistDict_configure(s1, d);
+    if (PersistDict_get_v(s1, "a") != 10) { printf("FAIL pre\n"); return 1; }
+
+    char* snap = PersistDict_save_state(s1);
+    PersistDict* s2 = PersistDict_restore_state(snap);
+    if (PersistDict_get_v(s2, "a") != 10) { printf("FAIL post a\n"); return 1; }
+    if (PersistDict_get_v(s2, "b") != 20) { printf("FAIL post b\n"); return 1; }
+    printf("PASS: 77_persist_dict_state_arg\n");
+    free(snap);
+    PersistDict_destroy(s1);
+    PersistDict_destroy(s2);
+    return 0;
+}

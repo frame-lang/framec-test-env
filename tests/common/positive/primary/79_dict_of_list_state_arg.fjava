@@ -1,0 +1,44 @@
+@@target java
+
+import java.util.Map;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Arrays;
+
+@@persist
+@@system DictOfList {
+    interface:
+        configure(m: java.util.Map<String, java.util.List<Integer>>)
+        get_at(key: String, idx: int): int
+
+    machine:
+        $Idle {
+            configure(m: java.util.Map<String, java.util.List<Integer>>) { -> $Active(m) }
+            get_at(key: String, idx: int): int { @@:(-1) }
+        }
+        $Active(m: java.util.Map<String, java.util.List<Integer>>) {
+            configure(m: java.util.Map<String, java.util.List<Integer>>) { -> $Active(m) }
+            get_at(key: String, idx: int): int {
+                @@:((m.containsKey(key) && idx < ((java.util.List)m.get(key)).size()) ? ((Integer)((java.util.List)m.get(key)).get(idx)) : -1)
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        DictOfList s1 = new DictOfList();
+        Map<String, List<Integer>> m = new HashMap<>();
+        m.put("a", Arrays.asList(10, 20));
+        m.put("b", Arrays.asList(30, 40, 50));
+        s1.configure(m);
+        if (s1.get_at("a", 0) != 10) { System.out.println("FAIL pre"); System.exit(1); }
+        String snap = s1.save_state();
+        DictOfList s2 = DictOfList.restore_state(snap);
+        if (s2.get_at("a", 0) != 10) { System.out.println("FAIL post a.0 got " + s2.get_at("a", 0)); System.exit(1); }
+        if (s2.get_at("a", 1) != 20) { System.out.println("FAIL post a.1"); System.exit(1); }
+        if (s2.get_at("b", 2) != 50) { System.out.println("FAIL post b.2"); System.exit(1); }
+        System.out.println("PASS: 79_dict_of_list_state_arg");
+    }
+}

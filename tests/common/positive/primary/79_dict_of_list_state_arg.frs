@@ -1,0 +1,40 @@
+@@target rust
+
+use std::collections::HashMap;
+
+@@persist
+@@system DictOfList {
+    interface:
+        configure(m: HashMap<String, Vec<i32>>)
+        get_at(key: String, idx: i32): i32
+
+    machine:
+        $Idle {
+            configure(m: HashMap<String, Vec<i32>>) { -> $Active(m) }
+            get_at(key: String, idx: i32): i32 { @@:(-1); return; }
+        }
+        $Active(m: HashMap<String, Vec<i32>>) {
+            configure(m: HashMap<String, Vec<i32>>) { -> $Active(m) }
+            get_at(key: String, idx: i32): i32 {
+                @@:(m.get(&key).and_then(|v| v.get(idx as usize)).copied().unwrap_or(-1));
+                return;
+            }
+        }
+    domain:
+        n: i32
+}
+
+fn main() {
+    let mut s1 = @@DictOfList();
+    let mut m: HashMap<String, Vec<i32>> = HashMap::new();
+    m.insert("a".to_string(), vec![10, 20]);
+    m.insert("b".to_string(), vec![30, 40, 50]);
+    s1.configure(m);
+    if s1.get_at("a".to_string(), 0) != 10 { println!("FAIL pre"); std::process::exit(1); }
+    let snap = s1.save_state();
+    let mut s2 = DictOfList::restore_state(&snap);
+    if s2.get_at("a".to_string(), 0) != 10 { println!("FAIL post a.0"); std::process::exit(1); }
+    if s2.get_at("a".to_string(), 1) != 20 { println!("FAIL post a.1"); std::process::exit(1); }
+    if s2.get_at("b".to_string(), 2) != 50 { println!("FAIL post b.2"); std::process::exit(1); }
+    println!("PASS: 79_dict_of_list_state_arg");
+}

@@ -1,0 +1,42 @@
+@@target csharp
+
+using System;
+using System.Collections.Generic;
+
+@@persist
+@@system ListOfDict {
+    interface:
+        configure(rows: List<Dictionary<string, int>>)
+        get_at(idx: int, key: string): int
+
+    machine:
+        $Idle {
+            configure(rows: List<Dictionary<string, int>>) { -> $Active(rows) }
+            get_at(idx: int, key: string): int { @@:(-1) }
+        }
+        $Active(rows: List<Dictionary<string, int>>) {
+            configure(rows: List<Dictionary<string, int>>) { -> $Active(rows) }
+            get_at(idx: int, key: string): int {
+                @@:(idx < rows.Count && rows[idx].TryGetValue(key, out int __vv) ? __vv : -1)
+            }
+        }
+    domain:
+        n : int = 0
+}
+
+class Program {
+    static void Main(string[] args) {
+        var s1 = new ListOfDict();
+        s1.configure(new List<Dictionary<string, int>> {
+            new Dictionary<string, int> { { "x", 1 }, { "y", 2 } },
+            new Dictionary<string, int> { { "z", 3 } }
+        });
+        if (s1.get_at(0, "x") != 1) { Console.WriteLine("FAIL pre"); Environment.Exit(1); }
+        string snap = s1.SaveState();
+        var s2 = ListOfDict.RestoreState(snap);
+        if (s2.get_at(0, "x") != 1) { Console.WriteLine("FAIL post 0.x"); Environment.Exit(1); }
+        if (s2.get_at(0, "y") != 2) { Console.WriteLine("FAIL post 0.y"); Environment.Exit(1); }
+        if (s2.get_at(1, "z") != 3) { Console.WriteLine("FAIL post 1.z"); Environment.Exit(1); }
+        Console.WriteLine("PASS: 80_list_of_dict_state_arg");
+    }
+}

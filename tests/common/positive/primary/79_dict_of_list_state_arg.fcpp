@@ -1,0 +1,45 @@
+@@target cpp
+
+#include <iostream>
+#include <map>
+#include <vector>
+#include <string>
+#include <cstdlib>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system DictOfList {
+    interface:
+        configure(m: std::map<std::string, std::vector<int>>)
+        get_at(key: std::string, idx: int): int
+
+    machine:
+        $Idle {
+            configure(m: std::map<std::string, std::vector<int>>) { -> $Active(m) }
+            get_at(key: std::string, idx: int): int { @@:(-1) }
+        }
+        $Active(m: std::map<std::string, std::vector<int>>) {
+            configure(m: std::map<std::string, std::vector<int>>) { -> $Active(m) }
+            get_at(key: std::string, idx: int): int {
+                @@:(m.count(key) && idx < (int)m.at(key).size() ? m.at(key)[idx] : -1)
+            }
+        }
+    domain:
+        n : int = 0
+}
+
+int main() {
+    DictOfList s1;
+    s1.configure(std::map<std::string, std::vector<int>>{
+        {"a", {10, 20}},
+        {"b", {30, 40, 50}}
+    });
+    if (s1.get_at("a", 0) != 10) { std::cout << "FAIL pre" << std::endl; return 1; }
+    std::string snap = s1.save_state();
+    DictOfList s2 = DictOfList::restore_state(snap);
+    if (s2.get_at("a", 0) != 10) { std::cout << "FAIL post a.0" << std::endl; return 1; }
+    if (s2.get_at("a", 1) != 20) { std::cout << "FAIL post a.1" << std::endl; return 1; }
+    if (s2.get_at("b", 2) != 50) { std::cout << "FAIL post b.2" << std::endl; return 1; }
+    std::cout << "PASS: 79_dict_of_list_state_arg" << std::endl;
+    return 0;
+}

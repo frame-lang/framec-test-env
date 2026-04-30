@@ -1,0 +1,41 @@
+@@target go
+
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "os"
+)
+
+var _ = json.Marshal
+
+@@persist
+@@system PersistDict {
+    interface:
+        Configure(m: map[string]int)
+        GetV(key: string): int
+
+    machine:
+        $Idle {
+            Configure(m: map[string]int) { -> $Active(m) }
+            GetV(key: string): int { @@:(-1); return; }
+        }
+        $Active(m: map[string]int) {
+            Configure(m: map[string]int) { -> $Active(m) }
+            GetV(key: string): int { if v, ok := m[key]; ok { @@:(v); return }; @@:(-1); return; }
+        }
+    domain:
+        n: int = 0
+}
+
+func main() {
+    s1 := NewPersistDict()
+    s1.Configure(map[string]int{"a": 10, "b": 20})
+    if s1.GetV("a") != 10 { fmt.Println("FAIL pre"); os.Exit(1) }
+    snap := s1.SaveState()
+    s2 := RestorePersistDict(snap)
+    if s2.GetV("a") != 10 { fmt.Println("FAIL post a"); os.Exit(1) }
+    if s2.GetV("b") != 20 { fmt.Println("FAIL post b"); os.Exit(1) }
+    fmt.Println("PASS: 77_persist_dict_state_arg")
+}

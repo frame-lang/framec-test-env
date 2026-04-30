@@ -1,0 +1,38 @@
+@@target cpp
+
+#include <iostream>
+#include <map>
+#include <string>
+#include <cstdlib>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system PersistDict {
+    interface:
+        configure(m: std::map<std::string, int>)
+        get_v(key: std::string): int
+
+    machine:
+        $Idle {
+            configure(m: std::map<std::string, int>) { -> $Active(m) }
+            get_v(key: std::string): int { @@:(-1) }
+        }
+        $Active(m: std::map<std::string, int>) {
+            configure(m: std::map<std::string, int>) { -> $Active(m) }
+            get_v(key: std::string): int { @@:(m.count(key) ? m.at(key) : -1) }
+        }
+    domain:
+        n : int = 0
+}
+
+int main() {
+    PersistDict s1;
+    s1.configure(std::map<std::string, int>{{"a", 10}, {"b", 20}});
+    if (s1.get_v("a") != 10) { std::cout << "FAIL pre" << std::endl; return 1; }
+    std::string snap = s1.save_state();
+    PersistDict s2 = PersistDict::restore_state(snap);
+    if (s2.get_v("a") != 10) { std::cout << "FAIL post a" << std::endl; return 1; }
+    if (s2.get_v("b") != 20) { std::cout << "FAIL post b" << std::endl; return 1; }
+    std::cout << "PASS: 77_persist_dict_state_arg" << std::endl;
+    return 0;
+}

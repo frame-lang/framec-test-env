@@ -1,0 +1,42 @@
+@@target rust
+
+use std::collections::HashMap;
+
+@@persist
+@@system ListOfDict {
+    interface:
+        configure(rows: Vec<HashMap<String, i32>>)
+        get_at(idx: i32, key: String): i32
+
+    machine:
+        $Idle {
+            configure(rows: Vec<HashMap<String, i32>>) { -> $Active(rows) }
+            get_at(idx: i32, key: String): i32 { @@:(-1); return; }
+        }
+        $Active(rows: Vec<HashMap<String, i32>>) {
+            configure(rows: Vec<HashMap<String, i32>>) { -> $Active(rows) }
+            get_at(idx: i32, key: String): i32 {
+                @@:(rows.get(idx as usize).and_then(|row| row.get(&key)).copied().unwrap_or(-1));
+                return;
+            }
+        }
+    domain:
+        n: i32
+}
+
+fn main() {
+    let mut s1 = @@ListOfDict();
+    let mut row1 = HashMap::new();
+    row1.insert("x".to_string(), 1);
+    row1.insert("y".to_string(), 2);
+    let mut row2 = HashMap::new();
+    row2.insert("z".to_string(), 3);
+    s1.configure(vec![row1, row2]);
+    if s1.get_at(0, "x".to_string()) != 1 { println!("FAIL pre"); std::process::exit(1); }
+    let snap = s1.save_state();
+    let mut s2 = ListOfDict::restore_state(&snap);
+    if s2.get_at(0, "x".to_string()) != 1 { println!("FAIL post 0.x"); std::process::exit(1); }
+    if s2.get_at(0, "y".to_string()) != 2 { println!("FAIL post 0.y"); std::process::exit(1); }
+    if s2.get_at(1, "z".to_string()) != 3 { println!("FAIL post 1.z"); std::process::exit(1); }
+    println!("PASS: 80_list_of_dict_state_arg");
+}

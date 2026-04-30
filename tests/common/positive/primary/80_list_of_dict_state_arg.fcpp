@@ -1,0 +1,45 @@
+@@target cpp
+
+#include <iostream>
+#include <vector>
+#include <map>
+#include <string>
+#include <cstdlib>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system ListOfDict {
+    interface:
+        configure(rows: std::vector<std::map<std::string, int>>)
+        get_at(idx: int, key: std::string): int
+
+    machine:
+        $Idle {
+            configure(rows: std::vector<std::map<std::string, int>>) { -> $Active(rows) }
+            get_at(idx: int, key: std::string): int { @@:(-1) }
+        }
+        $Active(rows: std::vector<std::map<std::string, int>>) {
+            configure(rows: std::vector<std::map<std::string, int>>) { -> $Active(rows) }
+            get_at(idx: int, key: std::string): int {
+                @@:(idx < (int)rows.size() && rows[idx].count(key) ? rows[idx].at(key) : -1)
+            }
+        }
+    domain:
+        n : int = 0
+}
+
+int main() {
+    ListOfDict s1;
+    s1.configure(std::vector<std::map<std::string, int>>{
+        {{"x", 1}, {"y", 2}},
+        {{"z", 3}}
+    });
+    if (s1.get_at(0, "x") != 1) { std::cout << "FAIL pre" << std::endl; return 1; }
+    std::string snap = s1.save_state();
+    ListOfDict s2 = ListOfDict::restore_state(snap);
+    if (s2.get_at(0, "x") != 1) { std::cout << "FAIL post 0.x" << std::endl; return 1; }
+    if (s2.get_at(0, "y") != 2) { std::cout << "FAIL post 0.y" << std::endl; return 1; }
+    if (s2.get_at(1, "z") != 3) { std::cout << "FAIL post 1.z" << std::endl; return 1; }
+    std::cout << "PASS: 80_list_of_dict_state_arg" << std::endl;
+    return 0;
+}

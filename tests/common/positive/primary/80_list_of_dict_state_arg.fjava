@@ -1,0 +1,45 @@
+@@target java
+
+import java.util.Map;
+import java.util.HashMap;
+import java.util.List;
+import java.util.ArrayList;
+
+@@persist
+@@system ListOfDict {
+    interface:
+        configure(rows: java.util.List<java.util.Map<String, Integer>>)
+        get_at(idx: int, key: String): int
+
+    machine:
+        $Idle {
+            configure(rows: java.util.List<java.util.Map<String, Integer>>) { -> $Active(rows) }
+            get_at(idx: int, key: String): int { @@:(-1) }
+        }
+        $Active(rows: java.util.List<java.util.Map<String, Integer>>) {
+            configure(rows: java.util.List<java.util.Map<String, Integer>>) { -> $Active(rows) }
+            get_at(idx: int, key: String): int {
+                @@:(idx < rows.size() ? ((Integer)((java.util.Map)rows.get(idx)).getOrDefault(key, -1)) : -1)
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        ListOfDict s1 = new ListOfDict();
+        List<Map<String, Integer>> rows = new ArrayList<>();
+        Map<String, Integer> r1 = new HashMap<>(); r1.put("x", 1); r1.put("y", 2);
+        Map<String, Integer> r2 = new HashMap<>(); r2.put("z", 3);
+        rows.add(r1); rows.add(r2);
+        s1.configure(rows);
+        if (s1.get_at(0, "x") != 1) { System.out.println("FAIL pre"); System.exit(1); }
+        String snap = s1.save_state();
+        ListOfDict s2 = ListOfDict.restore_state(snap);
+        if (s2.get_at(0, "x") != 1) { System.out.println("FAIL post 0.x got " + s2.get_at(0, "x")); System.exit(1); }
+        if (s2.get_at(0, "y") != 2) { System.out.println("FAIL post 0.y"); System.exit(1); }
+        if (s2.get_at(1, "z") != 3) { System.out.println("FAIL post 1.z"); System.exit(1); }
+        System.out.println("PASS: 80_list_of_dict_state_arg");
+    }
+}

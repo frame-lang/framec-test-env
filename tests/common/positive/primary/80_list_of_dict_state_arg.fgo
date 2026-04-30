@@ -1,0 +1,50 @@
+@@target go
+
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "os"
+)
+
+var _ = json.Marshal
+
+@@persist
+@@system ListOfDict {
+    interface:
+        Configure(rows: []map[string]int)
+        GetAt(idx: int, key: string): int
+
+    machine:
+        $Idle {
+            Configure(rows: []map[string]int) { -> $Active(rows) }
+            GetAt(idx: int, key: string): int { @@:(-1); return; }
+        }
+        $Active(rows: []map[string]int) {
+            Configure(rows: []map[string]int) { -> $Active(rows) }
+            GetAt(idx: int, key: string): int {
+                if idx < len(rows) {
+                    if v, ok := rows[idx][key]; ok { @@:(v); return }
+                }
+                @@:(-1); return;
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+func main() {
+    s1 := NewListOfDict()
+    s1.Configure([]map[string]int{
+        {"x": 1, "y": 2},
+        {"z": 3},
+    })
+    if s1.GetAt(0, "x") != 1 { fmt.Println("FAIL pre"); os.Exit(1) }
+    snap := s1.SaveState()
+    s2 := RestoreListOfDict(snap)
+    if s2.GetAt(0, "x") != 1 { fmt.Println("FAIL post 0.x got", s2.GetAt(0, "x")); os.Exit(1) }
+    if s2.GetAt(0, "y") != 2 { fmt.Println("FAIL post 0.y"); os.Exit(1) }
+    if s2.GetAt(1, "z") != 3 { fmt.Println("FAIL post 1.z"); os.Exit(1) }
+    fmt.Println("PASS: 80_list_of_dict_state_arg")
+}

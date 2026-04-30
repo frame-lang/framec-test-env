@@ -1,0 +1,34 @@
+@@target kotlin
+
+@@persist
+@@system NestedDict {
+    interface:
+        configure(m: Map<String, Map<String, Int>>)
+        get_inner(outer_key: String, inner_key: String): Int
+
+    machine:
+        $Idle {
+            configure(m: Map<String, Map<String, Int>>) { -> $Active(m) }
+            get_inner(outer_key: String, inner_key: String): Int { @@:(-1) }
+        }
+        $Active(m: Map<String, Map<String, Int>>) {
+            configure(m: Map<String, Map<String, Int>>) { -> $Active(m) }
+            get_inner(outer_key: String, inner_key: String): Int {
+                @@:(((m[outer_key] as? Map<String, Any?>)?.get(inner_key) as? Number)?.toInt() ?: -1)
+            }
+        }
+    domain:
+        n : Int = 0
+}
+
+fun main() {
+    val s1 = NestedDict()
+    s1.configure(mapOf("u" to mapOf("x" to 1, "y" to 2), "v" to mapOf("z" to 3)))
+    if (s1.get_inner("u", "x") != 1) { println("FAIL pre"); kotlin.system.exitProcess(1) }
+    val snap = s1.save_state()
+    val s2 = NestedDict.restore_state(snap)
+    if (s2.get_inner("u", "x") != 1) { println("FAIL post u.x got ${s2.get_inner("u", "x")}"); kotlin.system.exitProcess(1) }
+    if (s2.get_inner("u", "y") != 2) { println("FAIL post u.y"); kotlin.system.exitProcess(1) }
+    if (s2.get_inner("v", "z") != 3) { println("FAIL post v.z"); kotlin.system.exitProcess(1) }
+    println("PASS: 78_nested_dict_state_arg")
+}

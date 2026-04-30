@@ -1,0 +1,51 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system DictStateArg {
+    interface:
+        configure(m: dict)
+        get_v(key: char*): int
+        size(): int
+
+    machine:
+        $Idle {
+            configure(m: dict) { -> $Active(m) }
+            get_v(key: char*): int { @@:(-1) }
+            size(): int { @@:(0) }
+        }
+        $Active(m: dict) {
+            configure(m: dict) { -> $Active(m) }
+            get_v(key: char*): int {
+                @@:((int)(intptr_t)DictStateArg_FrameDict_get(m, key))
+            }
+            size(): int {
+                @@:(m->size)
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+int main(void) {
+    DictStateArg* s = DictStateArg_new();
+    if (DictStateArg_get_v(s, "a") != 0 && DictStateArg_get_v(s, "a") != -1) { printf("FAIL idle %d\n", DictStateArg_get_v(s, "a")); return 1; }
+    if (DictStateArg_size(s) != 0) { printf("FAIL idle size\n"); return 1; }
+    DictStateArg_FrameDict* d1 = DictStateArg_FrameDict_new();
+    DictStateArg_FrameDict_set(d1, "a", (void*)(intptr_t)10);
+    DictStateArg_FrameDict_set(d1, "b", (void*)(intptr_t)20);
+    DictStateArg_configure(s, d1);
+    if (DictStateArg_get_v(s, "a") != 10) { printf("FAIL a\n"); return 1; }
+    if (DictStateArg_get_v(s, "b") != 20) { printf("FAIL b\n"); return 1; }
+    if (DictStateArg_size(s) != 2) { printf("FAIL size\n"); return 1; }
+    DictStateArg_FrameDict* d2 = DictStateArg_FrameDict_new();
+    DictStateArg_FrameDict_set(d2, "x", (void*)(intptr_t)99);
+    DictStateArg_configure(s, d2);
+    if (DictStateArg_get_v(s, "x") != 99) { printf("FAIL x\n"); return 1; }
+    if (DictStateArg_size(s) != 1) { printf("FAIL size2\n"); return 1; }
+    printf("PASS: 76_dict_state_arg\n");
+    DictStateArg_destroy(s);
+    return 0;
+}

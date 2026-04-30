@@ -1,0 +1,36 @@
+@@target rust
+
+use std::collections::HashMap;
+
+@@persist
+@@system PersistDict {
+    interface:
+        configure(m: HashMap<String, i32>)
+        get_v(key: String): i32
+
+    machine:
+        $Idle {
+            configure(m: HashMap<String, i32>) { -> $Active(m) }
+            get_v(key: String): i32 { @@:(-1); return; }
+        }
+        $Active(m: HashMap<String, i32>) {
+            configure(m: HashMap<String, i32>) { -> $Active(m) }
+            get_v(key: String): i32 { @@:(*m.get(&key).unwrap_or(&-1)); return; }
+        }
+    domain:
+        n: i32
+}
+
+fn main() {
+    let mut s1 = @@PersistDict();
+    let mut m = HashMap::new();
+    m.insert("a".to_string(), 10);
+    m.insert("b".to_string(), 20);
+    s1.configure(m);
+    if s1.get_v("a".to_string()) != 10 { println!("FAIL pre"); std::process::exit(1); }
+    let snap = s1.save_state();
+    let mut s2 = PersistDict::restore_state(&snap);
+    if s2.get_v("a".to_string()) != 10 { println!("FAIL post a"); std::process::exit(1); }
+    if s2.get_v("b".to_string()) != 20 { println!("FAIL post b"); std::process::exit(1); }
+    println!("PASS: 77_persist_dict_state_arg");
+}

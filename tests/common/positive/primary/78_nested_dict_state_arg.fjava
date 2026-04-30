@@ -1,0 +1,43 @@
+@@target java
+
+import java.util.Map;
+import java.util.HashMap;
+
+@@persist
+@@system NestedDict {
+    interface:
+        configure(m: java.util.Map<String, java.util.Map<String, Integer>>)
+        get_inner(outer_key: String, inner_key: String): int
+
+    machine:
+        $Idle {
+            configure(m: java.util.Map<String, java.util.Map<String, Integer>>) { -> $Active(m) }
+            get_inner(outer_key: String, inner_key: String): int { @@:(-1) }
+        }
+        $Active(m: java.util.Map<String, java.util.Map<String, Integer>>) {
+            configure(m: java.util.Map<String, java.util.Map<String, Integer>>) { -> $Active(m) }
+            get_inner(outer_key: String, inner_key: String): int {
+                @@:(((Integer)((java.util.Map<String, Integer>)m.getOrDefault(outer_key, new java.util.HashMap<>())).getOrDefault(inner_key, -1)))
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        NestedDict s1 = new NestedDict();
+        Map<String, Map<String, Integer>> m = new HashMap<>();
+        Map<String, Integer> u = new HashMap<>(); u.put("x", 1); u.put("y", 2);
+        Map<String, Integer> v = new HashMap<>(); v.put("z", 3);
+        m.put("u", u); m.put("v", v);
+        s1.configure(m);
+        if (s1.get_inner("u", "x") != 1) { System.out.println("FAIL pre"); System.exit(1); }
+        String snap = s1.save_state();
+        NestedDict s2 = NestedDict.restore_state(snap);
+        if (s2.get_inner("u", "x") != 1) { System.out.println("FAIL post u.x got " + s2.get_inner("u", "x")); System.exit(1); }
+        if (s2.get_inner("u", "y") != 2) { System.out.println("FAIL post u.y"); System.exit(1); }
+        if (s2.get_inner("v", "z") != 3) { System.out.println("FAIL post v.z"); System.exit(1); }
+        System.out.println("PASS: 78_nested_dict_state_arg");
+    }
+}
