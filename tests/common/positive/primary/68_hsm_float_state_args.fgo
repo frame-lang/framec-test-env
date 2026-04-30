@@ -1,0 +1,54 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"math"
+	"os"
+)
+
+@@system FloatStateArg {
+    interface:
+        Configure(rate: float)
+        Scale(v: float): float
+
+    machine:
+        $Idle {
+            Configure(rate: float64) {
+                -> $Active(rate)
+            }
+            Scale(v: float64): float64 {
+                @@:(v)
+                return;
+            }
+        }
+
+        $Active => $Frame(rate: float64) {
+            Configure(rate: float64) {
+                -> $Active(rate)
+            }
+            Scale(v: float64): float64 {
+                => $^
+            }
+        }
+
+        $Frame {
+            Scale(v: float64): float64 {
+                @@:(v * rate)
+                return;
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+func main() {
+    s := NewFloatStateArg()
+    if math.Abs(s.Scale(2.0) - 2.0) > 1e-9 { fmt.Println("FAIL idle"); os.Exit(1) }
+    s.Configure(0.5)
+    if math.Abs(s.Scale(10.0) - 5.0) > 1e-9 { fmt.Println("FAIL 0.5"); os.Exit(1) }
+    s.Configure(2.5)
+    if math.Abs(s.Scale(4.0) - 10.0) > 1e-9 { fmt.Println("FAIL 2.5"); os.Exit(1) }
+    fmt.Println("PASS: 68_hsm_float_state_args")
+}

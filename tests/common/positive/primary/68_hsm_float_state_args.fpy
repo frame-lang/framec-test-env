@@ -1,0 +1,52 @@
+@@target python_3
+
+# Test 68: HSM cascade × state-args of type float.
+# Companion to tests 65 (int), 66 (str), 67 (bool) — exercises the
+# typed state-arg prefetch path for float state-args.
+
+@@system FloatStateArg {
+    interface:
+        configure(rate: float)
+        scale(v: float): float
+
+    machine:
+        $Idle {
+            configure(rate: float) {
+                -> $Active(rate)
+            }
+            scale(v: float): float {
+                @@:(v)
+                return
+            }
+        }
+
+        $Active => $Frame(rate: float) {
+            configure(rate: float) {
+                -> $Active(rate)
+            }
+            scale(v: float): float {
+                => $^
+            }
+        }
+
+        $Frame {
+            scale(v: float): float {
+                @@:(v * rate)
+                return
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+def main():
+    s = @@FloatStateArg()
+    assert s.scale(2.0) == 2.0
+    s.configure(0.5)
+    assert abs(s.scale(10.0) - 5.0) < 1e-9
+    s.configure(2.5)
+    assert abs(s.scale(4.0) - 10.0) < 1e-9
+    print("PASS: 68_hsm_float_state_args")
+
+if __name__ == '__main__':
+    main()
