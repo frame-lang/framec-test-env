@@ -342,14 +342,13 @@ of HSM × state-args would benefit from the wave 3 axis being closed.
 - Error: `error: assigning a property to itself | self.n = self.n`
 - Suspected codegen path: not framec — Swift compiler rejects literal
   self-assignment by default.
-- Status: needs-review
-- Notes: This is a corpus issue, not a codegen bug. The test case
-  evaluates `self.n = self.n` (a semantic no-op) at depth-1; 16 of 17
-  backends accept it (it's a no-op assignment), Swift's compiler
-  rejects it explicitly. Suggested fix: drop the receiver=LHS-target
-  combinations from `enumerate_cases` since they don't exercise any
-  codegen path the receiver=other-target combinations don't. Cleanest
-  is to filter in `gen_perm.py:enumerate_cases` rather than per-lang.
+- Status: **resolved 2026-04-30** (gen_perm.py filter at
+  `_is_self_assign_d1` (L515-525) called from `enumerate_cases`
+  L538). Corpus drops `self.n = self.n` and `self.scache =
+  self.scache` depth-1 cases. Not a codegen defect — Swift
+  explicitly rejects literal self-assignment as a warning-promoted-
+  to-error; 16 backends accept it as a no-op. Filtering at corpus-
+  generation time is cleaner than per-lang acceptance.
 
 ---
 

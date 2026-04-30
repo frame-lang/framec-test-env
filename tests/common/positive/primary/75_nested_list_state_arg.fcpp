@@ -1,0 +1,42 @@
+@@target cpp
+
+#include <iostream>
+#include <vector>
+#include <string>
+#include <cstdlib>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system NestedList {
+    interface:
+        configure(rows: std::vector<std::vector<int>>)
+        first_first(): int
+        outer_size(): int
+
+    machine:
+        $Idle {
+            configure(rows: std::vector<std::vector<int>>) { -> $Active(rows) }
+            first_first(): int { @@:(-1) }
+            outer_size(): int { @@:(0) }
+        }
+        $Active(rows: std::vector<std::vector<int>>) {
+            configure(rows: std::vector<std::vector<int>>) { -> $Active(rows) }
+            first_first(): int { @@:(rows[0][0]) }
+            outer_size(): int { @@:((int)rows.size()) }
+        }
+    domain:
+        n : int = 0
+}
+
+int main() {
+    NestedList s1;
+    s1.configure(std::vector<std::vector<int>>{{10, 20}, {30, 40}});
+    if (s1.first_first() != 10) { std::cout << "FAIL pre" << std::endl; return 1; }
+    if (s1.outer_size() != 2) { std::cout << "FAIL size" << std::endl; return 1; }
+    std::string snap = s1.save_state();
+    NestedList s2 = NestedList::restore_state(snap);
+    if (s2.first_first() != 10) { std::cout << "FAIL post" << std::endl; return 1; }
+    if (s2.outer_size() != 2) { std::cout << "FAIL post size" << std::endl; return 1; }
+    std::cout << "PASS: 75_nested_list_state_arg" << std::endl;
+    return 0;
+}

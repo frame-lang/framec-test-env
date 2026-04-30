@@ -1,0 +1,45 @@
+@@target go
+
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "os"
+)
+
+var _ = json.Marshal
+
+@@persist
+@@system NestedList {
+    interface:
+        Configure(rows: [][]int)
+        FirstFirst(): int
+        OuterSize(): int
+
+    machine:
+        $Idle {
+            Configure(rows: [][]int) { -> $Active(rows) }
+            FirstFirst(): int { @@:(-1); return; }
+            OuterSize(): int { @@:(0); return; }
+        }
+        $Active(rows: [][]int) {
+            Configure(rows: [][]int) { -> $Active(rows) }
+            FirstFirst(): int { @@:(rows[0][0]); return; }
+            OuterSize(): int { @@:(len(rows)); return; }
+        }
+    domain:
+        n: int = 0
+}
+
+func main() {
+    s1 := NewNestedList()
+    s1.Configure([][]int{{10, 20}, {30, 40}})
+    if s1.FirstFirst() != 10 { fmt.Println("FAIL pre"); os.Exit(1) }
+    if s1.OuterSize() != 2 { fmt.Println("FAIL size"); os.Exit(1) }
+    snap := s1.SaveState()
+    s2 := RestoreNestedList(snap)
+    if s2.FirstFirst() != 10 { fmt.Println("FAIL post"); os.Exit(1) }
+    if s2.OuterSize() != 2 { fmt.Println("FAIL post size"); os.Exit(1) }
+    fmt.Println("PASS: 75_nested_list_state_arg")
+}
