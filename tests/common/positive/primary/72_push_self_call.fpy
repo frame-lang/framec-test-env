@@ -1,0 +1,59 @@
+@@target python_3
+
+# Test 72: push × @@:self re-entrant dispatch.
+# Phase 19 wave 4 × Phase 3. From a pushed Modal state, the `ping`
+# handler invokes `self.compute()` re-entrantly. Different states
+# define different `compute()` returns; the dispatch should route
+# to the active state's handler.
+
+@@system PushSelf {
+    interface:
+        enter_modal()
+        ping(): int
+        exit_modal()
+        compute(): int
+
+    machine:
+        $Idle {
+            enter_modal() {
+                push$
+                -> $Modal
+            }
+            ping(): int {
+                @@:(0)
+                return
+            }
+            compute(): int {
+                @@:(99)
+                return
+            }
+        }
+
+        $Modal {
+            ping(): int {
+                @@:(self.compute() + 1)
+                return
+            }
+            compute(): int {
+                @@:(10)
+                return
+            }
+            exit_modal() {
+                -> pop$
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+def main():
+    s = @@PushSelf()
+    assert s.ping() == 0, f"idle: {s.ping()}"
+    s.enter_modal()
+    assert s.ping() == 11, f"modal: {s.ping()}"
+    s.exit_modal()
+    assert s.ping() == 0, f"back: {s.ping()}"
+    print("PASS: 72_push_self_call")
+
+if __name__ == '__main__':
+    main()
