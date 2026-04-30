@@ -34,6 +34,50 @@ triage.
 
 ---
 
+## D7: Float/double state-args broke C and C++
+
+- Lang: c, cpp
+- Tier: matrix test 68
+- Case: `68_hsm_float_state_args.fc` / `.fcpp`
+- Tag: state-args, typed, float, c, cpp
+- Failure mode: C++ run (`std::bad_any_cast`); C run (truncated values)
+- Status: **fixed 2026-04-30** (framepiler 5b0934b)
+- Surfaced: 2026-04-30 during Phase 15 wave 3 float-typed test 68
+
+### Diagnosis
+
+D7a — C++. Interface signature emitted `float rate` because
+`emit_params` had its own ad-hoc type-mapping with no float row,
+while handler bodies cast via `std::any_cast<double>` (correctly
+via `cpp_map_type`). `std::any` stored a `float`, then `any_cast<double>`
+threw `bad_any_cast`.
+
+D7b — C. The runtime stores values as `void*` and round-trips via
+`(intptr_t)`. That works for ints up to pointer width but truncates
+doubles (`(intptr_t)(0.5)` = 0). Five emit sites all hardcoded
+`(intptr_t)`: interface method push, per-handler state-arg prefetch,
+per-handler event-param prefetch, transition state-args push, and
+state_param_types wasn't propagated into HandlerContext for the
+frame_expansion read site. The C runtime emits
+`Sys_pack_double` / `Sys_unpack_double` (memcpy bit-pun) but they
+were only used for return values.
+
+### Fix
+
+C++: `backends/cpp.rs::emit_params` and `map_type` now both route
+through the shared `cpp_map_type`. Single source of truth.
+
+C: New `c_extract(type_str, val_expr)` helper handles state-arg /
+event-param prefetch (str/float/pointer/int). `interface_gen.rs`
+push and `frame_expansion.rs` transition push branch on the declared
+type and use `Sys_pack_double` for floats. C per-handler
+`HandlerContext` now propagates `state_param_types` so
+frame_expansion sees them.
+
+Verified across 17 backends with matrix test 68.
+
+---
+
 ## D6: Erlang transition target atom captured by same-name param
 
 - Lang: erlang
