@@ -1,0 +1,78 @@
+@@target python_3
+
+# Test 64: Operations × HSM cascade × state-args
+#
+# Three intersecting axes that haven't been combined in a matrix test:
+#   - Operations (Phase 5) — system-level functions
+#   - HSM cascade (Phase 14)
+#   - State-args (Phase 15) — declared at parent, read by name in child
+#
+# Cross-product: a child handler calls an operation, passing a state-
+# arg cascaded from $Parent as the argument. Verifies operation
+# argument-passing through HSM scope.
+
+@@system OpHsmStateArgs {
+    operations:
+        add_offset(x: int, off: int): int {
+            return x + off
+        }
+
+    interface:
+        enter_active(t: int)
+        classify(v: int): int
+
+    machine:
+        $Idle {
+            enter_active(t: int) {
+                -> $Active(t)
+            }
+            classify(v: int): int {
+                @@:(-1)
+                return
+            }
+        }
+
+        $Active => $Frame(threshold: int) {
+            enter_active(t: int) {
+                -> $Active(t)
+            }
+            classify(v: int): int {
+                @@:(self.add_offset(v, threshold))
+                return
+            }
+        }
+
+        $Frame {
+        }
+    domain:
+        n: int = 0
+}
+
+def main():
+    print("=== Test 64: Operations × HSM × state-args ===")
+    s = @@OpHsmStateArgs()
+
+    pre = s.classify(5)
+    assert pre == -1, f"Expected -1 in Idle, got {pre}"
+    print(f"1. Idle classify(5) = {pre}")
+
+    # Enter $Active with threshold=10, classify reads cascaded state-arg
+    # and passes to add_offset operation: add_offset(5, 10) = 15.
+    s.enter_active(10)
+    r = s.classify(5)
+    assert r == 15, f"Expected 15 (add_offset(5, 10)), got {r}"
+    print(f"2. classify(5) with threshold=10 → {r}")
+
+    r2 = s.classify(7)
+    assert r2 == 17, f"Expected 17 (add_offset(7, 10)), got {r2}"
+    print(f"3. classify(7) with threshold=10 → {r2}")
+
+    s.enter_active(100)
+    r3 = s.classify(5)
+    assert r3 == 105, f"Expected 105, got {r3}"
+    print(f"4. classify(5) with threshold=100 → {r3}")
+
+    print("PASS: 64_operation_hsm_state_args")
+
+if __name__ == '__main__':
+    main()

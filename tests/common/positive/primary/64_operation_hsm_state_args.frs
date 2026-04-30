@@ -1,0 +1,64 @@
+@@target rust
+
+@@system OpHsmStateArgs {
+    operations:
+        add_offset(x: i32, off: i32): i32 {
+            return x + off;
+        }
+
+    interface:
+        enter_active(t: i32)
+        classify(v: i32): i32
+
+    machine:
+        $Idle {
+            enter_active(t: i32) {
+                -> $Active(t)
+            }
+            classify(v: i32): i32 {
+                @@:(-1)
+                return;
+            }
+        }
+
+        $Active => $Frame(threshold: i32) {
+            enter_active(t: i32) {
+                -> $Active(t)
+            }
+            classify(v: i32): i32 {
+                let r = self.add_offset(v, threshold);
+                @@:(r)
+                return;
+            }
+        }
+
+        $Frame {
+        }
+    domain:
+        n: i32
+}
+
+fn main() {
+    println!("=== Test 64: Operations × HSM × state-args (Rust) ===");
+    let mut s = @@OpHsmStateArgs();
+
+    let pre = s.classify(5);
+    if pre != -1 { println!("FAIL: pre {}", pre); std::process::exit(1); }
+    println!("1. Idle classify(5) = {}", pre);
+
+    s.enter_active(10);
+    let r = s.classify(5);
+    if r != 15 { println!("FAIL: r {}", r); std::process::exit(1); }
+    println!("2. classify(5) with threshold=10 -> {}", r);
+
+    let r2 = s.classify(7);
+    if r2 != 17 { println!("FAIL: r2 {}", r2); std::process::exit(1); }
+    println!("3. classify(7) with threshold=10 -> {}", r2);
+
+    s.enter_active(100);
+    let r3 = s.classify(5);
+    if r3 != 105 { println!("FAIL: r3 {}", r3); std::process::exit(1); }
+    println!("4. classify(5) with threshold=100 -> {}", r3);
+
+    println!("PASS: 64_operation_hsm_state_args");
+}
