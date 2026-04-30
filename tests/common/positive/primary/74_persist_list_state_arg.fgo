@@ -1,0 +1,49 @@
+@@target go
+
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "os"
+)
+
+var _ = json.Marshal
+
+@@persist
+@@system PersistList {
+    interface:
+        Configure(items: []int)
+        FirstItem(): int
+        Size(): int
+
+    machine:
+        $Idle {
+            Configure(items: []int) {
+                -> $Active(items)
+            }
+            FirstItem(): int { @@:(-1); return; }
+            Size(): int { @@:(0); return; }
+        }
+        $Active(items: []int) {
+            Configure(items: []int) {
+                -> $Active(items)
+            }
+            FirstItem(): int { @@:(items[0]); return; }
+            Size(): int { @@:(len(items)); return; }
+        }
+    domain:
+        n: int = 0
+}
+
+func main() {
+    s1 := NewPersistList()
+    s1.Configure([]int{10, 20, 30})
+    if s1.FirstItem() != 10 { fmt.Println("FAIL pre"); os.Exit(1) }
+    snap := s1.SaveState()
+
+    s2 := RestorePersistList(snap)
+    if s2.FirstItem() != 10 { fmt.Println("FAIL restored first_item"); os.Exit(1) }
+    if s2.Size() != 3 { fmt.Println("FAIL restored size"); os.Exit(1) }
+    fmt.Println("PASS: 74_persist_list_state_arg")
+}

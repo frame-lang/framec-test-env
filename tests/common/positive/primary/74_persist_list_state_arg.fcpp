@@ -1,0 +1,46 @@
+@@target cpp
+
+#include <iostream>
+#include <vector>
+#include <string>
+#include <cstdlib>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system PersistList {
+    interface:
+        configure(items: std::vector<int>)
+        first_item(): int
+        size(): int
+
+    machine:
+        $Idle {
+            configure(items: std::vector<int>) {
+                -> $Active(items)
+            }
+            first_item(): int { @@:(-1) }
+            size(): int { @@:(0) }
+        }
+        $Active(items: std::vector<int>) {
+            configure(items: std::vector<int>) {
+                -> $Active(items)
+            }
+            first_item(): int { @@:(items[0]) }
+            size(): int { @@:((int)items.size()) }
+        }
+    domain:
+        n : int = 0
+}
+
+int main() {
+    PersistList s1;
+    s1.configure(std::vector<int>{10, 20, 30});
+    if (s1.first_item() != 10) { std::cout << "FAIL pre" << std::endl; return 1; }
+    std::string snap = s1.save_state();
+
+    PersistList s2 = PersistList::restore_state(snap);
+    if (s2.first_item() != 10) { std::cout << "FAIL restored first_item" << std::endl; return 1; }
+    if (s2.size() != 3) { std::cout << "FAIL restored size" << std::endl; return 1; }
+    std::cout << "PASS: 74_persist_list_state_arg" << std::endl;
+    return 0;
+}
