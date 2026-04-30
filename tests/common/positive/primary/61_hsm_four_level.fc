@@ -1,0 +1,79 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system HsmFourLevel {
+    interface:
+        drive(): int
+        write_at_level(level: int)
+        get_n(): int
+
+    machine:
+        $Leaf => $Mid {
+            drive(): int {
+                => $^
+            }
+            write_at_level(level: int) {
+                self->n = self->n + level * 1;
+                => $^
+            }
+            get_n(): int {
+                @@:(self->n)
+            }
+        }
+
+        $Mid => $Branch {
+            drive(): int {
+                => $^
+            }
+            write_at_level(level: int) {
+                self->n = self->n + level * 10;
+                => $^
+            }
+        }
+
+        $Branch => $Root {
+            drive(): int {
+                => $^
+            }
+            write_at_level(level: int) {
+                self->n = self->n + level * 100;
+                => $^
+            }
+        }
+
+        $Root {
+            drive(): int {
+                @@:(self->n)
+            }
+            write_at_level(level: int) {
+                self->n = self->n + level * 1000;
+            }
+        }
+    domain:
+        n : int = 0
+}
+
+int main(void) {
+    printf("=== Test 61: 4-level HSM cascade (C) ===\n");
+    HsmFourLevel* s = HsmFourLevel_new();
+
+    int initial = HsmFourLevel_drive(s);
+    if (initial != 0) { printf("FAIL: initial %d\n", initial); return 1; }
+    printf("1. Initial drive returned %d\n", initial);
+
+    HsmFourLevel_write_at_level(s, 2);
+    int after = HsmFourLevel_get_n(s);
+    if (after != 2222) { printf("FAIL: after %d\n", after); return 1; }
+    printf("2. After cascading write: n=%d\n", after);
+
+    int final_val = HsmFourLevel_drive(s);
+    if (final_val != 2222) { printf("FAIL: final %d\n", final_val); return 1; }
+    printf("3. Drive after write returned %d\n", final_val);
+
+    printf("PASS: 61_hsm_four_level\n");
+    HsmFourLevel_destroy(s);
+    return 0;
+}

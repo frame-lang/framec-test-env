@@ -1,0 +1,94 @@
+@@target python_3
+
+# Test 61: 4-level HSM cascade
+#
+# Phase 14 wave 2. Wave 1 maxed at 3-level HSM (p10 grandparent /
+# parent / child). This tests one level deeper:
+#   $Leaf => $Mid => $Branch => $Root
+#
+# The leaf forwards twice through Mid + Branch up to Root, which
+# handles. Tests:
+#   - Kernel descent works at 4-level depth.
+#   - Each intermediate level's `=> $^` correctly forwards.
+#   - Domain reads/writes from each level land on the same domain.
+
+@@system HsmFourLevel {
+    interface:
+        drive(): int
+        write_at_level(level: int)
+        get_n(): int
+
+    machine:
+        $Leaf => $Mid {
+            drive(): int {
+                => $^
+            }
+            write_at_level(level: int) {
+                self.n = self.n + level * 1
+                => $^
+            }
+            get_n(): int {
+                @@:(self.n)
+                return
+            }
+        }
+
+        $Mid => $Branch {
+            drive(): int {
+                => $^
+            }
+            write_at_level(level: int) {
+                self.n = self.n + level * 10
+                => $^
+            }
+        }
+
+        $Branch => $Root {
+            drive(): int {
+                => $^
+            }
+            write_at_level(level: int) {
+                self.n = self.n + level * 100
+                => $^
+            }
+        }
+
+        $Root {
+            drive(): int {
+                @@:(self.n)
+                return
+            }
+            write_at_level(level: int) {
+                self.n = self.n + level * 1000
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+def main():
+    print("=== Test 61: 4-level HSM cascade ===")
+    s = @@HsmFourLevel()
+
+    # drive() forwards Leaf → Mid → Branch → Root and returns Root's n
+    initial = s.drive()
+    assert initial == 0, f"Expected 0 from initial drive, got {initial}"
+    print(f"1. Initial drive returned {initial}")
+
+    # write_at_level(2) cascades through every level. Each level adds
+    # level * 10^depth where depth = leaf=0, mid=1, branch=2, root=3.
+    # So 2*1 + 2*10 + 2*100 + 2*1000 = 2222
+    s.write_at_level(2)
+    after_write = s.get_n()
+    assert after_write == 2222, f"Expected 2222 after cascading write, got {after_write}"
+    print(f"2. After cascading write: n={after_write}")
+
+    # drive again, now Root sees n = 2222
+    final = s.drive()
+    assert final == 2222, f"Expected 2222 after write+drive, got {final}"
+    print(f"3. Drive after write returned {final}")
+
+    print("PASS: 61_hsm_four_level")
+
+if __name__ == '__main__':
+    main()

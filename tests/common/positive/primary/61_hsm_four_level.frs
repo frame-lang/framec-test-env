@@ -1,0 +1,75 @@
+@@target rust
+
+@@system HsmFourLevel {
+    interface:
+        drive(): i32
+        write_at_level(level: i32)
+        get_n(): i32
+
+    machine:
+        $Leaf => $Mid {
+            drive(): i32 {
+                => $^
+            }
+            write_at_level(level: i32) {
+                self.n = self.n + level * 1;
+                => $^
+            }
+            get_n(): i32 {
+                @@:(self.n)
+                return;
+            }
+        }
+
+        $Mid => $Branch {
+            drive(): i32 {
+                => $^
+            }
+            write_at_level(level: i32) {
+                self.n = self.n + level * 10;
+                => $^
+            }
+        }
+
+        $Branch => $Root {
+            drive(): i32 {
+                => $^
+            }
+            write_at_level(level: i32) {
+                self.n = self.n + level * 100;
+                => $^
+            }
+        }
+
+        $Root {
+            drive(): i32 {
+                @@:(self.n)
+                return;
+            }
+            write_at_level(level: i32) {
+                self.n = self.n + level * 1000;
+            }
+        }
+    domain:
+        n: i32
+}
+
+fn main() {
+    println!("=== Test 61: 4-level HSM cascade (Rust) ===");
+    let mut s = @@HsmFourLevel();
+
+    let initial = s.drive();
+    if initial != 0 { println!("FAIL: initial {}", initial); std::process::exit(1); }
+    println!("1. Initial drive returned {}", initial);
+
+    s.write_at_level(2);
+    let after = s.get_n();
+    if after != 2222 { println!("FAIL: after {}", after); std::process::exit(1); }
+    println!("2. After cascading write: n={}", after);
+
+    let final_val = s.drive();
+    if final_val != 2222 { println!("FAIL: final {}", final_val); std::process::exit(1); }
+    println!("3. Drive after write returned {}", final_val);
+
+    println!("PASS: 61_hsm_four_level");
+}
