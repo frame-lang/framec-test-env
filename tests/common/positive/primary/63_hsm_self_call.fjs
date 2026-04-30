@@ -1,0 +1,51 @@
+@@target javascript
+
+@@system HsmSelfCall {
+    interface:
+        drive_via_child(): int
+        compute(): int
+        get_trace(): str
+
+    machine:
+        $Child => $Parent {
+            drive_via_child(): number {
+                this.trace = this.trace + "child:before;"
+                @@:self.compute()
+                this.trace = this.trace + "child:after;"
+                @@:(this.scratch)
+                return
+            }
+            compute(): number {
+                this.trace = this.trace + "compute@child;"
+                => $^
+            }
+            get_trace(): string {
+                @@:(this.trace)
+                return
+            }
+        }
+
+        $Parent {
+            compute(): number {
+                this.trace = this.trace + "compute@parent;"
+                this.scratch = 42
+                @@:(42)
+                return
+            }
+        }
+    domain:
+        trace: string = ""
+        scratch: number = 0
+}
+
+console.log("=== Test 63: HSM cascade × @@:self (JS) ===");
+const s = new HsmSelfCall();
+const r = s.drive_via_child();
+const trace = s.get_trace();
+console.log(`1. drive_via_child returned ${r}, trace=${trace}`);
+
+const expected = "child:before;compute@child;compute@parent;child:after;";
+if (trace !== expected) { console.log(`FAIL: trace mismatch got '${trace}'`); process.exit(1); }
+if (r !== 42) { console.log(`FAIL: r=${r}`); process.exit(1); }
+
+console.log("PASS: 63_hsm_self_call");

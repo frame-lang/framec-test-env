@@ -1,0 +1,53 @@
+@@target rust
+
+@@system HsmSelfCall {
+    interface:
+        drive_via_child(): i32
+        compute(): i32
+        get_trace(): String
+
+    machine:
+        $Child => $Parent {
+            drive_via_child(): i32 {
+                self.trace = self.trace.clone() + "child:before;";
+                @@:self.compute()
+                self.trace = self.trace.clone() + "child:after;";
+                @@:(self.scratch)
+                return;
+            }
+            compute(): i32 {
+                self.trace = self.trace.clone() + "compute@child;";
+                => $^
+            }
+            get_trace(): String {
+                @@:(self.trace.clone())
+                return;
+            }
+        }
+
+        $Parent {
+            compute(): i32 {
+                self.trace = self.trace.clone() + "compute@parent;";
+                self.scratch = 42;
+                @@:(42)
+                return;
+            }
+        }
+    domain:
+        trace: String
+        scratch: i32
+}
+
+fn main() {
+    println!("=== Test 63: HSM cascade × @@:self (Rust) ===");
+    let mut s = @@HsmSelfCall();
+    let r = s.drive_via_child();
+    let trace = s.get_trace();
+    println!("1. drive_via_child returned {}, trace={}", r, trace);
+
+    let expected = "child:before;compute@child;compute@parent;child:after;";
+    if trace != expected { println!("FAIL: trace={}", trace); std::process::exit(1); }
+    if r != 42 { println!("FAIL: r={}", r); std::process::exit(1); }
+
+    println!("PASS: 63_hsm_self_call");
+}

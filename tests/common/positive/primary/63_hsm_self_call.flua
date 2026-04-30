@@ -1,0 +1,51 @@
+@@target lua
+
+@@system HsmSelfCall {
+    interface:
+        drive_via_child(): int
+        compute(): int
+        get_trace(): str
+
+    machine:
+        $Child => $Parent {
+            drive_via_child(): int {
+                self.trace = self.trace .. "child:before;"
+                @@:self.compute()
+                self.trace = self.trace .. "child:after;"
+                @@:(self.scratch)
+                return
+            }
+            compute(): int {
+                self.trace = self.trace .. "compute@child;"
+                => $^
+            }
+            get_trace(): str {
+                @@:(self.trace)
+                return
+            }
+        }
+
+        $Parent {
+            compute(): int {
+                self.trace = self.trace .. "compute@parent;"
+                self.scratch = 42
+                @@:(42)
+                return
+            }
+        }
+    domain:
+        trace: str = ""
+        scratch: int = 0
+}
+
+print("=== Test 63: HSM cascade × @@:self (Lua) ===")
+local s = HsmSelfCall.new()
+local r = s:drive_via_child()
+local trace = s:get_trace()
+print("1. drive_via_child returned " .. tostring(r) .. ", trace=" .. tostring(trace))
+
+local expected = "child:before;compute@child;compute@parent;child:after;"
+if trace ~= expected then error("trace mismatch: " .. tostring(trace)) end
+if r ~= 42 then error("r=" .. tostring(r)) end
+
+print("PASS: 63_hsm_self_call")

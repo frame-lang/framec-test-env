@@ -1,0 +1,56 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system HsmSelfCall {
+    interface:
+        drive_via_child(): int
+        compute(): int
+        get_trace_bits(): int
+
+    machine:
+        $Child => $Parent {
+            drive_via_child(): int {
+                self->trace = self->trace | 0x01;
+                @@:self.compute();
+                self->trace = self->trace | 0x02;
+                @@:(self->scratch)
+            }
+            compute(): int {
+                self->trace = self->trace | 0x04;
+                => $^
+            }
+            get_trace_bits(): int {
+                @@:(self->trace)
+            }
+        }
+
+        $Parent {
+            compute(): int {
+                self->trace = self->trace | 0x08;
+                self->scratch = 42;
+                @@:(42)
+            }
+        }
+    domain:
+        trace : int = 0
+        scratch : int = 0
+}
+
+int main(void) {
+    printf("=== Test 63: HSM cascade × @@:self (C) ===\n");
+    HsmSelfCall* s = HsmSelfCall_new();
+    int r = HsmSelfCall_drive_via_child(s);
+    int trace = HsmSelfCall_get_trace_bits(s);
+    printf("1. drive_via_child returned %d, trace=0x%x\n", r, trace);
+
+    /* Bits: child:before(0x01) | compute@child(0x04) | compute@parent(0x08) | child:after(0x02) = 0x0F */
+    if (trace != 0x0F) { printf("FAIL: trace=0x%x\n", trace); return 1; }
+    if (r != 42) { printf("FAIL: r=%d\n", r); return 1; }
+
+    printf("PASS: 63_hsm_self_call\n");
+    HsmSelfCall_destroy(s);
+    return 0;
+}

@@ -1,0 +1,54 @@
+@@target csharp
+
+using System;
+
+@@system HsmSelfCall {
+    interface:
+        drive_via_child(): int
+        compute(): int
+        get_trace(): str
+
+    machine:
+        $Child => $Parent {
+            drive_via_child(): int {
+                trace = trace + "child:before;";
+                @@:self.compute()
+                trace = trace + "child:after;";
+                @@:(scratch)
+            }
+            compute(): int {
+                trace = trace + "compute@child;";
+                => $^
+            }
+            get_trace(): string {
+                @@:(trace)
+            }
+        }
+
+        $Parent {
+            compute(): int {
+                trace = trace + "compute@parent;";
+                scratch = 42;
+                @@:(42)
+            }
+        }
+    domain:
+        trace : string = ""
+        scratch : int = 0
+}
+
+class Program {
+    static void Main(string[] args) {
+        Console.WriteLine("=== Test 63: HSM cascade × @@:self (C#) ===");
+        var s = new HsmSelfCall();
+        int r = s.drive_via_child();
+        string trace = s.get_trace();
+        Console.WriteLine($"1. drive_via_child returned {r}, trace={trace}");
+
+        string expected = "child:before;compute@child;compute@parent;child:after;";
+        if (trace != expected) { Console.WriteLine($"FAIL: trace={trace}"); Environment.Exit(1); }
+        if (r != 42) { Console.WriteLine($"FAIL: r={r}"); Environment.Exit(1); }
+
+        Console.WriteLine("PASS: 63_hsm_self_call");
+    }
+}

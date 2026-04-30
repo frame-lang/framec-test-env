@@ -1,0 +1,55 @@
+@@target dart
+
+import 'dart:io';
+
+@@system HsmSelfCall {
+    interface:
+        drive_via_child(): int
+        compute(): int
+        get_trace(): str
+
+    machine:
+        $Child => $Parent {
+            drive_via_child(): int {
+                this.trace = this.trace + "child:before;";
+                @@:self.compute()
+                this.trace = this.trace + "child:after;";
+                @@:(this.scratch)
+                return;
+            }
+            compute(): int {
+                this.trace = this.trace + "compute@child;";
+                => $^
+            }
+            get_trace(): String {
+                @@:(this.trace)
+                return;
+            }
+        }
+
+        $Parent {
+            compute(): int {
+                this.trace = this.trace + "compute@parent;";
+                this.scratch = 42;
+                @@:(42)
+                return;
+            }
+        }
+    domain:
+        trace: String = ""
+        scratch: int = 0
+}
+
+void main() {
+    print("=== Test 63: HSM cascade × @@:self (Dart) ===");
+    final s = HsmSelfCall();
+    final r = s.drive_via_child();
+    final trace = s.get_trace();
+    print("1. drive_via_child returned $r, trace=$trace");
+
+    const expected = "child:before;compute@child;compute@parent;child:after;";
+    if (trace != expected) { print("FAIL: trace=$trace"); exit(1); }
+    if (r != 42) { print("FAIL: r=$r"); exit(1); }
+
+    print("PASS: 63_hsm_self_call");
+}

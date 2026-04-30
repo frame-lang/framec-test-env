@@ -1,0 +1,51 @@
+@@target ruby
+
+@@system HsmSelfCall {
+    interface:
+        drive_via_child(): int
+        compute(): int
+        get_trace(): str
+
+    machine:
+        $Child => $Parent {
+            drive_via_child(): int {
+                self.trace = self.trace + "child:before;"
+                @@:self.compute()
+                self.trace = self.trace + "child:after;"
+                @@:(self.scratch)
+                return
+            }
+            compute(): int {
+                self.trace = self.trace + "compute@child;"
+                => $^
+            }
+            get_trace(): str {
+                @@:(self.trace)
+                return
+            }
+        }
+
+        $Parent {
+            compute(): int {
+                self.trace = self.trace + "compute@parent;"
+                self.scratch = 42
+                @@:(42)
+                return
+            }
+        }
+    domain:
+        trace: str = ""
+        scratch: int = 0
+}
+
+puts("=== Test 63: HSM cascade × @@:self (Ruby) ===")
+s = HsmSelfCall.new
+r = s.drive_via_child()
+trace = s.get_trace()
+puts("1. drive_via_child returned #{r}, trace=#{trace}")
+
+expected = "child:before;compute@child;compute@parent;child:after;"
+raise "trace mismatch: #{trace}" unless trace == expected
+raise "r=#{r}" unless r == 42
+
+puts("PASS: 63_hsm_self_call")

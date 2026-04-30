@@ -1,0 +1,50 @@
+@@target kotlin
+
+@@system HsmSelfCall {
+    interface:
+        drive_via_child(): int
+        compute(): int
+        get_trace(): str
+
+    machine:
+        $Child => $Parent {
+            drive_via_child(): int {
+                trace = trace + "child:before;"
+                @@:self.compute()
+                trace = trace + "child:after;"
+                @@:(scratch)
+            }
+            compute(): int {
+                trace = trace + "compute@child;"
+                => $^
+            }
+            get_trace(): String {
+                @@:(trace)
+            }
+        }
+
+        $Parent {
+            compute(): int {
+                trace = trace + "compute@parent;"
+                scratch = 42
+                @@:(42)
+            }
+        }
+    domain:
+        trace : String = ""
+        scratch : int = 0
+}
+
+fun main() {
+    println("=== Test 63: HSM cascade × @@:self (Kotlin) ===")
+    val s = HsmSelfCall()
+    val r = s.drive_via_child()
+    val trace = s.get_trace()
+    println("1. drive_via_child returned $r, trace=$trace")
+
+    val expected = "child:before;compute@child;compute@parent;child:after;"
+    if (trace != expected) { println("FAIL: trace=$trace"); kotlin.system.exitProcess(1) }
+    if (r != 42) { println("FAIL: r=$r"); kotlin.system.exitProcess(1) }
+
+    println("PASS: 63_hsm_self_call")
+}

@@ -1,0 +1,55 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cstdlib>
+
+@@system HsmSelfCall {
+    interface:
+        drive_via_child(): int
+        compute(): int
+        get_trace(): str
+
+    machine:
+        $Child => $Parent {
+            drive_via_child(): int {
+                this->trace = this->trace + "child:before;";
+                @@:self.compute()
+                this->trace = this->trace + "child:after;";
+                @@:(this->scratch)
+            }
+            compute(): int {
+                this->trace = this->trace + "compute@child;";
+                => $^
+            }
+            get_trace(): std::string {
+                @@:(this->trace)
+            }
+        }
+
+        $Parent {
+            compute(): int {
+                this->trace = this->trace + "compute@parent;";
+                this->scratch = 42;
+                @@:(42)
+            }
+        }
+    domain:
+        trace : std::string = ""
+        scratch : int = 0
+}
+
+int main() {
+    std::cout << "=== Test 63: HSM cascade × @@:self (C++) ===" << std::endl;
+    HsmSelfCall s;
+    int r = s.drive_via_child();
+    std::string trace = s.get_trace();
+    std::cout << "1. drive_via_child returned " << r << ", trace=" << trace << std::endl;
+
+    std::string expected = "child:before;compute@child;compute@parent;child:after;";
+    if (trace != expected) { std::cout << "FAIL: trace=" << trace << std::endl; return 1; }
+    if (r != 42) { std::cout << "FAIL: r=" << r << std::endl; return 1; }
+
+    std::cout << "PASS: 63_hsm_self_call" << std::endl;
+    return 0;
+}

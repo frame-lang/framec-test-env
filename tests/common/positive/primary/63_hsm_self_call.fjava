@@ -1,0 +1,52 @@
+@@target java
+
+@@system HsmSelfCall {
+    interface:
+        drive_via_child(): int
+        compute(): int
+        get_trace(): str
+
+    machine:
+        $Child => $Parent {
+            drive_via_child(): int {
+                trace = trace + "child:before;";
+                @@:self.compute()
+                trace = trace + "child:after;";
+                @@:(scratch)
+            }
+            compute(): int {
+                trace = trace + "compute@child;";
+                => $^
+            }
+            get_trace(): String {
+                @@:(trace)
+            }
+        }
+
+        $Parent {
+            compute(): int {
+                trace = trace + "compute@parent;";
+                scratch = 42;
+                @@:(42)
+            }
+        }
+    domain:
+        trace : String = ""
+        scratch : int = 0
+}
+
+class Main {
+    public static void main(String[] args) {
+        System.out.println("=== Test 63: HSM cascade × @@:self (Java) ===");
+        var s = new HsmSelfCall();
+        int r = s.drive_via_child();
+        String trace = s.get_trace();
+        System.out.println("1. drive_via_child returned " + r + ", trace=" + trace);
+
+        String expected = "child:before;compute@child;compute@parent;child:after;";
+        if (!trace.equals(expected)) { System.out.println("FAIL: trace=" + trace); System.exit(1); }
+        if (r != 42) { System.out.println("FAIL: r=" + r); System.exit(1); }
+
+        System.out.println("PASS: 63_hsm_self_call");
+    }
+}

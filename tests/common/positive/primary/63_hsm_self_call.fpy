@@ -1,0 +1,70 @@
+@@target python_3
+
+# Test 63: HSM cascade × @@:self re-entrant dispatch
+#
+# Combines two axes:
+#   - HSM cascade with explicit `=> $^` forward
+#   - @@:self re-entrant interface dispatch
+#
+# A handler in $Child fires `@@:self.compute()`. The dispatch hits
+# $Child's `compute` handler, which forwards to `$Parent.compute`
+# via `=> $^`. Tests that the @@:self re-entrant pathway correctly
+# threads through HSM forward chains.
+
+@@system HsmSelfCall {
+    interface:
+        drive_via_child(): int
+        compute(): int
+        get_trace(): str
+
+    machine:
+        $Child => $Parent {
+            drive_via_child(): int {
+                self.trace = self.trace + "child:before;"
+                @@:self.compute()
+                self.trace = self.trace + "child:after;"
+                @@:(self.scratch)
+                return
+            }
+            compute(): int {
+                self.trace = self.trace + "compute@child;"
+                => $^
+            }
+            get_trace(): str {
+                @@:(self.trace)
+                return
+            }
+        }
+
+        $Parent {
+            compute(): int {
+                self.trace = self.trace + "compute@parent;"
+                self.scratch = 42
+                @@:(42)
+                return
+            }
+        }
+    domain:
+        trace: str = ""
+        scratch: int = 0
+}
+
+def main():
+    print("=== Test 63: HSM cascade × @@:self ===")
+    s = @@HsmSelfCall()
+
+    # Initial state $Child. drive_via_child fires @@:self.compute().
+    # That dispatches to $Child.compute → forwards via `=> $^` →
+    # $Parent.compute → sets scratch=42, returns 42.
+    r = s.drive_via_child()
+    trace = s.get_trace()
+    print(f"1. drive_via_child returned {r}, trace={trace}")
+
+    expected_trace = "child:before;compute@child;compute@parent;child:after;"
+    assert trace == expected_trace, f"Expected {expected_trace}, got {trace}"
+    assert r == 42, f"Expected 42 from drive_via_child, got {r}"
+
+    print("PASS: 63_hsm_self_call")
+
+if __name__ == '__main__':
+    main()

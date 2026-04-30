@@ -1,0 +1,60 @@
+@@target go
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system HsmSelfCall {
+    interface:
+        DriveViaChild(): int
+        Compute(): int
+        GetTrace(): str
+
+    machine:
+        $Child => $Parent {
+            DriveViaChild(): int {
+                s.trace = s.trace + "child:before;"
+                @@:self.Compute()
+                s.trace = s.trace + "child:after;"
+                @@:(s.scratch)
+                return;
+            }
+            Compute(): int {
+                s.trace = s.trace + "compute@child;"
+                => $^
+            }
+            GetTrace(): string {
+                @@:(s.trace)
+                return;
+            }
+        }
+
+        $Parent {
+            Compute(): int {
+                s.trace = s.trace + "compute@parent;"
+                s.scratch = 42
+                @@:(42)
+                return;
+            }
+        }
+    domain:
+        trace: string = ""
+        scratch: int = 0
+}
+
+func main() {
+    fmt.Println("=== Test 63: HSM cascade × @@:self (Go) ===")
+    s := NewHsmSelfCall()
+    r := s.DriveViaChild()
+    trace := s.GetTrace()
+    fmt.Printf("1. drive_via_child returned %d, trace=%s\n", r, trace)
+
+    expected := "child:before;compute@child;compute@parent;child:after;"
+    if trace != expected { fmt.Printf("FAIL: trace=%s\n", trace); os.Exit(1) }
+    if r != 42 { fmt.Printf("FAIL: r=%d\n", r); os.Exit(1) }
+
+    fmt.Println("PASS: 63_hsm_self_call")
+}
