@@ -1,0 +1,71 @@
+@@target ruby
+
+require 'json'
+
+@@persist
+@@system PersistHsmPushpop {
+    interface:
+        push_modal(v: int)
+        pop_modal()
+        get_x(): int
+
+    machine:
+        $Idle {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_x(): int {
+                @@:(-99)
+                return
+            }
+        }
+
+        $Modal => $Frame(x: int) {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_x(): int {
+                @@:(x)
+                return
+            }
+        }
+
+        $Frame {
+        }
+    domain:
+        v: int = 0
+}
+
+puts("=== Test 60: Persist × HSM × push/pop (Ruby) ===")
+s1 = PersistHsmPushpop.new
+s1.push_modal(42)
+s1.push_modal(99)
+pre = s1.get_x()
+raise "Expected 99 pre-save, got #{pre}" unless pre == 99
+puts("1. Pre-save top x=#{pre}")
+
+snap = s1.save_state()
+s2 = PersistHsmPushpop.restore_state(snap)
+post = s2.get_x()
+raise "Expected 99 post-restore, got #{post}" unless post == 99
+puts("2. Post-restore top x=#{post}")
+
+s2.pop_modal()
+mid = s2.get_x()
+raise "Expected 42 after first pop, got #{mid}" unless mid == 42
+puts("3. After first pop x=#{mid}")
+
+s2.pop_modal()
+bottom = s2.get_x()
+raise "Expected -99 after second pop, got #{bottom}" unless bottom == -99
+puts("4. After second pop x=#{bottom}")
+
+puts("PASS: 60_persist_hsm_pushpop")

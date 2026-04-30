@@ -1,0 +1,91 @@
+@@target python_3
+
+# Test 60: Persist × HSM cascade × push/pop modal stack — triple axis
+#
+# Phase 24 wave 5. Three high-density bug axes combined: HSM cascade
+# (state-args declared at parent, child reads via cascade) + push/pop
+# modal stack + persist save/restore. Each axis individually has
+# surfaced defects this session — the combined cross-product is
+# statistically the most likely to find combinatorial bugs.
+#
+# Pattern:
+#   - $Modal => $Frame(x: int): Modal cascades to Frame which holds
+#     the state-arg.
+#   - Drive: push_modal(42), push_modal(99). Stack: [Idle, Modal(42)],
+#     current: Modal(99).
+#   - Save with stack full + cascade chains in every entry.
+#   - Restore in fresh instance. Verify cascade-reads work.
+#   - Pop. Land at Modal(42). Verify cascade still works.
+#   - Pop. Land at Idle. Verify default.
+
+@@persist
+@@system PersistHsmPushpop {
+    interface:
+        push_modal(v: int)
+        pop_modal()
+        get_x(): int
+
+    machine:
+        $Idle {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_x(): int {
+                @@:(-99)
+                return
+            }
+        }
+
+        $Modal => $Frame(x: int) {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_x(): int {
+                @@:(x)
+                return
+            }
+        }
+
+        $Frame {
+        }
+    domain:
+        v: int = 0
+}
+
+def main():
+    print("=== Test 60: Persist × HSM × push/pop ===")
+    s1 = @@PersistHsmPushpop()
+    s1.push_modal(42)
+    s1.push_modal(99)
+    pre = s1.get_x()
+    assert pre == 99, f"Expected 99 pre-save (top), got {pre}"
+    print(f"1. Pre-save top x={pre}")
+
+    snap = s1.save_state()
+    s2 = PersistHsmPushpop.restore_state(snap)
+    post = s2.get_x()
+    assert post == 99, f"Expected 99 post-restore (top), got {post}"
+    print(f"2. Post-restore top x={post}")
+
+    s2.pop_modal()
+    mid = s2.get_x()
+    assert mid == 42, f"Expected 42 after first pop (Modal(42) cascade), got {mid}"
+    print(f"3. After first pop x={mid}")
+
+    s2.pop_modal()
+    bottom = s2.get_x()
+    assert bottom == -99, f"Expected -99 after second pop (Idle), got {bottom}"
+    print(f"4. After second pop x={bottom}")
+
+    print("PASS: 60_persist_hsm_pushpop")
+
+if __name__ == '__main__':
+    main()

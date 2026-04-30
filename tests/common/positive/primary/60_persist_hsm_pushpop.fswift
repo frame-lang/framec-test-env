@@ -1,0 +1,69 @@
+@@target swift
+
+import Foundation
+
+@@persist
+@@system PersistHsmPushpop {
+    interface:
+        push_modal(v: int)
+        pop_modal()
+        get_x(): int
+
+    machine:
+        $Idle {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_x(): int {
+                @@:(-99)
+            }
+        }
+
+        $Modal => $Frame(x: int) {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_x(): int {
+                @@:(x)
+            }
+        }
+
+        $Frame {
+        }
+    domain:
+        v : int = 0
+}
+
+print("=== Test 60: Persist × HSM × push/pop (Swift) ===")
+let s1 = PersistHsmPushpop()
+s1.push_modal(42)
+s1.push_modal(99)
+let pre = s1.get_x()
+if pre != 99 { print("FAIL: pre \(pre)"); exit(1) }
+print("1. Pre-save top x=\(pre)")
+
+let snap = s1.saveState()
+let s2 = PersistHsmPushpop.restoreState(snap)
+let post = s2.get_x()
+if post != 99 { print("FAIL: post \(post)"); exit(1) }
+print("2. Post-restore top x=\(post)")
+
+s2.pop_modal()
+let mid = s2.get_x()
+if mid != 42 { print("FAIL: mid \(mid)"); exit(1) }
+print("3. After first pop x=\(mid)")
+
+s2.pop_modal()
+let bottom = s2.get_x()
+if bottom != -99 { print("FAIL: bottom \(bottom)"); exit(1) }
+print("4. After second pop x=\(bottom)")
+
+print("PASS: 60_persist_hsm_pushpop")

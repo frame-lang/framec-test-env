@@ -1,0 +1,81 @@
+@@target go
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+var _ = json.Marshal
+
+@@persist
+@@system PersistHsmPushpop {
+    interface:
+        PushModal(v: int)
+        PopModal()
+        GetX(): int
+
+    machine:
+        $Idle {
+            PushModal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            PopModal() {
+                -> pop$
+            }
+            GetX(): int {
+                @@:(-99)
+                return;
+            }
+        }
+
+        $Modal => $Frame(x: int) {
+            PushModal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            PopModal() {
+                -> pop$
+            }
+            GetX(): int {
+                @@:(x)
+                return;
+            }
+        }
+
+        $Frame {
+        }
+    domain:
+        v: int = 0
+}
+
+func main() {
+    fmt.Println("=== Test 60: Persist × HSM × push/pop (Go) ===")
+    s1 := NewPersistHsmPushpop()
+    s1.PushModal(42)
+    s1.PushModal(99)
+    pre := s1.GetX()
+    if pre != 99 { fmt.Printf("FAIL: pre %d\n", pre); os.Exit(1) }
+    fmt.Printf("1. Pre-save top x=%d\n", pre)
+
+    snap := s1.SaveState()
+    s2 := RestorePersistHsmPushpop(snap)
+    post := s2.GetX()
+    if post != 99 { fmt.Printf("FAIL: post %d\n", post); os.Exit(1) }
+    fmt.Printf("2. Post-restore top x=%d\n", post)
+
+    s2.PopModal()
+    mid := s2.GetX()
+    if mid != 42 { fmt.Printf("FAIL: mid %d\n", mid); os.Exit(1) }
+    fmt.Printf("3. After first pop x=%d\n", mid)
+
+    s2.PopModal()
+    bottom := s2.GetX()
+    if bottom != -99 { fmt.Printf("FAIL: bottom %d\n", bottom); os.Exit(1) }
+    fmt.Printf("4. After second pop x=%d\n", bottom)
+
+    fmt.Println("PASS: 60_persist_hsm_pushpop")
+}

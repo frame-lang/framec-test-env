@@ -1,0 +1,75 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cstdlib>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system PersistHsmPushpop {
+    interface:
+        push_modal(v: int)
+        pop_modal()
+        get_x(): int
+
+    machine:
+        $Idle {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_x(): int {
+                @@:(-99)
+            }
+        }
+
+        $Modal => $Frame(x: int) {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_x(): int {
+                @@:(x)
+            }
+        }
+
+        $Frame {
+        }
+    domain:
+        v : int = 0
+}
+
+int main() {
+    std::cout << "=== Test 60: Persist × HSM × push/pop (C++) ===" << std::endl;
+    PersistHsmPushpop s1;
+    s1.push_modal(42);
+    s1.push_modal(99);
+    int pre = s1.get_x();
+    if (pre != 99) { std::cout << "FAIL: pre " << pre << std::endl; return 1; }
+    std::cout << "1. Pre-save top x=" << pre << std::endl;
+
+    std::string snap = s1.save_state();
+    PersistHsmPushpop s2 = PersistHsmPushpop::restore_state(snap);
+    int post = s2.get_x();
+    if (post != 99) { std::cout << "FAIL: post " << post << std::endl; return 1; }
+    std::cout << "2. Post-restore top x=" << post << std::endl;
+
+    s2.pop_modal();
+    int mid = s2.get_x();
+    if (mid != 42) { std::cout << "FAIL: mid " << mid << std::endl; return 1; }
+    std::cout << "3. After first pop x=" << mid << std::endl;
+
+    s2.pop_modal();
+    int bottom = s2.get_x();
+    if (bottom != -99) { std::cout << "FAIL: bottom " << bottom << std::endl; return 1; }
+    std::cout << "4. After second pop x=" << bottom << std::endl;
+
+    std::cout << "PASS: 60_persist_hsm_pushpop" << std::endl;
+    return 0;
+}

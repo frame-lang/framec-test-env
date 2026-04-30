@@ -1,0 +1,78 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@persist
+@@system PersistHsmPushpop {
+    interface:
+        push_modal(v: int)
+        pop_modal()
+        get_x(): int
+
+    machine:
+        $Idle {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_x(): int {
+                @@:(-99)
+            }
+        }
+
+        $Modal => $Frame(x: int) {
+            push_modal(v: int) {
+                push$
+                -> $Modal(v)
+            }
+            pop_modal() {
+                -> pop$
+            }
+            get_x(): int {
+                @@:(x)
+            }
+        }
+
+        $Frame {
+        }
+    domain:
+        v : int = 0
+}
+
+int main(void) {
+    printf("=== Test 60: Persist × HSM × push/pop (C) ===\n");
+    PersistHsmPushpop* s1 = PersistHsmPushpop_new();
+    PersistHsmPushpop_push_modal(s1, 42);
+    PersistHsmPushpop_push_modal(s1, 99);
+    int pre = PersistHsmPushpop_get_x(s1);
+    if (pre != 99) { printf("FAIL: pre %d\n", pre); return 1; }
+    printf("1. Pre-save top x=%d\n", pre);
+
+    char* snap = PersistHsmPushpop_save_state(s1);
+    PersistHsmPushpop* s2 = PersistHsmPushpop_restore_state(snap);
+    int post = PersistHsmPushpop_get_x(s2);
+    if (post != 99) { printf("FAIL: post %d\n", post); return 1; }
+    printf("2. Post-restore top x=%d\n", post);
+
+    PersistHsmPushpop_pop_modal(s2);
+    int mid = PersistHsmPushpop_get_x(s2);
+    if (mid != 42) { printf("FAIL: mid %d\n", mid); return 1; }
+    printf("3. After first pop x=%d\n", mid);
+
+    PersistHsmPushpop_pop_modal(s2);
+    int bottom = PersistHsmPushpop_get_x(s2);
+    if (bottom != -99) { printf("FAIL: bottom %d\n", bottom); return 1; }
+    printf("4. After second pop x=%d\n", bottom);
+
+    printf("PASS: 60_persist_hsm_pushpop\n");
+    free(snap);
+    PersistHsmPushpop_destroy(s1);
+    PersistHsmPushpop_destroy(s2);
+    return 0;
+}
