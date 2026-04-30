@@ -34,6 +34,45 @@ triage.
 
 ---
 
+## D6: Erlang transition target atom captured by same-name param
+
+- Lang: erlang
+- Tier: matrix test 67
+- Case: `67_hsm_bool_state_args.ferl`
+- Tag: state-args, erlang, atom, capitalize
+- Failure mode: run (`function not exported {bool_state_arg, true, 3}`)
+- Suspected codegen path: `erlang_capitalize_params` (word-boundary
+  replacement of param names indiscriminately rewrote atoms that
+  collided with param names)
+- Status: **fixed 2026-04-30** (framepiler 21a82f4)
+- Surfaced: 2026-04-30 during Phase 15 wave 3 bool-typed test 67
+
+### Diagnosis
+
+Frame source like `configure(active: bool) { -> $Active(active) }`
+declares state `$Active` and param `active` — both lower-case in
+Erlang. Codegen emits `frame_transition__(active, Data, ..., [Active])`
+where the first `active` is the target state atom and `[Active]` is
+the state-arg list with the param's value. The post-pass
+`erlang_capitalize_params` then word-boundary-replaces `active` →
+`Active` everywhere, including the atom — yielding
+`frame_transition__(Active, Data, ..., [Active])`. The runtime
+dispatched on the boolean value as if it were a state name and
+crashed.
+
+### Fix
+
+- `frame_expansion.rs`: emit the transition target as a quoted atom
+  `'active'`. `'foo'` and `foo` are equivalent atoms in Erlang.
+- `erlang_system.rs`: extend `erlang_capitalize_params` word-boundary
+  check so the `'` character flanks the token on either side and the
+  capitalize pass treats it as a non-replaceable boundary. Anything
+  inside quoted atoms now stays atom-typed.
+
+Verified across all 17 backends with matrix test 67.
+
+---
+
 ## D5: Typed state-arg prefetch defaulted to `int`; handler-param shadow
 
 - Lang: cross-backend
