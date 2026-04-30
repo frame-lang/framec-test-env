@@ -34,6 +34,136 @@ triage.
 
 ---
 
+## D13: C++ enter-args list-typed round-trip not exercised
+
+- Lang: cpp (and same shape applies to C / C# / Go for symmetry)
+- Tier: not exercised by any test
+- Case: n/a — theoretical
+- Tag: enter-args, list, persist
+- Failure mode: would-be runtime cast failure
+- Reproducer: n/a (would need a state with `$>(items: std::vector<int>)`
+  PLUS a non-`$>` handler that reads `enter_args` after restore)
+- Suspected codegen path: `interface_gen.rs` — D10 per-state typed
+  branching covers `state_args` but not `enter_args`. The enter-args
+  serialize/deserialize uses the int/double-only fallthrough.
+- Status: **open (low impact)**
+- Notes: enter_args are populated during transition and consumed by
+  the `$>` handler during the enter cascade. After enter completes
+  they live in the compartment but are typically dormant — no normal
+  Frame code reads them again. Persist round-trips them anyway, so
+  if a user manually accessed `__compartment->enter_args[i]` after
+  restore (and the declared type was a vector/list), the cast would
+  fail. Not a correctness issue for any test case in the corpus or
+  any cookbook example. Mirror the D10 fix (pull the per-state
+  branching out into a helper, apply to both state_args and
+  enter_args) when promoting a real test case.
+
+---
+
+## D12: C list state-args restricted to int element type
+
+- Lang: c
+- Tier: not exercised
+- Case: would be `75_nested_list_state_arg.fc` (intentionally absent)
+- Tag: list, state-args, c-only
+- Failure mode: data loss on persist round-trip for non-int elements
+- Reproducer: n/a — Frame `: list` syntax doesn't carry element type
+- Suspected codegen path: language-design / Frame syntax.
+  `interface_gen.rs` C persist serialize/deserialize hardcodes
+  `(intptr_t)int` element packing because `: list` translates to
+  `<sys>_FrameVec*` whose items are opaque `void*` with no element-
+  type metadata. Other backends know the element type from the
+  user's declared generic (`List<int>`, `Vec<i32>`, `[]int`, etc.).
+- Status: **open (architectural — needs Frame syntax extension)**
+- Notes: To support `: list[str]` / `: list[float]` / `: list[bool]`
+  in C, Frame would need element-type metadata in the type AST.
+  Today `: list` is one token. Extending to `: list[T]` would let
+  framec emit per-element pack/unpack helpers for each element
+  type. Out of scope for D10/D11; logged as a future enhancement.
+  Mitigation today: users who need typed C lists can declare a
+  pointer state-arg (`(items: char**)` etc.) and manage memory
+  manually — the C backend's pointer-type passthrough already
+  works.
+
+---
+
+## D11: Nested list state-args broken in 4 typed backends
+
+- Lang: java, kotlin, csharp, go
+- Tier: matrix test 75 (16 of 17 backends ship; C skipped per D12)
+- Case: `75_nested_list_state_arg`
+- Tag: nested, list, state-args, persist
+- Failure mode: ClassCastException (Java) / InvalidCastException (C#)
+  / type-assertion panic (Go) at user-handler cast site after
+  persist round-trip
+- Reproducer: `tests/common/positive/primary/75_nested_list_state_arg.f<lang>`
+- Generated source: `out_perm/<lang>/75_nested_list_state_arg/...`
+- Error (Java): `ClassCastException: org.json.JSONArray cannot be cast
+  to java.util.List`
+- Error (Go): `interface conversion: interface {} is []interface {},
+  not []int`
+- Suspected codegen path: `interface_gen.rs` — D10 per-state typed
+  branching only handled one level of generic; nested types fell
+  through to scalar fallback.
+- Status: **fixed 2026-04-30** (framepiler 7158310)
+- Notes: Recursive emitters per backend. JVM: static
+  `__convertJsonArray` helper that recurses through any depth; the
+  ArrayList<Object> tree casts cleanly at every level due to
+  generic erasure. C#: `cs_value_convert` recursively parses the
+  declared type string and emits nested IIFEs that build reified
+  `List<List<...>>` from a `List<object>` tree. Go: parallel —
+  `go_value_convert` emits nested function literals to build
+  `[][]int` etc. C++ already worked at any depth via
+  nlohmann::json's native `std::vector<T>` support. Element types
+  covered: int / long / float / double / string / bool. Still-deeper
+  enhancement opportunities: nested maps, struct elements.
+
+---
+
+## D10: List/array state-args broken on persist round-trip
+
+- Lang: c, cpp, csharp, go
+- Tier: matrix test 74 (all 17 backends ship)
+- Case: `74_persist_list_state_arg`
+- Tag: list, state-args, persist
+- Failure mode: cast failure at user-handler after restore
+- Reproducer: `tests/common/positive/primary/74_persist_list_state_arg.f<lang>`
+- Suspected codegen path: per-state typed restore was missing in
+  the persist deserialize for typed-collection state-args.
+- Status: **fixed 2026-04-30** (framepiler 5b9c0dd, framepiler 6a5f798)
+- Notes: Per-state branching that uses `state_param_types` to recover
+  declared element type when reconstructing the collection from JSON.
+  Mirrors the D7/D8 per-state branching but for compound types.
+  C: extended `c_param_type_and_cast` and `c_extract` for `: list`
+  → `<sys>_FrameVec*`; persist serialize/deserialize emit per-state
+  FrameVec ↔ JSON array round-trip. C++/C#/Go: per-state typed
+  any_cast / List<T> conversion / []T conversion respectively.
+
+---
+
+## D9: Compound interface params (Vec<T>, list types) broke Rust + Erlang
+
+- Lang: rust, erlang
+- Tier: matrix test 73 (16 backends + Erlang sidecar)
+- Case: `73_list_state_arg`
+- Tag: list, interface-params
+- Failure mode: rustc compile error (Rust); Erlang runtime crash on
+  pattern-match double-bind
+- Reproducer: `tests/common/positive/primary/73_list_state_arg.f<lang>`
+- Suspected codegen path:
+  - Rust: `rust_system.rs` interface push hardcoded `.to_string()`;
+    compound types like `Vec<i32>` lack `Display`.
+  - Erlang: `erlang_system.rs` user-event handler prefetched a
+    state-arg with the same name as an event-param already bound
+    by the call pattern.
+- Status: **fixed 2026-04-30** (framepiler 15b8e8c)
+- Notes: Rust: typed boxing — `Box::new(p.clone()) as Box<dyn Any>`;
+  dispatch downcasts use the param's exact declared type. Erlang:
+  shadow check — skip prefetch when handler.params has same-name
+  event param.
+
+---
+
 ## D8: Persist × float state-args broken in 8 typed backends
 
 - Lang: c, cpp, csharp, java, go, kotlin, swift, dart
