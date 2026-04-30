@@ -37,38 +37,55 @@ triage.
 ## D8: Persist × float state-args broken in 8 typed backends
 
 - Lang: c, cpp, csharp, java, go, kotlin, swift, dart
-- Tier: matrix test 69 (partial — only 9 passing backends shipped)
-- Case: `69_persist_float_state_arg.f<lang>` (kept on python, js, ts,
-  ruby, php, lua, gdscript, erlang, rust; removed for the 8 failing
-  typed backends pending fix)
+- Tier: matrix test 69 (all 17 backends ship)
+- Case: `69_persist_float_state_arg.f<lang>`
 - Tag: persist, state-args, typed, float
 - Failure mode: build (g++/swiftc/kotlinc/dartc/dotnet/go), runtime
   (ClassCastException/bad_any_cast) on round-trip
-- Status: **open 2026-04-30** — needs fix
+- Status: **fixed 2026-04-30** (framepiler d943a1a)
 - Surfaced: 2026-04-30
 
 ### Diagnosis
 
 Same defect family as D5 / D7 in a different code path: the
-@@persist serializer / deserializer codegen in `interface_gen.rs`
-hardcodes integer-width casts when round-tripping state_args
-through JSON. JSON parsers return numeric values as Number /
-BigDecimal / Double / Integer depending on representation; the
-deserialized list is then handed to the per-handler prefetch which
-casts to the declared type. C / C++ additionally hit the persist
-analogue of D7b — `(intptr_t)` truncation in the deserialize push.
+@@persist serializer / deserializer codegen hardcoded integer-width
+casts when round-tripping state_args through JSON. JSON parsers
+return numeric values as Number / BigDecimal / Double / Integer
+depending on representation; the deserialized list is then handed
+to the per-handler prefetch which casts to the declared type. C /
+C++ additionally hit the persist analogue of D7b — `(intptr_t)`
+truncation in the deserialize push.
 
-The 9 backends that pass (python, ts, js, rust, php, ruby, erlang,
-lua, gdscript) use natively-numeric storage that doesn't need the
-type-aware coercion.
+The 9 backends that pass natively (python, ts, js, rust, php, ruby,
+erlang, lua, gdscript) use natively-numeric storage that doesn't
+need the type-aware coercion.
 
-### Fix scope
+### Fix
 
-Apply the D5 `state_param_types` plumbing to the persist
-serializer / deserializer codegen. Each typed backend's deserialize
-body needs to coerce the JSON-parsed value per declared param type
-(double / int / etc.), mirroring D5's per-handler prefetch fix.
-Estimated 1-2 hours per backend × 8.
+Type-aware coercion routed per backend, mirroring D5 / D7 plumbing
+into the @@persist codegen path:
+
+- **Java / Kotlin** (state_dispatch.rs DispatchSyntax + per-handler
+  emit) — Number-ladder unwrap: `((Number) x).doubleValue()` /
+  `(x as Number).toDouble()`.
+- **Swift** — `(x as! NSNumber).doubleValue` ladder.
+- **C#** (interface_gen.rs deserializer + state_dispatch.rs
+  prefetch) — `TryGetInt32 → TryGetInt64 → GetDouble` in the
+  deserializer; per-handler casts via `System.Convert.ToXxx`.
+  Int32-first preserves existing typed reads (51_hsm_persist
+  regression-tested).
+- **Go** (state_dispatch.rs) — declared type from
+  `state_param_types`.
+- **C++** (interface_gen.rs persist) — serialize tries `int` then
+  `double`; deserialize branches on `is_number_integer` vs
+  `is_number_float`.
+- **C** (interface_gen.rs persist) — per-state branch keyed on
+  `comp->state` that emits `Sys_pack_double` / `Sys_unpack_double`
+  for float-typed slots, `(intptr_t)` cast for int-typed slots.
+  Required new per-state arg-type metadata collection at codegen.
+
+Verified by matrix test 69 (persist × float) across all 17 backends
+plus existing 51_hsm_persist regression test.
 
 ---
 
