@@ -34,6 +34,60 @@ triage.
 
 ---
 
+## D15: Dict/map state-args broken on persist round-trip
+
+- Lang: java, kotlin, csharp, go, cpp
+- Tier: matrix tests 77 (persist × dict), 78 (nested), 79 (dict-of-list),
+  80 (list-of-dict)
+- Case: `77_persist_dict_state_arg` and friends
+- Tag: dict, map, state-args, persist
+- Failure mode: ClassCastException / InvalidCastException / type-
+  assertion panic / std::any_cast bad_cast at user-handler cast
+  after restore.
+- Reproducer: `tests/common/positive/primary/77_persist_dict_state_arg.f<lang>`
+- Suspected codegen path: `interface_gen.rs` — D10/D11's per-state
+  typed restore handled `List<T>` / `Vec<T>` / `[]T` /
+  `std::vector<T>` but didn't recognise the JSON-object axis
+  (Map / Dictionary / std::map / map[K]V).
+- Status: **fixed 2026-04-30** (framepiler 34739bc)
+- Notes: Java/Kotlin: added recursive `__convertJsonObject`
+  alongside `__convertJsonArray`; the deserialize loop and both
+  helpers cross-reference each other so arbitrary nesting works.
+  Generic erasure makes user `(Map<K,V>)` cast succeed.
+  C#: extended `__convertJsonValue` with Object branch
+  (recursive Dictionary<string, object>); added Dictionary<K,V>
+  to `cs_value_convert` (parses comma-separated K, V at top
+  level; rejects non-string K because JSON keys are always
+  strings). Go: extended `go_value_convert` with `map[K]V`
+  handling (rejects non-string K). C++: replaced
+  `cpp_vec_elem_type` with `cpp_container_kind` (returns
+  "array" / "object"); serialize uses `nlohmann::json(__ctr)`,
+  deserialize branches on `is_array()` / `is_object()` and uses
+  the lib's native `get<T>()`. Element types covered:
+  int/long/float/double/string/bool. Nested dicts and dict×list
+  cross-products verified passing.
+
+---
+
+## D14: C `: dict` handler bindings fell through to int
+
+- Lang: c
+- Tier: matrix test 76 (dict pass-through) — 17 backends ship
+- Case: `76_dict_state_arg`
+- Tag: dict, state-args, c-only
+- Failure mode: runtime UB — handler treats FrameDict* pointer as int
+- Reproducer: `tests/common/positive/primary/76_dict_state_arg.fc`
+- Suspected codegen path: `state_dispatch.rs` — `c_param_type_and_cast`
+  and `c_extract` lacked a match arm for `: dict` / `: Dict`, falling
+  through to the `(int)(intptr_t)` int default. Mirrors the D10 C
+  `: list` defect.
+- Status: **fixed 2026-04-30** (framepiler 34739bc)
+- Notes: Added `dict` / `Dict` / `Record<string, any>` arm that
+  emits `<sys>_FrameDict*` cast, parallel to the `: list` →
+  `<sys>_FrameVec*` arm.
+
+---
+
 ## D13: C++ enter-args list-typed round-trip not exercised
 
 - Lang: cpp (and same shape applies to C / C# / Go for symmetry)
