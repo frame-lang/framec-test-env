@@ -1,0 +1,71 @@
+@@target python_3
+
+# Test 57: Persist with HSM cascade × state-args round-trip
+#
+# Phase 24 wave 4. Combines two high-density bug axes:
+#   - HSM cascade (parent state declares state-args, child binds them
+#     by name via the cascade) — Phase 14's territory.
+#   - Persist save/restore round-trip — Phase 24's territory.
+#
+# State-args declared at $Parent(x: int); $Child cascades up to $Parent
+# and reads x by name in its own handlers. The transition `-> $Child(42)`
+# binds x=42 at the Parent level via the cascade chain. After save/
+# restore in a fresh instance, x must still resolve correctly through
+# the cascade.
+
+@@persist
+@@system PersistHsmStateArgs {
+    interface:
+        drive(p: int)
+        get_x(): int
+
+    machine:
+        $Start {
+            drive(p: int) {
+                -> $Child(p)
+            }
+            get_x(): int {
+                @@:(-1)
+                return
+            }
+        }
+
+        $Child => $Parent(x: int) {
+            drive(p: int) {
+                -> $Child(p)
+            }
+            get_x(): int {
+                @@:(x)
+                return
+            }
+        }
+
+        $Parent {
+        }
+    domain:
+        v: int = 0
+}
+
+def main():
+    print("=== Test 57: Persist HSM × State-Args Round-Trip ===")
+    s1 = @@PersistHsmStateArgs()
+    s1.drive(42)
+    pre = s1.get_x()
+    assert pre == 42, f"Expected 42 pre-save, got {pre}"
+    print(f"1. Pre-save x={pre}")
+
+    snap = s1.save_state()
+    s2 = PersistHsmStateArgs.restore_state(snap)
+    post = s2.get_x()
+    assert post == 42, f"Expected 42 post-restore, got {post}"
+    print(f"2. Post-restore x={post}")
+
+    s2.drive(99)
+    post2 = s2.get_x()
+    assert post2 == 99, f"Expected 99 post-kick, got {post2}"
+    print(f"3. Post-restore-drive x={post2}")
+
+    print("PASS: 57_persist_hsm_state_args")
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,60 @@
+@@target cpp_17
+
+#include <iostream>
+#include <string>
+#include <cstdlib>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system PersistHsmStateArgs {
+    interface:
+        drive(p: int)
+        get_x(): int
+
+    machine:
+        $Start {
+            drive(p: int) {
+                -> $Child(p)
+            }
+            get_x(): int {
+                @@:(-1)
+            }
+        }
+
+        $Child => $Parent(x: int) {
+            drive(p: int) {
+                -> $Child(p)
+            }
+            get_x(): int {
+                @@:(x)
+            }
+        }
+
+        $Parent {
+        }
+    domain:
+        v : int = 0
+}
+
+int main() {
+    std::cout << "=== Test 57: Persist HSM × State-Args Round-Trip (C++) ===" << std::endl;
+    PersistHsmStateArgs s1;
+    s1.drive(42);
+    int pre = s1.get_x();
+    if (pre != 42) { std::cout << "FAIL: pre " << pre << std::endl; return 1; }
+    std::cout << "1. Pre-save x=" << pre << std::endl;
+
+    std::string snap = s1.save_state();
+    PersistHsmStateArgs s2 = PersistHsmStateArgs::restore_state(snap);
+    int post = s2.get_x();
+    if (post != 42) { std::cout << "FAIL: post " << post << std::endl; return 1; }
+    std::cout << "2. Post-restore x=" << post << std::endl;
+
+    s2.drive(99);
+    int post2 = s2.get_x();
+    if (post2 != 99) { std::cout << "FAIL: post2 " << post2 << std::endl; return 1; }
+    std::cout << "3. Post-restore-drive x=" << post2 << std::endl;
+
+    std::cout << "PASS: 57_persist_hsm_state_args" << std::endl;
+    return 0;
+}

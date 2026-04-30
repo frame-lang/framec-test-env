@@ -1,0 +1,56 @@
+@@target rust
+
+@@persist
+@@system PersistHsmStateArgs {
+    interface:
+        drive(p: i32)
+        get_x(): i32
+
+    machine:
+        $Start {
+            drive(p: i32) {
+                -> $Child(p)
+            }
+            get_x(): i32 {
+                @@:(-1)
+                return;
+            }
+        }
+
+        $Child => $Parent(x: i32) {
+            drive(p: i32) {
+                -> $Child(p)
+            }
+            get_x(): i32 {
+                @@:(x)
+                return;
+            }
+        }
+
+        $Parent {
+        }
+    domain:
+        v: i32
+}
+
+fn main() {
+    println!("=== Test 57: Persist HSM × State-Args Round-Trip (Rust) ===");
+    let mut s1 = @@PersistHsmStateArgs();
+    s1.drive(42);
+    let pre = s1.get_x();
+    if pre != 42 { println!("FAIL: pre {}", pre); std::process::exit(1); }
+    println!("1. Pre-save x={}", pre);
+
+    let json = s1.save_state();
+    let mut s2 = PersistHsmStateArgs::restore_state(&json);
+    let post = s2.get_x();
+    if post != 42 { println!("FAIL: post {}", post); std::process::exit(1); }
+    println!("2. Post-restore x={}", post);
+
+    s2.drive(99);
+    let post2 = s2.get_x();
+    if post2 != 99 { println!("FAIL: post2 {}", post2); std::process::exit(1); }
+    println!("3. Post-restore-drive x={}", post2);
+
+    println!("PASS: 57_persist_hsm_state_args");
+}

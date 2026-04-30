@@ -1,0 +1,72 @@
+@@target go
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+var _ = json.Marshal
+
+@@persist
+@@system PersistHsmStateArgs {
+    interface:
+        Drive(p: int)
+        GetX(): int
+
+    machine:
+        $Start {
+            Drive(p: int) {
+                -> $Child(p)
+            }
+            GetX(): int {
+                @@:(-1)
+                return;
+            }
+        }
+
+        $Child => $Parent(x: int) {
+            Drive(p: int) {
+                -> $Child(p)
+            }
+            GetX(): int {
+                @@:(x)
+                return;
+            }
+        }
+
+        $Parent {
+        }
+    domain:
+        v: int = 0
+}
+
+func main() {
+    fmt.Println("=== Test 57: Persist HSM × State-Args Round-Trip (Go) ===")
+    s1 := NewPersistHsmStateArgs()
+    s1.Drive(42)
+    pre := s1.GetX()
+    if pre != 42 {
+        fmt.Printf("FAIL: pre %d\n", pre); os.Exit(1)
+    }
+    fmt.Printf("1. Pre-save x=%d\n", pre)
+
+    snap := s1.SaveState()
+    s2 := RestorePersistHsmStateArgs(snap)
+    post := s2.GetX()
+    if post != 42 {
+        fmt.Printf("FAIL: post %d\n", post); os.Exit(1)
+    }
+    fmt.Printf("2. Post-restore x=%d\n", post)
+
+    s2.Drive(99)
+    post2 := s2.GetX()
+    if post2 != 99 {
+        fmt.Printf("FAIL: post2 %d\n", post2); os.Exit(1)
+    }
+    fmt.Printf("3. Post-restore-drive x=%d\n", post2)
+
+    fmt.Println("PASS: 57_persist_hsm_state_args")
+}

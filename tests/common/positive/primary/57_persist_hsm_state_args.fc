@@ -1,0 +1,63 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@persist
+@@system PersistHsmStateArgs {
+    interface:
+        drive(p: int)
+        get_x(): int
+
+    machine:
+        $Start {
+            drive(p: int) {
+                -> $Child(p)
+            }
+            get_x(): int {
+                @@:(-1)
+            }
+        }
+
+        $Child => $Parent(x: int) {
+            drive(p: int) {
+                -> $Child(p)
+            }
+            get_x(): int {
+                @@:(x)
+            }
+        }
+
+        $Parent {
+        }
+    domain:
+        v : int = 0
+}
+
+int main(void) {
+    printf("=== Test 57: Persist HSM × State-Args Round-Trip (C) ===\n");
+    PersistHsmStateArgs* s1 = PersistHsmStateArgs_new();
+    PersistHsmStateArgs_drive(s1, 42);
+    int pre = PersistHsmStateArgs_get_x(s1);
+    if (pre != 42) { printf("FAIL: pre %d\n", pre); return 1; }
+    printf("1. Pre-save x=%d\n", pre);
+
+    char* snap = PersistHsmStateArgs_save_state(s1);
+    PersistHsmStateArgs* s2 = PersistHsmStateArgs_restore_state(snap);
+    int post = PersistHsmStateArgs_get_x(s2);
+    if (post != 42) { printf("FAIL: post %d\n", post); return 1; }
+    printf("2. Post-restore x=%d\n", post);
+
+    PersistHsmStateArgs_drive(s2, 99);
+    int post2 = PersistHsmStateArgs_get_x(s2);
+    if (post2 != 99) { printf("FAIL: post2 %d\n", post2); return 1; }
+    printf("3. Post-restore-drive x=%d\n", post2);
+
+    printf("PASS: 57_persist_hsm_state_args\n");
+    free(snap);
+    PersistHsmStateArgs_destroy(s1);
+    PersistHsmStateArgs_destroy(s2);
+    return 0;
+}
