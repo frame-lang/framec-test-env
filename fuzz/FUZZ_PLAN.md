@@ -1305,11 +1305,11 @@ wave 3.
 ### Medium-yield: wave 2/3 of existing phases
 
 Each wave-N candidate noted in its phase's section:
-- **Phase 15 wave 3 — SHIPPED 2026-04-30 (int/str/bool/float).**
-  Matrix tests 63-68 ship state-args of types int (65), str (66),
-  bool (67), float (68) plus operations × HSM × state-args (64) and
-  HSM × `@@:self` (63). All 17 backends clean. Wave 3 surfaced
-  five framec defects:
+- **Phase 15 wave 3 — SHIPPED 2026-04-30 (int/str/bool/float +
+  persist × float).** Matrix tests 63-69 ship state-args of types
+  int (65), str (66), bool (67), float (68), persist × float (69)
+  plus operations × HSM (64) and HSM × `@@:self` (63). All 17
+  backends clean. Wave 3 surfaced five framec defects, all fixed:
   - **D4** (`19ba6d3`) — HSM cascade-arrow params not visible in
     parent state's handlers. Cross-backend (all 17).
   - **D5** (`314e909`) — typed-cast hardcoded to `int` for 7 typed
@@ -1322,11 +1322,15 @@ Each wave-N candidate noted in its phase's section:
     push, C++ `emit_params` type map). Now route through
     `Sys_pack_double` / `Sys_unpack_double` and the shared
     `cpp_map_type` helper.
-  - **D8** (open) — persist × float fails 8 typed backends (test 69,
-    persist serializer codegen hardcodes integer-width casts).
-    Diagnosis + fix scope in DEFECTS.md. Estimated 1-2hr per
-    backend × 8 = ~16hr session of work. List typed args may
-    surface a similar cluster — defer until D8 closed.
+  - **D8** (`d943a1a`) — persist × float failed 8 typed backends
+    (Java/Kotlin/Swift/C#/Go/C++/C/Dart). Number-ladder coercion
+    via per-backend type-aware unwrap (`((Number)x).doubleValue()`,
+    `(x as Number).toDouble()`, NSNumber, `Convert.ToXxx`,
+    `Sys_pack_double`/`Sys_unpack_double`, etc.) at both serialize
+    and deserialize sites. Per-state arg-type metadata collected at
+    codegen for C's pack/unpack switch.
+  Wave 3 list typed args may surface similar issues — deferred for
+  now (no urgent driver, unclear value-density).
 - **Phase 17 wave 2:** re-entrant event sequences (`@@:self.X()`
   mid-sequence), longer 5-8 event traces, persist save mid-
   sequence (overlaps with persist × multi-event above).
