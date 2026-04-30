@@ -1305,8 +1305,14 @@ wave 3.
 ### Medium-yield: wave 2/3 of existing phases
 
 Each wave-N candidate noted in its phase's section:
-- **Phase 15 wave 3:** typed args (bool / str), state-args carried
-  through `=> $^` forwards (Phase 14 × 15).
+- **Phase 15 wave 3 — PARTIAL SHIPPED 2026-04-30.** Matrix tests
+  63-66 ship state-args carried through `=> $^` forwards across
+  all 17 backends. Surfaced **D4** (cascade-arrow params not visible
+  in parent handlers — fixed in framepiler `19ba6d3`) and **D5**
+  (typed-cast hardcoded to `int` for 7 typed backends + handler-
+  param shadow break in 5 backends — fixed in framepiler `314e909`).
+  Remaining: bool / float / list typed args (D5 plumbing now in
+  place — drop-in extension).
 - **Phase 17 wave 2:** re-entrant event sequences (`@@:self.X()`
   mid-sequence), longer 5-8 event traces, persist save mid-
   sequence (overlaps with persist × multi-event above).
