@@ -1,0 +1,82 @@
+@@target python_3
+
+# Test 62: HSM cascade × if-condition × state-args
+#
+# Phase 14 wave 2. Combines:
+#   - HSM cascade ($Active => $Frame(threshold: int))
+#   - State-args declared at parent, read by name in child handler
+#   - `if` condition + branches reading the state-arg
+#
+# Cross-product: child reads cascaded state-arg INSIDE an `if`
+# condition (`if v > threshold`). Verifies state-arg resolution
+# survives lookup inside the condition expression at HSM depth.
+
+@@system HsmIfStateArgs {
+    interface:
+        enter_active(t: int)
+        classify(v: int): int
+
+    machine:
+        $Idle {
+            enter_active(t: int) {
+                -> $Active(t)
+            }
+            classify(v: int): int {
+                @@:(-1)
+                return
+            }
+        }
+
+        $Active => $Frame(threshold: int) {
+            enter_active(t: int) {
+                -> $Active(t)
+            }
+            classify(v: int): int {
+                if v > threshold:
+                    @@:(1)
+                else:
+                    @@:(0)
+                return
+            }
+        }
+
+        $Frame {
+        }
+    domain:
+        n: int = 0
+}
+
+def main():
+    print("=== Test 62: HSM × if × state-args ===")
+    s = @@HsmIfStateArgs()
+
+    # Initial state is $Idle (first in machine). classify returns -1.
+    pre = s.classify(5)
+    assert pre == -1, f"Expected -1 in Idle, got {pre}"
+    print(f"1. Idle classify(5) = {pre}")
+
+    # Transition into $Active with threshold=10. Cascade reads
+    # threshold from $Frame state-arg.
+    s.enter_active(10)
+    under = s.classify(5)    # 5 > 10? false → 0
+    assert under == 0, f"Expected 0 (under), got {under}"
+    print(f"2. classify(5) with threshold=10 → {under}")
+
+    over = s.classify(15)    # 15 > 10? true → 1
+    assert over == 1, f"Expected 1 (over), got {over}"
+    print(f"3. classify(15) with threshold=10 → {over}")
+
+    eq = s.classify(10)      # 10 > 10? false → 0
+    assert eq == 0, f"Expected 0 (eq, not over), got {eq}"
+    print(f"4. classify(10) with threshold=10 → {eq}")
+
+    # Re-enter with new threshold
+    s.enter_active(50)
+    new_under = s.classify(15)  # was over, now under
+    assert new_under == 0, f"Expected 0 with new threshold=50, got {new_under}"
+    print(f"5. classify(15) with threshold=50 → {new_under}")
+
+    print("PASS: 62_hsm_if_state_args")
+
+if __name__ == '__main__':
+    main()
