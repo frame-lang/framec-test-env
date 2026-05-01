@@ -1,0 +1,94 @@
+@@target kotlin
+
+@@persist
+@@system Inner {
+    interface:
+        cycle()
+        get_state(): String
+        get_count(): Int
+
+    machine:
+        $A {
+            cycle() { this.n = this.n + 1; -> $B }
+            get_state(): String { @@:("A") }
+            get_count(): Int { @@:(this.n) }
+        }
+        $B => $A {
+            cycle() { -> $A }
+            get_state(): String { @@:("B") }
+            get_count(): Int { => $^ }
+        }
+    domain:
+        n: Int = 0
+}
+
+@@system Outer {
+    interface:
+        tick()
+        cycle_inner()
+        get_outer_state(): String
+        get_inner_state(): String
+        get_inner_count(): Int
+        get_k(): Int
+
+    machine:
+        $Idle {
+            tick() { this.k = this.k + 1; -> $Active }
+            cycle_inner() { this.inner.cycle() }
+            get_outer_state(): String { @@:("Idle") }
+            get_inner_state(): String { @@:(this.inner.get_state()) }
+            get_inner_count(): Int { @@:(this.inner.get_count()) }
+            get_k(): Int { @@:(this.k) }
+        }
+        $Active => $Idle {
+            tick() { -> $Idle }
+            get_outer_state(): String { @@:("Active") }
+            cycle_inner() { => $^ }
+            get_inner_state(): String { => $^ }
+            get_inner_count(): Int { => $^ }
+            get_k(): Int { => $^ }
+        }
+    domain:
+        k: Int = 0
+        inner: Inner = @@Inner()
+}
+
+fun fmt(o: Outer): String = "${o.get_outer_state()}/${o.get_inner_state()}/${o.get_inner_count()}/${o.get_k()}"
+
+fun must(label: String, o: Outer, expected: String) {
+    val actual = fmt(o)
+    check(actual == expected) { "FAIL $label: $actual expected $expected" }
+}
+
+fun main() {
+    val o = Outer()
+    must("T0 fresh", o, "Idle/A/0/0")
+    val snap0 = o.save_state()
+    val r0 = Outer.restore_state(snap0)
+    must("T0 restored", r0, "Idle/A/0/0")
+
+    o.tick()
+    must("T1", o, "Active/A/0/1")
+    val snap1 = o.save_state()
+    val r1 = Outer.restore_state(snap1)
+    must("T1 restored", r1, "Active/A/0/1")
+
+    o.cycle_inner()
+    must("T2", o, "Active/B/1/1")
+    val snap2 = o.save_state()
+    val r2 = Outer.restore_state(snap2)
+    must("T2 restored", r2, "Active/B/1/1")
+
+    val snap2b = r2.save_state()
+    val r2b = Outer.restore_state(snap2b)
+    check(fmt(r2b) == fmt(r2)) { "FAIL idempotence: ${fmt(r2b)} != ${fmt(r2)}" }
+
+    r2.cycle_inner()
+    must("continue1", r2, "Active/A/1/1")
+    r2.tick()
+    must("continue2", r2, "Idle/A/1/1")
+    r2.tick()
+    must("continue3", r2, "Active/A/1/2")
+
+    println("PASS: 84_persist_nested_hsm")
+}

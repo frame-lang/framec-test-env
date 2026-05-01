@@ -1,0 +1,132 @@
+@@target typescript
+
+@@persist
+@@system Inner {
+    interface:
+        cycle()
+        get_state(): string
+        get_count(): number
+
+    machine:
+        $A {
+            cycle() { this.n = this.n + 1; -> $B }
+            get_state(): string { @@:("A") }
+            get_count(): number { @@:(this.n) }
+        }
+        $B => $A {
+            cycle() { -> $A }
+            get_state(): string { @@:("B") }
+            get_count(): number { => $^ }
+        }
+    domain:
+        n: number = 0
+}
+
+@@system Mid {
+    interface:
+        cycle()
+        cycle_inner()
+        get_state(): string
+        get_inner_state(): string
+        get_inner_count(): number
+        get_m(): number
+
+    machine:
+        $P {
+            cycle() { this.m = this.m + 1; -> $Q }
+            cycle_inner() { this.inner.cycle() }
+            get_state(): string { @@:("P") }
+            get_inner_state(): string { @@:(this.inner.get_state()) }
+            get_inner_count(): number { @@:(this.inner.get_count()) }
+            get_m(): number { @@:(this.m) }
+        }
+        $Q => $P {
+            cycle() { -> $P }
+            get_state(): string { @@:("Q") }
+            cycle_inner() { => $^ }
+            get_inner_state(): string { => $^ }
+            get_inner_count(): number { => $^ }
+            get_m(): number { => $^ }
+        }
+    domain:
+        m: number = 0
+        inner: Inner = @@Inner()
+}
+
+@@system Outer {
+    interface:
+        tick()
+        cycle_mid()
+        cycle_inner()
+        get_outer_state(): string
+        get_mid_state(): string
+        get_inner_state(): string
+        get_inner_count(): number
+        get_m(): number
+        get_k(): number
+
+    machine:
+        $Idle {
+            tick() { this.k = this.k + 1; -> $Active }
+            cycle_mid() { this.mid.cycle() }
+            cycle_inner() { this.mid.cycle_inner() }
+            get_outer_state(): string { @@:("Idle") }
+            get_mid_state(): string { @@:(this.mid.get_state()) }
+            get_inner_state(): string { @@:(this.mid.get_inner_state()) }
+            get_inner_count(): number { @@:(this.mid.get_inner_count()) }
+            get_m(): number { @@:(this.mid.get_m()) }
+            get_k(): number { @@:(this.k) }
+        }
+        $Active => $Idle {
+            tick() { -> $Idle }
+            get_outer_state(): string { @@:("Active") }
+            cycle_mid() { => $^ }
+            cycle_inner() { => $^ }
+            get_mid_state(): string { => $^ }
+            get_inner_state(): string { => $^ }
+            get_inner_count(): number { => $^ }
+            get_m(): number { => $^ }
+            get_k(): number { => $^ }
+        }
+    domain:
+        k: number = 0
+        mid: Mid = @@Mid()
+}
+
+const probe = (o: Outer): any[] => [o.get_outer_state(), o.get_mid_state(), o.get_inner_state(), o.get_inner_count(), o.get_m(), o.get_k()];
+const eq = (a: any[], b: any[]): boolean => a.length === b.length && a.every((v, i) => v === b[i]);
+const fail = (label: string, actual: any[], expected: any[]): void => { console.log(`FAIL ${label}: ${JSON.stringify(actual)} expected ${JSON.stringify(expected)}`); process.exit(1); };
+
+const o = new Outer();
+let p = probe(o); if (!eq(p, ["Idle", "P", "A", 0, 0, 0])) fail("T0 fresh", p, ["Idle", "P", "A", 0, 0, 0]);
+const snap0 = o.saveState();
+const r0 = Outer.restoreState(snap0);
+p = probe(r0); if (!eq(p, ["Idle", "P", "A", 0, 0, 0])) fail("T0 restored", p, ["Idle", "P", "A", 0, 0, 0]);
+
+o.tick();
+p = probe(o); if (!eq(p, ["Active", "P", "A", 0, 0, 1])) fail("T1", p, ["Active", "P", "A", 0, 0, 1]);
+const snap1 = o.saveState();
+const r1 = Outer.restoreState(snap1);
+p = probe(r1); if (!eq(p, ["Active", "P", "A", 0, 0, 1])) fail("T1 restored", p, ["Active", "P", "A", 0, 0, 1]);
+
+o.cycle_mid();
+o.cycle_inner();
+p = probe(o); if (!eq(p, ["Active", "Q", "B", 1, 1, 1])) fail("T2", p, ["Active", "Q", "B", 1, 1, 1]);
+const snap2 = o.saveState();
+const r2 = Outer.restoreState(snap2);
+p = probe(r2); if (!eq(p, ["Active", "Q", "B", 1, 1, 1])) fail("T2 restored", p, ["Active", "Q", "B", 1, 1, 1]);
+
+const snap2b = r2.saveState();
+const r2b = Outer.restoreState(snap2b);
+if (!eq(probe(r2b), probe(r2))) fail("Idempotence", probe(r2b), probe(r2));
+
+r2.cycle_inner();
+p = probe(r2); if (!eq(p, ["Active", "Q", "A", 1, 1, 1])) fail("continue1", p, ["Active", "Q", "A", 1, 1, 1]);
+r2.cycle_mid();
+p = probe(r2); if (!eq(p, ["Active", "P", "A", 1, 1, 1])) fail("continue2", p, ["Active", "P", "A", 1, 1, 1]);
+r2.tick();
+p = probe(r2); if (!eq(p, ["Idle", "P", "A", 1, 1, 1])) fail("continue3", p, ["Idle", "P", "A", 1, 1, 1]);
+r2.tick();
+p = probe(r2); if (!eq(p, ["Active", "P", "A", 1, 1, 2])) fail("continue4", p, ["Active", "P", "A", 1, 1, 2]);
+
+console.log("PASS: 85_persist_three_level_nested");

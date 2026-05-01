@@ -1,0 +1,143 @@
+@@target rust
+
+@@persist
+@@system Inner {
+    interface:
+        cycle()
+        get_state(): String
+        get_count(): i32
+
+    machine:
+        $A {
+            cycle() { self.n = self.n + 1; -> $B }
+            get_state(): String { @@:("A".to_string()) }
+            get_count(): i32 { @@:(self.n) }
+        }
+        $B => $A {
+            cycle() { -> $A }
+            get_state(): String { @@:("B".to_string()) }
+            get_count(): i32 { => $^ }
+        }
+    domain:
+        n: i32 = 0
+}
+
+@@system Mid {
+    interface:
+        cycle()
+        cycle_inner()
+        get_state(): String
+        get_inner_state(): String
+        get_inner_count(): i32
+        get_m(): i32
+
+    machine:
+        $P {
+            cycle() { self.m = self.m + 1; -> $Q }
+            cycle_inner() { self.inner.cycle(); }
+            get_state(): String { @@:("P".to_string()) }
+            get_inner_state(): String { @@:(self.inner.get_state()) }
+            get_inner_count(): i32 { @@:(self.inner.get_count()) }
+            get_m(): i32 { @@:(self.m) }
+        }
+        $Q => $P {
+            cycle() { -> $P }
+            get_state(): String { @@:("Q".to_string()) }
+            cycle_inner() { => $^ }
+            get_inner_state(): String { => $^ }
+            get_inner_count(): i32 { => $^ }
+            get_m(): i32 { => $^ }
+        }
+    domain:
+        m: i32 = 0
+        inner: Inner = @@Inner()
+}
+
+@@system Outer {
+    interface:
+        tick()
+        cycle_mid()
+        cycle_inner()
+        get_outer_state(): String
+        get_mid_state(): String
+        get_inner_state(): String
+        get_inner_count(): i32
+        get_m(): i32
+        get_k(): i32
+
+    machine:
+        $Idle {
+            tick() { self.k = self.k + 1; -> $Active }
+            cycle_mid() { self.mid.cycle(); }
+            cycle_inner() { self.mid.cycle_inner(); }
+            get_outer_state(): String { @@:("Idle".to_string()) }
+            get_mid_state(): String { @@:(self.mid.get_state()) }
+            get_inner_state(): String { @@:(self.mid.get_inner_state()) }
+            get_inner_count(): i32 { @@:(self.mid.get_inner_count()) }
+            get_m(): i32 { @@:(self.mid.get_m()) }
+            get_k(): i32 { @@:(self.k) }
+        }
+        $Active => $Idle {
+            tick() { -> $Idle }
+            get_outer_state(): String { @@:("Active".to_string()) }
+            cycle_mid() { => $^ }
+            cycle_inner() { => $^ }
+            get_mid_state(): String { => $^ }
+            get_inner_state(): String { => $^ }
+            get_inner_count(): i32 { => $^ }
+            get_m(): i32 { => $^ }
+            get_k(): i32 { => $^ }
+        }
+    domain:
+        k: i32 = 0
+        mid: Mid = @@Mid()
+}
+
+fn fmt(o: &mut Outer) -> String {
+    format!("{}/{}/{}/{}/{}/{}",
+        o.get_outer_state(), o.get_mid_state(), o.get_inner_state(),
+        o.get_inner_count(), o.get_m(), o.get_k())
+}
+
+fn must(label: &str, o: &mut Outer, expected: &str) {
+    let actual = fmt(o);
+    assert_eq!(actual, expected, "FAIL {}: {} expected {}", label, actual, expected);
+}
+
+fn main() {
+    let mut o = Outer::new();
+    must("T0 fresh", &mut o, "Idle/P/A/0/0/0");
+    let snap0 = o.save_state();
+    let mut r0 = Outer::restore_state(&snap0);
+    must("T0 restored", &mut r0, "Idle/P/A/0/0/0");
+
+    o.tick();
+    must("T1", &mut o, "Active/P/A/0/0/1");
+    let snap1 = o.save_state();
+    let mut r1 = Outer::restore_state(&snap1);
+    must("T1 restored", &mut r1, "Active/P/A/0/0/1");
+
+    o.cycle_mid();
+    o.cycle_inner();
+    must("T2", &mut o, "Active/Q/B/1/1/1");
+    let snap2 = o.save_state();
+    let mut r2 = Outer::restore_state(&snap2);
+    must("T2 restored", &mut r2, "Active/Q/B/1/1/1");
+
+    let snap2b = r2.save_state();
+    let mut r2b = Outer::restore_state(&snap2b);
+    let f1 = fmt(&mut r2);
+    let f2 = fmt(&mut r2b);
+    assert_eq!(f1, f2, "FAIL idempotence: {} != {}", f2, f1);
+
+    r2.cycle_inner();
+    must("continue1", &mut r2, "Active/Q/A/1/1/1");
+    r2.cycle_mid();
+    must("continue2", &mut r2, "Active/P/A/1/1/1");
+    r2.tick();
+    must("continue3", &mut r2, "Idle/P/A/1/1/1");
+    r2.tick();
+    must("continue4", &mut r2, "Active/P/A/1/1/2");
+
+    println!("PASS: 85_persist_three_level_nested");
+}
