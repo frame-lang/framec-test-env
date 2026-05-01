@@ -1313,10 +1313,33 @@ wave 3.
   async dispatch. Locally verified pass: python_3, javascript,
   typescript, java. Other backends compiled cleanly with framec;
   docker matrix verification pending.
-  Notable wave-6 finding: Python emits `async def save_state`
-  for async-typed systems even though save_state itself is
-  sync. Users must `await s.save_state()` — worth documenting
-  in the Python per-language guide.
+  Notable wave-6 finding: surfaced 3 framec defects on the
+  cross-product (D16 swift, D17 cpp_23 — both rooted in
+  `make_system_async` over-marking persist machinery; D18
+  csharp turned out to be a test-source naming issue, not
+  framec). All fixed in framepiler 62b8a40; persist machinery
+  now skipped in `make_system_async`. Behaviour change:
+  save_state/restore_state are sync on async systems
+  (previously async on Python/Rust/Swift).
+- **Wave 7 — persist × multi-system (SHIPPED 2026-04-30):**
+  test 82 (`82_persist_multi_system`) — parent system has a
+  nested child `@@system` instance as a domain field, plus
+  primitive domain vars. Save/restore the parent; verify the
+  primitives round-trip.
+  Backends shipped: python_3, javascript, typescript.
+  **Architectural finding**: nested system instances do NOT
+  auto-rehydrate on JSON-based persist (most typed backends).
+  Python's pickle serializes the entire object graph and
+  works fully (child counter state + methods callable post-
+  restore); JSON-based backends save the child as a plain
+  dict, losing the class info — the user can read the
+  primitives but cannot call methods on the restored child.
+  Test 82 deliberately tests only primitive round-trip on the
+  parent; child-method invocation post-restore is documented
+  as unsupported on JSON-based persist. Auto-rehydrating
+  nested systems would require either a Frame-level type-
+  registry pass or per-backend custom serializers — out of
+  scope for current persist contract.
 
 ### Medium-yield: wave 2/3 of existing phases
 

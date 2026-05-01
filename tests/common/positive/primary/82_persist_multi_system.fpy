@@ -1,0 +1,53 @@
+@@target python_3
+
+# Wave 7 — persist x multi-system. Verifies the parent system's
+# primitive domain fields round-trip when one of the domain fields
+# is a nested @@system instance. Calls to the nested system
+# post-restore are NOT exercised — that requires per-backend re-
+# hydration logic which most languages' persist mechanisms can't
+# provide automatically (only Python's pickle handles it natively).
+
+@@system Counter {
+    interface:
+        bump()
+        value(): int
+
+    machine:
+        $Active {
+            bump() { self.n = self.n + 1 }
+            value(): int { @@:(self.n); return }
+        }
+
+    domain:
+        n: int = 0
+}
+
+@@persist
+@@system Container {
+    interface:
+        tick()
+        get_n(): int
+
+    machine:
+        $Active {
+            tick() {
+                self.n = self.n + 10
+                self.counter.bump()
+            }
+            get_n(): int { @@:(self.n); return }
+        }
+
+    domain:
+        n: int = 0
+        counter = @@Counter()
+}
+
+if __name__ == '__main__':
+    c1 = Container()
+    c1.tick()
+    c1.tick()
+    assert c1.get_n() == 20
+    snap = c1.save_state()
+    c2 = Container.restore_state(snap)
+    assert c2.get_n() == 20, f"FAIL: parent n expected 20, got {c2.get_n()}"
+    print("PASS: 82_persist_multi_system")
