@@ -222,6 +222,7 @@ fi
 # sources, retry. C# follows the same pattern.
 compile_cp="$CLASSES_DIR"
 [ -f /lib/json.jar ] && compile_cp="$CLASSES_DIR:/lib/json.jar"
+[ -f /lib/jackson-core.jar ] && compile_cp="${compile_cp}:/lib/jackson-core.jar:/lib/jackson-annotations.jar:/lib/jackson-databind.jar"
 
 try_javac() {
     local files
@@ -272,6 +273,7 @@ fi
 
 run_cp="$CLASSES_DIR:/opt/test_runner.jar"
 [ -f /lib/json.jar ] && run_cp="${run_cp}:/lib/json.jar"
+[ -f /lib/jackson-core.jar ] && run_cp="${run_cp}:/lib/jackson-core.jar:/lib/jackson-annotations.jar:/lib/jackson-databind.jar"
 
 # Integrity check — verify dispatcher emitted test_count TAP lines.
 tap_out=$(mktemp)

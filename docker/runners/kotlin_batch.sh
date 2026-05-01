@@ -157,6 +157,9 @@ _libs=""
 [ -f /lib/kotlinx-coroutines-core-jvm.jar ] && {
     [ -n "$_libs" ] && _libs="${_libs}:/lib/kotlinx-coroutines-core-jvm.jar" || _libs="/lib/kotlinx-coroutines-core-jvm.jar"
 }
+[ -f /lib/jackson-core.jar ] && {
+    [ -n "$_libs" ] && _libs="${_libs}:/lib/jackson-core.jar:/lib/jackson-annotations.jar:/lib/jackson-databind.jar" || _libs="/lib/jackson-core.jar:/lib/jackson-annotations.jar:/lib/jackson-databind.jar"
+}
 [ -n "$_libs" ] && kt_cp="-cp $_libs"
 
 # Batch compile with error attribution. kotlinc errors look like:
@@ -253,6 +256,7 @@ dispatcher_cp="/opt/test_runner.jar"
 [ -f "$ALL_JAR" ] && dispatcher_cp="${ALL_JAR}:${dispatcher_cp}"
 [ -f /lib/json.jar ] && dispatcher_cp="${dispatcher_cp}:/lib/json.jar"
 [ -f /lib/kotlinx-coroutines-core-jvm.jar ] && dispatcher_cp="${dispatcher_cp}:/lib/kotlinx-coroutines-core-jvm.jar"
+[ -f /lib/jackson-core.jar ] && dispatcher_cp="${dispatcher_cp}:/lib/jackson-core.jar:/lib/jackson-annotations.jar:/lib/jackson-databind.jar"
 
 # Integrity check — verify dispatcher emitted test_count TAP lines.
 tap_out=$(mktemp)
