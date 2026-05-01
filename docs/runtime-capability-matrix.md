@@ -42,6 +42,8 @@ spec). Generated from a manual audit on 2026-04-26.
 | Forward transition (`-> => $State`)                      | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | **Step 25: persistence**                                 |
 | `@@persist` save / restore                               | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Nested `@@SystemName` save / restore                     | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅[o] | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅[p] |
+| E700 quiescent enforcement on `save_state`               | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ⚠️[q] |
 | **Async**                                                |
 | `async` interface methods                                | ✅ | ✅ | ✅ | ✅ | 🚫 | ✅ | ✅ | ✅[f] | 🚫[g] | 🚫 | ✅ | ✅ | 🚫 | 🚫 | ✅ | ✅ | 🚫[h] |
 | **Multi-feature surface (where target shape constrains)**|
@@ -196,6 +198,32 @@ spec). Generated from a manual audit on 2026-04-26.
     position recursion. Per-language guidance for choosing
     between the two idioms is tracked in
     `docs/per_language_guides/` (TODO — see roadmap).
+
+[o] **Go** — nested `@@SystemName` persist works (framepiler
+    `dd8d205`); cross-system persist used pointer fields (`*Inner`)
+    rather than embedded structs. Save recurses through child's
+    `SaveState`; restore via `RestoreOuter`-style factory functions
+    that produce pointer-typed instances.
+
+[p] **Erlang** — nested `@@SystemName` persist works via gen_statem
+    process trees: each child is its own gen_statem; save recurses
+    through `child:save_state(ChildPid)` which returns a map; load
+    spawns a fresh child process via `child:load_state(ChildMap)`.
+    Multi-system tests live in `tests/erlang/multi/` (one .ferl per
+    module, single shared driver.escript) since Erlang requires one
+    `-module` per file.
+
+[q] **Erlang** — quiescent contract is enforced *implicitly* by
+    `gen_statem` run-to-completion semantics rather than an explicit
+    E700 throw. A handler that synchronously calls `save_state` on
+    its own Pid would deadlock (the actor is busy processing the
+    current event and cannot respond to `sys:get_state`); the call
+    times out after 5 seconds and the calling process crashes with
+    `{timeout, ...}`. Functionally equivalent to E700 (operation
+    fails on contract violation) but mechanism differs. See
+    [`docs/per_language_guides/erlang.md`](../per_language_guides/erlang.md).
+    All 16 other backends raise `E700: system not quiescent` (typed
+    exception or panic per-language idiom; see RFC-0012).
 
 ## Summary
 
