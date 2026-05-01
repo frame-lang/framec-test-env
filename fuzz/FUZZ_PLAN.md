@@ -1301,6 +1301,22 @@ wave 3.
   has its own JSON serialization shape and toolchain wiring).
   Rust + Java + Erlang are highest priority — they got the
   most invasive parts of the bulk fix.
+- **Wave 6 — persist × async (SHIPPED 2026-04-30):** test 81
+  (`81_persist_async_basic`) added for all 11 wired async
+  backends — python_3, javascript, typescript, csharp, java,
+  kotlin, rust, swift, cpp_23, gdscript, plus a `@@skip`
+  marker for go (Go has no async/await). Pattern: async
+  `configure(amount)` awaits a compute, sets a domain var,
+  transitions to `$Active`. Save state, restore, verify
+  domain var survives, then call configure() again to verify
+  post-restore async still works. Combines persist with
+  async dispatch. Locally verified pass: python_3, javascript,
+  typescript, java. Other backends compiled cleanly with framec;
+  docker matrix verification pending.
+  Notable wave-6 finding: Python emits `async def save_state`
+  for async-typed systems even though save_state itself is
+  sync. Users must `await s.save_state()` — worth documenting
+  in the Python per-language guide.
 
 ### Medium-yield: wave 2/3 of existing phases
 
