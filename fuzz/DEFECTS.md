@@ -146,27 +146,19 @@ triage.
 
 ## D13: C++ enter-args list-typed round-trip not exercised
 
-- Lang: cpp (and same shape applies to C / C# / Go for symmetry)
-- Tier: not exercised by any test
-- Case: n/a — theoretical
+- Lang: cpp
+- Tier: was not exercised by any test
+- Case: n/a (theoretical)
 - Tag: enter-args, list, persist
-- Failure mode: would-be runtime cast failure
-- Reproducer: n/a (would need a state with `$>(items: std::vector<int>)`
-  PLUS a non-`$>` handler that reads `enter_args` after restore)
-- Suspected codegen path: `interface_gen.rs` — D10 per-state typed
-  branching covers `state_args` but not `enter_args`. The enter-args
-  serialize/deserialize uses the int/double-only fallthrough.
-- Status: **open (low impact)**
-- Notes: enter_args are populated during transition and consumed by
-  the `$>` handler during the enter cascade. After enter completes
-  they live in the compartment but are typically dormant — no normal
-  Frame code reads them again. Persist round-trips them anyway, so
-  if a user manually accessed `__compartment->enter_args[i]` after
-  restore (and the declared type was a vector/list), the cast would
-  fail. Not a correctness issue for any test case in the corpus or
-  any cookbook example. Mirror the D10 fix (pull the per-state
-  branching out into a helper, apply to both state_args and
-  enter_args) when promoting a real test case.
+- Failure mode: would-be runtime bad_any_cast
+- Status: **fixed 2026-04-30** (framepiler post-62b8a40)
+- Fix: mirrored D10's per-state typed branching from state_args
+  to enter_args in both save and restore sides of the C++ persist
+  codegen. Now `$>(items: std::vector<T>)` round-trips correctly
+  via `nlohmann::json`'s ADL — same architecture as state_args.
+- Notes: regression coverage still pending — no test currently
+  exercises enter-args containing a typed compound. The fix is
+  preventive symmetry with state_args.
 
 ---
 
@@ -184,23 +176,18 @@ triage.
   `<sys>_FrameVec*` whose items are opaque `void*` with no element-
   type metadata. Other backends know the element type from the
   user's declared generic (`List<int>`, `Vec<i32>`, `[]int`, etc.).
-- Status: **open (no syntax extension required after dispatcher landed)**
-- Notes: With the type-ignorant C dispatcher (framepiler 6efaf78
-  region — `<sys>_persist_pack_<mangled>`), the built-in `: list`
-  symbol-mangles to `list` and the runtime supplies a default
-  `<sys>_persist_pack_list` that packs each `void*` element as
-  int. Users who need typed lists (`list[str]`, `list[float]`)
-  declare a custom Frame type and supply matching
-  `<sys>_persist_pack_<theirtype>` / `unpack_<theirtype>` symbols
-  alongside their existing `#include <cjson/cJSON.h>` prolog —
-  the same extension hook used for any user-defined C type.
-  No Frame syntax change needed; the architectural boundary is
-  "framec mangles strings to identifiers, runtime+user supply
-  the symbols". Status remains "open" because the built-in
-  default is still int-only — anyone reading the docs may be
-  surprised. Tracking primarily for documentation; closeable
-  once the dispatcher pattern is documented in the C
-  per-language guide.
+- Status: **resolved 2026-04-30** (documented in C per-language
+  guide, framepiler post-62b8a40)
+- Fix path: docs only — the dispatcher pattern (framepiler
+  6efaf78) already provides the extension hook. The C
+  per-language guide (`docs/per_language_guides/c.md`) now
+  documents Approach A: declare a custom Frame type, supply
+  `<sys>_persist_pack_<theirtype>` / `unpack_<theirtype>`
+  alongside the standard cJSON prolog. The mangled symbol
+  matches the user-declared type string verbatim, so the
+  linker finds the user's implementation. The built-in
+  `: list` default stays int-only (no runtime change); typed
+  lists go through user-declared types.
 
 ---
 
