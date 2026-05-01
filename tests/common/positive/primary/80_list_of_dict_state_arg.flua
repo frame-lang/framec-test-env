@@ -1,0 +1,34 @@
+@@target lua
+
+@@persist
+@@system ListOfDict {
+    interface:
+        configure(rows: table)
+        get_at(idx: int, key: String): int
+
+    machine:
+        $Idle {
+            configure(rows: table) { -> $Active(rows) }
+            get_at(idx: int, key: String): int { @@:(-1) }
+        }
+        $Active(rows: table) {
+            configure(rows: table) { -> $Active(rows) }
+            get_at(idx: int, key: String): int {
+                local __row = rows[idx + 1]
+                if __row and __row[key] then @@:(__row[key]) else @@:(-1) end
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+local s1 = ListOfDict:new()
+s1:configure({{x = 1, y = 2}, {z = 3}})
+if s1:get_at(0, "x") ~= 1 then print("FAIL pre 0.x"); os.exit(1) end
+if s1:get_at(1, "z") ~= 3 then print("FAIL pre 1.z"); os.exit(1) end
+local snap = s1:save_state()
+local s2 = ListOfDict.restore_state(snap)
+if s2:get_at(0, "x") ~= 1 then print("FAIL post 0.x"); os.exit(1) end
+if s2:get_at(0, "y") ~= 2 then print("FAIL post 0.y"); os.exit(1) end
+if s2:get_at(1, "z") ~= 3 then print("FAIL post 1.z"); os.exit(1) end
+print("PASS: 80_list_of_dict_state_arg")

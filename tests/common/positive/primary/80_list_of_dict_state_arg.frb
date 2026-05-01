@@ -1,0 +1,33 @@
+@@target ruby
+
+@@persist
+@@system ListOfDict {
+    interface:
+        configure(rows: Array)
+        get_at(idx: int, key: String): int
+
+    machine:
+        $Idle {
+            configure(rows: Array) { -> $Active(rows) }
+            get_at(idx: int, key: String): int { @@:(-1) }
+        }
+        $Active(rows: Array) {
+            configure(rows: Array) { -> $Active(rows) }
+            get_at(idx: int, key: String): int {
+                @@:(idx < rows.length ? rows[idx].fetch(key, -1) : -1)
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+s1 = ListOfDict.new
+s1.configure([{"x" => 1, "y" => 2}, {"z" => 3}])
+abort("FAIL pre 0.x") unless s1.get_at(0, "x") == 1
+abort("FAIL pre 1.z") unless s1.get_at(1, "z") == 3
+snap = s1.save_state
+s2 = ListOfDict.restore_state(snap)
+abort("FAIL post 0.x") unless s2.get_at(0, "x") == 1
+abort("FAIL post 0.y") unless s2.get_at(0, "y") == 2
+abort("FAIL post 1.z") unless s2.get_at(1, "z") == 3
+puts "PASS: 80_list_of_dict_state_arg"
