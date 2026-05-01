@@ -1,0 +1,47 @@
+@@target rust
+
+async fn async_compute(x: i32) -> i32 {
+    x * 2
+}
+
+@@persist
+@@system PersistAsync {
+    interface:
+        async configure(amount: i32)
+        get(): i32
+
+    machine:
+        $Idle {
+            configure(amount: i32) {
+                self.value = async_compute(amount).await;
+                -> $Active
+            }
+            get(): i32 { @@:(0) }
+        }
+        $Active {
+            configure(amount: i32) {
+                self.value = self.value + async_compute(amount).await;
+                -> $Active
+            }
+            get(): i32 { @@:(self.value) }
+        }
+    domain:
+        value: i32 = 0
+}
+
+#[tokio::main]
+async fn main() {
+    let mut s1 = PersistAsync::new();
+    s1.init().await;
+    s1.configure(5).await;
+    let mut v = s1.get().await;
+    assert_eq!(v, 10, "FAIL pre: expected 10, got {}", v);
+    let snap = s1.save_state();
+    let mut s2 = PersistAsync::restore_state(&snap);
+    v = s2.get().await;
+    assert_eq!(v, 10, "FAIL post: expected 10, got {}", v);
+    s2.configure(3).await;
+    v = s2.get().await;
+    assert_eq!(v, 16, "FAIL post-2nd: expected 16, got {}", v);
+    println!("PASS: 81_persist_async_basic");
+}
