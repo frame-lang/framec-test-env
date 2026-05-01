@@ -34,6 +34,68 @@ triage.
 
 ---
 
+## D18: csharp persist methods missing on @@async systems
+
+- Lang: csharp
+- Tier: matrix test 81 (persist × async)
+- Case: `81_persist_async_basic.fcs` (currently `@@skip`)
+- Tag: persist, async, csharp, codegen
+- Failure mode: Compile error — `'PersistAsync' does not contain a
+  definition for 'save_state'` and `'restore_state'`. The C#
+  codegen does not emit save_state/restore_state methods when the
+  system is `@@async`. With `@@persist` alone, both methods are
+  emitted; the async marker silently suppresses them.
+- Suspected codegen path: `interface_gen.rs` C# section likely
+  guards persist-method emit on a sync-system condition.
+- Status: **open** (logged from wave 6 verification)
+- Mitigation: skip csharp in test 81 via `@@skip`; treat
+  persist+async as unsupported on csharp pending fix.
+
+---
+
+## D17: cpp persist save_state lambda co_return promise mismatch
+
+- Lang: cpp_23
+- Tier: matrix test 81 (persist × async)
+- Case: `81_persist_async_basic.fcpp` (currently `@@skip`)
+- Tag: persist, async, cpp, coroutines, codegen
+- Failure mode: `error: unable to find the promise type for this
+  coroutine` at the `co_return __cj` inside the `__ser` lambda
+  emitted by save_state. When the system is `@@async`, the entire
+  kernel becomes coroutinized via FrameTask, including persist's
+  __ser/__deser lambdas — but the lambdas don't have a
+  std::coroutine_traits specialization for their return type.
+- Suspected codegen path: `interface_gen.rs` C++ persist `__ser`
+  lambda needs to either return a non-coroutine type (when
+  persist is sync) or be wrapped in FrameTask<nlohmann::json>
+  consistently.
+- Status: **open** (logged from wave 6 verification)
+- Mitigation: skip cpp in test 81; persist+async cpp pending fix.
+
+---
+
+## D16: swift persist helpers async-marked but call sites lack await
+
+- Lang: swift
+- Tier: matrix test 81 (persist × async)
+- Case: `81_persist_async_basic.fswift` (currently `@@skip`)
+- Tag: persist, async, swift, codegen
+- Failure mode: `error: expression is 'async' but is not marked
+  with 'await'` at multiple sites where save_state/restore_state
+  call `__serComp(...)` / `__deserComp(...)`. When the system is
+  `@@async`, all instance methods are emitted as `async` —
+  including the framework helpers __serComp/__deserComp — but
+  the call sites in save_state/restore_state were emitted without
+  `await`.
+- Suspected codegen path: `interface_gen.rs` Swift section emits
+  the calls into save_state/restore_state bodies as plain method
+  calls; needs to detect async-system and emit `await __serComp(...)`
+  at all call sites.
+- Status: **open** (logged from wave 6 verification)
+- Mitigation: skip swift in test 81; persist+async swift pending fix.
+
+---
+
 ## D15: Dict/map state-args broken on persist round-trip
 
 - Lang: java, kotlin, csharp, go, cpp
