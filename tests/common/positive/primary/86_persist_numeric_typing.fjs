@@ -1,0 +1,94 @@
+@@target javascript
+
+@@persist
+@@system Inner {
+    interface:
+        bump_int()
+        bump_float()
+        flip_bool()
+        get_n_int()
+        get_n_float()
+        get_n_bool()
+        get_n_str()
+
+    machine:
+        $S {
+            bump_int() { this.n_int = this.n_int + 1 }
+            bump_float() { this.n_float = this.n_float + 0.25 }
+            flip_bool() { this.n_bool = !this.n_bool }
+            get_n_int() { @@:(this.n_int) }
+            get_n_float() { @@:(this.n_float) }
+            get_n_bool() { @@:(this.n_bool) }
+            get_n_str() { @@:(this.n_str) }
+        }
+    domain:
+        n_int = 7
+        n_float = 2.5
+        n_bool = true
+        n_str = "hello"
+}
+
+@@system Outer {
+    interface:
+        bump_k_int()
+        bump_k_float()
+        bump_inner_int()
+        bump_inner_float()
+        flip_inner_bool()
+        get_k_int()
+        get_k_float()
+        get_n_int()
+        get_n_float()
+        get_n_bool()
+        get_n_str()
+
+    machine:
+        $S {
+            bump_k_int() { this.k_int = this.k_int + 1 }
+            bump_k_float() { this.k_float = this.k_float + 0.25 }
+            bump_inner_int() { this.inner.bump_int() }
+            bump_inner_float() { this.inner.bump_float() }
+            flip_inner_bool() { this.inner.flip_bool() }
+            get_k_int() { @@:(this.k_int) }
+            get_k_float() { @@:(this.k_float) }
+            get_n_int() { @@:(this.inner.get_n_int()) }
+            get_n_float() { @@:(this.inner.get_n_float()) }
+            get_n_bool() { @@:(this.inner.get_n_bool()) }
+            get_n_str() { @@:(this.inner.get_n_str()) }
+        }
+    domain:
+        k_int = 42
+        k_float = 1.25
+        inner = @@Inner()
+}
+
+const fail = (label, what, actual) => { console.log(`FAIL ${label} ${what}: ${actual}`); process.exit(1); };
+
+const assertState = (o, label, k_int_str, k_float, n_int_str, n_float, n_bool, n_str) => {
+    if (String(o.get_k_int()) !== k_int_str) fail(label, "k_int", o.get_k_int());
+    if (String(o.get_n_int()) !== n_int_str) fail(label, "n_int", o.get_n_int());
+    if (Math.abs(o.get_k_float() - k_float) > 1e-9) fail(label, "k_float", o.get_k_float());
+    if (Math.abs(o.get_n_float() - n_float) > 1e-9) fail(label, "n_float", o.get_n_float());
+    if (o.get_n_bool() !== n_bool) fail(label, "n_bool", o.get_n_bool());
+    if (o.get_n_str() !== n_str) fail(label, "n_str", o.get_n_str());
+};
+
+const o = new Outer();
+assertState(o, "T0", "42", 1.25, "7", 2.5, true, "hello");
+
+o.bump_k_int();
+o.bump_k_float();
+o.bump_inner_int();
+o.bump_inner_float();
+o.flip_inner_bool();
+assertState(o, "T1", "43", 1.5, "8", 2.75, false, "hello");
+
+const snap = o.saveState();
+const r = Outer.restoreState(snap);
+assertState(r, "T1 restored", "43", 1.5, "8", 2.75, false, "hello");
+
+r.bump_k_int();
+r.bump_inner_int();
+assertState(r, "continue", "44", 1.5, "9", 2.75, false, "hello");
+
+console.log("PASS: 86_persist_numeric_typing");

@@ -1,0 +1,110 @@
+@@target go
+
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "os"
+)
+
+var _ = json.Marshal
+
+@@persist
+@@system Inner {
+    interface:
+        cycle()
+        get_state(): string
+        get_count(): int
+
+    machine:
+        $A {
+            cycle() { s.n = s.n + 1; -> $B }
+            get_state(): string { @@:("A") }
+            get_count(): int { @@:(s.n) }
+        }
+        $B => $A {
+            cycle() { -> $A }
+            get_state(): string { @@:("B") }
+            get_count(): int { => $^ }
+        }
+    domain:
+        n: int = 0
+}
+
+@@system Outer {
+    interface:
+        tick()
+        cycle_inner()
+        get_outer_state(): string
+        get_inner_state(): string
+        get_inner_count(): int
+        get_k(): int
+
+    machine:
+        $Idle {
+            tick() { s.k = s.k + 1; -> $Active }
+            cycle_inner() { s.inner.Cycle() }
+            get_outer_state(): string { @@:("Idle") }
+            get_inner_state(): string { @@:(s.inner.Get_state()) }
+            get_inner_count(): int { @@:(s.inner.Get_count()) }
+            get_k(): int { @@:(s.k) }
+        }
+        $Active => $Idle {
+            tick() { -> $Idle }
+            get_outer_state(): string { @@:("Active") }
+            cycle_inner() { => $^ }
+            get_inner_state(): string { => $^ }
+            get_inner_count(): int { => $^ }
+            get_k(): int { => $^ }
+        }
+    domain:
+        k: int = 0
+        inner: *Inner = @@Inner()
+}
+
+func formatProbe(o *Outer) string {
+    return fmt.Sprintf("%s/%s/%d/%d", o.Get_outer_state(), o.Get_inner_state(), o.Get_inner_count(), o.Get_k())
+}
+
+func must(label string, o *Outer, expected string) {
+    actual := formatProbe(o)
+    if actual != expected {
+        fmt.Printf("FAIL %s: %s expected %s\n", label, actual, expected)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    o1 := NewOuter()
+    o2 := NewOuter()
+
+    o1.Cycle_inner()
+    o1.Cycle_inner()
+    o1.Cycle_inner()
+    must("o1 pre", o1, "Idle/B/2/0")
+
+    o2.Tick()
+    o2.Tick()
+    o2.Tick()
+    must("o2 pre", o2, "Active/A/0/2")
+
+    snap1 := o1.SaveState()
+    snap2 := o2.SaveState()
+
+    r2 := RestoreOuter(snap2)
+    r1 := RestoreOuter(snap1)
+
+    must("r1 restored", r1, "Idle/B/2/0")
+    must("r2 restored", r2, "Active/A/0/2")
+
+    r1.Cycle_inner()
+    must("r1 after mut", r1, "Idle/A/2/0")
+    must("r2 after r1 mut", r2, "Active/A/0/2")
+
+    r2.Cycle_inner()
+    must("r1 after r2 mut", r1, "Idle/A/2/0")
+    must("r2 after r2 mut", r2, "Active/B/1/2")
+
+    fmt.Println("PASS: 87_persist_multi_instance")
+}

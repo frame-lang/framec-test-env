@@ -1,0 +1,90 @@
+@@target javascript
+
+@@persist
+@@system Inner {
+    interface:
+        cycle()
+        get_state()
+        get_count()
+
+    machine:
+        $A {
+            cycle() { this.n = this.n + 1; -> $B }
+            get_state() { @@:("A") }
+            get_count() { @@:(this.n) }
+        }
+        $B => $A {
+            cycle() { -> $A }
+            get_state() { @@:("B") }
+            get_count() { => $^ }
+        }
+    domain:
+        n = 0
+}
+
+@@system Outer {
+    interface:
+        tick()
+        cycle_inner()
+        get_outer_state()
+        get_inner_state()
+        get_inner_count()
+        get_k()
+
+    machine:
+        $Idle {
+            tick() { this.k = this.k + 1; -> $Active }
+            cycle_inner() { this.inner.cycle() }
+            get_outer_state() { @@:("Idle") }
+            get_inner_state() { @@:(this.inner.get_state()) }
+            get_inner_count() { @@:(this.inner.get_count()) }
+            get_k() { @@:(this.k) }
+        }
+        $Active => $Idle {
+            tick() { -> $Idle }
+            get_outer_state() { @@:("Active") }
+            cycle_inner() { => $^ }
+            get_inner_state() { => $^ }
+            get_inner_count() { => $^ }
+            get_k() { => $^ }
+        }
+    domain:
+        k = 0
+        inner = @@Inner()
+}
+
+const probe = (o) => [o.get_outer_state(), o.get_inner_state(), o.get_inner_count(), o.get_k()];
+const eq = (a, b) => a.length === b.length && a.every((v, i) => v === b[i]);
+const fail = (label, actual, expected) => { console.log(`FAIL ${label}: ${JSON.stringify(actual)} expected ${JSON.stringify(expected)}`); process.exit(1); };
+
+const o1 = new Outer();
+const o2 = new Outer();
+
+o1.cycle_inner();
+o1.cycle_inner();
+o1.cycle_inner();
+let p = probe(o1); if (!eq(p, ["Idle", "B", 2, 0])) fail("o1 pre", p, ["Idle", "B", 2, 0]);
+
+o2.tick();
+o2.tick();
+o2.tick();
+p = probe(o2); if (!eq(p, ["Active", "A", 0, 2])) fail("o2 pre", p, ["Active", "A", 0, 2]);
+
+const snap1 = o1.saveState();
+const snap2 = o2.saveState();
+
+const r2 = Outer.restoreState(snap2);
+const r1 = Outer.restoreState(snap1);
+
+p = probe(r1); if (!eq(p, ["Idle", "B", 2, 0])) fail("r1 restored", p, ["Idle", "B", 2, 0]);
+p = probe(r2); if (!eq(p, ["Active", "A", 0, 2])) fail("r2 restored", p, ["Active", "A", 0, 2]);
+
+r1.cycle_inner();
+p = probe(r1); if (!eq(p, ["Idle", "A", 2, 0])) fail("r1 after mut", p, ["Idle", "A", 2, 0]);
+p = probe(r2); if (!eq(p, ["Active", "A", 0, 2])) fail("r2 after r1 mut", p, ["Active", "A", 0, 2]);
+
+r2.cycle_inner();
+p = probe(r1); if (!eq(p, ["Idle", "A", 2, 0])) fail("r1 after r2 mut", p, ["Idle", "A", 2, 0]);
+p = probe(r2); if (!eq(p, ["Active", "B", 1, 2])) fail("r2 after r2 mut", p, ["Active", "B", 1, 2]);
+
+console.log("PASS: 87_persist_multi_instance");

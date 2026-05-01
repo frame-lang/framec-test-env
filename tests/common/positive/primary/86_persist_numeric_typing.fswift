@@ -1,0 +1,94 @@
+@@target swift
+
+import Foundation
+
+@@persist
+@@system Inner {
+    interface:
+        bump_int()
+        bump_float()
+        flip_bool()
+        get_n_int(): Int
+        get_n_float(): Double
+        get_n_bool(): Bool
+        get_n_str(): String
+
+    machine:
+        $S {
+            bump_int() { self.n_int = self.n_int + 1 }
+            bump_float() { self.n_float = self.n_float + 0.25 }
+            flip_bool() { self.n_bool = !self.n_bool }
+            get_n_int(): Int { @@:(self.n_int) }
+            get_n_float(): Double { @@:(self.n_float) }
+            get_n_bool(): Bool { @@:(self.n_bool) }
+            get_n_str(): String { @@:(self.n_str) }
+        }
+    domain:
+        n_int: Int = 7
+        n_float: Double = 2.5
+        n_bool: Bool = true
+        n_str: String = "hello"
+}
+
+@@system Outer {
+    interface:
+        bump_k_int()
+        bump_k_float()
+        bump_inner_int()
+        bump_inner_float()
+        flip_inner_bool()
+        get_k_int(): Int
+        get_k_float(): Double
+        get_n_int(): Int
+        get_n_float(): Double
+        get_n_bool(): Bool
+        get_n_str(): String
+
+    machine:
+        $S {
+            bump_k_int() { self.k_int = self.k_int + 1 }
+            bump_k_float() { self.k_float = self.k_float + 0.25 }
+            bump_inner_int() { self.inner.bump_int() }
+            bump_inner_float() { self.inner.bump_float() }
+            flip_inner_bool() { self.inner.flip_bool() }
+            get_k_int(): Int { @@:(self.k_int) }
+            get_k_float(): Double { @@:(self.k_float) }
+            get_n_int(): Int { @@:(self.inner.get_n_int()) }
+            get_n_float(): Double { @@:(self.inner.get_n_float()) }
+            get_n_bool(): Bool { @@:(self.inner.get_n_bool()) }
+            get_n_str(): String { @@:(self.inner.get_n_str()) }
+        }
+    domain:
+        k_int: Int = 42
+        k_float: Double = 1.25
+        inner: Inner = @@Inner()
+}
+
+func assertState(_ o: Outer, _ label: String, _ kIntStr: String, _ kFloat: Double, _ nIntStr: String, _ nFloat: Double, _ nBool: Bool, _ nStr: String) {
+    if String(o.get_k_int()) != kIntStr { print("FAIL \(label) k_int: \(o.get_k_int())"); exit(1) }
+    if String(o.get_n_int()) != nIntStr { print("FAIL \(label) n_int: \(o.get_n_int())"); exit(1) }
+    if abs(o.get_k_float() - kFloat) > 1e-9 { print("FAIL \(label) k_float: \(o.get_k_float())"); exit(1) }
+    if abs(o.get_n_float() - nFloat) > 1e-9 { print("FAIL \(label) n_float: \(o.get_n_float())"); exit(1) }
+    if o.get_n_bool() != nBool { print("FAIL \(label) n_bool: \(o.get_n_bool())"); exit(1) }
+    if o.get_n_str() != nStr { print("FAIL \(label) n_str: \(o.get_n_str())"); exit(1) }
+}
+
+let o = Outer()
+assertState(o, "T0", "42", 1.25, "7", 2.5, true, "hello")
+
+o.bump_k_int()
+o.bump_k_float()
+o.bump_inner_int()
+o.bump_inner_float()
+o.flip_inner_bool()
+assertState(o, "T1", "43", 1.5, "8", 2.75, false, "hello")
+
+let snap = o.saveState()
+let r = Outer.restoreState(snap)
+assertState(r, "T1 restored", "43", 1.5, "8", 2.75, false, "hello")
+
+r.bump_k_int()
+r.bump_inner_int()
+assertState(r, "continue", "44", 1.5, "9", 2.75, false, "hello")
+
+print("PASS: 86_persist_numeric_typing")

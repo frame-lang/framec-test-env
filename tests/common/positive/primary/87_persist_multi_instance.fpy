@@ -1,0 +1,114 @@
+@@target python_3
+
+# Wave 8 hardening: multi-instance independence under nested persist.
+# Drives two separate Outer instances to different states + different
+# inner counts. Save both, restore both. Verifies the two trajectories
+# are preserved with zero cross-talk — surfaces any static-field /
+# module-level state pollution in the persist codegen.
+
+@@persist
+@@system Inner {
+    interface:
+        cycle()
+        get_state(): str
+        get_count(): int
+
+    machine:
+        $A {
+            cycle() {
+                self.n = self.n + 1
+                -> $B
+            }
+            get_state(): str { @@:("A"); return }
+            get_count(): int { @@:(self.n); return }
+        }
+        $B => $A {
+            cycle() { -> $A }
+            get_state(): str { @@:("B"); return }
+            get_count(): int { => $^ }
+        }
+    domain:
+        n: int = 0
+}
+
+@@system Outer {
+    interface:
+        tick()
+        cycle_inner()
+        get_outer_state(): str
+        get_inner_state(): str
+        get_inner_count(): int
+        get_k(): int
+
+    machine:
+        $Idle {
+            tick() {
+                self.k = self.k + 1
+                -> $Active
+            }
+            cycle_inner() { self.inner.cycle() }
+            get_outer_state(): str { @@:("Idle"); return }
+            get_inner_state(): str { @@:(self.inner.get_state()); return }
+            get_inner_count(): int { @@:(self.inner.get_count()); return }
+            get_k(): int { @@:(self.k); return }
+        }
+        $Active => $Idle {
+            tick() { -> $Idle }
+            get_outer_state(): str { @@:("Active"); return }
+            cycle_inner() { => $^ }
+            get_inner_state(): str { => $^ }
+            get_inner_count(): int { => $^ }
+            get_k(): int { => $^ }
+        }
+    domain:
+        k: int = 0
+        inner = @@Inner()
+}
+
+if __name__ == '__main__':
+    def probe(o):
+        return (o.get_outer_state(), o.get_inner_state(), o.get_inner_count(), o.get_k())
+
+    # Two independent instances diverging onto separate trajectories.
+    o1 = Outer()
+    o2 = Outer()
+
+    # o1 stays in $Idle, inner stays in $A, but increments inner count to 3.
+    o1.cycle_inner()  # inner $A.cycle: n=1 -> $B
+    o1.cycle_inner()  # inner $B.cycle: -> $A
+    o1.cycle_inner()  # inner $A.cycle: n=2 -> $B
+    # o1: outer=$Idle, inner=$B, n=2, k=0
+    assert probe(o1) == ("Idle", "B", 2, 0), f"o1 pre: {probe(o1)}"
+
+    # o2 transitions outer twice, leaves inner alone.
+    o2.tick()         # -> $Active, k=1
+    o2.tick()         # -> $Idle
+    o2.tick()         # -> $Active, k=2
+    # o2: outer=$Active, inner=$A, n=0, k=2
+    assert probe(o2) == ("Active", "A", 0, 2), f"o2 pre: {probe(o2)}"
+
+    # Save both, restore both.
+    snap1 = o1.save_state()
+    snap2 = o2.save_state()
+
+    # Restore in REVERSED order (snap2 first, snap1 second) — defends
+    # against backends with last-restored-wins shared state.
+    r2 = Outer.restore_state(snap2)
+    r1 = Outer.restore_state(snap1)
+
+    # Both trajectories must round-trip independently.
+    assert probe(r1) == ("Idle", "B", 2, 0), f"r1 restored: {probe(r1)}"
+    assert probe(r2) == ("Active", "A", 0, 2), f"r2 restored: {probe(r2)}"
+
+    # Mutating one restored instance must NOT affect the other —
+    # proves nested inner is a per-instance object, not a shared one.
+    r1.cycle_inner()  # inner $B.cycle on r1: -> $A. r2's inner stays at $A,n=0.
+    assert probe(r1) == ("Idle", "A", 2, 0), f"r1 after mutation: {probe(r1)}"
+    assert probe(r2) == ("Active", "A", 0, 2), f"r2 after r1 mutation: {probe(r2)}"
+
+    # Drive r2 forward, r1 must be unaffected.
+    r2.cycle_inner()  # $Active forwards $Idle.cycle_inner: inner $A.cycle: n=1 -> $B
+    assert probe(r1) == ("Idle", "A", 2, 0), f"r1 after r2 mutation: {probe(r1)}"
+    assert probe(r2) == ("Active", "B", 1, 2), f"r2 after r2 mutation: {probe(r2)}"
+
+    print("PASS: 87_persist_multi_instance")

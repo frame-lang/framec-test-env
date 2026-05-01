@@ -1,0 +1,118 @@
+@@target go
+
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "math"
+    "os"
+    "strconv"
+)
+
+var _ = json.Marshal
+
+@@persist
+@@system Inner {
+    interface:
+        bump_int()
+        bump_float()
+        flip_bool()
+        get_n_int(): int
+        get_n_float(): float64
+        get_n_bool(): bool
+        get_n_str(): string
+
+    machine:
+        $S {
+            bump_int() { s.n_int = s.n_int + 1 }
+            bump_float() { s.n_float = s.n_float + 0.25 }
+            flip_bool() { s.n_bool = !s.n_bool }
+            get_n_int(): int { @@:(s.n_int) }
+            get_n_float(): float64 { @@:(s.n_float) }
+            get_n_bool(): bool { @@:(s.n_bool) }
+            get_n_str(): string { @@:(s.n_str) }
+        }
+    domain:
+        n_int: int = 7
+        n_float: float64 = 2.5
+        n_bool: bool = true
+        n_str: string = "hello"
+}
+
+@@system Outer {
+    interface:
+        bump_k_int()
+        bump_k_float()
+        bump_inner_int()
+        bump_inner_float()
+        flip_inner_bool()
+        get_k_int(): int
+        get_k_float(): float64
+        get_n_int(): int
+        get_n_float(): float64
+        get_n_bool(): bool
+        get_n_str(): string
+
+    machine:
+        $S {
+            bump_k_int() { s.k_int = s.k_int + 1 }
+            bump_k_float() { s.k_float = s.k_float + 0.25 }
+            bump_inner_int() { s.inner.Bump_int() }
+            bump_inner_float() { s.inner.Bump_float() }
+            flip_inner_bool() { s.inner.Flip_bool() }
+            get_k_int(): int { @@:(s.k_int) }
+            get_k_float(): float64 { @@:(s.k_float) }
+            get_n_int(): int { @@:(s.inner.Get_n_int()) }
+            get_n_float(): float64 { @@:(s.inner.Get_n_float()) }
+            get_n_bool(): bool { @@:(s.inner.Get_n_bool()) }
+            get_n_str(): string { @@:(s.inner.Get_n_str()) }
+        }
+    domain:
+        k_int: int = 42
+        k_float: float64 = 1.25
+        inner: *Inner = @@Inner()
+}
+
+func assertState(o *Outer, label, kIntStr string, kFloat float64, nIntStr string, nFloat float64, nBool bool, nStr string) {
+    if strconv.Itoa(o.Get_k_int()) != kIntStr {
+        fmt.Printf("FAIL %s k_int: %v\n", label, o.Get_k_int()); os.Exit(1)
+    }
+    if strconv.Itoa(o.Get_n_int()) != nIntStr {
+        fmt.Printf("FAIL %s n_int: %v\n", label, o.Get_n_int()); os.Exit(1)
+    }
+    if math.Abs(o.Get_k_float()-kFloat) > 1e-9 {
+        fmt.Printf("FAIL %s k_float: %v\n", label, o.Get_k_float()); os.Exit(1)
+    }
+    if math.Abs(o.Get_n_float()-nFloat) > 1e-9 {
+        fmt.Printf("FAIL %s n_float: %v\n", label, o.Get_n_float()); os.Exit(1)
+    }
+    if o.Get_n_bool() != nBool {
+        fmt.Printf("FAIL %s n_bool: %v\n", label, o.Get_n_bool()); os.Exit(1)
+    }
+    if o.Get_n_str() != nStr {
+        fmt.Printf("FAIL %s n_str: %v\n", label, o.Get_n_str()); os.Exit(1)
+    }
+}
+
+func main() {
+    o := NewOuter()
+    assertState(o, "T0", "42", 1.25, "7", 2.5, true, "hello")
+
+    o.Bump_k_int()
+    o.Bump_k_float()
+    o.Bump_inner_int()
+    o.Bump_inner_float()
+    o.Flip_inner_bool()
+    assertState(o, "T1", "43", 1.5, "8", 2.75, false, "hello")
+
+    snap := o.SaveState()
+    r := RestoreOuter(snap)
+    assertState(r, "T1 restored", "43", 1.5, "8", 2.75, false, "hello")
+
+    r.Bump_k_int()
+    r.Bump_inner_int()
+    assertState(r, "continue", "44", 1.5, "9", 2.75, false, "hello")
+
+    fmt.Println("PASS: 86_persist_numeric_typing")
+}

@@ -1,0 +1,100 @@
+@@target rust
+
+@@persist
+@@system Inner {
+    interface:
+        bump_int()
+        bump_float()
+        flip_bool()
+        get_n_int(): i32
+        get_n_float(): f64
+        get_n_bool(): bool
+        get_n_str(): String
+
+    machine:
+        $S {
+            bump_int() { self.n_int = self.n_int + 1; }
+            bump_float() { self.n_float = self.n_float + 0.25; }
+            flip_bool() { self.n_bool = !self.n_bool; }
+            get_n_int(): i32 { @@:(self.n_int) }
+            get_n_float(): f64 { @@:(self.n_float) }
+            get_n_bool(): bool { @@:(self.n_bool) }
+            get_n_str(): String { @@:(self.n_str.clone()) }
+        }
+    domain:
+        n_int: i32 = 7
+        n_float: f64 = 2.5
+        n_bool: bool = true
+        n_str: String = "hello".to_string()
+}
+
+@@system Outer {
+    interface:
+        bump_k_int()
+        bump_k_float()
+        bump_inner_int()
+        bump_inner_float()
+        flip_inner_bool()
+        get_k_int(): i32
+        get_k_float(): f64
+        get_n_int(): i32
+        get_n_float(): f64
+        get_n_bool(): bool
+        get_n_str(): String
+
+    machine:
+        $S {
+            bump_k_int() { self.k_int = self.k_int + 1; }
+            bump_k_float() { self.k_float = self.k_float + 0.25; }
+            bump_inner_int() { self.inner.bump_int(); }
+            bump_inner_float() { self.inner.bump_float(); }
+            flip_inner_bool() { self.inner.flip_bool(); }
+            get_k_int(): i32 { @@:(self.k_int) }
+            get_k_float(): f64 { @@:(self.k_float) }
+            get_n_int(): i32 { @@:(self.inner.get_n_int()) }
+            get_n_float(): f64 { @@:(self.inner.get_n_float()) }
+            get_n_bool(): bool { @@:(self.inner.get_n_bool()) }
+            get_n_str(): String { @@:(self.inner.get_n_str()) }
+        }
+    domain:
+        k_int: i32 = 42
+        k_float: f64 = 1.25
+        inner: Inner = @@Inner()
+}
+
+fn assert_state(o: &mut Outer, label: &str, k_int_str: &str, k_float: f64, n_int_str: &str, n_float: f64, n_bool: bool, n_str: &str) {
+    let k_int = o.get_k_int();
+    let n_int = o.get_n_int();
+    let k_f = o.get_k_float();
+    let n_f = o.get_n_float();
+    let n_b = o.get_n_bool();
+    let n_s = o.get_n_str();
+    assert_eq!(k_int.to_string(), k_int_str, "{} k_int", label);
+    assert_eq!(n_int.to_string(), n_int_str, "{} n_int", label);
+    assert!((k_f - k_float).abs() < 1e-9, "{} k_float: {}", label, k_f);
+    assert!((n_f - n_float).abs() < 1e-9, "{} n_float: {}", label, n_f);
+    assert_eq!(n_b, n_bool, "{} n_bool", label);
+    assert_eq!(n_s, n_str, "{} n_str", label);
+}
+
+fn main() {
+    let mut o = Outer::new();
+    assert_state(&mut o, "T0", "42", 1.25, "7", 2.5, true, "hello");
+
+    o.bump_k_int();
+    o.bump_k_float();
+    o.bump_inner_int();
+    o.bump_inner_float();
+    o.flip_inner_bool();
+    assert_state(&mut o, "T1", "43", 1.5, "8", 2.75, false, "hello");
+
+    let snap = o.save_state();
+    let mut r = Outer::restore_state(&snap);
+    assert_state(&mut r, "T1 restored", "43", 1.5, "8", 2.75, false, "hello");
+
+    r.bump_k_int();
+    r.bump_inner_int();
+    assert_state(&mut r, "continue", "44", 1.5, "9", 2.75, false, "hello");
+
+    println!("PASS: 86_persist_numeric_typing");
+}
