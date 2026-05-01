@@ -1,0 +1,47 @@
+@@target python_3
+
+import asyncio
+
+async def async_compute(x):
+    await asyncio.sleep(0)
+    return x * 2
+
+@@persist
+@@system PersistAsync {
+    interface:
+        async configure(amount: int)
+        get(): int
+
+    machine:
+        $Idle {
+            configure(amount: int) {
+                self.value = await async_compute(amount)
+                -> $Active
+            }
+            get(): int { @@:(0); return }
+        }
+        $Active {
+            configure(amount: int) {
+                self.value = self.value + await async_compute(amount)
+                -> $Active
+            }
+            get(): int { @@:(self.value); return }
+        }
+    domain:
+        value: int = 0
+}
+
+async def main():
+    s1 = @@PersistAsync()
+    await s1.init()
+    await s1.configure(5)
+    assert await s1.get() == 10, f"FAIL pre: expected 10, got {await s1.get()}"
+    snap = await s1.save_state()
+    s2 = PersistAsync.restore_state(snap)
+    assert await s2.get() == 10, f"FAIL post: expected 10, got {await s2.get()}"
+    await s2.configure(3)
+    assert await s2.get() == 16, f"FAIL post-2nd: expected 16, got {await s2.get()}"
+    print("PASS: 81_persist_async_basic")
+
+if __name__ == '__main__':
+    asyncio.run(main())
