@@ -128,16 +128,23 @@ triage.
   `<sys>_FrameVec*` whose items are opaque `void*` with no element-
   type metadata. Other backends know the element type from the
   user's declared generic (`List<int>`, `Vec<i32>`, `[]int`, etc.).
-- Status: **open (architectural — needs Frame syntax extension)**
-- Notes: To support `: list[str]` / `: list[float]` / `: list[bool]`
-  in C, Frame would need element-type metadata in the type AST.
-  Today `: list` is one token. Extending to `: list[T]` would let
-  framec emit per-element pack/unpack helpers for each element
-  type. Out of scope for D10/D11; logged as a future enhancement.
-  Mitigation today: users who need typed C lists can declare a
-  pointer state-arg (`(items: char**)` etc.) and manage memory
-  manually — the C backend's pointer-type passthrough already
-  works.
+- Status: **open (no syntax extension required after dispatcher landed)**
+- Notes: With the type-ignorant C dispatcher (framepiler 6efaf78
+  region — `<sys>_persist_pack_<mangled>`), the built-in `: list`
+  symbol-mangles to `list` and the runtime supplies a default
+  `<sys>_persist_pack_list` that packs each `void*` element as
+  int. Users who need typed lists (`list[str]`, `list[float]`)
+  declare a custom Frame type and supply matching
+  `<sys>_persist_pack_<theirtype>` / `unpack_<theirtype>` symbols
+  alongside their existing `#include <cjson/cJSON.h>` prolog —
+  the same extension hook used for any user-defined C type.
+  No Frame syntax change needed; the architectural boundary is
+  "framec mangles strings to identifiers, runtime+user supply
+  the symbols". Status remains "open" because the built-in
+  default is still int-only — anyone reading the docs may be
+  surprised. Tracking primarily for documentation; closeable
+  once the dispatcher pattern is documented in the C
+  per-language guide.
 
 ---
 
