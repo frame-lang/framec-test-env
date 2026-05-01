@@ -1,0 +1,106 @@
+@@target c
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@persist
+@@system Inner {
+    interface:
+        cycle()
+        get_state(): const char*
+        get_count(): int
+
+    machine:
+        $A {
+            cycle() { self->n = self->n + 1; -> $B }
+            get_state(): const char* { @@:("A") }
+            get_count(): int { @@:(self->n) }
+        }
+        $B => $A {
+            cycle() { -> $A }
+            get_state(): const char* { @@:("B") }
+            get_count(): int { => $^ }
+        }
+    domain:
+        n: int = 0
+}
+
+@@system Outer {
+    interface:
+        tick()
+        cycle_inner()
+        get_outer_state(): const char*
+        get_inner_state(): const char*
+        get_inner_count(): int
+        get_k(): int
+
+    machine:
+        $Idle {
+            tick() { self->k = self->k + 1; -> $Active }
+            cycle_inner() { Inner_cycle(self->inner); }
+            get_outer_state(): const char* { @@:("Idle") }
+            get_inner_state(): const char* { @@:(Inner_get_state(self->inner)) }
+            get_inner_count(): int { @@:(Inner_get_count(self->inner)) }
+            get_k(): int { @@:(self->k) }
+        }
+        $Active => $Idle {
+            tick() { -> $Idle }
+            get_outer_state(): const char* { @@:("Active") }
+            cycle_inner() { => $^ }
+            get_inner_state(): const char* { => $^ }
+            get_inner_count(): int { => $^ }
+            get_k(): int { => $^ }
+        }
+    domain:
+        k: int = 0
+        inner: Inner* = @@Inner()
+}
+
+static int eq_state(Outer* o, const char* expected_outer, const char* expected_inner, int expected_count, int expected_k) {
+    if (strcmp(Outer_get_outer_state(o), expected_outer) != 0) return 0;
+    if (strcmp(Outer_get_inner_state(o), expected_inner) != 0) return 0;
+    if (Outer_get_inner_count(o) != expected_count) return 0;
+    if (Outer_get_k(o) != expected_k) return 0;
+    return 1;
+}
+
+#define MUST(label, o, ostate, istate, count, k) \
+    if (!eq_state(o, ostate, istate, count, k)) { \
+        printf("FAIL %s: got %s/%s/%d/%d\n", label, Outer_get_outer_state(o), Outer_get_inner_state(o), Outer_get_inner_count(o), Outer_get_k(o)); \
+        return 1; \
+    }
+
+int main() {
+    Outer* o = Outer_new();
+    MUST("T0 fresh", o, "Idle", "A", 0, 0);
+    char* snap0 = Outer_save_state(o);
+    Outer* r0 = Outer_restore_state(snap0);
+    MUST("T0 restored", r0, "Idle", "A", 0, 0);
+    free(snap0);
+
+    Outer_tick(o);
+    MUST("T1", o, "Active", "A", 0, 1);
+    char* snap1 = Outer_save_state(o);
+    Outer* r1 = Outer_restore_state(snap1);
+    MUST("T1 restored", r1, "Active", "A", 0, 1);
+    free(snap1);
+
+    Outer_cycle_inner(o);
+    MUST("T2", o, "Active", "B", 1, 1);
+    char* snap2 = Outer_save_state(o);
+    Outer* r2 = Outer_restore_state(snap2);
+    MUST("T2 restored", r2, "Active", "B", 1, 1);
+    free(snap2);
+
+    Outer_cycle_inner(r2);
+    MUST("continue1", r2, "Active", "A", 1, 1);
+    Outer_tick(r2);
+    MUST("continue2", r2, "Idle", "A", 1, 1);
+    Outer_tick(r2);
+    MUST("continue3", r2, "Active", "A", 1, 2);
+
+    printf("PASS: 84_persist_nested_hsm\n");
+    return 0;
+}

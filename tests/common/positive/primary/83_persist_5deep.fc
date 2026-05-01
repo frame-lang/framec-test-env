@@ -1,17 +1,89 @@
 @@target c
-@@skip -- C dispatcher requires user-defined pack/unpack symbols per nested system type; out-of-scope for v1 5-deep test
 
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@persist
+@@system L5 {
+    interface:
+        bump()
+        value(): int
+    machine:
+        $S { bump() { self->n = self->n + 1; } value(): int { @@:(self->n) } }
+    domain: n: int = 0
+}
+
+@@system L4 {
+    interface:
+        bump()
+        value(): int
+    machine:
+        $S {
+            bump() { self->n = self->n + 1; L5_bump(self->child); }
+            value(): int { @@:(self->n + L5_value(self->child)) }
+        }
+    domain:
+        n: int = 0
+        child: L5* = @@L5()
+}
+
+@@system L3 {
+    interface:
+        bump()
+        value(): int
+    machine:
+        $S {
+            bump() { self->n = self->n + 1; L4_bump(self->child); }
+            value(): int { @@:(self->n + L4_value(self->child)) }
+        }
+    domain:
+        n: int = 0
+        child: L4* = @@L4()
+}
+
+@@system L2 {
+    interface:
+        bump()
+        value(): int
+    machine:
+        $S {
+            bump() { self->n = self->n + 1; L3_bump(self->child); }
+            value(): int { @@:(self->n + L3_value(self->child)) }
+        }
+    domain:
+        n: int = 0
+        child: L3* = @@L3()
+}
 
 @@system L1 {
     interface:
         bump()
+        value(): int
     machine:
-        $S { bump() { self->n = self->n + 1; } }
-    domain: n: int = 0
+        $S {
+            bump() { self->n = self->n + 1; L2_bump(self->child); }
+            value(): int { @@:(self->n + L2_value(self->child)) }
+        }
+    domain:
+        n: int = 0
+        child: L2* = @@L2()
 }
 
 int main() {
-    printf("SKIP: 83_persist_5deep -- C nested-system persist requires per-type pack/unpack symbols\n");
+    L1* a = L1_new();
+    L1_bump(a); L1_bump(a); L1_bump(a);
+    int pre = L1_value(a);
+    if (pre != 15) { printf("FAIL pre: %d\n", pre); return 1; }
+    char* snap = L1_save_state(a);
+    L1* b = L1_restore_state(snap);
+    int post = L1_value(b);
+    if (post != 15) { printf("FAIL post: %d\n", post); return 1; }
+    L1_bump(b);
+    int after = L1_value(b);
+    if (after != 20) { printf("FAIL after: %d\n", after); return 1; }
+    free(snap);
+    printf("PASS: 83_persist_5deep\n");
     return 0;
 }
