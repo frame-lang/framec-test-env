@@ -1,0 +1,38 @@
+@@target dart
+
+import 'dart:io';
+import 'dart:convert';
+
+@@persist
+@@system ListOfDict {
+    interface:
+        configure(rows: List<Map<String, int>>)
+        get_at(idx: int, key: String): int
+
+    machine:
+        $Idle {
+            configure(rows: List<Map<String, int>>) { -> $Active(rows) }
+            get_at(idx: int, key: String): int { @@:(-1) }
+        }
+        $Active(rows: List<Map<String, int>>) {
+            configure(rows: List<Map<String, int>>) { -> $Active(rows) }
+            get_at(idx: int, key: String): int {
+                @@:(idx < (rows as List).length && rows[idx] is Map ? (((rows[idx] as Map)[key] ?? -1) as int) : -1)
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+void main() {
+    var s1 = ListOfDict();
+    s1.configure([{"x": 1, "y": 2}, {"z": 3}]);
+    if (s1.get_at(0, "x") != 1) { print("FAIL pre 0.x"); return; }
+    if (s1.get_at(1, "z") != 3) { print("FAIL pre 1.z"); return; }
+    var snap = s1.saveState();
+    var s2 = ListOfDict.restoreState(snap);
+    if (s2.get_at(0, "x") != 1) { print("FAIL post 0.x"); return; }
+    if (s2.get_at(0, "y") != 2) { print("FAIL post 0.y"); return; }
+    if (s2.get_at(1, "z") != 3) { print("FAIL post 1.z"); return; }
+    print("PASS: 80_list_of_dict_state_arg");
+}
