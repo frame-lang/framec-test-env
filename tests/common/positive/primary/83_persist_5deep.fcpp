@@ -1,0 +1,87 @@
+@@target cpp
+
+#include <iostream>
+#include <string>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system L5 {
+    interface:
+        bump()
+        value(): int
+    machine:
+        $S { bump() { this->n = this->n + 1; } value(): int { @@:(this->n) } }
+    domain: n: int = 0
+}
+
+@@system L4 {
+    interface:
+        bump()
+        value(): int
+    machine:
+        $S {
+            bump() { this->n = this->n + 1; this->child.bump(); }
+            value(): int { @@:(this->n + this->child.value()) }
+        }
+    domain:
+        n: int = 0
+        child: L5 = @@L5()
+}
+
+@@system L3 {
+    interface:
+        bump()
+        value(): int
+    machine:
+        $S {
+            bump() { this->n = this->n + 1; this->child.bump(); }
+            value(): int { @@:(this->n + this->child.value()) }
+        }
+    domain:
+        n: int = 0
+        child: L4 = @@L4()
+}
+
+@@system L2 {
+    interface:
+        bump()
+        value(): int
+    machine:
+        $S {
+            bump() { this->n = this->n + 1; this->child.bump(); }
+            value(): int { @@:(this->n + this->child.value()) }
+        }
+    domain:
+        n: int = 0
+        child: L3 = @@L3()
+}
+
+@@system L1 {
+    interface:
+        bump()
+        value(): int
+    machine:
+        $S {
+            bump() { this->n = this->n + 1; this->child.bump(); }
+            value(): int { @@:(this->n + this->child.value()) }
+        }
+    domain:
+        n: int = 0
+        child: L2 = @@L2()
+}
+
+int main() {
+    L1 a;
+    a.bump(); a.bump(); a.bump();
+    int pre = a.value();
+    if (pre != 15) { std::cout << "FAIL pre: " << pre << std::endl; return 1; }
+    std::string snap = a.save_state();
+    L1 b = L1::restore_state(snap);
+    int post = b.value();
+    if (post != 15) { std::cout << "FAIL post: " << post << std::endl; return 1; }
+    b.bump();
+    int after = b.value();
+    if (after != 20) { std::cout << "FAIL after: " << after << std::endl; return 1; }
+    std::cout << "PASS: 83_persist_5deep" << std::endl;
+    return 0;
+}

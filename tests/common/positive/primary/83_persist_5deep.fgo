@@ -1,0 +1,86 @@
+@@target go
+
+package main
+
+import "fmt"
+
+@@persist
+@@system L5 {
+    interface:
+        bump()
+        value(): int
+    machine:
+        $S { bump() { self.n = self.n + 1 } value(): int { @@:(self.n) } }
+    domain: n: int = 0
+}
+
+@@system L4 {
+    interface:
+        bump()
+        value(): int
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child.bump() }
+            value(): int { @@:(self.n + self.child.value()) }
+        }
+    domain:
+        n: int = 0
+        child: *L5 = @@L5()
+}
+
+@@system L3 {
+    interface:
+        bump()
+        value(): int
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child.bump() }
+            value(): int { @@:(self.n + self.child.value()) }
+        }
+    domain:
+        n: int = 0
+        child: *L4 = @@L4()
+}
+
+@@system L2 {
+    interface:
+        bump()
+        value(): int
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child.bump() }
+            value(): int { @@:(self.n + self.child.value()) }
+        }
+    domain:
+        n: int = 0
+        child: *L3 = @@L3()
+}
+
+@@system L1 {
+    interface:
+        bump()
+        value(): int
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child.bump() }
+            value(): int { @@:(self.n + self.child.value()) }
+        }
+    domain:
+        n: int = 0
+        child: *L2 = @@L2()
+}
+
+func main() {
+    a := NewL1()
+    a.bump(); a.bump(); a.bump()
+    pre := a.value()
+    if pre != 15 { fmt.Println("FAIL pre:", pre); return }
+    snap := a.save_state()
+    b := L1_restore_state(snap)
+    post := b.value()
+    if post != 15 { fmt.Println("FAIL post:", post); return }
+    b.bump()
+    after := b.value()
+    if after != 20 { fmt.Println("FAIL after:", after); return }
+    fmt.Println("PASS: 83_persist_5deep")
+}

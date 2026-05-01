@@ -1,0 +1,82 @@
+@@target rust
+
+@@persist
+@@system L5 {
+    interface:
+        bump()
+        value(): i32
+    machine:
+        $S { bump() { self.n = self.n + 1; } value(): i32 { @@:(self.n) } }
+    domain: n: i32 = 0
+}
+
+@@system L4 {
+    interface:
+        bump()
+        value(): i32
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child.bump(); }
+            value(): i32 { @@:(self.n + self.child.value()) }
+        }
+    domain:
+        n: i32 = 0
+        child: L5 = L5::new()
+}
+
+@@system L3 {
+    interface:
+        bump()
+        value(): i32
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child.bump(); }
+            value(): i32 { @@:(self.n + self.child.value()) }
+        }
+    domain:
+        n: i32 = 0
+        child: L4 = L4::new()
+}
+
+@@system L2 {
+    interface:
+        bump()
+        value(): i32
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child.bump(); }
+            value(): i32 { @@:(self.n + self.child.value()) }
+        }
+    domain:
+        n: i32 = 0
+        child: L3 = L3::new()
+}
+
+@@system L1 {
+    interface:
+        bump()
+        value(): i32
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child.bump(); }
+            value(): i32 { @@:(self.n + self.child.value()) }
+        }
+    domain:
+        n: i32 = 0
+        child: L2 = L2::new()
+}
+
+fn main() {
+    let mut a = L1::new();
+    a.bump(); a.bump(); a.bump();
+    let pre = a.value();
+    assert_eq!(pre, 15, "FAIL pre");
+    let snap = a.save_state();
+    let mut b = L1::restore_state(&snap);
+    let post = b.value();
+    assert_eq!(post, 15, "FAIL post");
+    b.bump();
+    let after = b.value();
+    assert_eq!(after, 20, "FAIL after");
+    println!("PASS: 83_persist_5deep");
+}

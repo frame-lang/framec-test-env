@@ -1,0 +1,80 @@
+@@target lua
+
+@@persist
+@@system L5 {
+    interface:
+        bump()
+        get_value(): int
+    machine:
+        $S { bump() { self.n = self.n + 1 } get_value(): int { @@:(self.n) } }
+    domain: n: int = 0
+}
+
+@@system L4 {
+    interface:
+        bump()
+        get_value(): int
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child:bump() }
+            get_value(): int { @@:(self.n + self.child:get_value()) }
+        }
+    domain:
+        n: int = 0
+        child = @@L5()
+}
+
+@@system L3 {
+    interface:
+        bump()
+        get_value(): int
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child:bump() }
+            get_value(): int { @@:(self.n + self.child:get_value()) }
+        }
+    domain:
+        n: int = 0
+        child = @@L4()
+}
+
+@@system L2 {
+    interface:
+        bump()
+        get_value(): int
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child:bump() }
+            get_value(): int { @@:(self.n + self.child:get_value()) }
+        }
+    domain:
+        n: int = 0
+        child = @@L3()
+}
+
+@@system L1 {
+    interface:
+        bump()
+        get_value(): int
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child:bump() }
+            get_value(): int { @@:(self.n + self.child:get_value()) }
+        }
+    domain:
+        n: int = 0
+        child = @@L2()
+}
+
+local a = L1:new()
+a:bump(); a:bump(); a:bump()
+local pre = a:get_value()
+if pre ~= 15 then print("FAIL pre: " .. pre); os.exit(1) end
+local snap = a:save_state()
+local b = L1.restore_state(snap)
+local post = b:get_value()
+if post ~= 15 then print("FAIL post: " .. post); os.exit(1) end
+b:bump()
+local after = b:get_value()
+if after ~= 20 then print("FAIL after: " .. after); os.exit(1) end
+print("PASS: 83_persist_5deep")

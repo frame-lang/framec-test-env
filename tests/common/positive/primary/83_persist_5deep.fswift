@@ -1,0 +1,82 @@
+@@target swift
+
+import Foundation
+
+@@persist
+@@system L5 {
+    interface:
+        bump()
+        value(): Int
+    machine:
+        $S { bump() { self.n = self.n + 1 } value(): Int { @@:(self.n) } }
+    domain: n: Int = 0
+}
+
+@@system L4 {
+    interface:
+        bump()
+        value(): Int
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child.bump() }
+            value(): Int { @@:(self.n + self.child.value()) }
+        }
+    domain:
+        n: Int = 0
+        child: L5 = @@L5()
+}
+
+@@system L3 {
+    interface:
+        bump()
+        value(): Int
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child.bump() }
+            value(): Int { @@:(self.n + self.child.value()) }
+        }
+    domain:
+        n: Int = 0
+        child: L4 = @@L4()
+}
+
+@@system L2 {
+    interface:
+        bump()
+        value(): Int
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child.bump() }
+            value(): Int { @@:(self.n + self.child.value()) }
+        }
+    domain:
+        n: Int = 0
+        child: L3 = @@L3()
+}
+
+@@system L1 {
+    interface:
+        bump()
+        value(): Int
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; self.child.bump() }
+            value(): Int { @@:(self.n + self.child.value()) }
+        }
+    domain:
+        n: Int = 0
+        child: L2 = @@L2()
+}
+
+let a = L1()
+a.bump(); a.bump(); a.bump()
+let pre = a.value()
+if pre != 15 { print("FAIL pre: \(pre)"); exit(1) }
+let snap = a.saveState()
+let b = L1.restoreState(snap)
+let post = b.value()
+if post != 15 { print("FAIL post: \(post)"); exit(1) }
+b.bump()
+let after = b.value()
+if after != 20 { print("FAIL after: \(after)"); exit(1) }
+print("PASS: 83_persist_5deep")

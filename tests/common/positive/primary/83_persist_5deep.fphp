@@ -1,0 +1,82 @@
+@@target php
+
+<?php
+
+@@persist
+@@system L5 {
+    interface:
+        bump()
+        get_value(): int
+    machine:
+        $S { bump() { $this->n = $this->n + 1; } get_value(): int { @@:($this->n) } }
+    domain: n: int = 0
+}
+
+@@system L4 {
+    interface:
+        bump()
+        get_value(): int
+    machine:
+        $S {
+            bump() { $this->n = $this->n + 1; $this->child->bump(); }
+            get_value(): int { @@:($this->n + $this->child->get_value()) }
+        }
+    domain:
+        n: int = 0
+        child = @@L5()
+}
+
+@@system L3 {
+    interface:
+        bump()
+        get_value(): int
+    machine:
+        $S {
+            bump() { $this->n = $this->n + 1; $this->child->bump(); }
+            get_value(): int { @@:($this->n + $this->child->get_value()) }
+        }
+    domain:
+        n: int = 0
+        child = @@L4()
+}
+
+@@system L2 {
+    interface:
+        bump()
+        get_value(): int
+    machine:
+        $S {
+            bump() { $this->n = $this->n + 1; $this->child->bump(); }
+            get_value(): int { @@:($this->n + $this->child->get_value()) }
+        }
+    domain:
+        n: int = 0
+        child = @@L3()
+}
+
+@@system L1 {
+    interface:
+        bump()
+        get_value(): int
+    machine:
+        $S {
+            bump() { $this->n = $this->n + 1; $this->child->bump(); }
+            get_value(): int { @@:($this->n + $this->child->get_value()) }
+        }
+    domain:
+        n: int = 0
+        child = @@L2()
+}
+
+$a = new L1();
+$a->bump(); $a->bump(); $a->bump();
+$pre = $a->get_value();
+if ($pre !== 15) { echo "FAIL pre: $pre\n"; exit(1); }
+$snap = $a->save_state();
+$b = L1::restore_state($snap);
+$post = $b->get_value();
+if ($post !== 15) { echo "FAIL post: $post\n"; exit(1); }
+$b->bump();
+$after = $b->get_value();
+if ($after !== 20) { echo "FAIL after: $after\n"; exit(1); }
+echo "PASS: 83_persist_5deep\n";

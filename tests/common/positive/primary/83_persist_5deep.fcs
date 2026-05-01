@@ -1,0 +1,86 @@
+@@target csharp
+
+using System;
+
+@@persist
+@@system L5 {
+    interface:
+        bump()
+        get_n(): int
+    machine:
+        $S { bump() { this.n = this.n + 1; } get_n(): int { @@:(this.n) } }
+    domain: n: int = 0
+}
+
+@@system L4 {
+    interface:
+        bump()
+        get_n(): int
+    machine:
+        $S {
+            bump() { this.n = this.n + 1; this.child.bump(); }
+            get_n(): int { @@:(this.n + this.child.get_n()) }
+        }
+    domain:
+        n: int = 0
+        child: L5 = @@L5()
+}
+
+@@system L3 {
+    interface:
+        bump()
+        get_n(): int
+    machine:
+        $S {
+            bump() { this.n = this.n + 1; this.child.bump(); }
+            get_n(): int { @@:(this.n + this.child.get_n()) }
+        }
+    domain:
+        n: int = 0
+        child: L4 = @@L4()
+}
+
+@@system L2 {
+    interface:
+        bump()
+        get_n(): int
+    machine:
+        $S {
+            bump() { this.n = this.n + 1; this.child.bump(); }
+            get_n(): int { @@:(this.n + this.child.get_n()) }
+        }
+    domain:
+        n: int = 0
+        child: L3 = @@L3()
+}
+
+@@system L1 {
+    interface:
+        bump()
+        get_n(): int
+    machine:
+        $S {
+            bump() { this.n = this.n + 1; this.child.bump(); }
+            get_n(): int { @@:(this.n + this.child.get_n()) }
+        }
+    domain:
+        n: int = 0
+        child: L2 = @@L2()
+}
+
+class Program {
+    public static void Main(string[] args) {
+        var a = new L1();
+        a.bump(); a.bump(); a.bump();
+        int pre = a.get_n();
+        if (pre != 15) throw new Exception($"FAIL pre: {pre}");
+        var snap = a.SaveState();
+        var b = L1.RestoreState(snap);
+        int post = b.get_n();
+        if (post != 15) throw new Exception($"FAIL post: {post}");
+        b.bump();
+        int after = b.get_n();
+        if (after != 20) throw new Exception($"FAIL after: {after}");
+        Console.WriteLine("PASS: 83_persist_5deep");
+    }
+}
