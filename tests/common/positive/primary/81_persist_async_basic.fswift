@@ -1,21 +1,47 @@
 @@target swift
-@@skip -- D16: swift persist helpers async-marked but call sites missing await (framec defect)
 
 import Foundation
 
+@@persist
 @@system PersistAsync {
     interface:
-        configure(amount: Int)
+        async configure(amount: Int)
         get(): Int
 
     machine:
         $Idle {
-            configure(amount: Int) { -> $Active }
+            configure(amount: Int) {
+                self.value = amount * 2
+                -> $Active
+            }
             get(): Int { @@:(0) }
         }
         $Active {
-            get(): Int { @@:(0) }
+            configure(amount: Int) {
+                self.value = self.value + (amount * 2)
+                -> $Active
+            }
+            get(): Int { @@:(self.value) }
         }
+    domain:
+        value : Int = 0
 }
 
-print("SKIP: 81_persist_async_basic -- swift persist+async helper-await defect")
+let __sem = DispatchSemaphore(value: 0)
+Task {
+    let s1 = PersistAsync()
+    await s1.initAsync()
+    await s1.configure(5)
+    var v = await s1.get()
+    if v != 10 { print("FAIL pre: expected 10, got \(v)"); exit(1) }
+    let snap = s1.saveState()
+    let s2 = PersistAsync.restoreState(snap)
+    v = await s2.get()
+    if v != 10 { print("FAIL post: expected 10, got \(v)"); exit(1) }
+    await s2.configure(3)
+    v = await s2.get()
+    if v != 16 { print("FAIL post-2nd: expected 16, got \(v)"); exit(1) }
+    print("PASS: 81_persist_async_basic")
+    __sem.signal()
+}
+__sem.wait()

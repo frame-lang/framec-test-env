@@ -34,22 +34,14 @@ triage.
 
 ---
 
-## D18: csharp persist methods missing on @@async systems
+## D18: csharp persist method naming convention (NOT a defect)
 
 - Lang: csharp
 - Tier: matrix test 81 (persist × async)
-- Case: `81_persist_async_basic.fcs` (currently `@@skip`)
-- Tag: persist, async, csharp, codegen
-- Failure mode: Compile error — `'PersistAsync' does not contain a
-  definition for 'save_state'` and `'restore_state'`. The C#
-  codegen does not emit save_state/restore_state methods when the
-  system is `@@async`. With `@@persist` alone, both methods are
-  emitted; the async marker silently suppresses them.
-- Suspected codegen path: `interface_gen.rs` C# section likely
-  guards persist-method emit on a sync-system condition.
-- Status: **open** (logged from wave 6 verification)
-- Mitigation: skip csharp in test 81 via `@@skip`; treat
-  persist+async as unsupported on csharp pending fix.
+- Status: **resolved** — wasn't a framec defect. Test 81 was
+  calling `s1.save_state()` (snake_case) but C# emits the
+  PascalCase method `SaveState`/`RestoreState` per language
+  convention. Fixed by updating the test source.
 
 ---
 
@@ -57,20 +49,22 @@ triage.
 
 - Lang: cpp_23
 - Tier: matrix test 81 (persist × async)
-- Case: `81_persist_async_basic.fcpp` (currently `@@skip`)
+- Case: `81_persist_async_basic.fcpp`
 - Tag: persist, async, cpp, coroutines, codegen
 - Failure mode: `error: unable to find the promise type for this
   coroutine` at the `co_return __cj` inside the `__ser` lambda
-  emitted by save_state. When the system is `@@async`, the entire
-  kernel becomes coroutinized via FrameTask, including persist's
-  __ser/__deser lambdas — but the lambdas don't have a
-  std::coroutine_traits specialization for their return type.
-- Suspected codegen path: `interface_gen.rs` C++ persist `__ser`
-  lambda needs to either return a non-coroutine type (when
-  persist is sync) or be wrapped in FrameTask<nlohmann::json>
-  consistently.
-- Status: **open** (logged from wave 6 verification)
-- Mitigation: skip cpp in test 81; persist+async cpp pending fix.
+  emitted by save_state.
+- Root cause: `make_system_async` marked save_state as a
+  coroutine, which triggered the C++ backend's
+  `rewrite_return_to_co_return` post-pass to convert every `return`
+  in the body to `co_return` — including returns inside the
+  embedded `__ser` lambda whose return type is `nlohmann::json`
+  (not a coroutine type).
+- Status: **fixed 2026-04-30** (framepiler 62b8a40)
+- Fix: added persist machinery (`save_state` / `restore_state` /
+  `__serComp` / `__deserComp` / `__convertJson*`) to the skip
+  list in `make_system_async`. Persist is sync on all async
+  systems now; lambdas inside save_state stay regular functions.
 
 ---
 
@@ -78,21 +72,21 @@ triage.
 
 - Lang: swift
 - Tier: matrix test 81 (persist × async)
-- Case: `81_persist_async_basic.fswift` (currently `@@skip`)
+- Case: `81_persist_async_basic.fswift`
 - Tag: persist, async, swift, codegen
 - Failure mode: `error: expression is 'async' but is not marked
   with 'await'` at multiple sites where save_state/restore_state
-  call `__serComp(...)` / `__deserComp(...)`. When the system is
-  `@@async`, all instance methods are emitted as `async` —
-  including the framework helpers __serComp/__deserComp — but
-  the call sites in save_state/restore_state were emitted without
-  `await`.
-- Suspected codegen path: `interface_gen.rs` Swift section emits
-  the calls into save_state/restore_state bodies as plain method
-  calls; needs to detect async-system and emit `await __serComp(...)`
-  at all call sites.
-- Status: **open** (logged from wave 6 verification)
-- Mitigation: skip swift in test 81; persist+async swift pending fix.
+  call `__serComp(...)` / `__deserComp(...)`.
+- Root cause: same as D17. `make_system_async` indiscriminately
+  marked every instance method async, including the framework's
+  persist helpers. Call sites in save_state/restore_state were
+  emitted as plain method calls — no `await` — because they
+  don't match the dispatch-call patterns in
+  `add_await_to_string` (those target `__kernel`/`__router`/
+  `_state_`/`_s_`).
+- Status: **fixed 2026-04-30** (framepiler 62b8a40)
+- Fix: same as D17 — persist machinery skipped in
+  `make_system_async`, stays sync. No more async/await mismatch.
 
 ---
 

@@ -1,25 +1,52 @@
 @@target cpp_23
-@@skip -- D17: cpp persist + async lambda co_return promise type mismatch (framec defect)
 
 #include <iostream>
 #include <string>
+#include <nlohmann/json.hpp>
 
+@@persist
 @@system PersistAsync {
     interface:
-        configure(amount: int)
+        async configure(amount: int)
         get(): int
 
     machine:
         $Idle {
-            configure(amount: int) { -> $Active }
+            configure(amount: int) {
+                this->value = amount * 2;
+                -> $Active
+            }
             get(): int { @@:(0) }
         }
         $Active {
-            get(): int { @@:(0) }
+            configure(amount: int) {
+                this->value = this->value + (amount * 2);
+                -> $Active
+            }
+            get(): int { @@:(this->value) }
         }
+    domain:
+        value: int = 0
+}
+
+FrameTask<int> runMain() {
+    PersistAsync s1;
+    co_await s1.init();
+    co_await s1.configure(5);
+    int v = co_await s1.get();
+    if (v != 10) { std::cout << "FAIL pre: expected 10, got " << v << std::endl; std::exit(1); }
+    std::string snap = s1.save_state();
+    PersistAsync s2 = PersistAsync::restore_state(snap);
+    v = co_await s2.get();
+    if (v != 10) { std::cout << "FAIL post: expected 10, got " << v << std::endl; std::exit(1); }
+    co_await s2.configure(3);
+    v = co_await s2.get();
+    if (v != 16) { std::cout << "FAIL post-2nd: expected 16, got " << v << std::endl; std::exit(1); }
+    std::cout << "PASS: 81_persist_async_basic" << std::endl;
+    co_return 0;
 }
 
 int main() {
-    std::cout << "SKIP: 81_persist_async_basic -- cpp persist+async lambda co_return defect" << std::endl;
+    runMain().get();
     return 0;
 }
