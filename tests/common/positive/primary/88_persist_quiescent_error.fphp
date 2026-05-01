@@ -1,0 +1,39 @@
+@@target php
+
+<?php
+
+@@persist
+@@system Outer {
+    interface:
+        try_save_during_handler()
+
+    machine:
+        $S {
+            try_save_during_handler() {
+                $this->save_state();
+            }
+        }
+    domain:
+}
+
+$o1 = new Outer();
+$snap = $o1->save_state();
+if (empty($snap)) { echo "FAIL: quiescent save returned empty\n"; exit(1); }
+
+$o2 = new Outer();
+$threw = false;
+try {
+    $o2->try_save_during_handler();
+} catch (\Exception $e) {
+    $threw = true;
+    $msg = $e->getMessage();
+    if (strpos($msg, "E700") === false) { echo "FAIL wrong code: $msg\n"; exit(1); }
+    if (strpos($msg, "not quiescent") === false) { echo "FAIL wrong msg: $msg\n"; exit(1); }
+}
+if (!$threw) { echo "FAIL: expected E700; got no exception\n"; exit(1); }
+
+$o3 = new Outer();
+$snap3 = $o3->save_state();
+if (empty($snap3)) { echo "FAIL: fresh instance unusable\n"; exit(1); }
+
+echo "PASS: 88_persist_quiescent_error\n";

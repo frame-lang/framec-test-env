@@ -1,0 +1,43 @@
+@@target csharp
+
+using System;
+
+@@persist
+@@system Outer {
+    interface:
+        try_save_during_handler()
+
+    machine:
+        $S {
+            try_save_during_handler() {
+                this.SaveState();
+            }
+        }
+    domain:
+}
+
+class Program {
+    public static void Main(string[] args) {
+        var o1 = new Outer();
+        var snap = o1.SaveState();
+        if (string.IsNullOrEmpty(snap)) throw new Exception("FAIL: quiescent save returned empty");
+
+        var o2 = new Outer();
+        bool threw = false;
+        try {
+            o2.try_save_during_handler();
+        } catch (Exception e) {
+            threw = true;
+            var msg = e.Message ?? e.ToString();
+            if (!msg.Contains("E700")) throw new Exception($"FAIL wrong code: {msg}");
+            if (!msg.Contains("not quiescent")) throw new Exception($"FAIL wrong msg: {msg}");
+        }
+        if (!threw) throw new Exception("FAIL: expected E700; got no exception");
+
+        var o3 = new Outer();
+        var snap3 = o3.SaveState();
+        if (string.IsNullOrEmpty(snap3)) throw new Exception("FAIL: fresh instance unusable");
+
+        Console.WriteLine("PASS: 88_persist_quiescent_error");
+    }
+}

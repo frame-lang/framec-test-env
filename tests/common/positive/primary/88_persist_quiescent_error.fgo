@@ -1,0 +1,69 @@
+@@target go
+
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "os"
+    "strings"
+)
+
+var _ = json.Marshal
+
+@@persist
+@@system Outer {
+    interface:
+        try_save_during_handler()
+
+    machine:
+        $S {
+            try_save_during_handler() {
+                s.SaveState()
+            }
+        }
+    domain:
+}
+
+func main() {
+    o1 := NewOuter()
+    snap := o1.SaveState()
+    if len(snap) == 0 {
+        fmt.Println("FAIL: quiescent save returned empty")
+        os.Exit(1)
+    }
+
+    // Go panics on contract violation; recover() catches the panic.
+    o2 := NewOuter()
+    threw := false
+    func() {
+        defer func() {
+            if r := recover(); r != nil {
+                threw = true
+                msg := fmt.Sprintf("%v", r)
+                if !strings.Contains(msg, "E700") {
+                    fmt.Printf("FAIL wrong code: %s\n", msg)
+                    os.Exit(1)
+                }
+                if !strings.Contains(msg, "not quiescent") {
+                    fmt.Printf("FAIL wrong msg: %s\n", msg)
+                    os.Exit(1)
+                }
+            }
+        }()
+        o2.Try_save_during_handler()
+    }()
+    if !threw {
+        fmt.Println("FAIL: expected E700; got no panic")
+        os.Exit(1)
+    }
+
+    o3 := NewOuter()
+    snap3 := o3.SaveState()
+    if len(snap3) == 0 {
+        fmt.Println("FAIL: fresh instance unusable")
+        os.Exit(1)
+    }
+
+    fmt.Println("PASS: 88_persist_quiescent_error")
+}

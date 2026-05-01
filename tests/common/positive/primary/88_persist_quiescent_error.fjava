@@ -1,0 +1,42 @@
+@@target java
+
+@@persist
+@@system Outer {
+    interface:
+        try_save_during_handler()
+
+    machine:
+        $S {
+            try_save_during_handler() {
+                this.save_state();
+            }
+        }
+    domain:
+}
+
+class Main {
+    public static void main(String[] args) {
+        Outer o1 = new Outer();
+        String snap = o1.save_state();
+        if (snap == null || snap.isEmpty()) throw new RuntimeException("FAIL: quiescent save returned empty");
+
+        Outer o2 = new Outer();
+        boolean threw = false;
+        try {
+            o2.try_save_during_handler();
+        } catch (RuntimeException e) {
+            threw = true;
+            String msg = e.getMessage();
+            if (msg == null) msg = e.toString();
+            if (!msg.contains("E700")) throw new RuntimeException("FAIL wrong code: " + msg);
+            if (!msg.contains("not quiescent")) throw new RuntimeException("FAIL wrong msg: " + msg);
+        }
+        if (!threw) throw new RuntimeException("FAIL: expected E700; got no exception");
+
+        Outer o3 = new Outer();
+        String snap3 = o3.save_state();
+        if (snap3 == null) throw new RuntimeException("FAIL: fresh instance unusable");
+
+        System.out.println("PASS: 88_persist_quiescent_error");
+    }
+}

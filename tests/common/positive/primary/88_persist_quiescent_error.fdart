@@ -1,0 +1,42 @@
+@@target dart
+
+import 'dart:convert';
+import 'dart:io';
+
+@@persist
+@@system Outer {
+    interface:
+        try_save_during_handler()
+
+    machine:
+        $S {
+            try_save_during_handler() {
+                this.saveState();
+            }
+        }
+    domain:
+}
+
+void main() {
+    var o1 = Outer();
+    var snap = o1.saveState();
+    if (snap.isEmpty) { print("FAIL: quiescent save returned empty"); exit(1); }
+
+    var o2 = Outer();
+    var threw = false;
+    try {
+        o2.try_save_during_handler();
+    } catch (e) {
+        threw = true;
+        var msg = e.toString();
+        if (!msg.contains("E700")) { print("FAIL wrong code: $msg"); exit(1); }
+        if (!msg.contains("not quiescent")) { print("FAIL wrong msg: $msg"); exit(1); }
+    }
+    if (!threw) { print("FAIL: expected E700; got no exception"); exit(1); }
+
+    var o3 = Outer();
+    var snap3 = o3.saveState();
+    if (snap3.isEmpty) { print("FAIL: fresh instance unusable"); exit(1); }
+
+    print("PASS: 88_persist_quiescent_error");
+}

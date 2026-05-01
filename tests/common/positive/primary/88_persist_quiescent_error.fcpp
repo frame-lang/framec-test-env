@@ -1,0 +1,45 @@
+@@target cpp
+
+#include <iostream>
+#include <string>
+#include <stdexcept>
+#include <nlohmann/json.hpp>
+
+@@persist
+@@system Outer {
+    interface:
+        try_save_during_handler()
+
+    machine:
+        $S {
+            try_save_during_handler() {
+                this->save_state();
+            }
+        }
+    domain:
+}
+
+int main() {
+    Outer o1;
+    std::string snap = o1.save_state();
+    if (snap.empty()) { std::cout << "FAIL: quiescent save returned empty" << std::endl; return 1; }
+
+    Outer o2;
+    bool threw = false;
+    try {
+        o2.try_save_during_handler();
+    } catch (const std::runtime_error& e) {
+        threw = true;
+        std::string msg = e.what();
+        if (msg.find("E700") == std::string::npos) { std::cout << "FAIL wrong code: " << msg << std::endl; return 1; }
+        if (msg.find("not quiescent") == std::string::npos) { std::cout << "FAIL wrong msg: " << msg << std::endl; return 1; }
+    }
+    if (!threw) { std::cout << "FAIL: expected E700; got no exception" << std::endl; return 1; }
+
+    Outer o3;
+    std::string snap3 = o3.save_state();
+    if (snap3.empty()) { std::cout << "FAIL: fresh instance unusable" << std::endl; return 1; }
+
+    std::cout << "PASS: 88_persist_quiescent_error" << std::endl;
+    return 0;
+}

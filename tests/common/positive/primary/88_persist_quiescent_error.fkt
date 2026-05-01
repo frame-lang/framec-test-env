@@ -1,0 +1,39 @@
+@@target kotlin
+
+@@persist
+@@system Outer {
+    interface:
+        try_save_during_handler()
+
+    machine:
+        $S {
+            try_save_during_handler() {
+                this.save_state()
+            }
+        }
+    domain:
+}
+
+fun main() {
+    val o1 = Outer()
+    val snap = o1.save_state()
+    check(snap.isNotEmpty()) { "FAIL: quiescent save returned empty" }
+
+    val o2 = Outer()
+    var threw = false
+    try {
+        o2.try_save_during_handler()
+    } catch (e: RuntimeException) {
+        threw = true
+        val msg = e.message ?: e.toString()
+        check("E700" in msg) { "FAIL wrong code: $msg" }
+        check("not quiescent" in msg) { "FAIL wrong msg: $msg" }
+    }
+    check(threw) { "FAIL: expected E700; got no exception" }
+
+    val o3 = Outer()
+    val snap3 = o3.save_state()
+    check(snap3.isNotEmpty()) { "FAIL: fresh instance unusable" }
+
+    println("PASS: 88_persist_quiescent_error")
+}

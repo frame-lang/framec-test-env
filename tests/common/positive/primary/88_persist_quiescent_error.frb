@@ -1,0 +1,37 @@
+@@target ruby
+
+@@persist
+@@system Outer {
+    interface:
+        try_save_during_handler()
+
+    machine:
+        $S {
+            try_save_during_handler() {
+                self.save_state
+            }
+        }
+    domain:
+}
+
+o1 = Outer.new
+snap = o1.save_state
+abort("FAIL: quiescent save returned empty") if snap.nil? || snap.empty?
+
+o2 = Outer.new
+threw = false
+begin
+  o2.try_save_during_handler
+rescue RuntimeError => e
+  threw = true
+  msg = e.message
+  abort("FAIL wrong code: #{msg}") unless msg.include?("E700")
+  abort("FAIL wrong msg: #{msg}") unless msg.include?("not quiescent")
+end
+abort("FAIL: expected E700; got no exception") unless threw
+
+o3 = Outer.new
+snap3 = o3.save_state
+abort("FAIL: fresh instance unusable") if snap3.nil? || snap3.empty?
+
+puts "PASS: 88_persist_quiescent_error"

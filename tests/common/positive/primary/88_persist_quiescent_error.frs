@@ -1,0 +1,46 @@
+@@target rust
+
+@@persist
+@@system Outer {
+    interface:
+        try_save_during_handler()
+
+    machine:
+        $S {
+            try_save_during_handler() {
+                self.save_state();
+            }
+        }
+    domain:
+}
+
+fn main() {
+    let mut o1 = Outer::new();
+    let snap = o1.save_state();
+    assert!(!snap.is_empty(), "FAIL: quiescent save returned empty");
+
+    // Rust panics on contract violation. Use catch_unwind to verify
+    // panic message contains E700 / not quiescent.
+    let mut o2 = Outer::new();
+    let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        o2.try_save_during_handler();
+    }));
+    assert!(result.is_err(), "FAIL: expected E700 panic; got no panic");
+    if let Err(e) = result {
+        let msg = if let Some(s) = e.downcast_ref::<&str>() {
+            s.to_string()
+        } else if let Some(s) = e.downcast_ref::<String>() {
+            s.clone()
+        } else {
+            String::from("<unknown panic payload>")
+        };
+        assert!(msg.contains("E700"), "FAIL wrong code: {}", msg);
+        assert!(msg.contains("not quiescent"), "FAIL wrong msg: {}", msg);
+    }
+
+    let mut o3 = Outer::new();
+    let snap3 = o3.save_state();
+    assert!(!snap3.is_empty(), "FAIL: fresh instance unusable");
+
+    println!("PASS: 88_persist_quiescent_error");
+}

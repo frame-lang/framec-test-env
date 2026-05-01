@@ -1,0 +1,32 @@
+@@target lua
+
+@@persist
+@@system Outer {
+    interface:
+        try_save_during_handler()
+
+    machine:
+        $S {
+            try_save_during_handler() {
+                self:save_state()
+            }
+        }
+    domain:
+}
+
+local o1 = Outer:new()
+local snap = o1:save_state()
+if not snap or #snap == 0 then print("FAIL: quiescent save returned empty"); os.exit(1) end
+
+local o2 = Outer:new()
+local ok, err = pcall(function() o2:try_save_during_handler() end)
+if ok then print("FAIL: expected E700; got no error"); os.exit(1) end
+local msg = tostring(err)
+if not string.find(msg, "E700", 1, true) then print("FAIL wrong code: " .. msg); os.exit(1) end
+if not string.find(msg, "not quiescent", 1, true) then print("FAIL wrong msg: " .. msg); os.exit(1) end
+
+local o3 = Outer:new()
+local snap3 = o3:save_state()
+if not snap3 or #snap3 == 0 then print("FAIL: fresh instance unusable"); os.exit(1) end
+
+print("PASS: 88_persist_quiescent_error")
