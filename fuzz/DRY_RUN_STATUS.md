@@ -1,9 +1,19 @@
-# Fuzz dry-run status — 2026-05-02 (closed)
+# Fuzz dry-run status — 2026-05-02 (strict closure)
 
-**All 21 phases green.** Phase 19 closed 2026-05-02 with the
-post-D19-fix wave-2 rerun (1700/1700 clean) — that's the second
-consecutive clean wave-2, satisfying methodology rule #2. The next
-step is wave-3 axis-extension per `FUZZ_PLAN.md`.
+**All 21 phases green under strict reading of methodology rule #2
+(two consecutive clean post-fix waves).** The audit:
+
+- 18 phases that surfaced no defects: smoke + full = 2 consecutive
+  clean ✅
+- Phase 19 (D19 in wave-1): post-D19-fix wave-2 ran 170/170, then
+  today's 1700/1700. 2 post-fix ✅
+- Phase 2 (D20 in earlier wave-2 + D21/D22 GDScript surfaced by
+  intermediate run_all.sh W2 sweep at 51/81 GDScript): both fixed
+  by 2026-05-02 morning's RFC-0014 GDScript multi-system inner-
+  class wrap (framepiler 1be2f3f + e36e3d8). Two post-all-fixes
+  reruns of `diff_harness/run_fuzz.py --cases ../cases/persist`
+  both went 1377/1377. 2 post-fix ✅
+- Phase 8 (negative): runner regex bug, not codegen. ✅
 
 ---
 
@@ -35,7 +45,7 @@ A successful wave = pass on every case × every wired backend.
 
 | Phase | Wave 1 (smoke) | Wave 2 (full) | Defects in flight | Status |
 |---|---|---|---|---|
-| 2 (persist) | ✅ 17×2 = 34 | ✅ 17×81 = 1,377 | D20 found + fixed | **green** |
+| 2 (persist) | ✅ 17×2 = 34 | ✅ 17×81 = 1,377 ×2 post-fix | D20 + D21/D22 found + fixed | **green** |
 | 3 (selfcall) | ✅ 17×6 = 102 | ✅ 17×162 = 2,754 | none | **green** |
 | 4 (hsm-parents) | ✅ 17×3 = 51 | ✅ 17×81 = 1,377 | none | **green** |
 | 5 (operations) | ✅ 17×1 = 17 | ✅ 17×27 = 459 | none | **green** |
