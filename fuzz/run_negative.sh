@@ -70,9 +70,19 @@ read_expected_error() {
 # the CLI-provided -l value when the directive is absent.
 read_case_target() {
     local case_file=$1
-    head -10 "$case_file" 2>/dev/null \
-        | grep -m1 -oE '@@target[[:space:]]+[a-zA-Z_0-9]+' \
-        | sed 's/@@target[[:space:]]*//'
+    # RFC-0013 wave 2: prefer the bracketed form `@@[target("lang")]`.
+    # Fall back to the legacy bare `@@target lang` form for any
+    # un-migrated fixture (none should remain post-launch).
+    local hd
+    hd=$(head -10 "$case_file" 2>/dev/null)
+    local v
+    v=$(echo "$hd" | grep -m1 -oE '@@\[target\("[a-zA-Z_0-9]+"\)\]' \
+        | sed -E 's/.*@@\[target\("([a-zA-Z_0-9]+)"\)\].*/\1/')
+    if [ -z "$v" ]; then
+        v=$(echo "$hd" | grep -m1 -oE '@@target[[:space:]]+[a-zA-Z_0-9]+' \
+            | sed 's/@@target[[:space:]]*//')
+    fi
+    echo "$v"
 }
 
 pass=0; fail=0
