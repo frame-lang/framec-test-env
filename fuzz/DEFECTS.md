@@ -34,6 +34,31 @@ triage.
 
 ---
 
+## D19: Rust enter-args stringification breaks typed receiver
+
+- Lang: rust
+- Tier: smoke
+- Case: pp_p8_enter_args_round_trip__t0
+- Tag: phase-19, pushpop, enter-args, typed-arg
+- Failure mode: assert (got 0, expected 1)
+- Reproducer: cases_pushpop/pp_p8_enter_args_round_trip__t0.frs
+- Generated source: out_pushpop/rust/pp_p8_enter_args_round_trip__t0/...rs
+- Error: `_s_S1_hdl_frame_enter` receives `a: i64 = 0` instead of `a: i64 = 1`.
+- Suspected codegen path: rust_system / state_dispatch enter-args
+  plumbing — `prepareEnter` calls `vec![(1).to_string()]`, then the
+  enter dispatcher tries `__e.parameters.get(0).and_then(|v|
+  v.downcast_ref::<i64>())` which returns None (the param is a
+  String, not an i64), so `unwrap_or_default()` yields 0.
+- Status: open
+- Notes: Surfaced 2026-05-01 during breadth-first fuzz dry-run sweep.
+  Test does `-> (1) $S1` (typed enter-arg). The dispatcher and the
+  prepareEnter path agree on String for persist round-trip but
+  disagree for fresh enter dispatch. Either prepareEnter should keep
+  i64 for fresh transitions, or the dispatcher should `.parse::<i64>()`
+  the string. Other backends pass this case — Rust-only defect.
+
+---
+
 ## D18: csharp persist method naming convention (NOT a defect)
 
 - Lang: csharp
