@@ -64,8 +64,17 @@ def build_source(lang: Lang, system_block: str, meta: dict) -> str:
     rewritten = []
     prolog_injected = False
     for line in lines:
-        if line.strip().startswith("@@target "):
-            rewritten.append(f"@@target {lang.name}\n")
+        stripped = line.strip()
+        # Accept both bare-form (`@@target lang`, legacy) and the
+        # RFC-0013 attribute form (`@@[target("lang")]`). Rewrite to
+        # the attribute form unconditionally — the framec hard cut
+        # (E804) rejects the bare form post-wave-2.
+        is_target_line = (
+            stripped.startswith("@@target ")
+            or stripped.startswith("@@[target(")
+        )
+        if is_target_line:
+            rewritten.append(f'@@[target("{lang.name}")]\n')
             if lang.prolog and not prolog_injected:
                 rewritten.append("\n")
                 rewritten.append(lang.prolog)

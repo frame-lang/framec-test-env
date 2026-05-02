@@ -2931,9 +2931,11 @@ def run_c(p: Path) -> List[str]:
 
 def compile_java(p: Path) -> List[str]:
     # Frame emits the class under an exact filename; javac produces .class.
-    # In docker-java the container ships org.json at /lib/json.jar, so
-    # include it on the classpath for the persist save/restore code.
-    return ["javac", "-cp", "/lib/json.jar", str(p)]
+    # In docker-java the container ships jackson-databind/-core/-annotations
+    # and org.json at /lib/*.jar. Persist codegen uses jackson; the older
+    # org.json is kept on the classpath so legacy tests still build.
+    cp = "/lib/json.jar:/lib/jackson-core.jar:/lib/jackson-databind.jar:/lib/jackson-annotations.jar"
+    return ["javac", "-cp", cp, str(p)]
 
 
 def run_java(p: Path) -> List[str]:
@@ -2941,18 +2943,26 @@ def run_java(p: Path) -> List[str]:
     # Our harness wraps it with an additional CanaryMain class in the
     # same file, so javac produces both classes.
     cls = p.stem
-    return ["java", "-cp", f"/lib/json.jar:{p.parent}", f"{cls}Main"]
+    cp = (
+        "/lib/json.jar:/lib/jackson-core.jar:/lib/jackson-databind.jar:"
+        f"/lib/jackson-annotations.jar:{p.parent}"
+    )
+    return ["java", "-cp", cp, f"{cls}Main"]
 
 
 def compile_kotlin(p: Path) -> List[str]:
-    # kotlinc writes a jar. /lib/json.jar is org.json (used by
-    # persist save/restore); /lib/kotlinx-coroutines-core-jvm.jar
-    # provides `runBlocking` for the async harness's main(). Both
+    # kotlinc writes a jar. /lib/json.jar is org.json (legacy);
+    # /lib/jackson-*.jar power the persist save/restore codegen
+    # post-Jackson migration; /lib/kotlinx-coroutines-core-jvm.jar
+    # provides `runBlocking` for the async harness's main(). All
     # are pulled into docker-kotlin at image build time. Pass them
     # at compile and run time. -J-Xmx2g mirrors the docker runner
     # which OOMs with the default heap.
     jar = p.with_suffix(".jar")
-    cp = "/lib/json.jar:/lib/kotlinx-coroutines-core-jvm.jar"
+    cp = (
+        "/lib/json.jar:/lib/jackson-core.jar:/lib/jackson-databind.jar:"
+        "/lib/jackson-annotations.jar:/lib/kotlinx-coroutines-core-jvm.jar"
+    )
     return [
         "kotlinc", "-J-Xmx2g", "-cp", cp,
         str(p), "-include-runtime", "-d", str(jar),
@@ -2964,7 +2974,10 @@ def run_kotlin(p: Path) -> List[str]:
     # source filename and appending `Kt`, e.g. `case.kt` → `CaseKt`.
     jar = p.with_suffix(".jar")
     main_class = p.stem[:1].upper() + p.stem[1:] + "Kt"
-    cp = f"/lib/json.jar:/lib/kotlinx-coroutines-core-jvm.jar:{jar}"
+    cp = (
+        "/lib/json.jar:/lib/jackson-core.jar:/lib/jackson-databind.jar:"
+        f"/lib/jackson-annotations.jar:/lib/kotlinx-coroutines-core-jvm.jar:{jar}"
+    )
     return [
         "java", "-cp", cp,
         main_class,
