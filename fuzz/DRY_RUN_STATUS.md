@@ -1,4 +1,13 @@
-# Fuzz dry-run status — 2026-05-02
+# Fuzz dry-run status — 2026-05-02 (closed)
+
+**All 21 phases green.** Phase 19 closed 2026-05-02 with the
+post-D19-fix wave-2 rerun (1700/1700 clean) — that's the second
+consecutive clean wave-2, satisfying methodology rule #2. The next
+step is wave-3 axis-extension per `FUZZ_PLAN.md`.
+
+---
+
+
 
 This file tracks the dry-run discipline for the 21-phase fuzz program.
 A phase is **green** when two consecutive waves complete with zero new
@@ -43,7 +52,7 @@ A successful wave = pass on every case × every wired backend.
 | 16 (comments) | ✅ smoke | ✅ full | none | **green** |
 | 17 (multievent) | ✅ smoke | ✅ full | none | **green** |
 | 18 (stress) | ✅ smoke | ✅ full | none | **green** |
-| 19 (pushpop) | ⚠️ 169/170 (D19) | ✅ 170/170 post-fix | D19 found + fixed | **needs wave 2 rerun** |
+| 19 (pushpop) | ⚠️ 169/170 (D19) | ✅ 1700/1700 post-fix ×2 | D19 found + fixed | **green** |
 | 20 (const-sys) | ✅ smoke | ✅ full | none | **green** |
 | 21 (arith) | ✅ smoke | ✅ full | none | **green** |
 | 24 (persist-x) | ✅ smoke | ✅ full | none | **green** |
@@ -88,10 +97,11 @@ A successful wave = pass on every case × every wired backend.
 
 ## Next discipline step
 
-Re-run wave 2 (full tier) one more time after **all** defects fixed
-to confirm 2 consecutive clean waves on every phase. The Phase 2-7
-diff-harness rerun (commit `e6291b2`) already satisfied this; Phase
-19 still needs its post-fix wave-2 rerun to be airtight.
-
-Once that completes, axis-extension (wave-3) is the next
-discipline tier — see `FUZZ_PLAN.md` per-phase wave-2 candidates.
+Wave-3 axis-extension is the next tier. Per `FUZZ_PLAN.md` the
+high-value-density phases (2, 14, 15, 19, 24) already have axis-
+extension baked into their corpora through prior wave plans. The
+remaining wave-3 candidates are the single-axis phases — 11, 12,
+13, 16, 17, 20, 21 — where new dimensions can be added (e.g.
+phase 11 statement-pair: 3-statement bodies; phase 12 ctrl-flow:
+nested if/while; phase 13 shadow: HSM × shadow; phase 17
+multievent: 5-event sequences with persist boundaries).
