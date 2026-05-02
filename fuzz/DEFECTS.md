@@ -34,6 +34,30 @@ triage.
 
 ---
 
+## D20: Dart restore_state emits Frame keyword `as str` (not `as String`)
+
+- Lang: dart
+- Tier: full
+- Case: cases/persist/case_0009 + 53 others (all persist cases with str-typed domain field)
+- Tag: phase-2, persist, dart, restore, frame-keyword-normalization
+- Failure mode: run (Dart compile error: `'str' isn't a type`)
+- Reproducer: cases/persist/case_0009.frame
+- Generated source: /tmp/fz_full/case_0009/dart/out/case.dart
+- Error: `instance.s = data['s'] as str;` — should be `as String`.
+- Suspected codegen path: interface_gen.rs `parse_dart_type` —
+  primitive types fall through unchanged, so `str` reaches the
+  emitter as-is. Dispatch path normalized correctly but the
+  comprehension-restore path didn't.
+- Status: fixed (2026-05-01) — `parse_dart_type` now normalizes
+  `str|string` → `String`, `float` → `double` before storing as
+  `Primitive`.
+- Notes: Surfaced 2026-05-01 by Phase 2 full-tier dry run (81 cases ×
+  17 backends). 54 Dart cases failed; all other 16 backends 81/81
+  clean. Smoke tier (2 cases) didn't surface this because the smoke
+  subset happened to omit cases with str domain fields.
+
+---
+
 ## D19: Rust enter-args stringification breaks typed receiver
 
 - Lang: rust
