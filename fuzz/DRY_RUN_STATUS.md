@@ -45,7 +45,7 @@ A successful wave = pass on every case × every wired backend.
 | 9 (nested-syntax) | ✅ 5/5 | ✅ 17×5 = 85 | none | **green** |
 | 10 (expression) | ✅ smoke | ✅ full × 17 | none | **green** |
 | 11 (stmt-pair) | ✅ 25/25 | ✅ 100/100 | none | **green** |
-| 12 (ctrl-flow) | ✅ smoke | ✅ full | none | **green** |
+| 12 (ctrl-flow) | ✅ smoke | ✅ full + wave-3 (4800/4800: if/else + nested-if) | none | **green** |
 | 13 (shadow) | ✅ smoke | ✅ full | none | **green** |
 | 14 (hsm-cross) | ✅ 8/8 | ✅ 80/80 | none | **green** |
 | 15 (state-args) | ✅ smoke | ✅ full | none | **green** |
