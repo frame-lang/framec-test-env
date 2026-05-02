@@ -239,7 +239,7 @@ def gen_case(lang, case_id_str, smoke_tag, expected, frame_expr,
     drive_sig = f"{m_drive}(x: int): int" if lhs.drive_returns else f"{m_drive}(x: int)"
 
     lines = []
-    lines.append(f"@@target {spec.target}")
+    lines.append(f'@@[target("{spec.target}")]')
     if lang == "php":
         lines.append("<?php")
     lines.append("")

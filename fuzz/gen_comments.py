@@ -188,7 +188,7 @@ def gen_case(lang, cid, equiv, expected, pattern, lit, is_smoke):
     state_lines = pattern.build_states(spec, lang, lit)
 
     lines = []
-    lines.append(f"@@target {spec.target}")
+    lines.append(f'@@[target("{spec.target}")]')
     if lang == "php":
         lines.append("<?php")
     lines.append("")

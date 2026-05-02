@@ -172,7 +172,7 @@ def gen_machine(params, spec):
 def gen_system_frame(case_id, params, spec):
     sys_name = f"Persist{case_id:04d}"
     lines = []
-    lines.append(f"@@target {spec.target}")
+    lines.append(f'@@[target("{spec.target}")]')
     lines.append("")
     if spec.prolog:
         lines.append(spec.prolog)

@@ -490,7 +490,7 @@ def gen_case(lang, pattern):
     drive_decl = drive_sig.replace("drive", m_drive)
 
     lines: list[str] = []
-    lines.append(f"@@target {spec.target}")
+    lines.append(f'@@[target("{spec.target}")]')
     # PHP requires the `<?php` opener at the very top of the source —
     # without it the generated file is treated as literal HTML. The
     # other backends pass through the prolog cleanly.

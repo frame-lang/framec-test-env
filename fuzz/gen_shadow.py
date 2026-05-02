@@ -156,7 +156,7 @@ def gen_case(lang, cid, equiv, expected, shape, vt, is_smoke):
     expr = shape.render(spec, lang, lit)
 
     lines = []
-    lines.append(f"@@target {spec.target}")
+    lines.append(f'@@[target("{spec.target}")]')
     if lang == "php":
         lines.append("<?php")
     lines.append("")

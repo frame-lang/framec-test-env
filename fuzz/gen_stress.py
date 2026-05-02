@@ -166,7 +166,7 @@ def gen_case(lang, cid, equiv, expected, pattern, n, is_smoke):
     interface_methods.add(verify)
 
     lines = []
-    lines.append(f"@@target {spec.target}")
+    lines.append(f'@@[target("{spec.target}")]')
     if lang == "php":
         lines.append("<?php")
     lines.append("")

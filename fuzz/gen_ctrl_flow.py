@@ -83,6 +83,123 @@ def _if_js(cond, body):
     return f"{INDENT}if ({cond}) {{\n{BODY_INDENT}{body}\n{INDENT}}}"
 
 
+# ---------------------------------------------------------------------
+# Wave-3 constructs (if/else, nested if). Each renderer emits the
+# full construct given the outer cond, then-body (already terminated),
+# and either an else-body (for if_else) or an inner cond + body
+# (for nested_if). Indents stack: outer body uses BODY_INDENT (+4),
+# nested inner body uses INNER_INDENT (+8) below.
+# ---------------------------------------------------------------------
+
+INNER_BLOCK_INDENT = " " * 20      # indent of the inner if construct
+INNER_BODY_INDENT = " " * 24       # indent of the inner if's body
+
+
+def _if_else_python(cond, then_body, else_body):
+    return (
+        f"{INDENT}if {cond}:\n"
+        f"{BODY_INDENT}{then_body}\n"
+        f"{INDENT}else:\n"
+        f"{BODY_INDENT}{else_body}"
+    )
+
+
+def _if_else_gdscript(cond, then_body, else_body):
+    return _if_else_python(cond, then_body, else_body)
+
+
+def _if_else_js(cond, then_body, else_body):
+    return (
+        f"{INDENT}if ({cond}) {{\n"
+        f"{BODY_INDENT}{then_body}\n"
+        f"{INDENT}}} else {{\n"
+        f"{BODY_INDENT}{else_body}\n"
+        f"{INDENT}}}"
+    )
+
+
+def _if_else_rust(cond, then_body, else_body):
+    return (
+        f"{INDENT}if {cond} {{\n"
+        f"{BODY_INDENT}{then_body}\n"
+        f"{INDENT}}} else {{\n"
+        f"{BODY_INDENT}{else_body}\n"
+        f"{INDENT}}}"
+    )
+
+
+def _if_else_ruby(cond, then_body, else_body):
+    return (
+        f"{INDENT}if {cond}\n"
+        f"{BODY_INDENT}{then_body}\n"
+        f"{INDENT}else\n"
+        f"{BODY_INDENT}{else_body}\n"
+        f"{INDENT}end"
+    )
+
+
+def _if_else_lua(cond, then_body, else_body):
+    return (
+        f"{INDENT}if {cond} then\n"
+        f"{BODY_INDENT}{then_body}\n"
+        f"{INDENT}else\n"
+        f"{BODY_INDENT}{else_body}\n"
+        f"{INDENT}end"
+    )
+
+
+def _nested_if_python(outer_cond, inner_cond, body):
+    return (
+        f"{INDENT}if {outer_cond}:\n"
+        f"{INNER_BLOCK_INDENT}if {inner_cond}:\n"
+        f"{INNER_BODY_INDENT}{body}"
+    )
+
+
+def _nested_if_gdscript(outer_cond, inner_cond, body):
+    return _nested_if_python(outer_cond, inner_cond, body)
+
+
+def _nested_if_js(outer_cond, inner_cond, body):
+    return (
+        f"{INDENT}if ({outer_cond}) {{\n"
+        f"{INNER_BLOCK_INDENT}if ({inner_cond}) {{\n"
+        f"{INNER_BODY_INDENT}{body}\n"
+        f"{INNER_BLOCK_INDENT}}}\n"
+        f"{INDENT}}}"
+    )
+
+
+def _nested_if_rust(outer_cond, inner_cond, body):
+    return (
+        f"{INDENT}if {outer_cond} {{\n"
+        f"{INNER_BLOCK_INDENT}if {inner_cond} {{\n"
+        f"{INNER_BODY_INDENT}{body}\n"
+        f"{INNER_BLOCK_INDENT}}}\n"
+        f"{INDENT}}}"
+    )
+
+
+def _nested_if_ruby(outer_cond, inner_cond, body):
+    return (
+        f"{INDENT}if {outer_cond}\n"
+        f"{INNER_BLOCK_INDENT}if {inner_cond}\n"
+        f"{INNER_BODY_INDENT}{body}\n"
+        f"{INNER_BLOCK_INDENT}end\n"
+        f"{INDENT}end"
+    )
+
+
+def _nested_if_lua(outer_cond, inner_cond, body):
+    return (
+        f"{INDENT}if {outer_cond} then\n"
+        f"{INNER_BLOCK_INDENT}if {inner_cond} then\n"
+        f"{INNER_BODY_INDENT}{body}\n"
+        f"{INNER_BLOCK_INDENT}end\n"
+        f"{INDENT}end"
+    )
+
+
 def _if_typescript(cond, body):
     return _if_js(cond, body)
 
@@ -156,6 +273,47 @@ IF_RENDERERS = {
     "c": _if_c,
     "cpp": _if_cpp,
     "gdscript": _if_gdscript,
+}
+
+# `if/else` and nested-`if` renderers reuse the brace-with-paren shape
+# for every C-style language, the brace-without-paren shape for Rust/
+# Go/Swift, and target-specific shapes for Python/GDScript/Ruby/Lua.
+IF_ELSE_RENDERERS = {
+    "python_3": _if_else_python,
+    "gdscript": _if_else_gdscript,
+    "javascript": _if_else_js,
+    "typescript": _if_else_js,
+    "java": _if_else_js,
+    "c": _if_else_js,
+    "cpp": _if_else_js,
+    "csharp": _if_else_js,
+    "php": _if_else_js,
+    "kotlin": _if_else_js,
+    "dart": _if_else_js,
+    "rust": _if_else_rust,
+    "go": _if_else_rust,
+    "swift": _if_else_rust,
+    "ruby": _if_else_ruby,
+    "lua": _if_else_lua,
+}
+
+NESTED_IF_RENDERERS = {
+    "python_3": _nested_if_python,
+    "gdscript": _nested_if_gdscript,
+    "javascript": _nested_if_js,
+    "typescript": _nested_if_js,
+    "java": _nested_if_js,
+    "c": _nested_if_js,
+    "cpp": _nested_if_js,
+    "csharp": _nested_if_js,
+    "php": _nested_if_js,
+    "kotlin": _nested_if_js,
+    "dart": _nested_if_js,
+    "rust": _nested_if_rust,
+    "go": _nested_if_rust,
+    "swift": _nested_if_rust,
+    "ruby": _nested_if_ruby,
+    "lua": _nested_if_lua,
 }
 
 WAVE1_LANGS = list(IF_RENDERERS.keys())   # 16; Erlang excluded.
@@ -290,27 +448,147 @@ def simulate(cond, body, lit):
     raise ValueError(f"unhandled verify_method {body.verify_method}")
 
 
-def case_id(cond, body, lit):
+def case_id(cond, body, lit, construct="if_only", inner_cond=None):
     sign = "n" if lit < 0 else ""
-    return f"cf_{cond.name}__{body.name}__lit{sign}{abs(lit)}"
+    if construct == "if_only":
+        return f"cf_{cond.name}__{body.name}__lit{sign}{abs(lit)}"
+    if construct == "if_else":
+        return f"cf_else_{cond.name}__{body.name}__lit{sign}{abs(lit)}"
+    if construct == "nested_if":
+        return (
+            f"cf_nest_{cond.name}__{inner_cond.name}__{body.name}"
+            f"__lit{sign}{abs(lit)}"
+        )
+    raise ValueError(f"unknown construct {construct}")
 
 
-def equiv_class(cond, body):
-    return f"{cond.name}__{body.name}"
+def equiv_class(cond, body, construct="if_only", inner_cond=None):
+    if construct == "if_only":
+        return f"{cond.name}__{body.name}"
+    if construct == "if_else":
+        return f"else_{cond.name}__{body.name}"
+    if construct == "nested_if":
+        return f"nest_{cond.name}__{inner_cond.name}__{body.name}"
+    raise ValueError(f"unknown construct {construct}")
+
+
+# ---------------------------------------------------------------------
+# Wave-3 simulators.
+#
+# `simulate_if_else` mirrors `simulate` but the false branch fires an
+# observable else-mutation rather than leaving state unchanged. The
+# else mutation uses ELSE_LIT — distinct from any LIT_VALUES element
+# so a missing/buggy else emit produces a wrong-but-distinguishable
+# observable rather than silently matching another case.
+#
+# `simulate_nested_if` runs the body iff outer AND inner conds are
+# both true. Same body-simulator semantics as the wave-1 `simulate`,
+# just gated by a two-level conjunction.
+# ---------------------------------------------------------------------
+
+ELSE_LIT = 42       # disjoint from LIT_VALUES.
+
+
+def simulate_if_else(cond, body, lit):
+    """If cond is true the body's post-* fires (same as wave-1).
+    Otherwise the else arm writes ELSE_LIT into the same slot the
+    body would have written, so verify still observes via the body's
+    verify_method."""
+    ret_init = RET_SENTINEL if body.name == "ret_w" else 0
+    state = {"dom": DOMAIN_F_INIT, "sv": SV_S_INIT, "ret": ret_init}
+    if cond.is_true:
+        if body.post_dom is not None:
+            state["dom"] = body.post_dom(state, lit)
+        if body.post_sv is not None:
+            state["sv"] = body.post_sv(state, lit)
+        if body.post_ret is not None:
+            state["ret"] = body.post_ret(state, lit)
+    else:
+        # Else-body writes ELSE_LIT into the body's verify slot. For
+        # transition bodies the else arm is a no-op (transition bodies
+        # already verify via dom — let the false-cond case observe the
+        # initial dom value instead of forcing a redundant write).
+        if body.transitions:
+            pass
+        elif body.verify_method == "get_n":
+            state["dom"] = ELSE_LIT
+        elif body.verify_method == "get_scache":
+            state["sv"] = ELSE_LIT
+        elif body.drive_returns:
+            state["ret"] = ELSE_LIT
+    if body.drive_returns:
+        return state["ret"]
+    if body.verify_method == "get_n":
+        return state["dom"]
+    if body.verify_method == "get_scache":
+        return state["sv"]
+    raise ValueError(f"unhandled verify_method {body.verify_method}")
+
+
+def simulate_nested_if(outer_cond, inner_cond, body, lit):
+    ret_init = RET_SENTINEL if body.name == "ret_w" else 0
+    state = {"dom": DOMAIN_F_INIT, "sv": SV_S_INIT, "ret": ret_init}
+    if outer_cond.is_true and inner_cond.is_true:
+        if body.post_dom is not None:
+            state["dom"] = body.post_dom(state, lit)
+        if body.post_sv is not None:
+            state["sv"] = body.post_sv(state, lit)
+        if body.post_ret is not None:
+            state["ret"] = body.post_ret(state, lit)
+    if body.drive_returns:
+        return state["ret"]
+    if body.verify_method == "get_n":
+        return state["dom"]
+    if body.verify_method == "get_scache":
+        return state["sv"]
+    raise ValueError(f"unhandled verify_method {body.verify_method}")
 
 
 def enumerate_cases():
     seen_classes = set()
+    # Wave-1: if-only.
     for cond in CONDS:
         for body in BODIES:
             for lit in LIT_VALUES:
-                cid = case_id(cond, body, lit)
-                cls = equiv_class(cond, body)
+                cid = case_id(cond, body, lit, "if_only")
+                cls = equiv_class(cond, body, "if_only")
                 is_smoke = cls not in seen_classes
                 if is_smoke:
                     seen_classes.add(cls)
                 expected = simulate(cond, body, lit)
-                yield (cid, cls, expected, cond, body, lit, is_smoke)
+                yield (cid, cls, expected, cond, body, lit, is_smoke,
+                       "if_only", None)
+    # Wave-3 axis A: if/else. Same dimensions; else arm fires
+    # ELSE_LIT into the body's observable slot.
+    for cond in CONDS:
+        for body in BODIES:
+            for lit in LIT_VALUES:
+                cid = case_id(cond, body, lit, "if_else")
+                cls = equiv_class(cond, body, "if_else")
+                is_smoke = cls not in seen_classes
+                if is_smoke:
+                    seen_classes.add(cls)
+                expected = simulate_if_else(cond, body, lit)
+                yield (cid, cls, expected, cond, body, lit, is_smoke,
+                       "if_else", None)
+    # Wave-3 axis B: nested if. Outer fixed lit_true so we always
+    # enter the outer block; the inner cond varies. Body runs iff
+    # both true. Tests whether framec correctly emits Frame
+    # statements inside a doubly-nested native if — the indent and
+    # statement-boundary book-keeping that single-if depth doesn't
+    # exercise.
+    outer = CONDS[0]   # lit_true
+    for inner in CONDS:
+        for body in BODIES:
+            for lit in LIT_VALUES:
+                cid = case_id(outer, body, lit, "nested_if", inner)
+                cls = equiv_class(outer, body, "nested_if", inner)
+                is_smoke = cls not in seen_classes
+                if is_smoke:
+                    seen_classes.add(cls)
+                expected = simulate_nested_if(outer, inner, body, lit)
+                yield (cid, cls, expected, outer, body, lit, is_smoke,
+                       "nested_if", inner)
 
 
 # ---------------------------------------------------------------------
@@ -320,7 +598,28 @@ def enumerate_cases():
 # get_scache.
 # ---------------------------------------------------------------------
 
-def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke):
+def _else_body_src(body, spec, lit):
+    """Render the Frame statement for the else arm of an if_else
+    construct. Mirrors the body shape: same target slot, but writes
+    ELSE_LIT instead of `lit`. Transitions become no-ops (they have
+    no easy 'opposite transition' that observes a distinct slot)."""
+    if body.transitions:
+        return None
+    if body.name == "dom_w":
+        return f"{spec.self_word}{spec.field_op}f = {ELSE_LIT}"
+    if body.name == "sv_w":
+        return f"$.s = {ELSE_LIT}"
+    if body.name == "ret_w":
+        return f"@@:return = {ELSE_LIT}"
+    if body.name == "sc_assign_dom":
+        # The else arm doesn't need to call compute — write ELSE_LIT
+        # directly so the false-cond case observes a distinct value.
+        return f"{spec.self_word}{spec.field_op}f = {ELSE_LIT}"
+    raise ValueError(f"unhandled body shape for else: {body.name}")
+
+
+def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
+             construct="if_only", inner_cond=None):
     spec = LANGS[lang]
     sys_name = f"CtrlFlow_{cid}"
 
@@ -346,10 +645,30 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke):
     else:
         body_terminated = body_src + spec.stmt_end
 
-    if_construct = IF_RENDERERS[lang](cond_src, body_terminated)
+    if construct == "if_only":
+        if_construct = IF_RENDERERS[lang](cond_src, body_terminated)
+    elif construct == "if_else":
+        else_body_src = _else_body_src(body, spec, lit)
+        if else_body_src is None:
+            # Transition body in if_else degenerates to if_only (no
+            # else arm). Fall back to plain if-construct so the case
+            # is still emitted but observable matches the no-op else.
+            if_construct = IF_RENDERERS[lang](cond_src, body_terminated)
+        else:
+            else_terminated = else_body_src + spec.stmt_end
+            if_construct = IF_ELSE_RENDERERS[lang](
+                cond_src, body_terminated, else_terminated
+            )
+    elif construct == "nested_if":
+        inner_src = inner_cond.render(spec)
+        if_construct = NESTED_IF_RENDERERS[lang](
+            cond_src, inner_src, body_terminated
+        )
+    else:
+        raise ValueError(f"unknown construct {construct}")
 
     lines = []
-    lines.append(f"@@target {spec.target}")
+    lines.append(f'@@[target("{spec.target}")]')
     if lang == "php":
         lines.append("<?php")
     lines.append("")
@@ -626,8 +945,12 @@ def main():
         spec = LANGS[lang]
         smoke_count = 0
         per_lang = 0
-        for cid, equiv, expected, cond, body, lit, is_smoke in enumerate_cases():
-            src = gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke)
+        for (cid, equiv, expected, cond, body, lit, is_smoke,
+             construct, inner_cond) in enumerate_cases():
+            src = gen_case(
+                lang, cid, equiv, expected, cond, body, lit, is_smoke,
+                construct=construct, inner_cond=inner_cond,
+            )
             path = out / f"{cid}.{spec.ext}"
             path.write_text(src)
             index_rows.append(

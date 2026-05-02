@@ -349,7 +349,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
     decl_compute = "compute" in pattern.name
 
     lines = []
-    lines.append(f"@@target {spec.target}")
+    lines.append(f'@@[target("{spec.target}")]')
     if lang == "php":
         lines.append("<?php")
     lines.append("")

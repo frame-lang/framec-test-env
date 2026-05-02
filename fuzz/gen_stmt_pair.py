@@ -279,7 +279,7 @@ def gen_case(lang, cid, equiv, expected, s1, s2, lit, is_smoke):
     s2_src = s2.render(spec, lang, sys_name, lit)
 
     lines = []
-    lines.append(f"@@target {spec.target}")
+    lines.append(f'@@[target("{spec.target}")]')
     if lang == "php":
         lines.append("<?php")
     lines.append("")

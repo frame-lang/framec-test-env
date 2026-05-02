@@ -109,7 +109,7 @@ def gen_case(lang, case_id, params):
     next_state = f"$S{1 % n}"
 
     lines = []
-    lines.append(f"@@target {spec.target}")
+    lines.append(f'@@[target("{spec.target}")]')
     lines.append("")
     lines.append(f"@@system {sys_name} {{")
     lines.append("    interface:")
