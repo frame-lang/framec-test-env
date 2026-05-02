@@ -395,7 +395,15 @@ def main() -> int:
                     help="Comma-separated AND-of-tags filter (e.g. --tag=hsm,depth-2). "
                          "Cases must contain ALL listed tags in their .meta `tags` "
                          "field. See TAG_VOCABULARY.md for available tags.")
-    ap.add_argument("--workdir", type=Path, default=Path("/tmp/fuzz_work"))
+    ap.add_argument("--workdir", type=Path, default=Path("/tmp/fuzz_work"),
+                    help="Per-case scratch directory (transpiled source + "
+                         "compiled binaries). Wiped at start and on exit "
+                         "by default; use --keep-workdir for postmortem.")
+    ap.add_argument("--keep-workdir", action="store_true",
+                    help="Skip the start-of-run wipe AND the atexit teardown "
+                         "of --workdir. Useful for inspecting failed cases. "
+                         "Without this flag the workdir is recreated empty "
+                         "and removed when the run ends.")
     ap.add_argument(
         "--jobs", "-j", type=int,
         default=max(4, (_os.cpu_count() or 4)),
@@ -482,6 +490,19 @@ def main() -> int:
         print(f"no cases found in {args.cases}", file=sys.stderr)
         return 2
 
+    # Default hygiene: start with a clean workdir and remove it at exit.
+    # Each case generates 1-30 MB of transpiled source + compiled binaries;
+    # over a full run that's 5-10 GB. Letting them accumulate across runs
+    # is the leak that bit us on 2026-05-01 (38 GB in /tmp). The
+    # container pool's atexit hook already handles its own cleanup —
+    # this hook handles the host-side workdir.
+    import shutil as _shutil
+    if not args.keep_workdir:
+        if args.workdir.exists():
+            _shutil.rmtree(args.workdir, ignore_errors=True)
+        atexit.register(
+            lambda: _shutil.rmtree(args.workdir, ignore_errors=True)
+        )
     args.workdir.mkdir(parents=True, exist_ok=True)
 
     print(f"=== {first_kind} fuzz: {len(cases)} cases × {len(wanted)} backends ===")
