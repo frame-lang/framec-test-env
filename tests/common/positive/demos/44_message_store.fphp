@@ -1,0 +1,64 @@
+@@[target("php")]
+
+<?php
+
+@@[persist]
+@@system MessageStore {
+    operations:
+        @@[save]
+        save_state(): string {}
+
+        @@[load]
+        restore_state(data: string) {}
+
+    interface:
+        record(topic: str, payload: str)
+        count_for(topic: str): int
+        total(): int
+
+    machine:
+        $Recording {
+            record(topic: str, payload: str) {
+                $this->total_count = $this->total_count + 1;
+                if ($topic === "orders") {
+                    $this->orders_count = $this->orders_count + 1;
+                } else {
+                    if ($topic === "refunds") {
+                        $this->refunds_count = $this->refunds_count + 1;
+                    }
+                }
+            }
+            count_for(topic: str): int {
+                if ($topic === "orders") {
+                    @@:($this->orders_count)
+                } else {
+                    if ($topic === "refunds") {
+                        @@:($this->refunds_count)
+                    } else {
+                        @@:(0)
+                    }
+                }
+            }
+            total(): int { @@:($this->total_count) }
+        }
+
+    domain:
+        total_count = 0
+        orders_count = 0
+        refunds_count = 0
+}
+
+$s = @@MessageStore();
+$s->record("orders", "O-1");
+$s->record("orders", "O-2");
+$s->record("refunds", "R-1");
+
+$snap = $s->save_state();
+$s2 = new MessageStore();
+$s2->restore_state($snap);
+assert($s2->total() === 3,             "expected total=3");
+assert($s2->count_for("orders") === 2, "expected orders=2");
+$s2->record("orders", "O-3");
+assert($s2->total() === 4,             "expected total=4");
+assert($s2->count_for("orders") === 3, "expected orders=3");
+echo "PASS: message_store\n";

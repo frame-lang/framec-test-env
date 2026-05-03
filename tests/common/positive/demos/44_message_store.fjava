@@ -1,0 +1,66 @@
+@@[target("java")]
+
+@@[persist]
+@@system MessageStore {
+    operations:
+        @@[save]
+        save_state(): String {}
+
+        @@[load]
+        restore_state(data: String) {}
+
+    interface:
+        record(topic: String, payload: String)
+        count_for(topic: String): int
+        total(): int
+
+    machine:
+        $Recording {
+            record(topic: String, payload: String) {
+                this.total_count = this.total_count + 1;
+                if (topic.equals("orders")) {
+                    this.orders_count = this.orders_count + 1;
+                } else {
+                    if (topic.equals("refunds")) {
+                        this.refunds_count = this.refunds_count + 1;
+                    }
+                }
+            }
+            count_for(topic: String): int {
+                if (topic.equals("orders")) {
+                    @@:(this.orders_count)
+                } else {
+                    if (topic.equals("refunds")) {
+                        @@:(this.refunds_count)
+                    } else {
+                        @@:(0)
+                    }
+                }
+            }
+            total(): int { @@:(this.total_count) }
+        }
+
+    domain:
+        total_count: int = 0
+        orders_count: int = 0
+        refunds_count: int = 0
+}
+
+class Main {
+    public static void main(String[] args) {
+        var s = @@MessageStore();
+        s.record("orders", "O-1");
+        s.record("orders", "O-2");
+        s.record("refunds", "R-1");
+
+        var snap = (String) s.save_state();
+        var s2 = new MessageStore();
+        s2.restore_state(snap);
+        if ((int) s2.total() != 3) throw new RuntimeException("expected total=3");
+        if ((int) s2.count_for("orders") != 2) throw new RuntimeException("expected orders=2");
+        s2.record("orders", "O-3");
+        if ((int) s2.total() != 4) throw new RuntimeException("expected total=4");
+        if ((int) s2.count_for("orders") != 3) throw new RuntimeException("expected orders=3");
+        System.out.println("PASS: message_store");
+    }
+}
