@@ -1,0 +1,112 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@[persist]
+@@system WizardMachine {
+    operations:
+        @@[save]
+        save_state(): String {}
+
+        @@[load]
+        restore_state(data: String) {}
+
+    interface:
+        start(user: str)
+        client_collect(email: str)
+        server_validate()
+        client_confirm(accept: bool)
+        server_provision()
+        where_next(): str
+
+    machine:
+        $Start {
+            start(user: str) {
+                self.user = user
+                -> $NeedsClientCollect
+            }
+            where_next(): str { @@:("start") }
+        }
+
+        $NeedsClientCollect {
+            client_collect(email: str) {
+                self.email = email
+                -> $NeedsServerValidate
+            }
+            where_next(): str { @@:("client") }
+        }
+
+        $NeedsServerValidate {
+            server_validate() {
+                if self.email.find("@") != -1:
+                    self.server_notes = "ok"
+                    -> "valid" $NeedsClientConfirm
+                else:
+                    self.server_notes = "rejected"
+                    -> "invalid" $Rejected
+            }
+            where_next(): str { @@:("server") }
+        }
+
+        $NeedsClientConfirm {
+            client_confirm(accept: bool) {
+                if accept:
+                    -> "accepted" $NeedsServerProvision
+                else:
+                    -> "declined" $Cancelled
+            }
+            where_next(): str { @@:("client") }
+        }
+
+        $NeedsServerProvision {
+            server_provision() {
+                self.account_id = "acct-" + self.user
+                -> $Done
+            }
+            where_next(): str { @@:("server") }
+        }
+
+        $Done      { where_next(): str { @@:("done") } }
+        $Cancelled { where_next(): str { @@:("done") } }
+        $Rejected  { where_next(): str { @@:("done") } }
+
+    domain:
+        user = ""
+        email = ""
+        server_notes = ""
+        account_id = ""
+}
+
+func main():
+    var m = @@WizardMachine()
+    m.start("alice")
+    m.client_collect("alice@example.com")
+    var failures = 0
+    if m.where_next() != "server": print("FAIL: server #1"); failures += 1
+
+    var blob = m.save_state()
+    var m2 = WizardMachine.new()
+    m2.restore_state(blob)
+    m2.server_validate()
+    if m2.where_next() != "client": print("FAIL: client #2"); failures += 1
+
+    var blob2 = m2.save_state()
+    var m3 = WizardMachine.new()
+    m3.restore_state(blob2)
+    m3.client_confirm(true)
+    if m3.where_next() != "server": print("FAIL: server #3"); failures += 1
+
+    var blob3 = m3.save_state()
+    var m4 = WizardMachine.new()
+    m4.restore_state(blob3)
+    m4.server_provision()
+    if m4.where_next() != "done": print("FAIL: done"); failures += 1
+
+    if failures > 0:
+        print("FAIL: migrating_machine (" + str(failures) + " failures)")
+        quit(1)
+    print("PASS: migrating_machine")
+
+func _init():
+    main()
+    quit()

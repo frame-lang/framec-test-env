@@ -1,0 +1,117 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@[persist]
+@@system WizardMachine {
+    operations:
+        @@[save]
+        save_state(): char* {}
+
+        @@[load]
+        restore_state(data: char*) {}
+
+    interface:
+        start(user: str)
+        client_collect(email: str)
+        server_validate()
+        client_confirm(accept: int)
+        server_provision()
+        where_next(): str
+
+    machine:
+        $Start {
+            start(user: str) {
+                self->user = user;
+                -> $NeedsClientCollect
+            }
+            where_next(): str { @@:("start") }
+        }
+
+        $NeedsClientCollect {
+            client_collect(email: str) {
+                self->email = email;
+                -> $NeedsServerValidate
+            }
+            where_next(): str { @@:("client") }
+        }
+
+        $NeedsServerValidate {
+            server_validate() {
+                if (strchr(self->email, '@') != NULL) {
+                    self->server_notes = "ok";
+                    -> "valid" $NeedsClientConfirm
+                } else {
+                    self->server_notes = "rejected";
+                    -> "invalid" $Rejected
+                }
+            }
+            where_next(): str { @@:("server") }
+        }
+
+        $NeedsClientConfirm {
+            client_confirm(accept: int) {
+                if (accept) {
+                    -> "accepted" $NeedsServerProvision
+                } else {
+                    -> "declined" $Cancelled
+                }
+            }
+            where_next(): str { @@:("client") }
+        }
+
+        $NeedsServerProvision {
+            server_provision() {
+                static char acct_buf[64];
+                snprintf(acct_buf, sizeof(acct_buf), "acct-%s", self->user);
+                self->account_id = acct_buf;
+                -> $Done
+            }
+            where_next(): str { @@:("server") }
+        }
+
+        $Done      { where_next(): str { @@:("done") } }
+        $Cancelled { where_next(): str { @@:("done") } }
+        $Rejected  { where_next(): str { @@:("done") } }
+
+    domain:
+        user: str = ""
+        email: str = ""
+        server_notes: str = ""
+        account_id: str = ""
+}
+
+int main() {
+    WizardMachine* m = @@WizardMachine();
+    WizardMachine_start(m, "alice");
+    WizardMachine_client_collect(m, "alice@example.com");
+    if (strcmp(WizardMachine_where_next(m), "server") != 0) { printf("FAIL: server #1\n"); return 1; }
+
+    char* blob = WizardMachine_save_state(m);
+    WizardMachine* m2 = @@WizardMachine();
+    WizardMachine_restore_state(m2, blob);
+    WizardMachine_server_validate(m2);
+    if (strcmp(WizardMachine_where_next(m2), "client") != 0) { printf("FAIL: client #2\n"); return 1; }
+
+    char* blob2 = WizardMachine_save_state(m2);
+    WizardMachine* m3 = @@WizardMachine();
+    WizardMachine_restore_state(m3, blob2);
+    WizardMachine_client_confirm(m3, 1);
+    if (strcmp(WizardMachine_where_next(m3), "server") != 0) { printf("FAIL: server #3\n"); return 1; }
+
+    char* blob3 = WizardMachine_save_state(m3);
+    WizardMachine* m4 = @@WizardMachine();
+    WizardMachine_restore_state(m4, blob3);
+    WizardMachine_server_provision(m4);
+    if (strcmp(WizardMachine_where_next(m4), "done") != 0) { printf("FAIL: done\n"); return 1; }
+    printf("PASS: migrating_machine\n");
+    free(blob); free(blob2); free(blob3);
+    WizardMachine_destroy(m);
+    WizardMachine_destroy(m2);
+    WizardMachine_destroy(m3);
+    WizardMachine_destroy(m4);
+    return 0;
+}

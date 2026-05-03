@@ -1,0 +1,78 @@
+@@[target("erlang")]
+
+@@[persist]
+@@system WizardMachine {
+    operations:
+        @@[save]
+        save_state() {}
+
+        @@[load]
+        load_state(data) {}
+
+    interface:
+        start(user: str)
+        client_collect(email: str)
+        server_validate()
+        client_confirm(accept: bool)
+        server_provision()
+        where_next(): str
+
+    machine:
+        $Start {
+            start(user: str) {
+                self.user = user
+                -> $NeedsClientCollect
+            }
+            where_next(): str { @@:("start") }
+        }
+
+        $NeedsClientCollect {
+            client_collect(email: str) {
+                self.email = email
+                -> $NeedsServerValidate
+            }
+            where_next(): str { @@:("client") }
+        }
+
+        $NeedsServerValidate {
+            server_validate() {
+                if string:str(self.email, "@") > 0 {
+                    self.server_notes = "ok"
+                    -> "valid" $NeedsClientConfirm
+                } else {
+                    self.server_notes = "rejected"
+                    -> "invalid" $Rejected
+                }
+            }
+            where_next(): str { @@:("server") }
+        }
+
+        $NeedsClientConfirm {
+            client_confirm(accept: bool) {
+                if accept {
+                    -> "accepted" $NeedsServerProvision
+                } else {
+                    -> "declined" $Cancelled
+                }
+            }
+            where_next(): str { @@:("client") }
+        }
+
+        $NeedsServerProvision {
+            server_provision() {
+                self.account_id = "acct-" ++ self.user
+                -> $Done
+            }
+            where_next(): str { @@:("server") }
+        }
+
+        $Done      { where_next(): str { @@:("done") } }
+        $Cancelled { where_next(): str { @@:("done") } }
+        $Rejected  { where_next(): str { @@:("done") } }
+
+    domain:
+        user = ""
+        email = ""
+        server_notes = ""
+        account_id = ""
+}

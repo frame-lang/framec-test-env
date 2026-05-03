@@ -1,0 +1,108 @@
+@@[target("csharp")]
+
+using System;
+
+@@[persist]
+@@system WizardMachine {
+    operations:
+        @@[save]
+        SaveState(): String {}
+
+        @@[load]
+        RestoreState(data: String) {}
+
+    interface:
+        start(user: String)
+        client_collect(email: String)
+        server_validate()
+        client_confirm(accept: bool)
+        server_provision()
+        where_next(): String
+
+    machine:
+        $Start {
+            start(user: String) {
+                this.user = user;
+                -> $NeedsClientCollect
+            }
+            where_next(): String { @@:("start") }
+        }
+
+        $NeedsClientCollect {
+            client_collect(email: String) {
+                this.email = email;
+                -> $NeedsServerValidate
+            }
+            where_next(): String { @@:("client") }
+        }
+
+        $NeedsServerValidate {
+            server_validate() {
+                if (this.email.Contains("@")) {
+                    this.server_notes = "ok";
+                    -> "valid" $NeedsClientConfirm
+                } else {
+                    this.server_notes = "rejected";
+                    -> "invalid" $Rejected
+                }
+            }
+            where_next(): String { @@:("server") }
+        }
+
+        $NeedsClientConfirm {
+            client_confirm(accept: bool) {
+                if (accept) {
+                    -> "accepted" $NeedsServerProvision
+                } else {
+                    -> "declined" $Cancelled
+                }
+            }
+            where_next(): String { @@:("client") }
+        }
+
+        $NeedsServerProvision {
+            server_provision() {
+                this.account_id = "acct-" + this.user;
+                -> $Done
+            }
+            where_next(): String { @@:("server") }
+        }
+
+        $Done      { where_next(): String { @@:("done") } }
+        $Cancelled { where_next(): String { @@:("done") } }
+        $Rejected  { where_next(): String { @@:("done") } }
+
+    domain:
+        user: String = ""
+        email: String = ""
+        server_notes: String = ""
+        account_id: String = ""
+}
+
+class Program {
+    static void Main(string[] args) {
+        var m = @@WizardMachine();
+        m.start("alice");
+        m.client_collect("alice@example.com");
+        if ((string) m.where_next() != "server") throw new Exception("expected server #1");
+
+        var blob = (string) m.SaveState();
+        var m2 = new WizardMachine();
+        m2.RestoreState(blob);
+        m2.server_validate();
+        if ((string) m2.where_next() != "client") throw new Exception("expected client #2");
+
+        var blob2 = (string) m2.SaveState();
+        var m3 = new WizardMachine();
+        m3.RestoreState(blob2);
+        m3.client_confirm(true);
+        if ((string) m3.where_next() != "server") throw new Exception("expected server #3");
+
+        var blob3 = (string) m3.SaveState();
+        var m4 = new WizardMachine();
+        m4.RestoreState(blob3);
+        m4.server_provision();
+        if ((string) m4.where_next() != "done") throw new Exception("expected done");
+        Console.WriteLine("PASS: migrating_machine");
+    }
+}

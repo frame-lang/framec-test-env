@@ -1,0 +1,107 @@
+@@[target("dart")]
+
+import 'dart:convert';
+import 'dart:io';
+
+@@[persist]
+@@system WizardMachine {
+    operations:
+        @@[save]
+        saveState(): String {}
+
+        @@[load]
+        restoreState(data: String) {}
+
+    interface:
+        start(user: String)
+        client_collect(email: String)
+        server_validate()
+        client_confirm(accept: bool)
+        server_provision()
+        where_next(): String
+
+    machine:
+        $Start {
+            start(user: String) {
+                this.user = user;
+                -> $NeedsClientCollect
+            }
+            where_next(): String { @@:("start") }
+        }
+
+        $NeedsClientCollect {
+            client_collect(email: String) {
+                this.email = email;
+                -> $NeedsServerValidate
+            }
+            where_next(): String { @@:("client") }
+        }
+
+        $NeedsServerValidate {
+            server_validate() {
+                if (this.email.contains("@")) {
+                    this.server_notes = "ok";
+                    -> "valid" $NeedsClientConfirm
+                } else {
+                    this.server_notes = "rejected";
+                    -> "invalid" $Rejected
+                }
+            }
+            where_next(): String { @@:("server") }
+        }
+
+        $NeedsClientConfirm {
+            client_confirm(accept: bool) {
+                if (accept) {
+                    -> "accepted" $NeedsServerProvision
+                } else {
+                    -> "declined" $Cancelled
+                }
+            }
+            where_next(): String { @@:("client") }
+        }
+
+        $NeedsServerProvision {
+            server_provision() {
+                this.account_id = "acct-${this.user}";
+                -> $Done
+            }
+            where_next(): String { @@:("server") }
+        }
+
+        $Done      { where_next(): String { @@:("done") } }
+        $Cancelled { where_next(): String { @@:("done") } }
+        $Rejected  { where_next(): String { @@:("done") } }
+
+    domain:
+        user: String = ""
+        email: String = ""
+        server_notes: String = ""
+        account_id: String = ""
+}
+
+void main() {
+    final m = WizardMachine();
+    m.start("alice");
+    m.client_collect("alice@example.com");
+    if (m.where_next() != "server") { print("FAIL: server #1"); exit(1); }
+
+    final blob = m.saveState();
+    final m2 = WizardMachine();
+    m2.restoreState(blob);
+    m2.server_validate();
+    if (m2.where_next() != "client") { print("FAIL: client #2"); exit(1); }
+
+    final blob2 = m2.saveState();
+    final m3 = WizardMachine();
+    m3.restoreState(blob2);
+    m3.client_confirm(true);
+    if (m3.where_next() != "server") { print("FAIL: server #3"); exit(1); }
+
+    final blob3 = m3.saveState();
+    final m4 = WizardMachine();
+    m4.restoreState(blob3);
+    m4.server_provision();
+    if (m4.where_next() != "done") { print("FAIL: done"); exit(1); }
+    print("PASS: migrating_machine");
+}

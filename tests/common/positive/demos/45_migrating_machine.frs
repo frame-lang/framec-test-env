@@ -1,0 +1,106 @@
+@@[target("rust")]
+
+use serde_json;
+
+@@[persist]
+@@system WizardMachine {
+    operations:
+        @@[save]
+        save_state(): String {}
+
+        @@[load]
+        restore_state(data: String) {}
+
+    interface:
+        start(user: String)
+        client_collect(email: String)
+        server_validate()
+        client_confirm(accept: bool)
+        server_provision()
+        where_next(): String
+
+    machine:
+        $Start {
+            start(user: String) {
+                self.user = user;
+                -> $NeedsClientCollect
+            }
+            where_next(): String { @@:("start".to_string()) }
+        }
+
+        $NeedsClientCollect {
+            client_collect(email: String) {
+                self.email = email;
+                -> $NeedsServerValidate
+            }
+            where_next(): String { @@:("client".to_string()) }
+        }
+
+        $NeedsServerValidate {
+            server_validate() {
+                if self.email.contains("@") {
+                    self.server_notes = "ok".to_string();
+                    -> "valid" $NeedsClientConfirm
+                } else {
+                    self.server_notes = "rejected".to_string();
+                    -> "invalid" $Rejected
+                }
+            }
+            where_next(): String { @@:("server".to_string()) }
+        }
+
+        $NeedsClientConfirm {
+            client_confirm(accept: bool) {
+                if accept {
+                    -> "accepted" $NeedsServerProvision
+                } else {
+                    -> "declined" $Cancelled
+                }
+            }
+            where_next(): String { @@:("client".to_string()) }
+        }
+
+        $NeedsServerProvision {
+            server_provision() {
+                self.account_id = format!("acct-{}", self.user);
+                -> $Done
+            }
+            where_next(): String { @@:("server".to_string()) }
+        }
+
+        $Done      { where_next(): String { @@:("done".to_string()) } }
+        $Cancelled { where_next(): String { @@:("done".to_string()) } }
+        $Rejected  { where_next(): String { @@:("done".to_string()) } }
+
+    domain:
+        user: String = String::new()
+        email: String = String::new()
+        server_notes: String = String::new()
+        account_id: String = String::new()
+}
+
+fn main() {
+    let mut m = @@WizardMachine();
+    m.start("alice".to_string());
+    m.client_collect("alice@example.com".to_string());
+    assert_eq!(m.where_next(), "server");
+
+    let blob = m.save_state();
+    let mut m2 = WizardMachine::new();
+    m2.restore_state(blob);
+    m2.server_validate();
+    assert_eq!(m2.where_next(), "client");
+
+    let blob2 = m2.save_state();
+    let mut m3 = WizardMachine::new();
+    m3.restore_state(blob2);
+    m3.client_confirm(true);
+    assert_eq!(m3.where_next(), "server");
+
+    let blob3 = m3.save_state();
+    let mut m4 = WizardMachine::new();
+    m4.restore_state(blob3);
+    m4.server_provision();
+    assert_eq!(m4.where_next(), "done");
+    println!("PASS: migrating_machine");
+}

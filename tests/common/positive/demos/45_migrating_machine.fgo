@@ -1,0 +1,114 @@
+@@[target("go")]
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+	"strings"
+)
+
+@@[persist]
+@@system WizardMachine {
+    operations:
+        @@[save]
+        SaveState(): string {}
+
+        @@[load]
+        LoadState(data: string) {}
+
+    interface:
+        start(user: string)
+        client_collect(email: string)
+        server_validate()
+        client_confirm(accept: bool)
+        server_provision()
+        where_next(): string
+
+    machine:
+        $Start {
+            start(user: string) {
+                s.user = user
+                -> $NeedsClientCollect
+            }
+            where_next(): string { @@:("start") }
+        }
+
+        $NeedsClientCollect {
+            client_collect(email: string) {
+                s.email = email
+                -> $NeedsServerValidate
+            }
+            where_next(): string { @@:("client") }
+        }
+
+        $NeedsServerValidate {
+            server_validate() {
+                if strings.Contains(s.email, "@") {
+                    s.server_notes = "ok"
+                    -> "valid" $NeedsClientConfirm
+                } else {
+                    s.server_notes = "rejected"
+                    -> "invalid" $Rejected
+                }
+            }
+            where_next(): string { @@:("server") }
+        }
+
+        $NeedsClientConfirm {
+            client_confirm(accept: bool) {
+                if accept {
+                    -> "accepted" $NeedsServerProvision
+                } else {
+                    -> "declined" $Cancelled
+                }
+            }
+            where_next(): string { @@:("client") }
+        }
+
+        $NeedsServerProvision {
+            server_provision() {
+                s.account_id = "acct-" + s.user
+                -> $Done
+            }
+            where_next(): string { @@:("server") }
+        }
+
+        $Done      { where_next(): string { @@:("done") } }
+        $Cancelled { where_next(): string { @@:("done") } }
+        $Rejected  { where_next(): string { @@:("done") } }
+
+    domain:
+        user: string = ""
+        email: string = ""
+        server_notes: string = ""
+        account_id: string = ""
+}
+
+func main() {
+    m := NewWizardMachine()
+    m.Start("alice")
+    m.Client_collect("alice@example.com")
+    if m.Where_next() != "server" { fmt.Println("FAIL: server #1"); os.Exit(1) }
+
+    blob := m.SaveState()
+    m2 := NewWizardMachine()
+    m2.LoadState(blob)
+    m2.Server_validate()
+    if m2.Where_next() != "client" { fmt.Println("FAIL: client #2"); os.Exit(1) }
+
+    blob2 := m2.SaveState()
+    m3 := NewWizardMachine()
+    m3.LoadState(blob2)
+    m3.Client_confirm(true)
+    if m3.Where_next() != "server" { fmt.Println("FAIL: server #3"); os.Exit(1) }
+
+    blob3 := m3.SaveState()
+    m4 := NewWizardMachine()
+    m4.LoadState(blob3)
+    m4.Server_provision()
+    if m4.Where_next() != "done" { fmt.Println("FAIL: done"); os.Exit(1) }
+    _ = json.Marshal
+    fmt.Println("PASS: migrating_machine")
+}

@@ -1,0 +1,110 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <nlohmann/json.hpp>
+
+@@[persist]
+@@system WizardMachine {
+    operations:
+        @@[save]
+        save_state(): std::string {}
+
+        @@[load]
+        restore_state(data: std::string) {}
+
+    interface:
+        start(user: str)
+        client_collect(email: str)
+        server_validate()
+        client_confirm(accept: bool)
+        server_provision()
+        where_next(): str
+
+    machine:
+        $Start {
+            start(user: str) {
+                this->user = user;
+                -> $NeedsClientCollect
+            }
+            where_next(): str { @@:(std::string("start")) }
+        }
+
+        $NeedsClientCollect {
+            client_collect(email: str) {
+                this->email = email;
+                -> $NeedsServerValidate
+            }
+            where_next(): str { @@:(std::string("client")) }
+        }
+
+        $NeedsServerValidate {
+            server_validate() {
+                if (this->email.find("@") != std::string::npos) {
+                    this->server_notes = "ok";
+                    -> "valid" $NeedsClientConfirm
+                } else {
+                    this->server_notes = "rejected";
+                    -> "invalid" $Rejected
+                }
+            }
+            where_next(): str { @@:(std::string("server")) }
+        }
+
+        $NeedsClientConfirm {
+            client_confirm(accept: bool) {
+                if (accept) {
+                    -> "accepted" $NeedsServerProvision
+                } else {
+                    -> "declined" $Cancelled
+                }
+            }
+            where_next(): str { @@:(std::string("client")) }
+        }
+
+        $NeedsServerProvision {
+            server_provision() {
+                this->account_id = std::string("acct-") + this->user;
+                -> $Done
+            }
+            where_next(): str { @@:(std::string("server")) }
+        }
+
+        $Done      { where_next(): str { @@:(std::string("done")) } }
+        $Cancelled { where_next(): str { @@:(std::string("done")) } }
+        $Rejected  { where_next(): str { @@:(std::string("done")) } }
+
+    domain:
+        user: std::string = ""
+        email: std::string = ""
+        server_notes: std::string = ""
+        account_id: std::string = ""
+}
+
+int main() {
+    WizardMachine m;
+    m.start("alice");
+    m.client_collect("alice@example.com");
+    assert(std::any_cast<std::string>(m.where_next()) == "server");
+
+    auto blob = m.save_state();
+    WizardMachine m2;
+    m2.restore_state(blob);
+    m2.server_validate();
+    assert(std::any_cast<std::string>(m2.where_next()) == "client");
+
+    auto blob2 = m2.save_state();
+    WizardMachine m3;
+    m3.restore_state(blob2);
+    m3.client_confirm(true);
+    assert(std::any_cast<std::string>(m3.where_next()) == "server");
+
+    auto blob3 = m3.save_state();
+    WizardMachine m4;
+    m4.restore_state(blob3);
+    m4.server_provision();
+    assert(std::any_cast<std::string>(m4.where_next()) == "done");
+    std::cout << "PASS: migrating_machine" << std::endl;
+    return 0;
+}

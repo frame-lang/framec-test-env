@@ -1,0 +1,104 @@
+@@[target("php")]
+
+<?php
+
+@@[persist]
+@@system WizardMachine {
+    operations:
+        @@[save]
+        save_state(): string {}
+
+        @@[load]
+        restore_state(data: string) {}
+
+    interface:
+        start(user: str)
+        client_collect(email: str)
+        server_validate()
+        client_confirm(accept: bool)
+        server_provision()
+        where_next(): str
+
+    machine:
+        $Start {
+            start(user: str) {
+                $this->user = $user;
+                -> $NeedsClientCollect
+            }
+            where_next(): str { @@:("start") }
+        }
+
+        $NeedsClientCollect {
+            client_collect(email: str) {
+                $this->email = $email;
+                -> $NeedsServerValidate
+            }
+            where_next(): str { @@:("client") }
+        }
+
+        $NeedsServerValidate {
+            server_validate() {
+                if (strpos($this->email, "@") !== false) {
+                    $this->server_notes = "ok";
+                    -> "valid" $NeedsClientConfirm
+                } else {
+                    $this->server_notes = "rejected";
+                    -> "invalid" $Rejected
+                }
+            }
+            where_next(): str { @@:("server") }
+        }
+
+        $NeedsClientConfirm {
+            client_confirm(accept: bool) {
+                if ($accept) {
+                    -> "accepted" $NeedsServerProvision
+                } else {
+                    -> "declined" $Cancelled
+                }
+            }
+            where_next(): str { @@:("client") }
+        }
+
+        $NeedsServerProvision {
+            server_provision() {
+                $this->account_id = "acct-" . $this->user;
+                -> $Done
+            }
+            where_next(): str { @@:("server") }
+        }
+
+        $Done      { where_next(): str { @@:("done") } }
+        $Cancelled { where_next(): str { @@:("done") } }
+        $Rejected  { where_next(): str { @@:("done") } }
+
+    domain:
+        user = ""
+        email = ""
+        server_notes = ""
+        account_id = ""
+}
+
+$m = @@WizardMachine();
+$m->start("alice");
+$m->client_collect("alice@example.com");
+assert($m->where_next() === "server", "expected server #1");
+
+$blob = $m->save_state();
+$m2 = new WizardMachine();
+$m2->restore_state($blob);
+$m2->server_validate();
+assert($m2->where_next() === "client", "expected client #2");
+
+$blob2 = $m2->save_state();
+$m3 = new WizardMachine();
+$m3->restore_state($blob2);
+$m3->client_confirm(true);
+assert($m3->where_next() === "server", "expected server #3");
+
+$blob3 = $m3->save_state();
+$m4 = new WizardMachine();
+$m4->restore_state($blob3);
+$m4->server_provision();
+assert($m4->where_next() === "done", "expected done");
+echo "PASS: migrating_machine\n";

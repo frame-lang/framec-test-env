@@ -1,0 +1,106 @@
+@@[target("java")]
+
+@@[persist]
+@@system WizardMachine {
+    operations:
+        @@[save]
+        save_state(): String {}
+
+        @@[load]
+        restore_state(data: String) {}
+
+    interface:
+        start(user: String)
+        client_collect(email: String)
+        server_validate()
+        client_confirm(accept: boolean)
+        server_provision()
+        where_next(): String
+
+    machine:
+        $Start {
+            start(user: String) {
+                this.user = user;
+                -> $NeedsClientCollect
+            }
+            where_next(): String { @@:("start") }
+        }
+
+        $NeedsClientCollect {
+            client_collect(email: String) {
+                this.email = email;
+                -> $NeedsServerValidate
+            }
+            where_next(): String { @@:("client") }
+        }
+
+        $NeedsServerValidate {
+            server_validate() {
+                if (this.email.contains("@")) {
+                    this.server_notes = "ok";
+                    -> "valid" $NeedsClientConfirm
+                } else {
+                    this.server_notes = "rejected";
+                    -> "invalid" $Rejected
+                }
+            }
+            where_next(): String { @@:("server") }
+        }
+
+        $NeedsClientConfirm {
+            client_confirm(accept: boolean) {
+                if (accept) {
+                    -> "accepted" $NeedsServerProvision
+                } else {
+                    -> "declined" $Cancelled
+                }
+            }
+            where_next(): String { @@:("client") }
+        }
+
+        $NeedsServerProvision {
+            server_provision() {
+                this.account_id = "acct-" + this.user;
+                -> $Done
+            }
+            where_next(): String { @@:("server") }
+        }
+
+        $Done      { where_next(): String { @@:("done") } }
+        $Cancelled { where_next(): String { @@:("done") } }
+        $Rejected  { where_next(): String { @@:("done") } }
+
+    domain:
+        user: String = ""
+        email: String = ""
+        server_notes: String = ""
+        account_id: String = ""
+}
+
+class Main {
+    public static void main(String[] args) {
+        var m = @@WizardMachine();
+        m.start("alice");
+        m.client_collect("alice@example.com");
+        if (!((String) m.where_next()).equals("server")) throw new RuntimeException("expected server #1");
+
+        var blob = (String) m.save_state();
+        var m2 = new WizardMachine();
+        m2.restore_state(blob);
+        m2.server_validate();
+        if (!((String) m2.where_next()).equals("client")) throw new RuntimeException("expected client #2");
+
+        var blob2 = (String) m2.save_state();
+        var m3 = new WizardMachine();
+        m3.restore_state(blob2);
+        m3.client_confirm(true);
+        if (!((String) m3.where_next()).equals("server")) throw new RuntimeException("expected server #3");
+
+        var blob3 = (String) m3.save_state();
+        var m4 = new WizardMachine();
+        m4.restore_state(blob3);
+        m4.server_provision();
+        if (!((String) m4.where_next()).equals("done")) throw new RuntimeException("expected done");
+        System.out.println("PASS: migrating_machine");
+    }
+}

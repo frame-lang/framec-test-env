@@ -1,0 +1,102 @@
+@@[target("typescript")]
+
+@@[persist]
+@@system WizardMachine {
+    operations:
+        @@[save]
+        saveState(): string {}
+
+        @@[load]
+        restoreState(data: string) {}
+
+    interface:
+        start(user: str)
+        client_collect(email: str)
+        server_validate()
+        client_confirm(accept: bool)
+        server_provision()
+        where_next(): str
+
+    machine:
+        $Start {
+            start(user: str) {
+                this.user = user;
+                -> $NeedsClientCollect
+            }
+            where_next(): str { @@:("start") }
+        }
+
+        $NeedsClientCollect {
+            client_collect(email: str) {
+                this.email = email;
+                -> $NeedsServerValidate
+            }
+            where_next(): str { @@:("client") }
+        }
+
+        $NeedsServerValidate {
+            server_validate() {
+                if (this.email.includes("@")) {
+                    this.server_notes = "ok";
+                    -> "valid" $NeedsClientConfirm
+                } else {
+                    this.server_notes = "rejected";
+                    -> "invalid" $Rejected
+                }
+            }
+            where_next(): str { @@:("server") }
+        }
+
+        $NeedsClientConfirm {
+            client_confirm(accept: bool) {
+                if (accept) {
+                    -> "accepted" $NeedsServerProvision
+                } else {
+                    -> "declined" $Cancelled
+                }
+            }
+            where_next(): str { @@:("client") }
+        }
+
+        $NeedsServerProvision {
+            server_provision() {
+                this.account_id = `acct-${this.user}`;
+                -> $Done
+            }
+            where_next(): str { @@:("server") }
+        }
+
+        $Done      { where_next(): str { @@:("done") } }
+        $Cancelled { where_next(): str { @@:("done") } }
+        $Rejected  { where_next(): str { @@:("done") } }
+
+    domain:
+        user: string = ""
+        email: string = ""
+        server_notes: string = ""
+        account_id: string = ""
+}
+
+const m = @@WizardMachine();
+m.start("alice");
+m.client_collect("alice@example.com");
+if (m.where_next() !== "server") throw new Error("expected server #1");
+
+const blob = m.saveState();
+const m2 = @@WizardMachine();
+m2.restoreState(blob);
+m2.server_validate();
+if (m2.where_next() !== "client") throw new Error("expected client #2");
+
+const blob2 = m2.saveState();
+const m3 = @@WizardMachine();
+m3.restoreState(blob2);
+m3.client_confirm(true);
+if (m3.where_next() !== "server") throw new Error("expected server #3");
+
+const blob3 = m3.saveState();
+const m4 = @@WizardMachine();
+m4.restoreState(blob3);
+m4.server_provision();
+if (m4.where_next() !== "done") throw new Error("expected done");
+console.log("PASS: migrating_machine");
