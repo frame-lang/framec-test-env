@@ -1,0 +1,81 @@
+@@[target("rust")]
+
+@@system Elevator {
+    interface:
+        request(floor: i32)
+        tick()
+        close_doors()
+        current_floor(): i32
+        status(): String
+
+    machine:
+        $Idle {
+            request(floor: i32) {
+                if floor > self.floor {
+                    self.target = floor;
+                    -> $MovingUp
+                } else if floor < self.floor {
+                    self.target = floor;
+                    -> $MovingDown
+                } else {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): i32 { @@:(self.floor) }
+            status(): String { @@:("idle".to_string()) }
+        }
+
+        $MovingUp {
+            tick() {
+                self.floor = self.floor + 1;
+                if self.floor == self.target {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): i32 { @@:(self.floor) }
+            status(): String { @@:("up".to_string()) }
+        }
+
+        $MovingDown {
+            tick() {
+                self.floor = self.floor - 1;
+                if self.floor == self.target {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): i32 { @@:(self.floor) }
+            status(): String { @@:("down".to_string()) }
+        }
+
+        $DoorsOpen {
+            close_doors() { -> $Idle }
+            current_floor(): i32 { @@:(self.floor) }
+            status(): String { @@:("doors_open".to_string()) }
+        }
+
+    domain:
+        floor: i32 = 1
+        target: i32 = 1
+}
+
+fn main() {
+    let mut e = @@Elevator();
+    assert_eq!(e.status(), "idle");
+    assert_eq!(e.current_floor(), 1);
+    e.request(5);
+    assert_eq!(e.status(), "up");
+    e.tick(); e.tick(); e.tick(); e.tick();
+    assert_eq!(e.current_floor(), 5);
+    assert_eq!(e.status(), "doors_open");
+    e.close_doors();
+    assert_eq!(e.status(), "idle");
+    e.request(2);
+    assert_eq!(e.status(), "down");
+    e.tick(); e.tick(); e.tick();
+    assert_eq!(e.current_floor(), 2);
+    assert_eq!(e.status(), "doors_open");
+    e.close_doors();
+    e.request(2);
+    assert_eq!(e.status(), "doors_open");
+    println!("PASS: elevator");
+}

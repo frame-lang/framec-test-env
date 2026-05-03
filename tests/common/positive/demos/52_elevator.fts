@@ -1,0 +1,84 @@
+@@[target("typescript")]
+
+@@system Elevator {
+    interface:
+        request(floor: int)
+        tick()
+        close_doors()
+        current_floor(): int
+        status(): str
+
+    machine:
+        $Idle {
+            request(floor: int) {
+                if (floor > this.floor) {
+                    this.target = floor;
+                    -> $MovingUp
+                } else if (floor < this.floor) {
+                    this.target = floor;
+                    -> $MovingDown
+                } else {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(this.floor) }
+            status(): str { @@:("idle") }
+        }
+
+        $MovingUp {
+            tick() {
+                this.floor = this.floor + 1;
+                if (this.floor === this.target) {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(this.floor) }
+            status(): str { @@:("up") }
+        }
+
+        $MovingDown {
+            tick() {
+                this.floor = this.floor - 1;
+                if (this.floor === this.target) {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(this.floor) }
+            status(): str { @@:("down") }
+        }
+
+        $DoorsOpen {
+            close_doors() { -> $Idle }
+            current_floor(): int { @@:(this.floor) }
+            status(): str { @@:("doors_open") }
+        }
+
+    domain:
+        floor: int = 1
+        target: int = 1
+}
+
+const e = @@Elevator();
+if (e.status() !== "idle") throw new Error("expected idle");
+if (e.current_floor() !== 1) throw new Error("expected floor=1");
+
+e.request(5);
+if (e.status() !== "up") throw new Error("expected up");
+e.tick(); e.tick(); e.tick(); e.tick();
+if (e.current_floor() !== 5) throw new Error("expected floor=5");
+if (e.status() !== "doors_open") throw new Error("expected doors_open");
+
+e.close_doors();
+if (e.status() !== "idle") throw new Error("expected idle");
+
+e.request(2);
+if (e.status() !== "down") throw new Error("expected down");
+e.tick(); e.tick(); e.tick();
+if (e.current_floor() !== 2) throw new Error("expected floor=2");
+if (e.status() !== "doors_open") throw new Error("expected doors_open");
+e.close_doors();
+
+e.request(2);
+if (e.status() !== "doors_open") throw new Error("expected immediate doors_open");
+
+console.log("PASS: elevator");

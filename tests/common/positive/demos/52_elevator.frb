@@ -1,0 +1,79 @@
+@@[target("ruby")]
+
+@@system Elevator {
+    interface:
+        request(floor: int)
+        tick()
+        close_doors()
+        current_floor(): int
+        status(): str
+
+    machine:
+        $Idle {
+            request(floor: int) {
+                if floor > @floor
+                    @target = floor
+                    -> $MovingUp
+                elsif floor < @floor
+                    @target = floor
+                    -> $MovingDown
+                else
+                    -> $DoorsOpen
+                end
+            }
+            current_floor(): int { @@:(@floor) }
+            status(): str { @@:("idle") }
+        }
+
+        $MovingUp {
+            tick() {
+                @floor = @floor + 1
+                if @floor == @target
+                    -> $DoorsOpen
+                end
+            }
+            current_floor(): int { @@:(@floor) }
+            status(): str { @@:("up") }
+        }
+
+        $MovingDown {
+            tick() {
+                @floor = @floor - 1
+                if @floor == @target
+                    -> $DoorsOpen
+                end
+            }
+            current_floor(): int { @@:(@floor) }
+            status(): str { @@:("down") }
+        }
+
+        $DoorsOpen {
+            close_doors() { -> $Idle }
+            current_floor(): int { @@:(@floor) }
+            status(): str { @@:("doors_open") }
+        }
+
+    domain:
+        floor = 1
+        target = 1
+}
+
+e = Elevator.new
+raise "expected idle" unless e.status == "idle"
+raise "expected floor=1" unless e.current_floor == 1
+e.request(5)
+raise "expected up" unless e.status == "up"
+e.tick; e.tick; e.tick; e.tick
+raise "expected floor=5" unless e.current_floor == 5
+raise "expected doors_open" unless e.status == "doors_open"
+e.close_doors
+raise "expected idle" unless e.status == "idle"
+e.request(2)
+raise "expected down" unless e.status == "down"
+e.tick; e.tick; e.tick
+raise "expected floor=2" unless e.current_floor == 2
+raise "expected doors_open" unless e.status == "doors_open"
+e.close_doors
+e.request(2)
+raise "expected immediate" unless e.status == "doors_open"
+puts "PASS: elevator"

@@ -1,0 +1,99 @@
+@@[target("python_3")]
+
+# Smoke-test variant of cookbook recipe 52 (Elevator — Directional
+# Scan Algorithm). Single-target simplification: rather than
+# accumulating a sorted set of pending requests and reversing
+# direction at end-of-scan, this variant tracks one target floor
+# at a time. The state machine still exercises directional movement,
+# door-open at arrival, and idle return — the core elevator lifecycle.
+
+@@system Elevator {
+    interface:
+        request(floor: int)
+        tick()
+        close_doors()
+        current_floor(): int
+        status(): str
+
+    machine:
+        $Idle {
+            request(floor: int) {
+                if floor > self.floor:
+                    self.target = floor
+                    -> $MovingUp
+                elif floor < self.floor:
+                    self.target = floor
+                    -> $MovingDown
+                else:
+                    -> $DoorsOpen
+            }
+            current_floor(): int { @@:(self.floor) }
+            status(): str { @@:("idle") }
+        }
+
+        $MovingUp {
+            tick() {
+                self.floor = self.floor + 1
+                if self.floor == self.target:
+                    -> $DoorsOpen
+            }
+            current_floor(): int { @@:(self.floor) }
+            status(): str { @@:("up") }
+        }
+
+        $MovingDown {
+            tick() {
+                self.floor = self.floor - 1
+                if self.floor == self.target:
+                    -> $DoorsOpen
+            }
+            current_floor(): int { @@:(self.floor) }
+            status(): str { @@:("down") }
+        }
+
+        $DoorsOpen {
+            close_doors() { -> $Idle }
+            current_floor(): int { @@:(self.floor) }
+            status(): str { @@:("doors_open") }
+        }
+
+    domain:
+        floor: int = 1
+        target: int = 1
+}
+
+if __name__ == '__main__':
+    e = @@Elevator()
+    assert e.status() == "idle"
+    assert e.current_floor() == 1
+
+    # Request floor 5 — up
+    e.request(5)
+    assert e.status() == "up"
+    e.tick()
+    assert e.current_floor() == 2
+    e.tick()
+    e.tick()
+    e.tick()
+    assert e.current_floor() == 5
+    assert e.status() == "doors_open"
+
+    e.close_doors()
+    assert e.status() == "idle"
+
+    # Request floor 2 — down
+    e.request(2)
+    assert e.status() == "down"
+    e.tick()
+    e.tick()
+    e.tick()
+    assert e.current_floor() == 2
+    assert e.status() == "doors_open"
+    e.close_doors()
+    assert e.status() == "idle"
+
+    # Request current floor — opens doors immediately
+    e.request(2)
+    assert e.status() == "doors_open"
+
+    print("PASS: elevator")

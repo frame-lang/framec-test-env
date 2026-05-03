@@ -1,0 +1,88 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system Elevator {
+    interface:
+        request(floor: int)
+        tick()
+        close_doors()
+        current_floor(): int
+        status(): string
+
+    machine:
+        $Idle {
+            request(floor: int) {
+                if floor > s.floor {
+                    s.target = floor
+                    -> $MovingUp
+                } else if floor < s.floor {
+                    s.target = floor
+                    -> $MovingDown
+                } else {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(s.floor) }
+            status(): string { @@:("idle") }
+        }
+
+        $MovingUp {
+            tick() {
+                s.floor = s.floor + 1
+                if s.floor == s.target {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(s.floor) }
+            status(): string { @@:("up") }
+        }
+
+        $MovingDown {
+            tick() {
+                s.floor = s.floor - 1
+                if s.floor == s.target {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(s.floor) }
+            status(): string { @@:("down") }
+        }
+
+        $DoorsOpen {
+            close_doors() { -> $Idle }
+            current_floor(): int { @@:(s.floor) }
+            status(): string { @@:("doors_open") }
+        }
+
+    domain:
+        floor: int = 1
+        target: int = 1
+}
+
+func main() {
+    e := NewElevator()
+    if e.Status() != "idle" { fmt.Println("FAIL: idle"); os.Exit(1) }
+    if e.Current_floor() != 1 { fmt.Println("FAIL: floor=1"); os.Exit(1) }
+    e.Request(5)
+    if e.Status() != "up" { fmt.Println("FAIL: up"); os.Exit(1) }
+    e.Tick(); e.Tick(); e.Tick(); e.Tick()
+    if e.Current_floor() != 5 { fmt.Println("FAIL: floor=5"); os.Exit(1) }
+    if e.Status() != "doors_open" { fmt.Println("FAIL: doors_open"); os.Exit(1) }
+    e.Close_doors()
+    if e.Status() != "idle" { fmt.Println("FAIL: idle2"); os.Exit(1) }
+    e.Request(2)
+    if e.Status() != "down" { fmt.Println("FAIL: down"); os.Exit(1) }
+    e.Tick(); e.Tick(); e.Tick()
+    if e.Current_floor() != 2 { fmt.Println("FAIL: floor=2"); os.Exit(1) }
+    if e.Status() != "doors_open" { fmt.Println("FAIL: doors_open2"); os.Exit(1) }
+    e.Close_doors()
+    e.Request(2)
+    if e.Status() != "doors_open" { fmt.Println("FAIL: immediate"); os.Exit(1) }
+    fmt.Println("PASS: elevator")
+}

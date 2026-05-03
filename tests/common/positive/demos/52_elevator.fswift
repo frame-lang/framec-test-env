@@ -1,0 +1,81 @@
+@@[target("swift")]
+
+import Foundation
+
+@@system Elevator {
+    interface:
+        request(floor: Int)
+        tick()
+        close_doors()
+        current_floor(): Int
+        status(): String
+
+    machine:
+        $Idle {
+            request(floor: Int) {
+                if floor > self.floor {
+                    self.target = floor
+                    -> $MovingUp
+                } else if floor < self.floor {
+                    self.target = floor
+                    -> $MovingDown
+                } else {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): Int { @@:(self.floor) }
+            status(): String { @@:("idle") }
+        }
+
+        $MovingUp {
+            tick() {
+                self.floor = self.floor + 1
+                if self.floor == self.target {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): Int { @@:(self.floor) }
+            status(): String { @@:("up") }
+        }
+
+        $MovingDown {
+            tick() {
+                self.floor = self.floor - 1
+                if self.floor == self.target {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): Int { @@:(self.floor) }
+            status(): String { @@:("down") }
+        }
+
+        $DoorsOpen {
+            close_doors() { -> $Idle }
+            current_floor(): Int { @@:(self.floor) }
+            status(): String { @@:("doors_open") }
+        }
+
+    domain:
+        floor: Int = 1
+        target: Int = 1
+}
+
+let e = @@Elevator()
+if (e.status() as! String) != "idle" { print("FAIL: idle"); exit(1) }
+if (e.current_floor() as! Int) != 1 { print("FAIL: floor=1"); exit(1) }
+e.request(5)
+if (e.status() as! String) != "up" { print("FAIL: up"); exit(1) }
+e.tick(); e.tick(); e.tick(); e.tick()
+if (e.current_floor() as! Int) != 5 { print("FAIL: floor=5"); exit(1) }
+if (e.status() as! String) != "doors_open" { print("FAIL: doors_open"); exit(1) }
+e.close_doors()
+if (e.status() as! String) != "idle" { print("FAIL: idle2"); exit(1) }
+e.request(2)
+if (e.status() as! String) != "down" { print("FAIL: down"); exit(1) }
+e.tick(); e.tick(); e.tick()
+if (e.current_floor() as! Int) != 2 { print("FAIL: floor=2"); exit(1) }
+if (e.status() as! String) != "doors_open" { print("FAIL: doors_open2"); exit(1) }
+e.close_doors()
+e.request(2)
+if (e.status() as! String) != "doors_open" { print("FAIL: immediate"); exit(1) }
+print("PASS: elevator")

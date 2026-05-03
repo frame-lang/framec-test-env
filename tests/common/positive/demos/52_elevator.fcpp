@@ -1,0 +1,86 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system Elevator {
+    interface:
+        request(floor: int)
+        tick()
+        close_doors()
+        current_floor(): int
+        status(): str
+
+    machine:
+        $Idle {
+            request(floor: int) {
+                if (floor > this->floor) {
+                    this->target = floor;
+                    -> $MovingUp
+                } else if (floor < this->floor) {
+                    this->target = floor;
+                    -> $MovingDown
+                } else {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(this->floor) }
+            status(): str { @@:(std::string("idle")) }
+        }
+
+        $MovingUp {
+            tick() {
+                this->floor = this->floor + 1;
+                if (this->floor == this->target) {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(this->floor) }
+            status(): str { @@:(std::string("up")) }
+        }
+
+        $MovingDown {
+            tick() {
+                this->floor = this->floor - 1;
+                if (this->floor == this->target) {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(this->floor) }
+            status(): str { @@:(std::string("down")) }
+        }
+
+        $DoorsOpen {
+            close_doors() { -> $Idle }
+            current_floor(): int { @@:(this->floor) }
+            status(): str { @@:(std::string("doors_open")) }
+        }
+
+    domain:
+        floor: int = 1
+        target: int = 1
+}
+
+int main() {
+    Elevator e;
+    assert(std::any_cast<std::string>(e.status()) == "idle");
+    assert(std::any_cast<int>(e.current_floor()) == 1);
+    e.request(5);
+    assert(std::any_cast<std::string>(e.status()) == "up");
+    e.tick(); e.tick(); e.tick(); e.tick();
+    assert(std::any_cast<int>(e.current_floor()) == 5);
+    assert(std::any_cast<std::string>(e.status()) == "doors_open");
+    e.close_doors();
+    assert(std::any_cast<std::string>(e.status()) == "idle");
+    e.request(2);
+    assert(std::any_cast<std::string>(e.status()) == "down");
+    e.tick(); e.tick(); e.tick();
+    assert(std::any_cast<int>(e.current_floor()) == 2);
+    assert(std::any_cast<std::string>(e.status()) == "doors_open");
+    e.close_doors();
+    e.request(2);
+    assert(std::any_cast<std::string>(e.status()) == "doors_open");
+    std::cout << "PASS: elevator" << std::endl;
+    return 0;
+}

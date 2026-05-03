@@ -1,0 +1,83 @@
+@@[target("java")]
+
+@@system Elevator {
+    interface:
+        request(floor: int)
+        tick()
+        close_doors()
+        current_floor(): int
+        status(): String
+
+    machine:
+        $Idle {
+            request(floor: int) {
+                if (floor > this.floor) {
+                    this.target = floor;
+                    -> $MovingUp
+                } else if (floor < this.floor) {
+                    this.target = floor;
+                    -> $MovingDown
+                } else {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(this.floor) }
+            status(): String { @@:("idle") }
+        }
+
+        $MovingUp {
+            tick() {
+                this.floor = this.floor + 1;
+                if (this.floor == this.target) {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(this.floor) }
+            status(): String { @@:("up") }
+        }
+
+        $MovingDown {
+            tick() {
+                this.floor = this.floor - 1;
+                if (this.floor == this.target) {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(this.floor) }
+            status(): String { @@:("down") }
+        }
+
+        $DoorsOpen {
+            close_doors() { -> $Idle }
+            current_floor(): int { @@:(this.floor) }
+            status(): String { @@:("doors_open") }
+        }
+
+    domain:
+        floor: int = 1
+        target: int = 1
+}
+
+class Main {
+    public static void main(String[] args) {
+        var e = @@Elevator();
+        if (!((String) e.status()).equals("idle")) throw new RuntimeException("expected idle");
+        if ((int) e.current_floor() != 1) throw new RuntimeException("expected floor=1");
+        e.request(5);
+        if (!((String) e.status()).equals("up")) throw new RuntimeException("expected up");
+        e.tick(); e.tick(); e.tick(); e.tick();
+        if ((int) e.current_floor() != 5) throw new RuntimeException("expected floor=5");
+        if (!((String) e.status()).equals("doors_open")) throw new RuntimeException("expected doors_open");
+        e.close_doors();
+        if (!((String) e.status()).equals("idle")) throw new RuntimeException("expected idle");
+        e.request(2);
+        if (!((String) e.status()).equals("down")) throw new RuntimeException("expected down");
+        e.tick(); e.tick(); e.tick();
+        if ((int) e.current_floor() != 2) throw new RuntimeException("expected floor=2");
+        if (!((String) e.status()).equals("doors_open")) throw new RuntimeException("expected doors_open");
+        e.close_doors();
+        e.request(2);
+        if (!((String) e.status()).equals("doors_open")) throw new RuntimeException("expected immediate doors_open");
+        System.out.println("PASS: elevator");
+    }
+}

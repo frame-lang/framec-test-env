@@ -1,0 +1,88 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@system Elevator {
+    interface:
+        request(floor: int)
+        tick()
+        close_doors()
+        current_floor(): int
+        status(): String
+
+    machine:
+        $Idle {
+            request(floor: int) {
+                if floor > self.floor:
+                    self.target = floor
+                    -> $MovingUp
+                elif floor < self.floor:
+                    self.target = floor
+                    -> $MovingDown
+                else:
+                    -> $DoorsOpen
+            }
+            current_floor(): int { @@:(self.floor) }
+            status(): String { @@:("idle") }
+        }
+
+        $MovingUp {
+            tick() {
+                self.floor = self.floor + 1
+                if self.floor == self.target:
+                    -> $DoorsOpen
+            }
+            current_floor(): int { @@:(self.floor) }
+            status(): String { @@:("up") }
+        }
+
+        $MovingDown {
+            tick() {
+                self.floor = self.floor - 1
+                if self.floor == self.target:
+                    -> $DoorsOpen
+            }
+            current_floor(): int { @@:(self.floor) }
+            status(): String { @@:("down") }
+        }
+
+        $DoorsOpen {
+            close_doors() { -> $Idle }
+            current_floor(): int { @@:(self.floor) }
+            status(): String { @@:("doors_open") }
+        }
+
+    domain:
+        floor = 1
+        target = 1
+}
+
+func main():
+    var e = @@Elevator()
+    var failures = 0
+    if e.status() != "idle": print("FAIL: idle"); failures += 1
+    if e.current_floor() != 1: print("FAIL: floor=1"); failures += 1
+    e.request(5)
+    if e.status() != "up": print("FAIL: up"); failures += 1
+    e.tick(); e.tick(); e.tick(); e.tick()
+    if e.current_floor() != 5: print("FAIL: floor=5"); failures += 1
+    if e.status() != "doors_open": print("FAIL: doors_open"); failures += 1
+    e.close_doors()
+    if e.status() != "idle": print("FAIL: idle2"); failures += 1
+    e.request(2)
+    if e.status() != "down": print("FAIL: down"); failures += 1
+    e.tick(); e.tick(); e.tick()
+    if e.current_floor() != 2: print("FAIL: floor=2"); failures += 1
+    if e.status() != "doors_open": print("FAIL: doors_open2"); failures += 1
+    e.close_doors()
+    e.request(2)
+    if e.status() != "doors_open": print("FAIL: immediate"); failures += 1
+
+    if failures > 0:
+        print("FAIL: elevator (" + str(failures) + " failures)")
+        quit(1)
+    print("PASS: elevator")
+
+func _init():
+    main()
+    quit()

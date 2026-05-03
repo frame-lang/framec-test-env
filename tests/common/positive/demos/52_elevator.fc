@@ -1,0 +1,87 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system Elevator {
+    interface:
+        request(floor: int)
+        tick()
+        close_doors()
+        current_floor(): int
+        status(): str
+
+    machine:
+        $Idle {
+            request(floor: int) {
+                if (floor > self->floor) {
+                    self->target = floor;
+                    -> $MovingUp
+                } else if (floor < self->floor) {
+                    self->target = floor;
+                    -> $MovingDown
+                } else {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(self->floor) }
+            status(): str { @@:("idle") }
+        }
+
+        $MovingUp {
+            tick() {
+                self->floor = self->floor + 1;
+                if (self->floor == self->target) {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(self->floor) }
+            status(): str { @@:("up") }
+        }
+
+        $MovingDown {
+            tick() {
+                self->floor = self->floor - 1;
+                if (self->floor == self->target) {
+                    -> $DoorsOpen
+                }
+            }
+            current_floor(): int { @@:(self->floor) }
+            status(): str { @@:("down") }
+        }
+
+        $DoorsOpen {
+            close_doors() { -> $Idle }
+            current_floor(): int { @@:(self->floor) }
+            status(): str { @@:("doors_open") }
+        }
+
+    domain:
+        floor: int = 1
+        target: int = 1
+}
+
+int main() {
+    Elevator* e = @@Elevator();
+    if (strcmp(Elevator_status(e), "idle") != 0) { printf("FAIL: idle\n"); return 1; }
+    if (Elevator_current_floor(e) != 1) { printf("FAIL: floor=1\n"); return 1; }
+    Elevator_request(e, 5);
+    if (strcmp(Elevator_status(e), "up") != 0) { printf("FAIL: up\n"); return 1; }
+    Elevator_tick(e); Elevator_tick(e); Elevator_tick(e); Elevator_tick(e);
+    if (Elevator_current_floor(e) != 5) { printf("FAIL: floor=5\n"); return 1; }
+    if (strcmp(Elevator_status(e), "doors_open") != 0) { printf("FAIL: doors_open\n"); return 1; }
+    Elevator_close_doors(e);
+    if (strcmp(Elevator_status(e), "idle") != 0) { printf("FAIL: idle2\n"); return 1; }
+    Elevator_request(e, 2);
+    if (strcmp(Elevator_status(e), "down") != 0) { printf("FAIL: down\n"); return 1; }
+    Elevator_tick(e); Elevator_tick(e); Elevator_tick(e);
+    if (Elevator_current_floor(e) != 2) { printf("FAIL: floor=2\n"); return 1; }
+    if (strcmp(Elevator_status(e), "doors_open") != 0) { printf("FAIL: doors_open2\n"); return 1; }
+    Elevator_close_doors(e);
+    Elevator_request(e, 2);
+    if (strcmp(Elevator_status(e), "doors_open") != 0) { printf("FAIL: immediate doors_open\n"); return 1; }
+    printf("PASS: elevator\n");
+    Elevator_destroy(e);
+    return 0;
+}
