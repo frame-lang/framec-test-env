@@ -1,0 +1,104 @@
+@@[target("rust")]
+
+@@system LaunchController {
+    interface:
+        countdown_start()
+        ignite()
+        max_q_passed()
+        meco()
+        seco()
+        abort()
+        phase(): String
+        outcome(): String
+
+    machine:
+        $Idle {
+            countdown_start() { -> $Countdown }
+            phase(): String { @@:("Idle".to_string()) }
+            outcome(): String { @@:("none".to_string()) }
+        }
+
+        $Countdown {
+            ignite() { -> $Boost }
+            abort() {
+                self.outcome_str = "scrubbed".to_string();
+                -> $Aborted
+            }
+            phase(): String { @@:("Countdown".to_string()) }
+            outcome(): String { @@:("none".to_string()) }
+        }
+
+        $Boost {
+            max_q_passed() { -> $Sustain }
+            abort() {
+                self.outcome_str = "RTLS".to_string();
+                -> $Aborted
+            }
+            phase(): String { @@:("Boost".to_string()) }
+            outcome(): String { @@:("none".to_string()) }
+        }
+
+        $Sustain {
+            meco() { -> $Coast }
+            abort() {
+                self.outcome_str = "ATO".to_string();
+                -> $Aborted
+            }
+            phase(): String { @@:("Sustain".to_string()) }
+            outcome(): String { @@:("none".to_string()) }
+        }
+
+        $Coast {
+            seco() { -> $Orbit }
+            abort() {
+                self.outcome_str = "TAL".to_string();
+                -> $Aborted
+            }
+            phase(): String { @@:("Coast".to_string()) }
+            outcome(): String { @@:("none".to_string()) }
+        }
+
+        $Orbit {
+            phase(): String { @@:("Orbit".to_string()) }
+            outcome(): String { @@:("nominal".to_string()) }
+        }
+
+        $Aborted {
+            phase(): String { @@:("Aborted".to_string()) }
+            outcome(): String { @@:(self.outcome_str.clone()) }
+        }
+
+    domain:
+        outcome_str: String = String::new()
+}
+
+fn main() {
+    let mut lc = @@LaunchController();
+    lc.countdown_start();
+    lc.ignite();
+    lc.max_q_passed();
+    lc.meco();
+    lc.seco();
+    assert_eq!(lc.phase(), "Orbit");
+    assert_eq!(lc.outcome(), "nominal");
+
+    let mut lc2 = @@LaunchController();
+    lc2.countdown_start();
+    lc2.ignite();
+    lc2.abort();
+    assert_eq!(lc2.outcome(), "RTLS");
+
+    let mut lc3 = @@LaunchController();
+    lc3.countdown_start();
+    lc3.ignite();
+    lc3.max_q_passed();
+    lc3.abort();
+    assert_eq!(lc3.outcome(), "ATO");
+
+    let mut lc4 = @@LaunchController();
+    lc4.countdown_start();
+    lc4.abort();
+    assert_eq!(lc4.outcome(), "scrubbed");
+
+    println!("PASS: launch_sequence");
+}

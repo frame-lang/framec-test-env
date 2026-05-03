@@ -1,0 +1,113 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system LaunchController {
+    interface:
+        countdown_start()
+        ignite()
+        max_q_passed()
+        meco()
+        seco()
+        abort_launch()
+        phase(): str
+        outcome(): str
+
+    machine:
+        $Idle {
+            countdown_start() { -> $Countdown }
+            phase(): str { @@:("Idle") }
+            outcome(): str { @@:("none") }
+        }
+
+        $Countdown {
+            ignite() { -> $Boost }
+            abort_launch() {
+                self->outcome_str = "scrubbed";
+                -> $Aborted
+            }
+            phase(): str { @@:("Countdown") }
+            outcome(): str { @@:("none") }
+        }
+
+        $Boost {
+            max_q_passed() { -> $Sustain }
+            abort_launch() {
+                self->outcome_str = "RTLS";
+                -> $Aborted
+            }
+            phase(): str { @@:("Boost") }
+            outcome(): str { @@:("none") }
+        }
+
+        $Sustain {
+            meco() { -> $Coast }
+            abort_launch() {
+                self->outcome_str = "ATO";
+                -> $Aborted
+            }
+            phase(): str { @@:("Sustain") }
+            outcome(): str { @@:("none") }
+        }
+
+        $Coast {
+            seco() { -> $Orbit }
+            abort_launch() {
+                self->outcome_str = "TAL";
+                -> $Aborted
+            }
+            phase(): str { @@:("Coast") }
+            outcome(): str { @@:("none") }
+        }
+
+        $Orbit {
+            phase(): str { @@:("Orbit") }
+            outcome(): str { @@:("nominal") }
+        }
+
+        $Aborted {
+            phase(): str { @@:("Aborted") }
+            outcome(): str { @@:(self->outcome_str) }
+        }
+
+    domain:
+        outcome_str: str = ""
+}
+
+int main() {
+    LaunchController* lc = @@LaunchController();
+    LaunchController_countdown_start(lc);
+    LaunchController_ignite(lc);
+    LaunchController_max_q_passed(lc);
+    LaunchController_meco(lc);
+    LaunchController_seco(lc);
+    if (strcmp(LaunchController_phase(lc), "Orbit") != 0) { printf("FAIL: Orbit\n"); return 1; }
+    if (strcmp(LaunchController_outcome(lc), "nominal") != 0) { printf("FAIL: nominal\n"); return 1; }
+
+    LaunchController* lc2 = @@LaunchController();
+    LaunchController_countdown_start(lc2);
+    LaunchController_ignite(lc2);
+    LaunchController_abort_launch(lc2);
+    if (strcmp(LaunchController_outcome(lc2), "RTLS") != 0) { printf("FAIL: RTLS\n"); return 1; }
+
+    LaunchController* lc3 = @@LaunchController();
+    LaunchController_countdown_start(lc3);
+    LaunchController_ignite(lc3);
+    LaunchController_max_q_passed(lc3);
+    LaunchController_abort_launch(lc3);
+    if (strcmp(LaunchController_outcome(lc3), "ATO") != 0) { printf("FAIL: ATO\n"); return 1; }
+
+    LaunchController* lc4 = @@LaunchController();
+    LaunchController_countdown_start(lc4);
+    LaunchController_abort_launch(lc4);
+    if (strcmp(LaunchController_outcome(lc4), "scrubbed") != 0) { printf("FAIL: scrubbed\n"); return 1; }
+
+    printf("PASS: launch_sequence\n");
+    LaunchController_destroy(lc);
+    LaunchController_destroy(lc2);
+    LaunchController_destroy(lc3);
+    LaunchController_destroy(lc4);
+    return 0;
+}

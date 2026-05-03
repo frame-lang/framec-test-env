@@ -1,0 +1,106 @@
+@@[target("java")]
+
+@@system LaunchController {
+    interface:
+        countdown_start()
+        ignite()
+        max_q_passed()
+        meco()
+        seco()
+        abort()
+        phase(): String
+        outcome(): String
+
+    machine:
+        $Idle {
+            countdown_start() { -> $Countdown }
+            phase(): String { @@:("Idle") }
+            outcome(): String { @@:("none") }
+        }
+
+        $Countdown {
+            ignite() { -> $Boost }
+            abort() {
+                this.outcome_str = "scrubbed";
+                -> $Aborted
+            }
+            phase(): String { @@:("Countdown") }
+            outcome(): String { @@:("none") }
+        }
+
+        $Boost {
+            max_q_passed() { -> $Sustain }
+            abort() {
+                this.outcome_str = "RTLS";
+                -> $Aborted
+            }
+            phase(): String { @@:("Boost") }
+            outcome(): String { @@:("none") }
+        }
+
+        $Sustain {
+            meco() { -> $Coast }
+            abort() {
+                this.outcome_str = "ATO";
+                -> $Aborted
+            }
+            phase(): String { @@:("Sustain") }
+            outcome(): String { @@:("none") }
+        }
+
+        $Coast {
+            seco() { -> $Orbit }
+            abort() {
+                this.outcome_str = "TAL";
+                -> $Aborted
+            }
+            phase(): String { @@:("Coast") }
+            outcome(): String { @@:("none") }
+        }
+
+        $Orbit {
+            phase(): String { @@:("Orbit") }
+            outcome(): String { @@:("nominal") }
+        }
+
+        $Aborted {
+            phase(): String { @@:("Aborted") }
+            outcome(): String { @@:(this.outcome_str) }
+        }
+
+    domain:
+        outcome_str: String = ""
+}
+
+class Main {
+    public static void main(String[] args) {
+        var lc = @@LaunchController();
+        lc.countdown_start();
+        lc.ignite();
+        lc.max_q_passed();
+        lc.meco();
+        lc.seco();
+        if (!((String) lc.phase()).equals("Orbit")) throw new RuntimeException("expected Orbit");
+        if (!((String) lc.outcome()).equals("nominal")) throw new RuntimeException("expected nominal");
+
+        var lc2 = @@LaunchController();
+        lc2.countdown_start();
+        lc2.ignite();
+        lc2.abort();
+        if (!((String) lc2.outcome()).equals("RTLS")) throw new RuntimeException("expected RTLS");
+
+        var lc3 = @@LaunchController();
+        lc3.countdown_start();
+        lc3.ignite();
+        lc3.max_q_passed();
+        lc3.abort();
+        if (!((String) lc3.outcome()).equals("ATO")) throw new RuntimeException("expected ATO");
+
+        var lc4 = @@LaunchController();
+        lc4.countdown_start();
+        lc4.abort();
+        if (!((String) lc4.outcome()).equals("scrubbed")) throw new RuntimeException("expected scrubbed");
+
+        System.out.println("PASS: launch_sequence");
+    }
+}

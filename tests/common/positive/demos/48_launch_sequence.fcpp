@@ -1,0 +1,109 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system LaunchController {
+    interface:
+        countdown_start()
+        ignite()
+        max_q_passed()
+        meco()
+        seco()
+        abort_launch()
+        phase(): str
+        outcome(): str
+
+    machine:
+        $Idle {
+            countdown_start() { -> $Countdown }
+            phase(): str { @@:(std::string("Idle")) }
+            outcome(): str { @@:(std::string("none")) }
+        }
+
+        $Countdown {
+            ignite() { -> $Boost }
+            abort_launch() {
+                this->outcome_str = "scrubbed";
+                -> $Aborted
+            }
+            phase(): str { @@:(std::string("Countdown")) }
+            outcome(): str { @@:(std::string("none")) }
+        }
+
+        $Boost {
+            max_q_passed() { -> $Sustain }
+            abort_launch() {
+                this->outcome_str = "RTLS";
+                -> $Aborted
+            }
+            phase(): str { @@:(std::string("Boost")) }
+            outcome(): str { @@:(std::string("none")) }
+        }
+
+        $Sustain {
+            meco() { -> $Coast }
+            abort_launch() {
+                this->outcome_str = "ATO";
+                -> $Aborted
+            }
+            phase(): str { @@:(std::string("Sustain")) }
+            outcome(): str { @@:(std::string("none")) }
+        }
+
+        $Coast {
+            seco() { -> $Orbit }
+            abort_launch() {
+                this->outcome_str = "TAL";
+                -> $Aborted
+            }
+            phase(): str { @@:(std::string("Coast")) }
+            outcome(): str { @@:(std::string("none")) }
+        }
+
+        $Orbit {
+            phase(): str { @@:(std::string("Orbit")) }
+            outcome(): str { @@:(std::string("nominal")) }
+        }
+
+        $Aborted {
+            phase(): str { @@:(std::string("Aborted")) }
+            outcome(): str { @@:(this->outcome_str) }
+        }
+
+    domain:
+        outcome_str: std::string = ""
+}
+
+int main() {
+    LaunchController lc;
+    lc.countdown_start();
+    lc.ignite();
+    lc.max_q_passed();
+    lc.meco();
+    lc.seco();
+    assert(std::any_cast<std::string>(lc.phase()) == "Orbit");
+    assert(std::any_cast<std::string>(lc.outcome()) == "nominal");
+
+    LaunchController lc2;
+    lc2.countdown_start();
+    lc2.ignite();
+    lc2.abort_launch();
+    assert(std::any_cast<std::string>(lc2.outcome()) == "RTLS");
+
+    LaunchController lc3;
+    lc3.countdown_start();
+    lc3.ignite();
+    lc3.max_q_passed();
+    lc3.abort_launch();
+    assert(std::any_cast<std::string>(lc3.outcome()) == "ATO");
+
+    LaunchController lc4;
+    lc4.countdown_start();
+    lc4.abort_launch();
+    assert(std::any_cast<std::string>(lc4.outcome()) == "scrubbed");
+
+    std::cout << "PASS: launch_sequence" << std::endl;
+    return 0;
+}
