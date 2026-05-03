@@ -57,7 +57,7 @@ def _build_specs():
         int_type="int", str_type="str",
         self_x="self.x", self_v="self.v",
         save_call="snap = inst.save_state()",
-        restore_call="rest = {SYS}.restore_state(snap)",
+        restore_call="rest = {SYS}()\n    rest.restore_state(snap)",
         println='print("PASS: phase24")',
         fail_exit="""
 def _fail(msg):
@@ -110,10 +110,17 @@ def gen_p1_python(case_id, sys_name, value):
     Verify: rest.get_slot() returns VALUE (proves state-args were
             preserved across save/restore boundary).
     """
-    return f"""@@target python_3
+    return f"""@@[target("python_3")]
 
-@@persist
+@@[persist]
 @@system {sys_name} {{
+    operations:
+        @@[save]
+        save_state(): str {{}}
+
+        @@[load]
+        restore_state(data: str) {{}}
+
     interface:
         kick(v: int)
         get_slot(): int
@@ -151,7 +158,8 @@ if __name__ == '__main__':
     if pre_slot != {value}:
         _fail("pre-save slot " + str(pre_slot) + " != " + str({value}))
     snap = inst.save_state()
-    rest = {sys_name}.restore_state(snap)
+    rest = {sys_name}()
+    rest.restore_state(snap)
     post_slot = rest.get_slot()
     if post_slot != {value}:
         _fail("post-restore slot " + str(post_slot) + " != " + str({value}))
@@ -171,10 +179,17 @@ def gen_p2_python(case_id, sys_name, value):
     Verify: rest.get_tag() returns the tag passed to enter (proves
             enter-args were preserved across save/restore boundary).
     """
-    return f"""@@target python_3
+    return f"""@@[target("python_3")]
 
-@@persist
+@@[persist]
 @@system {sys_name} {{
+    operations:
+        @@[save]
+        save_state(): str {{}}
+
+        @@[load]
+        restore_state(data: str) {{}}
+
     interface:
         kick(v: int)
         get_tag(): int
@@ -215,7 +230,8 @@ if __name__ == '__main__':
     if pre_tag != {value}:
         _fail("pre-save tag " + str(pre_tag) + " != " + str({value}))
     snap = inst.save_state()
-    rest = {sys_name}.restore_state(snap)
+    rest = {sys_name}()
+    rest.restore_state(snap)
     post_tag = rest.get_tag()
     if post_tag != {value}:
         _fail("post-restore tag " + str(post_tag) + " != " + str({value}))
@@ -235,10 +251,17 @@ def gen_p3_python(case_id, sys_name, value):
     Pattern matches Phase 15 sa_p10 — state-args declared on cascaded
     parent, bound by name from child.
     """
-    return f"""@@target python_3
+    return f"""@@[target("python_3")]
 
-@@persist
+@@[persist]
 @@system {sys_name} {{
+    operations:
+        @@[save]
+        save_state(): str {{}}
+
+        @@[load]
+        restore_state(data: str) {{}}
+
     interface:
         drive(p: int)
         get_x(): int
@@ -279,7 +302,8 @@ if __name__ == '__main__':
     if pre != {value}:
         _fail("pre-save x " + str(pre) + " != " + str({value}))
     snap = inst.save_state()
-    rest = {sys_name}.restore_state(snap)
+    rest = {sys_name}()
+    rest.restore_state(snap)
     post = rest.get_x()
     if post != {value}:
         _fail("post-restore x " + str(post) + " != " + str({value}))
@@ -300,10 +324,17 @@ def gen_p4_python(case_id, sys_name, value):
     serialization drops state_args, the popped state will have
     bogus arg values.
     """
-    return f"""@@target python_3
+    return f"""@@[target("python_3")]
 
-@@persist
+@@[persist]
 @@system {sys_name} {{
+    operations:
+        @@[save]
+        save_state(): str {{}}
+
+        @@[load]
+        restore_state(data: str) {{}}
+
     interface:
         push_modal(v: int)
         pop_modal()
@@ -350,7 +381,8 @@ if __name__ == '__main__':
     if pre != {value}:
         _fail("pre-save slot " + str(pre) + " != " + str({value}))
     snap = inst.save_state()
-    rest = {sys_name}.restore_state(snap)
+    rest = {sys_name}()
+    rest.restore_state(snap)
     post = rest.get_slot()
     if post != {value}:
         _fail("post-restore slot " + str(post) + " != " + str({value}))
@@ -372,10 +404,17 @@ def gen_p5_python(case_id, sys_name, value):
     further events. Tests post-restore correctness, not just static
     equivalence.
     """
-    return f"""@@target python_3
+    return f"""@@[target("python_3")]
 
-@@persist
+@@[persist]
 @@system {sys_name} {{
+    operations:
+        @@[save]
+        save_state(): str {{}}
+
+        @@[load]
+        restore_state(data: str) {{}}
+
     interface:
         seed(v: int)
         bump()
@@ -421,7 +460,8 @@ if __name__ == '__main__':
     if pre != {value}:
         _fail("pre-save " + str(pre) + " != " + str({value}))
     snap = inst.save_state()
-    rest = {sys_name}.restore_state(snap)
+    rest = {sys_name}()
+    rest.restore_state(snap)
     rest.bump()
     post = rest.get_slot()
     expected = {value} + 100
@@ -450,8 +490,15 @@ VALUES = [0, 1, 42, 100, -7]
 
 P1_FRAME = """@@target {target}
 
-@@persist
+@@[persist]
 @@system {sys} {{
+    operations:
+        @@[save]
+        save_state(): str {{}}
+
+        @@[load]
+        restore_state(data: str) {{}}
+
     interface:
         kick(v: int)
         get_slot(): int
@@ -482,8 +529,15 @@ P1_FRAME = """@@target {target}
 
 P2_FRAME = """@@target {target}
 
-@@persist
+@@[persist]
 @@system {sys} {{
+    operations:
+        @@[save]
+        save_state(): str {{}}
+
+        @@[load]
+        restore_state(data: str) {{}}
+
     interface:
         kick(v: int)
         get_tag(): int
@@ -517,8 +571,15 @@ P2_FRAME = """@@target {target}
 
 P3_FRAME = """@@target {target}
 
-@@persist
+@@[persist]
 @@system {sys} {{
+    operations:
+        @@[save]
+        save_state(): str {{}}
+
+        @@[load]
+        restore_state(data: str) {{}}
+
     interface:
         drive(p: int)
         get_x(): int
@@ -552,8 +613,15 @@ P3_FRAME = """@@target {target}
 
 P4_FRAME = """@@target {target}
 
-@@persist
+@@[persist]
 @@system {sys} {{
+    operations:
+        @@[save]
+        save_state(): str {{}}
+
+        @@[load]
+        restore_state(data: str) {{}}
+
     interface:
         push_modal(v: int)
         pop_modal()
@@ -594,8 +662,15 @@ P4_FRAME = """@@target {target}
 
 P5_FRAME = """@@target {target}
 
-@@persist
+@@[persist]
 @@system {sys} {{
+    operations:
+        @@[save]
+        save_state(): str {{}}
+
+        @@[load]
+        restore_state(data: str) {{}}
+
     interface:
         seed(v: int)
         bump()

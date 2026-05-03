@@ -64,7 +64,8 @@ def _build_specs():
         int_type="int", str_type="str", bool_type="bool",
         self_x="self.x", self_s="self.s", self_b="self.b",
         save_call="snap = inst.save_state()",
-        restore_call="rest = {SYS}.restore_state(snap)",
+        # RFC-0012 amendment: load is an instance method, two-step.
+        restore_call="rest = {SYS}()\n    rest.restore_state(snap)",
         status_cmp='if rest.status() != inst_status: _fail(f"status: {{rest.status()}} != {{inst_status}}")',
         int_cmp='if rest.x != inst.x: _fail(f"x: {{rest.x}} != {{inst.x}}")',
         str_cmp='if rest.s != inst.s: _fail(f"s: {{rest.s}} != {{inst.s}}")',
@@ -84,7 +85,8 @@ def _fail(msg):
         int_type="number", str_type="string", bool_type="boolean",
         self_x="this.x", self_s="this.s", self_b="this.b",
         save_call="const snap = inst.saveState();",
-        restore_call="const rest = {SYS}.restoreState(snap);",
+        # RFC-0012 amendment: load is an instance method, two-step.
+        restore_call="const rest = @@{SYS}();\n    rest.restoreState(snap);",
         status_cmp='if (rest.status() !== inst_status) _fail(`status: ${{rest.status()}} !== ${{inst_status}}`);',
         int_cmp='if (rest.x !== inst.x) _fail(`x: ${{rest.x}} !== ${{inst.x}}`);',
         str_cmp='if (rest.s !== inst.s) _fail(`s: ${{rest.s}} !== ${{inst.s}}`);',
@@ -177,8 +179,19 @@ def gen_system_frame(case_id, params, spec):
     if spec.prolog:
         lines.append(spec.prolog)
         lines.append("")
-    lines.append("@@persist")
+    lines.append("@@[persist]")
     lines.append(f"@@system {sys_name} {{")
+    # RFC-0012 amendment: declare the framework-managed save/load ops.
+    save_ret = "str" if spec.target == "python_3" else "string"
+    save_method = "save_state" if spec.target == "python_3" else "saveState"
+    load_method = "restore_state" if spec.target == "python_3" else "restoreState"
+    lines.append("    operations:")
+    lines.append("        @@[save]")
+    lines.append(f"        {save_method}(): {save_ret} {{}}")
+    lines.append("")
+    lines.append("        @@[load]")
+    lines.append(f"        {load_method}(data: {save_ret}) {{}}")
+    lines.append("")
     lines.append(gen_machine(params, spec))
     lines.append("")
     lines.append("    domain:")
