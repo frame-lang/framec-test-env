@@ -1,0 +1,87 @@
+@@[target("python_3")]
+
+@@system Worker {
+    interface:
+        assign(msg: str)
+        finish()
+        busy(): bool
+
+    machine:
+        $Idle {
+            assign(msg: str) {
+                self.current = msg
+                -> $Working
+            }
+            busy(): bool { @@:(False) }
+        }
+        $Working {
+            $>() { print(f"worker[{self.name}] start: {self.current}") }
+            finish() {
+                print(f"worker[{self.name}] done")
+                self.current = ""
+                -> $Idle
+            }
+            busy(): bool { @@:(True) }
+        }
+
+    domain:
+        name: str = ""
+        current: str = ""
+}
+
+@@[main]
+@@system Dispatcher {
+    interface:
+        submit(msg: str): str
+        worker_a_free()
+        worker_b_free()
+
+    machine:
+        $Running {
+            submit(msg: str): str {
+                if not self.worker_a.busy():
+                    self.worker_a.assign(msg)
+                    @@:("dispatched to a")
+                else:
+                    if not self.worker_b.busy():
+                        self.worker_b.assign(msg)
+                        @@:("dispatched to b")
+                    else:
+                        self.backlog = self.backlog + 1
+                        @@:("queued")
+            }
+            worker_a_free() {
+                if self.backlog > 0:
+                    self.backlog = self.backlog - 1
+                    self.worker_a.assign("backlog-job")
+            }
+            worker_b_free() {
+                if self.backlog > 0:
+                    self.backlog = self.backlog - 1
+                    self.worker_b.assign("backlog-job")
+            }
+        }
+
+    domain:
+        worker_a = @@Worker()
+        worker_b = @@Worker()
+        backlog: int = 0
+}
+
+if __name__ == '__main__':
+    d = @@Dispatcher()
+    d.worker_a.name = "A"
+    d.worker_b.name = "B"
+
+    assert d.submit("job-1") == "dispatched to a"
+    assert d.submit("job-2") == "dispatched to b"
+    assert d.submit("job-3") == "queued"
+
+    d.worker_a.finish()
+    d.worker_a_free()  # picks up backlog
+    assert d.worker_a.busy() == True
+    assert d.backlog == 0
+
+    d.worker_b.finish()
+    d.worker_a.finish()
+    print("PASS: competing_consumers")

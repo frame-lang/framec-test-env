@@ -1,0 +1,96 @@
+@@[target("csharp")]
+
+using System;
+
+@@system Worker {
+    interface:
+        assign(msg: String)
+        finish()
+        busy(): bool
+
+    machine:
+        $Idle {
+            assign(msg: String) {
+                this.current = msg;
+                -> $Working
+            }
+            busy(): bool { @@:(false) }
+        }
+        $Working {
+            $>() { Console.WriteLine($"worker[{this.name}] start: {this.current}"); }
+            finish() {
+                Console.WriteLine($"worker[{this.name}] done");
+                this.current = "";
+                -> $Idle
+            }
+            busy(): bool { @@:(true) }
+        }
+
+    domain:
+        name: String = ""
+        current: String = ""
+}
+
+@@[main]
+@@system Dispatcher {
+    interface:
+        submit(msg: String): String
+        worker_a_free()
+        worker_b_free()
+
+    machine:
+        $Running {
+            submit(msg: String): String {
+                if (!this.worker_a.busy()) {
+                    this.worker_a.assign(msg);
+                    @@:("dispatched to a")
+                } else {
+                    if (!this.worker_b.busy()) {
+                        this.worker_b.assign(msg);
+                        @@:("dispatched to b")
+                    } else {
+                        this.backlog = this.backlog + 1;
+                        @@:("queued")
+                    }
+                }
+            }
+            worker_a_free() {
+                if (this.backlog > 0) {
+                    this.backlog = this.backlog - 1;
+                    this.worker_a.assign("backlog-job");
+                }
+            }
+            worker_b_free() {
+                if (this.backlog > 0) {
+                    this.backlog = this.backlog - 1;
+                    this.worker_b.assign("backlog-job");
+                }
+            }
+        }
+
+    domain:
+        worker_a: Worker = new Worker()
+        worker_b: Worker = new Worker()
+        backlog: int = 0
+}
+
+class Program {
+    static void Main(string[] args) {
+        var d = @@Dispatcher();
+        d.worker_a.name = "A";
+        d.worker_b.name = "B";
+
+        if ((string) d.submit("job-1") != "dispatched to a") throw new Exception("expected dispatched to a");
+        if ((string) d.submit("job-2") != "dispatched to b") throw new Exception("expected dispatched to b");
+        if ((string) d.submit("job-3") != "queued")          throw new Exception("expected queued");
+
+        d.worker_a.finish();
+        d.worker_a_free();
+        if ((bool) d.worker_a.busy() != true) throw new Exception("expected worker_a busy after backlog");
+        if (d.backlog != 0) throw new Exception("expected backlog drained");
+
+        d.worker_b.finish();
+        d.worker_a.finish();
+        Console.WriteLine("PASS: competing_consumers");
+    }
+}

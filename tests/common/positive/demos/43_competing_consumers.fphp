@@ -1,0 +1,92 @@
+@@[target("php")]
+
+<?php
+
+@@system Worker {
+    interface:
+        assign(msg: str)
+        finish()
+        busy(): bool
+
+    machine:
+        $Idle {
+            assign(msg: str) {
+                $this->current = $msg;
+                -> $Working
+            }
+            busy(): bool { @@:(false) }
+        }
+        $Working {
+            $>() { echo "worker[" . $this->name . "] start: " . $this->current . "\n"; }
+            finish() {
+                echo "worker[" . $this->name . "] done\n";
+                $this->current = "";
+                -> $Idle
+            }
+            busy(): bool { @@:(true) }
+        }
+
+    domain:
+        name = ""
+        current = ""
+}
+
+@@[main]
+@@system Dispatcher {
+    interface:
+        submit(msg: str): str
+        worker_a_free()
+        worker_b_free()
+
+    machine:
+        $Running {
+            submit(msg: str): str {
+                if (!$this->worker_a->busy()) {
+                    $this->worker_a->assign($msg);
+                    @@:("dispatched to a")
+                } else {
+                    if (!$this->worker_b->busy()) {
+                        $this->worker_b->assign($msg);
+                        @@:("dispatched to b")
+                    } else {
+                        $this->backlog = $this->backlog + 1;
+                        @@:("queued")
+                    }
+                }
+            }
+            worker_a_free() {
+                if ($this->backlog > 0) {
+                    $this->backlog = $this->backlog - 1;
+                    $this->worker_a->assign("backlog-job");
+                }
+            }
+            worker_b_free() {
+                if ($this->backlog > 0) {
+                    $this->backlog = $this->backlog - 1;
+                    $this->worker_b->assign("backlog-job");
+                }
+            }
+        }
+
+    domain:
+        worker_a = @@Worker()
+        worker_b = @@Worker()
+        backlog = 0
+}
+
+$d = @@Dispatcher();
+$d->worker_a->name = "A";
+$d->worker_b->name = "B";
+
+assert($d->submit("job-1") === "dispatched to a", "expected dispatched a");
+assert($d->submit("job-2") === "dispatched to b", "expected dispatched b");
+assert($d->submit("job-3") === "queued",          "expected queued");
+
+$d->worker_a->finish();
+$d->worker_a_free();
+assert($d->worker_a->busy() === true, "expected worker_a busy");
+assert($d->backlog === 0,             "expected backlog drained");
+
+$d->worker_b->finish();
+$d->worker_a->finish();
+echo "PASS: competing_consumers\n";

@@ -1,0 +1,92 @@
+@@[target("rust")]
+
+@@system Worker {
+    interface:
+        assign(msg: String)
+        finish()
+        busy(): bool
+
+    machine:
+        $Idle {
+            assign(msg: String) {
+                self.current = msg;
+                -> $Working
+            }
+            busy(): bool { @@:(false) }
+        }
+        $Working {
+            $>() { println!("worker[{}] start: {}", self.name, self.current); }
+            finish() {
+                println!("worker[{}] done", self.name);
+                self.current = String::new();
+                -> $Idle
+            }
+            busy(): bool { @@:(true) }
+        }
+
+    domain:
+        name: String = String::new()
+        current: String = String::new()
+}
+
+@@[main]
+@@system Dispatcher {
+    interface:
+        submit(msg: String): String
+        worker_a_free()
+        worker_b_free()
+
+    machine:
+        $Running {
+            submit(msg: String): String {
+                if !self.worker_a.busy() {
+                    self.worker_a.assign(msg);
+                    @@:("dispatched to a".to_string())
+                } else {
+                    if !self.worker_b.busy() {
+                        self.worker_b.assign(msg);
+                        @@:("dispatched to b".to_string())
+                    } else {
+                        self.backlog = self.backlog + 1;
+                        @@:("queued".to_string())
+                    }
+                }
+            }
+            worker_a_free() {
+                if self.backlog > 0 {
+                    self.backlog = self.backlog - 1;
+                    self.worker_a.assign("backlog-job".to_string());
+                }
+            }
+            worker_b_free() {
+                if self.backlog > 0 {
+                    self.backlog = self.backlog - 1;
+                    self.worker_b.assign("backlog-job".to_string());
+                }
+            }
+        }
+
+    domain:
+        worker_a: Worker = Worker::new()
+        worker_b: Worker = Worker::new()
+        backlog: i32 = 0
+}
+
+fn main() {
+    let mut d = @@Dispatcher();
+    d.worker_a.name = "A".to_string();
+    d.worker_b.name = "B".to_string();
+
+    assert_eq!(d.submit("job-1".to_string()), "dispatched to a");
+    assert_eq!(d.submit("job-2".to_string()), "dispatched to b");
+    assert_eq!(d.submit("job-3".to_string()), "queued");
+
+    d.worker_a.finish();
+    d.worker_a_free();
+    assert_eq!(d.worker_a.busy(), true);
+    assert_eq!(d.backlog, 0);
+
+    d.worker_b.finish();
+    d.worker_a.finish();
+    println!("PASS: competing_consumers");
+}

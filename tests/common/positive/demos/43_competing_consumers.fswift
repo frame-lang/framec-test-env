@@ -1,0 +1,92 @@
+@@[target("swift")]
+
+import Foundation
+
+@@system Worker {
+    interface:
+        assign(msg: String)
+        finish()
+        busy(): Bool
+
+    machine:
+        $Idle {
+            assign(msg: String) {
+                self.current = msg
+                -> $Working
+            }
+            busy(): Bool { @@:(false) }
+        }
+        $Working {
+            $>() { print("worker[\(self.name)] start: \(self.current)") }
+            finish() {
+                print("worker[\(self.name)] done")
+                self.current = ""
+                -> $Idle
+            }
+            busy(): Bool { @@:(true) }
+        }
+
+    domain:
+        name: String = ""
+        current: String = ""
+}
+
+@@[main]
+@@system Dispatcher {
+    interface:
+        submit(msg: String): String
+        worker_a_free()
+        worker_b_free()
+
+    machine:
+        $Running {
+            submit(msg: String): String {
+                if !(self.worker_a.busy() as! Bool) {
+                    self.worker_a.assign(msg)
+                    @@:("dispatched to a")
+                } else {
+                    if !(self.worker_b.busy() as! Bool) {
+                        self.worker_b.assign(msg)
+                        @@:("dispatched to b")
+                    } else {
+                        self.backlog = self.backlog + 1
+                        @@:("queued")
+                    }
+                }
+            }
+            worker_a_free() {
+                if self.backlog > 0 {
+                    self.backlog = self.backlog - 1
+                    self.worker_a.assign("backlog-job")
+                }
+            }
+            worker_b_free() {
+                if self.backlog > 0 {
+                    self.backlog = self.backlog - 1
+                    self.worker_b.assign("backlog-job")
+                }
+            }
+        }
+
+    domain:
+        worker_a: Worker = Worker()
+        worker_b: Worker = Worker()
+        backlog: Int = 0
+}
+
+let d = @@Dispatcher()
+d.worker_a.name = "A"
+d.worker_b.name = "B"
+
+if (d.submit("job-1") as! String) != "dispatched to a" { print("FAIL: dispatched a"); exit(1) }
+if (d.submit("job-2") as! String) != "dispatched to b" { print("FAIL: dispatched b"); exit(1) }
+if (d.submit("job-3") as! String) != "queued"          { print("FAIL: queued");      exit(1) }
+
+d.worker_a.finish()
+d.worker_a_free()
+if (d.worker_a.busy() as! Bool) != true { print("FAIL: expected worker_a busy"); exit(1) }
+if d.backlog != 0                        { print("FAIL: expected backlog drained"); exit(1) }
+
+d.worker_b.finish()
+d.worker_a.finish()
+print("PASS: competing_consumers")

@@ -1,0 +1,98 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system Worker {
+    interface:
+        assign(msg: str)
+        finish()
+        busy(): int
+
+    machine:
+        $Idle {
+            assign(msg: str) {
+                self->current = msg;
+                -> $Working
+            }
+            busy(): int { @@:(0) }
+        }
+        $Working {
+            $>() { printf("worker[%s] start: %s\n", self->name, self->current); }
+            finish() {
+                printf("worker[%s] done\n", self->name);
+                self->current = "";
+                -> $Idle
+            }
+            busy(): int { @@:(1) }
+        }
+
+    domain:
+        name: str = ""
+        current: str = ""
+}
+
+@@[main]
+@@system Dispatcher {
+    interface:
+        submit(msg: str): str
+        worker_a_free()
+        worker_b_free()
+
+    machine:
+        $Running {
+            submit(msg: str): str {
+                if (!Worker_busy(self->worker_a)) {
+                    Worker_assign(self->worker_a, msg);
+                    @@:("dispatched to a")
+                } else {
+                    if (!Worker_busy(self->worker_b)) {
+                        Worker_assign(self->worker_b, msg);
+                        @@:("dispatched to b")
+                    } else {
+                        self->backlog = self->backlog + 1;
+                        @@:("queued")
+                    }
+                }
+            }
+            worker_a_free() {
+                if (self->backlog > 0) {
+                    self->backlog = self->backlog - 1;
+                    Worker_assign(self->worker_a, "backlog-job");
+                }
+            }
+            worker_b_free() {
+                if (self->backlog > 0) {
+                    self->backlog = self->backlog - 1;
+                    Worker_assign(self->worker_b, "backlog-job");
+                }
+            }
+        }
+
+    domain:
+        worker_a: Worker* = @@Worker()
+        worker_b: Worker* = @@Worker()
+        backlog: int = 0
+}
+
+int main() {
+    Dispatcher* d = @@Dispatcher();
+    d->worker_a->name = "A";
+    d->worker_b->name = "B";
+
+    if (strcmp(Dispatcher_submit(d, "job-1"), "dispatched to a") != 0) { printf("FAIL: dispatched a\n"); return 1; }
+    if (strcmp(Dispatcher_submit(d, "job-2"), "dispatched to b") != 0) { printf("FAIL: dispatched b\n"); return 1; }
+    if (strcmp(Dispatcher_submit(d, "job-3"), "queued")          != 0) { printf("FAIL: queued\n");      return 1; }
+
+    Worker_finish(d->worker_a);
+    Dispatcher_worker_a_free(d);
+    if (!Worker_busy(d->worker_a)) { printf("FAIL: expected worker_a busy\n"); return 1; }
+    if (d->backlog != 0)            { printf("FAIL: expected backlog drained\n"); return 1; }
+
+    Worker_finish(d->worker_b);
+    Worker_finish(d->worker_a);
+    printf("PASS: competing_consumers\n");
+    Dispatcher_destroy(d);
+    return 0;
+}

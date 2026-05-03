@@ -1,0 +1,90 @@
+@@[target("lua")]
+
+@@system Worker {
+    interface:
+        assign(msg: str)
+        finish()
+        busy(): bool
+
+    machine:
+        $Idle {
+            assign(msg: str) {
+                self.current = msg
+                -> $Working
+            }
+            busy(): bool { @@:(false) }
+        }
+        $Working {
+            $>() { print("worker[" .. self.name .. "] start: " .. self.current) }
+            finish() {
+                print("worker[" .. self.name .. "] done")
+                self.current = ""
+                -> $Idle
+            }
+            busy(): bool { @@:(true) }
+        }
+
+    domain:
+        name: str = ""
+        current: str = ""
+}
+
+@@[main]
+@@system Dispatcher {
+    interface:
+        submit(msg: str): str
+        worker_a_free()
+        worker_b_free()
+
+    machine:
+        $Running {
+            submit(msg: str): str {
+                if not self.worker_a:busy() then
+                    self.worker_a:assign(msg)
+                    @@:("dispatched to a")
+                else
+                    if not self.worker_b:busy() then
+                        self.worker_b:assign(msg)
+                        @@:("dispatched to b")
+                    else
+                        self.backlog = self.backlog + 1
+                        @@:("queued")
+                    end
+                end
+            }
+            worker_a_free() {
+                if self.backlog > 0 then
+                    self.backlog = self.backlog - 1
+                    self.worker_a:assign("backlog-job")
+                end
+            }
+            worker_b_free() {
+                if self.backlog > 0 then
+                    self.backlog = self.backlog - 1
+                    self.worker_b:assign("backlog-job")
+                end
+            }
+        }
+
+    domain:
+        worker_a = Worker:new()
+        worker_b = Worker:new()
+        backlog: int = 0
+}
+
+local d = Dispatcher:new()
+d.worker_a.name = "A"
+d.worker_b.name = "B"
+
+assert(d:submit("job-1") == "dispatched to a", "expected dispatched a")
+assert(d:submit("job-2") == "dispatched to b", "expected dispatched b")
+assert(d:submit("job-3") == "queued",          "expected queued")
+
+d.worker_a:finish()
+d:worker_a_free()
+assert(d.worker_a:busy() == true, "expected worker_a busy")
+assert(d.backlog == 0,            "expected backlog drained")
+
+d.worker_b:finish()
+d.worker_a:finish()
+print("PASS: competing_consumers")

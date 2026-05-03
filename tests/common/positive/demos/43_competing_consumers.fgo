@@ -1,0 +1,99 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system Worker {
+    interface:
+        assign(msg: string)
+        finish()
+        busy(): bool
+
+    machine:
+        $Idle {
+            assign(msg: string) {
+                s.current = msg
+                -> $Working
+            }
+            busy(): bool { @@:(false) }
+        }
+        $Working {
+            $>() { fmt.Printf("worker[%s] start: %s\n", s.name, s.current) }
+            finish() {
+                fmt.Printf("worker[%s] done\n", s.name)
+                s.current = ""
+                -> $Idle
+            }
+            busy(): bool { @@:(true) }
+        }
+
+    domain:
+        name: string = ""
+        current: string = ""
+}
+
+@@[main]
+@@system Dispatcher {
+    interface:
+        submit(msg: string): string
+        worker_a_free()
+        worker_b_free()
+
+    machine:
+        $Running {
+            submit(msg: string): string {
+                if (!s.worker_a.Busy()) {
+                    s.worker_a.Assign(msg)
+                    @@:("dispatched to a")
+                } else {
+                    if (!s.worker_b.Busy()) {
+                        s.worker_b.Assign(msg)
+                        @@:("dispatched to b")
+                    } else {
+                        s.backlog = s.backlog + 1
+                        @@:("queued")
+                    }
+                }
+            }
+            worker_a_free() {
+                if (s.backlog > 0) {
+                    s.backlog = s.backlog - 1
+                    s.worker_a.Assign("backlog-job")
+                }
+            }
+            worker_b_free() {
+                if (s.backlog > 0) {
+                    s.backlog = s.backlog - 1
+                    s.worker_b.Assign("backlog-job")
+                }
+            }
+        }
+
+    domain:
+        worker_a: *Worker = NewWorker()
+        worker_b: *Worker = NewWorker()
+        backlog: int = 0
+}
+
+func main() {
+    d := NewDispatcher()
+    d.worker_a.name = "A"
+    d.worker_b.name = "B"
+
+    if d.Submit("job-1") != "dispatched to a" { fmt.Println("FAIL: dispatched a"); os.Exit(1) }
+    if d.Submit("job-2") != "dispatched to b" { fmt.Println("FAIL: dispatched b"); os.Exit(1) }
+    if d.Submit("job-3") != "queued"          { fmt.Println("FAIL: queued");      os.Exit(1) }
+
+    d.worker_a.Finish()
+    d.Worker_a_free()
+    if !d.worker_a.Busy() { fmt.Println("FAIL: expected worker_a busy"); os.Exit(1) }
+    if d.backlog != 0     { fmt.Println("FAIL: expected backlog drained"); os.Exit(1) }
+
+    d.worker_b.Finish()
+    d.worker_a.Finish()
+    fmt.Println("PASS: competing_consumers")
+}

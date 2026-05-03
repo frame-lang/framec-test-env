@@ -1,0 +1,92 @@
+@@[target("kotlin")]
+
+@@system Worker {
+    interface:
+        assign(msg: String)
+        finish()
+        busy(): Boolean
+
+    machine:
+        $Idle {
+            assign(msg: String) {
+                this.current = msg
+                -> $Working
+            }
+            busy(): Boolean { @@:(false) }
+        }
+        $Working {
+            $>() { println("worker[${this.name}] start: ${this.current}") }
+            finish() {
+                println("worker[${this.name}] done")
+                this.current = ""
+                -> $Idle
+            }
+            busy(): Boolean { @@:(true) }
+        }
+
+    domain:
+        name: String = ""
+        current: String = ""
+}
+
+@@[main]
+@@system Dispatcher {
+    interface:
+        submit(msg: String): String
+        worker_a_free()
+        worker_b_free()
+
+    machine:
+        $Running {
+            submit(msg: String): String {
+                if (!(this.worker_a.busy() as Boolean)) {
+                    this.worker_a.assign(msg)
+                    @@:("dispatched to a")
+                } else {
+                    if (!(this.worker_b.busy() as Boolean)) {
+                        this.worker_b.assign(msg)
+                        @@:("dispatched to b")
+                    } else {
+                        this.backlog = this.backlog + 1
+                        @@:("queued")
+                    }
+                }
+            }
+            worker_a_free() {
+                if (this.backlog > 0) {
+                    this.backlog = this.backlog - 1
+                    this.worker_a.assign("backlog-job")
+                }
+            }
+            worker_b_free() {
+                if (this.backlog > 0) {
+                    this.backlog = this.backlog - 1
+                    this.worker_b.assign("backlog-job")
+                }
+            }
+        }
+
+    domain:
+        worker_a: Worker = Worker()
+        worker_b: Worker = Worker()
+        backlog: Int = 0
+}
+
+fun main() {
+    val d = Dispatcher()
+    d.worker_a.name = "A"
+    d.worker_b.name = "B"
+
+    if ((d.submit("job-1") as String) != "dispatched to a") throw RuntimeException("expected dispatched a")
+    if ((d.submit("job-2") as String) != "dispatched to b") throw RuntimeException("expected dispatched b")
+    if ((d.submit("job-3") as String) != "queued")          throw RuntimeException("expected queued")
+
+    d.worker_a.finish()
+    d.worker_a_free()
+    if ((d.worker_a.busy() as Boolean) != true) throw RuntimeException("expected worker_a busy")
+    if (d.backlog != 0) throw RuntimeException("expected backlog drained")
+
+    d.worker_b.finish()
+    d.worker_a.finish()
+    println("PASS: competing_consumers")
+}

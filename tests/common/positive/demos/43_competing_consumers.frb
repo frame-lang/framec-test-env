@@ -1,0 +1,90 @@
+@@[target("ruby")]
+
+@@system Worker {
+    interface:
+        assign(msg: str)
+        finish()
+        busy(): bool
+
+    machine:
+        $Idle {
+            assign(msg: str) {
+                @current = msg
+                -> $Working
+            }
+            busy(): bool { @@:(false) }
+        }
+        $Working {
+            $>() { puts "worker[#{@name}] start: #{@current}" }
+            finish() {
+                puts "worker[#{@name}] done"
+                @current = ""
+                -> $Idle
+            }
+            busy(): bool { @@:(true) }
+        }
+
+    domain:
+        name = ""
+        current = ""
+}
+
+@@[main]
+@@system Dispatcher {
+    interface:
+        submit(msg: str): str
+        worker_a_free()
+        worker_b_free()
+
+    machine:
+        $Running {
+            submit(msg: str): str {
+                if !@worker_a.busy
+                    @worker_a.assign(msg)
+                    @@:("dispatched to a")
+                else
+                    if !@worker_b.busy
+                        @worker_b.assign(msg)
+                        @@:("dispatched to b")
+                    else
+                        @backlog = @backlog + 1
+                        @@:("queued")
+                    end
+                end
+            }
+            worker_a_free() {
+                if @backlog > 0
+                    @backlog = @backlog - 1
+                    @worker_a.assign("backlog-job")
+                end
+            }
+            worker_b_free() {
+                if @backlog > 0
+                    @backlog = @backlog - 1
+                    @worker_b.assign("backlog-job")
+                end
+            }
+        }
+
+    domain:
+        worker_a = Worker.new
+        worker_b = Worker.new
+        backlog = 0
+}
+
+d = Dispatcher.new
+d.worker_a.name = "A"
+d.worker_b.name = "B"
+
+raise "expected dispatched a" unless d.submit("job-1") == "dispatched to a"
+raise "expected dispatched b" unless d.submit("job-2") == "dispatched to b"
+raise "expected queued"        unless d.submit("job-3") == "queued"
+
+d.worker_a.finish
+d.worker_a_free
+raise "expected worker_a busy"     unless d.worker_a.busy == true
+raise "expected backlog drained"   unless d.backlog == 0
+
+d.worker_b.finish
+d.worker_a.finish
+puts "PASS: competing_consumers"
