@@ -1,0 +1,98 @@
+@@[target("typescript")]
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: str) {
+            this.pending.push(msg);
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): str
+        state_name(): str
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): str { @@:("stopped") }
+            state_name(): str { @@:("stopped") }
+        }
+
+        $Polling => $Active {
+            tick(): str {
+                const msg = this.poll_source();
+                if (msg === "") {
+                    @@:("empty")
+                    -> "no work" $Idle
+                } else {
+                    this.current = msg;
+                    @@:("got_msg")
+                    -> "dispatch" $Handling
+                }
+            }
+            state_name(): str { @@:("polling") }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                this.handle(this.current);
+                -> "done" $Polling
+            }
+            state_name(): str { @@:("handling") }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): str {
+                @@:("woke")
+                -> $Polling
+            }
+            state_name(): str { @@:("idle") }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    actions:
+        poll_source(): str {
+            if (this.pending.length === 0) {
+                return "";
+            }
+            return this.pending.shift()!;
+        }
+        handle(msg: str) {
+            console.log("handled: " + msg);
+        }
+
+    domain:
+        pending: string[] = []
+        current: str = ""
+}
+
+const pc = @@PollingConsumer();
+pc.supply("m1");
+pc.supply("m2");
+
+pc.start();
+if (pc.state_name() !== "polling")  throw new Error("expected polling");
+
+if (pc.tick() !== "got_msg")        throw new Error("expected got_msg #1");
+if (pc.state_name() !== "polling")  throw new Error("expected polling after #1");
+
+if (pc.tick() !== "got_msg")        throw new Error("expected got_msg #2");
+if (pc.state_name() !== "polling")  throw new Error("expected polling after #2");
+
+if (pc.tick() !== "empty")          throw new Error("expected empty");
+if (pc.state_name() !== "idle")     throw new Error("expected idle");
+
+if (pc.tick() !== "woke")           throw new Error("expected woke");
+if (pc.state_name() !== "polling")  throw new Error("expected polling after woke");
+
+pc.stop();
+if (pc.state_name() !== "stopped")  throw new Error("expected stopped");
+
+console.log("PASS: polling_consumer");

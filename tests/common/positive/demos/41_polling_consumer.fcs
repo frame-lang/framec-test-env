@@ -1,0 +1,107 @@
+@@[target("csharp")]
+
+using System;
+using System.Collections.Generic;
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: String) {
+            this.pending.Add(msg);
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): String
+        state_name(): String
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): String { @@:("stopped") }
+            state_name(): String { @@:("stopped") }
+        }
+
+        $Polling => $Active {
+            tick(): String {
+                string msg = this.poll_source();
+                if (msg == "") {
+                    @@:("empty")
+                    -> "no work" $Idle
+                } else {
+                    this.current = msg;
+                    @@:("got_msg")
+                    -> "dispatch" $Handling
+                }
+            }
+            state_name(): String { @@:("polling") }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                this.handle(this.current);
+                -> "done" $Polling
+            }
+            state_name(): String { @@:("handling") }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): String {
+                @@:("woke")
+                -> $Polling
+            }
+            state_name(): String { @@:("idle") }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    actions:
+        poll_source(): String {
+            if (this.pending.Count == 0) {
+                return "";
+            }
+            string head = this.pending[0];
+            this.pending.RemoveAt(0);
+            return head;
+        }
+        handle(msg: String) {
+            Console.WriteLine("handled: " + msg);
+        }
+
+    domain:
+        pending: List<string> = new List<string>()
+        current: String = ""
+}
+
+class Program {
+    static void Main(string[] args) {
+        var pc = @@PollingConsumer();
+        pc.supply("m1");
+        pc.supply("m2");
+
+        pc.start();
+        if ((string) pc.state_name() != "polling")  throw new Exception("expected polling");
+
+        if ((string) pc.tick() != "got_msg")        throw new Exception("expected got_msg #1");
+        if ((string) pc.state_name() != "polling")  throw new Exception("expected polling after #1");
+
+        if ((string) pc.tick() != "got_msg")        throw new Exception("expected got_msg #2");
+        if ((string) pc.state_name() != "polling")  throw new Exception("expected polling after #2");
+
+        if ((string) pc.tick() != "empty")          throw new Exception("expected empty");
+        if ((string) pc.state_name() != "idle")     throw new Exception("expected idle");
+
+        if ((string) pc.tick() != "woke")           throw new Exception("expected woke");
+        if ((string) pc.state_name() != "polling")  throw new Exception("expected polling after woke");
+
+        pc.stop();
+        if ((string) pc.state_name() != "stopped")  throw new Exception("expected stopped");
+
+        Console.WriteLine("PASS: polling_consumer");
+    }
+}

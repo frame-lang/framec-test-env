@@ -1,0 +1,100 @@
+@@[target("php")]
+
+<?php
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: str) {
+            $this->pending[] = $msg;
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): str
+        state_name(): str
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): str { @@:("stopped") }
+            state_name(): str { @@:("stopped") }
+        }
+
+        $Polling => $Active {
+            tick(): str {
+                $msg = $this->poll_source();
+                if ($msg === "") {
+                    @@:("empty")
+                    -> "no work" $Idle
+                } else {
+                    $this->current = $msg;
+                    @@:("got_msg")
+                    -> "dispatch" $Handling
+                }
+            }
+            state_name(): str { @@:("polling") }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                $this->handle($this->current);
+                -> "done" $Polling
+            }
+            state_name(): str { @@:("handling") }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): str {
+                @@:("woke")
+                -> $Polling
+            }
+            state_name(): str { @@:("idle") }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    actions:
+        poll_source() {
+            if (count($this->pending) === 0) {
+                return "";
+            }
+            return array_shift($this->pending);
+        }
+        handle(msg) {
+            echo "handled: " . $msg . "\n";
+        }
+
+    domain:
+        pending = []
+        current = ""
+}
+
+$pc = @@PollingConsumer();
+$pc->supply("m1");
+$pc->supply("m2");
+
+$pc->start();
+assert($pc->state_name() === "polling", "expected polling");
+
+assert($pc->tick() === "got_msg", "expected got_msg #1");
+assert($pc->state_name() === "polling", "expected polling after #1");
+
+assert($pc->tick() === "got_msg", "expected got_msg #2");
+assert($pc->state_name() === "polling", "expected polling after #2");
+
+assert($pc->tick() === "empty", "expected empty");
+assert($pc->state_name() === "idle", "expected idle");
+
+assert($pc->tick() === "woke", "expected woke");
+assert($pc->state_name() === "polling", "expected polling after woke");
+
+$pc->stop();
+assert($pc->state_name() === "stopped", "expected stopped");
+
+echo "PASS: polling_consumer\n";

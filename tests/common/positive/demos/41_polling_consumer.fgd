@@ -1,0 +1,117 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: String) {
+            self.pending.append(msg)
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): String
+        state_name(): String
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): String { @@:("stopped") }
+            state_name(): String { @@:("stopped") }
+        }
+
+        $Polling => $Active {
+            tick(): String {
+                var msg = self.poll_source()
+                if msg == "":
+                    @@:("empty")
+                    -> "no work" $Idle
+                else:
+                    self.current = msg
+                    @@:("got_msg")
+                    -> "dispatch" $Handling
+            }
+            state_name(): String { @@:("polling") }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                self.handle(self.current)
+                -> "done" $Polling
+            }
+            state_name(): String { @@:("handling") }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): String {
+                @@:("woke")
+                -> $Polling
+            }
+            state_name(): String { @@:("idle") }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    actions:
+        poll_source() {
+            if self.pending.is_empty():
+                return ""
+            return self.pending.pop_front()
+        }
+        handle(msg) {
+            print("handled: " + msg)
+        }
+
+    domain:
+        pending: Array = []
+        current: String = ""
+}
+
+func main():
+    var pc = @@PollingConsumer()
+    pc.supply("m1")
+    pc.supply("m2")
+    var failures = 0
+
+    pc.start()
+    if pc.state_name() != "polling":
+        print("FAIL: expected polling, got " + str(pc.state_name())); failures += 1
+
+    if pc.tick() != "got_msg":
+        print("FAIL: expected got_msg #1"); failures += 1
+    if pc.state_name() != "polling":
+        print("FAIL: expected polling after #1"); failures += 1
+
+    if pc.tick() != "got_msg":
+        print("FAIL: expected got_msg #2"); failures += 1
+    if pc.state_name() != "polling":
+        print("FAIL: expected polling after #2"); failures += 1
+
+    if pc.tick() != "empty":
+        print("FAIL: expected empty"); failures += 1
+    if pc.state_name() != "idle":
+        print("FAIL: expected idle"); failures += 1
+
+    if pc.tick() != "woke":
+        print("FAIL: expected woke"); failures += 1
+    if pc.state_name() != "polling":
+        print("FAIL: expected polling after woke"); failures += 1
+
+    pc.stop()
+    if pc.state_name() != "stopped":
+        print("FAIL: expected stopped"); failures += 1
+
+    if failures > 0:
+        print("FAIL: polling_consumer (" + str(failures) + " failures)")
+        quit(1)
+    print("PASS: polling_consumer")
+
+func _init():
+    main()
+    quit()

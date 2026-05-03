@@ -1,0 +1,100 @@
+@@[target("rust")]
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: String) {
+            self.pending.push(msg);
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): String
+        state_name(): String
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): String { @@:("stopped".to_string()) }
+            state_name(): String { @@:("stopped".to_string()) }
+        }
+
+        $Polling => $Active {
+            tick(): String {
+                let msg = self.poll_source();
+                if msg == "" {
+                    @@:("empty".to_string())
+                    -> "no work" $Idle
+                } else {
+                    self.current = msg;
+                    @@:("got_msg".to_string())
+                    -> "dispatch" $Handling
+                }
+            }
+            state_name(): String { @@:("polling".to_string()) }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                self.handle(self.current.clone());
+                -> "done" $Polling
+            }
+            state_name(): String { @@:("handling".to_string()) }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): String {
+                @@:("woke".to_string())
+                -> $Polling
+            }
+            state_name(): String { @@:("idle".to_string()) }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    actions:
+        poll_source(): String {
+            if self.pending.is_empty() {
+                return "".to_string();
+            }
+            return self.pending.remove(0);
+        }
+        handle(msg: String) {
+            println!("handled: {}", msg);
+        }
+
+    domain:
+        pending: Vec<String> = vec![]
+        current: String = "".to_string()
+}
+
+fn main() {
+    let mut pc = @@PollingConsumer();
+    pc.supply("m1".to_string());
+    pc.supply("m2".to_string());
+
+    pc.start();
+    assert_eq!(pc.state_name(), "polling");
+
+    assert_eq!(pc.tick(), "got_msg");
+    assert_eq!(pc.state_name(), "polling");
+
+    assert_eq!(pc.tick(), "got_msg");
+    assert_eq!(pc.state_name(), "polling");
+
+    assert_eq!(pc.tick(), "empty");
+    assert_eq!(pc.state_name(), "idle");
+
+    assert_eq!(pc.tick(), "woke");
+    assert_eq!(pc.state_name(), "polling");
+
+    pc.stop();
+    assert_eq!(pc.state_name(), "stopped");
+
+    println!("PASS: polling_consumer");
+}

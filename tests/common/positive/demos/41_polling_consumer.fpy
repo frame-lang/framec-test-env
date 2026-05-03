@@ -1,0 +1,101 @@
+@@[target("python_3")]
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: str) {
+            self.pending.append(msg)
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): str
+        state_name(): str
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): str { @@:("stopped") }
+            state_name(): str { @@:("stopped") }
+        }
+
+        $Polling => $Active {
+            tick(): str {
+                msg = self.poll_source()
+                if msg == "":
+                    @@:("empty")
+                    -> "no work" $Idle
+                else:
+                    self.current = msg
+                    @@:("got_msg")
+                    -> "dispatch" $Handling
+            }
+            state_name(): str { @@:("polling") }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                self.handle(self.current)
+                -> "done" $Polling
+            }
+            state_name(): str { @@:("handling") }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): str {
+                @@:("woke")
+                -> $Polling
+            }
+            state_name(): str { @@:("idle") }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    actions:
+        poll_source() {
+            if self.pending:
+                return self.pending.pop(0)
+            return ""
+        }
+        handle(msg) {
+            print(f"handled: {msg}")
+        }
+
+    domain:
+        pending: list = []
+        current: str = ""
+}
+
+if __name__ == '__main__':
+    pc = @@PollingConsumer()
+    PollingConsumer.supply(pc, "m1")
+    PollingConsumer.supply(pc, "m2")
+
+    pc.start()
+    assert pc.state_name() == "polling"
+
+    # First tick: pop m1, transition to $Handling, $Handling enter handles m1 + transitions back to $Polling
+    assert pc.tick() == "got_msg"
+    assert pc.state_name() == "polling"
+
+    # Second tick: pop m2, same chain
+    assert pc.tick() == "got_msg"
+    assert pc.state_name() == "polling"
+
+    # Third tick: queue empty → $Idle
+    assert pc.tick() == "empty"
+    assert pc.state_name() == "idle"
+
+    # In $Idle, tick wakes back to $Polling
+    assert pc.tick() == "woke"
+    assert pc.state_name() == "polling"
+
+    pc.stop()
+    assert pc.state_name() == "stopped"
+
+    print("PASS: polling_consumer")

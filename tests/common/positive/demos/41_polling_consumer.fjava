@@ -1,0 +1,104 @@
+@@[target("java")]
+
+import java.util.ArrayList;
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: String) {
+            this.pending.add(msg);
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): String
+        state_name(): String
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): String { @@:("stopped") }
+            state_name(): String { @@:("stopped") }
+        }
+
+        $Polling => $Active {
+            tick(): String {
+                String msg = this.poll_source();
+                if (msg.equals("")) {
+                    @@:("empty")
+                    -> "no work" $Idle
+                } else {
+                    this.current = msg;
+                    @@:("got_msg")
+                    -> "dispatch" $Handling
+                }
+            }
+            state_name(): String { @@:("polling") }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                this.handle(this.current);
+                -> "done" $Polling
+            }
+            state_name(): String { @@:("handling") }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): String {
+                @@:("woke")
+                -> $Polling
+            }
+            state_name(): String { @@:("idle") }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    actions:
+        poll_source(): String {
+            if (this.pending.isEmpty()) {
+                return "";
+            }
+            return this.pending.remove(0);
+        }
+        handle(msg: String) {
+            System.out.println("handled: " + msg);
+        }
+
+    domain:
+        pending: ArrayList<String> = new ArrayList<>()
+        current: String = ""
+}
+
+class Main {
+    public static void main(String[] args) {
+        var pc = @@PollingConsumer();
+        pc.supply("m1");
+        pc.supply("m2");
+
+        pc.start();
+        if (!((String) pc.state_name()).equals("polling"))   throw new RuntimeException("expected polling");
+
+        if (!((String) pc.tick()).equals("got_msg"))         throw new RuntimeException("expected got_msg #1");
+        if (!((String) pc.state_name()).equals("polling"))   throw new RuntimeException("expected polling after #1");
+
+        if (!((String) pc.tick()).equals("got_msg"))         throw new RuntimeException("expected got_msg #2");
+        if (!((String) pc.state_name()).equals("polling"))   throw new RuntimeException("expected polling after #2");
+
+        if (!((String) pc.tick()).equals("empty"))           throw new RuntimeException("expected empty");
+        if (!((String) pc.state_name()).equals("idle"))      throw new RuntimeException("expected idle");
+
+        if (!((String) pc.tick()).equals("woke"))            throw new RuntimeException("expected woke");
+        if (!((String) pc.state_name()).equals("polling"))   throw new RuntimeException("expected polling after woke");
+
+        pc.stop();
+        if (!((String) pc.state_name()).equals("stopped"))   throw new RuntimeException("expected stopped");
+
+        System.out.println("PASS: polling_consumer");
+    }
+}

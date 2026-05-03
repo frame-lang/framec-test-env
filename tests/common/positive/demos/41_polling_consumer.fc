@@ -1,0 +1,110 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: str) {
+            PollingConsumer_FrameVec_push(self->pending, (void*)msg);
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): str
+        state_name(): str
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): str { @@:("stopped") }
+            state_name(): str { @@:("stopped") }
+        }
+
+        $Polling => $Active {
+            tick(): str {
+                const char* msg = PollingConsumer_poll_source(self);
+                if (strcmp(msg, "") == 0) {
+                    @@:("empty")
+                    -> "no work" $Idle
+                } else {
+                    self->current = msg;
+                    @@:("got_msg")
+                    -> "dispatch" $Handling
+                }
+            }
+            state_name(): str { @@:("polling") }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                PollingConsumer_handle(self, self->current);
+                -> "done" $Polling
+            }
+            state_name(): str { @@:("handling") }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): str {
+                @@:("woke")
+                -> $Polling
+            }
+            state_name(): str { @@:("idle") }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    actions:
+        poll_source(): str {
+            if (self->head >= PollingConsumer_FrameVec_size(self->pending)) {
+                return "";
+            }
+            const char* head_msg = (const char*)PollingConsumer_FrameVec_get(self->pending, self->head);
+            self->head = self->head + 1;
+            return head_msg;
+        }
+        handle(msg: str) {
+            printf("handled: %s\n", msg);
+        }
+
+    domain:
+        pending: list
+        head: int = 0
+        current: str = ""
+}
+
+int main() {
+    PollingConsumer* pc = @@PollingConsumer();
+    pc->pending = PollingConsumer_FrameVec_new();
+    PollingConsumer_supply(pc, "m1");
+    PollingConsumer_supply(pc, "m2");
+
+    PollingConsumer_start(pc);
+    if (strcmp(PollingConsumer_state_name(pc), "polling") != 0)  { printf("FAIL: polling\n"); return 1; }
+
+    if (strcmp(PollingConsumer_tick(pc), "got_msg") != 0)        { printf("FAIL: got_msg #1\n"); return 1; }
+    if (strcmp(PollingConsumer_state_name(pc), "polling") != 0)  { printf("FAIL: polling after #1\n"); return 1; }
+
+    if (strcmp(PollingConsumer_tick(pc), "got_msg") != 0)        { printf("FAIL: got_msg #2\n"); return 1; }
+    if (strcmp(PollingConsumer_state_name(pc), "polling") != 0)  { printf("FAIL: polling after #2\n"); return 1; }
+
+    if (strcmp(PollingConsumer_tick(pc), "empty") != 0)          { printf("FAIL: empty\n"); return 1; }
+    if (strcmp(PollingConsumer_state_name(pc), "idle") != 0)     { printf("FAIL: idle\n"); return 1; }
+
+    if (strcmp(PollingConsumer_tick(pc), "woke") != 0)           { printf("FAIL: woke\n"); return 1; }
+    if (strcmp(PollingConsumer_state_name(pc), "polling") != 0)  { printf("FAIL: polling after woke\n"); return 1; }
+
+    PollingConsumer_stop(pc);
+    if (strcmp(PollingConsumer_state_name(pc), "stopped") != 0)  { printf("FAIL: stopped\n"); return 1; }
+
+    printf("PASS: polling_consumer\n");
+    PollingConsumer_destroy(pc);
+    return 0;
+}

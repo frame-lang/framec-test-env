@@ -1,0 +1,108 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <deque>
+#include <cassert>
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: str) {
+            this->pending.push_back(msg);
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): str
+        state_name(): str
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): str { @@:(std::string("stopped")) }
+            state_name(): str { @@:(std::string("stopped")) }
+        }
+
+        $Polling => $Active {
+            tick(): str {
+                std::string msg = this->poll_source();
+                if (msg == "") {
+                    @@:(std::string("empty"))
+                    -> "no work" $Idle
+                } else {
+                    this->current = msg;
+                    @@:(std::string("got_msg"))
+                    -> "dispatch" $Handling
+                }
+            }
+            state_name(): str { @@:(std::string("polling")) }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                this->handle(this->current);
+                -> "done" $Polling
+            }
+            state_name(): str { @@:(std::string("handling")) }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): str {
+                @@:(std::string("woke"))
+                -> $Polling
+            }
+            state_name(): str { @@:(std::string("idle")) }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    actions:
+        poll_source(): std::string {
+            if (this->pending.empty()) {
+                return "";
+            }
+            std::string head = this->pending.front();
+            this->pending.pop_front();
+            return head;
+        }
+        handle(msg: std::string) {
+            std::cout << "handled: " << msg << std::endl;
+        }
+
+    domain:
+        pending: std::deque<std::string>
+        current: std::string
+}
+
+int main() {
+    PollingConsumer pc;
+    pc.supply("m1");
+    pc.supply("m2");
+
+    pc.start();
+    assert(pc.state_name() == "polling");
+
+    assert(pc.tick() == "got_msg");
+    assert(pc.state_name() == "polling");
+
+    assert(pc.tick() == "got_msg");
+    assert(pc.state_name() == "polling");
+
+    assert(pc.tick() == "empty");
+    assert(pc.state_name() == "idle");
+
+    assert(pc.tick() == "woke");
+    assert(pc.state_name() == "polling");
+
+    pc.stop();
+    assert(pc.state_name() == "stopped");
+
+    std::cout << "PASS: polling_consumer" << std::endl;
+    return 0;
+}

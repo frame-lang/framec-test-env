@@ -1,0 +1,100 @@
+@@[target("swift")]
+
+import Foundation
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: String) {
+            self.pending.append(msg)
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): String
+        state_name(): String
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): String { @@:("stopped") }
+            state_name(): String { @@:("stopped") }
+        }
+
+        $Polling => $Active {
+            tick(): String {
+                let msg = self.poll_source()
+                if msg == "" {
+                    @@:("empty")
+                    -> "no work" $Idle
+                } else {
+                    self.current = msg
+                    @@:("got_msg")
+                    -> "dispatch" $Handling
+                }
+            }
+            state_name(): String { @@:("polling") }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                self.handle(self.current)
+                -> "done" $Polling
+            }
+            state_name(): String { @@:("handling") }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): String {
+                @@:("woke")
+                -> $Polling
+            }
+            state_name(): String { @@:("idle") }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    actions:
+        poll_source(): String {
+            if self.pending.isEmpty {
+                return ""
+            }
+            return self.pending.removeFirst()
+        }
+        handle(msg: String) {
+            print("handled: \(msg)")
+        }
+
+    domain:
+        pending: [String] = []
+        current: String = ""
+}
+
+let pc = @@PollingConsumer()
+pc.supply("m1")
+pc.supply("m2")
+
+pc.start()
+if (pc.state_name() as! String) != "polling"  { print("FAIL: expected polling"); exit(1) }
+
+if (pc.tick() as! String) != "got_msg"        { print("FAIL: expected got_msg #1"); exit(1) }
+if (pc.state_name() as! String) != "polling"  { print("FAIL: expected polling after #1"); exit(1) }
+
+if (pc.tick() as! String) != "got_msg"        { print("FAIL: expected got_msg #2"); exit(1) }
+if (pc.state_name() as! String) != "polling"  { print("FAIL: expected polling after #2"); exit(1) }
+
+if (pc.tick() as! String) != "empty"          { print("FAIL: expected empty"); exit(1) }
+if (pc.state_name() as! String) != "idle"     { print("FAIL: expected idle"); exit(1) }
+
+if (pc.tick() as! String) != "woke"           { print("FAIL: expected woke"); exit(1) }
+if (pc.state_name() as! String) != "polling"  { print("FAIL: expected polling after woke"); exit(1) }
+
+pc.stop()
+if (pc.state_name() as! String) != "stopped"  { print("FAIL: expected stopped"); exit(1) }
+
+print("PASS: polling_consumer")

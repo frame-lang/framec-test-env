@@ -1,0 +1,98 @@
+@@[target("lua")]
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: str) {
+            table.insert(self.pending, msg)
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): str
+        state_name(): str
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): str { @@:("stopped") }
+            state_name(): str { @@:("stopped") }
+        }
+
+        $Polling => $Active {
+            tick(): str {
+                local msg = self:poll_source()
+                if msg == "" then
+                    @@:("empty")
+                    -> "no work" $Idle
+                else
+                    self.current = msg
+                    @@:("got_msg")
+                    -> "dispatch" $Handling
+                end
+            }
+            state_name(): str { @@:("polling") }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                self:handle(self.current)
+                -> "done" $Polling
+            }
+            state_name(): str { @@:("handling") }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): str {
+                @@:("woke")
+                -> $Polling
+            }
+            state_name(): str { @@:("idle") }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    actions:
+        poll_source() {
+            if #self.pending == 0 then
+                return ""
+            end
+            return table.remove(self.pending, 1)
+        }
+        handle(msg) {
+            print("handled: " .. msg)
+        }
+
+    domain:
+        pending: list = []
+        current: str = ""
+}
+
+local pc = @@PollingConsumer()
+pc:supply("m1")
+pc:supply("m2")
+
+pc:start()
+assert(pc:state_name() == "polling", "expected polling")
+
+assert(pc:tick() == "got_msg", "expected got_msg #1")
+assert(pc:state_name() == "polling", "expected polling after #1")
+
+assert(pc:tick() == "got_msg", "expected got_msg #2")
+assert(pc:state_name() == "polling", "expected polling after #2")
+
+assert(pc:tick() == "empty", "expected empty")
+assert(pc:state_name() == "idle", "expected idle")
+
+assert(pc:tick() == "woke", "expected woke")
+assert(pc:state_name() == "polling", "expected polling after woke")
+
+pc:stop()
+assert(pc:state_name() == "stopped", "expected stopped")
+
+print("PASS: polling_consumer")

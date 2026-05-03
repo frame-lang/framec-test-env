@@ -1,0 +1,100 @@
+@@[target("dart")]
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: String) {
+            this.pending.add(msg);
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): String
+        state_name(): String
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): String { @@:("stopped") }
+            state_name(): String { @@:("stopped") }
+        }
+
+        $Polling => $Active {
+            tick(): String {
+                var msg = this.poll_source();
+                if (msg == "") {
+                    @@:("empty")
+                    -> "no work" $Idle
+                } else {
+                    this.current = msg;
+                    @@:("got_msg")
+                    -> "dispatch" $Handling
+                }
+            }
+            state_name(): String { @@:("polling") }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                this.handle(this.current);
+                -> "done" $Polling
+            }
+            state_name(): String { @@:("handling") }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): String {
+                @@:("woke")
+                -> $Polling
+            }
+            state_name(): String { @@:("idle") }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    actions:
+        poll_source(): String {
+            if (this.pending.isEmpty) {
+                return "";
+            }
+            return this.pending.removeAt(0);
+        }
+        handle(msg: String): void {
+            print("handled: $msg");
+        }
+
+    domain:
+        pending: List<String> = <String>[]
+        current: String = ""
+}
+
+void main() {
+    var pc = PollingConsumer();
+    pc.supply("m1");
+    pc.supply("m2");
+
+    pc.start();
+    if ((pc.state_name() as String) != "polling")  throw "expected polling";
+
+    if ((pc.tick() as String) != "got_msg")        throw "expected got_msg #1";
+    if ((pc.state_name() as String) != "polling")  throw "expected polling after #1";
+
+    if ((pc.tick() as String) != "got_msg")        throw "expected got_msg #2";
+    if ((pc.state_name() as String) != "polling")  throw "expected polling after #2";
+
+    if ((pc.tick() as String) != "empty")          throw "expected empty";
+    if ((pc.state_name() as String) != "idle")     throw "expected idle";
+
+    if ((pc.tick() as String) != "woke")           throw "expected woke";
+    if ((pc.state_name() as String) != "polling")  throw "expected polling after woke";
+
+    pc.stop();
+    if ((pc.state_name() as String) != "stopped")  throw "expected stopped";
+
+    print("PASS: polling_consumer");
+}

@@ -1,0 +1,63 @@
+@@[target("erlang")]
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: str) {
+            self.pending = self.pending ++ [msg]
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): str
+        state_name(): str
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): str { @@:("stopped") }
+            state_name(): str { @@:("stopped") }
+        }
+
+        $Polling => $Active {
+            tick(): str {
+                if length(self.pending) == 0 {
+                    @@:("empty")
+                    -> "no work" $Idle
+                } else {
+                    self.current = hd(self.pending)
+                    self.pending = tl(self.pending)
+                    @@:("got_msg")
+                    -> "dispatch" $Handling
+                }
+            }
+            state_name(): str { @@:("polling") }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                io:format("handled: ~s~n", [Data#data.current])
+                -> "done" $Polling
+            }
+            state_name(): str { @@:("handling") }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): str {
+                @@:("woke")
+                -> $Polling
+            }
+            state_name(): str { @@:("idle") }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    domain:
+        pending = []
+        current = ""
+}

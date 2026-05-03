@@ -1,0 +1,96 @@
+@@[target("ruby")]
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: str) {
+            @pending.push(msg)
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): str
+        state_name(): str
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): str { @@:("stopped") }
+            state_name(): str { @@:("stopped") }
+        }
+
+        $Polling => $Active {
+            tick(): str {
+                msg = self.poll_source
+                if msg == ""
+                    @@:("empty")
+                    -> "no work" $Idle
+                else
+                    @current = msg
+                    @@:("got_msg")
+                    -> "dispatch" $Handling
+                end
+            }
+            state_name(): str { @@:("polling") }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                self.handle(@current)
+                -> "done" $Polling
+            }
+            state_name(): str { @@:("handling") }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): str {
+                @@:("woke")
+                -> $Polling
+            }
+            state_name(): str { @@:("idle") }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    actions:
+        poll_source() {
+            return "" if @pending.empty?
+            return @pending.shift
+        }
+        handle(msg) {
+            puts "handled: #{msg}"
+        }
+
+    domain:
+        pending = []
+        current = ""
+}
+
+pc = PollingConsumer.new
+pc.supply("m1")
+pc.supply("m2")
+
+pc.start
+raise "expected polling"          unless pc.state_name == "polling"
+
+raise "expected got_msg #1"       unless pc.tick == "got_msg"
+raise "expected polling after #1" unless pc.state_name == "polling"
+
+raise "expected got_msg #2"       unless pc.tick == "got_msg"
+raise "expected polling after #2" unless pc.state_name == "polling"
+
+raise "expected empty"            unless pc.tick == "empty"
+raise "expected idle"             unless pc.state_name == "idle"
+
+raise "expected woke"             unless pc.tick == "woke"
+raise "expected polling after woke" unless pc.state_name == "polling"
+
+pc.stop
+raise "expected stopped"          unless pc.state_name == "stopped"
+
+puts "PASS: polling_consumer"

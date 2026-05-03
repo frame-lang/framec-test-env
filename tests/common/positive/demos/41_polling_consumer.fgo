@@ -1,0 +1,109 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system PollingConsumer {
+    operations:
+        supply(msg: string) {
+            s.pending = append(s.pending, msg)
+        }
+
+    interface:
+        start()
+        stop()
+        tick(): string
+        state_name(): string
+
+    machine:
+        $Stopped {
+            start() { -> $Polling }
+            tick(): string { @@:("stopped") }
+            state_name(): string { @@:("stopped") }
+        }
+
+        $Polling => $Active {
+            tick(): string {
+                msg := s.poll_source()
+                if (msg == "") {
+                    @@:("empty")
+                    -> "no work" $Idle
+                } else {
+                    s.current = msg
+                    @@:("got_msg")
+                    -> "dispatch" $Handling
+                }
+            }
+            state_name(): string { @@:("polling") }
+            => $^
+        }
+
+        $Handling => $Active {
+            $>() {
+                s.handle(s.current)
+                -> "done" $Polling
+            }
+            state_name(): string { @@:("handling") }
+            => $^
+        }
+
+        $Idle => $Active {
+            tick(): string {
+                @@:("woke")
+                -> $Polling
+            }
+            state_name(): string { @@:("idle") }
+            => $^
+        }
+
+        $Active {
+            stop() { -> $Stopped }
+        }
+
+    actions:
+        poll_source(): string {
+            if len(s.pending) == 0 {
+                return ""
+            }
+            head := s.pending[0]
+            s.pending = s.pending[1:]
+            return head
+        }
+        handle(msg: string) {
+            fmt.Println("handled: " + msg)
+        }
+
+    domain:
+        pending: []string = []string{}
+        current: string = ""
+}
+
+func main() {
+    pc := NewPollingConsumer()
+    pc.Supply("m1")
+    pc.Supply("m2")
+
+    pc.Start()
+    if pc.State_name() != "polling" { fmt.Println("FAIL: expected polling"); os.Exit(1) }
+
+    if pc.Tick() != "got_msg"       { fmt.Println("FAIL: expected got_msg #1"); os.Exit(1) }
+    if pc.State_name() != "polling" { fmt.Println("FAIL: expected polling after #1"); os.Exit(1) }
+
+    if pc.Tick() != "got_msg"       { fmt.Println("FAIL: expected got_msg #2"); os.Exit(1) }
+    if pc.State_name() != "polling" { fmt.Println("FAIL: expected polling after #2"); os.Exit(1) }
+
+    if pc.Tick() != "empty"         { fmt.Println("FAIL: expected empty"); os.Exit(1) }
+    if pc.State_name() != "idle"    { fmt.Println("FAIL: expected idle"); os.Exit(1) }
+
+    if pc.Tick() != "woke"          { fmt.Println("FAIL: expected woke"); os.Exit(1) }
+    if pc.State_name() != "polling" { fmt.Println("FAIL: expected polling after woke"); os.Exit(1) }
+
+    pc.Stop()
+    if pc.State_name() != "stopped" { fmt.Println("FAIL: expected stopped"); os.Exit(1) }
+
+    fmt.Println("PASS: polling_consumer")
+}
