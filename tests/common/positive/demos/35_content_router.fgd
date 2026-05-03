@@ -1,0 +1,52 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@system ContentBasedRouter {
+    interface:
+        route(kind: String, payload: String): String
+
+    machine:
+        $Routing {
+            route(kind: String, payload: String): String {
+                if kind == "order":
+                    self.to_orders(payload)
+                    @@:("orders")
+                else:
+                    if kind == "refund":
+                        self.to_refunds(payload)
+                        @@:("refunds")
+                    else:
+                        self.to_dlq(payload)
+                        @@:("dlq")
+            }
+        }
+
+    actions:
+        to_orders(p)  { print("-> orders:  " + p) }
+        to_refunds(p) { print("-> refunds: " + p) }
+        to_dlq(p)     { print("-> dlq:     " + p) }
+}
+
+func main():
+    var r = @@ContentBasedRouter()
+    var failures = 0
+
+    if r.route("order",   "SKU-1") != "orders":
+        print("FAIL: expected orders")
+        failures += 1
+    if r.route("refund",  "INV-7") != "refunds":
+        print("FAIL: expected refunds")
+        failures += 1
+    if r.route("unknown", "???") != "dlq":
+        print("FAIL: expected dlq")
+        failures += 1
+
+    if failures > 0:
+        print("FAIL: content_router (" + str(failures) + " failures)")
+        quit(1)
+    print("PASS: content_router")
+
+func _init():
+    main()
+    quit()

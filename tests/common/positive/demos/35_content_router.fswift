@@ -1,0 +1,37 @@
+@@[target("swift")]
+
+import Foundation
+
+@@system ContentBasedRouter {
+    interface:
+        route(kind: String, payload: String): String
+
+    machine:
+        $Routing {
+            route(kind: String, payload: String): String {
+                if kind == "order" {
+                    self.to_orders(payload)
+                    @@:("orders")
+                } else {
+                    if kind == "refund" {
+                        self.to_refunds(payload)
+                        @@:("refunds")
+                    } else {
+                        self.to_dlq(payload)
+                        @@:("dlq")
+                    }
+                }
+            }
+        }
+
+    actions:
+        to_orders(p: String)  { print("-> orders:  \(p)") }
+        to_refunds(p: String) { print("-> refunds: \(p)") }
+        to_dlq(p: String)     { print("-> dlq:     \(p)") }
+}
+
+let r = @@ContentBasedRouter()
+if (r.route("order",   "SKU-1") as! String) != "orders"  { print("FAIL: orders");  exit(1) }
+if (r.route("refund",  "INV-7") as! String) != "refunds" { print("FAIL: refunds"); exit(1) }
+if (r.route("unknown", "???") as! String)    != "dlq"     { print("FAIL: dlq");     exit(1) }
+print("PASS: content_router")

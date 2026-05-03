@@ -1,0 +1,35 @@
+@@[target("ruby")]
+
+@@system ContentBasedRouter {
+    interface:
+        route(kind: str, payload: str): str
+
+    machine:
+        $Routing {
+            route(kind: str, payload: str): str {
+                if kind == "order"
+                    self.to_orders(payload)
+                    @@:("orders")
+                else
+                    if kind == "refund"
+                        self.to_refunds(payload)
+                        @@:("refunds")
+                    else
+                        self.to_dlq(payload)
+                        @@:("dlq")
+                    end
+                end
+            }
+        }
+
+    actions:
+        to_orders(p)  { puts "-> orders:  #{p}" }
+        to_refunds(p) { puts "-> refunds: #{p}" }
+        to_dlq(p)     { puts "-> dlq:     #{p}" }
+}
+
+r = ContentBasedRouter.new
+raise "Expected orders"  unless r.route("order",   "SKU-1") == "orders"
+raise "Expected refunds" unless r.route("refund",  "INV-7") == "refunds"
+raise "Expected dlq"     unless r.route("unknown", "???")    == "dlq"
+puts "PASS: content_router"

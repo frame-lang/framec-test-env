@@ -1,0 +1,41 @@
+@@[target("csharp")]
+
+using System;
+
+@@system ContentBasedRouter {
+    interface:
+        route(kind: String, payload: String): String
+
+    machine:
+        $Routing {
+            route(kind: String, payload: String): String {
+                if (kind == "order") {
+                    this.to_orders(payload);
+                    @@:("orders")
+                } else {
+                    if (kind == "refund") {
+                        this.to_refunds(payload);
+                        @@:("refunds")
+                    } else {
+                        this.to_dlq(payload);
+                        @@:("dlq")
+                    }
+                }
+            }
+        }
+
+    actions:
+        to_orders(p: String)  { Console.WriteLine("-> orders:  " + p); }
+        to_refunds(p: String) { Console.WriteLine("-> refunds: " + p); }
+        to_dlq(p: String)     { Console.WriteLine("-> dlq:     " + p); }
+}
+
+class Program {
+    static void Main(string[] args) {
+        var r = @@ContentBasedRouter();
+        if ((string) r.route("order",   "SKU-1") != "orders")  throw new Exception("Expected orders");
+        if ((string) r.route("refund",  "INV-7") != "refunds") throw new Exception("Expected refunds");
+        if ((string) r.route("unknown", "???")    != "dlq")     throw new Exception("Expected dlq");
+        Console.WriteLine("PASS: content_router");
+    }
+}

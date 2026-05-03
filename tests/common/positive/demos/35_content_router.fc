@@ -1,0 +1,42 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <string.h>
+
+@@system ContentBasedRouter {
+    interface:
+        route(kind: str, payload: str): str
+
+    machine:
+        $Routing {
+            route(kind: str, payload: str): str {
+                if (strcmp(kind, "order") == 0) {
+                    ContentBasedRouter_to_orders(self, payload);
+                    @@:("orders")
+                } else {
+                    if (strcmp(kind, "refund") == 0) {
+                        ContentBasedRouter_to_refunds(self, payload);
+                        @@:("refunds")
+                    } else {
+                        ContentBasedRouter_to_dlq(self, payload);
+                        @@:("dlq")
+                    }
+                }
+            }
+        }
+
+    actions:
+        to_orders(p: str)  { printf("-> orders:  %s\n", p); }
+        to_refunds(p: str) { printf("-> refunds: %s\n", p); }
+        to_dlq(p: str)     { printf("-> dlq:     %s\n", p); }
+}
+
+int main() {
+    ContentBasedRouter* r = @@ContentBasedRouter();
+    if (strcmp(ContentBasedRouter_route(r, "order",   "SKU-1"), "orders")  != 0) { printf("FAIL: orders\n"); return 1; }
+    if (strcmp(ContentBasedRouter_route(r, "refund",  "INV-7"), "refunds") != 0) { printf("FAIL: refunds\n"); return 1; }
+    if (strcmp(ContentBasedRouter_route(r, "unknown", "???"),    "dlq")     != 0) { printf("FAIL: dlq\n"); return 1; }
+    printf("PASS: content_router\n");
+    ContentBasedRouter_destroy(r);
+    return 0;
+}

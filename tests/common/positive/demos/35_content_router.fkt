@@ -1,0 +1,37 @@
+@@[target("kotlin")]
+
+@@system ContentBasedRouter {
+    interface:
+        route(kind: String, payload: String): String
+
+    machine:
+        $Routing {
+            route(kind: String, payload: String): String {
+                if (kind == "order") {
+                    this.to_orders(payload)
+                    @@:("orders")
+                } else {
+                    if (kind == "refund") {
+                        this.to_refunds(payload)
+                        @@:("refunds")
+                    } else {
+                        this.to_dlq(payload)
+                        @@:("dlq")
+                    }
+                }
+            }
+        }
+
+    actions:
+        to_orders(p: String)  { println("-> orders:  $p") }
+        to_refunds(p: String) { println("-> refunds: $p") }
+        to_dlq(p: String)     { println("-> dlq:     $p") }
+}
+
+fun main() {
+    val r = @@ContentBasedRouter()
+    if ((r.route("order",   "SKU-1") as String) != "orders")  throw RuntimeException("Expected orders")
+    if ((r.route("refund",  "INV-7") as String) != "refunds") throw RuntimeException("Expected refunds")
+    if ((r.route("unknown", "???") as String)    != "dlq")     throw RuntimeException("Expected dlq")
+    println("PASS: content_router")
+}

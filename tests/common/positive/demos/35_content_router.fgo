@@ -1,0 +1,44 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system ContentBasedRouter {
+    interface:
+        route(kind: string, payload: string): string
+
+    machine:
+        $Routing {
+            route(kind: string, payload: string): string {
+                if (kind == "order") {
+                    s.to_orders(payload)
+                    @@:("orders")
+                } else {
+                    if (kind == "refund") {
+                        s.to_refunds(payload)
+                        @@:("refunds")
+                    } else {
+                        s.to_dlq(payload)
+                        @@:("dlq")
+                    }
+                }
+            }
+        }
+
+    actions:
+        to_orders(p: string)  { fmt.Println("-> orders:  " + p) }
+        to_refunds(p: string) { fmt.Println("-> refunds: " + p) }
+        to_dlq(p: string)     { fmt.Println("-> dlq:     " + p) }
+}
+
+func main() {
+    r := NewContentBasedRouter()
+    if r.Route("order",   "SKU-1") != "orders"  { fmt.Println("FAIL: orders"); os.Exit(1) }
+    if r.Route("refund",  "INV-7") != "refunds" { fmt.Println("FAIL: refunds"); os.Exit(1) }
+    if r.Route("unknown", "???")    != "dlq"     { fmt.Println("FAIL: dlq"); os.Exit(1) }
+    fmt.Println("PASS: content_router")
+}

@@ -1,0 +1,39 @@
+@@[target("java")]
+
+@@system ContentBasedRouter {
+    interface:
+        route(kind: String, payload: String): String
+
+    machine:
+        $Routing {
+            route(kind: String, payload: String): String {
+                if (kind.equals("order")) {
+                    this.to_orders(payload);
+                    @@:("orders")
+                } else {
+                    if (kind.equals("refund")) {
+                        this.to_refunds(payload);
+                        @@:("refunds")
+                    } else {
+                        this.to_dlq(payload);
+                        @@:("dlq")
+                    }
+                }
+            }
+        }
+
+    actions:
+        to_orders(p: String)  { System.out.println("-> orders:  " + p); }
+        to_refunds(p: String) { System.out.println("-> refunds: " + p); }
+        to_dlq(p: String)     { System.out.println("-> dlq:     " + p); }
+}
+
+class Main {
+    public static void main(String[] args) {
+        var r = @@ContentBasedRouter();
+        if (!((String) r.route("order",   "SKU-1")).equals("orders"))  throw new RuntimeException("Expected orders");
+        if (!((String) r.route("refund",  "INV-7")).equals("refunds")) throw new RuntimeException("Expected refunds");
+        if (!((String) r.route("unknown", "???")).equals("dlq"))        throw new RuntimeException("Expected dlq");
+        System.out.println("PASS: content_router");
+    }
+}
