@@ -1,0 +1,88 @@
+@@[target("swift")]
+
+import Foundation
+
+@@[persist]
+@@system DeadLetterProcessor {
+    operations:
+        @@[save]
+        saveState(): String {}
+
+        @@[load]
+        restoreState(data: String) {}
+
+    interface:
+        accept(msg_id: String, payload: String): String
+        process_tick(): String
+        reset()
+
+    machine:
+        $Idle {
+            accept(msg_id: String, payload: String): String {
+                self.msg_id = msg_id
+                self.payload = payload
+                self.attempts = 0
+                @@:("accepted")
+                -> $Processing
+            }
+            process_tick(): String { @@:("idle") }
+        }
+
+        $Processing {
+            $>() {
+                self.attempts = self.attempts + 1
+            }
+            process_tick(): String {
+                if self.try_process(self.payload) {
+                    @@:("ok")
+                    -> "success" $Done
+                } else {
+                    if self.attempts >= self.max_attempts {
+                        @@:("dead_lettered")
+                        -> "exhausted" $DeadLettered
+                    } else {
+                        @@:("retrying")
+                        -> "retry" $Processing
+                    }
+                }
+            }
+        }
+
+        $Done {
+            process_tick(): String { @@:("done") }
+            reset() { -> $Idle }
+        }
+
+        $DeadLettered {
+            $>() {
+                self.to_dlq(self.msg_id, self.payload)
+            }
+            process_tick(): String { @@:("dead_lettered") }
+            reset() { -> $Idle }
+        }
+
+    actions:
+        try_process(payload: String): Bool {
+            return false
+        }
+        to_dlq(msg_id: String, payload: String) {
+            print("DLQ <- \(msg_id): \(payload)")
+        }
+
+    domain:
+        msg_id: String = ""
+        payload: String = ""
+        attempts: Int = 0
+        max_attempts: Int = 3
+}
+
+var p = @@DeadLetterProcessor()
+if (p.accept("m-42", "flaky work") as! String) != "accepted" { print("FAIL: accepted");    exit(1) }
+if (p.process_tick() as! String) != "retrying"               { print("FAIL: retrying #1"); exit(1) }
+if (p.process_tick() as! String) != "retrying"               { print("FAIL: retrying #2"); exit(1) }
+
+let data = p.saveState()
+var p2 = DeadLetterProcessor()
+p2.restoreState(data)
+if (p2.process_tick() as! String) != "dead_lettered"         { print("FAIL: dead_lettered"); exit(1) }
+print("PASS: dead_letter_channel")

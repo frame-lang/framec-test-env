@@ -1,0 +1,91 @@
+@@[target("dart")]
+
+import 'dart:convert';
+import 'dart:io';
+
+@@[persist]
+@@system DeadLetterProcessor {
+    operations:
+        @@[save]
+        saveState(): String {}
+
+        @@[load]
+        restoreState(data: String) {}
+
+    interface:
+        accept(msg_id: String, payload: String): String
+        process_tick(): String
+        reset()
+
+    machine:
+        $Idle {
+            accept(msg_id: String, payload: String): String {
+                this.msg_id = msg_id;
+                this.payload = payload;
+                this.attempts = 0;
+                @@:("accepted")
+                -> $Processing
+            }
+            process_tick(): String { @@:("idle") }
+        }
+
+        $Processing {
+            $>() {
+                this.attempts = this.attempts + 1;
+            }
+            process_tick(): String {
+                if (this.try_process(this.payload)) {
+                    @@:("ok")
+                    -> "success" $Done
+                } else {
+                    if (this.attempts >= this.max_attempts) {
+                        @@:("dead_lettered")
+                        -> "exhausted" $DeadLettered
+                    } else {
+                        @@:("retrying")
+                        -> "retry" $Processing
+                    }
+                }
+            }
+        }
+
+        $Done {
+            process_tick(): String { @@:("done") }
+            reset() { -> $Idle }
+        }
+
+        $DeadLettered {
+            $>() {
+                this.to_dlq(this.msg_id, this.payload);
+            }
+            process_tick(): String { @@:("dead_lettered") }
+            reset() { -> $Idle }
+        }
+
+    actions:
+        try_process(payload: String): bool {
+            return false;
+        }
+        to_dlq(msg_id: String, payload: String): void {
+            print("DLQ <- $msg_id: $payload");
+        }
+
+    domain:
+        msg_id: String = ""
+        payload: String = ""
+        attempts: int = 0
+        max_attempts: int = 3
+}
+
+void main() {
+    final p = DeadLetterProcessor();
+    if (p.accept("m-42", "flaky work") != "accepted") { print("FAIL: accepted");      exit(1); }
+    if (p.process_tick() != "retrying")               { print("FAIL: retrying #1");   exit(1); }
+    if (p.process_tick() != "retrying")               { print("FAIL: retrying #2");   exit(1); }
+
+    final data = p.saveState();
+    final p2 = DeadLetterProcessor();
+    p2.restoreState(data);
+    if (p2.process_tick() != "dead_lettered")         { print("FAIL: dead_lettered"); exit(1); }
+    print("PASS: dead_letter_channel");
+}

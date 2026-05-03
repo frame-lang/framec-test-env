@@ -1,0 +1,97 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@[persist]
+@@system DeadLetterProcessor {
+    operations:
+        @@[save]
+        save_state(): char* {}
+
+        @@[load]
+        restore_state(data: char*) {}
+
+    interface:
+        accept(msg_id: str, payload: str): str
+        process_tick(): str
+        reset()
+
+    machine:
+        $Idle {
+            accept(msg_id: str, payload: str): str {
+                self->msg_id = msg_id;
+                self->payload = payload;
+                self->attempts = 0;
+                @@:("accepted")
+                -> $Processing
+            }
+            process_tick(): str { @@:("idle") }
+        }
+
+        $Processing {
+            $>() {
+                self->attempts = self->attempts + 1;
+            }
+            process_tick(): str {
+                if (DeadLetterProcessor_try_process(self, self->payload)) {
+                    @@:("ok")
+                    -> "success" $Done
+                } else {
+                    if (self->attempts >= self->max_attempts) {
+                        @@:("dead_lettered")
+                        -> "exhausted" $DeadLettered
+                    } else {
+                        @@:("retrying")
+                        -> "retry" $Processing
+                    }
+                }
+            }
+        }
+
+        $Done {
+            process_tick(): str { @@:("done") }
+            reset() { -> $Idle }
+        }
+
+        $DeadLettered {
+            $>() {
+                DeadLetterProcessor_to_dlq(self, self->msg_id, self->payload);
+            }
+            process_tick(): str { @@:("dead_lettered") }
+            reset() { -> $Idle }
+        }
+
+    actions:
+        try_process(payload: str): int {
+            return 0;
+        }
+        to_dlq(msg_id: str, payload: str) {
+            printf("DLQ <- %s: %s\n", msg_id, payload);
+        }
+
+    domain:
+        msg_id: str = ""
+        payload: str = ""
+        attempts: int = 0
+        max_attempts: int = 3
+}
+
+int main() {
+    DeadLetterProcessor* p = @@DeadLetterProcessor();
+    if (strcmp(DeadLetterProcessor_accept(p, "m-42", "flaky work"), "accepted") != 0) { printf("FAIL: accepted\n");      return 1; }
+    if (strcmp(DeadLetterProcessor_process_tick(p), "retrying")                  != 0) { printf("FAIL: retrying #1\n");   return 1; }
+    if (strcmp(DeadLetterProcessor_process_tick(p), "retrying")                  != 0) { printf("FAIL: retrying #2\n");   return 1; }
+
+    char* data = DeadLetterProcessor_save_state(p);
+    DeadLetterProcessor* p2 = @@DeadLetterProcessor();
+    DeadLetterProcessor_restore_state(p2, data);
+    if (strcmp(DeadLetterProcessor_process_tick(p2), "dead_lettered")            != 0) { printf("FAIL: dead_lettered\n"); return 1; }
+    printf("PASS: dead_letter_channel\n");
+    free(data);
+    DeadLetterProcessor_destroy(p);
+    DeadLetterProcessor_destroy(p2);
+    return 0;
+}

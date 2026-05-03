@@ -1,0 +1,86 @@
+@@[target("python_3")]
+
+@@[persist]
+@@system DeadLetterProcessor {
+    operations:
+        @@[save]
+        save_state(): bytes {}
+
+        @@[load]
+        restore_state(data: bytes) {}
+
+    interface:
+        accept(msg_id: str, payload: str): str
+        process_tick(): str
+        reset()
+
+    machine:
+        $Idle {
+            accept(msg_id: str, payload: str): str {
+                self.msg_id = msg_id
+                self.payload = payload
+                self.attempts = 0
+                @@:("accepted")
+                -> $Processing
+            }
+            process_tick(): str { @@:("idle") }
+        }
+
+        $Processing {
+            $>() {
+                self.attempts = self.attempts + 1
+            }
+            process_tick(): str {
+                if self.try_process(self.payload):
+                    @@:("ok")
+                    -> "success" $Done
+                else:
+                    if self.attempts >= self.max_attempts:
+                        @@:("dead_lettered")
+                        -> "exhausted" $DeadLettered
+                    else:
+                        @@:("retrying")
+                        -> "retry" $Processing
+            }
+        }
+
+        $Done {
+            process_tick(): str { @@:("done") }
+            reset() { -> $Idle }
+        }
+
+        $DeadLettered {
+            $>() {
+                self.to_dlq(self.msg_id, self.payload)
+            }
+            process_tick(): str { @@:("dead_lettered") }
+            reset() { -> $Idle }
+        }
+
+    actions:
+        try_process(payload) {
+            return False
+        }
+        to_dlq(msg_id, payload) {
+            print(f"DLQ <- {msg_id}: {payload}")
+        }
+
+    domain:
+        msg_id: str = ""
+        payload: str = ""
+        attempts: int = 0
+        max_attempts: int = 3
+}
+
+if __name__ == '__main__':
+    p = @@DeadLetterProcessor()
+    assert p.accept("m-42", "flaky work") == "accepted"
+    assert p.process_tick() == "retrying"
+    assert p.process_tick() == "retrying"
+
+    snapshot = p.save_state()
+    p2 = DeadLetterProcessor()
+    p2.restore_state(snapshot)
+    # Counter survived: attempts == 2; one more retry hits max_attempts → dead_lettered.
+    assert p2.process_tick() == "dead_lettered"
+    print("PASS: dead_letter_channel")

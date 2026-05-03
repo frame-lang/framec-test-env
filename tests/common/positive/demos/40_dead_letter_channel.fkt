@@ -1,0 +1,88 @@
+@@[target("kotlin")]
+
+@@[persist]
+@@system DeadLetterProcessor {
+    operations:
+        @@[save]
+        save_state(): String {}
+
+        @@[load]
+        restore_state(data: String) {}
+
+    interface:
+        accept(msg_id: String, payload: String): String
+        process_tick(): String
+        reset()
+
+    machine:
+        $Idle {
+            accept(msg_id: String, payload: String): String {
+                this.msg_id = msg_id
+                this.payload = payload
+                this.attempts = 0
+                @@:("accepted")
+                -> $Processing
+            }
+            process_tick(): String { @@:("idle") }
+        }
+
+        $Processing {
+            $>() {
+                this.attempts = this.attempts + 1
+            }
+            process_tick(): String {
+                if (this.try_process(this.payload)) {
+                    @@:("ok")
+                    -> "success" $Done
+                } else {
+                    if (this.attempts >= this.max_attempts) {
+                        @@:("dead_lettered")
+                        -> "exhausted" $DeadLettered
+                    } else {
+                        @@:("retrying")
+                        -> "retry" $Processing
+                    }
+                }
+            }
+        }
+
+        $Done {
+            process_tick(): String { @@:("done") }
+            reset() { -> $Idle }
+        }
+
+        $DeadLettered {
+            $>() {
+                this.to_dlq(this.msg_id, this.payload)
+            }
+            process_tick(): String { @@:("dead_lettered") }
+            reset() { -> $Idle }
+        }
+
+    actions:
+        try_process(payload: String): Boolean {
+            return false
+        }
+        to_dlq(msg_id: String, payload: String) {
+            println("DLQ <- $msg_id: $payload")
+        }
+
+    domain:
+        msg_id: String = ""
+        payload: String = ""
+        attempts: Int = 0
+        max_attempts: Int = 3
+}
+
+fun main() {
+    val p = @@DeadLetterProcessor()
+    if ((p.accept("m-42", "flaky work") as String) != "accepted") throw RuntimeException("expected accepted")
+    if ((p.process_tick() as String) != "retrying")               throw RuntimeException("expected retrying #1")
+    if ((p.process_tick() as String) != "retrying")               throw RuntimeException("expected retrying #2")
+
+    val data = p.save_state() as String
+    val p2 = DeadLetterProcessor()
+    p2.restore_state(data)
+    if ((p2.process_tick() as String) != "dead_lettered")         throw RuntimeException("expected dead_lettered")
+    println("PASS: dead_letter_channel")
+}

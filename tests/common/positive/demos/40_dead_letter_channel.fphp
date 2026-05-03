@@ -1,0 +1,88 @@
+@@[target("php")]
+
+<?php
+
+@@[persist]
+@@system DeadLetterProcessor {
+    operations:
+        @@[save]
+        save_state(): string {}
+
+        @@[load]
+        restore_state(data: string) {}
+
+    interface:
+        accept(msg_id: str, payload: str): str
+        process_tick(): str
+        reset()
+
+    machine:
+        $Idle {
+            accept(msg_id: str, payload: str): str {
+                $this->msg_id = $msg_id;
+                $this->payload = $payload;
+                $this->attempts = 0;
+                @@:("accepted")
+                -> $Processing
+            }
+            process_tick(): str { @@:("idle") }
+        }
+
+        $Processing {
+            $>() {
+                $this->attempts = $this->attempts + 1;
+            }
+            process_tick(): str {
+                if ($this->try_process($this->payload)) {
+                    @@:("ok")
+                    -> "success" $Done
+                } else {
+                    if ($this->attempts >= $this->max_attempts) {
+                        @@:("dead_lettered")
+                        -> "exhausted" $DeadLettered
+                    } else {
+                        @@:("retrying")
+                        -> "retry" $Processing
+                    }
+                }
+            }
+        }
+
+        $Done {
+            process_tick(): str { @@:("done") }
+            reset() { -> $Idle }
+        }
+
+        $DeadLettered {
+            $>() {
+                $this->to_dlq($this->msg_id, $this->payload);
+            }
+            process_tick(): str { @@:("dead_lettered") }
+            reset() { -> $Idle }
+        }
+
+    actions:
+        try_process(payload) {
+            return false;
+        }
+        to_dlq(msg_id, payload) {
+            echo "DLQ <- " . $msg_id . ": " . $payload . "\n";
+        }
+
+    domain:
+        msg_id = ""
+        payload = ""
+        attempts = 0
+        max_attempts = 3
+}
+
+$p = @@DeadLetterProcessor();
+assert($p->accept("m-42", "flaky work") === "accepted");
+assert($p->process_tick() === "retrying");
+assert($p->process_tick() === "retrying");
+
+$data = $p->save_state();
+$p2 = new DeadLetterProcessor();
+$p2->restore_state($data);
+assert($p2->process_tick() === "dead_lettered");
+echo "PASS: dead_letter_channel\n";

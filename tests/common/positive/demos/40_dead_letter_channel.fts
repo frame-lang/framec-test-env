@@ -1,0 +1,86 @@
+@@[target("typescript")]
+
+@@[persist]
+@@system DeadLetterProcessor {
+    operations:
+        @@[save]
+        saveState(): string {}
+
+        @@[load]
+        restoreState(data: string) {}
+
+    interface:
+        accept(msg_id: str, payload: str): str
+        process_tick(): str
+        reset()
+
+    machine:
+        $Idle {
+            accept(msg_id: str, payload: str): str {
+                this.msg_id = msg_id;
+                this.payload = payload;
+                this.attempts = 0;
+                @@:("accepted")
+                -> $Processing
+            }
+            process_tick(): str { @@:("idle") }
+        }
+
+        $Processing {
+            $>() {
+                this.attempts = this.attempts + 1;
+            }
+            process_tick(): str {
+                if (this.try_process(this.payload)) {
+                    @@:("ok")
+                    -> "success" $Done
+                } else {
+                    if (this.attempts >= this.max_attempts) {
+                        @@:("dead_lettered")
+                        -> "exhausted" $DeadLettered
+                    } else {
+                        @@:("retrying")
+                        -> "retry" $Processing
+                    }
+                }
+            }
+        }
+
+        $Done {
+            process_tick(): str { @@:("done") }
+            reset() { -> $Idle }
+        }
+
+        $DeadLettered {
+            $>() {
+                this.to_dlq(this.msg_id, this.payload);
+            }
+            process_tick(): str { @@:("dead_lettered") }
+            reset() { -> $Idle }
+        }
+
+    actions:
+        try_process(payload: str): bool {
+            return false;
+        }
+        to_dlq(msg_id: str, payload: str) {
+            console.log("DLQ <- " + msg_id + ": " + payload);
+        }
+
+    domain:
+        msg_id: string = ""
+        payload: string = ""
+        attempts: int = 0
+        max_attempts: int = 3
+}
+
+const p = @@DeadLetterProcessor();
+if (p.accept("m-42", "flaky work") !== "accepted") throw new Error("expected accepted");
+if (p.process_tick() !== "retrying") throw new Error("expected retrying #1");
+if (p.process_tick() !== "retrying") throw new Error("expected retrying #2");
+
+const data = p.saveState();
+const p2 = @@DeadLetterProcessor();
+p2.restoreState(data);
+if (p2.process_tick() !== "dead_lettered") throw new Error("expected dead_lettered after restore");
+console.log("PASS: dead_letter_channel");

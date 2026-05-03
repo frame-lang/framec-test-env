@@ -1,0 +1,97 @@
+@@[target("go")]
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+@@[persist]
+@@system DeadLetterProcessor {
+    operations:
+        @@[save]
+        SaveState(): string {}
+
+        @@[load]
+        LoadState(data: string) {}
+
+    interface:
+        accept(msg_id: string, payload: string): string
+        process_tick(): string
+        reset()
+
+    machine:
+        $Idle {
+            accept(msg_id: string, payload: string): string {
+                s.msg_id = msg_id
+                s.payload = payload
+                s.attempts = 0
+                @@:("accepted")
+                -> $Processing
+            }
+            process_tick(): string { @@:("idle") }
+        }
+
+        $Processing {
+            $>() {
+                s.attempts = s.attempts + 1
+            }
+            process_tick(): string {
+                if (s.try_process(s.payload)) {
+                    @@:("ok")
+                    -> "success" $Done
+                } else {
+                    if (s.attempts >= s.max_attempts) {
+                        @@:("dead_lettered")
+                        -> "exhausted" $DeadLettered
+                    } else {
+                        @@:("retrying")
+                        -> "retry" $Processing
+                    }
+                }
+            }
+        }
+
+        $Done {
+            process_tick(): string { @@:("done") }
+            reset() { -> $Idle }
+        }
+
+        $DeadLettered {
+            $>() {
+                s.to_dlq(s.msg_id, s.payload)
+            }
+            process_tick(): string { @@:("dead_lettered") }
+            reset() { -> $Idle }
+        }
+
+    actions:
+        try_process(payload: string): bool {
+            return false
+        }
+        to_dlq(msg_id: string, payload: string) {
+            fmt.Println("DLQ <- " + msg_id + ": " + payload)
+        }
+
+    domain:
+        msg_id: string = ""
+        payload: string = ""
+        attempts: int = 0
+        max_attempts: int = 3
+}
+
+func main() {
+    p := NewDeadLetterProcessor()
+    if p.Accept("m-42", "flaky work") != "accepted" { fmt.Println("FAIL: accepted");      os.Exit(1) }
+    if p.Process_tick() != "retrying"                { fmt.Println("FAIL: retrying #1");   os.Exit(1) }
+    if p.Process_tick() != "retrying"                { fmt.Println("FAIL: retrying #2");   os.Exit(1) }
+
+    data := p.SaveState()
+    p2 := NewDeadLetterProcessor()
+    p2.LoadState(data)
+    if p2.Process_tick() != "dead_lettered"          { fmt.Println("FAIL: dead_lettered"); os.Exit(1) }
+    _ = json.Marshal // keep import
+    fmt.Println("PASS: dead_letter_channel")
+}

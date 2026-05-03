@@ -1,0 +1,90 @@
+@@[target("rust")]
+
+use serde_json;
+
+@@[persist]
+@@system DeadLetterProcessor {
+    operations:
+        @@[save]
+        save_state(): String {}
+
+        @@[load]
+        restore_state(data: String) {}
+
+    interface:
+        accept(msg_id: String, payload: String): String
+        process_tick(): String
+        reset()
+
+    machine:
+        $Idle {
+            accept(msg_id: String, payload: String): String {
+                self.msg_id = msg_id;
+                self.payload = payload;
+                self.attempts = 0;
+                @@:("accepted".to_string())
+                -> $Processing
+            }
+            process_tick(): String { @@:("idle".to_string()) }
+        }
+
+        $Processing {
+            $>() {
+                self.attempts = self.attempts + 1;
+            }
+            process_tick(): String {
+                if self.try_process(self.payload.clone()) {
+                    @@:("ok".to_string())
+                    -> "success" $Done
+                } else {
+                    if self.attempts >= self.max_attempts {
+                        @@:("dead_lettered".to_string())
+                        -> "exhausted" $DeadLettered
+                    } else {
+                        @@:("retrying".to_string())
+                        -> "retry" $Processing
+                    }
+                }
+            }
+        }
+
+        $Done {
+            process_tick(): String { @@:("done".to_string()) }
+            reset() { -> $Idle }
+        }
+
+        $DeadLettered {
+            $>() {
+                self.to_dlq(self.msg_id.clone(), self.payload.clone());
+            }
+            process_tick(): String { @@:("dead_lettered".to_string()) }
+            reset() { -> $Idle }
+        }
+
+    actions:
+        try_process(payload: String): bool {
+            return false;
+        }
+        to_dlq(msg_id: String, payload: String) {
+            println!("DLQ <- {}: {}", msg_id, payload);
+        }
+
+    domain:
+        msg_id: String = String::new()
+        payload: String = String::new()
+        attempts: i32 = 0
+        max_attempts: i32 = 3
+}
+
+fn main() {
+    let mut p = @@DeadLetterProcessor();
+    assert_eq!(p.accept("m-42".to_string(), "flaky work".to_string()), "accepted");
+    assert_eq!(p.process_tick(), "retrying");
+    assert_eq!(p.process_tick(), "retrying");
+
+    let data = p.save_state();
+    let mut p2 = DeadLetterProcessor::new();
+    p2.restore_state(data);
+    assert_eq!(p2.process_tick(), "dead_lettered");
+    println!("PASS: dead_letter_channel");
+}

@@ -1,0 +1,72 @@
+@@[target("erlang")]
+
+@@[persist]
+@@system DeadLetterProcessor {
+    operations:
+        @@[save]
+        save_state() {}
+
+        @@[load]
+        load_state(data) {}
+
+    interface:
+        accept(msg_id: str, payload: str): str
+        process_tick(): str
+        reset()
+
+    machine:
+        $Idle {
+            accept(msg_id: str, payload: str): str {
+                self.msg_id = msg_id
+                self.payload = payload
+                self.attempts = 0
+                @@:("accepted")
+                -> $Processing
+            }
+            process_tick(): str { @@:("idle") }
+        }
+
+        $Processing {
+            $>() {
+                self.attempts = self.attempts + 1
+            }
+            process_tick(): str {
+                if self.try_process(self.payload) {
+                    @@:("ok")
+                    -> "success" $Done
+                } else {
+                    if self.attempts >= self.max_attempts {
+                        @@:("dead_lettered")
+                        -> "exhausted" $DeadLettered
+                    } else {
+                        @@:("retrying")
+                        -> "retry" $Processing
+                    }
+                }
+            }
+        }
+
+        $Done {
+            process_tick(): str { @@:("done") }
+            reset() { -> $Idle }
+        }
+
+        $DeadLettered {
+            $>() {
+                io:format("DLQ <- ~s: ~s~n", [Data#data.msg_id, Data#data.payload])
+            }
+            process_tick(): str { @@:("dead_lettered") }
+            reset() { -> $Idle }
+        }
+
+    actions:
+        try_process(payload) {
+            false
+        }
+
+    domain:
+        msg_id = ""
+        payload = ""
+        attempts = 0
+        max_attempts = 3
+}

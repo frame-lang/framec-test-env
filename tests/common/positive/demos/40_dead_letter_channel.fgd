@@ -1,0 +1,93 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@[persist]
+@@system DeadLetterProcessor {
+    operations:
+        @@[save]
+        save_state(): String {}
+
+        @@[load]
+        restore_state(data: String) {}
+
+    interface:
+        accept(msg_id: str, payload: str): str
+        process_tick(): str
+        reset()
+
+    machine:
+        $Idle {
+            accept(msg_id: str, payload: str): str {
+                self.msg_id = msg_id
+                self.payload = payload
+                self.attempts = 0
+                @@:("accepted")
+                -> $Processing
+            }
+            process_tick(): str { @@:("idle") }
+        }
+
+        $Processing {
+            $>() {
+                self.attempts = self.attempts + 1
+            }
+            process_tick(): str {
+                if self.try_process(self.payload):
+                    @@:("ok")
+                    -> "success" $Done
+                else:
+                    if self.attempts >= self.max_attempts:
+                        @@:("dead_lettered")
+                        -> "exhausted" $DeadLettered
+                    else:
+                        @@:("retrying")
+                        -> "retry" $Processing
+            }
+        }
+
+        $Done {
+            process_tick(): str { @@:("done") }
+            reset() { -> $Idle }
+        }
+
+        $DeadLettered {
+            $>() {
+                self.to_dlq(self.msg_id, self.payload)
+            }
+            process_tick(): str { @@:("dead_lettered") }
+            reset() { -> $Idle }
+        }
+
+    actions:
+        try_process(payload) { return false }
+        to_dlq(msg_id, payload) { print("DLQ <- " + msg_id + ": " + payload) }
+
+    domain:
+        msg_id = ""
+        payload = ""
+        attempts = 0
+        max_attempts = 3
+}
+
+func main():
+    var p = @@DeadLetterProcessor()
+    var failures = 0
+
+    if p.accept("m-42", "flaky work") != "accepted": print("FAIL: accepted");      failures += 1
+    if p.process_tick() != "retrying":                print("FAIL: retrying #1");   failures += 1
+    if p.process_tick() != "retrying":                print("FAIL: retrying #2");   failures += 1
+
+    var data = p.save_state()
+    var p2 = DeadLetterProcessor.new()
+    p2.restore_state(data)
+    if p2.process_tick() != "dead_lettered":          print("FAIL: dead_lettered"); failures += 1
+
+    if failures > 0:
+        print("FAIL: dead_letter_channel (" + str(failures) + " failures)")
+        quit(1)
+    print("PASS: dead_letter_channel")
+
+func _init():
+    main()
+    quit()

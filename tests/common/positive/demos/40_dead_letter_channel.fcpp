@@ -1,0 +1,94 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <nlohmann/json.hpp>
+
+@@[persist]
+@@system DeadLetterProcessor {
+    operations:
+        @@[save]
+        save_state(): std::string {}
+
+        @@[load]
+        restore_state(data: std::string) {}
+
+    interface:
+        accept(msg_id: str, payload: str): str
+        process_tick(): str
+        reset()
+
+    machine:
+        $Idle {
+            accept(msg_id: str, payload: str): str {
+                this->msg_id = msg_id;
+                this->payload = payload;
+                this->attempts = 0;
+                @@:(std::string("accepted"))
+                -> $Processing
+            }
+            process_tick(): str { @@:(std::string("idle")) }
+        }
+
+        $Processing {
+            $>() {
+                this->attempts = this->attempts + 1;
+            }
+            process_tick(): str {
+                if (this->try_process(this->payload)) {
+                    @@:(std::string("ok"))
+                    -> "success" $Done
+                } else {
+                    if (this->attempts >= this->max_attempts) {
+                        @@:(std::string("dead_lettered"))
+                        -> "exhausted" $DeadLettered
+                    } else {
+                        @@:(std::string("retrying"))
+                        -> "retry" $Processing
+                    }
+                }
+            }
+        }
+
+        $Done {
+            process_tick(): str { @@:(std::string("done")) }
+            reset() { -> $Idle }
+        }
+
+        $DeadLettered {
+            $>() {
+                this->to_dlq(this->msg_id, this->payload);
+            }
+            process_tick(): str { @@:(std::string("dead_lettered")) }
+            reset() { -> $Idle }
+        }
+
+    actions:
+        try_process(payload: std::string): bool {
+            return false;
+        }
+        to_dlq(msg_id: std::string, payload: std::string) {
+            std::cout << "DLQ <- " << msg_id << ": " << payload << std::endl;
+        }
+
+    domain:
+        msg_id: std::string = ""
+        payload: std::string = ""
+        attempts: int = 0
+        max_attempts: int = 3
+}
+
+int main() {
+    DeadLetterProcessor p;
+    assert(std::any_cast<std::string>(p.accept("m-42", "flaky work")) == "accepted");
+    assert(std::any_cast<std::string>(p.process_tick()) == "retrying");
+    assert(std::any_cast<std::string>(p.process_tick()) == "retrying");
+
+    auto data = p.save_state();
+    DeadLetterProcessor p2;
+    p2.restore_state(data);
+    assert(std::any_cast<std::string>(p2.process_tick()) == "dead_lettered");
+    std::cout << "PASS: dead_letter_channel" << std::endl;
+    return 0;
+}
