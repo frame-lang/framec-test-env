@@ -1,0 +1,89 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system CircuitBreaker {
+    interface:
+        call(payload: str): str
+        record_failure()
+        record_success()
+        probe()
+        state_name(): str
+
+    machine:
+        $Closed {
+            $>() {
+                self->failures = 0;
+            }
+            call(payload: str): str {
+                @@:(CircuitBreaker_invoke(self, payload))
+            }
+            record_failure() {
+                self->failures = self->failures + 1;
+                if (self->failures >= self->threshold) {
+                    -> "trip" $Open
+                }
+            }
+            record_success() {
+                self->failures = 0;
+            }
+            state_name(): str { @@:("closed") }
+        }
+
+        $Open {
+            call(payload: str): str {
+                @@:("rejected: circuit open")
+            }
+            probe() {
+                -> $HalfOpen
+            }
+            state_name(): str { @@:("open") }
+        }
+
+        $HalfOpen {
+            call(payload: str): str {
+                @@:(CircuitBreaker_invoke(self, payload))
+            }
+            record_success() {
+                -> "recover" $Closed
+            }
+            record_failure() {
+                -> "re-trip" $Open
+            }
+            state_name(): str { @@:("half_open") }
+        }
+
+    actions:
+        invoke(payload: str): str {
+            static char buf[64];
+            snprintf(buf, sizeof(buf), "ok:%s", payload);
+            return buf;
+        }
+
+    domain:
+        failures: int = 0
+        threshold: int = 3
+}
+
+int main() {
+    CircuitBreaker* cb = @@CircuitBreaker();
+    for (int i = 0; i < 3; i++) {
+        CircuitBreaker_call(cb, "x");
+        CircuitBreaker_record_failure(cb);
+    }
+    const char* name = CircuitBreaker_state_name(cb);
+    if (strcmp(name, "open") != 0) { printf("FAIL: expected open, got %s\n", name); return 1; }
+    if (strcmp(CircuitBreaker_call(cb, "x"), "rejected: circuit open") != 0) { printf("FAIL: expected rejection\n"); return 1; }
+    CircuitBreaker_probe(cb);
+    name = CircuitBreaker_state_name(cb);
+    if (strcmp(name, "half_open") != 0) { printf("FAIL: expected half_open, got %s\n", name); return 1; }
+    CircuitBreaker_call(cb, "x");
+    CircuitBreaker_record_success(cb);
+    name = CircuitBreaker_state_name(cb);
+    if (strcmp(name, "closed") != 0) { printf("FAIL: expected closed, got %s\n", name); return 1; }
+    printf("PASS: circuit_breaker\n");
+    CircuitBreaker_destroy(cb);
+    return 0;
+}

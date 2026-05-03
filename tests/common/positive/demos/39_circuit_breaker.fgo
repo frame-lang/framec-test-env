@@ -1,0 +1,100 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system CircuitBreaker {
+    interface:
+        call(payload: string): string
+        record_failure()
+        record_success()
+        probe()
+        state_name(): string
+
+    machine:
+        $Closed {
+            $>() {
+                s.failures = 0
+            }
+            call(payload: string): string {
+                @@:(s.invoke(payload))
+            }
+            record_failure() {
+                s.failures = s.failures + 1
+                if (s.failures >= s.threshold) {
+                    -> "trip" $Open
+                }
+            }
+            record_success() {
+                s.failures = 0
+            }
+            state_name(): string { @@:("closed") }
+        }
+
+        $Open {
+            call(payload: string): string {
+                @@:("rejected: circuit open")
+            }
+            probe() {
+                -> $HalfOpen
+            }
+            state_name(): string { @@:("open") }
+        }
+
+        $HalfOpen {
+            call(payload: string): string {
+                @@:(s.invoke(payload))
+            }
+            record_success() {
+                -> "recover" $Closed
+            }
+            record_failure() {
+                -> "re-trip" $Open
+            }
+            state_name(): string { @@:("half_open") }
+        }
+
+    actions:
+        invoke(payload: string): string {
+            return "ok:" + payload
+        }
+
+    domain:
+        failures: int = 0
+        threshold: int = 3
+}
+
+func main() {
+    cb := NewCircuitBreaker()
+    for i := 0; i < 3; i++ {
+        cb.Call("x")
+        cb.Record_failure()
+    }
+    name := cb.State_name()
+    if name != "open" {
+        fmt.Printf("FAIL: expected open, got %s\n", name)
+        os.Exit(1)
+    }
+    if cb.Call("x") != "rejected: circuit open" {
+        fmt.Println("FAIL: expected rejection")
+        os.Exit(1)
+    }
+    cb.Probe()
+    name = cb.State_name()
+    if name != "half_open" {
+        fmt.Printf("FAIL: expected half_open, got %s\n", name)
+        os.Exit(1)
+    }
+    cb.Call("x")
+    cb.Record_success()
+    name = cb.State_name()
+    if name != "closed" {
+        fmt.Printf("FAIL: expected closed, got %s\n", name)
+        os.Exit(1)
+    }
+    fmt.Println("PASS: circuit_breaker")
+}

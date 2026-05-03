@@ -1,0 +1,81 @@
+@@[target("swift")]
+
+import Foundation
+
+@@system CircuitBreaker {
+    interface:
+        call(payload: String): String
+        record_failure()
+        record_success()
+        probe()
+        state_name(): String
+
+    machine:
+        $Closed {
+            $>() {
+                self.failures = 0
+            }
+            call(payload: String): String {
+                @@:(self.invoke(payload))
+            }
+            record_failure() {
+                self.failures = self.failures + 1
+                if self.failures >= self.threshold {
+                    -> "trip" $Open
+                }
+            }
+            record_success() {
+                self.failures = 0
+            }
+            state_name(): String { @@:("closed") }
+        }
+
+        $Open {
+            call(payload: String): String {
+                @@:("rejected: circuit open")
+            }
+            probe() {
+                -> $HalfOpen
+            }
+            state_name(): String { @@:("open") }
+        }
+
+        $HalfOpen {
+            call(payload: String): String {
+                @@:(self.invoke(payload))
+            }
+            record_success() {
+                -> "recover" $Closed
+            }
+            record_failure() {
+                -> "re-trip" $Open
+            }
+            state_name(): String { @@:("half_open") }
+        }
+
+    actions:
+        invoke(payload: String): String {
+            return "ok:\(payload)"
+        }
+
+    domain:
+        failures: Int = 0
+        threshold: Int = 3
+}
+
+let cb = @@CircuitBreaker()
+for _ in 0..<3 {
+    let _ = cb.call("x")
+    cb.record_failure()
+}
+var s = cb.state_name() as! String
+if s != "open" { print("FAIL: expected open, got \(s)"); exit(1) }
+if (cb.call("x") as! String) != "rejected: circuit open" { print("FAIL: expected rejection"); exit(1) }
+cb.probe()
+s = cb.state_name() as! String
+if s != "half_open" { print("FAIL: expected half_open, got \(s)"); exit(1) }
+let _ = cb.call("x")
+cb.record_success()
+s = cb.state_name() as! String
+if s != "closed" { print("FAIL: expected closed, got \(s)"); exit(1) }
+print("PASS: circuit_breaker")

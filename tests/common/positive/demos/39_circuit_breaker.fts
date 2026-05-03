@@ -1,0 +1,76 @@
+@@[target("typescript")]
+
+@@system CircuitBreaker {
+    interface:
+        call(payload: str): str
+        record_failure()
+        record_success()
+        probe()
+        state_name(): str
+
+    machine:
+        $Closed {
+            $>() {
+                this.failures = 0;
+            }
+            call(payload: str): str {
+                @@:(this.invoke(payload))
+            }
+            record_failure() {
+                this.failures = this.failures + 1;
+                if (this.failures >= this.threshold) {
+                    -> "trip" $Open
+                }
+            }
+            record_success() {
+                this.failures = 0;
+            }
+            state_name(): str { @@:("closed") }
+        }
+
+        $Open {
+            call(payload: str): str {
+                @@:("rejected: circuit open")
+            }
+            probe() {
+                -> $HalfOpen
+            }
+            state_name(): str { @@:("open") }
+        }
+
+        $HalfOpen {
+            call(payload: str): str {
+                @@:(this.invoke(payload))
+            }
+            record_success() {
+                -> "recover" $Closed
+            }
+            record_failure() {
+                -> "re-trip" $Open
+            }
+            state_name(): str { @@:("half_open") }
+        }
+
+    actions:
+        invoke(payload: str): str {
+            return `ok:${payload}`;
+        }
+
+    domain:
+        failures: int = 0
+        threshold: int = 3
+}
+
+const cb = @@CircuitBreaker();
+for (let i = 0; i < 3; i++) {
+    cb.call("x");
+    cb.record_failure();
+}
+if (cb.state_name() !== "open") throw new Error(`Expected open, got ${cb.state_name()}`);
+if (cb.call("x") !== "rejected: circuit open") throw new Error("Expected rejection");
+cb.probe();
+if (cb.state_name() !== "half_open") throw new Error(`Expected half_open, got ${cb.state_name()}`);
+cb.call("x");
+cb.record_success();
+if (cb.state_name() !== "closed") throw new Error(`Expected closed, got ${cb.state_name()}`);
+console.log("PASS: circuit_breaker");

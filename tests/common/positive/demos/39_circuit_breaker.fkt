@@ -1,0 +1,81 @@
+@@[target("kotlin")]
+
+@@system CircuitBreaker {
+    interface:
+        call(payload: String): String
+        record_failure()
+        record_success()
+        probe()
+        state_name(): String
+
+    machine:
+        $Closed {
+            $>() {
+                this.failures = 0
+            }
+            call(payload: String): String {
+                @@:(this.invoke(payload))
+            }
+            record_failure() {
+                this.failures = this.failures + 1
+                if (this.failures >= this.threshold) {
+                    -> "trip" $Open
+                }
+            }
+            record_success() {
+                this.failures = 0
+            }
+            state_name(): String { @@:("closed") }
+        }
+
+        $Open {
+            call(payload: String): String {
+                @@:("rejected: circuit open")
+            }
+            probe() {
+                -> $HalfOpen
+            }
+            state_name(): String { @@:("open") }
+        }
+
+        $HalfOpen {
+            call(payload: String): String {
+                @@:(this.invoke(payload))
+            }
+            record_success() {
+                -> "recover" $Closed
+            }
+            record_failure() {
+                -> "re-trip" $Open
+            }
+            state_name(): String { @@:("half_open") }
+        }
+
+    actions:
+        invoke(payload: String): String {
+            return "ok:$payload"
+        }
+
+    domain:
+        failures: Int = 0
+        threshold: Int = 3
+}
+
+fun main() {
+    val cb = @@CircuitBreaker()
+    for (i in 0 until 3) {
+        cb.call("x")
+        cb.record_failure()
+    }
+    var s = cb.state_name() as String
+    if (s != "open") throw RuntimeException("Expected open, got $s")
+    if ((cb.call("x") as String) != "rejected: circuit open") throw RuntimeException("Expected rejection")
+    cb.probe()
+    s = cb.state_name() as String
+    if (s != "half_open") throw RuntimeException("Expected half_open, got $s")
+    cb.call("x")
+    cb.record_success()
+    s = cb.state_name() as String
+    if (s != "closed") throw RuntimeException("Expected closed, got $s")
+    println("PASS: circuit_breaker")
+}

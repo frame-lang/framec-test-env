@@ -1,0 +1,62 @@
+@@[target("erlang")]
+
+@@system CircuitBreaker {
+    interface:
+        call(payload: str): str
+        record_failure()
+        record_success()
+        probe()
+        state_name(): str
+
+    machine:
+        $Closed {
+            $>() {
+                self.failures = 0
+            }
+            call(payload: str): str {
+                @@:(self.invoke(payload))
+            }
+            record_failure() {
+                self.failures = self.failures + 1
+                if self.failures >= self.threshold {
+                    -> "trip" $Open
+                }
+            }
+            record_success() {
+                self.failures = 0
+            }
+            state_name(): str { @@:("closed") }
+        }
+
+        $Open {
+            call(payload: str): str {
+                @@:("rejected: circuit open")
+            }
+            probe() {
+                -> $HalfOpen
+            }
+            state_name(): str { @@:("open") }
+        }
+
+        $HalfOpen {
+            call(payload: str): str {
+                @@:(self.invoke(payload))
+            }
+            record_success() {
+                -> "recover" $Closed
+            }
+            record_failure() {
+                -> "re-trip" $Open
+            }
+            state_name(): str { @@:("half_open") }
+        }
+
+    actions:
+        invoke(payload) {
+            "ok:" ++ payload
+        }
+
+    domain:
+        failures = 0
+        threshold = 3
+}

@@ -1,0 +1,95 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@system CircuitBreaker {
+    interface:
+        try_call(payload: String): String
+        record_failure()
+        record_success()
+        probe()
+        state_name(): String
+
+    machine:
+        $Closed {
+            $>() {
+                self.failures = 0
+            }
+            try_call(payload: String): String {
+                @@:(self.invoke(payload))
+            }
+            record_failure() {
+                self.failures = self.failures + 1
+                if self.failures >= self.threshold:
+                    -> "trip" $Open
+            }
+            record_success() {
+                self.failures = 0
+            }
+            state_name(): String { @@:("closed") }
+        }
+
+        $Open {
+            try_call(payload: String): String {
+                @@:("rejected: circuit open")
+            }
+            probe() {
+                -> $HalfOpen
+            }
+            state_name(): String { @@:("open") }
+        }
+
+        $HalfOpen {
+            try_call(payload: String): String {
+                @@:(self.invoke(payload))
+            }
+            record_success() {
+                -> "recover" $Closed
+            }
+            record_failure() {
+                -> "re-trip" $Open
+            }
+            state_name(): String { @@:("half_open") }
+        }
+
+    actions:
+        invoke(payload) {
+            return "ok:" + payload
+        }
+
+    domain:
+        failures: int = 0
+        threshold: int = 3
+}
+
+func main():
+    var cb = @@CircuitBreaker()
+    var failures = 0
+
+    for i in range(3):
+        cb.try_call("x")
+        cb.record_failure()
+    if cb.state_name() != "open":
+        print("FAIL: expected open, got " + str(cb.state_name()))
+        failures += 1
+    if cb.try_call("x") != "rejected: circuit open":
+        print("FAIL: expected rejection")
+        failures += 1
+    cb.probe()
+    if cb.state_name() != "half_open":
+        print("FAIL: expected half_open, got " + str(cb.state_name()))
+        failures += 1
+    cb.try_call("x")
+    cb.record_success()
+    if cb.state_name() != "closed":
+        print("FAIL: expected closed, got " + str(cb.state_name()))
+        failures += 1
+
+    if failures > 0:
+        print("FAIL: circuit_breaker (" + str(failures) + " failures)")
+        quit(1)
+    print("PASS: circuit_breaker")
+
+func _init():
+    main()
+    quit()

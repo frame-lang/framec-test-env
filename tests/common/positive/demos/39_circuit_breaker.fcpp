@@ -1,0 +1,83 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system CircuitBreaker {
+    interface:
+        call(payload: str): str
+        record_failure()
+        record_success()
+        probe()
+        state_name(): str
+
+    machine:
+        $Closed {
+            $>() {
+                this->failures = 0;
+            }
+            call(payload: str): str {
+                @@:(this->invoke(payload))
+            }
+            record_failure() {
+                this->failures = this->failures + 1;
+                if (this->failures >= this->threshold) {
+                    -> "trip" $Open
+                }
+            }
+            record_success() {
+                this->failures = 0;
+            }
+            state_name(): str { @@:(std::string("closed")) }
+        }
+
+        $Open {
+            call(payload: str): str {
+                @@:(std::string("rejected: circuit open"))
+            }
+            probe() {
+                -> $HalfOpen
+            }
+            state_name(): str { @@:(std::string("open")) }
+        }
+
+        $HalfOpen {
+            call(payload: str): str {
+                @@:(this->invoke(payload))
+            }
+            record_success() {
+                -> "recover" $Closed
+            }
+            record_failure() {
+                -> "re-trip" $Open
+            }
+            state_name(): str { @@:(std::string("half_open")) }
+        }
+
+    actions:
+        invoke(payload: std::string): std::string {
+            return "ok:" + payload;
+        }
+
+    domain:
+        failures: int = 0
+        threshold: int = 3
+}
+
+int main() {
+    CircuitBreaker cb;
+    for (int i = 0; i < 3; i++) {
+        cb.call("x");
+        cb.record_failure();
+    }
+    assert(cb.state_name() == "open");
+    assert(cb.call("x") == "rejected: circuit open");
+    cb.probe();
+    assert(cb.state_name() == "half_open");
+    cb.call("x");
+    cb.record_success();
+    assert(cb.state_name() == "closed");
+    std::cout << "PASS: circuit_breaker" << std::endl;
+    return 0;
+}

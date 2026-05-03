@@ -1,0 +1,78 @@
+@@[target("rust")]
+
+@@system CircuitBreaker {
+    interface:
+        call(payload: String): String
+        record_failure()
+        record_success()
+        probe()
+        state_name(): String
+
+    machine:
+        $Closed {
+            $>() {
+                self.failures = 0;
+            }
+            call(payload: String): String {
+                @@:(self.invoke(payload))
+            }
+            record_failure() {
+                self.failures = self.failures + 1;
+                if self.failures >= self.threshold {
+                    -> "trip" $Open
+                }
+            }
+            record_success() {
+                self.failures = 0;
+            }
+            state_name(): String { @@:("closed".to_string()) }
+        }
+
+        $Open {
+            call(payload: String): String {
+                @@:("rejected: circuit open".to_string())
+            }
+            probe() {
+                -> $HalfOpen
+            }
+            state_name(): String { @@:("open".to_string()) }
+        }
+
+        $HalfOpen {
+            call(payload: String): String {
+                @@:(self.invoke(payload))
+            }
+            record_success() {
+                -> "recover" $Closed
+            }
+            record_failure() {
+                -> "re-trip" $Open
+            }
+            state_name(): String { @@:("half_open".to_string()) }
+        }
+
+    actions:
+        invoke(payload: String): String {
+            return format!("ok:{}", payload);
+        }
+
+    domain:
+        failures: i32 = 0
+        threshold: i32 = 3
+}
+
+fn main() {
+    let mut cb = @@CircuitBreaker();
+    for _ in 0..3 {
+        cb.call("x".to_string());
+        cb.record_failure();
+    }
+    assert_eq!(cb.state_name(), "open");
+    assert_eq!(cb.call("x".to_string()), "rejected: circuit open");
+    cb.probe();
+    assert_eq!(cb.state_name(), "half_open");
+    cb.call("x".to_string());
+    cb.record_success();
+    assert_eq!(cb.state_name(), "closed");
+    println!("PASS: circuit_breaker");
+}

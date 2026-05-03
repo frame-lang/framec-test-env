@@ -1,0 +1,83 @@
+@@[target("java")]
+
+@@system CircuitBreaker {
+    interface:
+        call(payload: String): String
+        record_failure()
+        record_success()
+        probe()
+        state_name(): String
+
+    machine:
+        $Closed {
+            $>() {
+                this.failures = 0;
+            }
+            call(payload: String): String {
+                @@:(this.invoke(payload))
+            }
+            record_failure() {
+                this.failures = this.failures + 1;
+                if (this.failures >= this.threshold) {
+                    -> "trip" $Open
+                }
+            }
+            record_success() {
+                this.failures = 0;
+            }
+            state_name(): String { @@:("closed") }
+        }
+
+        $Open {
+            call(payload: String): String {
+                @@:("rejected: circuit open")
+            }
+            probe() {
+                -> $HalfOpen
+            }
+            state_name(): String { @@:("open") }
+        }
+
+        $HalfOpen {
+            call(payload: String): String {
+                @@:(this.invoke(payload))
+            }
+            record_success() {
+                -> "recover" $Closed
+            }
+            record_failure() {
+                -> "re-trip" $Open
+            }
+            state_name(): String { @@:("half_open") }
+        }
+
+    actions:
+        invoke(payload: String): String {
+            return "ok:" + payload;
+        }
+
+    domain:
+        failures: int = 0
+        threshold: int = 3
+}
+
+class Main {
+    public static void main(String[] args) {
+        var cb = @@CircuitBreaker();
+        for (int i = 0; i < 3; i++) {
+            cb.call("x");
+            cb.record_failure();
+        }
+        var s = (String) cb.state_name();
+        if (!s.equals("open")) throw new RuntimeException("Expected open, got " + s);
+        if (!((String) cb.call("x")).equals("rejected: circuit open")) throw new RuntimeException("Expected rejection");
+        cb.probe();
+        s = (String) cb.state_name();
+        if (!s.equals("half_open")) throw new RuntimeException("Expected half_open, got " + s);
+        cb.call("x");
+        cb.record_success();
+        s = (String) cb.state_name();
+        if (!s.equals("closed")) throw new RuntimeException("Expected closed, got " + s);
+        System.out.println("PASS: circuit_breaker");
+    }
+}

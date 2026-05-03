@@ -1,0 +1,85 @@
+@@[target("csharp")]
+
+using System;
+
+@@system CircuitBreaker {
+    interface:
+        call(payload: String): String
+        record_failure()
+        record_success()
+        probe()
+        state_name(): String
+
+    machine:
+        $Closed {
+            $>() {
+                this.failures = 0;
+            }
+            call(payload: String): String {
+                @@:(this.invoke(payload))
+            }
+            record_failure() {
+                this.failures = this.failures + 1;
+                if (this.failures >= this.threshold) {
+                    -> "trip" $Open
+                }
+            }
+            record_success() {
+                this.failures = 0;
+            }
+            state_name(): String { @@:("closed") }
+        }
+
+        $Open {
+            call(payload: String): String {
+                @@:("rejected: circuit open")
+            }
+            probe() {
+                -> $HalfOpen
+            }
+            state_name(): String { @@:("open") }
+        }
+
+        $HalfOpen {
+            call(payload: String): String {
+                @@:(this.invoke(payload))
+            }
+            record_success() {
+                -> "recover" $Closed
+            }
+            record_failure() {
+                -> "re-trip" $Open
+            }
+            state_name(): String { @@:("half_open") }
+        }
+
+    actions:
+        invoke(payload: String): String {
+            return "ok:" + payload;
+        }
+
+    domain:
+        failures: int = 0
+        threshold: int = 3
+}
+
+class Program {
+    static void Main(string[] args) {
+        var cb = @@CircuitBreaker();
+        for (int i = 0; i < 3; i++) {
+            cb.call("x");
+            cb.record_failure();
+        }
+        var s = (string) cb.state_name();
+        if (s != "open") throw new Exception("Expected open, got " + s);
+        if ((string) cb.call("x") != "rejected: circuit open") throw new Exception("Expected rejection");
+        cb.probe();
+        s = (string) cb.state_name();
+        if (s != "half_open") throw new Exception("Expected half_open, got " + s);
+        cb.call("x");
+        cb.record_success();
+        s = (string) cb.state_name();
+        if (s != "closed") throw new Exception("Expected closed, got " + s);
+        Console.WriteLine("PASS: circuit_breaker");
+    }
+}

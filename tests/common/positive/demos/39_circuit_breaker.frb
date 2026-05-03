@@ -1,0 +1,76 @@
+@@[target("ruby")]
+
+@@system CircuitBreaker {
+    interface:
+        call(payload: str): str
+        record_failure()
+        record_success()
+        probe()
+        state_name(): str
+
+    machine:
+        $Closed {
+            $>() {
+                @failures = 0
+            }
+            call(payload: str): str {
+                @@:(self.invoke(payload))
+            }
+            record_failure() {
+                @failures = @failures + 1
+                if @failures >= @threshold
+                    -> "trip" $Open
+                end
+            }
+            record_success() {
+                @failures = 0
+            }
+            state_name(): str { @@:("closed") }
+        }
+
+        $Open {
+            call(payload: str): str {
+                @@:("rejected: circuit open")
+            }
+            probe() {
+                -> $HalfOpen
+            }
+            state_name(): str { @@:("open") }
+        }
+
+        $HalfOpen {
+            call(payload: str): str {
+                @@:(self.invoke(payload))
+            }
+            record_success() {
+                -> "recover" $Closed
+            }
+            record_failure() {
+                -> "re-trip" $Open
+            }
+            state_name(): str { @@:("half_open") }
+        }
+
+    actions:
+        invoke(payload) {
+            return "ok:#{payload}"
+        }
+
+    domain:
+        failures = 0
+        threshold = 3
+}
+
+cb = CircuitBreaker.new
+3.times do
+    cb.call("x")
+    cb.record_failure
+end
+raise "Expected open, got #{cb.state_name}" unless cb.state_name == "open"
+raise "Expected rejection" unless cb.call("x") == "rejected: circuit open"
+cb.probe
+raise "Expected half_open, got #{cb.state_name}" unless cb.state_name == "half_open"
+cb.call("x")
+cb.record_success
+raise "Expected closed, got #{cb.state_name}" unless cb.state_name == "closed"
+puts "PASS: circuit_breaker"
