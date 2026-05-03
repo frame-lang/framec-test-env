@@ -1,0 +1,48 @@
+@@[target("dart")]
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: String, part: String): String
+        status(): String
+
+    machine:
+        $Collecting {
+            receive(correlation_id: String, part: String): String {
+                if (!this.groups.containsKey(correlation_id)) {
+                    this.groups[correlation_id] = <String>[];
+                }
+                this.groups[correlation_id]!.add(part);
+
+                if (this.groups[correlation_id]!.length >= this.expected_parts) {
+                    var parts = this.groups.remove(correlation_id)!;
+                    var combined = parts.join(",");
+                    this.emit(correlation_id, combined);
+                    @@:("complete")
+                } else {
+                    @@:("collecting")
+                }
+            }
+            status(): String {
+                @@:("in_flight=${this.groups.length}")
+            }
+        }
+
+    actions:
+        emit(cid: String, combined: String): void {
+            print("[$cid] -> $combined");
+        }
+
+    domain:
+        groups: Map<String, List<String>> = <String, List<String>>{}
+        expected_parts: int = 3
+}
+
+void main() {
+    var a = Aggregator();
+    if ((a.receive("A", "p1") as String) != "collecting") throw "expected collecting #1";
+    if ((a.receive("B", "p1") as String) != "collecting") throw "expected collecting #2";
+    if ((a.receive("A", "p2") as String) != "collecting") throw "expected collecting #3";
+    if ((a.receive("A", "p3") as String) != "complete")   throw "expected complete";
+    if ((a.status() as String) != "in_flight=1")           throw "expected in_flight=1";
+    print("PASS: aggregator");
+}

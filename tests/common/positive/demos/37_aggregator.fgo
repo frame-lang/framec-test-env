@@ -1,0 +1,57 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: string, part: string): string
+        status(): string
+
+    machine:
+        $Collecting {
+            receive(correlation_id: string, part: string): string {
+                if _, ok := s.groups[correlation_id]; !ok {
+                    s.groups[correlation_id] = []string{}
+                }
+                s.groups[correlation_id] = append(s.groups[correlation_id], part)
+
+                if len(s.groups[correlation_id]) >= s.expected_parts {
+                    parts := s.groups[correlation_id]
+                    delete(s.groups, correlation_id)
+                    combined := strings.Join(parts, ",")
+                    s.emit(correlation_id, combined)
+                    @@:("complete")
+                } else {
+                    @@:("collecting")
+                }
+            }
+            status(): string {
+                @@:(fmt.Sprintf("in_flight=%d", len(s.groups)))
+            }
+        }
+
+    actions:
+        emit(cid: string, combined: string) {
+            fmt.Printf("[%s] -> %s\n", cid, combined)
+        }
+
+    domain:
+        groups: map[string][]string = map[string][]string{}
+        expected_parts: int = 3
+}
+
+func main() {
+    a := NewAggregator()
+    if a.Receive("A", "p1") != "collecting" { fmt.Println("FAIL: collecting #1"); os.Exit(1) }
+    if a.Receive("B", "p1") != "collecting" { fmt.Println("FAIL: collecting #2"); os.Exit(1) }
+    if a.Receive("A", "p2") != "collecting" { fmt.Println("FAIL: collecting #3"); os.Exit(1) }
+    if a.Receive("A", "p3") != "complete"   { fmt.Println("FAIL: complete");      os.Exit(1) }
+    if a.Status() != "in_flight=1"           { fmt.Println("FAIL: in_flight=1");   os.Exit(1) }
+    fmt.Println("PASS: aggregator")
+}

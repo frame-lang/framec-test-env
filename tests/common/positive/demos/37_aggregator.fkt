@@ -1,0 +1,48 @@
+@@[target("kotlin")]
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: String, part: String): String
+        status(): String
+
+    machine:
+        $Collecting {
+            receive(correlation_id: String, part: String): String {
+                if (!this.groups.containsKey(correlation_id)) {
+                    this.groups[correlation_id] = mutableListOf()
+                }
+                this.groups[correlation_id]!!.add(part)
+
+                if (this.groups[correlation_id]!!.size >= this.expected_parts) {
+                    val parts = this.groups.remove(correlation_id)!!
+                    val combined = parts.joinToString(",")
+                    this.emit(correlation_id, combined)
+                    @@:("complete")
+                } else {
+                    @@:("collecting")
+                }
+            }
+            status(): String {
+                @@:("in_flight=${this.groups.size}")
+            }
+        }
+
+    actions:
+        emit(cid: String, combined: String) {
+            println("[$cid] -> $combined")
+        }
+
+    domain:
+        groups: MutableMap<String, MutableList<String>> = mutableMapOf()
+        expected_parts: Int = 3
+}
+
+fun main() {
+    val a = @@Aggregator()
+    if ((a.receive("A", "p1") as String) != "collecting") throw RuntimeException("expected collecting #1")
+    if ((a.receive("B", "p1") as String) != "collecting") throw RuntimeException("expected collecting #2")
+    if ((a.receive("A", "p2") as String) != "collecting") throw RuntimeException("expected collecting #3")
+    if ((a.receive("A", "p3") as String) != "complete")   throw RuntimeException("expected complete")
+    if ((a.status() as String) != "in_flight=1")           throw RuntimeException("expected in_flight=1")
+    println("PASS: aggregator")
+}

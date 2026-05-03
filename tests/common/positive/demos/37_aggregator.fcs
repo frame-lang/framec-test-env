@@ -1,0 +1,54 @@
+@@[target("csharp")]
+
+using System;
+using System.Collections.Generic;
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: String, part: String): String
+        status(): String
+
+    machine:
+        $Collecting {
+            receive(correlation_id: String, part: String): String {
+                if (!this.groups.ContainsKey(correlation_id)) {
+                    this.groups[correlation_id] = new List<string>();
+                }
+                this.groups[correlation_id].Add(part);
+
+                if (this.groups[correlation_id].Count >= this.expected_parts) {
+                    var parts = this.groups[correlation_id];
+                    this.groups.Remove(correlation_id);
+                    var combined = string.Join(",", parts);
+                    this.emit(correlation_id, combined);
+                    @@:("complete")
+                } else {
+                    @@:("collecting")
+                }
+            }
+            status(): String {
+                @@:($"in_flight={this.groups.Count}")
+            }
+        }
+
+    actions:
+        emit(cid: String, combined: String) {
+            Console.WriteLine($"[{cid}] -> {combined}");
+        }
+
+    domain:
+        groups: Dictionary<string, List<string>> = new Dictionary<string, List<string>>()
+        expected_parts: int = 3
+}
+
+class Program {
+    static void Main(string[] args) {
+        var a = @@Aggregator();
+        if ((string) a.receive("A", "p1") != "collecting") throw new Exception("expected collecting #1");
+        if ((string) a.receive("B", "p1") != "collecting") throw new Exception("expected collecting #2");
+        if ((string) a.receive("A", "p2") != "collecting") throw new Exception("expected collecting #3");
+        if ((string) a.receive("A", "p3") != "complete")   throw new Exception("expected complete");
+        if ((string) a.status() != "in_flight=1")           throw new Exception("expected in_flight=1");
+        Console.WriteLine("PASS: aggregator");
+    }
+}

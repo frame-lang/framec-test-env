@@ -1,0 +1,56 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: String, part: String): String
+        status(): String
+
+    machine:
+        $Collecting {
+            receive(correlation_id: String, part: String): String {
+                if not self.groups.has(correlation_id):
+                    self.groups[correlation_id] = []
+                self.groups[correlation_id].append(part)
+
+                if self.groups[correlation_id].size() >= self.expected_parts:
+                    var parts = self.groups[correlation_id]
+                    self.groups.erase(correlation_id)
+                    var combined = ",".join(parts)
+                    self.emit(correlation_id, combined)
+                    @@:("complete")
+                else:
+                    @@:("collecting")
+            }
+            status(): String {
+                @@:("in_flight=" + str(self.groups.size()))
+            }
+        }
+
+    actions:
+        emit(cid, combined) { print("[" + cid + "] -> " + combined) }
+
+    domain:
+        groups: Dictionary = {}
+        expected_parts: int = 3
+}
+
+func main():
+    var a = @@Aggregator()
+    var failures = 0
+
+    if a.receive("A", "p1") != "collecting": print("FAIL: collecting #1"); failures += 1
+    if a.receive("B", "p1") != "collecting": print("FAIL: collecting #2"); failures += 1
+    if a.receive("A", "p2") != "collecting": print("FAIL: collecting #3"); failures += 1
+    if a.receive("A", "p3") != "complete":   print("FAIL: complete");      failures += 1
+    if a.status() != "in_flight=1":           print("FAIL: in_flight=1");   failures += 1
+
+    if failures > 0:
+        print("FAIL: aggregator (" + str(failures) + " failures)")
+        quit(1)
+    print("PASS: aggregator")
+
+func _init():
+    main()
+    quit()

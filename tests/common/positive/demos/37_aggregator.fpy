@@ -1,0 +1,45 @@
+@@[target("python_3")]
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: str, part: str): str
+        status(): str
+
+    machine:
+        $Collecting {
+            receive(correlation_id: str, part: str): str {
+                if correlation_id not in self.groups:
+                    self.groups[correlation_id] = []
+                self.groups[correlation_id].append(part)
+
+                if len(self.groups[correlation_id]) >= self.expected_parts:
+                    combined = ",".join(self.groups[correlation_id])
+                    del self.groups[correlation_id]
+                    self.emit(correlation_id, combined)
+                    @@:("complete")
+                else:
+                    @@:("collecting")
+            }
+            status(): str {
+                @@:(f"in_flight={len(self.groups)}")
+            }
+        }
+
+    actions:
+        emit(cid, combined) {
+            print(f"[{cid}] -> {combined}")
+        }
+
+    domain:
+        groups: dict = {}
+        expected_parts: int = 3
+}
+
+if __name__ == '__main__':
+    a = @@Aggregator()
+    assert a.receive("A", "p1") == "collecting"
+    assert a.receive("B", "p1") == "collecting"
+    assert a.receive("A", "p2") == "collecting"
+    assert a.receive("A", "p3") == "complete"
+    assert a.status() == "in_flight=1"  # B still open
+    print("PASS: aggregator")

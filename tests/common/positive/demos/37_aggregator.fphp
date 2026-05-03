@@ -1,0 +1,48 @@
+@@[target("php")]
+
+<?php
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: str, part: str): str
+        status(): str
+
+    machine:
+        $Collecting {
+            receive(correlation_id: str, part: str): str {
+                if (!isset($this->groups[$correlation_id])) {
+                    $this->groups[$correlation_id] = [];
+                }
+                $this->groups[$correlation_id][] = $part;
+
+                if (count($this->groups[$correlation_id]) >= $this->expected_parts) {
+                    $combined = implode(",", $this->groups[$correlation_id]);
+                    unset($this->groups[$correlation_id]);
+                    $this->emit($correlation_id, $combined);
+                    @@:("complete")
+                } else {
+                    @@:("collecting")
+                }
+            }
+            status(): str {
+                @@:("in_flight=" . count($this->groups))
+            }
+        }
+
+    actions:
+        emit(cid, combined) {
+            echo "[" . $cid . "] -> " . $combined . "\n";
+        }
+
+    domain:
+        groups = []
+        expected_parts = 3
+}
+
+$a = @@Aggregator();
+assert($a->receive("A", "p1") === "collecting");
+assert($a->receive("B", "p1") === "collecting");
+assert($a->receive("A", "p2") === "collecting");
+assert($a->receive("A", "p3") === "complete");
+assert($a->status() === "in_flight=1");
+echo "PASS: aggregator\n";

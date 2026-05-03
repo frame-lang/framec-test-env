@@ -1,0 +1,51 @@
+@@[target("rust")]
+
+use std::collections::HashMap;
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: String, part: String): String
+        status(): String
+
+    machine:
+        $Collecting {
+            receive(correlation_id: String, part: String): String {
+                if !self.groups.contains_key(&correlation_id) {
+                    self.groups.insert(correlation_id.clone(), Vec::new());
+                }
+                self.groups.get_mut(&correlation_id).unwrap().push(part);
+
+                let len = self.groups.get(&correlation_id).unwrap().len() as i32;
+                if len >= self.expected_parts {
+                    let parts = self.groups.remove(&correlation_id).unwrap();
+                    let combined = parts.join(",");
+                    self.emit(correlation_id, combined);
+                    @@:("complete".to_string())
+                } else {
+                    @@:("collecting".to_string())
+                }
+            }
+            status(): String {
+                @@:(format!("in_flight={}", self.groups.len()))
+            }
+        }
+
+    actions:
+        emit(cid: String, combined: String) {
+            println!("[{}] -> {}", cid, combined);
+        }
+
+    domain:
+        groups: HashMap<String, Vec<String>> = HashMap::new()
+        expected_parts: i32 = 3
+}
+
+fn main() {
+    let mut a = @@Aggregator();
+    assert_eq!(a.receive("A".to_string(), "p1".to_string()), "collecting");
+    assert_eq!(a.receive("B".to_string(), "p1".to_string()), "collecting");
+    assert_eq!(a.receive("A".to_string(), "p2".to_string()), "collecting");
+    assert_eq!(a.receive("A".to_string(), "p3".to_string()), "complete");
+    assert_eq!(a.status(), "in_flight=1");
+    println!("PASS: aggregator");
+}

@@ -1,0 +1,44 @@
+@@[target("ruby")]
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: str, part: str): str
+        status(): str
+
+    machine:
+        $Collecting {
+            receive(correlation_id: str, part: str): str {
+                @groups[correlation_id] = [] unless @groups.key?(correlation_id)
+                @groups[correlation_id].push(part)
+
+                if @groups[correlation_id].length >= @expected_parts
+                    parts = @groups.delete(correlation_id)
+                    combined = parts.join(",")
+                    self.emit(correlation_id, combined)
+                    @@:("complete")
+                else
+                    @@:("collecting")
+                end
+            }
+            status(): str {
+                @@:("in_flight=#{@groups.size}")
+            }
+        }
+
+    actions:
+        emit(cid, combined) {
+            puts "[#{cid}] -> #{combined}"
+        }
+
+    domain:
+        groups = {}
+        expected_parts = 3
+}
+
+a = Aggregator.new
+raise "expected collecting #1" unless a.receive("A", "p1") == "collecting"
+raise "expected collecting #2" unless a.receive("B", "p1") == "collecting"
+raise "expected collecting #3" unless a.receive("A", "p2") == "collecting"
+raise "expected complete"      unless a.receive("A", "p3") == "complete"
+raise "expected in_flight=1"   unless a.status == "in_flight=1"
+puts "PASS: aggregator"

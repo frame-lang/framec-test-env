@@ -1,0 +1,46 @@
+@@[target("typescript")]
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: str, part: str): str
+        status(): str
+
+    machine:
+        $Collecting {
+            receive(correlation_id: str, part: str): str {
+                if (!(correlation_id in this.groups)) {
+                    this.groups[correlation_id] = [];
+                }
+                this.groups[correlation_id].push(part);
+
+                if (this.groups[correlation_id].length >= this.expected_parts) {
+                    const combined = this.groups[correlation_id].join(",");
+                    delete this.groups[correlation_id];
+                    this.emit(correlation_id, combined);
+                    @@:("complete")
+                } else {
+                    @@:("collecting")
+                }
+            }
+            status(): str {
+                @@:(`in_flight=${Object.keys(this.groups).length}`)
+            }
+        }
+
+    actions:
+        emit(cid: str, combined: str) {
+            console.log(`[${cid}] -> ${combined}`);
+        }
+
+    domain:
+        groups: { [k: string]: string[] } = {}
+        expected_parts: int = 3
+}
+
+const a = @@Aggregator();
+if (a.receive("A", "p1") !== "collecting") throw new Error("expected collecting #1");
+if (a.receive("B", "p1") !== "collecting") throw new Error("expected collecting #2");
+if (a.receive("A", "p2") !== "collecting") throw new Error("expected collecting #3");
+if (a.receive("A", "p3") !== "complete")   throw new Error("expected complete");
+if (a.status() !== "in_flight=1")           throw new Error("expected in_flight=1: " + a.status());
+console.log("PASS: aggregator");

@@ -1,0 +1,55 @@
+@@[target("java")]
+
+import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.stream.Collectors;
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: String, part: String): String
+        status(): String
+
+    machine:
+        $Collecting {
+            receive(correlation_id: String, part: String): String {
+                if (!this.groups.containsKey(correlation_id)) {
+                    this.groups.put(correlation_id, new ArrayList<>());
+                }
+                this.groups.get(correlation_id).add(part);
+
+                if (this.groups.get(correlation_id).size() >= this.expected_parts) {
+                    List<String> parts = this.groups.remove(correlation_id);
+                    String combined = parts.stream().collect(Collectors.joining(","));
+                    this.emit(correlation_id, combined);
+                    @@:("complete")
+                } else {
+                    @@:("collecting")
+                }
+            }
+            status(): String {
+                @@:("in_flight=" + this.groups.size())
+            }
+        }
+
+    actions:
+        emit(cid: String, combined: String) {
+            System.out.println("[" + cid + "] -> " + combined);
+        }
+
+    domain:
+        groups: HashMap<String, List<String>> = new HashMap<>()
+        expected_parts: int = 3
+}
+
+class Main {
+    public static void main(String[] args) {
+        var a = @@Aggregator();
+        if (!((String) a.receive("A", "p1")).equals("collecting")) throw new RuntimeException("expected collecting #1");
+        if (!((String) a.receive("B", "p1")).equals("collecting")) throw new RuntimeException("expected collecting #2");
+        if (!((String) a.receive("A", "p2")).equals("collecting")) throw new RuntimeException("expected collecting #3");
+        if (!((String) a.receive("A", "p3")).equals("complete"))   throw new RuntimeException("expected complete");
+        if (!((String) a.status()).equals("in_flight=1"))           throw new RuntimeException("expected in_flight=1");
+        System.out.println("PASS: aggregator");
+    }
+}

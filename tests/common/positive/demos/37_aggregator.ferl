@@ -1,0 +1,33 @@
+@@[target("erlang")]
+
+@@system Aggregator {
+    interface:
+        accept(correlation_id: str, part: str): str
+        status(): str
+
+    machine:
+        $Collecting {
+            accept(correlation_id: str, part: str): str {
+                if maps:is_key(correlation_id, self.groups) == false {
+                    self.groups = maps:put(correlation_id, [], self.groups)
+                }
+                self.groups = maps:put(correlation_id, maps:get(correlation_id, self.groups) ++ [part], self.groups)
+
+                if length(maps:get(correlation_id, self.groups)) >= self.expected_parts {
+                    Combined = string:join(maps:get(correlation_id, self.groups), ","),
+                    self.groups = maps:remove(correlation_id, self.groups),
+                    io:format("[~s] -> ~s~n", [correlation_id, Combined])
+                    @@:("complete")
+                } else {
+                    @@:("collecting")
+                }
+            }
+            status(): str {
+                @@:("in_flight=" ++ integer_to_list(maps:size(self.groups)))
+            }
+        }
+
+    domain:
+        groups = #{}
+        expected_parts = 3
+}

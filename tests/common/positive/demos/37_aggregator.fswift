@@ -1,0 +1,48 @@
+@@[target("swift")]
+
+import Foundation
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: String, part: String): String
+        status(): String
+
+    machine:
+        $Collecting {
+            receive(correlation_id: String, part: String): String {
+                if self.groups[correlation_id] == nil {
+                    self.groups[correlation_id] = []
+                }
+                self.groups[correlation_id]!.append(part)
+
+                if self.groups[correlation_id]!.count >= self.expected_parts {
+                    let parts = self.groups.removeValue(forKey: correlation_id)!
+                    let combined = parts.joined(separator: ",")
+                    self.emit(correlation_id, combined)
+                    @@:("complete")
+                } else {
+                    @@:("collecting")
+                }
+            }
+            status(): String {
+                @@:("in_flight=\(self.groups.count)")
+            }
+        }
+
+    actions:
+        emit(cid: String, combined: String) {
+            print("[\(cid)] -> \(combined)")
+        }
+
+    domain:
+        groups: [String: [String]] = [:]
+        expected_parts: Int = 3
+}
+
+let a = @@Aggregator()
+if (a.receive("A", "p1") as! String) != "collecting" { print("FAIL: collecting #1"); exit(1) }
+if (a.receive("B", "p1") as! String) != "collecting" { print("FAIL: collecting #2"); exit(1) }
+if (a.receive("A", "p2") as! String) != "collecting" { print("FAIL: collecting #3"); exit(1) }
+if (a.receive("A", "p3") as! String) != "complete"   { print("FAIL: complete");      exit(1) }
+if (a.status() as! String) != "in_flight=1"           { print("FAIL: in_flight=1");   exit(1) }
+print("PASS: aggregator")

@@ -1,0 +1,58 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <sstream>
+#include <cassert>
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: str, part: str): str
+        status(): str
+
+    machine:
+        $Collecting {
+            receive(correlation_id: str, part: str): str {
+                this->groups[correlation_id].push_back(part);
+
+                if (static_cast<int>(this->groups[correlation_id].size()) >= this->expected_parts) {
+                    auto parts = this->groups[correlation_id];
+                    this->groups.erase(correlation_id);
+                    std::ostringstream oss;
+                    for (size_t i = 0; i < parts.size(); i++) {
+                        if (i > 0) oss << ",";
+                        oss << parts[i];
+                    }
+                    this->emit(correlation_id, oss.str());
+                    @@:(std::string("complete"))
+                } else {
+                    @@:(std::string("collecting"))
+                }
+            }
+            status(): str {
+                @@:(std::string("in_flight=") + std::to_string(this->groups.size()))
+            }
+        }
+
+    actions:
+        emit(cid: std::string, combined: std::string) {
+            std::cout << "[" << cid << "] -> " << combined << std::endl;
+        }
+
+    domain:
+        groups: std::unordered_map<std::string, std::vector<std::string>>
+        expected_parts: int = 3
+}
+
+int main() {
+    Aggregator a;
+    assert(a.receive("A", "p1") == "collecting");
+    assert(a.receive("B", "p1") == "collecting");
+    assert(a.receive("A", "p2") == "collecting");
+    assert(a.receive("A", "p3") == "complete");
+    assert(a.status() == "in_flight=1");
+    std::cout << "PASS: aggregator" << std::endl;
+    return 0;
+}

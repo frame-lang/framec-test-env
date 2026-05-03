@@ -1,0 +1,49 @@
+@@[target("lua")]
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: str, part: str): str
+        status(): str
+
+    machine:
+        $Collecting {
+            receive(correlation_id: str, part: str): str {
+                if self.groups[correlation_id] == nil then
+                    self.groups[correlation_id] = {}
+                end
+                table.insert(self.groups[correlation_id], part)
+
+                if #self.groups[correlation_id] >= self.expected_parts then
+                    local parts = self.groups[correlation_id]
+                    self.groups[correlation_id] = nil
+                    local combined = table.concat(parts, ",")
+                    self:emit(correlation_id, combined)
+                    @@:("complete")
+                else
+                    @@:("collecting")
+                end
+            }
+            status(): str {
+                local n = 0
+                for _ in pairs(self.groups) do n = n + 1 end
+                @@:("in_flight=" .. tostring(n))
+            }
+        }
+
+    actions:
+        emit(cid, combined) {
+            print("[" .. cid .. "] -> " .. combined)
+        }
+
+    domain:
+        groups = {}
+        expected_parts: int = 3
+}
+
+local a = @@Aggregator()
+assert(a:receive("A", "p1") == "collecting", "expected collecting #1")
+assert(a:receive("B", "p1") == "collecting", "expected collecting #2")
+assert(a:receive("A", "p2") == "collecting", "expected collecting #3")
+assert(a:receive("A", "p3") == "complete",   "expected complete")
+assert(a:status() == "in_flight=1",          "expected in_flight=1")
+print("PASS: aggregator")

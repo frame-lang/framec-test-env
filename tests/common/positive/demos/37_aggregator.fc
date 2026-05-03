@@ -1,0 +1,125 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// Tiny dict-of-list for the aggregator. Bounded sizes are fine — the
+// fixture only exercises 2 correlation IDs and 4 parts.
+#define AG_MAX_GROUPS  8
+#define AG_MAX_PARTS   8
+#define AG_KEY_LEN     32
+#define AG_PART_LEN    32
+
+typedef struct {
+    char keys[AG_MAX_GROUPS][AG_KEY_LEN];
+    char parts[AG_MAX_GROUPS][AG_MAX_PARTS][AG_PART_LEN];
+    int part_counts[AG_MAX_GROUPS];
+    int active[AG_MAX_GROUPS];
+    int group_count;
+} ag_groups_t;
+
+static int ag_find(ag_groups_t* g, const char* key) {
+    for (int i = 0; i < g->group_count; i++) {
+        if (g->active[i] && strcmp(g->keys[i], key) == 0) return i;
+    }
+    return -1;
+}
+
+static int ag_get_or_create(ag_groups_t* g, const char* key) {
+    int idx = ag_find(g, key);
+    if (idx >= 0) return idx;
+    for (int i = 0; i < AG_MAX_GROUPS; i++) {
+        if (!g->active[i]) {
+            strncpy(g->keys[i], key, AG_KEY_LEN - 1);
+            g->keys[i][AG_KEY_LEN - 1] = '\0';
+            g->part_counts[i] = 0;
+            g->active[i] = 1;
+            if (i >= g->group_count) g->group_count = i + 1;
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void ag_append(ag_groups_t* g, int idx, const char* part) {
+    int n = g->part_counts[idx];
+    if (n >= AG_MAX_PARTS) return;
+    strncpy(g->parts[idx][n], part, AG_PART_LEN - 1);
+    g->parts[idx][n][AG_PART_LEN - 1] = '\0';
+    g->part_counts[idx] = n + 1;
+}
+
+static const char* ag_join(ag_groups_t* g, int idx) {
+    static char buf[AG_MAX_PARTS * (AG_PART_LEN + 1)];
+    buf[0] = '\0';
+    for (int i = 0; i < g->part_counts[idx]; i++) {
+        if (i > 0) strcat(buf, ",");
+        strcat(buf, g->parts[idx][i]);
+    }
+    return buf;
+}
+
+static void ag_remove(ag_groups_t* g, int idx) {
+    g->active[idx] = 0;
+    g->part_counts[idx] = 0;
+}
+
+static int ag_in_flight(ag_groups_t* g) {
+    int n = 0;
+    for (int i = 0; i < g->group_count; i++) {
+        if (g->active[i]) n++;
+    }
+    return n;
+}
+
+@@system Aggregator {
+    interface:
+        receive(correlation_id: str, part: str): str
+        status(): str
+
+    machine:
+        $Collecting {
+            receive(correlation_id: str, part: str): str {
+                int idx = ag_get_or_create(&self->groups, correlation_id);
+                ag_append(&self->groups, idx, part);
+
+                if (self->groups.part_counts[idx] >= self->expected_parts) {
+                    const char* combined = ag_join(&self->groups, idx);
+                    Aggregator_emit(self, correlation_id, combined);
+                    ag_remove(&self->groups, idx);
+                    @@:("complete")
+                } else {
+                    @@:("collecting")
+                }
+            }
+            status(): str {
+                static char buf[32];
+                snprintf(buf, sizeof(buf), "in_flight=%d", ag_in_flight(&self->groups));
+                @@:(buf)
+            }
+        }
+
+    actions:
+        emit(cid: str, combined: str) {
+            printf("[%s] -> %s\n", cid, combined);
+        }
+
+    domain:
+        groups: ag_groups_t
+        expected_parts: int = 3
+}
+
+int main() {
+    Aggregator* a = @@Aggregator();
+    memset(&a->groups, 0, sizeof(ag_groups_t));
+
+    if (strcmp(Aggregator_receive(a, "A", "p1"), "collecting") != 0) { printf("FAIL: collecting #1\n"); return 1; }
+    if (strcmp(Aggregator_receive(a, "B", "p1"), "collecting") != 0) { printf("FAIL: collecting #2\n"); return 1; }
+    if (strcmp(Aggregator_receive(a, "A", "p2"), "collecting") != 0) { printf("FAIL: collecting #3\n"); return 1; }
+    if (strcmp(Aggregator_receive(a, "A", "p3"), "complete")   != 0) { printf("FAIL: complete\n");      return 1; }
+    if (strcmp(Aggregator_status(a), "in_flight=1")             != 0) { printf("FAIL: in_flight=1: %s\n", Aggregator_status(a)); return 1; }
+    printf("PASS: aggregator\n");
+    Aggregator_destroy(a);
+    return 0;
+}
