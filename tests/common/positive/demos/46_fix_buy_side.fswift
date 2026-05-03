@@ -1,0 +1,104 @@
+@@[target("swift")]
+
+import Foundation
+
+@@system FixBuySideOrder {
+    interface:
+        send_new(cl_ord_id: String)
+        exec_new(exec_id: String)
+        exec_partial_fill(qty: Double, px: Double)
+        exec_fill(qty: Double, px: Double)
+        exec_canceled(exec_id: String)
+        get_status(): String
+        get_cum_qty(): Double
+        get_leaves_qty(): Double
+
+    machine:
+        $Pending {
+            send_new(cl_ord_id: String) {
+                self.cl_ord_id = cl_ord_id
+                self.leaves_qty = self.order_qty
+                -> $PendingNew
+            }
+            get_status(): String { @@:("Pending") }
+            get_cum_qty(): Double { @@:(self.cum_qty) }
+            get_leaves_qty(): Double { @@:(self.leaves_qty) }
+        }
+
+        $PendingNew {
+            exec_new(exec_id: String) { -> $New }
+            get_status(): String { @@:("PendingNew") }
+            get_cum_qty(): Double { @@:(self.cum_qty) }
+            get_leaves_qty(): Double { @@:(self.leaves_qty) }
+        }
+
+        $New {
+            exec_partial_fill(qty: Double, px: Double) {
+                self.cum_qty = self.cum_qty + qty
+                self.leaves_qty = self.order_qty - self.cum_qty
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: Double, px: Double) {
+                self.cum_qty = self.cum_qty + qty
+                self.leaves_qty = 0.0
+                -> $Filled
+            }
+            exec_canceled(exec_id: String) { -> $Canceled }
+            get_status(): String { @@:("New") }
+            get_cum_qty(): Double { @@:(self.cum_qty) }
+            get_leaves_qty(): Double { @@:(self.leaves_qty) }
+        }
+
+        $PartiallyFilled {
+            exec_partial_fill(qty: Double, px: Double) {
+                self.cum_qty = self.cum_qty + qty
+                self.leaves_qty = self.order_qty - self.cum_qty
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: Double, px: Double) {
+                self.cum_qty = self.cum_qty + qty
+                self.leaves_qty = 0.0
+                -> $Filled
+            }
+            exec_canceled(exec_id: String) { -> $Canceled }
+            get_status(): String { @@:("PartiallyFilled") }
+            get_cum_qty(): Double { @@:(self.cum_qty) }
+            get_leaves_qty(): Double { @@:(self.leaves_qty) }
+        }
+
+        $Filled {
+            get_status(): String { @@:("Filled") }
+            get_cum_qty(): Double { @@:(self.cum_qty) }
+            get_leaves_qty(): Double { @@:(self.leaves_qty) }
+        }
+
+        $Canceled {
+            get_status(): String { @@:("Canceled") }
+            get_cum_qty(): Double { @@:(self.cum_qty) }
+            get_leaves_qty(): Double { @@:(self.leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id: String = ""
+        order_qty: Double = 100.0
+        cum_qty: Double = 0.0
+        leaves_qty: Double = 0.0
+}
+
+let o = @@FixBuySideOrder()
+if (o.get_status() as! String) != "Pending" { print("FAIL: Pending"); exit(1) }
+o.send_new("CL-1")
+if (o.get_status() as! String) != "PendingNew" { print("FAIL: PendingNew"); exit(1) }
+if (o.get_leaves_qty() as! Double) != 100.0 { print("FAIL: leaves=100"); exit(1) }
+o.exec_new("E-1")
+if (o.get_status() as! String) != "New" { print("FAIL: New"); exit(1) }
+o.exec_partial_fill(40.0, 100.5)
+if (o.get_status() as! String) != "PartiallyFilled" { print("FAIL: PartiallyFilled"); exit(1) }
+if (o.get_cum_qty() as! Double) != 40.0 { print("FAIL: cum=40"); exit(1) }
+o.exec_partial_fill(30.0, 100.6)
+if (o.get_cum_qty() as! Double) != 70.0 { print("FAIL: cum=70"); exit(1) }
+o.exec_fill(30.0, 100.7)
+if (o.get_status() as! String) != "Filled" { print("FAIL: Filled"); exit(1) }
+if (o.get_cum_qty() as! Double) != 100.0 { print("FAIL: cum=100"); exit(1) }
+if (o.get_leaves_qty() as! Double) != 0.0 { print("FAIL: leaves=0"); exit(1) }
+print("PASS: fix_buy_side")

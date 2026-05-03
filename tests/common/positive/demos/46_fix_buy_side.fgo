@@ -1,0 +1,111 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system FixBuySideOrder {
+    interface:
+        send_new(cl_ord_id: string)
+        exec_new(exec_id: string)
+        exec_partial_fill(qty: float64, px: float64)
+        exec_fill(qty: float64, px: float64)
+        exec_canceled(exec_id: string)
+        get_status(): string
+        get_cum_qty(): float64
+        get_leaves_qty(): float64
+
+    machine:
+        $Pending {
+            send_new(cl_ord_id: string) {
+                s.cl_ord_id = cl_ord_id
+                s.leaves_qty = s.order_qty
+                -> $PendingNew
+            }
+            get_status(): string { @@:("Pending") }
+            get_cum_qty(): float64 { @@:(s.cum_qty) }
+            get_leaves_qty(): float64 { @@:(s.leaves_qty) }
+        }
+
+        $PendingNew {
+            exec_new(exec_id: string) { -> $New }
+            get_status(): string { @@:("PendingNew") }
+            get_cum_qty(): float64 { @@:(s.cum_qty) }
+            get_leaves_qty(): float64 { @@:(s.leaves_qty) }
+        }
+
+        $New {
+            exec_partial_fill(qty: float64, px: float64) {
+                s.cum_qty = s.cum_qty + qty
+                s.leaves_qty = s.order_qty - s.cum_qty
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: float64, px: float64) {
+                s.cum_qty = s.cum_qty + qty
+                s.leaves_qty = 0.0
+                -> $Filled
+            }
+            exec_canceled(exec_id: string) { -> $Canceled }
+            get_status(): string { @@:("New") }
+            get_cum_qty(): float64 { @@:(s.cum_qty) }
+            get_leaves_qty(): float64 { @@:(s.leaves_qty) }
+        }
+
+        $PartiallyFilled {
+            exec_partial_fill(qty: float64, px: float64) {
+                s.cum_qty = s.cum_qty + qty
+                s.leaves_qty = s.order_qty - s.cum_qty
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: float64, px: float64) {
+                s.cum_qty = s.cum_qty + qty
+                s.leaves_qty = 0.0
+                -> $Filled
+            }
+            exec_canceled(exec_id: string) { -> $Canceled }
+            get_status(): string { @@:("PartiallyFilled") }
+            get_cum_qty(): float64 { @@:(s.cum_qty) }
+            get_leaves_qty(): float64 { @@:(s.leaves_qty) }
+        }
+
+        $Filled {
+            get_status(): string { @@:("Filled") }
+            get_cum_qty(): float64 { @@:(s.cum_qty) }
+            get_leaves_qty(): float64 { @@:(s.leaves_qty) }
+        }
+
+        $Canceled {
+            get_status(): string { @@:("Canceled") }
+            get_cum_qty(): float64 { @@:(s.cum_qty) }
+            get_leaves_qty(): float64 { @@:(s.leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id: string = ""
+        order_qty: float64 = 100.0
+        cum_qty: float64 = 0.0
+        leaves_qty: float64 = 0.0
+}
+
+func main() {
+    o := NewFixBuySideOrder()
+    if o.Get_status() != "Pending" { fmt.Println("FAIL: Pending"); os.Exit(1) }
+    o.Send_new("CL-1")
+    if o.Get_status() != "PendingNew" { fmt.Println("FAIL: PendingNew"); os.Exit(1) }
+    if o.Get_leaves_qty() != 100.0 { fmt.Println("FAIL: leaves=100"); os.Exit(1) }
+    o.Exec_new("E-1")
+    if o.Get_status() != "New" { fmt.Println("FAIL: New"); os.Exit(1) }
+    o.Exec_partial_fill(40.0, 100.5)
+    if o.Get_status() != "PartiallyFilled" { fmt.Println("FAIL: PartiallyFilled"); os.Exit(1) }
+    if o.Get_cum_qty() != 40.0 { fmt.Println("FAIL: cum=40"); os.Exit(1) }
+    o.Exec_partial_fill(30.0, 100.6)
+    if o.Get_cum_qty() != 70.0 { fmt.Println("FAIL: cum=70"); os.Exit(1) }
+    o.Exec_fill(30.0, 100.7)
+    if o.Get_status() != "Filled" { fmt.Println("FAIL: Filled"); os.Exit(1) }
+    if o.Get_cum_qty() != 100.0 { fmt.Println("FAIL: cum=100"); os.Exit(1) }
+    if o.Get_leaves_qty() != 0.0 { fmt.Println("FAIL: leaves=0"); os.Exit(1) }
+    fmt.Println("PASS: fix_buy_side")
+}

@@ -1,0 +1,102 @@
+@@[target("ruby")]
+
+@@system FixBuySideOrder {
+    interface:
+        send_new(cl_ord_id: str)
+        exec_new(exec_id: str)
+        exec_partial_fill(qty: float, px: float)
+        exec_fill(qty: float, px: float)
+        exec_canceled(exec_id: str)
+        get_status(): str
+        get_cum_qty(): float
+        get_leaves_qty(): float
+
+    machine:
+        $Pending {
+            send_new(cl_ord_id: str) {
+                @cl_ord_id = cl_ord_id
+                @leaves_qty = @order_qty
+                -> $PendingNew
+            }
+            get_status(): str { @@:("Pending") }
+            get_cum_qty(): float { @@:(@cum_qty) }
+            get_leaves_qty(): float { @@:(@leaves_qty) }
+        }
+
+        $PendingNew {
+            exec_new(exec_id: str) { -> $New }
+            get_status(): str { @@:("PendingNew") }
+            get_cum_qty(): float { @@:(@cum_qty) }
+            get_leaves_qty(): float { @@:(@leaves_qty) }
+        }
+
+        $New {
+            exec_partial_fill(qty: float, px: float) {
+                @cum_qty = @cum_qty + qty
+                @leaves_qty = @order_qty - @cum_qty
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: float, px: float) {
+                @cum_qty = @cum_qty + qty
+                @leaves_qty = 0.0
+                -> $Filled
+            }
+            exec_canceled(exec_id: str) { -> $Canceled }
+            get_status(): str { @@:("New") }
+            get_cum_qty(): float { @@:(@cum_qty) }
+            get_leaves_qty(): float { @@:(@leaves_qty) }
+        }
+
+        $PartiallyFilled {
+            exec_partial_fill(qty: float, px: float) {
+                @cum_qty = @cum_qty + qty
+                @leaves_qty = @order_qty - @cum_qty
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: float, px: float) {
+                @cum_qty = @cum_qty + qty
+                @leaves_qty = 0.0
+                -> $Filled
+            }
+            exec_canceled(exec_id: str) { -> $Canceled }
+            get_status(): str { @@:("PartiallyFilled") }
+            get_cum_qty(): float { @@:(@cum_qty) }
+            get_leaves_qty(): float { @@:(@leaves_qty) }
+        }
+
+        $Filled {
+            get_status(): str { @@:("Filled") }
+            get_cum_qty(): float { @@:(@cum_qty) }
+            get_leaves_qty(): float { @@:(@leaves_qty) }
+        }
+
+        $Canceled {
+            get_status(): str { @@:("Canceled") }
+            get_cum_qty(): float { @@:(@cum_qty) }
+            get_leaves_qty(): float { @@:(@leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id = ""
+        order_qty = 100.0
+        cum_qty = 0.0
+        leaves_qty = 0.0
+}
+
+o = FixBuySideOrder.new
+raise "expected Pending"        unless o.get_status == "Pending"
+o.send_new("CL-1")
+raise "expected PendingNew"     unless o.get_status == "PendingNew"
+raise "expected leaves=100"     unless o.get_leaves_qty == 100.0
+o.exec_new("E-1")
+raise "expected New"            unless o.get_status == "New"
+o.exec_partial_fill(40.0, 100.5)
+raise "expected PartiallyFilled" unless o.get_status == "PartiallyFilled"
+raise "expected cum=40"          unless o.get_cum_qty == 40.0
+o.exec_partial_fill(30.0, 100.6)
+raise "expected cum=70"          unless o.get_cum_qty == 70.0
+o.exec_fill(30.0, 100.7)
+raise "expected Filled"          unless o.get_status == "Filled"
+raise "expected cum=100"         unless o.get_cum_qty == 100.0
+raise "expected leaves=0"        unless o.get_leaves_qty == 0.0
+puts "PASS: fix_buy_side"

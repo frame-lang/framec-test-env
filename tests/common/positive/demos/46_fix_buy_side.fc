@@ -1,0 +1,110 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system FixBuySideOrder {
+    interface:
+        send_new(cl_ord_id: str)
+        exec_new(exec_id: str)
+        exec_partial_fill(qty: double, px: double)
+        exec_fill(qty: double, px: double)
+        exec_canceled(exec_id: str)
+        get_status(): str
+        get_cum_qty(): double
+        get_leaves_qty(): double
+
+    machine:
+        $Pending {
+            send_new(cl_ord_id: str) {
+                self->cl_ord_id = cl_ord_id;
+                self->leaves_qty = self->order_qty;
+                -> $PendingNew
+            }
+            get_status(): str { @@:("Pending") }
+            get_cum_qty(): double { @@:(self->cum_qty) }
+            get_leaves_qty(): double { @@:(self->leaves_qty) }
+        }
+
+        $PendingNew {
+            exec_new(exec_id: str) { -> $New }
+            get_status(): str { @@:("PendingNew") }
+            get_cum_qty(): double { @@:(self->cum_qty) }
+            get_leaves_qty(): double { @@:(self->leaves_qty) }
+        }
+
+        $New {
+            exec_partial_fill(qty: double, px: double) {
+                self->cum_qty = self->cum_qty + qty;
+                self->leaves_qty = self->order_qty - self->cum_qty;
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: double, px: double) {
+                self->cum_qty = self->cum_qty + qty;
+                self->leaves_qty = 0.0;
+                -> $Filled
+            }
+            exec_canceled(exec_id: str) { -> $Canceled }
+            get_status(): str { @@:("New") }
+            get_cum_qty(): double { @@:(self->cum_qty) }
+            get_leaves_qty(): double { @@:(self->leaves_qty) }
+        }
+
+        $PartiallyFilled {
+            exec_partial_fill(qty: double, px: double) {
+                self->cum_qty = self->cum_qty + qty;
+                self->leaves_qty = self->order_qty - self->cum_qty;
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: double, px: double) {
+                self->cum_qty = self->cum_qty + qty;
+                self->leaves_qty = 0.0;
+                -> $Filled
+            }
+            exec_canceled(exec_id: str) { -> $Canceled }
+            get_status(): str { @@:("PartiallyFilled") }
+            get_cum_qty(): double { @@:(self->cum_qty) }
+            get_leaves_qty(): double { @@:(self->leaves_qty) }
+        }
+
+        $Filled {
+            get_status(): str { @@:("Filled") }
+            get_cum_qty(): double { @@:(self->cum_qty) }
+            get_leaves_qty(): double { @@:(self->leaves_qty) }
+        }
+
+        $Canceled {
+            get_status(): str { @@:("Canceled") }
+            get_cum_qty(): double { @@:(self->cum_qty) }
+            get_leaves_qty(): double { @@:(self->leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id: str = ""
+        order_qty: double = 100.0
+        cum_qty: double = 0.0
+        leaves_qty: double = 0.0
+}
+
+int main() {
+    FixBuySideOrder* o = @@FixBuySideOrder();
+    if (strcmp(FixBuySideOrder_get_status(o), "Pending") != 0) { printf("FAIL: Pending\n"); return 1; }
+    FixBuySideOrder_send_new(o, "CL-1");
+    if (strcmp(FixBuySideOrder_get_status(o), "PendingNew") != 0) { printf("FAIL: PendingNew\n"); return 1; }
+    if (FixBuySideOrder_get_leaves_qty(o) != 100.0) { printf("FAIL: leaves=100\n"); return 1; }
+    FixBuySideOrder_exec_new(o, "E-1");
+    if (strcmp(FixBuySideOrder_get_status(o), "New") != 0) { printf("FAIL: New\n"); return 1; }
+    FixBuySideOrder_exec_partial_fill(o, 40.0, 100.5);
+    if (strcmp(FixBuySideOrder_get_status(o), "PartiallyFilled") != 0) { printf("FAIL: PartiallyFilled\n"); return 1; }
+    if (FixBuySideOrder_get_cum_qty(o) != 40.0) { printf("FAIL: cum=40\n"); return 1; }
+    FixBuySideOrder_exec_partial_fill(o, 30.0, 100.6);
+    if (FixBuySideOrder_get_cum_qty(o) != 70.0) { printf("FAIL: cum=70\n"); return 1; }
+    FixBuySideOrder_exec_fill(o, 30.0, 100.7);
+    if (strcmp(FixBuySideOrder_get_status(o), "Filled") != 0) { printf("FAIL: Filled\n"); return 1; }
+    if (FixBuySideOrder_get_cum_qty(o) != 100.0) { printf("FAIL: cum=100\n"); return 1; }
+    if (FixBuySideOrder_get_leaves_qty(o) != 0.0) { printf("FAIL: leaves=0\n"); return 1; }
+    printf("PASS: fix_buy_side\n");
+    FixBuySideOrder_destroy(o);
+    return 0;
+}

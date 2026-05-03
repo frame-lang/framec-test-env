@@ -1,0 +1,109 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system FixBuySideOrder {
+    interface:
+        send_new(cl_ord_id: str)
+        exec_new(exec_id: str)
+        exec_partial_fill(qty: double, px: double)
+        exec_fill(qty: double, px: double)
+        exec_canceled(exec_id: str)
+        get_status(): str
+        get_cum_qty(): double
+        get_leaves_qty(): double
+
+    machine:
+        $Pending {
+            send_new(cl_ord_id: str) {
+                this->cl_ord_id = cl_ord_id;
+                this->leaves_qty = this->order_qty;
+                -> $PendingNew
+            }
+            get_status(): str { @@:(std::string("Pending")) }
+            get_cum_qty(): double { @@:(this->cum_qty) }
+            get_leaves_qty(): double { @@:(this->leaves_qty) }
+        }
+
+        $PendingNew {
+            exec_new(exec_id: str) { -> $New }
+            get_status(): str { @@:(std::string("PendingNew")) }
+            get_cum_qty(): double { @@:(this->cum_qty) }
+            get_leaves_qty(): double { @@:(this->leaves_qty) }
+        }
+
+        $New {
+            exec_partial_fill(qty: double, px: double) {
+                this->cum_qty = this->cum_qty + qty;
+                this->leaves_qty = this->order_qty - this->cum_qty;
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: double, px: double) {
+                this->cum_qty = this->cum_qty + qty;
+                this->leaves_qty = 0.0;
+                -> $Filled
+            }
+            exec_canceled(exec_id: str) { -> $Canceled }
+            get_status(): str { @@:(std::string("New")) }
+            get_cum_qty(): double { @@:(this->cum_qty) }
+            get_leaves_qty(): double { @@:(this->leaves_qty) }
+        }
+
+        $PartiallyFilled {
+            exec_partial_fill(qty: double, px: double) {
+                this->cum_qty = this->cum_qty + qty;
+                this->leaves_qty = this->order_qty - this->cum_qty;
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: double, px: double) {
+                this->cum_qty = this->cum_qty + qty;
+                this->leaves_qty = 0.0;
+                -> $Filled
+            }
+            exec_canceled(exec_id: str) { -> $Canceled }
+            get_status(): str { @@:(std::string("PartiallyFilled")) }
+            get_cum_qty(): double { @@:(this->cum_qty) }
+            get_leaves_qty(): double { @@:(this->leaves_qty) }
+        }
+
+        $Filled {
+            get_status(): str { @@:(std::string("Filled")) }
+            get_cum_qty(): double { @@:(this->cum_qty) }
+            get_leaves_qty(): double { @@:(this->leaves_qty) }
+        }
+
+        $Canceled {
+            get_status(): str { @@:(std::string("Canceled")) }
+            get_cum_qty(): double { @@:(this->cum_qty) }
+            get_leaves_qty(): double { @@:(this->leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id: std::string = ""
+        order_qty: double = 100.0
+        cum_qty: double = 0.0
+        leaves_qty: double = 0.0
+}
+
+int main() {
+    FixBuySideOrder o;
+    assert(std::any_cast<std::string>(o.get_status()) == "Pending");
+    o.send_new("CL-1");
+    assert(std::any_cast<std::string>(o.get_status()) == "PendingNew");
+    assert(std::any_cast<double>(o.get_leaves_qty()) == 100.0);
+    o.exec_new("E-1");
+    assert(std::any_cast<std::string>(o.get_status()) == "New");
+    o.exec_partial_fill(40.0, 100.5);
+    assert(std::any_cast<std::string>(o.get_status()) == "PartiallyFilled");
+    assert(std::any_cast<double>(o.get_cum_qty()) == 40.0);
+    o.exec_partial_fill(30.0, 100.6);
+    assert(std::any_cast<double>(o.get_cum_qty()) == 70.0);
+    o.exec_fill(30.0, 100.7);
+    assert(std::any_cast<std::string>(o.get_status()) == "Filled");
+    assert(std::any_cast<double>(o.get_cum_qty()) == 100.0);
+    assert(std::any_cast<double>(o.get_leaves_qty()) == 0.0);
+    std::cout << "PASS: fix_buy_side" << std::endl;
+    return 0;
+}

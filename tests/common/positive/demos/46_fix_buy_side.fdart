@@ -1,0 +1,104 @@
+@@[target("dart")]
+
+@@system FixBuySideOrder {
+    interface:
+        send_new(cl_ord_id: String)
+        exec_new(exec_id: String)
+        exec_partial_fill(qty: double, px: double)
+        exec_fill(qty: double, px: double)
+        exec_canceled(exec_id: String)
+        get_status(): String
+        get_cum_qty(): double
+        get_leaves_qty(): double
+
+    machine:
+        $Pending {
+            send_new(cl_ord_id: String) {
+                this.cl_ord_id = cl_ord_id;
+                this.leaves_qty = this.order_qty;
+                -> $PendingNew
+            }
+            get_status(): String { @@:("Pending") }
+            get_cum_qty(): double { @@:(this.cum_qty) }
+            get_leaves_qty(): double { @@:(this.leaves_qty) }
+        }
+
+        $PendingNew {
+            exec_new(exec_id: String) { -> $New }
+            get_status(): String { @@:("PendingNew") }
+            get_cum_qty(): double { @@:(this.cum_qty) }
+            get_leaves_qty(): double { @@:(this.leaves_qty) }
+        }
+
+        $New {
+            exec_partial_fill(qty: double, px: double) {
+                this.cum_qty = this.cum_qty + qty;
+                this.leaves_qty = this.order_qty - this.cum_qty;
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: double, px: double) {
+                this.cum_qty = this.cum_qty + qty;
+                this.leaves_qty = 0.0;
+                -> $Filled
+            }
+            exec_canceled(exec_id: String) { -> $Canceled }
+            get_status(): String { @@:("New") }
+            get_cum_qty(): double { @@:(this.cum_qty) }
+            get_leaves_qty(): double { @@:(this.leaves_qty) }
+        }
+
+        $PartiallyFilled {
+            exec_partial_fill(qty: double, px: double) {
+                this.cum_qty = this.cum_qty + qty;
+                this.leaves_qty = this.order_qty - this.cum_qty;
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: double, px: double) {
+                this.cum_qty = this.cum_qty + qty;
+                this.leaves_qty = 0.0;
+                -> $Filled
+            }
+            exec_canceled(exec_id: String) { -> $Canceled }
+            get_status(): String { @@:("PartiallyFilled") }
+            get_cum_qty(): double { @@:(this.cum_qty) }
+            get_leaves_qty(): double { @@:(this.leaves_qty) }
+        }
+
+        $Filled {
+            get_status(): String { @@:("Filled") }
+            get_cum_qty(): double { @@:(this.cum_qty) }
+            get_leaves_qty(): double { @@:(this.leaves_qty) }
+        }
+
+        $Canceled {
+            get_status(): String { @@:("Canceled") }
+            get_cum_qty(): double { @@:(this.cum_qty) }
+            get_leaves_qty(): double { @@:(this.leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id: String = ""
+        order_qty: double = 100.0
+        cum_qty: double = 0.0
+        leaves_qty: double = 0.0
+}
+
+void main() {
+    final o = FixBuySideOrder();
+    if (o.get_status() != "Pending") throw "expected Pending";
+    o.send_new("CL-1");
+    if (o.get_status() != "PendingNew") throw "expected PendingNew";
+    if (o.get_leaves_qty() != 100.0) throw "expected leaves=100";
+    o.exec_new("E-1");
+    if (o.get_status() != "New") throw "expected New";
+    o.exec_partial_fill(40.0, 100.5);
+    if (o.get_status() != "PartiallyFilled") throw "expected PartiallyFilled";
+    if (o.get_cum_qty() != 40.0) throw "expected cum=40";
+    o.exec_partial_fill(30.0, 100.6);
+    if (o.get_cum_qty() != 70.0) throw "expected cum=70";
+    o.exec_fill(30.0, 100.7);
+    if (o.get_status() != "Filled") throw "expected Filled";
+    if (o.get_cum_qty() != 100.0) throw "expected cum=100";
+    if (o.get_leaves_qty() != 0.0) throw "expected leaves=0";
+    print("PASS: fix_buy_side");
+}

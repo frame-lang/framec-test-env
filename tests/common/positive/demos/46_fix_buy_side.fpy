@@ -1,0 +1,118 @@
+@@[target("python_3")]
+
+# Smoke-test variant of cookbook recipe 46. Exercises the core
+# OrdStatus lifecycle (New -> PartiallyFilled -> Filled) and tracks
+# cum_qty / leaves_qty. Full precedence rules + cancel/replace paths
+# live in the cookbook documentation; the matrix test validates that
+# the fundamental shape generates and runs across all 17 backends.
+
+@@system FixBuySideOrder {
+    interface:
+        send_new(cl_ord_id: str)
+        exec_new(exec_id: str)
+        exec_partial_fill(qty: float, px: float)
+        exec_fill(qty: float, px: float)
+        exec_canceled(exec_id: str)
+        get_status(): str
+        get_cum_qty(): float
+        get_leaves_qty(): float
+
+    machine:
+        $Pending {
+            send_new(cl_ord_id: str) {
+                self.cl_ord_id = cl_ord_id
+                self.leaves_qty = self.order_qty
+                -> $PendingNew
+            }
+            get_status(): str { @@:("Pending") }
+            get_cum_qty(): float { @@:(self.cum_qty) }
+            get_leaves_qty(): float { @@:(self.leaves_qty) }
+        }
+
+        $PendingNew {
+            exec_new(exec_id: str) {
+                -> $New
+            }
+            get_status(): str { @@:("PendingNew") }
+            get_cum_qty(): float { @@:(self.cum_qty) }
+            get_leaves_qty(): float { @@:(self.leaves_qty) }
+        }
+
+        $New {
+            exec_partial_fill(qty: float, px: float) {
+                self.cum_qty = self.cum_qty + qty
+                self.leaves_qty = self.order_qty - self.cum_qty
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: float, px: float) {
+                self.cum_qty = self.cum_qty + qty
+                self.leaves_qty = 0.0
+                -> $Filled
+            }
+            exec_canceled(exec_id: str) { -> $Canceled }
+            get_status(): str { @@:("New") }
+            get_cum_qty(): float { @@:(self.cum_qty) }
+            get_leaves_qty(): float { @@:(self.leaves_qty) }
+        }
+
+        $PartiallyFilled {
+            exec_partial_fill(qty: float, px: float) {
+                self.cum_qty = self.cum_qty + qty
+                self.leaves_qty = self.order_qty - self.cum_qty
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: float, px: float) {
+                self.cum_qty = self.cum_qty + qty
+                self.leaves_qty = 0.0
+                -> $Filled
+            }
+            exec_canceled(exec_id: str) { -> $Canceled }
+            get_status(): str { @@:("PartiallyFilled") }
+            get_cum_qty(): float { @@:(self.cum_qty) }
+            get_leaves_qty(): float { @@:(self.leaves_qty) }
+        }
+
+        $Filled {
+            get_status(): str { @@:("Filled") }
+            get_cum_qty(): float { @@:(self.cum_qty) }
+            get_leaves_qty(): float { @@:(self.leaves_qty) }
+        }
+
+        $Canceled {
+            get_status(): str { @@:("Canceled") }
+            get_cum_qty(): float { @@:(self.cum_qty) }
+            get_leaves_qty(): float { @@:(self.leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id: str = ""
+        order_qty: float = 100.0
+        cum_qty: float = 0.0
+        leaves_qty: float = 0.0
+}
+
+if __name__ == '__main__':
+    o = @@FixBuySideOrder()
+    assert o.get_status() == "Pending"
+
+    o.send_new("CL-1")
+    assert o.get_status() == "PendingNew"
+    assert o.get_leaves_qty() == 100.0
+
+    o.exec_new("E-1")
+    assert o.get_status() == "New"
+
+    o.exec_partial_fill(40.0, 100.5)
+    assert o.get_status() == "PartiallyFilled"
+    assert o.get_cum_qty() == 40.0
+    assert o.get_leaves_qty() == 60.0
+
+    o.exec_partial_fill(30.0, 100.6)
+    assert o.get_cum_qty() == 70.0
+    assert o.get_leaves_qty() == 30.0
+
+    o.exec_fill(30.0, 100.7)
+    assert o.get_status() == "Filled"
+    assert o.get_cum_qty() == 100.0
+    assert o.get_leaves_qty() == 0.0
+    print("PASS: fix_buy_side")

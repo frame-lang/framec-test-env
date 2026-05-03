@@ -1,0 +1,104 @@
+@@[target("php")]
+
+<?php
+
+@@system FixBuySideOrder {
+    interface:
+        send_new(cl_ord_id: str)
+        exec_new(exec_id: str)
+        exec_partial_fill(qty: float, px: float)
+        exec_fill(qty: float, px: float)
+        exec_canceled(exec_id: str)
+        get_status(): str
+        get_cum_qty(): float
+        get_leaves_qty(): float
+
+    machine:
+        $Pending {
+            send_new(cl_ord_id: str) {
+                $this->cl_ord_id = $cl_ord_id;
+                $this->leaves_qty = $this->order_qty;
+                -> $PendingNew
+            }
+            get_status(): str { @@:("Pending") }
+            get_cum_qty(): float { @@:($this->cum_qty) }
+            get_leaves_qty(): float { @@:($this->leaves_qty) }
+        }
+
+        $PendingNew {
+            exec_new(exec_id: str) { -> $New }
+            get_status(): str { @@:("PendingNew") }
+            get_cum_qty(): float { @@:($this->cum_qty) }
+            get_leaves_qty(): float { @@:($this->leaves_qty) }
+        }
+
+        $New {
+            exec_partial_fill(qty: float, px: float) {
+                $this->cum_qty = $this->cum_qty + $qty;
+                $this->leaves_qty = $this->order_qty - $this->cum_qty;
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: float, px: float) {
+                $this->cum_qty = $this->cum_qty + $qty;
+                $this->leaves_qty = 0.0;
+                -> $Filled
+            }
+            exec_canceled(exec_id: str) { -> $Canceled }
+            get_status(): str { @@:("New") }
+            get_cum_qty(): float { @@:($this->cum_qty) }
+            get_leaves_qty(): float { @@:($this->leaves_qty) }
+        }
+
+        $PartiallyFilled {
+            exec_partial_fill(qty: float, px: float) {
+                $this->cum_qty = $this->cum_qty + $qty;
+                $this->leaves_qty = $this->order_qty - $this->cum_qty;
+                -> $PartiallyFilled
+            }
+            exec_fill(qty: float, px: float) {
+                $this->cum_qty = $this->cum_qty + $qty;
+                $this->leaves_qty = 0.0;
+                -> $Filled
+            }
+            exec_canceled(exec_id: str) { -> $Canceled }
+            get_status(): str { @@:("PartiallyFilled") }
+            get_cum_qty(): float { @@:($this->cum_qty) }
+            get_leaves_qty(): float { @@:($this->leaves_qty) }
+        }
+
+        $Filled {
+            get_status(): str { @@:("Filled") }
+            get_cum_qty(): float { @@:($this->cum_qty) }
+            get_leaves_qty(): float { @@:($this->leaves_qty) }
+        }
+
+        $Canceled {
+            get_status(): str { @@:("Canceled") }
+            get_cum_qty(): float { @@:($this->cum_qty) }
+            get_leaves_qty(): float { @@:($this->leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id = ""
+        order_qty = 100.0
+        cum_qty = 0.0
+        leaves_qty = 0.0
+}
+
+$o = @@FixBuySideOrder();
+assert($o->get_status() === "Pending");
+$o->send_new("CL-1");
+assert($o->get_status() === "PendingNew");
+assert($o->get_leaves_qty() == 100.0);
+$o->exec_new("E-1");
+assert($o->get_status() === "New");
+$o->exec_partial_fill(40.0, 100.5);
+assert($o->get_status() === "PartiallyFilled");
+assert($o->get_cum_qty() == 40.0);
+$o->exec_partial_fill(30.0, 100.6);
+assert($o->get_cum_qty() == 70.0);
+$o->exec_fill(30.0, 100.7);
+assert($o->get_status() === "Filled");
+assert($o->get_cum_qty() == 100.0);
+assert($o->get_leaves_qty() == 0.0);
+echo "PASS: fix_buy_side\n";
