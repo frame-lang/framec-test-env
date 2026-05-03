@@ -9,6 +9,13 @@
 
 @@[persist]
 @@system Inner {
+    operations:
+        @@[save]
+        save_state(): bytes {}
+
+        @@[load]
+        restore_state(data: bytes) {}
+
     interface:
         cycle()
         get_state(): str
@@ -34,6 +41,13 @@
 
 @@[main]
 @@system Outer {
+    operations:
+        @@[save]
+        save_state(): bytes {}
+
+        @@[load]
+        restore_state(data: bytes) {}
+
     interface:
         tick()
         cycle_inner()
@@ -75,14 +89,18 @@ if __name__ == '__main__':
     o = Outer()
     assert probe(o) == ("Idle", "A", 0, 0), f"T0 fresh: {probe(o)}"
     snap0 = o.save_state()
-    r0 = Outer.restore_state(snap0)
+    r0 = Outer()
+
+    r0.restore_state(snap0)
     assert probe(r0) == ("Idle", "A", 0, 0), f"T0 restored: {probe(r0)}"
 
     # T1: after tick — outer transitions $Idle→$Active, k increments
     o.tick()
     assert probe(o) == ("Active", "A", 0, 1), f"T1: {probe(o)}"
     snap1 = o.save_state()
-    r1 = Outer.restore_state(snap1)
+    r1 = Outer()
+
+    r1.restore_state(snap1)
     assert probe(r1) == ("Active", "A", 0, 1), f"T1 restored: {probe(r1)}"
 
     # T2: after cycle_inner — $Active forwards to $Idle which calls
@@ -91,14 +109,18 @@ if __name__ == '__main__':
     o.cycle_inner()
     assert probe(o) == ("Active", "B", 1, 1), f"T2: {probe(o)}"
     snap2 = o.save_state()
-    r2 = Outer.restore_state(snap2)
+    r2 = Outer()
+
+    r2.restore_state(snap2)
     assert probe(r2) == ("Active", "B", 1, 1), f"T2 restored: {probe(r2)}"
 
     # Idempotence: save→restore→save→restore must yield identical
     # observables. (JSON-byte equality is not portable; observation
     # equality is the contract we care about.)
     snap2b = r2.save_state()
-    r2b = Outer.restore_state(snap2b)
+    r2b = Outer()
+
+    r2b.restore_state(snap2b)
     assert probe(r2b) == probe(r2), f"Idempotence: {probe(r2b)} != {probe(r2)}"
 
     # Continuation: drive the restored instance — proves compartments,

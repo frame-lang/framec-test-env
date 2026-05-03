@@ -7,6 +7,13 @@
 
 @@[persist]
 @@system Inner {
+    operations:
+        @@[save]
+        save_state(): bytes {}
+
+        @@[load]
+        restore_state(data: bytes) {}
+
     interface:
         cycle()
         get_state(): str
@@ -31,6 +38,13 @@
 }
 
 @@system Mid {
+    operations:
+        @@[save]
+        save_state(): bytes {}
+
+        @@[load]
+        restore_state(data: bytes) {}
+
     interface:
         cycle()
         cycle_inner()
@@ -66,6 +80,13 @@
 
 @@[main]
 @@system Outer {
+    operations:
+        @@[save]
+        save_state(): bytes {}
+
+        @@[load]
+        restore_state(data: bytes) {}
+
     interface:
         tick()
         cycle_mid()
@@ -116,13 +137,17 @@ if __name__ == '__main__':
     o = Outer()
     assert probe(o) == ("Idle", "P", "A", 0, 0, 0), f"T0 fresh: {probe(o)}"
     snap0 = o.save_state()
-    r0 = Outer.restore_state(snap0)
+    r0 = Outer()
+
+    r0.restore_state(snap0)
     assert probe(r0) == ("Idle", "P", "A", 0, 0, 0), f"T0 restored: {probe(r0)}"
 
     o.tick()
     assert probe(o) == ("Active", "P", "A", 0, 0, 1), f"T1: {probe(o)}"
     snap1 = o.save_state()
-    r1 = Outer.restore_state(snap1)
+    r1 = Outer()
+
+    r1.restore_state(snap1)
     assert probe(r1) == ("Active", "P", "A", 0, 0, 1), f"T1 restored: {probe(r1)}"
 
     # Mutate Mid (m++, $P→$Q) and Inner (n++, $A→$B). Outer stays $Active.
@@ -130,11 +155,15 @@ if __name__ == '__main__':
     o.cycle_inner()    # $Active forwards $Q forwards $P.cycle_inner: inner $A.cycle: n=1, inner→$B
     assert probe(o) == ("Active", "Q", "B", 1, 1, 1), f"T2: {probe(o)}"
     snap2 = o.save_state()
-    r2 = Outer.restore_state(snap2)
+    r2 = Outer()
+
+    r2.restore_state(snap2)
     assert probe(r2) == ("Active", "Q", "B", 1, 1, 1), f"T2 restored: {probe(r2)}"
 
     snap2b = r2.save_state()
-    r2b = Outer.restore_state(snap2b)
+    r2b = Outer()
+
+    r2b.restore_state(snap2b)
     assert probe(r2b) == probe(r2), f"Idempotence: {probe(r2b)} != {probe(r2)}"
 
     r2.cycle_inner()   # inner $B.cycle: -> $A
