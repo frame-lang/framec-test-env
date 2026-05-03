@@ -1,7 +1,17 @@
 #!/bin/bash
-# Batched Go test runner. `go build -o bin file.go` per test in parallel,
-# then exec each binary. Avoids `go run`'s repeated compile-and-discard
-# (the Go compiler caches, but startup overhead still adds up × 200).
+# Batched Go test runner.
+#
+# Each test is a standalone `package main` file. Instead of invoking
+# `go build` per test (each pays ~30-100ms toolchain overhead even
+# with a warm cache), we lay out all tests as separate sub-packages
+# under a single Go module and run ONE `go build ./cmd/...`. The Go
+# toolchain parallelizes the builds internally and amortizes startup
+# across the whole corpus.
+#
+# Layout:
+#   /go_runner/go.mod                (pre-created at image build)
+#   /go_runner/cmd/<sanitized>/main.go    (one per test)
+#   /go_runner/bin/<sanitized>            (output binaries)
 
 set -uo pipefail
 
@@ -11,7 +21,9 @@ set -uo pipefail
 
 OUTPUT="/output"
 COMPILE_DIR="/tmp/go_out"
-BIN_DIR="/tmp/go_bin"
+RUNNER_ROOT="/go_runner"
+CMD_DIR="$RUNNER_ROOT/cmd"
+BIN_DIR="$RUNNER_ROOT/bin"
 MANIFEST="/tmp/go_manifest.tsv"
 COMPILE_ONLY="${COMPILE_ONLY:-false}"
 JOBS="${GO_COMPILE_JOBS:-$(nproc 2>/dev/null || echo 4)}"
@@ -21,8 +33,8 @@ ext="fgo"
 out_ext="go"
 
 mkdir -p "$OUTPUT"
-rm -rf "$COMPILE_DIR" "$BIN_DIR" "$MANIFEST" 2>/dev/null
-mkdir -p "$COMPILE_DIR" "$BIN_DIR"
+rm -rf "$COMPILE_DIR" "$CMD_DIR" "$BIN_DIR" "$MANIFEST" 2>/dev/null
+mkdir -p "$COMPILE_DIR" "$CMD_DIR" "$BIN_DIR"
 : > "$MANIFEST"
 
 tests=$(find /tests/common/positive -name "*.$ext" 2>/dev/null | sort)
@@ -84,8 +96,6 @@ for test_file in $tests; do
     fi
 
     # `go build` rejects files named *_test.go outside of a test context.
-    # The existing runner.sh (line 167-170) handles this by copying to a
-    # sibling *_run.go — mirror that here.
     if echo "$src" | grep -q '_test\.go$'; then
         renamed="${src%_test.go}_run.go"
         cp "$src" "$renamed"
@@ -97,8 +107,10 @@ for test_file in $tests; do
         continue
     fi
 
-    bin_path="$BIN_DIR/${sanitized}"
-    printf '%s\t%s\n' "$src" "$bin_path" >> "$COMPILE_LIST"
+    # Lay out as a sub-package: /go_runner/cmd/<sanitized>/main.go
+    pkg_dir="$CMD_DIR/$sanitized"
+    mkdir -p "$pkg_dir"
+    cp "$src" "$pkg_dir/main.go"
     printf '%s\tRUN\t%s\t%s\n' "$test_num" "$test_name" "$sanitized" >> "$MANIFEST"
 done
 
@@ -121,34 +133,38 @@ fi
 STATUS_DIR="/tmp/go_compile_status"
 rm -rf "$STATUS_DIR" 2>/dev/null
 mkdir -p "$STATUS_DIR"
-export STATUS_DIR
 
-compile_one() {
-    local src="$1"
-    local bin="$2"
-    local name
-    name=$(basename "$bin")
-    # Each test is a standalone file with `package main; func main()`.
-    # go build on a single file compiles it in isolation.
-    if go build -o "$bin" "$src" 2> "$STATUS_DIR/${name}.err"; then
-        echo 0 > "$STATUS_DIR/${name}.rc"
-    else
-        echo 1 > "$STATUS_DIR/${name}.rc"
+# Single multi-bin go build. The Go toolchain parallelizes
+# internally, so xargs -P is unnecessary here.
+BUILD_LOG="$STATUS_DIR/go_build.log"
+( cd "$RUNNER_ROOT" && go build -o "$BIN_DIR/" ./cmd/... ) > "$BUILD_LOG" 2>&1
+build_rc=$?
+
+# If the build failed, scrape per-package errors to mark
+# specific tests COMPILE_FAIL. Errors look like:
+#   ./cmd/<sanitized>/main.go:NN:CC: ...message
+# Falls back to marking everything COMPILE_FAIL if we can't
+# attribute (preserves the integrity-check invariant).
+if [ "$build_rc" -ne 0 ]; then
+    bad=$(grep -oE 'cmd/[A-Za-z0-9_]+/' "$BUILD_LOG" | sed 's|cmd/||;s|/||' | sort -u)
+    if [ -n "$bad" ]; then
+        # Retry build excluding the bad packages — some otherwise-good
+        # tests may still need compilation. Each retry is cheap because
+        # Go caches per-package.
+        for s in $bad; do
+            rm -rf "$CMD_DIR/$s"
+        done
+        ( cd "$RUNNER_ROOT" && go build -o "$BIN_DIR/" ./cmd/... ) >> "$BUILD_LOG" 2>&1 || true
     fi
-}
-export -f compile_one
-
-if [ -s "$COMPILE_LIST" ]; then
-    awk -F'\t' '{print $1; print $2}' "$COMPILE_LIST" | \
-        xargs -n 2 -P "$JOBS" bash -c 'compile_one "$@"' _
 fi
 
+# Mark RUN rows whose binary doesn't exist as COMPILE_FAIL.
 tmp_manifest="${MANIFEST}.tmp"
-awk -v sd="$STATUS_DIR" -F'\t' 'BEGIN{OFS="\t"} {
+awk -v bd="$BIN_DIR" -F'\t' 'BEGIN{OFS="\t"} {
     if ($2 == "RUN") {
-        rc_file = sd "/" $4 ".rc"
-        getline rc < rc_file; close(rc_file)
-        if (rc != "0") { $2 = "COMPILE_FAIL"; $4 = "" }
+        bin = bd "/" $4
+        cmd = "test -x \"" bin "\""
+        if (system(cmd) != 0) { $2 = "COMPILE_FAIL"; $4 = "" }
     }
     print
 }' "$MANIFEST" > "$tmp_manifest"
