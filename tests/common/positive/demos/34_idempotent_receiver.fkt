@@ -1,0 +1,36 @@
+@@[target("kotlin")]
+
+@@system IdempotentReceiver {
+    interface:
+        deliver(msg_id: String, payload: String): String
+
+    machine:
+        $Ready {
+            deliver(msg_id: String, payload: String): String {
+                if (this.seen.contains(msg_id)) {
+                    @@:("duplicate")
+                } else {
+                    this.seen.add(msg_id)
+                    this.process(payload)
+                    @@:("accepted")
+                }
+            }
+        }
+
+    actions:
+        process(payload: String) {
+            println("processing: $payload")
+        }
+
+    domain:
+        seen: MutableSet<String> = mutableSetOf()
+}
+
+fun main() {
+    val r = @@IdempotentReceiver()
+    if ((r.deliver("m1", "hello") as String) != "accepted")  throw RuntimeException("expected accepted #1")
+    if ((r.deliver("m1", "hello") as String) != "duplicate") throw RuntimeException("expected duplicate #1")
+    if ((r.deliver("m2", "world") as String) != "accepted")  throw RuntimeException("expected accepted #2")
+    if ((r.deliver("m2", "world") as String) != "duplicate") throw RuntimeException("expected duplicate #2")
+    println("PASS: idempotent_receiver")
+}

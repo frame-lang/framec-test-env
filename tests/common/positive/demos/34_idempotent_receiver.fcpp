@@ -1,0 +1,42 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <unordered_set>
+#include <cassert>
+
+@@system IdempotentReceiver {
+    interface:
+        deliver(msg_id: str, payload: str): str
+
+    machine:
+        $Ready {
+            deliver(msg_id: str, payload: str): str {
+                if (this->seen.count(msg_id) > 0) {
+                    @@:(std::string("duplicate"))
+                } else {
+                    this->seen.insert(msg_id);
+                    this->process(payload);
+                    @@:(std::string("accepted"))
+                }
+            }
+        }
+
+    actions:
+        process(payload: std::string) {
+            std::cout << "processing: " << payload << std::endl;
+        }
+
+    domain:
+        seen: std::unordered_set<std::string>
+}
+
+int main() {
+    IdempotentReceiver r;
+    assert(r.deliver("m1", "hello") == "accepted");
+    assert(r.deliver("m1", "hello") == "duplicate");
+    assert(r.deliver("m2", "world") == "accepted");
+    assert(r.deliver("m2", "world") == "duplicate");
+    std::cout << "PASS: idempotent_receiver" << std::endl;
+    return 0;
+}

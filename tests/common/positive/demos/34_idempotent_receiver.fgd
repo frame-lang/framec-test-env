@@ -1,0 +1,44 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@system IdempotentReceiver {
+    interface:
+        deliver(msg_id: String, payload: String): String
+
+    machine:
+        $Ready {
+            deliver(msg_id: String, payload: String): String {
+                if self.seen.has(msg_id):
+                    @@:("duplicate")
+                else:
+                    self.seen[msg_id] = true
+                    self.process(payload)
+                    @@:("accepted")
+            }
+        }
+
+    actions:
+        process(payload) { print("processing: " + payload) }
+
+    domain:
+        seen: Dictionary = {}
+}
+
+func main():
+    var r = @@IdempotentReceiver()
+    var failures = 0
+
+    if r.deliver("m1", "hello") != "accepted":  print("FAIL: accepted #1");  failures += 1
+    if r.deliver("m1", "hello") != "duplicate": print("FAIL: duplicate #1"); failures += 1
+    if r.deliver("m2", "world") != "accepted":  print("FAIL: accepted #2");  failures += 1
+    if r.deliver("m2", "world") != "duplicate": print("FAIL: duplicate #2"); failures += 1
+
+    if failures > 0:
+        print("FAIL: idempotent_receiver (" + str(failures) + " failures)")
+        quit(1)
+    print("PASS: idempotent_receiver")
+
+func _init():
+    main()
+    quit()

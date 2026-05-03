@@ -1,0 +1,36 @@
+@@[target("ruby")]
+
+require 'set'
+
+@@system IdempotentReceiver {
+    interface:
+        deliver(msg_id: str, payload: str): str
+
+    machine:
+        $Ready {
+            deliver(msg_id: str, payload: str): str {
+                if @seen.include?(msg_id)
+                    @@:("duplicate")
+                else
+                    @seen.add(msg_id)
+                    self.process(payload)
+                    @@:("accepted")
+                end
+            }
+        }
+
+    actions:
+        process(payload) {
+            puts "processing: #{payload}"
+        }
+
+    domain:
+        seen = Set.new
+}
+
+r = IdempotentReceiver.new
+raise "expected accepted #1"  unless r.deliver("m1", "hello") == "accepted"
+raise "expected duplicate #1" unless r.deliver("m1", "hello") == "duplicate"
+raise "expected accepted #2"  unless r.deliver("m2", "world") == "accepted"
+raise "expected duplicate #2" unless r.deliver("m2", "world") == "duplicate"
+puts "PASS: idempotent_receiver"

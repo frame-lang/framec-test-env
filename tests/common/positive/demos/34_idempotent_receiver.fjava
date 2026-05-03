@@ -1,0 +1,40 @@
+@@[target("java")]
+
+import java.util.HashSet;
+
+@@system IdempotentReceiver {
+    interface:
+        deliver(msg_id: String, payload: String): String
+
+    machine:
+        $Ready {
+            deliver(msg_id: String, payload: String): String {
+                if (this.seen.contains(msg_id)) {
+                    @@:("duplicate")
+                } else {
+                    this.seen.add(msg_id);
+                    this.process(payload);
+                    @@:("accepted")
+                }
+            }
+        }
+
+    actions:
+        process(payload: String) {
+            System.out.println("processing: " + payload);
+        }
+
+    domain:
+        seen: HashSet<String> = new HashSet<>()
+}
+
+class Main {
+    public static void main(String[] args) {
+        var r = @@IdempotentReceiver();
+        if (!((String) r.deliver("m1", "hello")).equals("accepted"))   throw new RuntimeException("expected accepted #1");
+        if (!((String) r.deliver("m1", "hello")).equals("duplicate"))  throw new RuntimeException("expected duplicate #1");
+        if (!((String) r.deliver("m2", "world")).equals("accepted"))   throw new RuntimeException("expected accepted #2");
+        if (!((String) r.deliver("m2", "world")).equals("duplicate"))  throw new RuntimeException("expected duplicate #2");
+        System.out.println("PASS: idempotent_receiver");
+    }
+}

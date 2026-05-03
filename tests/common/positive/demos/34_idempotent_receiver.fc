@@ -1,0 +1,66 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// Plain linear-scan set for the matrix tests; kept tiny since the
+// fixture only exercises 2 IDs.
+#define IR_SET_CAP 16
+typedef struct {
+    char items[IR_SET_CAP][32];
+    int count;
+} ir_set_t;
+
+static int ir_set_contains(ir_set_t* s, const char* msg_id) {
+    for (int i = 0; i < s->count; i++) {
+        if (strcmp(s->items[i], msg_id) == 0) return 1;
+    }
+    return 0;
+}
+
+static void ir_set_add(ir_set_t* s, const char* msg_id) {
+    if (s->count >= IR_SET_CAP) return;
+    strncpy(s->items[s->count], msg_id, sizeof(s->items[0]) - 1);
+    s->items[s->count][sizeof(s->items[0]) - 1] = '\0';
+    s->count++;
+}
+
+@@system IdempotentReceiver {
+    interface:
+        deliver(msg_id: str, payload: str): str
+
+    machine:
+        $Ready {
+            deliver(msg_id: str, payload: str): str {
+                if (ir_set_contains(&self->seen, msg_id)) {
+                    @@:("duplicate")
+                } else {
+                    ir_set_add(&self->seen, msg_id);
+                    IdempotentReceiver_process(self, payload);
+                    @@:("accepted")
+                }
+            }
+        }
+
+    actions:
+        process(payload: str) {
+            printf("processing: %s\n", payload);
+        }
+
+    domain:
+        seen: ir_set_t
+}
+
+int main() {
+    IdempotentReceiver* r = @@IdempotentReceiver();
+    memset(&r->seen, 0, sizeof(ir_set_t));
+
+    if (strcmp(IdempotentReceiver_deliver(r, "m1", "hello"), "accepted")  != 0) { printf("FAIL: accepted #1\n");  return 1; }
+    if (strcmp(IdempotentReceiver_deliver(r, "m1", "hello"), "duplicate") != 0) { printf("FAIL: duplicate #1\n"); return 1; }
+    if (strcmp(IdempotentReceiver_deliver(r, "m2", "world"), "accepted")  != 0) { printf("FAIL: accepted #2\n");  return 1; }
+    if (strcmp(IdempotentReceiver_deliver(r, "m2", "world"), "duplicate") != 0) { printf("FAIL: duplicate #2\n"); return 1; }
+    printf("PASS: idempotent_receiver\n");
+    IdempotentReceiver_destroy(r);
+    return 0;
+}

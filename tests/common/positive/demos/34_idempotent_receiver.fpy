@@ -1,0 +1,34 @@
+@@[target("python_3")]
+
+@@system IdempotentReceiver {
+    interface:
+        deliver(msg_id: str, payload: str): str
+
+    machine:
+        $Ready {
+            deliver(msg_id: str, payload: str): str {
+                if msg_id in self.seen:
+                    @@:("duplicate")
+                else:
+                    self.seen.add(msg_id)
+                    self.process(payload)
+                    @@:("accepted")
+            }
+        }
+
+    actions:
+        process(payload) {
+            print(f"processing: {payload}")
+        }
+
+    domain:
+        seen: set = set()
+}
+
+if __name__ == '__main__':
+    r = @@IdempotentReceiver()
+    assert r.deliver("m1", "hello") == "accepted"
+    assert r.deliver("m1", "hello") == "duplicate"
+    assert r.deliver("m2", "world") == "accepted"
+    assert r.deliver("m2", "world") == "duplicate"
+    print("PASS: idempotent_receiver")

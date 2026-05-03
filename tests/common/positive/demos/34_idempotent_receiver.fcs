@@ -1,0 +1,41 @@
+@@[target("csharp")]
+
+using System;
+using System.Collections.Generic;
+
+@@system IdempotentReceiver {
+    interface:
+        deliver(msg_id: String, payload: String): String
+
+    machine:
+        $Ready {
+            deliver(msg_id: String, payload: String): String {
+                if (this.seen.Contains(msg_id)) {
+                    @@:("duplicate")
+                } else {
+                    this.seen.Add(msg_id);
+                    this.process(payload);
+                    @@:("accepted")
+                }
+            }
+        }
+
+    actions:
+        process(payload: String) {
+            Console.WriteLine("processing: " + payload);
+        }
+
+    domain:
+        seen: HashSet<string> = new HashSet<string>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        var r = @@IdempotentReceiver();
+        if ((string) r.deliver("m1", "hello") != "accepted")   throw new Exception("expected accepted #1");
+        if ((string) r.deliver("m1", "hello") != "duplicate")  throw new Exception("expected duplicate #1");
+        if ((string) r.deliver("m2", "world") != "accepted")   throw new Exception("expected accepted #2");
+        if ((string) r.deliver("m2", "world") != "duplicate")  throw new Exception("expected duplicate #2");
+        Console.WriteLine("PASS: idempotent_receiver");
+    }
+}

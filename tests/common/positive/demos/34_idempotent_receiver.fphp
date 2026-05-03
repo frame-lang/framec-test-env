@@ -1,0 +1,36 @@
+@@[target("php")]
+
+<?php
+
+@@system IdempotentReceiver {
+    interface:
+        deliver(msg_id: str, payload: str): str
+
+    machine:
+        $Ready {
+            deliver(msg_id: str, payload: str): str {
+                if (isset($this->seen[$msg_id])) {
+                    @@:("duplicate")
+                } else {
+                    $this->seen[$msg_id] = true;
+                    $this->process($payload);
+                    @@:("accepted")
+                }
+            }
+        }
+
+    actions:
+        process(payload) {
+            echo "processing: " . $payload . "\n";
+        }
+
+    domain:
+        seen = []
+}
+
+$r = @@IdempotentReceiver();
+assert($r->deliver("m1", "hello") === "accepted",  "expected accepted #1");
+assert($r->deliver("m1", "hello") === "duplicate", "expected duplicate #1");
+assert($r->deliver("m2", "world") === "accepted",  "expected accepted #2");
+assert($r->deliver("m2", "world") === "duplicate", "expected duplicate #2");
+echo "PASS: idempotent_receiver\n";

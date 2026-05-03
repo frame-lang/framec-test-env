@@ -1,0 +1,44 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system IdempotentReceiver {
+    interface:
+        deliver(msg_id: string, payload: string): string
+
+    machine:
+        $Ready {
+            deliver(msg_id: string, payload: string): string {
+                _, exists := s.seen[msg_id]
+                if exists {
+                    @@:("duplicate")
+                } else {
+                    s.seen[msg_id] = true
+                    s.process(payload)
+                    @@:("accepted")
+                }
+            }
+        }
+
+    actions:
+        process(payload: string) {
+            fmt.Println("processing: " + payload)
+        }
+
+    domain:
+        seen: map[string]bool = map[string]bool{}
+}
+
+func main() {
+    r := NewIdempotentReceiver()
+    if r.Deliver("m1", "hello") != "accepted"  { fmt.Println("FAIL: accepted #1");  os.Exit(1) }
+    if r.Deliver("m1", "hello") != "duplicate" { fmt.Println("FAIL: duplicate #1"); os.Exit(1) }
+    if r.Deliver("m2", "world") != "accepted"  { fmt.Println("FAIL: accepted #2");  os.Exit(1) }
+    if r.Deliver("m2", "world") != "duplicate" { fmt.Println("FAIL: duplicate #2"); os.Exit(1) }
+    fmt.Println("PASS: idempotent_receiver")
+}

@@ -1,0 +1,34 @@
+@@[target("javascript")]
+
+@@system IdempotentReceiver {
+    interface:
+        deliver(msg_id, payload)
+
+    machine:
+        $Ready {
+            deliver(msg_id, payload) {
+                if (this.seen.has(msg_id)) {
+                    @@:("duplicate")
+                } else {
+                    this.seen.add(msg_id);
+                    this.process(payload);
+                    @@:("accepted")
+                }
+            }
+        }
+
+    actions:
+        process(payload) {
+            console.log("processing: " + payload);
+        }
+
+    domain:
+        seen = new Set()
+}
+
+const r = @@IdempotentReceiver();
+if (r.deliver("m1", "hello") !== "accepted")  throw new Error("expected accepted #1");
+if (r.deliver("m1", "hello") !== "duplicate") throw new Error("expected duplicate #1");
+if (r.deliver("m2", "world") !== "accepted")  throw new Error("expected accepted #2");
+if (r.deliver("m2", "world") !== "duplicate") throw new Error("expected duplicate #2");
+console.log("PASS: idempotent_receiver");

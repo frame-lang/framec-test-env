@@ -1,0 +1,34 @@
+@@[target("lua")]
+
+@@system IdempotentReceiver {
+    interface:
+        deliver(msg_id: str, payload: str): str
+
+    machine:
+        $Ready {
+            deliver(msg_id: str, payload: str): str {
+                if self.seen[msg_id] then
+                    @@:("duplicate")
+                else
+                    self.seen[msg_id] = true
+                    self:process(payload)
+                    @@:("accepted")
+                end
+            }
+        }
+
+    actions:
+        process(payload) {
+            print("processing: " .. payload)
+        }
+
+    domain:
+        seen = {}
+}
+
+local r = @@IdempotentReceiver()
+assert(r:deliver("m1", "hello") == "accepted",  "expected accepted #1")
+assert(r:deliver("m1", "hello") == "duplicate", "expected duplicate #1")
+assert(r:deliver("m2", "world") == "accepted",  "expected accepted #2")
+assert(r:deliver("m2", "world") == "duplicate", "expected duplicate #2")
+print("PASS: idempotent_receiver")
