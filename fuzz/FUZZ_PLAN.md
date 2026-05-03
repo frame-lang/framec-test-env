@@ -1370,12 +1370,39 @@ Each wave-N candidate noted in its phase's section:
     codegen for C's pack/unpack switch.
   Wave 3 list typed args may surface similar issues — deferred for
   now (no urgent driver, unclear value-density).
-- **Phase 17 wave 2:** re-entrant event sequences (`@@:self.X()`
-  mid-sequence), longer 5-8 event traces, persist save mid-
-  sequence (overlaps with persist × multi-event above).
-- **Phase 19 wave 4:** push depth ≥ 3 stress, push from leaf with
-  pop-back via `=> $^` forward, push chained with self-call
-  dispatch.
+- **Phase 17 wave 2 — SHIPPED 2026-05-03.** 4 new patterns added to
+  `gen_multievent.py` covering `@@:self.X()` mid-handler dispatch:
+  - p9 self-call mid-handler (single re-entrant call inside outer
+    handler body, then post-call mutation)
+  - p10 nested self-call (two-level @@:self chain — drive →
+    middle_bump → inner_bump)
+  - p11 self-call then external (re-entrant dispatch followed by
+    user-driven external event)
+  - p12 self-call after transition ($S0 → $S1, then bump_outer in
+    $S1 does @@:self.bump_inner — verifies dispatch against current
+    state, not the entry-time state)
+  Pattern class extended with `extra_iface` field for methods only
+  reachable via @@:self that need interface declaration but no
+  driver invocation. 12 patterns × 10 value-tuples × 17 langs =
+  **2040/2040 full-tier clean**. Zero defects surfaced. Longer
+  5-8 event traces shipped in wave 3 (p5-p8). Persist save mid-
+  sequence shipped in Phase 24 wave 6 (test 81).
+- **Phase 19 wave 4 — SHIPPED 2026-05-03.** 4 new patterns added to
+  `gen_pushpop.py`:
+  - p11 depth-three push ($S0 push → $S1 push → $S2 push → $S3,
+    bump at $S3, then pop3/pop2/pop1 unwind back to $S0)
+  - p12 leaf-push forward-back (HSM leaf $Child pushes to $Modal,
+    bumps, pops back; then `fwd_bump` on $Child forwards to
+    $Parent's handler — verifies HSM forwarding chain still wired
+    after a push/pop round-trip)
+  - p13 push with @@:self ($S0 pushes to $Modal; modal handler does
+    `@@:self.bump_f()` re-entrant dispatch against the pushed
+    compartment, then pop back)
+  - p14 three-push alternating pop (3-deep push with bumps at every
+    depth, then alternating pops walk back through all three)
+  Pattern class extended with `extra_iface` parallel to the
+  multievent fix. 14 patterns × 10 value-tuples × 17 langs =
+  **2380/2380 full-tier clean**. Zero defects surfaced.
 - **Phase 20 wave 2:** const used as transition arg
   (`-> $S(self.const_k)`), const initialised from a system param,
   `@@:system.state` inside `if` conditions, Erlang state-name

@@ -25,13 +25,16 @@ from gen_nested import LANGS, method_name
 
 
 class Pattern:
-    __slots__ = ("name", "build_states", "compute", "pre_drive_seq")
+    __slots__ = ("name", "build_states", "compute", "pre_drive_seq", "extra_iface")
 
-    def __init__(self, name, build_states, compute, pre_drive_seq):
+    def __init__(self, name, build_states, compute, pre_drive_seq, extra_iface=None):
         self.name = name
         self.build_states = build_states
         self.compute = compute
         self.pre_drive_seq = pre_drive_seq
+        # Methods that are referenced via @@:self.X() but not user-driven.
+        # They must appear in the interface but NOT in the driver's call list.
+        self.extra_iface = extra_iface or []
 
 
 def _build_p1_three_event_same_state(spec, lang, lit_a, lit_b):
@@ -281,6 +284,121 @@ def _build_p4_event_in_hsm_chain(spec, lang, lit_a, lit_b):
     ]
 
 
+def _build_p9_self_call_mid_handler(spec, lang, lit_a, lit_b):
+    """P9 (wave 2): outer event handler fires `@@:self.X()` mid-body
+    to a sibling event in the same state. The sibling bumps $.f by
+    lit_b. After the self-call returns, the outer handler bumps $.f
+    by lit_a. Sequence: drive once, get_f. Final $.f = lit_a + lit_b.
+
+    Tests re-entrant dispatch: the self-call must execute the
+    sibling's body fully (including its $.f mutation) before the
+    outer handler resumes its post-call bump."""
+    m_drive = method_name(lang, "drive")
+    m_inner = method_name(lang, "inner_bump")
+    m_get = method_name(lang, "get_f")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                @@:self.{m_inner}(){spec.stmt_end}",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {lit_a}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_inner}() {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {lit_b}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_get}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}",
+        f"        }}",
+    ]
+
+
+def _build_p10_nested_self_call(spec, lang, lit_a, lit_b):
+    """P10 (wave 2): two-level @@:self chain. drive() handler calls
+    @@:self.middle_bump(), which itself calls @@:self.inner_bump().
+    Each level adds a literal to $.f. After both nested calls return,
+    drive() also bumps $.f. Sequence: drive once. Final $.f =
+    lit_a + lit_b + lit_a (inner=lit_b, middle=lit_a, drive=lit_a).
+
+    Tests that `@@:self` dispatch correctly nests — frame stack /
+    handler stack must unwind properly across two levels."""
+    m_drive = method_name(lang, "drive")
+    m_mid = method_name(lang, "middle_bump")
+    m_inner = method_name(lang, "inner_bump")
+    m_get = method_name(lang, "get_f")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                @@:self.{m_mid}(){spec.stmt_end}",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {lit_a}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_mid}() {{",
+        f"                @@:self.{m_inner}(){spec.stmt_end}",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {lit_a}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_inner}() {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {lit_b}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_get}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}",
+        f"        }}",
+    ]
+
+
+def _build_p11_self_call_then_external(spec, lang, lit_a, lit_b):
+    """P11 (wave 2): handler does @@:self.bump_a() (re-entrant),
+    then user fires bump_b directly afterwards. Tests that re-entrant
+    dispatch leaves the system in a consistent state for subsequent
+    user events. Sequence: drive, bump_b. Final $.f = lit_a + lit_b
+    (drive's @@:self.bump_a contributes lit_a; user's bump_b
+    contributes lit_b)."""
+    m_drive = method_name(lang, "drive")
+    m_bump_a = method_name(lang, "bump_a")
+    m_bump_b = method_name(lang, "bump_b")
+    m_get = method_name(lang, "get_f")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                @@:self.{m_bump_a}(){spec.stmt_end}",
+        f"            }}",
+        f"            {m_bump_a}() {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {lit_a}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_bump_b}() {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {lit_b}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_get}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}",
+        f"        }}",
+    ]
+
+
+def _build_p12_self_call_after_transition(spec, lang, lit_a, lit_b):
+    """P12 (wave 2): drive() in $S0 transitions to $S1, then user
+    fires bump_outer in $S1 — bump_outer's body does @@:self.bump_inner()
+    where bump_inner is also defined on $S1. Sequence: drive, bump_outer,
+    get_f. Final $.f = lit_a (bump_inner) + lit_b (bump_outer post-call).
+
+    Tests that re-entrant dispatch dispatches against the CURRENT
+    state ($S1), not the state at handler-entry time."""
+    m_drive = method_name(lang, "drive")
+    m_outer = method_name(lang, "bump_outer")
+    m_inner = method_name(lang, "bump_inner")
+    m_get = method_name(lang, "get_f")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                -> $S1",
+        f"            }}",
+        f"        }}",
+        f"        $S1 {{",
+        f"            {m_outer}() {{",
+        f"                @@:self.{m_inner}(){spec.stmt_end}",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {lit_b}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_inner}() {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {lit_a}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_get}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}",
+        f"        }}",
+    ]
+
+
 PATTERNS = [
     Pattern("p1_three_event_same_state",
             _build_p1_three_event_same_state,
@@ -315,6 +433,30 @@ PATTERNS = [
             _build_p8_ten_same_event,
             lambda a, b: 10 * a,
             ["bump_a"] * 10),
+    # Wave 2: @@:self.X() mid-sequence — re-entrant dispatch within
+    # a multi-event trace. Tests that nested handler invocations
+    # mutate domain consistently and leave the state machine
+    # operable for subsequent user events.
+    Pattern("p9_self_call_mid_handler",
+            _build_p9_self_call_mid_handler,
+            lambda a, b: a + b,  # outer_bump=a, inner=b
+            ["drive"],
+            extra_iface=["inner_bump"]),
+    Pattern("p10_nested_self_call",
+            _build_p10_nested_self_call,
+            lambda a, b: 2 * a + b,  # drive=a, middle=a, inner=b
+            ["drive"],
+            extra_iface=["middle_bump", "inner_bump"]),
+    Pattern("p11_self_call_then_external",
+            _build_p11_self_call_then_external,
+            lambda a, b: a + b,  # drive→@@:self.bump_a=a, then user bump_b=b
+            ["drive", "bump_b"],
+            extra_iface=["bump_a"]),
+    Pattern("p12_self_call_after_transition",
+            _build_p12_self_call_after_transition,
+            lambda a, b: a + b,  # bump_inner=a, bump_outer post-call=b
+            ["drive", "bump_outer"],
+            extra_iface=["bump_inner"]),
 ]
 
 
@@ -364,6 +506,8 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
     # plus get_f. Sorted for deterministic emission.
     interface_methods = set()
     for m in pattern.pre_drive_seq:
+        interface_methods.add(method_name(lang, m))
+    for m in pattern.extra_iface:
         interface_methods.add(method_name(lang, m))
     interface_methods.add(verify)
 

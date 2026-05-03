@@ -42,13 +42,16 @@ from gen_nested import LANGS, method_name
 # ---------------------------------------------------------------------
 
 class Pattern:
-    __slots__ = ("name", "build_states", "compute", "pre_drive_seq")
+    __slots__ = ("name", "build_states", "compute", "pre_drive_seq", "extra_iface")
 
-    def __init__(self, name, build_states, compute, pre_drive_seq):
+    def __init__(self, name, build_states, compute, pre_drive_seq, extra_iface=None):
         self.name = name
         self.build_states = build_states          # lambda(spec, lang, base, bump) -> [str]
         self.compute = compute                    # lambda(base, bump) -> int
         self.pre_drive_seq = pre_drive_seq        # list of method names to call before verify
+        # Methods referenced via @@:self.X() but not user-driven; appear
+        # in the interface but skipped by the driver.
+        self.extra_iface = extra_iface or []
 
 
 def _build_p1_dom_persists(spec, lang, base, bump):
@@ -389,6 +392,195 @@ def _build_p4_pop_then_event(spec, lang, base, bump):
 
 # Pattern registry. Each pattern's `compute` returns the expected
 # value of the verified getter after the pre_drive_seq is run.
+def _build_p11_depth_three_push(spec, lang, base, bump):
+    """P11 (wave 4): depth-3 push chain. $S0 push → $S1 push → $S2
+    push → $S3, then $S3.bump_f bumps $.f, then pop3 → pop2 → pop1
+    return all the way back to $S0. Verifies the state stack survives
+    3-deep push and pop unwinds in LIFO order. Final $.f =
+    BASE + BUMP."""
+    m_drive_to_s1 = method_name(lang, "drive")
+    m_drive_to_s2 = method_name(lang, "to_s2")
+    m_drive_to_s3 = method_name(lang, "to_s3")
+    m_bump = method_name(lang, "bump_f")
+    m_pop3 = method_name(lang, "pop3")
+    m_pop2 = method_name(lang, "pop2")
+    m_pop1 = method_name(lang, "pop1")
+    m_get = method_name(lang, "get_f")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive_to_s1}() {{",
+        f"                push$",
+        f"                -> $S1",
+        f"            }}",
+        f"            {m_get}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}",
+        f"        }}",
+        f"        $S1 {{",
+        f"            {m_drive_to_s2}() {{",
+        f"                push$",
+        f"                -> $S2",
+        f"            }}",
+        f"            {m_pop1}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+        f"        $S2 {{",
+        f"            {m_drive_to_s3}() {{",
+        f"                push$",
+        f"                -> $S3",
+        f"            }}",
+        f"            {m_pop2}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+        f"        $S3 {{",
+        f"            {m_bump}() {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {bump}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_pop3}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+    ]
+
+
+def _build_p12_leaf_push_forward_back(spec, lang, base, bump):
+    """P12 (wave 4): push from HSM leaf, then pop back, then trigger
+    a forwarded event (=> $^) that the parent handles. drive (in $S0)
+    transitions to $Child, which pushes → $Modal. $Modal.bump_f
+    bumps $.f. $Modal.pop_back pops back to $Child. fwd_bump in
+    $Child forwards to $Parent which bumps $.f. Verifies that after
+    a push/pop round-trip, the HSM forwarding chain is still wired
+    up correctly. Final $.f = BASE + BUMP + BUMP."""
+    m_drive = method_name(lang, "drive")
+    m_push = method_name(lang, "go_push")
+    m_bump = method_name(lang, "bump_f")
+    m_pop = method_name(lang, "pop_back")
+    m_fwd = method_name(lang, "fwd_bump")
+    m_get = method_name(lang, "get_f")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                -> $Child",
+        f"            }}",
+        f"        }}",
+        f"        $Child => $Parent {{",
+        f"            {m_push}() {{",
+        f"                push$",
+        f"                -> $Modal",
+        f"            }}",
+        f"            {m_fwd}() {{",
+        f"                => $^",
+        f"            }}",
+        f"            {m_get}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}",
+        f"        }}",
+        f"        $Modal {{",
+        f"            {m_bump}() {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {bump}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_pop}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+        f"        $Parent {{",
+        f"            {m_fwd}() {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {bump}{spec.stmt_end}",
+        f"            }}",
+        f"        }}",
+    ]
+
+
+def _build_p13_push_with_self_call(spec, lang, base, bump):
+    """P13 (wave 4): push to a modal state, then the modal state's
+    drive_in_modal() handler does @@:self.bump_f() (re-entrant
+    dispatch within the pushed compartment). Pop back. Verifies that
+    @@:self dispatches against the CURRENT compartment (the modal,
+    while pushed) and that pop unwinds correctly afterwards.
+    Final $.f = BASE + BUMP."""
+    m_drive = method_name(lang, "drive")
+    m_in_modal = method_name(lang, "drive_in_modal")
+    m_bump = method_name(lang, "bump_f")
+    m_pop = method_name(lang, "pop_back")
+    m_get = method_name(lang, "get_f")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                push$",
+        f"                -> $Modal",
+        f"            }}",
+        f"            {m_get}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}",
+        f"        }}",
+        f"        $Modal {{",
+        f"            {m_in_modal}() {{",
+        f"                @@:self.{m_bump}(){spec.stmt_end}",
+        f"            }}",
+        f"            {m_bump}() {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {bump}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_pop}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+    ]
+
+
+def _build_p14_three_push_alternating_pop(spec, lang, base, bump):
+    """P14 (wave 4): 3-deep push chain with bumps at each level,
+    then alternating pop events that walk back through all three.
+    drive → $S1 (push), bump_f (lit at $S1), to_s2 → $S2 (push),
+    bump_f (lit at $S2), to_s3 → $S3 (push), bump_f (lit at $S3),
+    then pop3 → pop2 → pop1. Final $.f = BASE + 3*BUMP. Stress-
+    tests that bumps at every depth survive the unwind."""
+    m_drive = method_name(lang, "drive")
+    m_to_s2 = method_name(lang, "to_s2")
+    m_to_s3 = method_name(lang, "to_s3")
+    m_bump = method_name(lang, "bump_f")
+    m_pop3 = method_name(lang, "pop3")
+    m_pop2 = method_name(lang, "pop2")
+    m_pop1 = method_name(lang, "pop1")
+    m_get = method_name(lang, "get_f")
+    return [
+        f"        $S0 {{",
+        f"            {m_drive}() {{",
+        f"                push$",
+        f"                -> $S1",
+        f"            }}",
+        f"            {m_get}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}",
+        f"        }}",
+        f"        $S1 {{",
+        f"            {m_bump}() {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {bump}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_to_s2}() {{",
+        f"                push$",
+        f"                -> $S2",
+        f"            }}",
+        f"            {m_pop1}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+        f"        $S2 {{",
+        f"            {m_bump}() {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {bump}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_to_s3}() {{",
+        f"                push$",
+        f"                -> $S3",
+        f"            }}",
+        f"            {m_pop2}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+        f"        $S3 {{",
+        f"            {m_bump}() {{",
+        f"                {spec.self_word}{spec.field_op}f = {spec.self_word}{spec.field_op}f + {bump}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_pop3}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+    ]
+
+
 PATTERNS = [
     Pattern("p1_dom_persists",
             _build_p1_dom_persists,
@@ -437,6 +629,27 @@ PATTERNS = [
             _build_p10_hsm_state_args_push_pop,
             lambda base, bump: base,
             ["drive", "push_then", "go_back"]),
+    # Wave 4: depth-3 push, leaf-push w/ pop-back + forward, push +
+    # @@:self dispatch. Stress-tests the state stack's deeper
+    # interactions with HSM forwarding and re-entrant dispatch.
+    Pattern("p11_depth_three_push",
+            _build_p11_depth_three_push,
+            lambda base, bump: base + bump,  # only $S3 bumps
+            ["drive", "to_s2", "to_s3", "bump_f", "pop3", "pop2", "pop1"]),
+    Pattern("p12_leaf_push_forward_back",
+            _build_p12_leaf_push_forward_back,
+            lambda base, bump: base + 2 * bump,  # modal bumps + parent fwd bumps
+            ["drive", "go_push", "bump_f", "pop_back", "fwd_bump"]),
+    Pattern("p13_push_with_self_call",
+            _build_p13_push_with_self_call,
+            lambda base, bump: base + bump,
+            ["drive", "drive_in_modal", "pop_back"],
+            extra_iface=["bump_f"]),
+    Pattern("p14_three_push_alternating_pop",
+            _build_p14_three_push_alternating_pop,
+            lambda base, bump: base + 3 * bump,  # bump at each of 3 depths
+            ["drive", "bump_f", "to_s2", "bump_f", "to_s3", "bump_f",
+             "pop3", "pop2", "pop1"]),
 ]
 
 
@@ -485,7 +698,11 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
     if pattern.name in ("p1_dom_persists", "p3_depth_two",
                         "p5_push_from_hsm_child",
                         "p6_push_into_hsm_chain",
-                        "p8_enter_args_round_trip"):
+                        "p8_enter_args_round_trip",
+                        "p11_depth_three_push",
+                        "p12_leaf_push_forward_back",
+                        "p13_push_with_self_call",
+                        "p14_three_push_alternating_pop"):
         verify = m_get_f
     else:
         verify = m_get_x
@@ -496,6 +713,8 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
     # sequence. We declare every method the pattern uses.
     interface_methods = set()
     for m in pattern.pre_drive_seq:
+        interface_methods.add(method_name(lang, m))
+    for m in pattern.extra_iface:
         interface_methods.add(method_name(lang, m))
     interface_methods.add(verify)
 
