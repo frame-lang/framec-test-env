@@ -1,0 +1,55 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@system MessageFilter {
+    interface:
+        consider(payload: String): String
+        stats(): String
+
+    machine:
+        $Accepting {
+            consider(payload: String): String {
+                if self.matches(payload):
+                    self.passed = self.passed + 1
+                    self.forward(payload)
+                    @@:("passed")
+                else:
+                    self.dropped = self.dropped + 1
+                    @@:("dropped")
+            }
+            stats(): String {
+                @@:("passed=" + str(self.passed) + " dropped=" + str(self.dropped))
+            }
+        }
+
+    actions:
+        matches(payload) { return payload.find("urgent") != -1 }
+        forward(payload) { print("-> " + payload) }
+
+    domain:
+        passed: int = 0
+        dropped: int = 0
+}
+
+func main():
+    var f = @@MessageFilter()
+    var failures = 0
+
+    if f.consider("urgent: reboot") != "passed":
+        print("FAIL: passed"); failures += 1
+    if f.consider("weekly digest") != "dropped":
+        print("FAIL: dropped"); failures += 1
+    if f.consider("urgent: patch") != "passed":
+        print("FAIL: passed"); failures += 1
+    if f.stats() != "passed=2 dropped=1":
+        print("FAIL: stats: " + str(f.stats())); failures += 1
+
+    if failures > 0:
+        print("FAIL: message_filter (" + str(failures) + " failures)")
+        quit(1)
+    print("PASS: message_filter")
+
+func _init():
+    main()
+    quit()

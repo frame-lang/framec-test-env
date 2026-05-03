@@ -1,0 +1,45 @@
+@@[target("swift")]
+
+import Foundation
+
+@@system MessageFilter {
+    interface:
+        consider(payload: String): String
+        stats(): String
+
+    machine:
+        $Accepting {
+            consider(payload: String): String {
+                if self.matches(payload) {
+                    self.passed = self.passed + 1
+                    self.forward(payload)
+                    @@:("passed")
+                } else {
+                    self.dropped = self.dropped + 1
+                    @@:("dropped")
+                }
+            }
+            stats(): String {
+                @@:("passed=\(self.passed) dropped=\(self.dropped)")
+            }
+        }
+
+    actions:
+        matches(payload: String): Bool {
+            return payload.contains("urgent")
+        }
+        forward(payload: String) {
+            print("-> \(payload)")
+        }
+
+    domain:
+        passed: Int = 0
+        dropped: Int = 0
+}
+
+let f = @@MessageFilter()
+if (f.consider("urgent: reboot") as! String) != "passed"  { print("FAIL: passed");  exit(1) }
+if (f.consider("weekly digest")  as! String) != "dropped" { print("FAIL: dropped"); exit(1) }
+if (f.consider("urgent: patch")  as! String) != "passed"  { print("FAIL: passed");  exit(1) }
+if (f.stats() as! String)            != "passed=2 dropped=1" { print("FAIL: stats"); exit(1) }
+print("PASS: message_filter")

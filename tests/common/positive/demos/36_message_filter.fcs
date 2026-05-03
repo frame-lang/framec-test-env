@@ -1,0 +1,49 @@
+@@[target("csharp")]
+
+using System;
+
+@@system MessageFilter {
+    interface:
+        consider(payload: String): String
+        stats(): String
+
+    machine:
+        $Accepting {
+            consider(payload: String): String {
+                if (this.matches(payload)) {
+                    this.passed = this.passed + 1;
+                    this.forward(payload);
+                    @@:("passed")
+                } else {
+                    this.dropped = this.dropped + 1;
+                    @@:("dropped")
+                }
+            }
+            stats(): String {
+                @@:($"passed={this.passed} dropped={this.dropped}")
+            }
+        }
+
+    actions:
+        matches(payload: String): bool {
+            return payload.Contains("urgent");
+        }
+        forward(payload: String) {
+            Console.WriteLine("-> " + payload);
+        }
+
+    domain:
+        passed: int = 0
+        dropped: int = 0
+}
+
+class Program {
+    static void Main(string[] args) {
+        var f = @@MessageFilter();
+        if ((string) f.consider("urgent: reboot") != "passed")  throw new Exception("Expected passed");
+        if ((string) f.consider("weekly digest")  != "dropped") throw new Exception("Expected dropped");
+        if ((string) f.consider("urgent: patch")  != "passed")  throw new Exception("Expected passed");
+        if ((string) f.stats() != "passed=2 dropped=1")         throw new Exception("Bad stats");
+        Console.WriteLine("PASS: message_filter");
+    }
+}

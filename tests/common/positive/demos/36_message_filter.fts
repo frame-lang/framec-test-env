@@ -1,0 +1,43 @@
+@@[target("typescript")]
+
+@@system MessageFilter {
+    interface:
+        consider(payload: str): str
+        stats(): str
+
+    machine:
+        $Accepting {
+            consider(payload: str): str {
+                if (this.matches(payload)) {
+                    this.passed = this.passed + 1;
+                    this.forward(payload);
+                    @@:("passed")
+                } else {
+                    this.dropped = this.dropped + 1;
+                    @@:("dropped")
+                }
+            }
+            stats(): str {
+                @@:(`passed=${this.passed} dropped=${this.dropped}`)
+            }
+        }
+
+    actions:
+        matches(payload: str): bool {
+            return payload.includes("urgent");
+        }
+        forward(payload: str) {
+            console.log("-> " + payload);
+        }
+
+    domain:
+        passed: int = 0
+        dropped: int = 0
+}
+
+const f = @@MessageFilter();
+if (f.consider("urgent: reboot") !== "passed")  throw new Error("Expected passed");
+if (f.consider("weekly digest")  !== "dropped") throw new Error("Expected dropped");
+if (f.consider("urgent: patch")  !== "passed")  throw new Error("Expected passed");
+if (f.stats() !== "passed=2 dropped=1") throw new Error("Bad stats: " + f.stats());
+console.log("PASS: message_filter");

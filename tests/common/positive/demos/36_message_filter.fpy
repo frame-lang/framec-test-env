@@ -1,0 +1,43 @@
+@@[target("python_3")]
+
+@@system MessageFilter {
+    interface:
+        consider(payload: str): str
+        stats(): str
+
+    machine:
+        $Accepting {
+            consider(payload: str): str {
+                if self.matches(payload):
+                    self.passed = self.passed + 1
+                    self.forward(payload)
+                    @@:("passed")
+                else:
+                    self.dropped = self.dropped + 1
+                    @@:("dropped")
+            }
+            stats(): str {
+                @@:(f"passed={self.passed} dropped={self.dropped}")
+            }
+        }
+
+    actions:
+        matches(payload) {
+            return "urgent" in payload
+        }
+        forward(payload) {
+            print(f"-> {payload}")
+        }
+
+    domain:
+        passed: int = 0
+        dropped: int = 0
+}
+
+if __name__ == '__main__':
+    f = @@MessageFilter()
+    assert f.consider("urgent: reboot") == "passed"
+    assert f.consider("weekly digest")  == "dropped"
+    assert f.consider("urgent: patch")  == "passed"
+    assert f.stats() == "passed=2 dropped=1"
+    print("PASS: message_filter")

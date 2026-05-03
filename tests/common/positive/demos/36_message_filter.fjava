@@ -1,0 +1,47 @@
+@@[target("java")]
+
+@@system MessageFilter {
+    interface:
+        consider(payload: String): String
+        stats(): String
+
+    machine:
+        $Accepting {
+            consider(payload: String): String {
+                if (this.matches(payload)) {
+                    this.passed = this.passed + 1;
+                    this.forward(payload);
+                    @@:("passed")
+                } else {
+                    this.dropped = this.dropped + 1;
+                    @@:("dropped")
+                }
+            }
+            stats(): String {
+                @@:("passed=" + this.passed + " dropped=" + this.dropped)
+            }
+        }
+
+    actions:
+        matches(payload: String): boolean {
+            return payload.contains("urgent");
+        }
+        forward(payload: String) {
+            System.out.println("-> " + payload);
+        }
+
+    domain:
+        passed: int = 0
+        dropped: int = 0
+}
+
+class Main {
+    public static void main(String[] args) {
+        var f = @@MessageFilter();
+        if (!((String) f.consider("urgent: reboot")).equals("passed"))  throw new RuntimeException("Expected passed");
+        if (!((String) f.consider("weekly digest")).equals("dropped"))  throw new RuntimeException("Expected dropped");
+        if (!((String) f.consider("urgent: patch")).equals("passed"))   throw new RuntimeException("Expected passed");
+        if (!((String) f.stats()).equals("passed=2 dropped=1"))         throw new RuntimeException("Bad stats: " + f.stats());
+        System.out.println("PASS: message_filter");
+    }
+}

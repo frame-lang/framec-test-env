@@ -1,0 +1,53 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+	"strings"
+)
+
+@@system MessageFilter {
+    interface:
+        consider(payload: string): string
+        stats(): string
+
+    machine:
+        $Accepting {
+            consider(payload: string): string {
+                if (s.matches(payload)) {
+                    s.passed = s.passed + 1
+                    s.forward(payload)
+                    @@:("passed")
+                } else {
+                    s.dropped = s.dropped + 1
+                    @@:("dropped")
+                }
+            }
+            stats(): string {
+                @@:(fmt.Sprintf("passed=%d dropped=%d", s.passed, s.dropped))
+            }
+        }
+
+    actions:
+        matches(payload: string): bool {
+            return strings.Contains(payload, "urgent")
+        }
+        forward(payload: string) {
+            fmt.Println("-> " + payload)
+        }
+
+    domain:
+        passed: int = 0
+        dropped: int = 0
+}
+
+func main() {
+    f := NewMessageFilter()
+    if f.Consider("urgent: reboot") != "passed"  { fmt.Println("FAIL: passed");  os.Exit(1) }
+    if f.Consider("weekly digest")  != "dropped" { fmt.Println("FAIL: dropped"); os.Exit(1) }
+    if f.Consider("urgent: patch")  != "passed"  { fmt.Println("FAIL: passed");  os.Exit(1) }
+    if f.Stats() != "passed=2 dropped=1"          { fmt.Println("FAIL: stats");   os.Exit(1) }
+    fmt.Println("PASS: message_filter")
+}

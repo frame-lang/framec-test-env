@@ -1,0 +1,43 @@
+@@[target("ruby")]
+
+@@system MessageFilter {
+    interface:
+        consider(payload: str): str
+        stats(): str
+
+    machine:
+        $Accepting {
+            consider(payload: str): str {
+                if self.matches(payload)
+                    @passed = @passed + 1
+                    self.forward(payload)
+                    @@:("passed")
+                else
+                    @dropped = @dropped + 1
+                    @@:("dropped")
+                end
+            }
+            stats(): str {
+                @@:("passed=#{@passed} dropped=#{@dropped}")
+            }
+        }
+
+    actions:
+        matches(payload) {
+            return payload.include?("urgent")
+        }
+        forward(payload) {
+            puts "-> #{payload}"
+        }
+
+    domain:
+        passed = 0
+        dropped = 0
+}
+
+f = MessageFilter.new
+raise "Expected passed"  unless f.consider("urgent: reboot") == "passed"
+raise "Expected dropped" unless f.consider("weekly digest")  == "dropped"
+raise "Expected passed"  unless f.consider("urgent: patch")  == "passed"
+raise "Bad stats"        unless f.stats == "passed=2 dropped=1"
+puts "PASS: message_filter"

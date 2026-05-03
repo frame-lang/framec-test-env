@@ -1,0 +1,45 @@
+@@[target("kotlin")]
+
+@@system MessageFilter {
+    interface:
+        consider(payload: String): String
+        stats(): String
+
+    machine:
+        $Accepting {
+            consider(payload: String): String {
+                if (this.matches(payload)) {
+                    this.passed = this.passed + 1
+                    this.forward(payload)
+                    @@:("passed")
+                } else {
+                    this.dropped = this.dropped + 1
+                    @@:("dropped")
+                }
+            }
+            stats(): String {
+                @@:("passed=${this.passed} dropped=${this.dropped}")
+            }
+        }
+
+    actions:
+        matches(payload: String): Boolean {
+            return payload.contains("urgent")
+        }
+        forward(payload: String) {
+            println("-> $payload")
+        }
+
+    domain:
+        passed: Int = 0
+        dropped: Int = 0
+}
+
+fun main() {
+    val f = @@MessageFilter()
+    if ((f.consider("urgent: reboot") as String) != "passed")  throw RuntimeException("Expected passed")
+    if ((f.consider("weekly digest")  as String) != "dropped") throw RuntimeException("Expected dropped")
+    if ((f.consider("urgent: patch")  as String) != "passed")  throw RuntimeException("Expected passed")
+    if ((f.stats() as String)            != "passed=2 dropped=1") throw RuntimeException("Bad stats")
+    println("PASS: message_filter")
+}

@@ -1,0 +1,50 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system MessageFilter {
+    interface:
+        consider(payload: str): str
+        stats(): str
+
+    machine:
+        $Accepting {
+            consider(payload: str): str {
+                if (this->matches(payload)) {
+                    this->passed = this->passed + 1;
+                    this->forward(payload);
+                    @@:(std::string("passed"))
+                } else {
+                    this->dropped = this->dropped + 1;
+                    @@:(std::string("dropped"))
+                }
+            }
+            stats(): str {
+                @@:(std::string("passed=") + std::to_string(this->passed) + std::string(" dropped=") + std::to_string(this->dropped))
+            }
+        }
+
+    actions:
+        matches(payload: std::string): bool {
+            return payload.find("urgent") != std::string::npos;
+        }
+        forward(payload: std::string) {
+            std::cout << "-> " << payload << std::endl;
+        }
+
+    domain:
+        passed: int = 0
+        dropped: int = 0
+}
+
+int main() {
+    MessageFilter f;
+    assert(f.consider("urgent: reboot") == "passed");
+    assert(f.consider("weekly digest")  == "dropped");
+    assert(f.consider("urgent: patch")  == "passed");
+    assert(f.stats() == "passed=2 dropped=1");
+    std::cout << "PASS: message_filter" << std::endl;
+    return 0;
+}

@@ -1,0 +1,45 @@
+@@[target("php")]
+
+<?php
+
+@@system MessageFilter {
+    interface:
+        consider(payload: str): str
+        stats(): str
+
+    machine:
+        $Accepting {
+            consider(payload: str): str {
+                if ($this->matches($payload)) {
+                    $this->passed = $this->passed + 1;
+                    $this->forward($payload);
+                    @@:("passed")
+                } else {
+                    $this->dropped = $this->dropped + 1;
+                    @@:("dropped")
+                }
+            }
+            stats(): str {
+                @@:("passed=" . $this->passed . " dropped=" . $this->dropped)
+            }
+        }
+
+    actions:
+        matches(payload) {
+            return strpos($payload, "urgent") !== false;
+        }
+        forward(payload) {
+            echo "-> " . $payload . "\n";
+        }
+
+    domain:
+        passed = 0
+        dropped = 0
+}
+
+$f = @@MessageFilter();
+assert($f->consider("urgent: reboot") === "passed");
+assert($f->consider("weekly digest")  === "dropped");
+assert($f->consider("urgent: patch")  === "passed");
+assert($f->stats() === "passed=2 dropped=1");
+echo "PASS: message_filter\n";

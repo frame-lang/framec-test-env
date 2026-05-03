@@ -1,0 +1,43 @@
+@@[target("javascript")]
+
+@@system MessageFilter {
+    interface:
+        consider(payload)
+        stats()
+
+    machine:
+        $Accepting {
+            consider(payload) {
+                if (this.matches(payload)) {
+                    this.passed = this.passed + 1;
+                    this.forward(payload);
+                    @@:("passed")
+                } else {
+                    this.dropped = this.dropped + 1;
+                    @@:("dropped")
+                }
+            }
+            stats() {
+                @@:(`passed=${this.passed} dropped=${this.dropped}`)
+            }
+        }
+
+    actions:
+        matches(payload) {
+            return payload.includes("urgent");
+        }
+        forward(payload) {
+            console.log("-> " + payload);
+        }
+
+    domain:
+        passed = 0
+        dropped = 0
+}
+
+const f = @@MessageFilter();
+if (f.consider("urgent: reboot") !== "passed")  throw new Error("Expected passed");
+if (f.consider("weekly digest")  !== "dropped") throw new Error("Expected dropped");
+if (f.consider("urgent: patch")  !== "passed")  throw new Error("Expected passed");
+if (f.stats() !== "passed=2 dropped=1") throw new Error("Bad stats: " + f.stats());
+console.log("PASS: message_filter");

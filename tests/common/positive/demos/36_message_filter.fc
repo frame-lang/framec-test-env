@@ -1,0 +1,52 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <string.h>
+
+@@system MessageFilter {
+    interface:
+        consider(payload: str): str
+        stats(): str
+
+    machine:
+        $Accepting {
+            consider(payload: str): str {
+                if (MessageFilter_matches(self, payload)) {
+                    self->passed = self->passed + 1;
+                    MessageFilter_forward(self, payload);
+                    @@:("passed")
+                } else {
+                    self->dropped = self->dropped + 1;
+                    @@:("dropped")
+                }
+            }
+            stats(): str {
+                static char buf[64];
+                snprintf(buf, sizeof(buf), "passed=%d dropped=%d", self->passed, self->dropped);
+                @@:(buf)
+            }
+        }
+
+    actions:
+        matches(payload: str): int {
+            return strstr(payload, "urgent") != NULL;
+        }
+        forward(payload: str) {
+            printf("-> %s\n", payload);
+        }
+
+    domain:
+        passed: int = 0
+        dropped: int = 0
+}
+
+int main() {
+    MessageFilter* f = @@MessageFilter();
+    if (strcmp(MessageFilter_consider(f, "urgent: reboot"), "passed") != 0)  { printf("FAIL: passed\n"); return 1; }
+    if (strcmp(MessageFilter_consider(f, "weekly digest"), "dropped") != 0)  { printf("FAIL: dropped\n"); return 1; }
+    if (strcmp(MessageFilter_consider(f, "urgent: patch"), "passed") != 0)   { printf("FAIL: passed\n"); return 1; }
+    if (strcmp(MessageFilter_stats(f), "passed=2 dropped=1") != 0)            { printf("FAIL: stats\n"); return 1; }
+    printf("PASS: message_filter\n");
+    MessageFilter_destroy(f);
+    return 0;
+}

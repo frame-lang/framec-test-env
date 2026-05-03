@@ -1,0 +1,43 @@
+@@[target("lua")]
+
+@@system MessageFilter {
+    interface:
+        consider(payload: str): str
+        stats(): str
+
+    machine:
+        $Accepting {
+            consider(payload: str): str {
+                if self:matches(payload) then
+                    self.passed = self.passed + 1
+                    self:forward(payload)
+                    @@:("passed")
+                else
+                    self.dropped = self.dropped + 1
+                    @@:("dropped")
+                end
+            }
+            stats(): str {
+                @@:("passed=" .. tostring(self.passed) .. " dropped=" .. tostring(self.dropped))
+            }
+        }
+
+    actions:
+        matches(payload) {
+            return string.find(payload, "urgent") ~= nil
+        }
+        forward(payload) {
+            print("-> " .. payload)
+        }
+
+    domain:
+        passed: int = 0
+        dropped: int = 0
+}
+
+local f = @@MessageFilter()
+assert(f:consider("urgent: reboot") == "passed")
+assert(f:consider("weekly digest")  == "dropped")
+assert(f:consider("urgent: patch")  == "passed")
+assert(f:stats() == "passed=2 dropped=1")
+print("PASS: message_filter")

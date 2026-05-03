@@ -1,0 +1,45 @@
+@@[target("rust")]
+
+@@system MessageFilter {
+    interface:
+        consider(payload: String): String
+        stats(): String
+
+    machine:
+        $Accepting {
+            consider(payload: String): String {
+                if self.matches(payload.clone()) {
+                    self.passed = self.passed + 1;
+                    self.forward(payload);
+                    @@:("passed".to_string())
+                } else {
+                    self.dropped = self.dropped + 1;
+                    @@:("dropped".to_string())
+                }
+            }
+            stats(): String {
+                @@:(format!("passed={} dropped={}", self.passed, self.dropped))
+            }
+        }
+
+    actions:
+        matches(payload: String): bool {
+            return payload.contains("urgent");
+        }
+        forward(payload: String) {
+            println!("-> {}", payload);
+        }
+
+    domain:
+        passed: i32 = 0
+        dropped: i32 = 0
+}
+
+fn main() {
+    let mut f = @@MessageFilter();
+    assert_eq!(f.consider("urgent: reboot".to_string()), "passed");
+    assert_eq!(f.consider("weekly digest".to_string()),  "dropped");
+    assert_eq!(f.consider("urgent: patch".to_string()),  "passed");
+    assert_eq!(f.stats(), "passed=2 dropped=1");
+    println!("PASS: message_filter");
+}
