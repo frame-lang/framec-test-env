@@ -1,0 +1,55 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@[persist]
+@@system Counter {
+    operations:
+        @@[save]
+        save_op(): char* {}
+
+        @@[load]
+        load_op(data: char*) {}
+
+    interface:
+        bump()
+        get_n(): int
+
+    machine:
+        $Active {
+            bump() {
+                self->n = self->n + 1;
+            }
+            get_n(): int { @@:(self->n) }
+        }
+
+    domain:
+        n: int = 0
+}
+
+int main() {
+    Counter* c1 = @@Counter();
+    Counter_bump(c1);
+    Counter_bump(c1);
+    Counter_bump(c1);
+    char* data = Counter_save_op(c1);
+
+    Counter* c2 = @@Counter();
+    Counter_load_op(c2, data);
+    free(data);
+
+    int got = Counter_get_n(c2);
+    if (got != 3) {
+        printf("FAIL: expected 3, got %d\n", got);
+        Counter_destroy(c1);
+        Counter_destroy(c2);
+        return 1;
+    }
+    printf("PASS: 93_persist_save_load_contract\n");
+    Counter_destroy(c1);
+    Counter_destroy(c2);
+    return 0;
+}

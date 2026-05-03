@@ -116,6 +116,134 @@ def _build_p3_chain_three_states(spec, lang, lit_a, lit_b):
     ]
 
 
+def _build_p5_five_event_same_state(spec, lang, lit_a, lit_b):
+    """P5 (wave-3): five events fired against the same state.
+    bump_a/b/c/d/e each add a literal to $.f. Verifies no per-event
+    handler-state corruption across longer chains than wave-1's
+    3-event P1."""
+    methods = ["bump_a", "bump_b", "bump_c", "bump_d", "bump_e"]
+    m_get = method_name(lang, "get_f")
+    lines = [f"        $S0 {{"]
+    # Lits cycle through (lit_a, lit_b, lit_a, lit_b, lit_a) so the
+    # final $.f = 3*lit_a + 2*lit_b.
+    lit_seq = [lit_a, lit_b, lit_a, lit_b, lit_a]
+    for m, lit in zip(methods, lit_seq):
+        mn = method_name(lang, m)
+        lines.append(f"            {mn}() {{")
+        lines.append(
+            f"                {spec.self_word}{spec.field_op}f = "
+            f"{spec.self_word}{spec.field_op}f + {lit}{spec.stmt_end}"
+        )
+        lines.append(f"            }}")
+    lines.append(f"            {m_get}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}")
+    lines.append(f"        }}")
+    return lines
+
+
+def _build_p6_five_state_chain(spec, lang, lit_a, lit_b):
+    """P6 (wave-3): five-state linear transition chain. drive_to_n
+    transitions $S(n-1) → $S(n); each $Si has its own bump_n that
+    adds lit_a to $.f. Sequence: drive_to_1, bump_1, drive_to_2,
+    bump_2, drive_to_3, bump_3, drive_to_4, bump_4. Final $.f =
+    4*lit_a. lit_b unused — but keeping signature uniform."""
+    m_get = method_name(lang, "get_f")
+    lines = []
+    # $S0 declares all "drive" methods because Frame's interface
+    # has to be uniform across states; same shape as wave-1 patterns.
+    # Each $Si has its own bump_i (only) — the verifier picks the
+    # last state's get_f.
+    for i in range(5):
+        lines.append(f"        $S{i} {{")
+        if i < 4:
+            mn_drive = method_name(lang, f"drive_to_{i+1}")
+            lines.append(f"            {mn_drive}() {{")
+            lines.append(f"                -> $S{i+1}")
+            lines.append(f"            }}")
+        if i >= 1:
+            mn_bump = method_name(lang, f"bump_{i}")
+            lines.append(f"            {mn_bump}() {{")
+            lines.append(
+                f"                {spec.self_word}{spec.field_op}f = "
+                f"{spec.self_word}{spec.field_op}f + {lit_a}{spec.stmt_end}"
+            )
+            lines.append(f"            }}")
+        if i == 4:
+            lines.append(f"            {m_get}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}")
+        lines.append(f"        }}")
+    return lines
+
+
+def _build_p7_alternating_transition_bump(spec, lang, lit_a, lit_b):
+    """P7 (wave-3): six events alternating transition + bump across
+    three states. drive_a → $S1, bump_a (lit_a), drive_b → $S2, bump_b
+    (lit_b), drive_c → $S3, bump_c (lit_a). Final $.f = 2*lit_a + lit_b.
+    Tests interleaving of state-mutation events with transition events
+    over a 6-event sequence."""
+    m_get = method_name(lang, "get_f")
+    states = []
+    states.append([
+        f"        $S0 {{",
+        f"            {method_name(lang, 'drive_a')}() {{",
+        f"                -> $S1",
+        f"            }}",
+        f"        }}",
+    ])
+    states.append([
+        f"        $S1 {{",
+        f"            {method_name(lang, 'bump_a')}() {{",
+        f"                {spec.self_word}{spec.field_op}f = "
+        f"{spec.self_word}{spec.field_op}f + {lit_a}{spec.stmt_end}",
+        f"            }}",
+        f"            {method_name(lang, 'drive_b')}() {{",
+        f"                -> $S2",
+        f"            }}",
+        f"        }}",
+    ])
+    states.append([
+        f"        $S2 {{",
+        f"            {method_name(lang, 'bump_b')}() {{",
+        f"                {spec.self_word}{spec.field_op}f = "
+        f"{spec.self_word}{spec.field_op}f + {lit_b}{spec.stmt_end}",
+        f"            }}",
+        f"            {method_name(lang, 'drive_c')}() {{",
+        f"                -> $S3",
+        f"            }}",
+        f"        }}",
+    ])
+    states.append([
+        f"        $S3 {{",
+        f"            {method_name(lang, 'bump_c')}() {{",
+        f"                {spec.self_word}{spec.field_op}f = "
+        f"{spec.self_word}{spec.field_op}f + {lit_a}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_get}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}",
+        f"        }}",
+    ])
+    out = []
+    for st in states:
+        out.extend(st)
+    return out
+
+
+def _build_p8_ten_same_event(spec, lang, lit_a, lit_b):
+    """P8 (wave-3): ten consecutive invocations of the same event in
+    one state. bump_a fires ten times, each adding lit_a. Final $.f
+    = 10*lit_a. Verifies handler reentry has no per-call state
+    leak (e.g., that the handler's local context-stack frame is
+    properly popped after each invocation). lit_b unused."""
+    mn = method_name(lang, "bump_a")
+    m_get = method_name(lang, "get_f")
+    return [
+        f"        $S0 {{",
+        f"            {mn}() {{",
+        f"                {spec.self_word}{spec.field_op}f = "
+        f"{spec.self_word}{spec.field_op}f + {lit_a}{spec.stmt_end}",
+        f"            }}",
+        f"            {m_get}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}",
+        f"        }}",
+    ]
+
+
 def _build_p4_event_in_hsm_chain(spec, lang, lit_a, lit_b):
     """P4: events fired in HSM hierarchy across a transition.
     drive_to_child transitions $S0 → $Child (HSM child of $Parent).
@@ -170,6 +298,23 @@ PATTERNS = [
             _build_p4_event_in_hsm_chain,
             lambda a, b: a + b,
             ["drive", "bump_a", "fwd_bump"]),
+    Pattern("p5_five_event_same_state",
+            _build_p5_five_event_same_state,
+            lambda a, b: 3 * a + 2 * b,  # lit cycle: a,b,a,b,a
+            ["bump_a", "bump_b", "bump_c", "bump_d", "bump_e"]),
+    Pattern("p6_five_state_chain",
+            _build_p6_five_state_chain,
+            lambda a, b: 4 * a,  # bump_1..bump_4 each adds lit_a
+            ["drive_to_1", "bump_1", "drive_to_2", "bump_2",
+             "drive_to_3", "bump_3", "drive_to_4", "bump_4"]),
+    Pattern("p7_alternating_transition_bump",
+            _build_p7_alternating_transition_bump,
+            lambda a, b: 2 * a + b,
+            ["drive_a", "bump_a", "drive_b", "bump_b", "drive_c", "bump_c"]),
+    Pattern("p8_ten_same_event",
+            _build_p8_ten_same_event,
+            lambda a, b: 10 * a,
+            ["bump_a"] * 10),
 ]
 
 
