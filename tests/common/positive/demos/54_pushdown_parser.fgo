@@ -1,0 +1,64 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system BracketParser {
+    interface:
+        open()
+        close()
+        depth_now(): int
+        status(): string
+
+    machine:
+        $Flat {
+            open() {
+                s.depth = s.depth + 1
+                push$
+                -> $Nested
+            }
+            depth_now(): int { @@:(s.depth) }
+            status(): string { @@:("flat") }
+        }
+
+        $Nested {
+            open() {
+                s.depth = s.depth + 1
+                push$
+                -> $Nested
+            }
+            close() {
+                s.depth = s.depth - 1
+                -> pop$
+            }
+            depth_now(): int { @@:(s.depth) }
+            status(): string { @@:("nested") }
+        }
+
+    domain:
+        depth: int = 0
+}
+
+func main() {
+    p := NewBracketParser()
+    if p.Status() != "flat" { fmt.Println("FAIL: flat"); os.Exit(1) }
+    if p.Depth_now() != 0 { fmt.Println("FAIL: 0"); os.Exit(1) }
+    p.Open()
+    if p.Status() != "nested" { fmt.Println("FAIL: nested"); os.Exit(1) }
+    if p.Depth_now() != 1 { fmt.Println("FAIL: 1"); os.Exit(1) }
+    p.Open()
+    if p.Depth_now() != 2 { fmt.Println("FAIL: 2"); os.Exit(1) }
+    p.Close()
+    if p.Depth_now() != 1 { fmt.Println("FAIL: 1 after"); os.Exit(1) }
+    p.Close()
+    if p.Status() != "flat" { fmt.Println("FAIL: flat after"); os.Exit(1) }
+    if p.Depth_now() != 0 { fmt.Println("FAIL: 0 after"); os.Exit(1) }
+    p.Open()
+    p.Close()
+    if p.Status() != "flat" { fmt.Println("FAIL: flat re-flat"); os.Exit(1) }
+    fmt.Println("PASS: pushdown_parser")
+}

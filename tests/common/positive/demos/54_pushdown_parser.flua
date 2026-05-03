@@ -1,0 +1,55 @@
+@@[target("lua")]
+
+@@system BracketParser {
+    interface:
+        open()
+        close()
+        depth_now(): int
+        status(): str
+
+    machine:
+        $Flat {
+            open() {
+                self.depth = self.depth + 1
+                push$
+                -> $Nested
+            }
+            depth_now(): int { @@:(self.depth) }
+            status(): str { @@:("flat") }
+        }
+
+        $Nested {
+            open() {
+                self.depth = self.depth + 1
+                push$
+                -> $Nested
+            }
+            close() {
+                self.depth = self.depth - 1
+                -> pop$
+            }
+            depth_now(): int { @@:(self.depth) }
+            status(): str { @@:("nested") }
+        }
+
+    domain:
+        depth: int = 0
+}
+
+local p = @@BracketParser()
+assert(p:status() == "flat", "expected flat")
+assert(p:depth_now() == 0, "expected 0")
+p:open()
+assert(p:status() == "nested", "expected nested")
+assert(p:depth_now() == 1, "expected 1")
+p:open()
+assert(p:depth_now() == 2, "expected 2")
+p:close()
+assert(p:depth_now() == 1, "expected 1 after")
+p:close()
+assert(p:status() == "flat", "expected flat after")
+assert(p:depth_now() == 0, "expected 0 after")
+p:open()
+p:close()
+assert(p:status() == "flat", "expected flat re-flat")
+print("PASS: pushdown_parser")

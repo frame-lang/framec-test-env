@@ -1,0 +1,59 @@
+@@[target("java")]
+
+@@system BracketParser {
+    interface:
+        open()
+        close()
+        depth_now(): int
+        status(): String
+
+    machine:
+        $Flat {
+            open() {
+                this.depth = this.depth + 1;
+                push$
+                -> $Nested
+            }
+            depth_now(): int { @@:(this.depth) }
+            status(): String { @@:("flat") }
+        }
+
+        $Nested {
+            open() {
+                this.depth = this.depth + 1;
+                push$
+                -> $Nested
+            }
+            close() {
+                this.depth = this.depth - 1;
+                -> pop$
+            }
+            depth_now(): int { @@:(this.depth) }
+            status(): String { @@:("nested") }
+        }
+
+    domain:
+        depth: int = 0
+}
+
+class Main {
+    public static void main(String[] args) {
+        var p = @@BracketParser();
+        if (!((String) p.status()).equals("flat")) throw new RuntimeException("expected flat");
+        if ((int) p.depth_now() != 0) throw new RuntimeException("expected 0");
+        p.open();
+        if (!((String) p.status()).equals("nested")) throw new RuntimeException("expected nested");
+        if ((int) p.depth_now() != 1) throw new RuntimeException("expected 1");
+        p.open();
+        if ((int) p.depth_now() != 2) throw new RuntimeException("expected 2");
+        p.close();
+        if ((int) p.depth_now() != 1) throw new RuntimeException("expected 1 after");
+        p.close();
+        if (!((String) p.status()).equals("flat")) throw new RuntimeException("expected flat after");
+        if ((int) p.depth_now() != 0) throw new RuntimeException("expected 0 after");
+        p.open();
+        p.close();
+        if (!((String) p.status()).equals("flat")) throw new RuntimeException("expected flat re-flat");
+        System.out.println("PASS: pushdown_parser");
+    }
+}

@@ -1,0 +1,63 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system BracketParser {
+    interface:
+        open()
+        close()
+        depth_now(): int
+        status(): str
+
+    machine:
+        $Flat {
+            open() {
+                self->depth = self->depth + 1;
+                push$
+                -> $Nested
+            }
+            depth_now(): int { @@:(self->depth) }
+            status(): str { @@:("flat") }
+        }
+
+        $Nested {
+            open() {
+                self->depth = self->depth + 1;
+                push$
+                -> $Nested
+            }
+            close() {
+                self->depth = self->depth - 1;
+                -> pop$
+            }
+            depth_now(): int { @@:(self->depth) }
+            status(): str { @@:("nested") }
+        }
+
+    domain:
+        depth: int = 0
+}
+
+int main() {
+    BracketParser* p = @@BracketParser();
+    if (strcmp(BracketParser_status(p), "flat") != 0) { printf("FAIL: flat\n"); return 1; }
+    if (BracketParser_depth_now(p) != 0) { printf("FAIL: 0\n"); return 1; }
+    BracketParser_open(p);
+    if (strcmp(BracketParser_status(p), "nested") != 0) { printf("FAIL: nested\n"); return 1; }
+    if (BracketParser_depth_now(p) != 1) { printf("FAIL: 1\n"); return 1; }
+    BracketParser_open(p);
+    if (BracketParser_depth_now(p) != 2) { printf("FAIL: 2\n"); return 1; }
+    BracketParser_close(p);
+    if (BracketParser_depth_now(p) != 1) { printf("FAIL: 1 after\n"); return 1; }
+    BracketParser_close(p);
+    if (strcmp(BracketParser_status(p), "flat") != 0) { printf("FAIL: flat after\n"); return 1; }
+    if (BracketParser_depth_now(p) != 0) { printf("FAIL: 0 after\n"); return 1; }
+    BracketParser_open(p);
+    BracketParser_close(p);
+    if (strcmp(BracketParser_status(p), "flat") != 0) { printf("FAIL: flat re-flat\n"); return 1; }
+    printf("PASS: pushdown_parser\n");
+    BracketParser_destroy(p);
+    return 0;
+}

@@ -1,0 +1,57 @@
+@@[target("swift")]
+
+import Foundation
+
+@@system BracketParser {
+    interface:
+        open()
+        close()
+        depth_now(): Int
+        status(): String
+
+    machine:
+        $Flat {
+            open() {
+                self.depth = self.depth + 1
+                push$
+                -> $Nested
+            }
+            depth_now(): Int { @@:(self.depth) }
+            status(): String { @@:("flat") }
+        }
+
+        $Nested {
+            open() {
+                self.depth = self.depth + 1
+                push$
+                -> $Nested
+            }
+            close() {
+                self.depth = self.depth - 1
+                -> pop$
+            }
+            depth_now(): Int { @@:(self.depth) }
+            status(): String { @@:("nested") }
+        }
+
+    domain:
+        depth: Int = 0
+}
+
+let p = @@BracketParser()
+if (p.status() as! String) != "flat" { print("FAIL: flat"); exit(1) }
+if (p.depth_now() as! Int) != 0 { print("FAIL: 0"); exit(1) }
+p.open()
+if (p.status() as! String) != "nested" { print("FAIL: nested"); exit(1) }
+if (p.depth_now() as! Int) != 1 { print("FAIL: 1"); exit(1) }
+p.open()
+if (p.depth_now() as! Int) != 2 { print("FAIL: 2"); exit(1) }
+p.close()
+if (p.depth_now() as! Int) != 1 { print("FAIL: 1 after"); exit(1) }
+p.close()
+if (p.status() as! String) != "flat" { print("FAIL: flat after"); exit(1) }
+if (p.depth_now() as! Int) != 0 { print("FAIL: 0 after"); exit(1) }
+p.open()
+p.close()
+if (p.status() as! String) != "flat" { print("FAIL: flat re-flat"); exit(1) }
+print("PASS: pushdown_parser")
