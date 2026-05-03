@@ -7,76 +7,43 @@ fits the available time budget.
 
 ## Background: where wall-clock time goes today
 
-After the round of optimizations in commits `c3e2740` (kotlin -Xmx
-bump), `13267d8` (parallel erlc), `56132ca` (kotlin OOM-retry), and
-`6d7dc22` (per-container parallelism cap), the full matrix runs in
-~128 s on a 12-core host with 15.6 GB Docker memory.
+After the 2026-05-03 perf wave (gdscript batching `fe7ac063`,
+erlang batching `0ce91e61`, go single-build `8e110dc2`, dart
+no-link-platform `0829e692`), the full matrix runs in **~96 s**
+on the matrix host (8-core).
 
-Per-language wall-clock under matrix load (sorted slowest-first):
+Per-language wall-clock under matrix load (sorted slowest-first,
+solo runs with warm caches):
 
 | Lang | Wall-clock | Bottleneck |
 |---|---|---|
-| kotlin | ~125 s | single batched `kotlinc` JVM |
-| cpp | ~125 s | per-test `g++` (parallel) |
-| gdscript | ~110 s | per-test `godot --headless` cold start |
-| erlang | ~95 s | per-test `escript` cold start |
-| rust | ~90 s | one `cargo build` for all bins |
-| go | ~90 s | per-test `go build` (parallel) |
-| dart | ~90 s | per-test `dart compile kernel` (parallel) |
-| c | ~70 s | per-test `gcc` (parallel) |
-| swift | ~60 s | per-test `swiftc` (parallel) |
-| csharp | ~45 s | one `dotnet build` |
-| java | ~40 s | one `javac` |
-| typescript | ~25 s | one `tsx` process |
-| python | ~25 s | one `python3` import-each |
-| ruby, php, lua, javascript | <10 s | interpreted, fast |
+| kotlin | ~18 s | single batched `kotlinc` JVM |
+| erlang | ~18 s | batched `erl -run` (was 22 s; per-test escripts now collapse into ~5 BEAM starts) |
+| rust | ~14 s | one `cargo build` for all bins |
+| dart | ~10 s | per-test `dart compile kernel --no-link-platform` (parallel; was 18 s) |
+| swift | ~10 s | per-test `swiftc` (parallel) |
+| c | ~7 s | per-test `gcc` (parallel; ccache warm) |
+| go | ~7 s | one `go build ./cmd/...` (was 17 s with per-test builds) |
+| csharp | ~5 s | one `dotnet build` |
+| java | ~5 s | one `javac` |
+| cpp | ~4 s | per-test `g++` (parallel; ccache warm) |
+| gdscript | ~3 s | one Godot process running batch harness (was 44 s with per-test cold starts) |
+| typescript | ~3 s | one `tsx` process |
+| python | ~3 s | one `python3` import-each |
+| ruby, php, lua, javascript | <2 s | interpreted, fast |
 
-The matrix wall-clock is bound by the slowest container. Anything that
-shaves the top three (kotlin / cpp / gdscript) drops total wall-clock;
-anything that shaves the lower tiers does not.
+The matrix wall-clock (96s) is bound by the slowest container.
+The current top three (kotlin / erlang / rust) all use one
+process internally already; further wins would come from
+in-process framec API (#171) eliminating subprocess fork-exec
+per test, or per-container parallelism tuning (#162).
 
 ## Open opportunities
 
-### 1. GDScript — batch tests in fewer Godot processes
-**Effort:** medium · **Expected payoff:** ~50 s solo, possibly ~20 s
-matrix (gdscript is currently ~110 s in matrix; cutting it doesn't
-necessarily reduce wall-clock unless cpp / kotlin shrink too).
-
-Each test is a fresh `godot --headless --script <file>` invocation
-that pays a 1–2 s cold start. With 217 tests at 6-way parallelism
-that's ~50 s of pure startup overhead.
-
-A single Godot process *can* execute multiple SceneTree scripts in
-sequence via `load()` and instantiation, so a wrapper `.gd` driver
-could run a manifest of tests in one process. The complication: each
-test currently calls `quit()` at the end, which terminates the whole
-SceneTree. The driver needs each test to signal completion without
-quitting, then advance to the next.
-
-Sketch:
-
-```gdscript
-# /opt/test_runner.gd
-extends SceneTree
-var tests: Array
-var idx := 0
-func _init():
-    tests = read_manifest("/tmp/gd_manifest.tsv")
-    next_test()
-func next_test():
-    if idx >= tests.size(): quit(); return
-    var t = tests[idx]; idx += 1
-    var s = load(t).new()
-    # capture s.run() output, classify, emit TAP
-    next_test()
-```
-
-Risk: every existing `*.fgd` test extends SceneTree and calls
-`quit()`; rewriting them is a big touch. Alternative: have the
-driver `instantiate` each test, set a flag the test checks instead
-of `quit()`, and re-emit the test source through framec with
-`@@target gdscript_runner` mode. Either path is a substantial
-refactor.
+<!-- Item 1 (GDScript batching) shipped 2026-05-03 in `fe7ac063`.
+Empirically discovered that `quit()` in a `script.new()`-instantiated
+SceneTree subclass exits only the inner SceneTree, not the parent
+harness — so no fixture rewrite was needed. See "Closed" below. -->
 
 ### 2. Per-container parallelism: granular tuning
 **Effort:** small · **Expected payoff:** marginal (5–10 s).
@@ -106,52 +73,28 @@ intuition.
 <!-- Item 3 (ccache for cpp / c) shipped 2026-04-26 in `2e83816`. See
 the "Closed" section for the actual numbers. -->
 
+<!-- Item 4 (single-go-build) shipped 2026-05-03 in `8e110dc2`. Tests
+are laid out as sub-packages under one Go module
+(`/go_runner/cmd/<sanitized>/main.go`); a single
+`go build ./cmd/...` produces all binaries. Go: 17 s → 6.7 s. -->
 
-### 4. Single-go-build across tests
-**Effort:** medium · **Expected payoff:** ~30 s (go: ~90 s → ~60 s).
+<!-- Item 5 (Dart aot-snapshot) investigated 2026-05-03 — N/A. AOT
+compile is ~3.4× slower than kernel and the faster exec doesn't
+recover. Kernel mode wins. Instead, `--no-link-platform`
+(`0829e692`) skips embedding the 7.9 MB platform kernel per .dill;
+Dart 18 s → 10.1 s. -->
 
-`go build` cold-starts the toolchain per test. A single
-`go build ./...` over a tests/ directory containing one `main`
-package per test would amortise the toolchain init across all
-tests. Current per-test `main` packages collide; the workaround
-is per-test directory. Going to `go build` of all dirs at once is
-viable but needs the test runner to walk the resulting bin/
-directory rather than expecting per-test bin paths.
+<!-- Item 6 (Erlang single-erlc) shipped 2026-05-03 in `0ce91e61` via a
+different mechanism than originally proposed. Generated escripts are
+converted to callable modules (`-module(test_<id>). run() -> ...`)
+and batch-executed via a single `erl -run` shell using
+load_dir_modules / purge_dir_modules to handle short-name collisions
+across tests. Erlang 22 s → 18 s. -->
 
-### 5. Dart — `dart compile aot-snapshot` instead of kernel
-**Effort:** small · **Expected payoff:** uncertain; may slow exec
-phase by enough to net-negative.
-
-`dart compile kernel` produces a `.dill` file the VM JITs at run
-time; the VM cold start adds ~1 s per test. `dart compile
-aot-snapshot` produces a native binary that runs immediately but
-takes longer to produce. For a test suite with many short runs and
-one compile per test, AOT may be a wash. Worth measuring before
-committing to the change.
-
-### 6. Erlang — single erlc, multi-source
-**Effort:** small · **Expected payoff:** ~10–20 s (erlang: 15 s solo →
-~5 s solo; matrix benefit smaller).
-
-`erlc *.erl` compiles N files in one BEAM startup. Currently we
-parallelise N invocations of `erlc -o <dir> <one_file>`. A single
-invocation amortises the cold start across all files. The challenge:
-each test's .erl lives in its own work_dir for namespace isolation.
-Either flatten everything into one dir (with sanitized filenames so
-no collisions) or use multiple `-o` flags — neither is supported
-out of the box. Easiest: invoke `erlc` once per work_dir but
-batched, so we still pay N BEAM startups but with fewer xargs
-spawns.
-
-### 7. Pre-compiled C runtime header
-**Effort:** small · **Expected payoff:** ~10–20 s (c: ~70 s → ~50 s).
-
-The C runtime (FrameVec, FrameDict, etc.) is currently inlined into
-every generated .c file. A shared `frame_runtime.h` precompiled
-with `gcc -x c-header` would let each test compile only the
-test-specific code. Generated source would `#include
-"frame_runtime.h"` instead of inlining the runtime. Same idea
-applies to C++ if its runtime headers grow.
+<!-- Item 7 (PCH for C) investigated 2026-05-03 — N/A. C is already
+~6 s for 265 tests (~24 ms/test). Per-step gcc breakdown: cold
+compile 41 ms, preprocess 8 ms, link 9 ms. PCH would save ~2 s
+total — not worth the integration cost on top of ccache. -->
 
 ### 8. Stagger heavy containers in the orchestrator
 **Effort:** medium · **Expected payoff:** uncertain; potentially
@@ -191,3 +134,25 @@ becomes a bottleneck for the project (currently it isn't).
   iterate `machine.states` (Vec) instead of `arcanum.get_enhanced_states()`
   (HashMap) and sort handlers by event name. ccache hit rate 69% → 76%
   on c/cpp warm runs.
+- ✅ GDScript single-Godot batch harness (`fe7ac063`, 2026-05-03) —
+  one Godot process loads each test via `script.new()` from a parent
+  SceneTree subclass. Inner `quit()` exits the inner SceneTree
+  without killing the parent (empirically verified). Markers
+  (`==FRAME-TEST-BEGIN/END==`) slice batch output per-test. GDScript:
+  44 s → 3.6 s (12×). No fixture rewrite required.
+- ✅ Erlang escript→module batching (`0ce91e61`, 2026-05-03) —
+  generated escripts converted to callable modules
+  (`-module(test_<id>). run() -> ...`), batch-executed via a single
+  `erl -run` shell. `load_dir_modules` / `purge_dir_modules` per-test
+  handles short-name collisions (e.g. `s` shared across tests).
+  Sidecar drivers fall back to legacy escript path. Erlang: 22 s → 18 s.
+- ✅ Single Go build across tests (`8e110dc2`, 2026-05-03) — tests
+  laid out as sub-packages under one Go module
+  (`/go_runner/cmd/<sanitized>/main.go`); a single
+  `go build ./cmd/...` builds all binaries. Toolchain parallelises
+  internally. Go: 17 s → 6.7 s (2.5×).
+- ✅ Dart `--no-link-platform` (`0829e692`, 2026-05-03) — skip
+  embedding the 7.9 MB platform kernel in each .dill; Dart locates
+  it at runtime. Compile 229 ms → 185 ms, run 32 ms → 20 ms, .dill
+  size 7.9 MB → 16 K (494× smaller — less I/O, more cache locality).
+  Dart: 18 s → 10.1 s (1.8×).
