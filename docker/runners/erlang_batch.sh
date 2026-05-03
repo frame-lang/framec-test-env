@@ -366,23 +366,246 @@ if [ "$COMPILE_ONLY" = "true" ]; then
     exit $fail
 fi
 
-# ---- Parallel escript execution ----
-TIMEOUT_SEC="${ERLANG_TEST_TIMEOUT:-30}"
-export STATUS_DIR WORK_ROOT TIMEOUT_SEC
+# ---- Batched parallel BEAM execution ----
+#
+# Each escript boots its own BEAM (~250-500ms cold). We collapse N
+# escripts into one BEAM by:
+#   1. Converting each `run_test.escript` into a callable module
+#      `test_<sanitized>.erl` exporting `run/0` (drop the
+#      `init:stop()` / `halt(_)` and the escript shebang).
+#   2. Compiling all converted modules + their system modules
+#      into a per-batch shared dir.
+#   3. Running ONE `erl -noshell` invocation per batch that adds
+#      each test's dir to the code path, calls `Mod:run()` with a
+#      try/catch wrapper, prints `==FRAME-TEST-BEGIN/END==` markers
+#      so the classifier can slice per-test stdout.
+#   4. Running B batches in parallel via xargs -P.
+TIMEOUT_SEC="${ERLANG_TEST_TIMEOUT:-120}"
+BATCH_SIZE="${ERLANG_BATCH_SIZE:-50}"
+export STATUS_DIR WORK_ROOT TIMEOUT_SEC BATCH_SIZE
 
-run_one() {
+# Convert each RUN-row escript into a callable module. Keep the
+# original escript for tests that use sidecar drivers with patterns
+# we can't safely transform (multi-line `main(_) -> ... main_helper(...)`,
+# helper functions, etc.). Heuristic: only convert escripts that
+# match the simple `main(_) -> body, init:stop().` shape that the
+# generated path always emits.
+convert_to_module() {
     local sanitized="$1"
     local dir="$WORK_ROOT/$sanitized"
-    # File redirect rather than bash subshell capture: preserves NUL
-    # bytes, multibyte boundaries, and arbitrary binary output.
+    local escript="$dir/run_test.escript"
+    [ -f "$escript" ] || return 1
+    local mod_name="test_${sanitized}"
+    local mod_file="$dir/${mod_name}.erl"
+    # Strip shebang, replace `main(_) ->` with `run() ->`, drop
+    # trailing `init:stop().` / `halt(_).` calls. Any helper
+    # functions defined after main/1 are kept as-is (they get
+    # exported below).
+    # Replace `init:stop().` / `halt(...).` with `ok.` (the final
+    # expression must terminate with `.` and the previous chain of
+    # statements ends with `,`, so we can't just delete the line).
+    awk -v MOD="$mod_name" '
+        BEGIN { print "-module(" MOD ")." ; print "-compile(export_all)." }
+        /^#!/ { next }
+        /^main *\( *_? *\) *->/ {
+            sub(/^main *\( *_? *\) *->/, "run() ->")
+            print
+            next
+        }
+        /^[[:space:]]*init:stop\(\)\./ { print "    ok."; next }
+        /^[[:space:]]*halt\([^)]*\)\./ { print "    ok."; next }
+        /^[[:space:]]*halt\(\)\./ { print "    ok."; next }
+        { print }
+    ' "$escript" > "$mod_file"
+    # erlc writes errors to stdout, not stderr; capture both.
+    if ! erlc -o "$dir" "$mod_file" >"$dir/test_mod_erlc_err" 2>&1; then
+        rm -f "$mod_file" "$dir/${mod_name}.beam"
+        return 1
+    fi
+    return 0
+}
+export -f convert_to_module
+
+awk -F'\t' '$2 == "RUN" { print $4 }' "$MANIFEST" | \
+    xargs -n 1 -P "$JOBS" -I{} bash -c 'convert_to_module "$@" || true' _ {}
+
+# Build the batch runner module. Compile once into a shared dir.
+export BATCH_RUNNER_DIR="$WORK_ROOT/batch_runner"
+mkdir -p "$BATCH_RUNNER_DIR"
+cat > "$BATCH_RUNNER_DIR/batch_runner.erl" <<'ERLEOF'
+-module(batch_runner).
+-export([main/1]).
+
+%% Args alternating: <module_name> <work_dir> ...
+main(Args) ->
+    run_pairs(Args),
+    init:stop().
+
+%% Load every .beam in Dir (force-replacing any previously-loaded
+%% module with the same name). Tests can share short module names
+%% like `s` across fixtures, so we can't trust the codeserver's
+%% in-memory copy of a module to be the right one for this test.
+load_dir_modules(Dir) ->
+    case file:list_dir(Dir) of
+        {ok, Names} ->
+            lists:foreach(fun(F) ->
+                case lists:suffix(".beam", F) of
+                    true ->
+                        Mod = list_to_atom(filename:rootname(F)),
+                        code:purge(Mod),
+                        code:delete(Mod),
+                        Path = filename:join(Dir, filename:rootname(F)),
+                        code:load_abs(Path);
+                    false -> ok
+                end
+            end, Names);
+        _ -> ok
+    end.
+
+%% Purge every module loaded from Dir so the next test gets a
+%% clean slate. We can't tell from the codeserver which module
+%% came from which dir, so we just purge anything matching a
+%% .beam file in this Dir.
+purge_dir_modules(Dir) ->
+    case file:list_dir(Dir) of
+        {ok, Names} ->
+            lists:foreach(fun(F) ->
+                case lists:suffix(".beam", F) of
+                    true ->
+                        Mod = list_to_atom(filename:rootname(F)),
+                        code:purge(Mod),
+                        code:delete(Mod);
+                    false -> ok
+                end
+            end, Names);
+        _ -> ok
+    end.
+
+run_pairs([]) -> ok;
+run_pairs([Mod, Dir | Rest]) ->
+    ModAtom = list_to_atom(Mod),
+    io:format("==FRAME-TEST-BEGIN== ~s~n", [Mod]),
+    %% Force-load every .beam in this test's dir so module names
+    %% shared across tests resolve to THIS test's compile.
+    load_dir_modules(Dir),
+    try
+        ModAtom:run()
+    catch
+        C:E:S ->
+            io:format("ERLANG-BATCH-EXC ~p:~p~nstack: ~p~n", [C, E, S])
+    end,
+    io:format("==FRAME-TEST-END== ~s~n", [Mod]),
+    purge_dir_modules(Dir),
+    run_pairs(Rest).
+ERLEOF
+if ! erlc -o "$BATCH_RUNNER_DIR" "$BATCH_RUNNER_DIR/batch_runner.erl"; then
+    echo "FATAL: batch_runner failed to compile" >&2
+    exit 1
+fi
+
+# Build batch manifests. Each entry: <test_module_name>\t<work_dir>
+# Tests whose convert_to_module failed (no test_<sanitized>.beam)
+# fall back to the legacy per-test escript run.
+BATCH_DIR="$STATUS_DIR/batches"
+LEGACY_LIST="$STATUS_DIR/legacy.tsv"
+mkdir -p "$BATCH_DIR"
+: > "$LEGACY_LIST"
+batch_idx=0
+row_idx=0
+batch_file="$BATCH_DIR/batch_$(printf '%04d' $batch_idx).tsv"
+: > "$batch_file"
+
+awk -F'\t' '$2 == "RUN" { print $4 }' "$MANIFEST" | while read -r sanitized; do
+    dir="$WORK_ROOT/$sanitized"
+    mod_name="test_${sanitized}"
+    if [ -f "$dir/${mod_name}.beam" ]; then
+        printf '%s\t%s\n' "$mod_name" "$dir" >> "$batch_file"
+        row_idx=$((row_idx + 1))
+        if [ "$row_idx" -ge "$BATCH_SIZE" ]; then
+            batch_idx=$((batch_idx + 1))
+            row_idx=0
+            batch_file="$BATCH_DIR/batch_$(printf '%04d' $batch_idx).tsv"
+            : > "$batch_file"
+        fi
+    else
+        printf '%s\n' "$sanitized" >> "$LEGACY_LIST"
+    fi
+done
+[ ! -s "$batch_file" ] && rm -f "$batch_file"
+
+run_batch() {
+    local batch_id="$1"
+    local manifest="$2"
+    local batch_out="$STATUS_DIR/batch_${batch_id}.out"
+
+    # Build args list: alternating module names and work dirs.
+    local -a args
+    while IFS=$'\t' read -r mod dir; do
+        args+=("$mod" "$dir")
+    done < "$manifest"
+    [ "${#args[@]}" -eq 0 ] && return
+
+    # Use `erl -run Mod main Args...` form: each token after `-run`
+    # becomes an arg. Module is loaded from -pa code path.
+    setsid --wait timeout "$TIMEOUT_SEC" erl -noshell \
+        -pa "$BATCH_RUNNER_DIR" \
+        -run batch_runner main "${args[@]}" \
+        > "$batch_out" 2>&1
+    local rc=$?
+    sync "$batch_out" 2>/dev/null || true
+
+    awk -v OUTDIR="$STATUS_DIR" -v RC="$rc" '
+        /^==FRAME-TEST-BEGIN== / {
+            mod = $2
+            sanitized = mod
+            sub(/^test_/, "", sanitized)
+            cur = OUTDIR "/" sanitized ".out"
+            cur_rc = OUTDIR "/" sanitized ".rc"
+            saw_begin = 1
+            content = ""
+            saw_exc = 0
+            next
+        }
+        /^==FRAME-TEST-END== / {
+            if (saw_begin) {
+                printf "%s", content > cur
+                close(cur)
+                if (RC == 124) { print "124" > cur_rc }
+                else if (saw_exc) { print "1" > cur_rc }
+                else { print "0" > cur_rc }
+                close(cur_rc)
+                saw_begin = 0
+            }
+            next
+        }
+        /^ERLANG-BATCH-EXC / { saw_exc = 1 }
+        saw_begin { content = content $0 "\n" }
+    ' "$batch_out"
+}
+export -f run_batch
+
+# Run batches in parallel.
+ls "$BATCH_DIR"/batch_*.tsv 2>/dev/null | \
+    xargs -n 1 -P "$JOBS" -I{} bash -c '
+        f="$1"
+        id=$(basename "$f" .tsv | sed "s/batch_//")
+        run_batch "$id" "$f"
+    ' _ {}
+
+# Legacy fallback: run any test that didn't convert via the
+# original per-test escript path.
+run_legacy() {
+    local sanitized="$1"
+    local dir="$WORK_ROOT/$sanitized"
     ( cd "$dir" && timeout "$TIMEOUT_SEC" escript run_test.escript ) \
         > "$STATUS_DIR/${sanitized}.out" 2>&1
     echo $? > "$STATUS_DIR/${sanitized}.rc"
 }
-export -f run_one
+export -f run_legacy
 
-awk -F'\t' '$2 == "RUN" { print $4 }' "$MANIFEST" | \
-    xargs -n 1 -P "$JOBS" -I{} bash -c 'run_one "$@"' _ {}
+if [ -s "$LEGACY_LIST" ]; then
+    cat "$LEGACY_LIST" | xargs -n 1 -P "$JOBS" -I{} bash -c 'run_legacy "$@"' _ {}
+fi
 
 # ---- Collect + emit TAP ----
 pass=0; fail=0; skip=0
