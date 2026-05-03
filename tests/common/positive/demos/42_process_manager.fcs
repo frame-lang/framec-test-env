@@ -1,0 +1,116 @@
+@@[target("csharp")]
+
+using System;
+
+@@system OrderSaga {
+    interface:
+        start(order_id: String)
+        reserved()
+        reserve_failed(reason: String)
+        charged(tx_id: String)
+        charge_failed(reason: String)
+        shipped(tracking: String)
+        ship_failed(reason: String)
+        status(): String
+
+    machine:
+        $New {
+            start(order_id: String) {
+                this.order_id = order_id;
+                -> $Reserving
+            }
+            status(): String { @@:("new") }
+        }
+
+        $Reserving {
+            $>() { this.call_reserve(this.order_id); }
+            reserved() { -> $Charging }
+            reserve_failed(reason: String) {
+                this.failure = reason;
+                -> "abort" $Failed
+            }
+            status(): String { @@:("reserving") }
+        }
+
+        $Charging {
+            $>() { this.call_charge(this.order_id); }
+            charged(tx_id: String) {
+                this.tx_id = tx_id;
+                -> $Shipping
+            }
+            charge_failed(reason: String) {
+                this.failure = reason;
+                -> "compensate" $CompensatingReservation
+            }
+            status(): String { @@:("charging") }
+        }
+
+        $Shipping {
+            $>() { this.call_ship(this.order_id); }
+            shipped(tracking: String) {
+                this.tracking = tracking;
+                -> $Completed
+            }
+            ship_failed(reason: String) {
+                this.failure = reason;
+                -> "compensate" $CompensatingCharge
+            }
+            status(): String { @@:("shipping") }
+        }
+
+        $CompensatingCharge {
+            $>() {
+                this.call_refund(this.tx_id);
+                -> "refunded" $CompensatingReservation
+            }
+            status(): String { @@:("compensating_charge") }
+        }
+
+        $CompensatingReservation {
+            $>() {
+                this.call_release(this.order_id);
+                -> "released" $Failed
+            }
+            status(): String { @@:("compensating_reservation") }
+        }
+
+        $Completed {
+            status(): String { @@:("completed") }
+        }
+
+        $Failed {
+            status(): String { @@:($"failed: {this.failure}") }
+        }
+
+    actions:
+        call_reserve(oid: String) { Console.WriteLine($"reserve {oid}"); }
+        call_charge(oid: String)  { Console.WriteLine($"charge {oid}"); }
+        call_ship(oid: String)    { Console.WriteLine($"ship {oid}"); }
+        call_refund(tx: String)   { Console.WriteLine($"refund {tx}"); }
+        call_release(oid: String) { Console.WriteLine($"release reservation for {oid}"); }
+
+    domain:
+        order_id: String = ""
+        tx_id: String = ""
+        tracking: String = ""
+        failure: String = ""
+}
+
+class Program {
+    static void Main(string[] args) {
+        var s = @@OrderSaga();
+        s.start("O-1");
+        s.reserved();
+        s.charged("T-9");
+        s.shipped("UPS-42");
+        if ((string) s.status() != "completed") throw new Exception("expected completed");
+
+        var s2 = @@OrderSaga();
+        s2.start("O-2");
+        s2.reserved();
+        s2.charged("T-10");
+        s2.ship_failed("carrier down");
+        if ((string) s2.status() != "failed: carrier down") throw new Exception("expected failed");
+        Console.WriteLine("PASS: process_manager");
+    }
+}

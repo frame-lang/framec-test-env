@@ -1,0 +1,112 @@
+@@[target("rust")]
+
+@@system OrderSaga {
+    interface:
+        start(order_id: String)
+        reserved()
+        reserve_failed(reason: String)
+        charged(tx_id: String)
+        charge_failed(reason: String)
+        shipped(tracking: String)
+        ship_failed(reason: String)
+        status(): String
+
+    machine:
+        $New {
+            start(order_id: String) {
+                self.order_id = order_id;
+                -> $Reserving
+            }
+            status(): String { @@:("new".to_string()) }
+        }
+
+        $Reserving {
+            $>() { self.call_reserve(self.order_id.clone()); }
+            reserved() { -> $Charging }
+            reserve_failed(reason: String) {
+                self.failure = reason;
+                -> "abort" $Failed
+            }
+            status(): String { @@:("reserving".to_string()) }
+        }
+
+        $Charging {
+            $>() { self.call_charge(self.order_id.clone()); }
+            charged(tx_id: String) {
+                self.tx_id = tx_id;
+                -> $Shipping
+            }
+            charge_failed(reason: String) {
+                self.failure = reason;
+                -> "compensate" $CompensatingReservation
+            }
+            status(): String { @@:("charging".to_string()) }
+        }
+
+        $Shipping {
+            $>() { self.call_ship(self.order_id.clone()); }
+            shipped(tracking: String) {
+                self.tracking = tracking;
+                -> $Completed
+            }
+            ship_failed(reason: String) {
+                self.failure = reason;
+                -> "compensate" $CompensatingCharge
+            }
+            status(): String { @@:("shipping".to_string()) }
+        }
+
+        $CompensatingCharge {
+            $>() {
+                self.call_refund(self.tx_id.clone());
+                -> "refunded" $CompensatingReservation
+            }
+            status(): String { @@:("compensating_charge".to_string()) }
+        }
+
+        $CompensatingReservation {
+            $>() {
+                self.call_release(self.order_id.clone());
+                -> "released" $Failed
+            }
+            status(): String { @@:("compensating_reservation".to_string()) }
+        }
+
+        $Completed {
+            status(): String { @@:("completed".to_string()) }
+        }
+
+        $Failed {
+            status(): String { @@:(format!("failed: {}", self.failure)) }
+        }
+
+    actions:
+        call_reserve(oid: String) { println!("reserve {}", oid); }
+        call_charge(oid: String)  { println!("charge {}", oid); }
+        call_ship(oid: String)    { println!("ship {}", oid); }
+        call_refund(tx: String)   { println!("refund {}", tx); }
+        call_release(oid: String) { println!("release reservation for {}", oid); }
+
+    domain:
+        order_id: String = String::new()
+        tx_id: String = String::new()
+        tracking: String = String::new()
+        failure: String = String::new()
+}
+
+fn main() {
+    let mut s = @@OrderSaga();
+    s.start("O-1".to_string());
+    s.reserved();
+    s.charged("T-9".to_string());
+    s.shipped("UPS-42".to_string());
+    assert_eq!(s.status(), "completed");
+
+    let mut s2 = @@OrderSaga();
+    s2.start("O-2".to_string());
+    s2.reserved();
+    s2.charged("T-10".to_string());
+    s2.ship_failed("carrier down".to_string());
+    assert_eq!(s2.status(), "failed: carrier down");
+    println!("PASS: process_manager");
+}

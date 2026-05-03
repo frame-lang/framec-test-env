@@ -1,0 +1,110 @@
+@@[target("javascript")]
+
+@@system OrderSaga {
+    interface:
+        start(order_id)
+        reserved()
+        reserve_failed(reason)
+        charged(tx_id)
+        charge_failed(reason)
+        shipped(tracking)
+        ship_failed(reason)
+        status()
+
+    machine:
+        $New {
+            start(order_id) {
+                this.order_id = order_id;
+                -> $Reserving
+            }
+            status() { @@:("new") }
+        }
+
+        $Reserving {
+            $>() { this.call_reserve(this.order_id); }
+            reserved() { -> $Charging }
+            reserve_failed(reason) {
+                this.failure = reason;
+                -> "abort" $Failed
+            }
+            status() { @@:("reserving") }
+        }
+
+        $Charging {
+            $>() { this.call_charge(this.order_id); }
+            charged(tx_id) {
+                this.tx_id = tx_id;
+                -> $Shipping
+            }
+            charge_failed(reason) {
+                this.failure = reason;
+                -> "compensate" $CompensatingReservation
+            }
+            status() { @@:("charging") }
+        }
+
+        $Shipping {
+            $>() { this.call_ship(this.order_id); }
+            shipped(tracking) {
+                this.tracking = tracking;
+                -> $Completed
+            }
+            ship_failed(reason) {
+                this.failure = reason;
+                -> "compensate" $CompensatingCharge
+            }
+            status() { @@:("shipping") }
+        }
+
+        $CompensatingCharge {
+            $>() {
+                this.call_refund(this.tx_id);
+                -> "refunded" $CompensatingReservation
+            }
+            status() { @@:("compensating_charge") }
+        }
+
+        $CompensatingReservation {
+            $>() {
+                this.call_release(this.order_id);
+                -> "released" $Failed
+            }
+            status() { @@:("compensating_reservation") }
+        }
+
+        $Completed {
+            status() { @@:("completed") }
+        }
+
+        $Failed {
+            status() { @@:(`failed: ${this.failure}`) }
+        }
+
+    actions:
+        call_reserve(oid) { console.log("reserve " + oid); }
+        call_charge(oid)  { console.log("charge " + oid); }
+        call_ship(oid)    { console.log("ship " + oid); }
+        call_refund(tx)   { console.log("refund " + tx); }
+        call_release(oid) { console.log("release reservation for " + oid); }
+
+    domain:
+        order_id = ""
+        tx_id = ""
+        tracking = ""
+        failure = ""
+}
+
+const s = @@OrderSaga();
+s.start("O-1");
+s.reserved();
+s.charged("T-9");
+s.shipped("UPS-42");
+if (s.status() !== "completed") throw new Error("expected completed");
+
+const s2 = @@OrderSaga();
+s2.start("O-2");
+s2.reserved();
+s2.charged("T-10");
+s2.ship_failed("carrier down");
+if (s2.status() !== "failed: carrier down") throw new Error("expected failed: carrier down");
+console.log("PASS: process_manager");

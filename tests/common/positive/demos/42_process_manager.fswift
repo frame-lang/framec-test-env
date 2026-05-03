@@ -1,0 +1,112 @@
+@@[target("swift")]
+
+import Foundation
+
+@@system OrderSaga {
+    interface:
+        start(order_id: String)
+        reserved()
+        reserve_failed(reason: String)
+        charged(tx_id: String)
+        charge_failed(reason: String)
+        shipped(tracking: String)
+        ship_failed(reason: String)
+        status(): String
+
+    machine:
+        $New {
+            start(order_id: String) {
+                self.order_id = order_id
+                -> $Reserving
+            }
+            status(): String { @@:("new") }
+        }
+
+        $Reserving {
+            $>() { self.call_reserve(self.order_id) }
+            reserved() { -> $Charging }
+            reserve_failed(reason: String) {
+                self.failure = reason
+                -> "abort" $Failed
+            }
+            status(): String { @@:("reserving") }
+        }
+
+        $Charging {
+            $>() { self.call_charge(self.order_id) }
+            charged(tx_id: String) {
+                self.tx_id = tx_id
+                -> $Shipping
+            }
+            charge_failed(reason: String) {
+                self.failure = reason
+                -> "compensate" $CompensatingReservation
+            }
+            status(): String { @@:("charging") }
+        }
+
+        $Shipping {
+            $>() { self.call_ship(self.order_id) }
+            shipped(tracking: String) {
+                self.tracking = tracking
+                -> $Completed
+            }
+            ship_failed(reason: String) {
+                self.failure = reason
+                -> "compensate" $CompensatingCharge
+            }
+            status(): String { @@:("shipping") }
+        }
+
+        $CompensatingCharge {
+            $>() {
+                self.call_refund(self.tx_id)
+                -> "refunded" $CompensatingReservation
+            }
+            status(): String { @@:("compensating_charge") }
+        }
+
+        $CompensatingReservation {
+            $>() {
+                self.call_release(self.order_id)
+                -> "released" $Failed
+            }
+            status(): String { @@:("compensating_reservation") }
+        }
+
+        $Completed {
+            status(): String { @@:("completed") }
+        }
+
+        $Failed {
+            status(): String { @@:("failed: \(self.failure)") }
+        }
+
+    actions:
+        call_reserve(oid: String) { print("reserve \(oid)") }
+        call_charge(oid: String)  { print("charge \(oid)") }
+        call_ship(oid: String)    { print("ship \(oid)") }
+        call_refund(tx: String)   { print("refund \(tx)") }
+        call_release(oid: String) { print("release reservation for \(oid)") }
+
+    domain:
+        order_id: String = ""
+        tx_id: String = ""
+        tracking: String = ""
+        failure: String = ""
+}
+
+let s = @@OrderSaga()
+s.start("O-1")
+s.reserved()
+s.charged("T-9")
+s.shipped("UPS-42")
+if (s.status() as! String) != "completed" { print("FAIL: expected completed"); exit(1) }
+
+let s2 = @@OrderSaga()
+s2.start("O-2")
+s2.reserved()
+s2.charged("T-10")
+s2.ship_failed("carrier down")
+if (s2.status() as! String) != "failed: carrier down" { print("FAIL: expected failed"); exit(1) }
+print("PASS: process_manager")

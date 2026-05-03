@@ -1,0 +1,117 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system OrderSaga {
+    interface:
+        start(order_id: str)
+        reserved()
+        reserve_failed(reason: str)
+        charged(tx_id: str)
+        charge_failed(reason: str)
+        shipped(tracking: str)
+        ship_failed(reason: str)
+        status(): str
+
+    machine:
+        $New {
+            start(order_id: str) {
+                this->order_id = order_id;
+                -> $Reserving
+            }
+            status(): str { @@:(std::string("new")) }
+        }
+
+        $Reserving {
+            $>() { this->call_reserve(this->order_id); }
+            reserved() { -> $Charging }
+            reserve_failed(reason: str) {
+                this->failure = reason;
+                -> "abort" $Failed
+            }
+            status(): str { @@:(std::string("reserving")) }
+        }
+
+        $Charging {
+            $>() { this->call_charge(this->order_id); }
+            charged(tx_id: str) {
+                this->tx_id = tx_id;
+                -> $Shipping
+            }
+            charge_failed(reason: str) {
+                this->failure = reason;
+                -> "compensate" $CompensatingReservation
+            }
+            status(): str { @@:(std::string("charging")) }
+        }
+
+        $Shipping {
+            $>() { this->call_ship(this->order_id); }
+            shipped(tracking: str) {
+                this->tracking = tracking;
+                -> $Completed
+            }
+            ship_failed(reason: str) {
+                this->failure = reason;
+                -> "compensate" $CompensatingCharge
+            }
+            status(): str { @@:(std::string("shipping")) }
+        }
+
+        $CompensatingCharge {
+            $>() {
+                this->call_refund(this->tx_id);
+                -> "refunded" $CompensatingReservation
+            }
+            status(): str { @@:(std::string("compensating_charge")) }
+        }
+
+        $CompensatingReservation {
+            $>() {
+                this->call_release(this->order_id);
+                -> "released" $Failed
+            }
+            status(): str { @@:(std::string("compensating_reservation")) }
+        }
+
+        $Completed {
+            status(): str { @@:(std::string("completed")) }
+        }
+
+        $Failed {
+            status(): str { @@:(std::string("failed: ") + this->failure) }
+        }
+
+    actions:
+        call_reserve(oid: std::string) { std::cout << "reserve " << oid << std::endl; }
+        call_charge(oid: std::string)  { std::cout << "charge " << oid << std::endl; }
+        call_ship(oid: std::string)    { std::cout << "ship " << oid << std::endl; }
+        call_refund(tx: std::string)   { std::cout << "refund " << tx << std::endl; }
+        call_release(oid: std::string) { std::cout << "release reservation for " << oid << std::endl; }
+
+    domain:
+        order_id: std::string = ""
+        tx_id: std::string = ""
+        tracking: std::string = ""
+        failure: std::string = ""
+}
+
+int main() {
+    OrderSaga s;
+    s.start("O-1");
+    s.reserved();
+    s.charged("T-9");
+    s.shipped("UPS-42");
+    assert(s.status() == "completed");
+
+    OrderSaga s2;
+    s2.start("O-2");
+    s2.reserved();
+    s2.charged("T-10");
+    s2.ship_failed("carrier down");
+    assert(s2.status() == "failed: carrier down");
+    std::cout << "PASS: process_manager" << std::endl;
+    return 0;
+}

@@ -1,0 +1,112 @@
+@@[target("php")]
+
+<?php
+
+@@system OrderSaga {
+    interface:
+        start(order_id: str)
+        reserved()
+        reserve_failed(reason: str)
+        charged(tx_id: str)
+        charge_failed(reason: str)
+        shipped(tracking: str)
+        ship_failed(reason: str)
+        status(): str
+
+    machine:
+        $New {
+            start(order_id: str) {
+                $this->order_id = $order_id;
+                -> $Reserving
+            }
+            status(): str { @@:("new") }
+        }
+
+        $Reserving {
+            $>() { $this->call_reserve($this->order_id); }
+            reserved() { -> $Charging }
+            reserve_failed(reason: str) {
+                $this->failure = $reason;
+                -> "abort" $Failed
+            }
+            status(): str { @@:("reserving") }
+        }
+
+        $Charging {
+            $>() { $this->call_charge($this->order_id); }
+            charged(tx_id: str) {
+                $this->tx_id = $tx_id;
+                -> $Shipping
+            }
+            charge_failed(reason: str) {
+                $this->failure = $reason;
+                -> "compensate" $CompensatingReservation
+            }
+            status(): str { @@:("charging") }
+        }
+
+        $Shipping {
+            $>() { $this->call_ship($this->order_id); }
+            shipped(tracking: str) {
+                $this->tracking = $tracking;
+                -> $Completed
+            }
+            ship_failed(reason: str) {
+                $this->failure = $reason;
+                -> "compensate" $CompensatingCharge
+            }
+            status(): str { @@:("shipping") }
+        }
+
+        $CompensatingCharge {
+            $>() {
+                $this->call_refund($this->tx_id);
+                -> "refunded" $CompensatingReservation
+            }
+            status(): str { @@:("compensating_charge") }
+        }
+
+        $CompensatingReservation {
+            $>() {
+                $this->call_release($this->order_id);
+                -> "released" $Failed
+            }
+            status(): str { @@:("compensating_reservation") }
+        }
+
+        $Completed {
+            status(): str { @@:("completed") }
+        }
+
+        $Failed {
+            status(): str { @@:("failed: " . $this->failure) }
+        }
+
+    actions:
+        call_reserve(oid) { echo "reserve " . $oid . "\n"; }
+        call_charge(oid)  { echo "charge " . $oid . "\n"; }
+        call_ship(oid)    { echo "ship " . $oid . "\n"; }
+        call_refund(tx)   { echo "refund " . $tx . "\n"; }
+        call_release(oid) { echo "release reservation for " . $oid . "\n"; }
+
+    domain:
+        order_id = ""
+        tx_id = ""
+        tracking = ""
+        failure = ""
+}
+
+$s = @@OrderSaga();
+$s->start("O-1");
+$s->reserved();
+$s->charged("T-9");
+$s->shipped("UPS-42");
+assert($s->status() === "completed", "expected completed");
+
+$s2 = @@OrderSaga();
+$s2->start("O-2");
+$s2->reserved();
+$s2->charged("T-10");
+$s2->ship_failed("carrier down");
+assert($s2->status() === "failed: carrier down", "expected failed");
+echo "PASS: process_manager\n";

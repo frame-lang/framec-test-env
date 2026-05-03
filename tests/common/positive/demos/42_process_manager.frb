@@ -1,0 +1,110 @@
+@@[target("ruby")]
+
+@@system OrderSaga {
+    interface:
+        start(order_id: str)
+        reserved()
+        reserve_failed(reason: str)
+        charged(tx_id: str)
+        charge_failed(reason: str)
+        shipped(tracking: str)
+        ship_failed(reason: str)
+        status(): str
+
+    machine:
+        $New {
+            start(order_id: str) {
+                @order_id = order_id
+                -> $Reserving
+            }
+            status(): str { @@:("new") }
+        }
+
+        $Reserving {
+            $>() { self.call_reserve(@order_id) }
+            reserved() { -> $Charging }
+            reserve_failed(reason: str) {
+                @failure = reason
+                -> "abort" $Failed
+            }
+            status(): str { @@:("reserving") }
+        }
+
+        $Charging {
+            $>() { self.call_charge(@order_id) }
+            charged(tx_id: str) {
+                @tx_id = tx_id
+                -> $Shipping
+            }
+            charge_failed(reason: str) {
+                @failure = reason
+                -> "compensate" $CompensatingReservation
+            }
+            status(): str { @@:("charging") }
+        }
+
+        $Shipping {
+            $>() { self.call_ship(@order_id) }
+            shipped(tracking: str) {
+                @tracking = tracking
+                -> $Completed
+            }
+            ship_failed(reason: str) {
+                @failure = reason
+                -> "compensate" $CompensatingCharge
+            }
+            status(): str { @@:("shipping") }
+        }
+
+        $CompensatingCharge {
+            $>() {
+                self.call_refund(@tx_id)
+                -> "refunded" $CompensatingReservation
+            }
+            status(): str { @@:("compensating_charge") }
+        }
+
+        $CompensatingReservation {
+            $>() {
+                self.call_release(@order_id)
+                -> "released" $Failed
+            }
+            status(): str { @@:("compensating_reservation") }
+        }
+
+        $Completed {
+            status(): str { @@:("completed") }
+        }
+
+        $Failed {
+            status(): str { @@:("failed: #{@failure}") }
+        }
+
+    actions:
+        call_reserve(oid) { puts "reserve #{oid}" }
+        call_charge(oid)  { puts "charge #{oid}" }
+        call_ship(oid)    { puts "ship #{oid}" }
+        call_refund(tx)   { puts "refund #{tx}" }
+        call_release(oid) { puts "release reservation for #{oid}" }
+
+    domain:
+        order_id = ""
+        tx_id = ""
+        tracking = ""
+        failure = ""
+}
+
+s = OrderSaga.new
+s.start("O-1")
+s.reserved
+s.charged("T-9")
+s.shipped("UPS-42")
+raise "expected completed" unless s.status == "completed"
+
+s2 = OrderSaga.new
+s2.start("O-2")
+s2.reserved
+s2.charged("T-10")
+s2.ship_failed("carrier down")
+raise "expected failed: carrier down" unless s2.status == "failed: carrier down"
+puts "PASS: process_manager"

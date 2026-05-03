@@ -1,0 +1,88 @@
+@@[target("erlang")]
+
+@@system OrderSaga {
+    interface:
+        start(order_id: str)
+        reserved()
+        reserve_failed(reason: str)
+        charged(tx_id: str)
+        charge_failed(reason: str)
+        shipped(tracking: str)
+        ship_failed(reason: str)
+        status(): str
+
+    machine:
+        $New {
+            start(order_id: str) {
+                self.order_id = order_id
+                -> $Reserving
+            }
+            status(): str { @@:("new") }
+        }
+
+        $Reserving {
+            $>() { io:format("reserve ~s~n", [Data#data.order_id]) }
+            reserved() { -> $Charging }
+            reserve_failed(reason: str) {
+                self.failure = reason
+                -> "abort" $Failed
+            }
+            status(): str { @@:("reserving") }
+        }
+
+        $Charging {
+            $>() { io:format("charge ~s~n", [Data#data.order_id]) }
+            charged(tx_id: str) {
+                self.tx_id = tx_id
+                -> $Shipping
+            }
+            charge_failed(reason: str) {
+                self.failure = reason
+                -> "compensate" $CompensatingReservation
+            }
+            status(): str { @@:("charging") }
+        }
+
+        $Shipping {
+            $>() { io:format("ship ~s~n", [Data#data.order_id]) }
+            shipped(tracking: str) {
+                self.tracking = tracking
+                -> $Completed
+            }
+            ship_failed(reason: str) {
+                self.failure = reason
+                -> "compensate" $CompensatingCharge
+            }
+            status(): str { @@:("shipping") }
+        }
+
+        $CompensatingCharge {
+            $>() {
+                io:format("refund ~s~n", [Data#data.tx_id]),
+                -> "refunded" $CompensatingReservation
+            }
+            status(): str { @@:("compensating_charge") }
+        }
+
+        $CompensatingReservation {
+            $>() {
+                io:format("release reservation for ~s~n", [Data#data.order_id]),
+                -> "released" $Failed
+            }
+            status(): str { @@:("compensating_reservation") }
+        }
+
+        $Completed {
+            status(): str { @@:("completed") }
+        }
+
+        $Failed {
+            status(): str { @@:("failed: " ++ Data#data.failure) }
+        }
+
+    domain:
+        order_id = ""
+        tx_id = ""
+        tracking = ""
+        failure = ""
+}

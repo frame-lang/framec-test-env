@@ -1,0 +1,110 @@
+@@[target("lua")]
+
+@@system OrderSaga {
+    interface:
+        start(order_id: str)
+        reserved()
+        reserve_failed(reason: str)
+        charged(tx_id: str)
+        charge_failed(reason: str)
+        shipped(tracking: str)
+        ship_failed(reason: str)
+        status(): str
+
+    machine:
+        $New {
+            start(order_id: str) {
+                self.order_id = order_id
+                -> $Reserving
+            }
+            status(): str { @@:("new") }
+        }
+
+        $Reserving {
+            $>() { self:call_reserve(self.order_id) }
+            reserved() { -> $Charging }
+            reserve_failed(reason: str) {
+                self.failure = reason
+                -> "abort" $Failed
+            }
+            status(): str { @@:("reserving") }
+        }
+
+        $Charging {
+            $>() { self:call_charge(self.order_id) }
+            charged(tx_id: str) {
+                self.tx_id = tx_id
+                -> $Shipping
+            }
+            charge_failed(reason: str) {
+                self.failure = reason
+                -> "compensate" $CompensatingReservation
+            }
+            status(): str { @@:("charging") }
+        }
+
+        $Shipping {
+            $>() { self:call_ship(self.order_id) }
+            shipped(tracking: str) {
+                self.tracking = tracking
+                -> $Completed
+            }
+            ship_failed(reason: str) {
+                self.failure = reason
+                -> "compensate" $CompensatingCharge
+            }
+            status(): str { @@:("shipping") }
+        }
+
+        $CompensatingCharge {
+            $>() {
+                self:call_refund(self.tx_id)
+                -> "refunded" $CompensatingReservation
+            }
+            status(): str { @@:("compensating_charge") }
+        }
+
+        $CompensatingReservation {
+            $>() {
+                self:call_release(self.order_id)
+                -> "released" $Failed
+            }
+            status(): str { @@:("compensating_reservation") }
+        }
+
+        $Completed {
+            status(): str { @@:("completed") }
+        }
+
+        $Failed {
+            status(): str { @@:("failed: " .. self.failure) }
+        }
+
+    actions:
+        call_reserve(oid) { print("reserve " .. oid) }
+        call_charge(oid)  { print("charge " .. oid) }
+        call_ship(oid)    { print("ship " .. oid) }
+        call_refund(tx)   { print("refund " .. tx) }
+        call_release(oid) { print("release reservation for " .. oid) }
+
+    domain:
+        order_id: str = ""
+        tx_id: str = ""
+        tracking: str = ""
+        failure: str = ""
+}
+
+local s = @@OrderSaga()
+s:start("O-1")
+s:reserved()
+s:charged("T-9")
+s:shipped("UPS-42")
+assert(s:status() == "completed", "expected completed")
+
+local s2 = @@OrderSaga()
+s2:start("O-2")
+s2:reserved()
+s2:charged("T-10")
+s2:ship_failed("carrier down")
+assert(s2:status() == "failed: carrier down", "expected failed")
+print("PASS: process_manager")

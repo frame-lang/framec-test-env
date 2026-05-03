@@ -1,0 +1,123 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system OrderSaga {
+    interface:
+        start(order_id: str)
+        reserved()
+        reserve_failed(reason: str)
+        charged(tx_id: str)
+        charge_failed(reason: str)
+        shipped(tracking: str)
+        ship_failed(reason: str)
+        status(): str
+
+    machine:
+        $New {
+            start(order_id: str) {
+                self->order_id = order_id;
+                -> $Reserving
+            }
+            status(): str { @@:("new") }
+        }
+
+        $Reserving {
+            $>() { OrderSaga_call_reserve(self, self->order_id); }
+            reserved() { -> $Charging }
+            reserve_failed(reason: str) {
+                self->failure = reason;
+                -> "abort" $Failed
+            }
+            status(): str { @@:("reserving") }
+        }
+
+        $Charging {
+            $>() { OrderSaga_call_charge(self, self->order_id); }
+            charged(tx_id: str) {
+                self->tx_id = tx_id;
+                -> $Shipping
+            }
+            charge_failed(reason: str) {
+                self->failure = reason;
+                -> "compensate" $CompensatingReservation
+            }
+            status(): str { @@:("charging") }
+        }
+
+        $Shipping {
+            $>() { OrderSaga_call_ship(self, self->order_id); }
+            shipped(tracking: str) {
+                self->tracking = tracking;
+                -> $Completed
+            }
+            ship_failed(reason: str) {
+                self->failure = reason;
+                -> "compensate" $CompensatingCharge
+            }
+            status(): str { @@:("shipping") }
+        }
+
+        $CompensatingCharge {
+            $>() {
+                OrderSaga_call_refund(self, self->tx_id);
+                -> "refunded" $CompensatingReservation
+            }
+            status(): str { @@:("compensating_charge") }
+        }
+
+        $CompensatingReservation {
+            $>() {
+                OrderSaga_call_release(self, self->order_id);
+                -> "released" $Failed
+            }
+            status(): str { @@:("compensating_reservation") }
+        }
+
+        $Completed {
+            status(): str { @@:("completed") }
+        }
+
+        $Failed {
+            status(): str {
+                static char buf[64];
+                snprintf(buf, sizeof(buf), "failed: %s", self->failure);
+                @@:(buf)
+            }
+        }
+
+    actions:
+        call_reserve(oid: str) { printf("reserve %s\n", oid); }
+        call_charge(oid: str)  { printf("charge %s\n", oid); }
+        call_ship(oid: str)    { printf("ship %s\n", oid); }
+        call_refund(tx: str)   { printf("refund %s\n", tx); }
+        call_release(oid: str) { printf("release reservation for %s\n", oid); }
+
+    domain:
+        order_id: str = ""
+        tx_id: str = ""
+        tracking: str = ""
+        failure: str = ""
+}
+
+int main() {
+    OrderSaga* s = @@OrderSaga();
+    OrderSaga_start(s, "O-1");
+    OrderSaga_reserved(s);
+    OrderSaga_charged(s, "T-9");
+    OrderSaga_shipped(s, "UPS-42");
+    if (strcmp(OrderSaga_status(s), "completed") != 0) { printf("FAIL: expected completed\n"); return 1; }
+
+    OrderSaga* s2 = @@OrderSaga();
+    OrderSaga_start(s2, "O-2");
+    OrderSaga_reserved(s2);
+    OrderSaga_charged(s2, "T-10");
+    OrderSaga_ship_failed(s2, "carrier down");
+    if (strcmp(OrderSaga_status(s2), "failed: carrier down") != 0) { printf("FAIL: expected failed: carrier down\n"); return 1; }
+    printf("PASS: process_manager\n");
+    OrderSaga_destroy(s);
+    OrderSaga_destroy(s2);
+    return 0;
+}
