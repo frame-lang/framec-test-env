@@ -1,0 +1,77 @@
+@@[target("kotlin")]
+
+@@system FixSellSide {
+    interface:
+        new_order(cl_ord_id: String, qty: Double, price: Double)
+        market_fill(qty: Double, px: Double)
+        cancel_request(cancel_cl_ord_id: String)
+        status(): String
+        get_cum_qty(): Double
+        get_leaves_qty(): Double
+
+    machine:
+        $NoOrder {
+            new_order(cl_ord_id: String, qty: Double, price: Double) {
+                this.cl_ord_id = cl_ord_id
+                this.order_qty = qty
+                this.leaves_qty = qty
+                this.price = price
+                -> $Working
+            }
+            status(): String { @@:("NoOrder") }
+            get_cum_qty(): Double { @@:(this.cum_qty) }
+            get_leaves_qty(): Double { @@:(this.leaves_qty) }
+        }
+
+        $Working {
+            market_fill(qty: Double, px: Double) {
+                this.cum_qty = this.cum_qty + qty
+                this.leaves_qty = this.order_qty - this.cum_qty
+                if (this.leaves_qty <= 0.0) {
+                    -> $Filled
+                }
+            }
+            cancel_request(cancel_cl_ord_id: String) { -> $Canceled }
+            status(): String { @@:("Working") }
+            get_cum_qty(): Double { @@:(this.cum_qty) }
+            get_leaves_qty(): Double { @@:(this.leaves_qty) }
+        }
+
+        $Filled {
+            status(): String { @@:("Filled") }
+            get_cum_qty(): Double { @@:(this.cum_qty) }
+            get_leaves_qty(): Double { @@:(this.leaves_qty) }
+        }
+
+        $Canceled {
+            status(): String { @@:("Canceled") }
+            get_cum_qty(): Double { @@:(this.cum_qty) }
+            get_leaves_qty(): Double { @@:(this.leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id: String = ""
+        order_qty: Double = 0.0
+        cum_qty: Double = 0.0
+        leaves_qty: Double = 0.0
+        price: Double = 0.0
+}
+
+fun main() {
+    val o = @@FixSellSide()
+    if ((o.status() as String) != "NoOrder") throw RuntimeException("expected NoOrder")
+    o.new_order("CL-1", 200.0, 50.0)
+    if ((o.status() as String) != "Working") throw RuntimeException("expected Working")
+    if ((o.get_leaves_qty() as Double) != 200.0) throw RuntimeException("expected leaves=200")
+    o.market_fill(80.0, 50.05)
+    if ((o.get_cum_qty() as Double) != 80.0) throw RuntimeException("expected cum=80")
+    o.market_fill(120.0, 50.10)
+    if ((o.status() as String) != "Filled") throw RuntimeException("expected Filled")
+
+    val o2 = @@FixSellSide()
+    o2.new_order("CL-2", 100.0, 49.0)
+    o2.market_fill(30.0, 49.10)
+    o2.cancel_request("CXL-2")
+    if ((o2.status() as String) != "Canceled") throw RuntimeException("expected Canceled")
+    println("PASS: fix_sell_side")
+}

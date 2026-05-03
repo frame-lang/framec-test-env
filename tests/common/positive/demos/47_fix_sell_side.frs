@@ -1,0 +1,78 @@
+@@[target("rust")]
+
+@@system FixSellSide {
+    interface:
+        new_order(cl_ord_id: String, qty: f64, price: f64)
+        market_fill(qty: f64, px: f64)
+        cancel_request(cancel_cl_ord_id: String)
+        status(): String
+        get_cum_qty(): f64
+        get_leaves_qty(): f64
+
+    machine:
+        $NoOrder {
+            new_order(cl_ord_id: String, qty: f64, price: f64) {
+                self.cl_ord_id = cl_ord_id;
+                self.order_qty = qty;
+                self.leaves_qty = qty;
+                self.price = price;
+                -> $Working
+            }
+            status(): String { @@:("NoOrder".to_string()) }
+            get_cum_qty(): f64 { @@:(self.cum_qty) }
+            get_leaves_qty(): f64 { @@:(self.leaves_qty) }
+        }
+
+        $Working {
+            market_fill(qty: f64, px: f64) {
+                self.cum_qty = self.cum_qty + qty;
+                self.leaves_qty = self.order_qty - self.cum_qty;
+                if self.leaves_qty <= 0.0 {
+                    -> $Filled
+                }
+            }
+            cancel_request(cancel_cl_ord_id: String) { -> $Canceled }
+            status(): String { @@:("Working".to_string()) }
+            get_cum_qty(): f64 { @@:(self.cum_qty) }
+            get_leaves_qty(): f64 { @@:(self.leaves_qty) }
+        }
+
+        $Filled {
+            status(): String { @@:("Filled".to_string()) }
+            get_cum_qty(): f64 { @@:(self.cum_qty) }
+            get_leaves_qty(): f64 { @@:(self.leaves_qty) }
+        }
+
+        $Canceled {
+            status(): String { @@:("Canceled".to_string()) }
+            get_cum_qty(): f64 { @@:(self.cum_qty) }
+            get_leaves_qty(): f64 { @@:(self.leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id: String = String::new()
+        order_qty: f64 = 0.0
+        cum_qty: f64 = 0.0
+        leaves_qty: f64 = 0.0
+        price: f64 = 0.0
+}
+
+fn main() {
+    let mut o = @@FixSellSide();
+    assert_eq!(o.status(), "NoOrder");
+    o.new_order("CL-1".to_string(), 200.0, 50.0);
+    assert_eq!(o.status(), "Working");
+    assert_eq!(o.get_leaves_qty(), 200.0);
+    o.market_fill(80.0, 50.05);
+    assert_eq!(o.get_cum_qty(), 80.0);
+    o.market_fill(120.0, 50.10);
+    assert_eq!(o.status(), "Filled");
+    assert_eq!(o.get_cum_qty(), 200.0);
+
+    let mut o2 = @@FixSellSide();
+    o2.new_order("CL-2".to_string(), 100.0, 49.0);
+    o2.market_fill(30.0, 49.10);
+    o2.cancel_request("CXL-2".to_string());
+    assert_eq!(o2.status(), "Canceled");
+    println!("PASS: fix_sell_side");
+}

@@ -1,0 +1,90 @@
+@@[target("python_3")]
+
+# Smoke-test variant of cookbook recipe 47. Exercises the core
+# sell-side order lifecycle (NoOrder -> Working -> Filled / Canceled).
+# Full IOC/FOK/replace logic + buy-side cross-talk lives in the
+# cookbook documentation.
+
+@@system FixSellSide {
+    interface:
+        new_order(cl_ord_id: str, qty: float, price: float)
+        market_fill(qty: float, px: float)
+        cancel_request(cancel_cl_ord_id: str)
+        status(): str
+        get_cum_qty(): float
+        get_leaves_qty(): float
+
+    machine:
+        $NoOrder {
+            new_order(cl_ord_id: str, qty: float, price: float) {
+                self.cl_ord_id = cl_ord_id
+                self.order_qty = qty
+                self.leaves_qty = qty
+                self.price = price
+                -> $Working
+            }
+            status(): str { @@:("NoOrder") }
+            get_cum_qty(): float { @@:(self.cum_qty) }
+            get_leaves_qty(): float { @@:(self.leaves_qty) }
+        }
+
+        $Working {
+            market_fill(qty: float, px: float) {
+                self.cum_qty = self.cum_qty + qty
+                self.leaves_qty = self.order_qty - self.cum_qty
+                if self.leaves_qty <= 0:
+                    -> $Filled
+            }
+            cancel_request(cancel_cl_ord_id: str) { -> $Canceled }
+            status(): str { @@:("Working") }
+            get_cum_qty(): float { @@:(self.cum_qty) }
+            get_leaves_qty(): float { @@:(self.leaves_qty) }
+        }
+
+        $Filled {
+            status(): str { @@:("Filled") }
+            get_cum_qty(): float { @@:(self.cum_qty) }
+            get_leaves_qty(): float { @@:(self.leaves_qty) }
+        }
+
+        $Canceled {
+            status(): str { @@:("Canceled") }
+            get_cum_qty(): float { @@:(self.cum_qty) }
+            get_leaves_qty(): float { @@:(self.leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id: str = ""
+        order_qty: float = 0.0
+        cum_qty: float = 0.0
+        leaves_qty: float = 0.0
+        price: float = 0.0
+}
+
+if __name__ == '__main__':
+    o = @@FixSellSide()
+    assert o.status() == "NoOrder"
+
+    o.new_order("CL-1", 200.0, 50.0)
+    assert o.status() == "Working"
+    assert o.get_leaves_qty() == 200.0
+
+    o.market_fill(80.0, 50.05)
+    assert o.status() == "Working"
+    assert o.get_cum_qty() == 80.0
+    assert o.get_leaves_qty() == 120.0
+
+    o.market_fill(120.0, 50.10)
+    assert o.status() == "Filled"
+    assert o.get_cum_qty() == 200.0
+    assert o.get_leaves_qty() == 0.0
+
+    # Second order, then cancel
+    o2 = @@FixSellSide()
+    o2.new_order("CL-2", 100.0, 49.0)
+    o2.market_fill(30.0, 49.10)
+    assert o2.get_cum_qty() == 30.0
+    o2.cancel_request("CXL-2")
+    assert o2.status() == "Canceled"
+    assert o2.get_cum_qty() == 30.0  # unfilled portion canceled
+    print("PASS: fix_sell_side")

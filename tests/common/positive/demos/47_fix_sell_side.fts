@@ -1,0 +1,80 @@
+@@[target("typescript")]
+
+@@system FixSellSide {
+    interface:
+        new_order(cl_ord_id: str, qty: float, price: float)
+        market_fill(qty: float, px: float)
+        cancel_request(cancel_cl_ord_id: str)
+        status(): str
+        get_cum_qty(): float
+        get_leaves_qty(): float
+
+    machine:
+        $NoOrder {
+            new_order(cl_ord_id: str, qty: float, price: float) {
+                this.cl_ord_id = cl_ord_id;
+                this.order_qty = qty;
+                this.leaves_qty = qty;
+                this.price = price;
+                -> $Working
+            }
+            status(): str { @@:("NoOrder") }
+            get_cum_qty(): float { @@:(this.cum_qty) }
+            get_leaves_qty(): float { @@:(this.leaves_qty) }
+        }
+
+        $Working {
+            market_fill(qty: float, px: float) {
+                this.cum_qty = this.cum_qty + qty;
+                this.leaves_qty = this.order_qty - this.cum_qty;
+                if (this.leaves_qty <= 0) {
+                    -> $Filled
+                }
+            }
+            cancel_request(cancel_cl_ord_id: str) { -> $Canceled }
+            status(): str { @@:("Working") }
+            get_cum_qty(): float { @@:(this.cum_qty) }
+            get_leaves_qty(): float { @@:(this.leaves_qty) }
+        }
+
+        $Filled {
+            status(): str { @@:("Filled") }
+            get_cum_qty(): float { @@:(this.cum_qty) }
+            get_leaves_qty(): float { @@:(this.leaves_qty) }
+        }
+
+        $Canceled {
+            status(): str { @@:("Canceled") }
+            get_cum_qty(): float { @@:(this.cum_qty) }
+            get_leaves_qty(): float { @@:(this.leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id: str = ""
+        order_qty: float = 0.0
+        cum_qty: float = 0.0
+        leaves_qty: float = 0.0
+        price: float = 0.0
+}
+
+const o = @@FixSellSide();
+if (o.status() !== "NoOrder") throw new Error("expected NoOrder");
+o.new_order("CL-1", 200.0, 50.0);
+if (o.status() !== "Working") throw new Error("expected Working");
+if (o.get_leaves_qty() !== 200.0) throw new Error("expected leaves=200");
+o.market_fill(80.0, 50.05);
+if (o.status() !== "Working") throw new Error("expected Working after partial");
+if (o.get_cum_qty() !== 80.0) throw new Error("expected cum=80");
+if (o.get_leaves_qty() !== 120.0) throw new Error("expected leaves=120");
+o.market_fill(120.0, 50.10);
+if (o.status() !== "Filled") throw new Error("expected Filled");
+if (o.get_cum_qty() !== 200.0) throw new Error("expected cum=200");
+if (o.get_leaves_qty() !== 0.0) throw new Error("expected leaves=0");
+
+const o2 = @@FixSellSide();
+o2.new_order("CL-2", 100.0, 49.0);
+o2.market_fill(30.0, 49.10);
+if (o2.get_cum_qty() !== 30.0) throw new Error("expected cum2=30");
+o2.cancel_request("CXL-2");
+if (o2.status() !== "Canceled") throw new Error("expected Canceled");
+console.log("PASS: fix_sell_side");

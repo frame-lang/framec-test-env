@@ -1,0 +1,58 @@
+@@[target("erlang")]
+
+@@system FixSellSide {
+    interface:
+        new_order(cl_ord_id: str, qty: float, price: float)
+        market_fill(qty: float, px: float)
+        cancel_request(cancel_cl_ord_id: str)
+        status(): str
+        get_cum_qty(): float
+        get_leaves_qty(): float
+
+    machine:
+        $NoOrder {
+            new_order(cl_ord_id: str, qty: float, price: float) {
+                self.cl_ord_id = cl_ord_id
+                self.order_qty = qty
+                self.leaves_qty = qty
+                self.price = price
+                -> $Working
+            }
+            status(): str { @@:("NoOrder") }
+            get_cum_qty(): float { @@:(Data#data.cum_qty) }
+            get_leaves_qty(): float { @@:(Data#data.leaves_qty) }
+        }
+
+        $Working {
+            market_fill(qty: float, px: float) {
+                self.cum_qty = self.cum_qty + qty
+                self.leaves_qty = self.order_qty - self.cum_qty
+                if self.leaves_qty =< 0.0 {
+                    -> $Filled
+                }
+            }
+            cancel_request(cancel_cl_ord_id: str) { -> $Canceled }
+            status(): str { @@:("Working") }
+            get_cum_qty(): float { @@:(Data#data.cum_qty) }
+            get_leaves_qty(): float { @@:(Data#data.leaves_qty) }
+        }
+
+        $Filled {
+            status(): str { @@:("Filled") }
+            get_cum_qty(): float { @@:(Data#data.cum_qty) }
+            get_leaves_qty(): float { @@:(Data#data.leaves_qty) }
+        }
+
+        $Canceled {
+            status(): str { @@:("Canceled") }
+            get_cum_qty(): float { @@:(Data#data.cum_qty) }
+            get_leaves_qty(): float { @@:(Data#data.leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id = ""
+        order_qty = 0.0
+        cum_qty = 0.0
+        leaves_qty = 0.0
+        price = 0.0
+}

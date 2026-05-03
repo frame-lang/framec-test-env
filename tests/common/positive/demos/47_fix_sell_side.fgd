@@ -1,0 +1,86 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@system FixSellSide {
+    interface:
+        new_order(cl_ord_id: String, qty: float, price: float)
+        market_fill(qty: float, px: float)
+        cancel_request(cancel_cl_ord_id: String)
+        status(): String
+        get_cum_qty(): float
+        get_leaves_qty(): float
+
+    machine:
+        $NoOrder {
+            new_order(cl_ord_id: String, qty: float, price: float) {
+                self.cl_ord_id = cl_ord_id
+                self.order_qty = qty
+                self.leaves_qty = qty
+                self.price = price
+                -> $Working
+            }
+            status(): String { @@:("NoOrder") }
+            get_cum_qty(): float { @@:(self.cum_qty) }
+            get_leaves_qty(): float { @@:(self.leaves_qty) }
+        }
+
+        $Working {
+            market_fill(qty: float, px: float) {
+                self.cum_qty = self.cum_qty + qty
+                self.leaves_qty = self.order_qty - self.cum_qty
+                if self.leaves_qty <= 0.0:
+                    -> $Filled
+            }
+            cancel_request(cancel_cl_ord_id: String) { -> $Canceled }
+            status(): String { @@:("Working") }
+            get_cum_qty(): float { @@:(self.cum_qty) }
+            get_leaves_qty(): float { @@:(self.leaves_qty) }
+        }
+
+        $Filled {
+            status(): String { @@:("Filled") }
+            get_cum_qty(): float { @@:(self.cum_qty) }
+            get_leaves_qty(): float { @@:(self.leaves_qty) }
+        }
+
+        $Canceled {
+            status(): String { @@:("Canceled") }
+            get_cum_qty(): float { @@:(self.cum_qty) }
+            get_leaves_qty(): float { @@:(self.leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id = ""
+        order_qty = 0.0
+        cum_qty = 0.0
+        leaves_qty = 0.0
+        price = 0.0
+}
+
+func main():
+    var o = @@FixSellSide()
+    var failures = 0
+    if o.status() != "NoOrder": print("FAIL: NoOrder"); failures += 1
+    o.new_order("CL-1", 200.0, 50.0)
+    if o.status() != "Working": print("FAIL: Working"); failures += 1
+    if o.get_leaves_qty() != 200.0: print("FAIL: leaves=200"); failures += 1
+    o.market_fill(80.0, 50.05)
+    if o.get_cum_qty() != 80.0: print("FAIL: cum=80"); failures += 1
+    o.market_fill(120.0, 50.10)
+    if o.status() != "Filled": print("FAIL: Filled"); failures += 1
+
+    var o2 = @@FixSellSide()
+    o2.new_order("CL-2", 100.0, 49.0)
+    o2.market_fill(30.0, 49.10)
+    o2.cancel_request("CXL-2")
+    if o2.status() != "Canceled": print("FAIL: Canceled"); failures += 1
+
+    if failures > 0:
+        print("FAIL: fix_sell_side (" + str(failures) + " failures)")
+        quit(1)
+    print("PASS: fix_sell_side")
+
+func _init():
+    main()
+    quit()

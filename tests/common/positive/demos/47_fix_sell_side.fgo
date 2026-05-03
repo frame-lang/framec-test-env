@@ -1,0 +1,84 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system FixSellSide {
+    interface:
+        new_order(cl_ord_id: string, qty: float64, price: float64)
+        market_fill(qty: float64, px: float64)
+        cancel_request(cancel_cl_ord_id: string)
+        status(): string
+        get_cum_qty(): float64
+        get_leaves_qty(): float64
+
+    machine:
+        $NoOrder {
+            new_order(cl_ord_id: string, qty: float64, price: float64) {
+                s.cl_ord_id = cl_ord_id
+                s.order_qty = qty
+                s.leaves_qty = qty
+                s.price = price
+                -> $Working
+            }
+            status(): string { @@:("NoOrder") }
+            get_cum_qty(): float64 { @@:(s.cum_qty) }
+            get_leaves_qty(): float64 { @@:(s.leaves_qty) }
+        }
+
+        $Working {
+            market_fill(qty: float64, px: float64) {
+                s.cum_qty = s.cum_qty + qty
+                s.leaves_qty = s.order_qty - s.cum_qty
+                if s.leaves_qty <= 0.0 {
+                    -> $Filled
+                }
+            }
+            cancel_request(cancel_cl_ord_id: string) { -> $Canceled }
+            status(): string { @@:("Working") }
+            get_cum_qty(): float64 { @@:(s.cum_qty) }
+            get_leaves_qty(): float64 { @@:(s.leaves_qty) }
+        }
+
+        $Filled {
+            status(): string { @@:("Filled") }
+            get_cum_qty(): float64 { @@:(s.cum_qty) }
+            get_leaves_qty(): float64 { @@:(s.leaves_qty) }
+        }
+
+        $Canceled {
+            status(): string { @@:("Canceled") }
+            get_cum_qty(): float64 { @@:(s.cum_qty) }
+            get_leaves_qty(): float64 { @@:(s.leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id: string = ""
+        order_qty: float64 = 0.0
+        cum_qty: float64 = 0.0
+        leaves_qty: float64 = 0.0
+        price: float64 = 0.0
+}
+
+func main() {
+    o := NewFixSellSide()
+    if o.Status() != "NoOrder" { fmt.Println("FAIL: NoOrder"); os.Exit(1) }
+    o.New_order("CL-1", 200.0, 50.0)
+    if o.Status() != "Working" { fmt.Println("FAIL: Working"); os.Exit(1) }
+    if o.Get_leaves_qty() != 200.0 { fmt.Println("FAIL: leaves=200"); os.Exit(1) }
+    o.Market_fill(80.0, 50.05)
+    if o.Get_cum_qty() != 80.0 { fmt.Println("FAIL: cum=80"); os.Exit(1) }
+    o.Market_fill(120.0, 50.10)
+    if o.Status() != "Filled" { fmt.Println("FAIL: Filled"); os.Exit(1) }
+
+    o2 := NewFixSellSide()
+    o2.New_order("CL-2", 100.0, 49.0)
+    o2.Market_fill(30.0, 49.10)
+    o2.Cancel_request("CXL-2")
+    if o2.Status() != "Canceled" { fmt.Println("FAIL: Canceled"); os.Exit(1) }
+    fmt.Println("PASS: fix_sell_side")
+}

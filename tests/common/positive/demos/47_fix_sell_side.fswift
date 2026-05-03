@@ -1,0 +1,77 @@
+@@[target("swift")]
+
+import Foundation
+
+@@system FixSellSide {
+    interface:
+        new_order(cl_ord_id: String, qty: Double, price: Double)
+        market_fill(qty: Double, px: Double)
+        cancel_request(cancel_cl_ord_id: String)
+        status(): String
+        get_cum_qty(): Double
+        get_leaves_qty(): Double
+
+    machine:
+        $NoOrder {
+            new_order(cl_ord_id: String, qty: Double, price: Double) {
+                self.cl_ord_id = cl_ord_id
+                self.order_qty = qty
+                self.leaves_qty = qty
+                self.price = price
+                -> $Working
+            }
+            status(): String { @@:("NoOrder") }
+            get_cum_qty(): Double { @@:(self.cum_qty) }
+            get_leaves_qty(): Double { @@:(self.leaves_qty) }
+        }
+
+        $Working {
+            market_fill(qty: Double, px: Double) {
+                self.cum_qty = self.cum_qty + qty
+                self.leaves_qty = self.order_qty - self.cum_qty
+                if self.leaves_qty <= 0.0 {
+                    -> $Filled
+                }
+            }
+            cancel_request(cancel_cl_ord_id: String) { -> $Canceled }
+            status(): String { @@:("Working") }
+            get_cum_qty(): Double { @@:(self.cum_qty) }
+            get_leaves_qty(): Double { @@:(self.leaves_qty) }
+        }
+
+        $Filled {
+            status(): String { @@:("Filled") }
+            get_cum_qty(): Double { @@:(self.cum_qty) }
+            get_leaves_qty(): Double { @@:(self.leaves_qty) }
+        }
+
+        $Canceled {
+            status(): String { @@:("Canceled") }
+            get_cum_qty(): Double { @@:(self.cum_qty) }
+            get_leaves_qty(): Double { @@:(self.leaves_qty) }
+        }
+
+    domain:
+        cl_ord_id: String = ""
+        order_qty: Double = 0.0
+        cum_qty: Double = 0.0
+        leaves_qty: Double = 0.0
+        price: Double = 0.0
+}
+
+let o = @@FixSellSide()
+if (o.status() as! String) != "NoOrder" { print("FAIL: NoOrder"); exit(1) }
+o.new_order("CL-1", 200.0, 50.0)
+if (o.status() as! String) != "Working" { print("FAIL: Working"); exit(1) }
+if (o.get_leaves_qty() as! Double) != 200.0 { print("FAIL: leaves=200"); exit(1) }
+o.market_fill(80.0, 50.05)
+if (o.get_cum_qty() as! Double) != 80.0 { print("FAIL: cum=80"); exit(1) }
+o.market_fill(120.0, 50.10)
+if (o.status() as! String) != "Filled" { print("FAIL: Filled"); exit(1) }
+
+let o2 = @@FixSellSide()
+o2.new_order("CL-2", 100.0, 49.0)
+o2.market_fill(30.0, 49.10)
+o2.cancel_request("CXL-2")
+if (o2.status() as! String) != "Canceled" { print("FAIL: Canceled"); exit(1) }
+print("PASS: fix_sell_side")
