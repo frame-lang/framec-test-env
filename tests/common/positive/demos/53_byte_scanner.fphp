@@ -1,0 +1,62 @@
+@@[target("php")]
+
+<?php
+
+@@system Scanner {
+    interface:
+        feed_letter()
+        feed_punct()
+        eof()
+        token_count(): int
+        status(): str
+
+    machine:
+        $Start {
+            feed_letter() { -> $InIdent }
+            feed_punct() {
+                $this->count = $this->count + 1;
+            }
+            eof() {
+                $this->count = $this->count + 1;
+            }
+            token_count(): int { @@:($this->count) }
+            status(): str { @@:("start") }
+        }
+
+        $InIdent {
+            feed_letter() {}
+            feed_punct() {
+                $this->count = $this->count + 2;
+                -> $Start
+            }
+            eof() {
+                $this->count = $this->count + 2;
+            }
+            token_count(): int { @@:($this->count) }
+            status(): str { @@:("in_ident") }
+        }
+
+    domain:
+        count = 0
+}
+
+$s = @@Scanner();
+assert($s->status() === "start");
+assert($s->token_count() === 0);
+$s->feed_letter();
+assert($s->status() === "in_ident");
+$s->feed_letter();
+$s->feed_punct();
+assert($s->status() === "start");
+assert($s->token_count() === 2);
+$s->feed_punct();
+assert($s->token_count() === 3);
+$s->eof();
+assert($s->token_count() === 4);
+
+$s2 = @@Scanner();
+$s2->feed_letter();
+$s2->feed_letter();
+$s2->eof();
+assert($s2->token_count() === 2);
+echo "PASS: byte_scanner\n";

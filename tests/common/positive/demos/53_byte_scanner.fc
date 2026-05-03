@@ -1,0 +1,69 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system Scanner {
+    interface:
+        feed_letter()
+        feed_punct()
+        eof()
+        token_count(): int
+        status(): str
+
+    machine:
+        $Start {
+            feed_letter() { -> $InIdent }
+            feed_punct() {
+                self->count = self->count + 1;
+            }
+            eof() {
+                self->count = self->count + 1;
+            }
+            token_count(): int { @@:(self->count) }
+            status(): str { @@:("start") }
+        }
+
+        $InIdent {
+            feed_letter() {}
+            feed_punct() {
+                self->count = self->count + 2;
+                -> $Start
+            }
+            eof() {
+                self->count = self->count + 2;
+            }
+            token_count(): int { @@:(self->count) }
+            status(): str { @@:("in_ident") }
+        }
+
+    domain:
+        count: int = 0
+}
+
+int main() {
+    Scanner* s = @@Scanner();
+    if (strcmp(Scanner_status(s), "start") != 0) { printf("FAIL: start\n"); return 1; }
+    if (Scanner_token_count(s) != 0) { printf("FAIL: count0\n"); return 1; }
+    Scanner_feed_letter(s);
+    if (strcmp(Scanner_status(s), "in_ident") != 0) { printf("FAIL: in_ident\n"); return 1; }
+    Scanner_feed_letter(s);
+    Scanner_feed_punct(s);
+    if (strcmp(Scanner_status(s), "start") != 0) { printf("FAIL: start after\n"); return 1; }
+    if (Scanner_token_count(s) != 2) { printf("FAIL: count2\n"); return 1; }
+    Scanner_feed_punct(s);
+    if (Scanner_token_count(s) != 3) { printf("FAIL: count3\n"); return 1; }
+    Scanner_eof(s);
+    if (Scanner_token_count(s) != 4) { printf("FAIL: count4\n"); return 1; }
+
+    Scanner* s2 = @@Scanner();
+    Scanner_feed_letter(s2);
+    Scanner_feed_letter(s2);
+    Scanner_eof(s2);
+    if (Scanner_token_count(s2) != 2) { printf("FAIL: count2 after eof\n"); return 1; }
+    printf("PASS: byte_scanner\n");
+    Scanner_destroy(s);
+    Scanner_destroy(s2);
+    return 0;
+}

@@ -1,0 +1,72 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@system Scanner {
+    interface:
+        feed_letter()
+        feed_punct()
+        eof()
+        token_count(): int
+        status(): String
+
+    machine:
+        $Start {
+            feed_letter() { -> $InIdent }
+            feed_punct() {
+                self.count = self.count + 1
+            }
+            eof() {
+                self.count = self.count + 1
+            }
+            token_count(): int { @@:(self.count) }
+            status(): String { @@:("start") }
+        }
+
+        $InIdent {
+            feed_letter() { pass }
+            feed_punct() {
+                self.count = self.count + 2
+                -> $Start
+            }
+            eof() {
+                self.count = self.count + 2
+            }
+            token_count(): int { @@:(self.count) }
+            status(): String { @@:("in_ident") }
+        }
+
+    domain:
+        count = 0
+}
+
+func main():
+    var s = @@Scanner()
+    var failures = 0
+    if s.status() != "start": print("FAIL: start"); failures += 1
+    if s.token_count() != 0: print("FAIL: count0"); failures += 1
+    s.feed_letter()
+    if s.status() != "in_ident": print("FAIL: in_ident"); failures += 1
+    s.feed_letter()
+    s.feed_punct()
+    if s.status() != "start": print("FAIL: start after"); failures += 1
+    if s.token_count() != 2: print("FAIL: count2"); failures += 1
+    s.feed_punct()
+    if s.token_count() != 3: print("FAIL: count3"); failures += 1
+    s.eof()
+    if s.token_count() != 4: print("FAIL: count4"); failures += 1
+
+    var s2 = @@Scanner()
+    s2.feed_letter()
+    s2.feed_letter()
+    s2.eof()
+    if s2.token_count() != 2: print("FAIL: count2 eof"); failures += 1
+
+    if failures > 0:
+        print("FAIL: byte_scanner (" + str(failures) + " failures)")
+        quit(1)
+    print("PASS: byte_scanner")
+
+func _init():
+    main()
+    quit()

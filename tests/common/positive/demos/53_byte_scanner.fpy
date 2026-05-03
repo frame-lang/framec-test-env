@@ -1,0 +1,80 @@
+@@[target("python_3")]
+
+# Smoke-test variant of cookbook recipe 53 (Byte Scanner — Tokenize
+# a Simple Language). Reduced-alphabet simplification: rather than
+# parsing actual character classes (isalpha / isdigit / isspace),
+# this variant accepts pre-classified events feed_letter() and
+# feed_punct(). The state machine still exercises the core scanner
+# pattern: $Start ↔ $InIdent transitions, accumulator state via
+# domain field, token-emit on category change, and an EOF flush.
+
+@@system Scanner {
+    interface:
+        feed_letter()
+        feed_punct()
+        eof()
+        token_count(): int
+        status(): str
+
+    machine:
+        $Start {
+            feed_letter() { -> $InIdent }
+            feed_punct() {
+                self.count = self.count + 1
+            }
+            eof() {
+                self.count = self.count + 1
+            }
+            token_count(): int { @@:(self.count) }
+            status(): str { @@:("start") }
+        }
+
+        $InIdent {
+            feed_letter() {}
+            feed_punct() {
+                self.count = self.count + 2
+                -> $Start
+            }
+            eof() {
+                self.count = self.count + 2
+            }
+            token_count(): int { @@:(self.count) }
+            status(): str { @@:("in_ident") }
+        }
+
+    domain:
+        count: int = 0
+}
+
+if __name__ == '__main__':
+    s = @@Scanner()
+    assert s.status() == "start"
+    assert s.token_count() == 0
+
+    # "ab," — letters, then punct
+    s.feed_letter()
+    assert s.status() == "in_ident"
+    s.feed_letter()
+    assert s.status() == "in_ident"
+    s.feed_punct()
+    # emits IDENT (count+=2) then back to Start; punct emitted on next event
+    assert s.status() == "start"
+    assert s.token_count() == 2
+
+    # ","
+    s.feed_punct()
+    assert s.token_count() == 3
+
+    # eof: just one EOF
+    s.eof()
+    assert s.token_count() == 4
+
+    # New scanner: letters then eof flushes ident + eof
+    s2 = @@Scanner()
+    s2.feed_letter()
+    s2.feed_letter()
+    s2.eof()
+    # eof in InIdent emits IDENT (+2)
+    assert s2.token_count() == 2
+
+    print("PASS: byte_scanner")

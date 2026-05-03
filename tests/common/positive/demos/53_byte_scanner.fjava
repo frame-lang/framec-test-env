@@ -1,0 +1,64 @@
+@@[target("java")]
+
+@@system Scanner {
+    interface:
+        feed_letter()
+        feed_punct()
+        eof()
+        token_count(): int
+        status(): String
+
+    machine:
+        $Start {
+            feed_letter() { -> $InIdent }
+            feed_punct() {
+                this.count = this.count + 1;
+            }
+            eof() {
+                this.count = this.count + 1;
+            }
+            token_count(): int { @@:(this.count) }
+            status(): String { @@:("start") }
+        }
+
+        $InIdent {
+            feed_letter() {}
+            feed_punct() {
+                this.count = this.count + 2;
+                -> $Start
+            }
+            eof() {
+                this.count = this.count + 2;
+            }
+            token_count(): int { @@:(this.count) }
+            status(): String { @@:("in_ident") }
+        }
+
+    domain:
+        count: int = 0
+}
+
+class Main {
+    public static void main(String[] args) {
+        var s = @@Scanner();
+        if (!((String) s.status()).equals("start")) throw new RuntimeException("expected start");
+        if ((int) s.token_count() != 0) throw new RuntimeException("expected count=0");
+        s.feed_letter();
+        if (!((String) s.status()).equals("in_ident")) throw new RuntimeException("expected in_ident");
+        s.feed_letter();
+        s.feed_punct();
+        if (!((String) s.status()).equals("start")) throw new RuntimeException("expected start after");
+        if ((int) s.token_count() != 2) throw new RuntimeException("expected count=2");
+        s.feed_punct();
+        if ((int) s.token_count() != 3) throw new RuntimeException("expected count=3");
+        s.eof();
+        if ((int) s.token_count() != 4) throw new RuntimeException("expected count=4");
+
+        var s2 = @@Scanner();
+        s2.feed_letter();
+        s2.feed_letter();
+        s2.eof();
+        if ((int) s2.token_count() != 2) throw new RuntimeException("expected count=2 after eof");
+        System.out.println("PASS: byte_scanner");
+    }
+}

@@ -1,0 +1,60 @@
+@@[target("lua")]
+
+@@system Scanner {
+    interface:
+        feed_letter()
+        feed_punct()
+        eof()
+        token_count(): int
+        status(): str
+
+    machine:
+        $Start {
+            feed_letter() { -> $InIdent }
+            feed_punct() {
+                self.count = self.count + 1
+            }
+            eof() {
+                self.count = self.count + 1
+            }
+            token_count(): int { @@:(self.count) }
+            status(): str { @@:("start") }
+        }
+
+        $InIdent {
+            feed_letter() {}
+            feed_punct() {
+                self.count = self.count + 2
+                -> $Start
+            }
+            eof() {
+                self.count = self.count + 2
+            }
+            token_count(): int { @@:(self.count) }
+            status(): str { @@:("in_ident") }
+        }
+
+    domain:
+        count: int = 0
+}
+
+local s = @@Scanner()
+assert(s:status() == "start", "expected start")
+assert(s:token_count() == 0, "expected count=0")
+s:feed_letter()
+assert(s:status() == "in_ident", "expected in_ident")
+s:feed_letter()
+s:feed_punct()
+assert(s:status() == "start", "expected start after")
+assert(s:token_count() == 2, "expected count=2")
+s:feed_punct()
+assert(s:token_count() == 3, "expected count=3")
+s:eof()
+assert(s:token_count() == 4, "expected count=4")
+
+local s2 = @@Scanner()
+s2:feed_letter()
+s2:feed_letter()
+s2:eof()
+assert(s2:token_count() == 2, "expected count=2 eof")
+print("PASS: byte_scanner")

@@ -1,0 +1,62 @@
+@@[target("kotlin")]
+
+@@system Scanner {
+    interface:
+        feed_letter()
+        feed_punct()
+        eof()
+        token_count(): Int
+        status(): String
+
+    machine:
+        $Start {
+            feed_letter() { -> $InIdent }
+            feed_punct() {
+                this.count = this.count + 1
+            }
+            eof() {
+                this.count = this.count + 1
+            }
+            token_count(): Int { @@:(this.count) }
+            status(): String { @@:("start") }
+        }
+
+        $InIdent {
+            feed_letter() {}
+            feed_punct() {
+                this.count = this.count + 2
+                -> $Start
+            }
+            eof() {
+                this.count = this.count + 2
+            }
+            token_count(): Int { @@:(this.count) }
+            status(): String { @@:("in_ident") }
+        }
+
+    domain:
+        count: Int = 0
+}
+
+fun main() {
+    val s = @@Scanner()
+    if ((s.status() as String) != "start") throw RuntimeException("expected start")
+    if ((s.token_count() as Int) != 0) throw RuntimeException("expected count=0")
+    s.feed_letter()
+    if ((s.status() as String) != "in_ident") throw RuntimeException("expected in_ident")
+    s.feed_letter()
+    s.feed_punct()
+    if ((s.status() as String) != "start") throw RuntimeException("expected start after")
+    if ((s.token_count() as Int) != 2) throw RuntimeException("expected count=2")
+    s.feed_punct()
+    if ((s.token_count() as Int) != 3) throw RuntimeException("expected count=3")
+    s.eof()
+    if ((s.token_count() as Int) != 4) throw RuntimeException("expected count=4")
+
+    val s2 = @@Scanner()
+    s2.feed_letter()
+    s2.feed_letter()
+    s2.eof()
+    if ((s2.token_count() as Int) != 2) throw RuntimeException("expected count=2 after eof")
+    println("PASS: byte_scanner")
+}

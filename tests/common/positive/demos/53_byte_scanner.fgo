@@ -1,0 +1,69 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system Scanner {
+    interface:
+        feed_letter()
+        feed_punct()
+        eof()
+        token_count(): int
+        status(): string
+
+    machine:
+        $Start {
+            feed_letter() { -> $InIdent }
+            feed_punct() {
+                s.count = s.count + 1
+            }
+            eof() {
+                s.count = s.count + 1
+            }
+            token_count(): int { @@:(s.count) }
+            status(): string { @@:("start") }
+        }
+
+        $InIdent {
+            feed_letter() {}
+            feed_punct() {
+                s.count = s.count + 2
+                -> $Start
+            }
+            eof() {
+                s.count = s.count + 2
+            }
+            token_count(): int { @@:(s.count) }
+            status(): string { @@:("in_ident") }
+        }
+
+    domain:
+        count: int = 0
+}
+
+func main() {
+    sc := NewScanner()
+    if sc.Status() != "start" { fmt.Println("FAIL: start"); os.Exit(1) }
+    if sc.Token_count() != 0 { fmt.Println("FAIL: count0"); os.Exit(1) }
+    sc.Feed_letter()
+    if sc.Status() != "in_ident" { fmt.Println("FAIL: in_ident"); os.Exit(1) }
+    sc.Feed_letter()
+    sc.Feed_punct()
+    if sc.Status() != "start" { fmt.Println("FAIL: start after"); os.Exit(1) }
+    if sc.Token_count() != 2 { fmt.Println("FAIL: count2"); os.Exit(1) }
+    sc.Feed_punct()
+    if sc.Token_count() != 3 { fmt.Println("FAIL: count3"); os.Exit(1) }
+    sc.Eof()
+    if sc.Token_count() != 4 { fmt.Println("FAIL: count4"); os.Exit(1) }
+
+    sc2 := NewScanner()
+    sc2.Feed_letter()
+    sc2.Feed_letter()
+    sc2.Eof()
+    if sc2.Token_count() != 2 { fmt.Println("FAIL: count2 eof"); os.Exit(1) }
+    fmt.Println("PASS: byte_scanner")
+}

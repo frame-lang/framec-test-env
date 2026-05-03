@@ -1,0 +1,67 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system Scanner {
+    interface:
+        feed_letter()
+        feed_punct()
+        eof()
+        token_count(): int
+        status(): str
+
+    machine:
+        $Start {
+            feed_letter() { -> $InIdent }
+            feed_punct() {
+                this->count = this->count + 1;
+            }
+            eof() {
+                this->count = this->count + 1;
+            }
+            token_count(): int { @@:(this->count) }
+            status(): str { @@:(std::string("start")) }
+        }
+
+        $InIdent {
+            feed_letter() {}
+            feed_punct() {
+                this->count = this->count + 2;
+                -> $Start
+            }
+            eof() {
+                this->count = this->count + 2;
+            }
+            token_count(): int { @@:(this->count) }
+            status(): str { @@:(std::string("in_ident")) }
+        }
+
+    domain:
+        count: int = 0
+}
+
+int main() {
+    Scanner s;
+    assert(std::any_cast<std::string>(s.status()) == "start");
+    assert(std::any_cast<int>(s.token_count()) == 0);
+    s.feed_letter();
+    assert(std::any_cast<std::string>(s.status()) == "in_ident");
+    s.feed_letter();
+    s.feed_punct();
+    assert(std::any_cast<std::string>(s.status()) == "start");
+    assert(std::any_cast<int>(s.token_count()) == 2);
+    s.feed_punct();
+    assert(std::any_cast<int>(s.token_count()) == 3);
+    s.eof();
+    assert(std::any_cast<int>(s.token_count()) == 4);
+
+    Scanner s2;
+    s2.feed_letter();
+    s2.feed_letter();
+    s2.eof();
+    assert(std::any_cast<int>(s2.token_count()) == 2);
+    std::cout << "PASS: byte_scanner" << std::endl;
+    return 0;
+}
