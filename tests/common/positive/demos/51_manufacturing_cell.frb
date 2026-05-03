@@ -1,0 +1,74 @@
+@@[target("ruby")]
+
+@@system ManufacturingCell {
+    interface:
+        work_order(order_id: str)
+        phase_done()
+        emergency_stop()
+        reset()
+        parts_produced(): int
+        status(): str
+
+    machine:
+        $Idle => $Active {
+            work_order(order_id: str) { -> $Setup }
+            status(): str { @@:("idle") }
+            => $^
+        }
+
+        $Setup => $Active {
+            phase_done() { -> $Machining }
+            status(): str { @@:("setup") }
+            => $^
+        }
+
+        $Machining => $Active {
+            phase_done() { -> $Teardown }
+            status(): str { @@:("machining") }
+            => $^
+        }
+
+        $Teardown => $Active {
+            phase_done() {
+                @parts = @parts + 1
+                -> $Idle
+            }
+            status(): str { @@:("teardown") }
+            => $^
+        }
+
+        $Active {
+            emergency_stop() { -> $EStopped }
+            parts_produced(): int { @@:(@parts) }
+            status(): str { @@:("active") }
+        }
+
+        $EStopped {
+            reset() { -> $Idle }
+            parts_produced(): int { @@:(@parts) }
+            status(): str { @@:("estopped") }
+        }
+
+    domain:
+        parts = 0
+}
+
+c = ManufacturingCell.new
+raise "expected idle" unless c.status == "idle"
+raise "expected parts=0" unless c.parts_produced == 0
+c.work_order("WO-001")
+raise "expected setup" unless c.status == "setup"
+c.phase_done
+raise "expected machining" unless c.status == "machining"
+c.phase_done
+raise "expected teardown" unless c.status == "teardown"
+c.phase_done
+raise "expected idle" unless c.status == "idle"
+raise "expected parts=1" unless c.parts_produced == 1
+c.work_order("WO-002")
+c.phase_done
+c.emergency_stop
+raise "expected estopped" unless c.status == "estopped"
+c.reset
+raise "expected idle final" unless c.status == "idle"
+puts "PASS: manufacturing_cell"

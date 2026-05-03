@@ -1,0 +1,86 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@system ManufacturingCell {
+    interface:
+        work_order(order_id: String)
+        phase_done()
+        emergency_stop()
+        reset()
+        parts_produced(): int
+        status(): String
+
+    machine:
+        $Idle => $Active {
+            work_order(order_id: String) { -> $Setup }
+            status(): String { @@:("idle") }
+            => $^
+        }
+
+        $Setup => $Active {
+            phase_done() { -> $Machining }
+            status(): String { @@:("setup") }
+            => $^
+        }
+
+        $Machining => $Active {
+            phase_done() { -> $Teardown }
+            status(): String { @@:("machining") }
+            => $^
+        }
+
+        $Teardown => $Active {
+            phase_done() {
+                self.parts = self.parts + 1
+                -> $Idle
+            }
+            status(): String { @@:("teardown") }
+            => $^
+        }
+
+        $Active {
+            emergency_stop() { -> $EStopped }
+            parts_produced(): int { @@:(self.parts) }
+            status(): String { @@:("active") }
+        }
+
+        $EStopped {
+            reset() { -> $Idle }
+            parts_produced(): int { @@:(self.parts) }
+            status(): String { @@:("estopped") }
+        }
+
+    domain:
+        parts = 0
+}
+
+func main():
+    var c = @@ManufacturingCell()
+    var failures = 0
+    if c.status() != "idle": print("FAIL: idle"); failures += 1
+    if c.parts_produced() != 0: print("FAIL: parts0"); failures += 1
+    c.work_order("WO-001")
+    if c.status() != "setup": print("FAIL: setup"); failures += 1
+    c.phase_done()
+    if c.status() != "machining": print("FAIL: machining"); failures += 1
+    c.phase_done()
+    if c.status() != "teardown": print("FAIL: teardown"); failures += 1
+    c.phase_done()
+    if c.status() != "idle": print("FAIL: idle2"); failures += 1
+    if c.parts_produced() != 1: print("FAIL: parts1"); failures += 1
+    c.work_order("WO-002")
+    c.phase_done()
+    c.emergency_stop()
+    if c.status() != "estopped": print("FAIL: estopped"); failures += 1
+    c.reset()
+    if c.status() != "idle": print("FAIL: idle final"); failures += 1
+
+    if failures > 0:
+        print("FAIL: manufacturing_cell (" + str(failures) + " failures)")
+        quit(1)
+    print("PASS: manufacturing_cell")
+
+func _init():
+    main()
+    quit()

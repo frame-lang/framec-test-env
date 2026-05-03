@@ -1,0 +1,74 @@
+@@[target("lua")]
+
+@@system ManufacturingCell {
+    interface:
+        work_order(order_id: str)
+        phase_done()
+        emergency_stop()
+        reset()
+        parts_produced(): int
+        status(): str
+
+    machine:
+        $Idle => $Active {
+            work_order(order_id: str) { -> $Setup }
+            status(): str { @@:("idle") }
+            => $^
+        }
+
+        $Setup => $Active {
+            phase_done() { -> $Machining }
+            status(): str { @@:("setup") }
+            => $^
+        }
+
+        $Machining => $Active {
+            phase_done() { -> $Teardown }
+            status(): str { @@:("machining") }
+            => $^
+        }
+
+        $Teardown => $Active {
+            phase_done() {
+                self.parts = self.parts + 1
+                -> $Idle
+            }
+            status(): str { @@:("teardown") }
+            => $^
+        }
+
+        $Active {
+            emergency_stop() { -> $EStopped }
+            parts_produced(): int { @@:(self.parts) }
+            status(): str { @@:("active") }
+        }
+
+        $EStopped {
+            reset() { -> $Idle }
+            parts_produced(): int { @@:(self.parts) }
+            status(): str { @@:("estopped") }
+        }
+
+    domain:
+        parts: int = 0
+}
+
+local c = @@ManufacturingCell()
+assert(c:status() == "idle", "expected idle")
+assert(c:parts_produced() == 0, "expected parts=0")
+c:work_order("WO-001")
+assert(c:status() == "setup", "expected setup")
+c:phase_done()
+assert(c:status() == "machining", "expected machining")
+c:phase_done()
+assert(c:status() == "teardown", "expected teardown")
+c:phase_done()
+assert(c:status() == "idle", "expected idle")
+assert(c:parts_produced() == 1, "expected parts=1")
+c:work_order("WO-002")
+c:phase_done()
+c:emergency_stop()
+assert(c:status() == "estopped", "expected estopped")
+c:reset()
+assert(c:status() == "idle", "expected idle final")
+print("PASS: manufacturing_cell")

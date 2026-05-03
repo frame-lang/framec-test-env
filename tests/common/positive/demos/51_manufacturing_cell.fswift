@@ -1,0 +1,76 @@
+@@[target("swift")]
+
+import Foundation
+
+@@system ManufacturingCell {
+    interface:
+        work_order(order_id: String)
+        phase_done()
+        emergency_stop()
+        reset()
+        parts_produced(): Int
+        status(): String
+
+    machine:
+        $Idle => $Active {
+            work_order(order_id: String) { -> $Setup }
+            status(): String { @@:("idle") }
+            => $^
+        }
+
+        $Setup => $Active {
+            phase_done() { -> $Machining }
+            status(): String { @@:("setup") }
+            => $^
+        }
+
+        $Machining => $Active {
+            phase_done() { -> $Teardown }
+            status(): String { @@:("machining") }
+            => $^
+        }
+
+        $Teardown => $Active {
+            phase_done() {
+                self.parts = self.parts + 1
+                -> $Idle
+            }
+            status(): String { @@:("teardown") }
+            => $^
+        }
+
+        $Active {
+            emergency_stop() { -> $EStopped }
+            parts_produced(): Int { @@:(self.parts) }
+            status(): String { @@:("active") }
+        }
+
+        $EStopped {
+            reset() { -> $Idle }
+            parts_produced(): Int { @@:(self.parts) }
+            status(): String { @@:("estopped") }
+        }
+
+    domain:
+        parts: Int = 0
+}
+
+let c = @@ManufacturingCell()
+if (c.status() as! String) != "idle" { print("FAIL: idle"); exit(1) }
+if (c.parts_produced() as! Int) != 0 { print("FAIL: parts0"); exit(1) }
+c.work_order("WO-001")
+if (c.status() as! String) != "setup" { print("FAIL: setup"); exit(1) }
+c.phase_done()
+if (c.status() as! String) != "machining" { print("FAIL: machining"); exit(1) }
+c.phase_done()
+if (c.status() as! String) != "teardown" { print("FAIL: teardown"); exit(1) }
+c.phase_done()
+if (c.status() as! String) != "idle" { print("FAIL: idle2"); exit(1) }
+if (c.parts_produced() as! Int) != 1 { print("FAIL: parts1"); exit(1) }
+c.work_order("WO-002")
+c.phase_done()
+c.emergency_stop()
+if (c.status() as! String) != "estopped" { print("FAIL: estopped"); exit(1) }
+c.reset()
+if (c.status() as! String) != "idle" { print("FAIL: idle final"); exit(1) }
+print("PASS: manufacturing_cell")

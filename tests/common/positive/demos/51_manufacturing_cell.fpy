@@ -1,0 +1,88 @@
+@@[target("python_3")]
+
+# Smoke-test variant of cookbook recipe 51 (Manufacturing Cell —
+# Priority Queue with Sub-Phases). Linear lifecycle simplification:
+# rather than tracking a priority-sorted job queue, this variant
+# advances through Setup -> Machining -> Teardown phases for a
+# single job at a time. emergency_stop is handled on the $Active
+# HSM parent so it works from any sub-phase. parts_produced
+# increments when teardown completes.
+
+@@system ManufacturingCell {
+    interface:
+        work_order(order_id: str)
+        phase_done()
+        emergency_stop()
+        reset()
+        parts_produced(): int
+        status(): str
+
+    machine:
+        $Idle => $Active {
+            work_order(order_id: str) { -> $Setup }
+            status(): str { @@:("idle") }
+            => $^
+        }
+
+        $Setup => $Active {
+            phase_done() { -> $Machining }
+            status(): str { @@:("setup") }
+            => $^
+        }
+
+        $Machining => $Active {
+            phase_done() { -> $Teardown }
+            status(): str { @@:("machining") }
+            => $^
+        }
+
+        $Teardown => $Active {
+            phase_done() {
+                self.parts = self.parts + 1
+                -> $Idle
+            }
+            status(): str { @@:("teardown") }
+            => $^
+        }
+
+        $Active {
+            emergency_stop() { -> $EStopped }
+            parts_produced(): int { @@:(self.parts) }
+            status(): str { @@:("active") }
+        }
+
+        $EStopped {
+            reset() { -> $Idle }
+            parts_produced(): int { @@:(self.parts) }
+            status(): str { @@:("estopped") }
+        }
+
+    domain:
+        parts: int = 0
+}
+
+if __name__ == '__main__':
+    cell = @@ManufacturingCell()
+    assert cell.status() == "idle"
+    assert cell.parts_produced() == 0
+
+    # Nominal cycle
+    cell.work_order("WO-001")
+    assert cell.status() == "setup"
+    cell.phase_done()
+    assert cell.status() == "machining"
+    cell.phase_done()
+    assert cell.status() == "teardown"
+    cell.phase_done()
+    assert cell.status() == "idle"
+    assert cell.parts_produced() == 1
+
+    # Emergency stop from middle of cycle
+    cell.work_order("WO-002")
+    cell.phase_done()  # now in machining
+    cell.emergency_stop()
+    assert cell.status() == "estopped"
+    cell.reset()
+    assert cell.status() == "idle"
+
+    print("PASS: manufacturing_cell")

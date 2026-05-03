@@ -1,0 +1,76 @@
+@@[target("dart")]
+
+@@system ManufacturingCell {
+    interface:
+        work_order(order_id: String)
+        phase_done()
+        emergency_stop()
+        reset()
+        parts_produced(): int
+        status(): String
+
+    machine:
+        $Idle => $Active {
+            work_order(order_id: String) { -> $Setup }
+            status(): String { @@:("idle") }
+            => $^
+        }
+
+        $Setup => $Active {
+            phase_done() { -> $Machining }
+            status(): String { @@:("setup") }
+            => $^
+        }
+
+        $Machining => $Active {
+            phase_done() { -> $Teardown }
+            status(): String { @@:("machining") }
+            => $^
+        }
+
+        $Teardown => $Active {
+            phase_done() {
+                this.parts = this.parts + 1;
+                -> $Idle
+            }
+            status(): String { @@:("teardown") }
+            => $^
+        }
+
+        $Active {
+            emergency_stop() { -> $EStopped }
+            parts_produced(): int { @@:(this.parts) }
+            status(): String { @@:("active") }
+        }
+
+        $EStopped {
+            reset() { -> $Idle }
+            parts_produced(): int { @@:(this.parts) }
+            status(): String { @@:("estopped") }
+        }
+
+    domain:
+        parts: int = 0
+}
+
+void main() {
+    final c = ManufacturingCell();
+    if (c.status() != "idle") throw "expected idle";
+    if (c.parts_produced() != 0) throw "expected parts=0";
+    c.work_order("WO-001");
+    if (c.status() != "setup") throw "expected setup";
+    c.phase_done();
+    if (c.status() != "machining") throw "expected machining";
+    c.phase_done();
+    if (c.status() != "teardown") throw "expected teardown";
+    c.phase_done();
+    if (c.status() != "idle") throw "expected idle";
+    if (c.parts_produced() != 1) throw "expected parts=1";
+    c.work_order("WO-002");
+    c.phase_done();
+    c.emergency_stop();
+    if (c.status() != "estopped") throw "expected estopped";
+    c.reset();
+    if (c.status() != "idle") throw "expected idle final";
+    print("PASS: manufacturing_cell");
+}

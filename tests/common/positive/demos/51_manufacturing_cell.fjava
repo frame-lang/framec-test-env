@@ -1,0 +1,78 @@
+@@[target("java")]
+
+@@system ManufacturingCell {
+    interface:
+        work_order(order_id: String)
+        phase_done()
+        emergency_stop()
+        reset()
+        parts_produced(): int
+        status(): String
+
+    machine:
+        $Idle => $Active {
+            work_order(order_id: String) { -> $Setup }
+            status(): String { @@:("idle") }
+            => $^
+        }
+
+        $Setup => $Active {
+            phase_done() { -> $Machining }
+            status(): String { @@:("setup") }
+            => $^
+        }
+
+        $Machining => $Active {
+            phase_done() { -> $Teardown }
+            status(): String { @@:("machining") }
+            => $^
+        }
+
+        $Teardown => $Active {
+            phase_done() {
+                this.parts = this.parts + 1;
+                -> $Idle
+            }
+            status(): String { @@:("teardown") }
+            => $^
+        }
+
+        $Active {
+            emergency_stop() { -> $EStopped }
+            parts_produced(): int { @@:(this.parts) }
+            status(): String { @@:("active") }
+        }
+
+        $EStopped {
+            reset() { -> $Idle }
+            parts_produced(): int { @@:(this.parts) }
+            status(): String { @@:("estopped") }
+        }
+
+    domain:
+        parts: int = 0
+}
+
+class Main {
+    public static void main(String[] args) {
+        var c = @@ManufacturingCell();
+        if (!((String) c.status()).equals("idle")) throw new RuntimeException("expected idle");
+        if ((int) c.parts_produced() != 0) throw new RuntimeException("expected parts=0");
+        c.work_order("WO-001");
+        if (!((String) c.status()).equals("setup")) throw new RuntimeException("expected setup");
+        c.phase_done();
+        if (!((String) c.status()).equals("machining")) throw new RuntimeException("expected machining");
+        c.phase_done();
+        if (!((String) c.status()).equals("teardown")) throw new RuntimeException("expected teardown");
+        c.phase_done();
+        if (!((String) c.status()).equals("idle")) throw new RuntimeException("expected idle");
+        if ((int) c.parts_produced() != 1) throw new RuntimeException("expected parts=1");
+        c.work_order("WO-002");
+        c.phase_done();
+        c.emergency_stop();
+        if (!((String) c.status()).equals("estopped")) throw new RuntimeException("expected estopped");
+        c.reset();
+        if (!((String) c.status()).equals("idle")) throw new RuntimeException("expected idle final");
+        System.out.println("PASS: manufacturing_cell");
+    }
+}

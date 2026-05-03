@@ -1,0 +1,82 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system ManufacturingCell {
+    interface:
+        work_order(order_id: str)
+        phase_done()
+        emergency_stop()
+        reset()
+        parts_produced(): int
+        status(): str
+
+    machine:
+        $Idle => $Active {
+            work_order(order_id: str) { -> $Setup }
+            status(): str { @@:("idle") }
+            => $^
+        }
+
+        $Setup => $Active {
+            phase_done() { -> $Machining }
+            status(): str { @@:("setup") }
+            => $^
+        }
+
+        $Machining => $Active {
+            phase_done() { -> $Teardown }
+            status(): str { @@:("machining") }
+            => $^
+        }
+
+        $Teardown => $Active {
+            phase_done() {
+                self->parts = self->parts + 1;
+                -> $Idle
+            }
+            status(): str { @@:("teardown") }
+            => $^
+        }
+
+        $Active {
+            emergency_stop() { -> $EStopped }
+            parts_produced(): int { @@:(self->parts) }
+            status(): str { @@:("active") }
+        }
+
+        $EStopped {
+            reset() { -> $Idle }
+            parts_produced(): int { @@:(self->parts) }
+            status(): str { @@:("estopped") }
+        }
+
+    domain:
+        parts: int = 0
+}
+
+int main() {
+    ManufacturingCell* c = @@ManufacturingCell();
+    if (strcmp(ManufacturingCell_status(c), "idle") != 0) { printf("FAIL: idle\n"); return 1; }
+    if (ManufacturingCell_parts_produced(c) != 0) { printf("FAIL: parts0\n"); return 1; }
+    ManufacturingCell_work_order(c, "WO-001");
+    if (strcmp(ManufacturingCell_status(c), "setup") != 0) { printf("FAIL: setup\n"); return 1; }
+    ManufacturingCell_phase_done(c);
+    if (strcmp(ManufacturingCell_status(c), "machining") != 0) { printf("FAIL: machining\n"); return 1; }
+    ManufacturingCell_phase_done(c);
+    if (strcmp(ManufacturingCell_status(c), "teardown") != 0) { printf("FAIL: teardown\n"); return 1; }
+    ManufacturingCell_phase_done(c);
+    if (strcmp(ManufacturingCell_status(c), "idle") != 0) { printf("FAIL: idle2\n"); return 1; }
+    if (ManufacturingCell_parts_produced(c) != 1) { printf("FAIL: parts1\n"); return 1; }
+    ManufacturingCell_work_order(c, "WO-002");
+    ManufacturingCell_phase_done(c);
+    ManufacturingCell_emergency_stop(c);
+    if (strcmp(ManufacturingCell_status(c), "estopped") != 0) { printf("FAIL: estopped\n"); return 1; }
+    ManufacturingCell_reset(c);
+    if (strcmp(ManufacturingCell_status(c), "idle") != 0) { printf("FAIL: idle final\n"); return 1; }
+    printf("PASS: manufacturing_cell\n");
+    ManufacturingCell_destroy(c);
+    return 0;
+}

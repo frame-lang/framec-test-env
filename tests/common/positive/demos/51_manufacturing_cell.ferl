@@ -1,0 +1,54 @@
+@@[target("erlang")]
+
+@@system ManufacturingCell {
+    interface:
+        work_order(order_id: str)
+        phase_done()
+        emergency_stop()
+        reset()
+        parts_produced(): int
+        status(): str
+
+    machine:
+        $Idle => $Active {
+            work_order(order_id: str) { -> $Setup }
+            status(): str { @@:("idle") }
+            => $^
+        }
+
+        $Setup => $Active {
+            phase_done() { -> $Machining }
+            status(): str { @@:("setup") }
+            => $^
+        }
+
+        $Machining => $Active {
+            phase_done() { -> $Teardown }
+            status(): str { @@:("machining") }
+            => $^
+        }
+
+        $Teardown => $Active {
+            phase_done() {
+                self.parts = Data#data.parts + 1
+                -> $Idle
+            }
+            status(): str { @@:("teardown") }
+            => $^
+        }
+
+        $Active {
+            emergency_stop() { -> $EStopped }
+            parts_produced(): int { @@:(Data#data.parts) }
+            status(): str { @@:("active") }
+        }
+
+        $EStopped {
+            reset() { -> $Idle }
+            parts_produced(): int { @@:(Data#data.parts) }
+            status(): str { @@:("estopped") }
+        }
+
+    domain:
+        parts = 0
+}

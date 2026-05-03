@@ -1,0 +1,83 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system ManufacturingCell {
+    interface:
+        work_order(order_id: string)
+        phase_done()
+        emergency_stop()
+        reset()
+        parts_produced(): int
+        status(): string
+
+    machine:
+        $Idle => $Active {
+            work_order(order_id: string) { -> $Setup }
+            status(): string { @@:("idle") }
+            => $^
+        }
+
+        $Setup => $Active {
+            phase_done() { -> $Machining }
+            status(): string { @@:("setup") }
+            => $^
+        }
+
+        $Machining => $Active {
+            phase_done() { -> $Teardown }
+            status(): string { @@:("machining") }
+            => $^
+        }
+
+        $Teardown => $Active {
+            phase_done() {
+                s.parts = s.parts + 1
+                -> $Idle
+            }
+            status(): string { @@:("teardown") }
+            => $^
+        }
+
+        $Active {
+            emergency_stop() { -> $EStopped }
+            parts_produced(): int { @@:(s.parts) }
+            status(): string { @@:("active") }
+        }
+
+        $EStopped {
+            reset() { -> $Idle }
+            parts_produced(): int { @@:(s.parts) }
+            status(): string { @@:("estopped") }
+        }
+
+    domain:
+        parts: int = 0
+}
+
+func main() {
+    c := NewManufacturingCell()
+    if c.Status() != "idle" { fmt.Println("FAIL: idle"); os.Exit(1) }
+    if c.Parts_produced() != 0 { fmt.Println("FAIL: parts0"); os.Exit(1) }
+    c.Work_order("WO-001")
+    if c.Status() != "setup" { fmt.Println("FAIL: setup"); os.Exit(1) }
+    c.Phase_done()
+    if c.Status() != "machining" { fmt.Println("FAIL: machining"); os.Exit(1) }
+    c.Phase_done()
+    if c.Status() != "teardown" { fmt.Println("FAIL: teardown"); os.Exit(1) }
+    c.Phase_done()
+    if c.Status() != "idle" { fmt.Println("FAIL: idle2"); os.Exit(1) }
+    if c.Parts_produced() != 1 { fmt.Println("FAIL: parts1"); os.Exit(1) }
+    c.Work_order("WO-002")
+    c.Phase_done()
+    c.Emergency_stop()
+    if c.Status() != "estopped" { fmt.Println("FAIL: estopped"); os.Exit(1) }
+    c.Reset()
+    if c.Status() != "idle" { fmt.Println("FAIL: idle final"); os.Exit(1) }
+    fmt.Println("PASS: manufacturing_cell")
+}

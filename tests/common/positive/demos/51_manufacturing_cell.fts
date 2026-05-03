@@ -1,0 +1,77 @@
+@@[target("typescript")]
+
+@@system ManufacturingCell {
+    interface:
+        work_order(order_id: str)
+        phase_done()
+        emergency_stop()
+        reset()
+        parts_produced(): int
+        status(): str
+
+    machine:
+        $Idle => $Active {
+            work_order(order_id: str) { -> $Setup }
+            status(): str { @@:("idle") }
+            => $^
+        }
+
+        $Setup => $Active {
+            phase_done() { -> $Machining }
+            status(): str { @@:("setup") }
+            => $^
+        }
+
+        $Machining => $Active {
+            phase_done() { -> $Teardown }
+            status(): str { @@:("machining") }
+            => $^
+        }
+
+        $Teardown => $Active {
+            phase_done() {
+                this.parts = this.parts + 1;
+                -> $Idle
+            }
+            status(): str { @@:("teardown") }
+            => $^
+        }
+
+        $Active {
+            emergency_stop() { -> $EStopped }
+            parts_produced(): int { @@:(this.parts) }
+            status(): str { @@:("active") }
+        }
+
+        $EStopped {
+            reset() { -> $Idle }
+            parts_produced(): int { @@:(this.parts) }
+            status(): str { @@:("estopped") }
+        }
+
+    domain:
+        parts: int = 0
+}
+
+const cell = @@ManufacturingCell();
+if (cell.status() !== "idle") throw new Error("expected idle");
+if (cell.parts_produced() !== 0) throw new Error("expected parts=0");
+
+cell.work_order("WO-001");
+if (cell.status() !== "setup") throw new Error("expected setup");
+cell.phase_done();
+if (cell.status() !== "machining") throw new Error("expected machining");
+cell.phase_done();
+if (cell.status() !== "teardown") throw new Error("expected teardown");
+cell.phase_done();
+if (cell.status() !== "idle") throw new Error("expected idle");
+if (cell.parts_produced() !== 1) throw new Error("expected parts=1");
+
+cell.work_order("WO-002");
+cell.phase_done();
+cell.emergency_stop();
+if (cell.status() !== "estopped") throw new Error("expected estopped");
+cell.reset();
+if (cell.status() !== "idle") throw new Error("expected idle final");
+
+console.log("PASS: manufacturing_cell");

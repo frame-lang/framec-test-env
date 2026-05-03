@@ -1,0 +1,76 @@
+@@[target("rust")]
+
+@@system ManufacturingCell {
+    interface:
+        work_order(order_id: String)
+        phase_done()
+        emergency_stop()
+        reset()
+        parts_produced(): i32
+        status(): String
+
+    machine:
+        $Idle => $Active {
+            work_order(order_id: String) { -> $Setup }
+            status(): String { @@:("idle".to_string()) }
+            => $^
+        }
+
+        $Setup => $Active {
+            phase_done() { -> $Machining }
+            status(): String { @@:("setup".to_string()) }
+            => $^
+        }
+
+        $Machining => $Active {
+            phase_done() { -> $Teardown }
+            status(): String { @@:("machining".to_string()) }
+            => $^
+        }
+
+        $Teardown => $Active {
+            phase_done() {
+                self.parts = self.parts + 1;
+                -> $Idle
+            }
+            status(): String { @@:("teardown".to_string()) }
+            => $^
+        }
+
+        $Active {
+            emergency_stop() { -> $EStopped }
+            parts_produced(): i32 { @@:(self.parts) }
+            status(): String { @@:("active".to_string()) }
+        }
+
+        $EStopped {
+            reset() { -> $Idle }
+            parts_produced(): i32 { @@:(self.parts) }
+            status(): String { @@:("estopped".to_string()) }
+        }
+
+    domain:
+        parts: i32 = 0
+}
+
+fn main() {
+    let mut cell = @@ManufacturingCell();
+    assert_eq!(cell.status(), "idle");
+    assert_eq!(cell.parts_produced(), 0);
+    cell.work_order("WO-001".to_string());
+    assert_eq!(cell.status(), "setup");
+    cell.phase_done();
+    assert_eq!(cell.status(), "machining");
+    cell.phase_done();
+    assert_eq!(cell.status(), "teardown");
+    cell.phase_done();
+    assert_eq!(cell.status(), "idle");
+    assert_eq!(cell.parts_produced(), 1);
+    cell.work_order("WO-002".to_string());
+    cell.phase_done();
+    cell.emergency_stop();
+    assert_eq!(cell.status(), "estopped");
+    cell.reset();
+    assert_eq!(cell.status(), "idle");
+    println!("PASS: manufacturing_cell");
+}
