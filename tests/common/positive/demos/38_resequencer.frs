@@ -1,0 +1,50 @@
+@@[target("rust")]
+
+use std::collections::HashMap;
+
+@@system Resequencer {
+    interface:
+        arrive(seq: i32, payload: String): String
+        status(): String
+
+    machine:
+        $Buffering {
+            arrive(seq: i32, payload: String): String {
+                self.buffer.insert(seq, payload);
+                let mut released = 0;
+                while self.buffer.contains_key(&self.next_seq) {
+                    let p = self.buffer.remove(&self.next_seq).unwrap();
+                    let cur = self.next_seq;
+                    self.release(cur, p);
+                    self.next_seq = self.next_seq + 1;
+                    released = released + 1;
+                }
+                if released > 0 {
+                    @@:(format!("released {}", released))
+                } else {
+                    @@:("buffered".to_string())
+                }
+            }
+            status(): String {
+                @@:(format!("next={} buffered={}", self.next_seq, self.buffer.len()))
+            }
+        }
+
+    actions:
+        release(seq: i32, payload: String) {
+            println!("  out #{}: {}", seq, payload);
+        }
+
+    domain:
+        buffer: HashMap<i32, String> = HashMap::new()
+        next_seq: i32 = 1
+}
+
+fn main() {
+    let mut rs = @@Resequencer();
+    assert_eq!(rs.arrive(3, "c".to_string()), "buffered");
+    assert_eq!(rs.arrive(1, "a".to_string()), "released 1");
+    assert_eq!(rs.arrive(2, "b".to_string()), "released 2");
+    assert_eq!(rs.status(), "next=4 buffered=0");
+    println!("PASS: resequencer");
+}

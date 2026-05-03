@@ -1,0 +1,45 @@
+@@[target("ruby")]
+
+@@system Resequencer {
+    interface:
+        arrive(seq: int, payload: str): str
+        status(): str
+
+    machine:
+        $Buffering {
+            arrive(seq: int, payload: str): str {
+                @buffer[seq] = payload
+                released = 0
+                while @buffer.key?(@next_seq)
+                    p = @buffer.delete(@next_seq)
+                    self.release(@next_seq, p)
+                    @next_seq = @next_seq + 1
+                    released = released + 1
+                end
+                if released > 0
+                    @@:("released #{released}")
+                else
+                    @@:("buffered")
+                end
+            }
+            status(): str {
+                @@:("next=#{@next_seq} buffered=#{@buffer.size}")
+            }
+        }
+
+    actions:
+        release(seq, payload) {
+            puts "  out ##{seq}: #{payload}"
+        }
+
+    domain:
+        buffer = {}
+        next_seq = 1
+}
+
+rs = Resequencer.new
+raise "expected buffered"        unless rs.arrive(3, "c") == "buffered"
+raise "expected released 1"      unless rs.arrive(1, "a") == "released 1"
+raise "expected released 2"      unless rs.arrive(2, "b") == "released 2"
+raise "expected next=4 buf=0"    unless rs.status == "next=4 buffered=0"
+puts "PASS: resequencer"

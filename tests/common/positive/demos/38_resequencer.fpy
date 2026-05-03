@@ -1,0 +1,45 @@
+@@[target("python_3")]
+
+@@system Resequencer {
+    interface:
+        arrive(seq: int, payload: str): str
+        status(): str
+
+    machine:
+        $Buffering {
+            arrive(seq: int, payload: str): str {
+                self.buffer[seq] = payload
+                released = 0
+                while self.next_seq in self.buffer:
+                    p = self.buffer[self.next_seq]
+                    del self.buffer[self.next_seq]
+                    self.release(self.next_seq, p)
+                    self.next_seq = self.next_seq + 1
+                    released = released + 1
+                if released > 0:
+                    @@:(f"released {released}")
+                else:
+                    @@:("buffered")
+            }
+            status(): str {
+                @@:(f"next={self.next_seq} buffered={len(self.buffer)}")
+            }
+        }
+
+    actions:
+        release(seq, payload) {
+            print(f"  out #{seq}: {payload}")
+        }
+
+    domain:
+        buffer: dict = {}
+        next_seq: int = 1
+}
+
+if __name__ == '__main__':
+    rs = @@Resequencer()
+    assert rs.arrive(3, "c") == "buffered"      # waiting for 1
+    assert rs.arrive(1, "a") == "released 1"
+    assert rs.arrive(2, "b") == "released 2"    # drains 2 and 3
+    assert rs.status() == "next=4 buffered=0"
+    print("PASS: resequencer")

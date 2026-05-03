@@ -1,0 +1,47 @@
+@@[target("swift")]
+
+import Foundation
+
+@@system Resequencer {
+    interface:
+        arrive(seq: Int, payload: String): String
+        status(): String
+
+    machine:
+        $Buffering {
+            arrive(seq: Int, payload: String): String {
+                self.buffer[seq] = payload
+                var released = 0
+                while self.buffer[self.next_seq] != nil {
+                    let p = self.buffer.removeValue(forKey: self.next_seq)!
+                    self.release(self.next_seq, p)
+                    self.next_seq = self.next_seq + 1
+                    released = released + 1
+                }
+                if released > 0 {
+                    @@:("released \(released)")
+                } else {
+                    @@:("buffered")
+                }
+            }
+            status(): String {
+                @@:("next=\(self.next_seq) buffered=\(self.buffer.count)")
+            }
+        }
+
+    actions:
+        release(seq: Int, payload: String) {
+            print("  out #\(seq): \(payload)")
+        }
+
+    domain:
+        buffer: [Int: String] = [:]
+        next_seq: Int = 1
+}
+
+let rs = @@Resequencer()
+if (rs.arrive(3, "c") as! String) != "buffered"    { print("FAIL: buffered");     exit(1) }
+if (rs.arrive(1, "a") as! String) != "released 1"  { print("FAIL: released 1");   exit(1) }
+if (rs.arrive(2, "b") as! String) != "released 2"  { print("FAIL: released 2");   exit(1) }
+if (rs.status() as! String) != "next=4 buffered=0" { print("FAIL: status");       exit(1) }
+print("PASS: resequencer")

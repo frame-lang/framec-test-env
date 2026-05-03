@@ -1,0 +1,47 @@
+@@[target("kotlin")]
+
+@@system Resequencer {
+    interface:
+        arrive(seq: Int, payload: String): String
+        status(): String
+
+    machine:
+        $Buffering {
+            arrive(seq: Int, payload: String): String {
+                this.buffer[seq] = payload
+                var released = 0
+                while (this.buffer.containsKey(this.next_seq)) {
+                    val p = this.buffer.remove(this.next_seq)!!
+                    this.release(this.next_seq, p)
+                    this.next_seq = this.next_seq + 1
+                    released = released + 1
+                }
+                if (released > 0) {
+                    @@:("released $released")
+                } else {
+                    @@:("buffered")
+                }
+            }
+            status(): String {
+                @@:("next=${this.next_seq} buffered=${this.buffer.size}")
+            }
+        }
+
+    actions:
+        release(seq: Int, payload: String) {
+            println("  out #$seq: $payload")
+        }
+
+    domain:
+        buffer: MutableMap<Int, String> = mutableMapOf()
+        next_seq: Int = 1
+}
+
+fun main() {
+    val rs = @@Resequencer()
+    if ((rs.arrive(3, "c") as String) != "buffered")    throw RuntimeException("expected buffered")
+    if ((rs.arrive(1, "a") as String) != "released 1")  throw RuntimeException("expected released 1")
+    if ((rs.arrive(2, "b") as String) != "released 2")  throw RuntimeException("expected released 2")
+    if ((rs.status() as String) != "next=4 buffered=0") throw RuntimeException("expected next=4 buffered=0")
+    println("PASS: resequencer")
+}

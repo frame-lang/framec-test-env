@@ -1,0 +1,117 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+// Tiny int->string dict for the resequencer. Bounded sizes are fine —
+// the fixture only buffers up to a handful of messages.
+#define RS_CAP 16
+
+typedef struct {
+    int keys[RS_CAP];
+    char vals[RS_CAP][32];
+    int active[RS_CAP];
+    int count;
+} rs_buffer_t;
+
+static int rs_find(rs_buffer_t* b, int key) {
+    for (int i = 0; i < b->count; i++) {
+        if (b->active[i] && b->keys[i] == key) return i;
+    }
+    return -1;
+}
+
+static void rs_put(rs_buffer_t* b, int key, const char* val) {
+    int idx = rs_find(b, key);
+    if (idx < 0) {
+        for (int i = 0; i < RS_CAP; i++) {
+            if (!b->active[i]) {
+                idx = i;
+                if (i >= b->count) b->count = i + 1;
+                break;
+            }
+        }
+    }
+    if (idx < 0) return;
+    b->keys[idx] = key;
+    strncpy(b->vals[idx], val, sizeof(b->vals[0]) - 1);
+    b->vals[idx][sizeof(b->vals[0]) - 1] = '\0';
+    b->active[idx] = 1;
+}
+
+static int rs_contains(rs_buffer_t* b, int key) { return rs_find(b, key) >= 0; }
+
+static const char* rs_get(rs_buffer_t* b, int key) {
+    int idx = rs_find(b, key);
+    return idx >= 0 ? b->vals[idx] : "";
+}
+
+static void rs_remove(rs_buffer_t* b, int key) {
+    int idx = rs_find(b, key);
+    if (idx >= 0) b->active[idx] = 0;
+}
+
+static int rs_size(rs_buffer_t* b) {
+    int n = 0;
+    for (int i = 0; i < b->count; i++) if (b->active[i]) n++;
+    return n;
+}
+
+@@system Resequencer {
+    interface:
+        arrive(seq: int, payload: str): str
+        status(): str
+
+    machine:
+        $Buffering {
+            arrive(seq: int, payload: str): str {
+                rs_put(&self->buffer, seq, payload);
+                int released = 0;
+                while (rs_contains(&self->buffer, self->next_seq)) {
+                    const char* p = rs_get(&self->buffer, self->next_seq);
+                    char p_copy[32];
+                    strncpy(p_copy, p, sizeof(p_copy) - 1);
+                    p_copy[sizeof(p_copy) - 1] = '\0';
+                    rs_remove(&self->buffer, self->next_seq);
+                    Resequencer_release(self, self->next_seq, p_copy);
+                    self->next_seq = self->next_seq + 1;
+                    released = released + 1;
+                }
+                static char buf[32];
+                if (released > 0) {
+                    snprintf(buf, sizeof(buf), "released %d", released);
+                    @@:(buf)
+                } else {
+                    @@:("buffered")
+                }
+            }
+            status(): str {
+                static char buf[64];
+                snprintf(buf, sizeof(buf), "next=%d buffered=%d", self->next_seq, rs_size(&self->buffer));
+                @@:(buf)
+            }
+        }
+
+    actions:
+        release(seq: int, payload: str) {
+            printf("  out #%d: %s\n", seq, payload);
+        }
+
+    domain:
+        buffer: rs_buffer_t
+        next_seq: int = 1
+}
+
+int main() {
+    Resequencer* rs = @@Resequencer();
+    memset(&rs->buffer, 0, sizeof(rs_buffer_t));
+
+    if (strcmp(Resequencer_arrive(rs, 3, "c"), "buffered")    != 0) { printf("FAIL: buffered\n");   return 1; }
+    if (strcmp(Resequencer_arrive(rs, 1, "a"), "released 1")  != 0) { printf("FAIL: released 1\n"); return 1; }
+    if (strcmp(Resequencer_arrive(rs, 2, "b"), "released 2")  != 0) { printf("FAIL: released 2\n"); return 1; }
+    if (strcmp(Resequencer_status(rs), "next=4 buffered=0")    != 0) { printf("FAIL: status\n");     return 1; }
+    printf("PASS: resequencer\n");
+    Resequencer_destroy(rs);
+    return 0;
+}

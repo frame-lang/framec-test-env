@@ -1,0 +1,53 @@
+@@[target("csharp")]
+
+using System;
+using System.Collections.Generic;
+
+@@system Resequencer {
+    interface:
+        arrive(seq: int, payload: String): String
+        status(): String
+
+    machine:
+        $Buffering {
+            arrive(seq: int, payload: String): String {
+                this.buffer[seq] = payload;
+                int released = 0;
+                while (this.buffer.ContainsKey(this.next_seq)) {
+                    string p = this.buffer[this.next_seq];
+                    this.buffer.Remove(this.next_seq);
+                    this.release(this.next_seq, p);
+                    this.next_seq = this.next_seq + 1;
+                    released = released + 1;
+                }
+                if (released > 0) {
+                    @@:($"released {released}")
+                } else {
+                    @@:("buffered")
+                }
+            }
+            status(): String {
+                @@:($"next={this.next_seq} buffered={this.buffer.Count}")
+            }
+        }
+
+    actions:
+        release(seq: int, payload: String) {
+            Console.WriteLine($"  out #{seq}: {payload}");
+        }
+
+    domain:
+        buffer: Dictionary<int, string> = new Dictionary<int, string>()
+        next_seq: int = 1
+}
+
+class Program {
+    static void Main(string[] args) {
+        var rs = @@Resequencer();
+        if ((string) rs.arrive(3, "c") != "buffered")    throw new Exception("expected buffered");
+        if ((string) rs.arrive(1, "a") != "released 1")  throw new Exception("expected released 1");
+        if ((string) rs.arrive(2, "b") != "released 2")  throw new Exception("expected released 2");
+        if ((string) rs.status() != "next=4 buffered=0") throw new Exception("expected next=4 buffered=0");
+        Console.WriteLine("PASS: resequencer");
+    }
+}

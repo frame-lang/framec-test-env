@@ -1,0 +1,46 @@
+@@[target("javascript")]
+
+@@system Resequencer {
+    interface:
+        arrive(seq, payload)
+        status()
+
+    machine:
+        $Buffering {
+            arrive(seq, payload) {
+                this.buffer[seq] = payload;
+                let released = 0;
+                while (this.next_seq in this.buffer) {
+                    const p = this.buffer[this.next_seq];
+                    delete this.buffer[this.next_seq];
+                    this.release(this.next_seq, p);
+                    this.next_seq = this.next_seq + 1;
+                    released = released + 1;
+                }
+                if (released > 0) {
+                    @@:(`released ${released}`)
+                } else {
+                    @@:("buffered")
+                }
+            }
+            status() {
+                @@:(`next=${this.next_seq} buffered=${Object.keys(this.buffer).length}`)
+            }
+        }
+
+    actions:
+        release(seq, payload) {
+            console.log(`  out #${seq}: ${payload}`);
+        }
+
+    domain:
+        buffer = {}
+        next_seq = 1
+}
+
+const rs = @@Resequencer();
+if (rs.arrive(3, "c") !== "buffered")    throw new Error("expected buffered");
+if (rs.arrive(1, "a") !== "released 1")  throw new Error("expected released 1");
+if (rs.arrive(2, "b") !== "released 2")  throw new Error("expected released 2");
+if (rs.status() !== "next=4 buffered=0") throw new Error("expected next=4 buffered=0");
+console.log("PASS: resequencer");

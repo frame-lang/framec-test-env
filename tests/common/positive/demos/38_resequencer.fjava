@@ -1,0 +1,51 @@
+@@[target("java")]
+
+import java.util.HashMap;
+
+@@system Resequencer {
+    interface:
+        arrive(seq: int, payload: String): String
+        status(): String
+
+    machine:
+        $Buffering {
+            arrive(seq: int, payload: String): String {
+                this.buffer.put(seq, payload);
+                int released = 0;
+                while (this.buffer.containsKey(this.next_seq)) {
+                    String p = this.buffer.remove(this.next_seq);
+                    this.release(this.next_seq, p);
+                    this.next_seq = this.next_seq + 1;
+                    released = released + 1;
+                }
+                if (released > 0) {
+                    @@:("released " + released)
+                } else {
+                    @@:("buffered")
+                }
+            }
+            status(): String {
+                @@:("next=" + this.next_seq + " buffered=" + this.buffer.size())
+            }
+        }
+
+    actions:
+        release(seq: int, payload: String) {
+            System.out.println("  out #" + seq + ": " + payload);
+        }
+
+    domain:
+        buffer: HashMap<Integer, String> = new HashMap<>()
+        next_seq: int = 1
+}
+
+class Main {
+    public static void main(String[] args) {
+        var rs = @@Resequencer();
+        if (!((String) rs.arrive(3, "c")).equals("buffered"))    throw new RuntimeException("expected buffered");
+        if (!((String) rs.arrive(1, "a")).equals("released 1"))  throw new RuntimeException("expected released 1");
+        if (!((String) rs.arrive(2, "b")).equals("released 2"))  throw new RuntimeException("expected released 2");
+        if (!((String) rs.status()).equals("next=4 buffered=0")) throw new RuntimeException("expected next=4 buffered=0");
+        System.out.println("PASS: resequencer");
+    }
+}

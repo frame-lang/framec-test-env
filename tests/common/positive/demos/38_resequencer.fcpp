@@ -1,0 +1,54 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <unordered_map>
+#include <cassert>
+
+@@system Resequencer {
+    interface:
+        arrive(seq: int, payload: str): str
+        status(): str
+
+    machine:
+        $Buffering {
+            arrive(seq: int, payload: str): str {
+                this->buffer[seq] = payload;
+                int released = 0;
+                while (this->buffer.count(this->next_seq) > 0) {
+                    std::string p = this->buffer[this->next_seq];
+                    this->buffer.erase(this->next_seq);
+                    this->release(this->next_seq, p);
+                    this->next_seq = this->next_seq + 1;
+                    released = released + 1;
+                }
+                if (released > 0) {
+                    @@:(std::string("released ") + std::to_string(released))
+                } else {
+                    @@:(std::string("buffered"))
+                }
+            }
+            status(): str {
+                @@:(std::string("next=") + std::to_string(this->next_seq) + std::string(" buffered=") + std::to_string(this->buffer.size()))
+            }
+        }
+
+    actions:
+        release(seq: int, payload: std::string) {
+            std::cout << "  out #" << seq << ": " << payload << std::endl;
+        }
+
+    domain:
+        buffer: std::unordered_map<int, std::string>
+        next_seq: int = 1
+}
+
+int main() {
+    Resequencer rs;
+    assert(rs.arrive(3, "c") == "buffered");
+    assert(rs.arrive(1, "a") == "released 1");
+    assert(rs.arrive(2, "b") == "released 2");
+    assert(rs.status() == "next=4 buffered=0");
+    std::cout << "PASS: resequencer" << std::endl;
+    return 0;
+}

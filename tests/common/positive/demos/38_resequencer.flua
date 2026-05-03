@@ -1,0 +1,48 @@
+@@[target("lua")]
+
+@@system Resequencer {
+    interface:
+        arrive(seq: int, payload: str): str
+        status(): str
+
+    machine:
+        $Buffering {
+            arrive(seq: int, payload: str): str {
+                self.buffer[seq] = payload
+                local released = 0
+                while self.buffer[self.next_seq] ~= nil do
+                    local p = self.buffer[self.next_seq]
+                    self.buffer[self.next_seq] = nil
+                    self:release(self.next_seq, p)
+                    self.next_seq = self.next_seq + 1
+                    released = released + 1
+                end
+                if released > 0 then
+                    @@:("released " .. tostring(released))
+                else
+                    @@:("buffered")
+                end
+            }
+            status(): str {
+                local n = 0
+                for _ in pairs(self.buffer) do n = n + 1 end
+                @@:("next=" .. tostring(self.next_seq) .. " buffered=" .. tostring(n))
+            }
+        }
+
+    actions:
+        release(seq, payload) {
+            print("  out #" .. tostring(seq) .. ": " .. payload)
+        }
+
+    domain:
+        buffer = {}
+        next_seq: int = 1
+}
+
+local rs = @@Resequencer()
+assert(rs:arrive(3, "c") == "buffered",    "expected buffered")
+assert(rs:arrive(1, "a") == "released 1",  "expected released 1")
+assert(rs:arrive(2, "b") == "released 2",  "expected released 2")
+assert(rs:status() == "next=4 buffered=0", "expected next=4 buffered=0")
+print("PASS: resequencer")

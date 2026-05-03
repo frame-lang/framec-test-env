@@ -1,0 +1,55 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@system Resequencer {
+    interface:
+        arrive(seq: int, payload: String): String
+        status(): String
+
+    machine:
+        $Buffering {
+            arrive(seq: int, payload: String): String {
+                self.buffer[seq] = payload
+                var released = 0
+                while self.buffer.has(self.next_seq):
+                    var p = self.buffer[self.next_seq]
+                    self.buffer.erase(self.next_seq)
+                    self.release(self.next_seq, p)
+                    self.next_seq = self.next_seq + 1
+                    released = released + 1
+                if released > 0:
+                    @@:("released " + str(released))
+                else:
+                    @@:("buffered")
+            }
+            status(): String {
+                @@:("next=" + str(self.next_seq) + " buffered=" + str(self.buffer.size()))
+            }
+        }
+
+    actions:
+        release(seq, payload) { print("  out #" + str(seq) + ": " + payload) }
+
+    domain:
+        buffer: Dictionary = {}
+        next_seq: int = 1
+}
+
+func main():
+    var rs = @@Resequencer()
+    var failures = 0
+
+    if rs.arrive(3, "c") != "buffered":     print("FAIL: buffered");     failures += 1
+    if rs.arrive(1, "a") != "released 1":   print("FAIL: released 1");   failures += 1
+    if rs.arrive(2, "b") != "released 2":   print("FAIL: released 2");   failures += 1
+    if rs.status() != "next=4 buffered=0":  print("FAIL: status: " + rs.status()); failures += 1
+
+    if failures > 0:
+        print("FAIL: resequencer (" + str(failures) + " failures)")
+        quit(1)
+    print("PASS: resequencer")
+
+func _init():
+    main()
+    quit()

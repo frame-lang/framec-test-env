@@ -1,0 +1,58 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system Resequencer {
+    interface:
+        arrive(seq: int, payload: string): string
+        status(): string
+
+    machine:
+        $Buffering {
+            arrive(seq: int, payload: string): string {
+                s.buffer[seq] = payload
+                released := 0
+                for {
+                    p, ok := s.buffer[s.next_seq]
+                    if !ok {
+                        break
+                    }
+                    delete(s.buffer, s.next_seq)
+                    s.release(s.next_seq, p)
+                    s.next_seq = s.next_seq + 1
+                    released = released + 1
+                }
+                if released > 0 {
+                    @@:(fmt.Sprintf("released %d", released))
+                } else {
+                    @@:("buffered")
+                }
+            }
+            status(): string {
+                @@:(fmt.Sprintf("next=%d buffered=%d", s.next_seq, len(s.buffer)))
+            }
+        }
+
+    actions:
+        release(seq: int, payload: string) {
+            fmt.Printf("  out #%d: %s\n", seq, payload)
+        }
+
+    domain:
+        buffer: map[int]string = map[int]string{}
+        next_seq: int = 1
+}
+
+func main() {
+    rs := NewResequencer()
+    if rs.Arrive(3, "c") != "buffered"    { fmt.Println("FAIL: buffered");     os.Exit(1) }
+    if rs.Arrive(1, "a") != "released 1"  { fmt.Println("FAIL: released 1");   os.Exit(1) }
+    if rs.Arrive(2, "b") != "released 2"  { fmt.Println("FAIL: released 2");   os.Exit(1) }
+    if rs.Status() != "next=4 buffered=0" { fmt.Println("FAIL: status");       os.Exit(1) }
+    fmt.Println("PASS: resequencer")
+}

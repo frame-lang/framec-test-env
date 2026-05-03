@@ -1,0 +1,40 @@
+@@[target("erlang")]
+
+@@system Resequencer {
+    interface:
+        arrive(seq: int, payload: str): str
+        status(): str
+
+    machine:
+        $Buffering {
+            arrive(seq: int, payload: str): str {
+                self.buffer = maps:put(seq, payload, self.buffer)
+                Released = drain_loop(0, Data#data.next_seq, Data#data.buffer),
+                {NewNext, NewBuf, ReleasedCount} = Released,
+                self.next_seq = NewNext
+                self.buffer = NewBuf
+                if ReleasedCount > 0 {
+                    @@:("released " ++ integer_to_list(ReleasedCount))
+                } else {
+                    @@:("buffered")
+                }
+            }
+            status(): str {
+                @@:("next=" ++ integer_to_list(self.next_seq) ++ " buffered=" ++ integer_to_list(maps:size(self.buffer)))
+            }
+        }
+
+    domain:
+        buffer = #{}
+        next_seq = 1
+}
+
+drain_loop(Count, Next, Buf) ->
+    case maps:is_key(Next, Buf) of
+        true ->
+            P = maps:get(Next, Buf),
+            io:format("  out #~p: ~s~n", [Next, P]),
+            drain_loop(Count + 1, Next + 1, maps:remove(Next, Buf));
+        false ->
+            {Next, Buf, Count}
+    end.
