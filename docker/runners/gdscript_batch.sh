@@ -1,10 +1,21 @@
 #!/bin/bash
 # Batched GDScript test runner.
-# Godot cold start dominates (~1-2s per invocation) and godot has no native
-# multi-script runner mode, so we keep one godot process per test but run
-# them in parallel via xargs -P. Each godot instance eats ~150-250MB of RSS;
-# cap concurrency a bit lower than the other languages to stay under
-# container memory limits.
+#
+# Godot cold start dominates (~520ms per invocation). Two batching layers:
+#   1. Process-level: run M tests inside a single godot process via a
+#      harness script (load + .new() each test as a SceneTree subclass —
+#      an inner script's quit() does NOT terminate the parent process,
+#      empirically verified 2026-05-03).
+#   2. Across-batch: run B parallel batches via xargs -P, each batch
+#      feeding the harness M test paths.
+#
+# With B=4 batches × M≈70 tests/batch, we go from 255 godot startups
+# down to 4 — eliminating ~99% of startup cost.
+#
+# Per-test stdout is captured via a `==FRAME-TEST-BEGIN== <path>` /
+# `==FRAME-TEST-END== <path>` marker pair the harness prints; this
+# script's classifier slices the harness output into per-test .out
+# files matching the existing single-test format.
 
 set -uo pipefail
 
@@ -112,37 +123,132 @@ if [ "$COMPILE_ONLY" = "true" ] || [ "$have_godot" != "true" ]; then
     exit $fail
 fi
 
-# ---- Parallel godot execution ----
-TIMEOUT_SEC="${GDSCRIPT_TEST_TIMEOUT:-10}"
-export STATUS_DIR COMPILE_DIR TIMEOUT_SEC
+# ---- Batched parallel godot execution ----
+TIMEOUT_SEC="${GDSCRIPT_TEST_TIMEOUT:-60}"
+# Tests per godot invocation. Big enough to amortize startup, small
+# enough that one slow test in a batch doesn't penalize the whole
+# batch under timeout. Default ~70 with 255 tests / 4 batches.
+BATCH_SIZE="${GDSCRIPT_BATCH_SIZE:-70}"
+export STATUS_DIR COMPILE_DIR TIMEOUT_SEC BATCH_SIZE
 
-run_one() {
-    local sanitized="$1"
-    local src
-    src=$(ls "$COMPILE_DIR/$sanitized"/*.gd 2>/dev/null | head -1)
-    if [ -z "$src" ]; then
-        echo 1 > "$STATUS_DIR/${sanitized}.rc"
-        echo "source missing" > "$STATUS_DIR/${sanitized}.out"
+# Harness GDScript: loads each test path as a SceneTree subclass and
+# instantiates it. The inner script's _init() runs the test body and
+# its quit() call exits the inner SceneTree without killing the
+# parent process. Markers around each test let the classifier slice
+# stdout per test.
+export HARNESS_GD=/tmp/gd_harness.gd
+cat > "$HARNESS_GD" <<'GDEOF'
+extends SceneTree
+func _init():
+    var paths = OS.get_cmdline_user_args()
+    var sep_b = "==FRAME-TEST-BEGIN=="
+    var sep_e = "==FRAME-TEST-END=="
+    for p in paths:
+        print(sep_b + " " + p)
+        var s = load(p)
+        if s == null:
+            print("[harness] LOAD-FAIL " + p)
+        else:
+            var inst = s.new()
+            # inst is a SceneTree subclass — its _init() body runs the
+            # test inline; quit() is a no-op for a non-main SceneTree.
+            inst = null
+        print(sep_e + " " + p)
+    quit()
+GDEOF
+
+run_batch() {
+    local batch_id="$1"
+    local manifest="$2"   # tab-separated: <sanitized>\t<src_path>
+    local batch_out="$STATUS_DIR/batch_${batch_id}.out"
+
+    # Collect all src paths for this batch.
+    local paths=()
+    while IFS=$'\t' read -r sanitized src_path; do
+        [ -z "$src_path" ] && continue
+        paths+=("$src_path")
+    done < "$manifest"
+
+    if [ "${#paths[@]}" -eq 0 ]; then
         return
     fi
-    # setsid --wait: godot spawns detached helper children that inherit
-    # our redirected stdout fd. A plain redirection lets this shell move
-    # on to write .rc while those children are still writing to .out —
-    # the classifier then reads a partially-populated file and reports
-    # "unrecognized output". --wait blocks until every process in the
-    # new session exits, so .out is fully flushed before we proceed.
-    setsid --wait timeout "$TIMEOUT_SEC" godot --headless --script "$src" \
-        > "$STATUS_DIR/${sanitized}.out" 2>&1
-    # Force the kernel page cache to commit so any concurrent reader
-    # in the post-loop sees the final size+content. Cheap; only this
-    # specific file's pages.
-    sync "$STATUS_DIR/${sanitized}.out" 2>/dev/null || true
-    echo $? > "$STATUS_DIR/${sanitized}.rc"
-}
-export -f run_one
 
-awk -F'\t' '$2 == "RUN" { print $4 }' "$MANIFEST" | \
-    xargs -n 1 -P "$JOBS" -I{} bash -c 'run_one "$@"' _ {}
+    # Single godot invocation, multiple tests. setsid --wait flushes
+    # godot's spawned children before we move on (same pattern as
+    # the legacy per-test path).
+    setsid --wait timeout "$TIMEOUT_SEC" godot --headless \
+        --script "$HARNESS_GD" -- "${paths[@]}" > "$batch_out" 2>&1
+    local rc=$?
+    sync "$batch_out" 2>/dev/null || true
+
+    # Slice the batch output into per-test .out / .rc by the
+    # FRAME-TEST-BEGIN/END markers.
+    awk -v OUTDIR="$STATUS_DIR" -v RC="$rc" '
+        /^==FRAME-TEST-BEGIN== / {
+            path = $2
+            n = split(path, parts, "/")
+            sanitized = parts[n - 1]   # /tmp/gd_out/<sanitized>/foo.gd
+            cur = OUTDIR "/" sanitized ".out"
+            cur_rc = OUTDIR "/" sanitized ".rc"
+            saw_begin = 1
+            content = ""
+            next
+        }
+        /^==FRAME-TEST-END== / {
+            if (saw_begin) {
+                printf "%s", content > cur
+                close(cur)
+                # Per-test rc: if the whole batch timed out (rc=124)
+                # propagate that; otherwise treat each test as
+                # exit 0 (its content gets classified by the next
+                # stage, just like the legacy single-test flow).
+                if (RC == 124) {
+                    print "124" > cur_rc
+                } else {
+                    print "0" > cur_rc
+                }
+                close(cur_rc)
+                saw_begin = 0
+            }
+            next
+        }
+        saw_begin { content = content $0 "\n" }
+    ' "$batch_out"
+}
+export -f run_batch
+
+# Build batch manifests. Each batch gets BATCH_SIZE rows of
+# <sanitized>\t<src_path>.
+BATCH_DIR="$STATUS_DIR/batches"
+mkdir -p "$BATCH_DIR"
+batch_idx=0
+row_idx=0
+batch_file="$BATCH_DIR/batch_$(printf '%04d' $batch_idx).tsv"
+: > "$batch_file"
+
+awk -F'\t' '$2 == "RUN" { print $4 }' "$MANIFEST" | while read -r sanitized; do
+    src=$(ls "$COMPILE_DIR/$sanitized"/*.gd 2>/dev/null | head -1)
+    [ -z "$src" ] && continue
+    printf '%s\t%s\n' "$sanitized" "$src" >> "$batch_file"
+    row_idx=$((row_idx + 1))
+    if [ "$row_idx" -ge "$BATCH_SIZE" ]; then
+        batch_idx=$((batch_idx + 1))
+        row_idx=0
+        batch_file="$BATCH_DIR/batch_$(printf '%04d' $batch_idx).tsv"
+        : > "$batch_file"
+    fi
+done
+
+# Drop empty trailing batch if we didn't write any rows to it.
+[ ! -s "$batch_file" ] && rm -f "$batch_file"
+
+# Run each batch in parallel; B=$JOBS (defaults to half nproc).
+ls "$BATCH_DIR"/batch_*.tsv 2>/dev/null | \
+    xargs -n 1 -P "$JOBS" -I{} bash -c '
+        f="$1"
+        id=$(basename "$f" .tsv | sed "s/batch_//")
+        run_batch "$id" "$f"
+    ' _ {}
 
 pass=0; fail=0; skip=0
 while IFS=$'\t' read -r num status name rest; do
