@@ -116,7 +116,11 @@ compile_one() {
     local dill="$2"
     local name
     name=$(basename "$dill" .dill)
-    if dart compile kernel "$src" -o "$dill" > "$STATUS_DIR/${name}.err" 2>&1; then
+    # --no-link-platform: skip embedding the platform kernel
+    # in each .dill (saves ~30ms compile + 12ms launch per
+    # test, plus ~7.9MB I/O per file). Dart locates the
+    # platform automatically at runtime.
+    if dart compile kernel --no-link-platform "$src" -o "$dill" > "$STATUS_DIR/${name}.err" 2>&1; then
         echo 0 > "$STATUS_DIR/${name}.rc"
     else
         echo 1 > "$STATUS_DIR/${name}.rc"
