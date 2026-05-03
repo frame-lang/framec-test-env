@@ -1,0 +1,54 @@
+@@[target("rust")]
+
+@@system PrintSpooler {
+    interface:
+        submit(name: String, pages: i32)
+        done()
+        queue_depth(): i32
+        status(): String
+
+    machine:
+        $Idle {
+            submit(name: String, pages: i32) { -> $Printing }
+            queue_depth(): i32 { @@:(0) }
+            status(): String { @@:("idle".to_string()) }
+        }
+
+        $Printing {
+            submit(name: String, pages: i32) {
+                self.depth = self.depth + 1;
+            }
+            done() {
+                if self.depth > 0 {
+                    self.depth = self.depth - 1;
+                } else {
+                    -> $Idle
+                }
+            }
+            queue_depth(): i32 { @@:(self.depth) }
+            status(): String { @@:("printing".to_string()) }
+        }
+
+    domain:
+        depth: i32 = 0
+}
+
+fn main() {
+    let mut sp = @@PrintSpooler();
+    assert_eq!(sp.status(), "idle");
+    assert_eq!(sp.queue_depth(), 0);
+    sp.submit("a".to_string(), 1);
+    assert_eq!(sp.status(), "printing");
+    sp.submit("b".to_string(), 2);
+    assert_eq!(sp.queue_depth(), 1);
+    sp.submit("c".to_string(), 3);
+    assert_eq!(sp.queue_depth(), 2);
+    sp.done();
+    assert_eq!(sp.queue_depth(), 1);
+    sp.done();
+    assert_eq!(sp.queue_depth(), 0);
+    assert_eq!(sp.status(), "printing");
+    sp.done();
+    assert_eq!(sp.status(), "idle");
+    println!("PASS: print_spooler");
+}

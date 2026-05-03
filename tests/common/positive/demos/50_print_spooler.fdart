@@ -1,0 +1,54 @@
+@@[target("dart")]
+
+@@system PrintSpooler {
+    interface:
+        submit(name: String, pages: int)
+        done()
+        queue_depth(): int
+        status(): String
+
+    machine:
+        $Idle {
+            submit(name: String, pages: int) { -> $Printing }
+            queue_depth(): int { @@:(0) }
+            status(): String { @@:("idle") }
+        }
+
+        $Printing {
+            submit(name: String, pages: int) {
+                this.depth = this.depth + 1;
+            }
+            done() {
+                if (this.depth > 0) {
+                    this.depth = this.depth - 1;
+                } else {
+                    -> $Idle
+                }
+            }
+            queue_depth(): int { @@:(this.depth) }
+            status(): String { @@:("printing") }
+        }
+
+    domain:
+        depth: int = 0
+}
+
+void main() {
+    final sp = PrintSpooler();
+    if (sp.status() != "idle") throw "expected idle";
+    if (sp.queue_depth() != 0) throw "expected depth=0";
+    sp.submit("a", 1);
+    if (sp.status() != "printing") throw "expected printing";
+    sp.submit("b", 2);
+    if (sp.queue_depth() != 1) throw "expected depth=1";
+    sp.submit("c", 3);
+    if (sp.queue_depth() != 2) throw "expected depth=2";
+    sp.done();
+    if (sp.queue_depth() != 1) throw "expected depth=1 after done";
+    sp.done();
+    if (sp.queue_depth() != 0) throw "expected depth=0 after done";
+    if (sp.status() != "printing") throw "expected printing still";
+    sp.done();
+    if (sp.status() != "idle") throw "expected idle final";
+    print("PASS: print_spooler");
+}

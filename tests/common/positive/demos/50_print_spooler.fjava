@@ -1,0 +1,56 @@
+@@[target("java")]
+
+@@system PrintSpooler {
+    interface:
+        submit(name: String, pages: int)
+        done()
+        queue_depth(): int
+        status(): String
+
+    machine:
+        $Idle {
+            submit(name: String, pages: int) { -> $Printing }
+            queue_depth(): int { @@:(0) }
+            status(): String { @@:("idle") }
+        }
+
+        $Printing {
+            submit(name: String, pages: int) {
+                this.depth = this.depth + 1;
+            }
+            done() {
+                if (this.depth > 0) {
+                    this.depth = this.depth - 1;
+                } else {
+                    -> $Idle
+                }
+            }
+            queue_depth(): int { @@:(this.depth) }
+            status(): String { @@:("printing") }
+        }
+
+    domain:
+        depth: int = 0
+}
+
+class Main {
+    public static void main(String[] args) {
+        var sp = @@PrintSpooler();
+        if (!((String) sp.status()).equals("idle")) throw new RuntimeException("expected idle");
+        if ((int) sp.queue_depth() != 0) throw new RuntimeException("expected depth=0");
+        sp.submit("a", 1);
+        if (!((String) sp.status()).equals("printing")) throw new RuntimeException("expected printing");
+        sp.submit("b", 2);
+        if ((int) sp.queue_depth() != 1) throw new RuntimeException("expected depth=1");
+        sp.submit("c", 3);
+        if ((int) sp.queue_depth() != 2) throw new RuntimeException("expected depth=2");
+        sp.done();
+        if ((int) sp.queue_depth() != 1) throw new RuntimeException("expected depth=1 after done");
+        sp.done();
+        if ((int) sp.queue_depth() != 0) throw new RuntimeException("expected depth=0 after done");
+        if (!((String) sp.status()).equals("printing")) throw new RuntimeException("expected printing still");
+        sp.done();
+        if (!((String) sp.status()).equals("idle")) throw new RuntimeException("expected idle final");
+        System.out.println("PASS: print_spooler");
+    }
+}

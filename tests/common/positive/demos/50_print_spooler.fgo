@@ -1,0 +1,61 @@
+@@[target("go")]
+
+package main
+
+import (
+	"fmt"
+	"os"
+)
+
+@@system PrintSpooler {
+    interface:
+        submit(name: string, pages: int)
+        done()
+        queue_depth(): int
+        status(): string
+
+    machine:
+        $Idle {
+            submit(name: string, pages: int) { -> $Printing }
+            queue_depth(): int { @@:(0) }
+            status(): string { @@:("idle") }
+        }
+
+        $Printing {
+            submit(name: string, pages: int) {
+                s.depth = s.depth + 1
+            }
+            done() {
+                if s.depth > 0 {
+                    s.depth = s.depth - 1
+                } else {
+                    -> $Idle
+                }
+            }
+            queue_depth(): int { @@:(s.depth) }
+            status(): string { @@:("printing") }
+        }
+
+    domain:
+        depth: int = 0
+}
+
+func main() {
+    sp := NewPrintSpooler()
+    if sp.Status() != "idle" { fmt.Println("FAIL: idle"); os.Exit(1) }
+    if sp.Queue_depth() != 0 { fmt.Println("FAIL: depth0"); os.Exit(1) }
+    sp.Submit("a", 1)
+    if sp.Status() != "printing" { fmt.Println("FAIL: printing"); os.Exit(1) }
+    sp.Submit("b", 2)
+    if sp.Queue_depth() != 1 { fmt.Println("FAIL: depth1"); os.Exit(1) }
+    sp.Submit("c", 3)
+    if sp.Queue_depth() != 2 { fmt.Println("FAIL: depth2"); os.Exit(1) }
+    sp.Done()
+    if sp.Queue_depth() != 1 { fmt.Println("FAIL: depth1b"); os.Exit(1) }
+    sp.Done()
+    if sp.Queue_depth() != 0 { fmt.Println("FAIL: depth0b"); os.Exit(1) }
+    if sp.Status() != "printing" { fmt.Println("FAIL: still printing"); os.Exit(1) }
+    sp.Done()
+    if sp.Status() != "idle" { fmt.Println("FAIL: idle final"); os.Exit(1) }
+    fmt.Println("PASS: print_spooler")
+}

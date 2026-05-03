@@ -1,0 +1,54 @@
+@@[target("php")]
+
+<?php
+
+@@system PrintSpooler {
+    interface:
+        submit(name: str, pages: int)
+        done()
+        queue_depth(): int
+        status(): str
+
+    machine:
+        $Idle {
+            submit(name: str, pages: int) { -> $Printing }
+            queue_depth(): int { @@:(0) }
+            status(): str { @@:("idle") }
+        }
+
+        $Printing {
+            submit(name: str, pages: int) {
+                $this->depth = $this->depth + 1;
+            }
+            done() {
+                if ($this->depth > 0) {
+                    $this->depth = $this->depth - 1;
+                } else {
+                    -> $Idle
+                }
+            }
+            queue_depth(): int { @@:($this->depth) }
+            status(): str { @@:("printing") }
+        }
+
+    domain:
+        depth = 0
+}
+
+$sp = @@PrintSpooler();
+assert($sp->status() === "idle");
+assert($sp->queue_depth() === 0);
+$sp->submit("a", 1);
+assert($sp->status() === "printing");
+$sp->submit("b", 2);
+assert($sp->queue_depth() === 1);
+$sp->submit("c", 3);
+assert($sp->queue_depth() === 2);
+$sp->done();
+assert($sp->queue_depth() === 1);
+$sp->done();
+assert($sp->queue_depth() === 0);
+assert($sp->status() === "printing");
+$sp->done();
+assert($sp->status() === "idle");
+echo "PASS: print_spooler\n";

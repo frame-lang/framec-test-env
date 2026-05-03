@@ -1,0 +1,54 @@
+@@[target("swift")]
+
+import Foundation
+
+@@system PrintSpooler {
+    interface:
+        submit(name: String, pages: Int)
+        done()
+        queue_depth(): Int
+        status(): String
+
+    machine:
+        $Idle {
+            submit(name: String, pages: Int) { -> $Printing }
+            queue_depth(): Int { @@:(0) }
+            status(): String { @@:("idle") }
+        }
+
+        $Printing {
+            submit(name: String, pages: Int) {
+                self.depth = self.depth + 1
+            }
+            done() {
+                if self.depth > 0 {
+                    self.depth = self.depth - 1
+                } else {
+                    -> $Idle
+                }
+            }
+            queue_depth(): Int { @@:(self.depth) }
+            status(): String { @@:("printing") }
+        }
+
+    domain:
+        depth: Int = 0
+}
+
+let sp = @@PrintSpooler()
+if (sp.status() as! String) != "idle" { print("FAIL: idle"); exit(1) }
+if (sp.queue_depth() as! Int) != 0 { print("FAIL: depth0"); exit(1) }
+sp.submit("a", 1)
+if (sp.status() as! String) != "printing" { print("FAIL: printing"); exit(1) }
+sp.submit("b", 2)
+if (sp.queue_depth() as! Int) != 1 { print("FAIL: depth1"); exit(1) }
+sp.submit("c", 3)
+if (sp.queue_depth() as! Int) != 2 { print("FAIL: depth2"); exit(1) }
+sp.done()
+if (sp.queue_depth() as! Int) != 1 { print("FAIL: depth1b"); exit(1) }
+sp.done()
+if (sp.queue_depth() as! Int) != 0 { print("FAIL: depth0b"); exit(1) }
+if (sp.status() as! String) != "printing" { print("FAIL: still printing"); exit(1) }
+sp.done()
+if (sp.status() as! String) != "idle" { print("FAIL: idle final"); exit(1) }
+print("PASS: print_spooler")

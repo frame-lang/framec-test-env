@@ -1,0 +1,60 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+@@system PrintSpooler {
+    interface:
+        submit(name: str, pages: int)
+        done()
+        queue_depth(): int
+        status(): str
+
+    machine:
+        $Idle {
+            submit(name: str, pages: int) { -> $Printing }
+            queue_depth(): int { @@:(0) }
+            status(): str { @@:("idle") }
+        }
+
+        $Printing {
+            submit(name: str, pages: int) {
+                self->depth = self->depth + 1;
+            }
+            done() {
+                if (self->depth > 0) {
+                    self->depth = self->depth - 1;
+                } else {
+                    -> $Idle
+                }
+            }
+            queue_depth(): int { @@:(self->depth) }
+            status(): str { @@:("printing") }
+        }
+
+    domain:
+        depth: int = 0
+}
+
+int main() {
+    PrintSpooler* sp = @@PrintSpooler();
+    if (strcmp(PrintSpooler_status(sp), "idle") != 0) { printf("FAIL: idle\n"); return 1; }
+    if (PrintSpooler_queue_depth(sp) != 0) { printf("FAIL: depth0\n"); return 1; }
+    PrintSpooler_submit(sp, "a", 1);
+    if (strcmp(PrintSpooler_status(sp), "printing") != 0) { printf("FAIL: printing\n"); return 1; }
+    PrintSpooler_submit(sp, "b", 2);
+    if (PrintSpooler_queue_depth(sp) != 1) { printf("FAIL: depth1\n"); return 1; }
+    PrintSpooler_submit(sp, "c", 3);
+    if (PrintSpooler_queue_depth(sp) != 2) { printf("FAIL: depth2\n"); return 1; }
+    PrintSpooler_done(sp);
+    if (PrintSpooler_queue_depth(sp) != 1) { printf("FAIL: depth1b\n"); return 1; }
+    PrintSpooler_done(sp);
+    if (PrintSpooler_queue_depth(sp) != 0) { printf("FAIL: depth0b\n"); return 1; }
+    if (strcmp(PrintSpooler_status(sp), "printing") != 0) { printf("FAIL: still printing\n"); return 1; }
+    PrintSpooler_done(sp);
+    if (strcmp(PrintSpooler_status(sp), "idle") != 0) { printf("FAIL: idle final\n"); return 1; }
+    printf("PASS: print_spooler\n");
+    PrintSpooler_destroy(sp);
+    return 0;
+}

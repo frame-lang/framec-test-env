@@ -1,0 +1,52 @@
+@@[target("lua")]
+
+@@system PrintSpooler {
+    interface:
+        submit(name: str, pages: int)
+        done()
+        queue_depth(): int
+        status(): str
+
+    machine:
+        $Idle {
+            submit(name: str, pages: int) { -> $Printing }
+            queue_depth(): int { @@:(0) }
+            status(): str { @@:("idle") }
+        }
+
+        $Printing {
+            submit(name: str, pages: int) {
+                self.depth = self.depth + 1
+            }
+            done() {
+                if self.depth > 0 then
+                    self.depth = self.depth - 1
+                else
+                    -> $Idle
+                end
+            }
+            queue_depth(): int { @@:(self.depth) }
+            status(): str { @@:("printing") }
+        }
+
+    domain:
+        depth: int = 0
+}
+
+local sp = @@PrintSpooler()
+assert(sp:status() == "idle", "expected idle")
+assert(sp:queue_depth() == 0, "expected depth=0")
+sp:submit("a", 1)
+assert(sp:status() == "printing", "expected printing")
+sp:submit("b", 2)
+assert(sp:queue_depth() == 1, "expected depth=1")
+sp:submit("c", 3)
+assert(sp:queue_depth() == 2, "expected depth=2")
+sp:done()
+assert(sp:queue_depth() == 1, "expected depth=1 after done")
+sp:done()
+assert(sp:queue_depth() == 0, "expected depth=0 after done")
+assert(sp:status() == "printing", "expected printing still")
+sp:done()
+assert(sp:status() == "idle", "expected idle final")
+print("PASS: print_spooler")

@@ -1,0 +1,52 @@
+@@[target("ruby")]
+
+@@system PrintSpooler {
+    interface:
+        submit(name: str, pages: int)
+        done()
+        queue_depth(): int
+        status(): str
+
+    machine:
+        $Idle {
+            submit(name: str, pages: int) { -> $Printing }
+            queue_depth(): int { @@:(0) }
+            status(): str { @@:("idle") }
+        }
+
+        $Printing {
+            submit(name: str, pages: int) {
+                @depth = @depth + 1
+            }
+            done() {
+                if @depth > 0
+                    @depth = @depth - 1
+                else
+                    -> $Idle
+                end
+            }
+            queue_depth(): int { @@:(@depth) }
+            status(): str { @@:("printing") }
+        }
+
+    domain:
+        depth = 0
+}
+
+sp = PrintSpooler.new
+raise "expected idle" unless sp.status == "idle"
+raise "expected depth=0" unless sp.queue_depth == 0
+sp.submit("a", 1)
+raise "expected printing" unless sp.status == "printing"
+sp.submit("b", 2)
+raise "expected depth=1" unless sp.queue_depth == 1
+sp.submit("c", 3)
+raise "expected depth=2" unless sp.queue_depth == 2
+sp.done
+raise "expected depth=1b" unless sp.queue_depth == 1
+sp.done
+raise "expected depth=0b" unless sp.queue_depth == 0
+raise "expected still printing" unless sp.status == "printing"
+sp.done
+raise "expected idle final" unless sp.status == "idle"
+puts "PASS: print_spooler"

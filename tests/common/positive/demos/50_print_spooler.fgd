@@ -1,0 +1,63 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@system PrintSpooler {
+    interface:
+        submit(name: String, pages: int)
+        done()
+        queue_depth(): int
+        status(): String
+
+    machine:
+        $Idle {
+            submit(name: String, pages: int) { -> $Printing }
+            queue_depth(): int { @@:(0) }
+            status(): String { @@:("idle") }
+        }
+
+        $Printing {
+            submit(name: String, pages: int) {
+                self.depth = self.depth + 1
+            }
+            done() {
+                if self.depth > 0:
+                    self.depth = self.depth - 1
+                else:
+                    -> $Idle
+            }
+            queue_depth(): int { @@:(self.depth) }
+            status(): String { @@:("printing") }
+        }
+
+    domain:
+        depth = 0
+}
+
+func main():
+    var sp = @@PrintSpooler()
+    var failures = 0
+    if sp.status() != "idle": print("FAIL: idle"); failures += 1
+    if sp.queue_depth() != 0: print("FAIL: depth0"); failures += 1
+    sp.submit("a", 1)
+    if sp.status() != "printing": print("FAIL: printing"); failures += 1
+    sp.submit("b", 2)
+    if sp.queue_depth() != 1: print("FAIL: depth1"); failures += 1
+    sp.submit("c", 3)
+    if sp.queue_depth() != 2: print("FAIL: depth2"); failures += 1
+    sp.done()
+    if sp.queue_depth() != 1: print("FAIL: depth1b"); failures += 1
+    sp.done()
+    if sp.queue_depth() != 0: print("FAIL: depth0b"); failures += 1
+    if sp.status() != "printing": print("FAIL: still printing"); failures += 1
+    sp.done()
+    if sp.status() != "idle": print("FAIL: idle final"); failures += 1
+
+    if failures > 0:
+        print("FAIL: print_spooler (" + str(failures) + " failures)")
+        quit(1)
+    print("PASS: print_spooler")
+
+func _init():
+    main()
+    quit()

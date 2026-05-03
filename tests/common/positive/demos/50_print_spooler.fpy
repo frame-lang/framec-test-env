@@ -1,0 +1,68 @@
+@@[target("python_3")]
+
+# Smoke-test variant of cookbook recipe 50 (Print Spooler — Basic
+# Work Queue). Single-counter simplification: rather than tracking a
+# list of job dicts, this variant tracks queue depth as an int. The
+# state machine still exercises the core lifecycle: $Idle accepts
+# the first submit and transitions to $Printing; subsequent submits
+# while $Printing increment the queue; done() decrements the queue
+# until empty, then returns to $Idle.
+
+@@system PrintSpooler {
+    interface:
+        submit(name: str, pages: int)
+        done()
+        queue_depth(): int
+        status(): str
+
+    machine:
+        $Idle {
+            submit(name: str, pages: int) { -> $Printing }
+            queue_depth(): int { @@:(0) }
+            status(): str { @@:("idle") }
+        }
+
+        $Printing {
+            submit(name: str, pages: int) {
+                self.depth = self.depth + 1
+            }
+            done() {
+                if self.depth > 0:
+                    self.depth = self.depth - 1
+                else:
+                    -> $Idle
+            }
+            queue_depth(): int { @@:(self.depth) }
+            status(): str { @@:("printing") }
+        }
+
+    domain:
+        depth: int = 0
+}
+
+if __name__ == '__main__':
+    sp = @@PrintSpooler()
+    assert sp.status() == "idle"
+    assert sp.queue_depth() == 0
+
+    sp.submit("a", 1)
+    assert sp.status() == "printing"
+    assert sp.queue_depth() == 0
+
+    sp.submit("b", 2)
+    assert sp.queue_depth() == 1
+
+    sp.submit("c", 3)
+    assert sp.queue_depth() == 2
+
+    sp.done()
+    assert sp.queue_depth() == 1
+
+    sp.done()
+    assert sp.queue_depth() == 0
+    assert sp.status() == "printing"
+
+    sp.done()
+    assert sp.status() == "idle"
+
+    print("PASS: print_spooler")

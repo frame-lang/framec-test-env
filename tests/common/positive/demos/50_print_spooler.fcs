@@ -1,0 +1,58 @@
+@@[target("csharp")]
+
+using System;
+
+@@system PrintSpooler {
+    interface:
+        submit(name: String, pages: int)
+        done()
+        queue_depth(): int
+        status(): String
+
+    machine:
+        $Idle {
+            submit(name: String, pages: int) { -> $Printing }
+            queue_depth(): int { @@:(0) }
+            status(): String { @@:("idle") }
+        }
+
+        $Printing {
+            submit(name: String, pages: int) {
+                this.depth = this.depth + 1;
+            }
+            done() {
+                if (this.depth > 0) {
+                    this.depth = this.depth - 1;
+                } else {
+                    -> $Idle
+                }
+            }
+            queue_depth(): int { @@:(this.depth) }
+            status(): String { @@:("printing") }
+        }
+
+    domain:
+        depth: int = 0
+}
+
+class Program {
+    static void Main(string[] args) {
+        var sp = @@PrintSpooler();
+        if ((string) sp.status() != "idle") throw new Exception("expected idle");
+        if ((int) sp.queue_depth() != 0) throw new Exception("expected depth=0");
+        sp.submit("a", 1);
+        if ((string) sp.status() != "printing") throw new Exception("expected printing");
+        sp.submit("b", 2);
+        if ((int) sp.queue_depth() != 1) throw new Exception("expected depth=1");
+        sp.submit("c", 3);
+        if ((int) sp.queue_depth() != 2) throw new Exception("expected depth=2");
+        sp.done();
+        if ((int) sp.queue_depth() != 1) throw new Exception("expected depth=1 after done");
+        sp.done();
+        if ((int) sp.queue_depth() != 0) throw new Exception("expected depth=0 after done");
+        if ((string) sp.status() != "printing") throw new Exception("expected printing still");
+        sp.done();
+        if ((string) sp.status() != "idle") throw new Exception("expected idle final");
+        Console.WriteLine("PASS: print_spooler");
+    }
+}

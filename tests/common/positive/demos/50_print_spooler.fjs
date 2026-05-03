@@ -1,0 +1,52 @@
+@@[target("javascript")]
+
+@@system PrintSpooler {
+    interface:
+        submit(name, pages)
+        done()
+        queue_depth()
+        status()
+
+    machine:
+        $Idle {
+            submit(name, pages) { -> $Printing }
+            queue_depth() { @@:(0) }
+            status() { @@:("idle") }
+        }
+
+        $Printing {
+            submit(name, pages) {
+                this.depth = this.depth + 1;
+            }
+            done() {
+                if (this.depth > 0) {
+                    this.depth = this.depth - 1;
+                } else {
+                    -> $Idle
+                }
+            }
+            queue_depth() { @@:(this.depth) }
+            status() { @@:("printing") }
+        }
+
+    domain:
+        depth = 0
+}
+
+const sp = @@PrintSpooler();
+if (sp.status() !== "idle") throw new Error("expected idle");
+if (sp.queue_depth() !== 0) throw new Error("expected depth=0");
+sp.submit("a", 1);
+if (sp.status() !== "printing") throw new Error("expected printing");
+sp.submit("b", 2);
+if (sp.queue_depth() !== 1) throw new Error("expected depth=1");
+sp.submit("c", 3);
+if (sp.queue_depth() !== 2) throw new Error("expected depth=2");
+sp.done();
+if (sp.queue_depth() !== 1) throw new Error("expected depth=1 after done");
+sp.done();
+if (sp.queue_depth() !== 0) throw new Error("expected depth=0 after done");
+if (sp.status() !== "printing") throw new Error("expected printing still");
+sp.done();
+if (sp.status() !== "idle") throw new Error("expected idle after final done");
+console.log("PASS: print_spooler");

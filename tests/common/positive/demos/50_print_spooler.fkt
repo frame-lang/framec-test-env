@@ -1,0 +1,54 @@
+@@[target("kotlin")]
+
+@@system PrintSpooler {
+    interface:
+        submit(name: String, pages: Int)
+        done()
+        queue_depth(): Int
+        status(): String
+
+    machine:
+        $Idle {
+            submit(name: String, pages: Int) { -> $Printing }
+            queue_depth(): Int { @@:(0) }
+            status(): String { @@:("idle") }
+        }
+
+        $Printing {
+            submit(name: String, pages: Int) {
+                this.depth = this.depth + 1
+            }
+            done() {
+                if (this.depth > 0) {
+                    this.depth = this.depth - 1
+                } else {
+                    -> $Idle
+                }
+            }
+            queue_depth(): Int { @@:(this.depth) }
+            status(): String { @@:("printing") }
+        }
+
+    domain:
+        depth: Int = 0
+}
+
+fun main() {
+    val sp = @@PrintSpooler()
+    if ((sp.status() as String) != "idle") throw RuntimeException("expected idle")
+    if ((sp.queue_depth() as Int) != 0) throw RuntimeException("expected depth=0")
+    sp.submit("a", 1)
+    if ((sp.status() as String) != "printing") throw RuntimeException("expected printing")
+    sp.submit("b", 2)
+    if ((sp.queue_depth() as Int) != 1) throw RuntimeException("expected depth=1")
+    sp.submit("c", 3)
+    if ((sp.queue_depth() as Int) != 2) throw RuntimeException("expected depth=2")
+    sp.done()
+    if ((sp.queue_depth() as Int) != 1) throw RuntimeException("expected depth=1 after done")
+    sp.done()
+    if ((sp.queue_depth() as Int) != 0) throw RuntimeException("expected depth=0 after done")
+    if ((sp.status() as String) != "printing") throw RuntimeException("expected printing still")
+    sp.done()
+    if ((sp.status() as String) != "idle") throw RuntimeException("expected idle final")
+    println("PASS: print_spooler")
+}

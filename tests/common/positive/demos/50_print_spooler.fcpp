@@ -1,0 +1,59 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <cassert>
+
+@@system PrintSpooler {
+    interface:
+        submit(name: str, pages: int)
+        done()
+        queue_depth(): int
+        status(): str
+
+    machine:
+        $Idle {
+            submit(name: str, pages: int) { -> $Printing }
+            queue_depth(): int { @@:(0) }
+            status(): str { @@:(std::string("idle")) }
+        }
+
+        $Printing {
+            submit(name: str, pages: int) {
+                this->depth = this->depth + 1;
+            }
+            done() {
+                if (this->depth > 0) {
+                    this->depth = this->depth - 1;
+                } else {
+                    -> $Idle
+                }
+            }
+            queue_depth(): int { @@:(this->depth) }
+            status(): str { @@:(std::string("printing")) }
+        }
+
+    domain:
+        depth: int = 0
+}
+
+int main() {
+    PrintSpooler sp;
+    assert(std::any_cast<std::string>(sp.status()) == "idle");
+    assert(std::any_cast<int>(sp.queue_depth()) == 0);
+    sp.submit("a", 1);
+    assert(std::any_cast<std::string>(sp.status()) == "printing");
+    sp.submit("b", 2);
+    assert(std::any_cast<int>(sp.queue_depth()) == 1);
+    sp.submit("c", 3);
+    assert(std::any_cast<int>(sp.queue_depth()) == 2);
+    sp.done();
+    assert(std::any_cast<int>(sp.queue_depth()) == 1);
+    sp.done();
+    assert(std::any_cast<int>(sp.queue_depth()) == 0);
+    assert(std::any_cast<std::string>(sp.status()) == "printing");
+    sp.done();
+    assert(std::any_cast<std::string>(sp.status()) == "idle");
+    std::cout << "PASS: print_spooler" << std::endl;
+    return 0;
+}
