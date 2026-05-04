@@ -1,0 +1,60 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+@@[persist]
+@@system Counter {
+    operations:
+        @@[save]
+        save_state(): String {}
+
+        @@[load]
+        restore_state(data: String) {}
+
+        @@[on_load]
+        rebuild_derived() {
+            self.doubled = self.n * 2
+            self.was_restored = true
+        }
+
+    interface:
+        bump()
+        get_n(): int
+        get_doubled(): int
+        was_loaded(): bool
+
+    machine:
+        $Active {
+            bump() { self.n = self.n + 1 }
+            get_n(): int { @@:(self.n) }
+            get_doubled(): int { @@:(self.doubled) }
+            was_loaded(): bool { @@:(self.was_restored) }
+        }
+
+    domain:
+        n: int = 0
+        doubled: int = 0
+        was_restored: bool = false
+}
+
+func _init():
+    var c1 = Counter.new()
+    c1.bump(); c1.bump(); c1.bump()
+    if c1.was_loaded():
+        print("FAIL: was_restored should be false pre-restore"); quit()
+    if c1.get_doubled() != 0:
+        print("FAIL: doubled should be 0 pre-restore, got " + str(c1.get_doubled())); quit()
+
+    var data = c1.save_state()
+
+    var c2 = Counter.new()
+    c2.restore_state(data)
+    if not c2.was_loaded():
+        print("FAIL: was_restored should be true after on_load"); quit()
+    if c2.get_n() != 3:
+        print("FAIL: n should be 3, got " + str(c2.get_n())); quit()
+    if c2.get_doubled() != 6:
+        print("FAIL: doubled should be 6, got " + str(c2.get_doubled())); quit()
+
+    print("PASS: 95_persist_on_load_hook")
+    quit()

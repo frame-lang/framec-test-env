@@ -1,0 +1,57 @@
+@@[target("ruby")]
+
+@@[persist]
+@@system Counter {
+    operations:
+        @@[save]
+        save_state(): String {}
+
+        @@[load]
+        restore_state(data: String) {}
+
+        @@[on_load]
+        rebuild_derived() {
+            @doubled = @n * 2
+            @was_restored = true
+        }
+
+    interface:
+        bump()
+        get_n(): Integer
+        get_doubled(): Integer
+        was_loaded(): TrueClass
+
+    machine:
+        $Active {
+            bump() { @n = @n + 1 }
+            get_n(): Integer { @@:(@n) }
+            get_doubled(): Integer { @@:(@doubled) }
+            was_loaded(): TrueClass { @@:(@was_restored) }
+        }
+
+    domain:
+        n: Integer = 0
+        doubled: Integer = 0
+        was_restored: TrueClass = false
+}
+
+c1 = Counter.new
+c1.bump; c1.bump; c1.bump
+if c1.was_loaded
+    puts "FAIL: was_restored should be false pre-restore"
+elsif c1.get_doubled != 0
+    puts "FAIL: doubled should be 0, got #{c1.get_doubled}"
+else
+    data = c1.save_state
+    c2 = Counter.new
+    c2.restore_state(data)
+    if !c2.was_loaded
+        puts "FAIL: was_restored should be true after on_load"
+    elsif c2.get_n != 3
+        puts "FAIL: n should be 3, got #{c2.get_n}"
+    elsif c2.get_doubled != 6
+        puts "FAIL: doubled should be 6, got #{c2.get_doubled}"
+    else
+        puts "PASS: 95_persist_on_load_hook"
+    end
+end

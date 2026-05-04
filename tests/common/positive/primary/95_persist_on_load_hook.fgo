@@ -1,0 +1,64 @@
+@@[target("go")]
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+var _ = json.Unmarshal
+var _ = os.Args
+
+@@[persist]
+@@system Counter {
+    operations:
+        @@[save]
+        SaveState(): string {}
+
+        @@[load]
+        RestoreState(data: string) {}
+
+        @@[on_load]
+        RebuildDerived() {
+            s.doubled = s.n * 2
+            s.was_restored = true
+        }
+
+    interface:
+        Bump()
+        GetN(): int
+        GetDoubled(): int
+        WasLoaded(): bool
+
+    machine:
+        $Active {
+            Bump() { s.n = s.n + 1 }
+            GetN(): int { @@:(s.n) }
+            GetDoubled(): int { @@:(s.doubled) }
+            WasLoaded(): bool { @@:(s.was_restored) }
+        }
+
+    domain:
+        n: int = 0
+        doubled: int = 0
+        was_restored: bool = false
+}
+
+func main() {
+    c1 := NewCounter()
+    c1.Bump(); c1.Bump(); c1.Bump()
+    if c1.WasLoaded() { fmt.Println("FAIL: was_restored should be false pre-restore"); return }
+    if c1.GetDoubled() != 0 { fmt.Printf("FAIL: doubled should be 0, got %d\n", c1.GetDoubled()); return }
+
+    data := c1.SaveState()
+
+    c2 := NewCounter()
+    c2.RestoreState(data)
+    if !c2.WasLoaded() { fmt.Println("FAIL: was_restored should be true after on_load"); return }
+    if c2.GetN() != 3 { fmt.Printf("FAIL: n should be 3, got %d\n", c2.GetN()); return }
+    if c2.GetDoubled() != 6 { fmt.Printf("FAIL: doubled should be 6, got %d\n", c2.GetDoubled()); return }
+
+    fmt.Println("PASS: 95_persist_on_load_hook")
+}

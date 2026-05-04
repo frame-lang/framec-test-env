@@ -1,0 +1,58 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <nlohmann/json.hpp>
+
+@@[persist]
+@@system Counter {
+    operations:
+        @@[save]
+        save_state(): std::string {}
+
+        @@[load]
+        restore_state(data: std::string) {}
+
+        @@[on_load]
+        rebuild_derived() {
+            this->doubled = this->n * 2;
+            this->was_restored = true;
+        }
+
+    interface:
+        bump()
+        get_n(): int
+        get_doubled(): int
+        was_loaded(): bool
+
+    machine:
+        $Active {
+            bump() { this->n = this->n + 1; }
+            get_n(): int { @@:(this->n) }
+            get_doubled(): int { @@:(this->doubled) }
+            was_loaded(): bool { @@:(this->was_restored) }
+        }
+
+    domain:
+        n: int = 0
+        doubled: int = 0
+        was_restored: bool = false
+}
+
+int main() {
+    Counter c1;
+    c1.bump(); c1.bump(); c1.bump();
+    if (c1.was_loaded()) { std::cout << "FAIL: was_restored should be false pre-restore" << std::endl; return 1; }
+    if (c1.get_doubled() != 0) { std::cout << "FAIL: doubled should be 0, got " << c1.get_doubled() << std::endl; return 1; }
+
+    std::string data = c1.save_state();
+
+    Counter c2;
+    c2.restore_state(data);
+    if (!c2.was_loaded()) { std::cout << "FAIL: was_restored should be true after on_load" << std::endl; return 1; }
+    if (c2.get_n() != 3) { std::cout << "FAIL: n should be 3, got " << c2.get_n() << std::endl; return 1; }
+    if (c2.get_doubled() != 6) { std::cout << "FAIL: doubled should be 6, got " << c2.get_doubled() << std::endl; return 1; }
+
+    std::cout << "PASS: 95_persist_on_load_hook" << std::endl;
+    return 0;
+}

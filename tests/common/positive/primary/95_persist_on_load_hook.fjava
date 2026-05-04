@@ -1,0 +1,55 @@
+@@[target("java")]
+
+@@[persist]
+@@system Counter {
+    operations:
+        @@[save]
+        save_state(): String {}
+
+        @@[load]
+        restore_state(data: String) {}
+
+        @@[on_load]
+        rebuild_derived() {
+            this.doubled = this.n * 2;
+            this.was_restored = true;
+        }
+
+    interface:
+        bump()
+        get_n(): int
+        get_doubled(): int
+        was_loaded(): boolean
+
+    machine:
+        $Active {
+            bump() { this.n = this.n + 1; }
+            get_n(): int { @@:(this.n) }
+            get_doubled(): int { @@:(this.doubled) }
+            was_loaded(): boolean { @@:(this.was_restored) }
+        }
+
+    domain:
+        n: int = 0
+        doubled: int = 0
+        was_restored: boolean = false
+}
+
+class Main {
+    public static void main(String[] args) {
+        Counter c1 = new Counter();
+        c1.bump(); c1.bump(); c1.bump();
+        if (c1.was_loaded()) { System.out.println("FAIL: was_restored should be false pre-restore"); return; }
+        if (c1.get_doubled() != 0) { System.out.println("FAIL: doubled should be 0, got " + c1.get_doubled()); return; }
+
+        String data = c1.save_state();
+
+        Counter c2 = new Counter();
+        c2.restore_state(data);
+        if (!c2.was_loaded()) { System.out.println("FAIL: was_restored should be true after on_load"); return; }
+        if (c2.get_n() != 3) { System.out.println("FAIL: n should be 3, got " + c2.get_n()); return; }
+        if (c2.get_doubled() != 6) { System.out.println("FAIL: doubled should be 6, got " + c2.get_doubled()); return; }
+
+        System.out.println("PASS: 95_persist_on_load_hook");
+    }
+}
