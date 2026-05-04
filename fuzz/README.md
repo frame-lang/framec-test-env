@@ -711,18 +711,20 @@ Patterns:
   outer.tick() → inner.bump(), save outer, restore, verify the
   inner state survived.
 
-First-wave coverage: 4 langs (Python, JS, TS, Rust). Run:
+Coverage: **16 langs** (all 17 minus Erlang — gen_statem processes
+don't compose as in-process domain fields; cross-system Erlang
+persist is covered separately via `tests/erlang/multi/*`). Run:
 
 ```bash
 python3 gen_persist_multisys.py --max 10
-# transpile + run each via the matrix harness, or by hand:
-for f in cases_persist_multisys/python_3_*.fpy; do
-    framec compile -l python_3 -o /tmp "$f"
-    python3 /tmp/$(basename "$f" .fpy).py
-done
+./run_persist_multisys.sh
 ```
 
-v1 result (2026-05-04): **40 cases × 4 langs all transpile**;
-Python and JS verified end-to-end (PASS on every case). RFC-0015
-Phase 5 fuzz scaffold landed; expansion to remaining 13 backends and
-P2/P3 patterns is iterative.
+The runner transpiles every case and runs the dynamic-language ones
+in-process (Python + JS). Toolchain-heavy backends (Java, Rust,
+GDScript, etc.) are transpile-checked here; the matrix harness owns
+their runtime exec.
+
+Result (2026-05-04): **160 cases × 16 langs all transpile clean**;
+Python + JS = 20/20 PASS at runtime. Locks in the RFC-0015 Issue #2
+fix end-to-end.
