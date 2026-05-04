@@ -1,0 +1,48 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <nlohmann/json.hpp>
+
+@@[persist(JSON)]
+@@[save(snapshot)]
+@@[load(rehydrate)]
+@@system Counter {
+    interface:
+        get_fire_count(): int
+
+    machine:
+        $A {
+            $>() {
+                this->fire_count = this->fire_count + 1;
+            }
+            get_fire_count(): int { @@:(this->fire_count) }
+        }
+
+    domain:
+        fire_count: int = 0
+}
+
+int main() {
+    Counter c;
+    if (c.get_fire_count() != 1) {
+        std::cout << "FAIL: expected 1 after construction, got " << c.get_fire_count() << std::endl;
+        return 1;
+    }
+    std::string snap = c.snapshot();
+
+    Counter fresh;
+    if (fresh.get_fire_count() != 1) {
+        std::cout << "FAIL: expected 1 on fresh construction, got " << fresh.get_fire_count() << std::endl;
+        return 1;
+    }
+
+    fresh.rehydrate(snap);
+    if (fresh.get_fire_count() != 1) {
+        std::cout << "D4 violation: $> re-ran on restore (count=" << fresh.get_fire_count() << ", expected 1)" << std::endl;
+        return 1;
+    }
+
+    std::cout << "PASS: rfc0015_restore_skips_init" << std::endl;
+    return 0;
+}

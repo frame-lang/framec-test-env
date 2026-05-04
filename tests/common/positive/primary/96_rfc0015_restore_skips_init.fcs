@@ -1,0 +1,45 @@
+@@[target("csharp")]
+
+@@[persist(JSON)]
+@@[save(snapshot)]
+@@[load(rehydrate)]
+@@system Counter {
+    interface:
+        GetFireCount(): int
+
+    machine:
+        $A {
+            $>() {
+                this.fire_count = this.fire_count + 1;
+            }
+            GetFireCount(): int { @@:(this.fire_count) }
+        }
+
+    domain:
+        fire_count: int = 0
+}
+
+class Program {
+    static void Main() {
+        Counter c = new Counter();
+        if (c.GetFireCount() != 1) {
+            System.Console.WriteLine($"FAIL: expected 1 after construction, got {c.GetFireCount()}");
+            return;
+        }
+        string snap = c.snapshot();
+
+        Counter fresh = new Counter();
+        if (fresh.GetFireCount() != 1) {
+            System.Console.WriteLine($"FAIL: expected 1 on fresh construction, got {fresh.GetFireCount()}");
+            return;
+        }
+
+        fresh.rehydrate(snap);
+        if (fresh.GetFireCount() != 1) {
+            System.Console.WriteLine($"D4 violation: $> re-ran on restore (count={fresh.GetFireCount()}, expected 1)");
+            return;
+        }
+
+        System.Console.WriteLine("PASS: rfc0015_restore_skips_init");
+    }
+}

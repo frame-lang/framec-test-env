@@ -1,0 +1,54 @@
+@@[target("go")]
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+var _ = json.Unmarshal
+var _ = os.Args
+
+@@[persist(JSON)]
+@@[save(snapshot)]
+@@[load(rehydrate)]
+@@system Counter {
+    interface:
+        GetFireCount(): int
+
+    machine:
+        $A {
+            $>() {
+                s.fire_count = s.fire_count + 1
+            }
+            GetFireCount(): int { @@:(s.fire_count) }
+        }
+
+    domain:
+        fire_count: int = 0
+}
+
+func main() {
+    c := NewCounter()
+    if c.GetFireCount() != 1 {
+        fmt.Printf("FAIL: expected 1 after construction, got %d\n", c.GetFireCount())
+        return
+    }
+    snap := c.Snapshot()
+
+    fresh := NewCounter()
+    if fresh.GetFireCount() != 1 {
+        fmt.Printf("FAIL: expected 1 on fresh construction, got %d\n", fresh.GetFireCount())
+        return
+    }
+
+    fresh.Rehydrate(snap)
+    if fresh.GetFireCount() != 1 {
+        fmt.Printf("D4 violation: $> re-ran on restore (count=%d, expected 1)\n", fresh.GetFireCount())
+        return
+    }
+
+    fmt.Println("PASS: rfc0015_restore_skips_init")
+}

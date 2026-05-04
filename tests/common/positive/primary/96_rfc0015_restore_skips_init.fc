@@ -1,0 +1,59 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@[persist(JSON)]
+@@[save(snapshot)]
+@@[load(rehydrate)]
+@@system Counter {
+    interface:
+        get_fire_count(): int
+
+    machine:
+        $A {
+            $>() {
+                self->fire_count = self->fire_count + 1;
+            }
+            get_fire_count(): int { @@:(self->fire_count) }
+        }
+
+    domain:
+        fire_count: int = 0
+}
+
+int main() {
+    Counter* c = Counter_new();
+    if (Counter_get_fire_count(c) != 1) {
+        printf("FAIL: expected 1 after construction, got %d\n", Counter_get_fire_count(c));
+        Counter_destroy(c);
+        return 1;
+    }
+    char* snap = Counter_snapshot(c);
+
+    Counter* fresh = Counter_new();
+    if (Counter_get_fire_count(fresh) != 1) {
+        printf("FAIL: expected 1 on fresh construction, got %d\n", Counter_get_fire_count(fresh));
+        free(snap);
+        Counter_destroy(c);
+        Counter_destroy(fresh);
+        return 1;
+    }
+
+    Counter_rehydrate(fresh, snap);
+    if (Counter_get_fire_count(fresh) != 1) {
+        printf("D4 violation: $> re-ran on restore (count=%d, expected 1)\n", Counter_get_fire_count(fresh));
+        free(snap);
+        Counter_destroy(c);
+        Counter_destroy(fresh);
+        return 1;
+    }
+
+    printf("PASS: rfc0015_restore_skips_init\n");
+    free(snap);
+    Counter_destroy(c);
+    Counter_destroy(fresh);
+    return 0;
+}

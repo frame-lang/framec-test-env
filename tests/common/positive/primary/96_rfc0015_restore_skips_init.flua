@@ -1,0 +1,41 @@
+@@[target("lua")]
+
+@@[persist(JSON)]
+@@[save(snapshot)]
+@@[load(rehydrate)]
+@@system Counter {
+    interface:
+        get_fire_count(): number
+
+    machine:
+        $A {
+            $>() {
+                self.fire_count = self.fire_count + 1
+            }
+            get_fire_count(): number { @@:(self.fire_count) }
+        }
+
+    domain:
+        fire_count: number = 0
+}
+
+local c = Counter:new()
+if c:get_fire_count() ~= 1 then
+    print("FAIL: expected 1 after construction, got " .. c:get_fire_count())
+    return
+end
+local snap = c:snapshot()
+
+local fresh = Counter:new()
+if fresh:get_fire_count() ~= 1 then
+    print("FAIL: expected 1 on fresh construction, got " .. fresh:get_fire_count())
+    return
+end
+
+fresh:rehydrate(snap)
+if fresh:get_fire_count() ~= 1 then
+    print("D4 violation: $> re-ran on restore (count=" .. fresh:get_fire_count() .. ", expected 1)")
+    return
+end
+
+print("PASS: rfc0015_restore_skips_init")

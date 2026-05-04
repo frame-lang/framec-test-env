@@ -1,0 +1,45 @@
+@@[target("java")]
+
+@@[persist(JSON)]
+@@[save(snapshot)]
+@@[load(rehydrate)]
+@@system Counter {
+    interface:
+        get_fire_count(): int
+
+    machine:
+        $A {
+            $>() {
+                this.fire_count = this.fire_count + 1;
+            }
+            get_fire_count(): int { @@:(this.fire_count) }
+        }
+
+    domain:
+        fire_count: int = 0
+}
+
+class Main {
+    public static void main(String[] args) {
+        Counter c = new Counter();
+        if (c.get_fire_count() != 1) {
+            System.out.println("FAIL: expected 1 after construction, got " + c.get_fire_count());
+            return;
+        }
+        String snap = c.snapshot();
+
+        Counter fresh = new Counter();
+        if (fresh.get_fire_count() != 1) {
+            System.out.println("FAIL: expected 1 on fresh construction, got " + fresh.get_fire_count());
+            return;
+        }
+
+        fresh.rehydrate(snap);
+        if (fresh.get_fire_count() != 1) {
+            System.out.println("D4 violation: $> re-ran on restore (count=" + fresh.get_fire_count() + ", expected 1)");
+            return;
+        }
+
+        System.out.println("PASS: rfc0015_restore_skips_init");
+    }
+}
