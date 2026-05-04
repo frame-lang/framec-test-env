@@ -1,0 +1,66 @@
+@@[target("python_3")]
+
+# RFC-0015 D4 contract: restore must skip user init.
+#
+# This test exercises the `frame_restore_mode`-equivalent contract:
+# the user's start-state `$>` handler fires once on construction
+# but must NOT re-fire on restore. The saved compartment is what
+# wins; user init logic is one-shot at construction time.
+#
+# Construction → $> fires → fire_count = 1
+# Save snapshot
+# Fresh construction (a different instance) → $> fires → fresh.fire_count = 1
+# Rehydrate from snapshot → must overwrite fire_count to saved value (1)
+#                          and NOT re-run $> (which would push count to 2)
+#
+# A failure here means the host language's constructor + enter handler
+# fire during restore — violating RFC-0015 D4. On Python today this
+# passes because rehydrate is plain JSON-overwrite of domain fields,
+# never going through $> again.
+#
+# Cross-backend port: pending matrix recovery (Docker storage corruption
+# in the dev session prevented running the matrix to verify other
+# backends honor D4).
+
+@@[persist(JSON)]
+@@[save(snapshot)]
+@@[load(rehydrate)]
+@@system Counter {
+    interface:
+        get_fire_count(): int
+
+    machine:
+        $A {
+            $>() {
+                self.fire_count = self.fire_count + 1
+            }
+            get_fire_count(): int { @@:(self.fire_count) }
+        }
+
+    domain:
+        fire_count: int = 0
+}
+
+if __name__ == '__main__':
+    # Construct — $> fires once.
+    c = Counter()
+    assert c.get_fire_count() == 1, \
+        f"expected 1 after construction, got {c.get_fire_count()}"
+
+    # Save.
+    snapshot = c.snapshot()
+
+    # Fresh instance — its own constructor fires $> once.
+    fresh = Counter()
+    assert fresh.get_fire_count() == 1, \
+        f"expected 1 on fresh construction, got {fresh.get_fire_count()}"
+
+    # Rehydrate. The saved fire_count (1) overwrites fresh's value.
+    # If $> fires again during rehydrate, count would become 2 and
+    # this assertion would catch the D4 violation.
+    fresh.rehydrate(snapshot)
+    assert fresh.get_fire_count() == 1, \
+        f"D4 violation: $> handler re-ran on restore " \
+        f"(count={fresh.get_fire_count()}, expected 1)"
+
+    print("PASS: rfc0015_restore_skips_init")
