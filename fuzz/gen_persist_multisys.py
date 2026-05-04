@@ -536,19 +536,115 @@ def method_names_for(lang):
     }
 
 
-def gen_p1(lang, case_id):
-    """Render P1 simple_nested for `lang`."""
+def _build_frame(lang, pattern_id, case_id, *, inner_param):
+    """Render the Frame source common to P1 / P2.
+
+    P1 (inner_param=False): zero-arg Inner.
+    P2 (inner_param=True): Inner takes `seed: int` constructor param;
+       Outer instantiates with `@@Inner(42)`. This is the Issue #2
+       reproducer pattern at scale — exercises that restore_state
+       reconstructs the parameterized sub-system correctly via the
+       RFC-0015 factory-only contract (saved seed threaded through to
+       `Inner.new(seed)` on restore).
+
+    Both patterns share the same epilogue (verify n==3 after 3 ticks),
+    so the same per-language assertion text serves both. The only
+    behavioural difference: P2 has an extra constructor-arg path that
+    must not break restore.
+    """
     spec = LANGS[lang]
     names = method_names_for(lang)
-    tag = f"p1_simple_nested_{case_id}"
+    tag = f"{pattern_id}_{case_id}"
     self_ = spec["self_"]
     blob = spec["blob_type"]
     int_t = spec["int_type"]
     inner_vis = spec.get("inner_visibility", "")
-    inner_decl = f"@@system {inner_vis} Inner" if inner_vis else "@@system Inner"
+    inner_name = f"@@system {inner_vis} Inner" if inner_vis else "@@system Inner"
 
-    # Frame skeleton — identical structure across backends; only
-    # the receiver / type names vary.
+    # P2: Inner takes a constructor param. The state machine ignores
+    # it (just bumps n); the test is whether the restore-time
+    # constructor call survives.
+    if inner_param:
+        inner_decl = f"{inner_name}(seed: {int_t})"
+        inner_domain = f"        seed: {int_t} = seed\n        n: {int_t} = 0"
+        outer_inner_init = "@@Inner(42)"
+    else:
+        inner_decl = inner_name
+        inner_domain = f"        n: {int_t} = 0"
+        outer_inner_init = "@@Inner()"
+
+    frame = f'''@@[target("{spec["target"]}")]
+
+{spec["prologue"]}@@[persist({blob})]
+@@[save({names["save"]})]
+@@[load({names["load"]})]
+{inner_decl} {{{{
+    interface:
+        {names["tick"]}()
+        {names["get_n"]}(): {int_t}
+    machine:
+        $Active {{{{
+            {names["tick"]}() {{{{ {self_}.n = {self_}.n + 1 }}}}
+            {names["get_n"]}(): {int_t} {{{{ @@:({self_}.n) }}}}
+        }}}}
+    domain:
+{inner_domain}
+}}}}
+
+@@[persist({blob})]
+@@[save({names["save"]})]
+@@[load({names["load"]})]
+@@[main]
+@@system Outer {{{{
+    interface:
+        {names["tick"]}()
+        {names["get_inner_n"]}(): {int_t}
+    machine:
+        $Run {{{{
+            {names["tick"]}() {{{{ {self_}.inner.{names["tick"]}() }}}}
+            {names["get_inner_n"]}(): {int_t} {{{{ @@:({self_}.inner.{names["get_n"]}()) }}}}
+        }}}}
+    domain:
+        inner: Inner = {outer_inner_init}
+}}}}
+'''
+
+    return frame.format() + spec["epilogue"].format(tag=tag)
+
+
+def gen_p1(lang, case_id):
+    """Render P1 simple_nested — zero-arg Inner."""
+    return _build_frame(lang, "p1_simple_nested", case_id, inner_param=False)
+
+
+def gen_p2(lang, case_id):
+    """Render P2 parameterized_inner — Inner takes seed: int.
+    Issue #2 reproducer at scale."""
+    return _build_frame(lang, "p2_parameterized_inner", case_id, inner_param=True)
+
+
+def gen_p3(lang, case_id):
+    """Render P3 chained — three nested systems Outer → Middle →
+    Inner. The leaf bumps a counter. Tests that persist round-trip
+    survives depth-2 cross-system composition.
+
+    The outer-side API (`tick`, `get_inner_n`) matches P1, so the
+    same per-language epilogue serves both. Only the Frame skeleton
+    grows a Middle layer."""
+    spec = LANGS[lang]
+    names = method_names_for(lang)
+    tag = f"p3_chained_{case_id}"
+    self_ = spec["self_"]
+    blob = spec["blob_type"]
+    int_t = spec["int_type"]
+    # Java needs both Inner and Middle package-private so Outer can
+    # remain the file's lone public class.
+    inner_vis = spec.get("inner_visibility", "")
+    inner_decl = (f"@@system {inner_vis} Inner" if inner_vis
+                  else "@@system Inner")
+    middle_decl = (f"@@system {inner_vis} Middle" if inner_vis
+                   else "@@system Middle")
+
     frame = f'''@@[target("{spec["target"]}")]
 
 {spec["prologue"]}@@[persist({blob})]
@@ -570,6 +666,22 @@ def gen_p1(lang, case_id):
 @@[persist({blob})]
 @@[save({names["save"]})]
 @@[load({names["load"]})]
+{middle_decl} {{{{
+    interface:
+        {names["tick"]}()
+        {names["get_n"]}(): {int_t}
+    machine:
+        $Active {{{{
+            {names["tick"]}() {{{{ {self_}.inner.{names["tick"]}() }}}}
+            {names["get_n"]}(): {int_t} {{{{ @@:({self_}.inner.{names["get_n"]}()) }}}}
+        }}}}
+    domain:
+        inner: Inner = @@Inner()
+}}}}
+
+@@[persist({blob})]
+@@[save({names["save"]})]
+@@[load({names["load"]})]
 @@[main]
 @@system Outer {{{{
     interface:
@@ -577,17 +689,22 @@ def gen_p1(lang, case_id):
         {names["get_inner_n"]}(): {int_t}
     machine:
         $Run {{{{
-            {names["tick"]}() {{{{ {self_}.inner.{names["tick"]}() }}}}
-            {names["get_inner_n"]}(): {int_t} {{{{ @@:({self_}.inner.{names["get_n"]}()) }}}}
+            {names["tick"]}() {{{{ {self_}.middle.{names["tick"]}() }}}}
+            {names["get_inner_n"]}(): {int_t} {{{{ @@:({self_}.middle.{names["get_n"]}()) }}}}
         }}}}
     domain:
-        inner: Inner = @@Inner()
+        middle: Middle = @@Middle()
 }}}}
 '''
 
-    # The epilogue carries `{tag}` as a single literal — the inner
-    # `{{` escaping is to keep the f-string above clean.
     return frame.format() + spec["epilogue"].format(tag=tag)
+
+
+PATTERNS = [
+    ("p1_simple_nested", gen_p1),
+    ("p2_parameterized_inner", gen_p2),
+    ("p3_chained", gen_p3),
+]
 
 
 def write_cases(out_dir: Path, langs, max_per_pattern):
@@ -595,13 +712,13 @@ def write_cases(out_dir: Path, langs, max_per_pattern):
     written = 0
     for lang in langs:
         ext = LANGS[lang]["ext"]
-        for i in range(max_per_pattern):
-            case_id = f"{i:03d}"
-            text = gen_p1(lang, case_id)
-            tag = f"p1_simple_nested_{case_id}"
-            out = out_dir / f"{lang}_{tag}.{ext}"
-            out.write_text(text)
-            written += 1
+        for tag_prefix, gen in PATTERNS:
+            for i in range(max_per_pattern):
+                case_id = f"{i:03d}"
+                text = gen(lang, case_id)
+                out = out_dir / f"{lang}_{tag_prefix}_{case_id}.{ext}"
+                out.write_text(text)
+                written += 1
     return written
 
 

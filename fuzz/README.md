@@ -708,8 +708,14 @@ the saved nested blob. This phase locks the fix in.
 
 Patterns:
 - **P1 simple_nested** — outer holds zero-arg Inner. Mutate via
-  outer.tick() → inner.bump(), save outer, restore, verify the
-  inner state survived.
+  outer.tick() → inner.bump(), save outer, restore, verify inner
+  state.
+- **P2 parameterized_inner** — Inner takes `seed: int` constructor
+  param. The Issue #2 reproducer at scale: restore must thread the
+  saved seed back through `Inner.new(seed)` instead of zero-arg-
+  calling and crashing.
+- **P3 chained** — three-level Outer → Middle → Inner. Tests
+  cross-system persist round-trip at depth 2.
 
 Coverage: **16 langs** (all 17 minus Erlang — gen_statem processes
 don't compose as in-process domain fields; cross-system Erlang
@@ -725,6 +731,7 @@ in-process (Python + JS). Toolchain-heavy backends (Java, Rust,
 GDScript, etc.) are transpile-checked here; the matrix harness owns
 their runtime exec.
 
-Result (2026-05-04): **160 cases × 16 langs all transpile clean**;
-Python + JS = 20/20 PASS at runtime. Locks in the RFC-0015 Issue #2
-fix end-to-end.
+Result (2026-05-04): **240 cases (3 patterns × 16 langs × 5
+cases) all transpile clean**; Python + JS = 30/30 PASS at runtime.
+Locks in the RFC-0015 Issue #2 fix end-to-end across simple, param-
+eterized-constructor, and 3-level-chained shapes.

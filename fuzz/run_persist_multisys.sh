@@ -14,9 +14,14 @@ trans_fail=0
 
 for case in "$cases_dir"/*; do
     name=$(basename "$case")
-    lang=$(echo "$name" | sed 's/_p1_.*//')
+    lang=$(echo "$name" | sed -E 's/_p[0-9]+_.*//')
     ext="${name##*.}"
-    if ! framec compile -l "$lang" -o "$out_dir" "$case" 2>/dev/null; then
+    # `lang` is the LANGS dict key; framec wants the `target` value.
+    case "$lang" in
+        cpp) target="cpp_17" ;;
+        *)   target="$lang" ;;
+    esac
+    if ! framec compile -l "$target" -o "$out_dir" "$case" 2>/dev/null; then
         echo "TRANSPILE FAIL: $name"
         trans_fail=$((trans_fail + 1))
         continue
