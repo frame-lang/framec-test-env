@@ -1,0 +1,53 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+
+@@system Counter {
+    interface:
+        get_value(): int
+        bump()
+
+    machine:
+        $Active {
+            get_value(): int { @@:(Counter__read(self)) }
+            bump() { self->n = self->n + 1; }
+        }
+
+    actions:
+        // `@@:(<expr>)` inside actions: bodies must lower to a native
+        // `return <expr>` — actions are plain functions, not Frame
+        // handlers, so there's no context-stack `_return` slot.
+        _read(): int {
+            if (self->n > 0) {
+                @@:(self->n)
+            } else {
+                @@:(0)
+            }
+        }
+
+    domain:
+        n: int = 0
+}
+
+int main() {
+    Counter* inst = @@Counter();
+    if (Counter_get_value(inst) != 0) {
+        printf("FAIL initial: expected 0, got %d\n", Counter_get_value(inst));
+        Counter_destroy(inst);
+        return 1;
+    }
+
+    Counter_bump(inst);
+    Counter_bump(inst);
+    Counter_bump(inst);
+    if (Counter_get_value(inst) != 3) {
+        printf("FAIL post-bump: expected 3, got %d\n", Counter_get_value(inst));
+        Counter_destroy(inst);
+        return 1;
+    }
+
+    printf("PASS: 94_at_colon_paren_in_action\n");
+    Counter_destroy(inst);
+    return 0;
+}

@@ -1,0 +1,53 @@
+@@[target("go")]
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system Counter {
+    interface:
+        get_value(): int
+        bump()
+
+    machine:
+        $Active {
+            get_value(): int { @@:(s._read()) }
+            bump() { s.n = s.n + 1 }
+        }
+
+    actions:
+        // `@@:(<expr>)` inside actions: bodies must lower to a native
+        // `return <expr>` — actions are plain functions, not Frame
+        // handlers, so there's no context-stack `_return` slot.
+        _read(): int {
+            if s.n > 0 {
+                @@:(s.n)
+            } else {
+                @@:(0)
+            }
+        }
+
+    domain:
+        n: int = 0
+}
+
+func main() {
+    inst := @@Counter()
+    if inst.Get_value() != 0 {
+        fmt.Printf("FAIL initial: expected 0, got %d\n", inst.Get_value())
+        os.Exit(1)
+    }
+
+    inst.Bump()
+    inst.Bump()
+    inst.Bump()
+    if inst.Get_value() != 3 {
+        fmt.Printf("FAIL post-bump: expected 3, got %d\n", inst.Get_value())
+        os.Exit(1)
+    }
+
+    fmt.Println("PASS: 94_at_colon_paren_in_action")
+}
