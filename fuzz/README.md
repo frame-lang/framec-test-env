@@ -693,3 +693,36 @@ the saved state's `$>` handler. State-vars have a re-init guard
 enter-handler logic is NOT auto-guarded. Any test that relies on
 post-pop state must either avoid state-mutating `$>` handlers or
 make them idempotent.
+
+## Phase 25: RFC-0015 persist × multi-system fuzz (Issue #2 lock-in)
+
+`gen_persist_multisys.py` — exercises the parameterized sub-system
+× persist round-trip pattern that motivated RFC-0015. The original
+defect: outer system holds `inner: Inner = @@Inner(seed)` in its
+domain, save_state on the outer crashes restore because the codegen
+tries to reconstruct `inner` via the user-defined `_init(seed)`.
+
+RFC-0015's factory-only contract eliminates the user-arg constructor:
+restore allocates with the empty blank-allocator, then populates from
+the saved nested blob. This phase locks the fix in.
+
+Patterns:
+- **P1 simple_nested** — outer holds zero-arg Inner. Mutate via
+  outer.tick() → inner.bump(), save outer, restore, verify the
+  inner state survived.
+
+First-wave coverage: 4 langs (Python, JS, TS, Rust). Run:
+
+```bash
+python3 gen_persist_multisys.py --max 10
+# transpile + run each via the matrix harness, or by hand:
+for f in cases_persist_multisys/python_3_*.fpy; do
+    framec compile -l python_3 -o /tmp "$f"
+    python3 /tmp/$(basename "$f" .fpy).py
+done
+```
+
+v1 result (2026-05-04): **40 cases × 4 langs all transpile**;
+Python and JS verified end-to-end (PASS on every case). RFC-0015
+Phase 5 fuzz scaffold landed; expansion to remaining 13 backends and
+P2/P3 patterns is iterative.
