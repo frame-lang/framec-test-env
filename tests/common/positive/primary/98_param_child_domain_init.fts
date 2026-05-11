@@ -1,0 +1,49 @@
+@@[target("typescript")]
+
+// RFC-0017 regression: see .fpy header for the full story. This
+// TypeScript port covers the same coordinate (parameterized child
+// + orchestrator domain field) so the matrix catches a Pattern A
+// classifier or domain-init-expansion drift in the TS backend.
+
+@@system Counter(seed: int) {
+    interface:
+        bump()
+        get_value(): int
+    machine:
+        $S {
+            $> { this.n = this.seed }
+            bump() { this.n = this.n + 1 }
+            get_value(): int { @@:(this.n) }
+        }
+    domain:
+        seed: number = seed
+        n: number = 0
+}
+
+@@[main]
+@@system World {
+    interface:
+        bump_c()
+        bump_d()
+        get_c(): int
+        get_d(): int
+    machine:
+        $S {
+            bump_c() { this.c.bump() }
+            bump_d() { this.d.bump() }
+            get_c(): int { @@:(this.c.get_value()) }
+            get_d(): int { @@:(this.d.get_value()) }
+        }
+    domain:
+        c: Counter = @@Counter(7)
+        d: Counter = @@Counter(11)
+}
+
+const w = @@World();
+if (w.get_c() !== 7) { console.log(`FAIL initial c: ${w.get_c()}`); process.exit(1); }
+if (w.get_d() !== 11) { console.log(`FAIL initial d: ${w.get_d()}`); process.exit(1); }
+w.bump_c();
+w.bump_d();
+if (w.get_c() !== 8) { console.log(`FAIL bump_c: ${w.get_c()}`); process.exit(1); }
+if (w.get_d() !== 12) { console.log(`FAIL bump_d: ${w.get_d()}`); process.exit(1); }
+console.log("PASS: 98_param_child_domain_init");

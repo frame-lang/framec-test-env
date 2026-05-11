@@ -1,0 +1,53 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+
+// RFC-0017 regression: see .fpy header.
+
+@@system Counter(seed: int) {
+    interface:
+        bump()
+        get_value(): int
+    machine:
+        $S {
+            $> { self->n = self->seed; }
+            bump() { self->n = self->n + 1; }
+            get_value(): int { @@:(self->n) }
+        }
+    domain:
+        seed: int = seed
+        n: int = 0
+}
+
+@@[main]
+@@system World {
+    interface:
+        bump_c()
+        bump_d()
+        get_c(): int
+        get_d(): int
+    machine:
+        $S {
+            bump_c() { self->c->bump(); }
+            bump_d() { self->d->bump(); }
+            get_c(): int { @@:(self->c->get_value()) }
+            get_d(): int { @@:(self->d->get_value()) }
+        }
+    domain:
+        c: Counter = @@Counter(7)
+        d: Counter = @@Counter(11)
+}
+
+int main() {
+    World* w = @@World();
+    if (World_get_c(w) != 7) { printf("FAIL initial c: %d\n", World_get_c(w)); return 1; }
+    if (World_get_d(w) != 11) { printf("FAIL initial d: %d\n", World_get_d(w)); return 1; }
+    World_bump_c(w);
+    World_bump_d(w);
+    if (World_get_c(w) != 8) { printf("FAIL bump_c: %d\n", World_get_c(w)); return 1; }
+    if (World_get_d(w) != 12) { printf("FAIL bump_d: %d\n", World_get_d(w)); return 1; }
+    printf("PASS: 98_param_child_domain_init\n");
+    World_destroy(w);
+    return 0;
+}

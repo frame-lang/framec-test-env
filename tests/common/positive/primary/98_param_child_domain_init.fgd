@@ -1,0 +1,61 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+# RFC-0017 regression: see .fpy header. GDScript was the originally-
+# broken backend (frame-arcade/cca repro at
+# _scratch/RFC-0017_GDSCRIPT_INIT_DECOUPLE_BUG.md). This fixture is
+# the matrix-level companion to the codegen fix.
+
+@@system Counter(seed: int) {
+    interface:
+        bump()
+        get_value(): int
+    machine:
+        $S {
+            $> { self.n = self.seed }
+            bump() { self.n = self.n + 1 }
+            get_value(): int { @@:(self.n) }
+        }
+    domain:
+        seed: int = seed
+        n: int = 0
+}
+
+@@[main]
+@@system World {
+    interface:
+        bump_c()
+        bump_d()
+        get_c(): int
+        get_d(): int
+    machine:
+        $S {
+            bump_c() { self.c.bump() }
+            bump_d() { self.d.bump() }
+            get_c(): int { @@:(self.c.get_value()) }
+            get_d(): int { @@:(self.d.get_value()) }
+        }
+    domain:
+        c = @@Counter(7)
+        d = @@Counter(11)
+}
+
+func _init():
+    var w = World._create()
+    if w.get_c() != 7:
+        print("FAIL initial c: " + str(w.get_c()))
+        quit()
+    if w.get_d() != 11:
+        print("FAIL initial d: " + str(w.get_d()))
+        quit()
+    w.bump_c()
+    w.bump_d()
+    if w.get_c() != 8:
+        print("FAIL bump_c: " + str(w.get_c()))
+        quit()
+    if w.get_d() != 12:
+        print("FAIL bump_d: " + str(w.get_d()))
+        quit()
+    print("PASS: 98_param_child_domain_init")
+    quit()

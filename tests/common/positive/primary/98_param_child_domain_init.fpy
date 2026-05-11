@@ -1,0 +1,56 @@
+@@[target("python_3")]
+
+# RFC-0017 regression: `@@SystemName(args)` in a parent's `domain:`
+# block must lower to the per-backend factory call (`Counter._create(7)`,
+# `Counter.__create(7)`, `Counter_create(7)`, `counter:create(7)`,
+# `CreateCounter(7)`, etc.) — never the bare-ctor spelling, which
+# after init-decoupling takes no args. The GDScript repro from
+# frame-arcade/cca surfaced this gap (the pre-fix expander emitted
+# `Counter.new(7)` for GDScript and ill-formed bare-ctor calls for
+# every other backend); the matrix never exercised parameterized
+# child + domain-init together, so the bug shipped unnoticed in
+# Phase A4. This fixture closes the gap.
+
+@@system Counter(seed: int) {
+    interface:
+        bump()
+        get_value(): int
+    machine:
+        $S {
+            $> { self.n = self.seed }
+            bump() { self.n = self.n + 1 }
+            get_value(): int { @@:(self.n); return }
+        }
+    domain:
+        seed: int = seed
+        n: int = 0
+}
+
+@@[main]
+@@system World {
+    interface:
+        bump_c()
+        bump_d()
+        get_c(): int
+        get_d(): int
+    machine:
+        $S {
+            bump_c() { self.c.bump() }
+            bump_d() { self.d.bump() }
+            get_c(): int { @@:(self.c.get_value()); return }
+            get_d(): int { @@:(self.d.get_value()); return }
+        }
+    domain:
+        c = @@Counter(7)
+        d = @@Counter(11)
+}
+
+if __name__ == "__main__":
+    w = World._create()
+    assert w.get_c() == 7, f"initial seed for c: expected 7, got {w.get_c()}"
+    assert w.get_d() == 11, f"initial seed for d: expected 11, got {w.get_d()}"
+    w.bump_c()
+    w.bump_d()
+    assert w.get_c() == 8, f"after bump_c: expected 8, got {w.get_c()}"
+    assert w.get_d() == 12, f"after bump_d: expected 12, got {w.get_d()}"
+    print("PASS: 98_param_child_domain_init")
