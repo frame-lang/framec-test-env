@@ -32,7 +32,7 @@ assert_state(Label, Pid, KInt, KFloat, NInt, NFloat, NBool, NStr) ->
 main(_) ->
     code:add_patha("."),
 
-    {ok, O} = outer:start_link(),
+    O = outer:create(),
     assert_state("T0", O, 42, 1.25, 7, 2.5, true, "hello"),
 
     outer:bump_k_int(O),

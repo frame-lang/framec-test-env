@@ -1,6 +1,6 @@
 #!/usr/bin/env escript
 main(_) ->
-    {ok, Pid} = list_state_arg:start_link(),
+    Pid = list_state_arg:create(),
     -1 = list_state_arg:first_item(Pid),
     0 = list_state_arg:size(Pid),
     list_state_arg:configure(Pid, [10, 20, 30]),

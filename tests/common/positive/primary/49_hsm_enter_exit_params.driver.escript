@@ -19,7 +19,7 @@
 
 main(_) ->
     code:add_patha("."),
-    {ok, Pid} = h_s_m_enter_exit_params:start_link(),
+    Pid = h_s_m_enter_exit_params:create(),
 
     %% Step 0: starting state
     "Start" = h_s_m_enter_exit_params:get_state(Pid),

@@ -1,6 +1,6 @@
 #!/usr/bin/env escript
 main(_) ->
-    {ok, Pid1} = nested_dict:start_link(),
+    Pid1 = nested_dict:create(),
     nested_dict:configure(Pid1, #{"u" => #{"x" => 1, "y" => 2}, "v" => #{"z" => 3}}),
     1 = nested_dict:get_inner(Pid1, "u", "x"),
     Saved = nested_dict:save_state(Pid1),

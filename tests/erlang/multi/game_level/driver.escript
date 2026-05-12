@@ -8,7 +8,7 @@
 
 main(_) ->
     code:add_patha("."),
-    {ok, Pid} = game_level:start_link(),
+    Pid = game_level:create(),
 
     %% Initial state — Loading.
     "loading" = game_level:level_status(Pid),

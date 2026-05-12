@@ -7,7 +7,7 @@
 
 main(_) ->
     code:add_patha("."),
-    {ok, Pid} = agent:start_link(),
+    Pid = agent:create(),
 
     %% Initial: idle.
     "idle" = agent:status(Pid),

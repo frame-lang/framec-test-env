@@ -1,6 +1,6 @@
 #!/usr/bin/env escript
 main(_) ->
-    {ok, Pid1} = list_of_dict:start_link(),
+    Pid1 = list_of_dict:create(),
     list_of_dict:configure(Pid1, [#{"x" => 1, "y" => 2}, #{"z" => 3}]),
     1 = list_of_dict:get_at(Pid1, 0, "x"),
     3 = list_of_dict:get_at(Pid1, 1, "z"),

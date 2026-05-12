@@ -20,8 +20,8 @@ must(Label, Pid, Expected) ->
 main(_) ->
     code:add_patha("."),
 
-    {ok, O1} = outer:start_link(),
-    {ok, O2} = outer:start_link(),
+    O1 = outer:create(),
+    O2 = outer:create(),
 
     outer:cycle_inner(O1),
     outer:cycle_inner(O1),

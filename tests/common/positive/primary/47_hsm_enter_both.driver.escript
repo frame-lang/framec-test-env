@@ -4,7 +4,7 @@
 %% $Parent, the runtime's `__prepareEnter` walks the chain root-down
 %% and fires every $> handler in order.
 %%
-%% Expected log after start_link/0 (which fires the start-state
+%% Expected log after create/0 (which fires the start-state
 %% cascade via the implicit init transition):
 %%   "init,parent_enter,child_enter"
 
@@ -12,7 +12,7 @@
 
 main(_) ->
     code:add_patha("."),
-    {ok, Pid} = h_s_m_enter_both:start_link(),
+    Pid = h_s_m_enter_both:create(),
 
     Log = h_s_m_enter_both:get_log(Pid),
     Expected = "init,parent_enter,child_enter",

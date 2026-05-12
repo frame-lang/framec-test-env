@@ -11,7 +11,7 @@
 
 main(_) ->
     code:add_patha("."),
-    {ok, Pid} = app:start_link(),
+    Pid = app:create(),
     _ = app:start(Pid),
     _ = app:stop(Pid),
     io:format("ok 1 - multi_system_composition~n"),

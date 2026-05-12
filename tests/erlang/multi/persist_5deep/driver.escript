@@ -8,7 +8,7 @@
 main(_) ->
     code:add_patha("."),
 
-    {ok, A} = l1:start_link(),
+    A = l1:create(),
     l1:bump(A),
     l1:bump(A),
     l1:bump(A),

@@ -4,7 +4,7 @@
 %%
 %%   $A => $Parent, $B => $Parent
 %%
-%%   start_link → enter $A (parent has no $>, so just "a_enter")
+%%   create → enter $A (parent has no $>, so just "a_enter")
 %%   goB        → exit $A ("a_exit"), enter $B ("b_enter")
 %%                $Parent is the LCA of A and B so no $Parent exit/enter
 %%                fires (it stays in the active chain).
@@ -16,7 +16,7 @@
 
 main(_) ->
     code:add_patha("."),
-    {ok, Pid} = h_s_m_exit_handlers:start_link(),
+    Pid = h_s_m_exit_handlers:create(),
 
     "init,a_enter" = h_s_m_exit_handlers:get_log(Pid),
 

@@ -6,7 +6,7 @@
 
 main(_) ->
     code:add_patha("."),
-    {ok, Pid} = self_call_test:start_link(),
+    Pid = self_call_test:create(),
     %% get_base/1 returns the literal 42 directly.
     42 = self_call_test:get_base(Pid),
     %% calibrate/1 reentrantly calls get_base via @@:self and propagates

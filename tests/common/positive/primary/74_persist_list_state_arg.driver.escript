@@ -1,6 +1,6 @@
 #!/usr/bin/env escript
 main(_) ->
-    {ok, Pid1} = persist_list:start_link(),
+    Pid1 = persist_list:create(),
     persist_list:configure(Pid1, [10, 20, 30]),
     10 = persist_list:first_item(Pid1),
     Saved = persist_list:save_state(Pid1),

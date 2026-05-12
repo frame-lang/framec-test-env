@@ -22,7 +22,7 @@ must(Label, Pid, Expected) ->
 main(_) ->
     code:add_patha("."),
 
-    {ok, O} = outer:start_link(),
+    O = outer:create(),
     must("T0", O, {"Idle", "P", "A", 0, 0, 0}),
     Snap0 = outer:save_state(O),
     {ok, R0} = outer:load_state(Snap0),

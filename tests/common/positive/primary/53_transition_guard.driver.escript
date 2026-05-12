@@ -23,7 +23,7 @@
 
 main(_) ->
     code:add_patha("."),
-    {ok, Pid} = transition_guard:start_link(),
+    Pid = transition_guard:create(),
 
     transition_guard:run(Pid),
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env escript
 main(_) ->
-    {ok, Pid} = dict_state_arg:start_link(),
+    Pid = dict_state_arg:create(),
     -1 = dict_state_arg:get_v(Pid, "a"),
     0 = dict_state_arg:size(Pid),
     dict_state_arg:configure(Pid, #{"a" => 10, "b" => 20}),

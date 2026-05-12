@@ -1,6 +1,6 @@
 #!/usr/bin/env escript
 main(_) ->
-    {ok, Pid1} = persist_dict:start_link(),
+    Pid1 = persist_dict:create(),
     persist_dict:configure(Pid1, #{"a" => 10, "b" => 20}),
     10 = persist_dict:get_v(Pid1, "a"),
     Saved = persist_dict:save_state(Pid1),

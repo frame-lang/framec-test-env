@@ -11,7 +11,7 @@ main(_) ->
     code:add_patha("."),
 
     %% Driver_sys spins up its own Counter inside its #data{} record.
-    {ok, Pid} = driver_sys:start_link(),
+    Pid = driver_sys:create(),
 
     %% Three bumps go through the cross-system call rewrite:
     %%   self.counter.bump()  →  counter:bump(Data#data.counter)

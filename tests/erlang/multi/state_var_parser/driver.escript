@@ -11,7 +11,7 @@ main(_) ->
 
     %% Case 1: bare variable read.
     Bytes1 = <<"$.varname">>,
-    {ok, P1} = state_var_parser_fsm:start_link(),
+    P1 = state_var_parser_fsm:create(),
     _ = state_var_parser_fsm:setup(P1, Bytes1, 0, byte_size(Bytes1)),
     _ = state_var_parser_fsm:do_parse(P1),
     false = state_var_parser_fsm:get_is_assignment(P1),
@@ -19,7 +19,7 @@ main(_) ->
 
     %% Case 2: assignment. ExprScanner from pos past `=` to ';'.
     Bytes2 = <<"$.varname = x;">>,
-    {ok, P2} = state_var_parser_fsm:start_link(),
+    P2 = state_var_parser_fsm:create(),
     _ = state_var_parser_fsm:setup(P2, Bytes2, 0, byte_size(Bytes2)),
     _ = state_var_parser_fsm:do_parse(P2),
     true = state_var_parser_fsm:get_is_assignment(P2),
@@ -27,7 +27,7 @@ main(_) ->
 
     %% Case 3: comparison `==` is NOT an assignment.
     Bytes3 = <<"$.varname == y">>,
-    {ok, P3} = state_var_parser_fsm:start_link(),
+    P3 = state_var_parser_fsm:create(),
     _ = state_var_parser_fsm:setup(P3, Bytes3, 0, byte_size(Bytes3)),
     _ = state_var_parser_fsm:do_parse(P3),
     false = state_var_parser_fsm:get_is_assignment(P3),

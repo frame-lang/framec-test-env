@@ -9,7 +9,7 @@
 
 main(_) ->
     code:add_patha("."),
-    {ok, Pid} = auth_app:start_link(),
+    Pid = auth_app:create(),
 
     %% Initial state — unauthenticated.
     "unauthenticated" = auth_app:app_status(Pid),

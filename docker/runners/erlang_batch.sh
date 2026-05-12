@@ -125,11 +125,22 @@ for test_file in $tests; do
         continue
     fi
 
-    start_link_arity=$(grep "^-export" "$target_erl" | head -1 | grep -oE 'start_link/[0-9]+' | sed 's|start_link/||')
-    start_link_arity=${start_link_arity:-0}
+    # RFC-0017: construction goes through the generated factory
+    # `Mod:create(SysParams...)` (returns a bare Pid), not the bare
+    # `start_link/N` (which no longer runs the start-state enter
+    # cascade — it's the no-initialization allocation that @@!Foo()
+    # and the persist restore path use). Fall back to start_link for
+    # any fixture that predates a `create/N` export.
+    ctor_fn="create"
+    ctor_arity=$(grep "^-export" "$target_erl" | head -1 | grep -oE 'create/[0-9]+' | head -1 | sed 's|create/||')
+    if [ -z "$ctor_arity" ]; then
+        ctor_fn="start_link"
+        ctor_arity=$(grep "^-export" "$target_erl" | head -1 | grep -oE 'start_link/[0-9]+' | sed 's|start_link/||')
+    fi
+    ctor_arity=${ctor_arity:-0}
 
-    start_link_args=""
-    if [ "$start_link_arity" -gt 0 ]; then
+    ctor_args=""
+    if [ "$ctor_arity" -gt 0 ]; then
         sys_line=$(grep -m1 "^@@system " "$test_file" 2>/dev/null)
         sys_params_str=$(echo "$sys_line" | sed -n 's/.*@@system [A-Za-z_][A-Za-z0-9_]*[[:space:]]*(\(.*\))[[:space:]]*{.*/\1/p')
         if [ -n "$sys_params_str" ]; then
@@ -137,7 +148,7 @@ for test_file in $tests; do
                 echo "$p" | sed -n 's/.*: *\([a-zA-Z][a-zA-Z0-9_]*\).*/\1/p'
             done > "$work_dir/sys_param_types.txt"
         fi
-        for i in $(seq 1 "$start_link_arity"); do
+        for i in $(seq 1 "$ctor_arity"); do
             ptype=""
             if [ -f "$work_dir/sys_param_types.txt" ]; then
                 ptype=$(sed -n "${i}p" "$work_dir/sys_param_types.txt")
@@ -148,27 +159,44 @@ for test_file in $tests; do
                 int|float|number|Int|Float) val="0" ;;
                 *)                      val="undefined" ;;
             esac
-            if [ -z "$start_link_args" ]; then
-                start_link_args="$val"
+            if [ -z "$ctor_args" ]; then
+                ctor_args="$val"
             else
-                start_link_args="$start_link_args, $val"
+                ctor_args="$ctor_args, $val"
             fi
         done
     fi
 
-    erl_exports=$(grep "^-export" "$target_erl" | head -1 | sed 's/-export(\[//;s/\])\.//' | sed -E 's/start_link\/[0-9]+,?//' | sed 's/,\s*$//' | tr ',' '\n' | grep -v '^$' | sed 's|/| |')
+    # Strip the RFC-0017 lifecycle exports (start_link/frame_init/
+    # create) and the persist save/restore pair from the smoke walk —
+    # those aren't interface methods, and create/N would be called
+    # with the wrong arity (Pid prepended) below.
+    erl_exports=$(grep "^-export" "$target_erl" | head -1 | sed 's/-export(\[//;s/\])\.//' \
+        | sed -E 's/(start_link|frame_init|create|save_state|restore_state)\/[0-9]+,?//g' \
+        | sed 's/,\s*$//' | tr ',' '\n' | grep -v '^$' | sed 's|/| |')
 
     escript_path="$work_dir/run_test.escript"
-    cat > "$escript_path" << ESCRIPT
+    if [ "$ctor_fn" = "start_link" ]; then
+        cat > "$escript_path" << ESCRIPT
 #!/usr/bin/env escript
 main(_) ->
     code:add_patha("."),
-    {ok, Pid} = ${erl_module}:start_link(${start_link_args}),
+    {ok, Pid} = ${erl_module}:start_link(${ctor_args}),
 ESCRIPT
+    else
+        cat > "$escript_path" << ESCRIPT
+#!/usr/bin/env escript
+main(_) ->
+    code:add_patha("."),
+    Pid = ${erl_module}:${ctor_fn}(${ctor_args}),
+ESCRIPT
+    fi
     while IFS=' ' read -r fname arity; do
         fname=$(echo "$fname" | tr -d ' ')
         arity=$(echo "$arity" | tr -d ' ')
-        if [ -z "$fname" ] || [ "$fname" = "start_link" ]; then continue; fi
+        case "$fname" in
+            ""|start_link|frame_init|create|save_state|restore_state) continue ;;
+        esac
         args="Pid"
         remaining=$((arity - 1))
         if [ "$remaining" -gt 0 ]; then

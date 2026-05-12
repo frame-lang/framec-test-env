@@ -1,6 +1,6 @@
 #!/usr/bin/env escript
 main(_) ->
-    {ok, Pid1} = nested_list:start_link(),
+    Pid1 = nested_list:create(),
     nested_list:configure(Pid1, [[10, 20], [30, 40]]),
     10 = nested_list:first_first(Pid1),
     2 = nested_list:outer_size(Pid1),
