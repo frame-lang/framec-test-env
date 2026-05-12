@@ -12,13 +12,18 @@
 #   make help                     # This message
 #
 # The framec binary is always built from source inside Docker.
-# Set FRAMEPILER_SRC to your framepiler checkout:
-#   make test FRAMEPILER_SRC=/path/to/framepiler
+# FRAMEPILER_SRC must point at your framec checkout. Defaults to
+# ../../framec (the sibling-dir layout: <parent>/framec next to
+# <parent>/framec-test-env). Override if yours lives elsewhere:
+#   make test FRAMEPILER_SRC=/path/to/framec
 
 SHELL := /bin/bash
 
 # --- Configuration ---
-FRAMEPILER_SRC ?= $(shell cd ../.. && pwd)/framepiler
+# Path to the framec checkout (renamed from "framepiler"). The variable
+# keeps its old name for command-line back-compat; the default tracks
+# the rename.
+FRAMEPILER_SRC ?= $(shell cd ../.. && pwd)/framec
 DOCKER_DIR     := $(shell pwd)
 TEST_ENV_ROOT  := $(shell cd .. && pwd)
 RUNNER         := runners/runner.sh
