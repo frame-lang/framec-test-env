@@ -1,0 +1,68 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+// Test 100: @@[no_persist] domain fields (RFC-0016.1)
+
+@@[persist(char*)]
+@@[save(save_op)]
+@@[load(load_op)]
+@@system NoPersistField {
+    interface:
+        bump()
+        set_cache(v: int)
+        set_note(s: char*)
+        get_n(): int
+        get_cache(): int
+        get_note(): char*
+
+    machine:
+        $Active {
+            bump() { self->n = self->n + 1; }
+            set_cache(v: int) { self->cache = v; }
+            set_note(s: char*) { self->note = s; }
+            get_n(): int { @@:(self->n) }
+            get_cache(): int { @@:(self->cache) }
+            get_note(): char* { @@:(self->note) }
+        }
+
+    domain:
+        n: int = 0
+        @@[no_persist]
+        cache: int = -1
+        note: char* = "fresh"
+}
+
+int main() {
+    NoPersistField* c1 = @@NoPersistField();
+    NoPersistField_bump(c1);
+    NoPersistField_bump(c1);
+    NoPersistField_bump(c1);
+    NoPersistField_set_cache(c1, 99);
+    NoPersistField_set_note(c1, "hello");
+    char* data = NoPersistField_save_op(c1);
+
+    NoPersistField* c2 = @@NoPersistField();
+    NoPersistField_load_op(c2, data);
+    free(data);
+
+    int rc = 0;
+    if (NoPersistField_get_n(c2) != 3) {
+        printf("FAIL: expected n=3, got %d\n", NoPersistField_get_n(c2));
+        rc = 1;
+    } else if (strcmp(NoPersistField_get_note(c2), "hello") != 0) {
+        printf("FAIL: expected note=hello, got %s\n", NoPersistField_get_note(c2));
+        rc = 1;
+    } else if (NoPersistField_get_cache(c2) != -1) {
+        printf("FAIL: expected cache=-1 (domain default; @@[no_persist] field not restored), got %d\n", NoPersistField_get_cache(c2));
+        rc = 1;
+    } else {
+        printf("PASS: 100_no_persist_field\n");
+    }
+    NoPersistField_destroy(c1);
+    NoPersistField_destroy(c2);
+    return rc;
+}

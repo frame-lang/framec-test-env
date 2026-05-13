@@ -1,0 +1,70 @@
+@@[target("go")]
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+var _ = json.Unmarshal
+var _ = os.Args
+
+// Test 100: @@[no_persist] domain fields (RFC-0016.1)
+
+@@[persist(string)]
+@@[save(SaveOp)]
+@@[load(LoadOp)]
+@@system NoPersistField {
+    interface:
+        Bump()
+        SetCache(v: int)
+        SetNote(val: string)
+        GetN(): int
+        GetCache(): int
+        GetNote(): string
+
+    machine:
+        $Active {
+            Bump() { s.n = s.n + 1 }
+            SetCache(v: int) { s.cache = v }
+            SetNote(val: string) { s.note = val }
+            GetN(): int { @@:(s.n) }
+            GetCache(): int { @@:(s.cache) }
+            GetNote(): string { @@:(s.note) }
+        }
+
+    domain:
+        n: int = 0
+        @@[no_persist]
+        cache: int = -1
+        note: string = "fresh"
+}
+
+func main() {
+    c1 := @@NoPersistField()
+    c1.Bump()
+    c1.Bump()
+    c1.Bump()
+    c1.SetCache(99)
+    c1.SetNote("hello")
+    data := c1.SaveOp()
+
+    c2 := @@NoPersistField()
+    c2.LoadOp(data)
+
+    if c2.GetN() != 3 {
+        fmt.Printf("FAIL: expected n=3, got %d\n", c2.GetN())
+        return
+    }
+    if c2.GetNote() != "hello" {
+        fmt.Printf("FAIL: expected note=hello, got %s\n", c2.GetNote())
+        return
+    }
+    if c2.GetCache() != -1 {
+        fmt.Printf("FAIL: expected cache=-1 (domain default; @@[no_persist] field not restored), got %d\n", c2.GetCache())
+        return
+    }
+    fmt.Println("PASS: 100_no_persist_field")
+}

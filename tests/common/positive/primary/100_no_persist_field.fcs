@@ -1,0 +1,61 @@
+@@[target("csharp")]
+
+// Test 100: @@[no_persist] domain fields (RFC-0016.1)
+
+@@[persist(string)]
+@@[save(SaveOp)]
+@@[load(LoadOp)]
+@@system NoPersistField {
+    interface:
+        Bump()
+        SetCache(v: int)
+        SetNote(s: string)
+        GetN(): int
+        GetCache(): int
+        GetNote(): string
+
+    machine:
+        $Active {
+            Bump() { this.n = this.n + 1; }
+            SetCache(v: int) { this.cache = v; }
+            SetNote(s: string) { this.note = s; }
+            GetN(): int { @@:(this.n) }
+            GetCache(): int { @@:(this.cache) }
+            GetNote(): string { @@:(this.note) }
+        }
+
+    domain:
+        n: int = 0
+        @@[no_persist]
+        cache: int = -1
+        note: string = "fresh"
+}
+
+class Program {
+    static void Main() {
+        NoPersistField c1 = @@NoPersistField();
+        c1.Bump();
+        c1.Bump();
+        c1.Bump();
+        c1.SetCache(99);
+        c1.SetNote("hello");
+        string data = c1.SaveOp();
+
+        NoPersistField c2 = @@NoPersistField();
+        c2.LoadOp(data);
+
+        if (c2.GetN() != 3) {
+            System.Console.WriteLine($"FAIL: expected n=3, got {c2.GetN()}");
+            return;
+        }
+        if (c2.GetNote() != "hello") {
+            System.Console.WriteLine($"FAIL: expected note=hello, got {c2.GetNote()}");
+            return;
+        }
+        if (c2.GetCache() != -1) {
+            System.Console.WriteLine($"FAIL: expected cache=-1 (domain default; @@[no_persist] field not restored), got {c2.GetCache()}");
+            return;
+        }
+        System.Console.WriteLine("PASS: 100_no_persist_field");
+    }
+}

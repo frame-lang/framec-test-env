@@ -1,0 +1,53 @@
+@@[target("swift")]
+
+// Test 100: @@[no_persist] domain fields (RFC-0016.1)
+
+@@[persist(String)]
+@@[save(saveOp)]
+@@[load(loadOp)]
+@@system NoPersistField {
+    interface:
+        bump()
+        setCache(v: Int)
+        setNote(s: String)
+        getN(): Int
+        getCache(): Int
+        getNote(): String
+
+    machine:
+        $Active {
+            bump() { self.n = self.n + 1 }
+            setCache(v: Int) { self.cache = v }
+            setNote(s: String) { self.note = s }
+            getN(): Int { @@:(self.n) }
+            getCache(): Int { @@:(self.cache) }
+            getNote(): String { @@:(self.note) }
+        }
+
+    domain:
+        n: Int = 0
+        @@[no_persist]
+        cache: Int = -1
+        note: String = "fresh"
+}
+
+let c1 = @@NoPersistField()
+c1.bump()
+c1.bump()
+c1.bump()
+c1.setCache(99)
+c1.setNote("hello")
+let data = c1.saveOp()
+
+let c2 = @@NoPersistField()
+c2.loadOp(data)
+
+if c2.getN() != 3 {
+    print("FAIL: expected n=3, got \(c2.getN())")
+} else if c2.getNote() != "hello" {
+    print("FAIL: expected note=hello, got \(c2.getNote())")
+} else if c2.getCache() != -1 {
+    print("FAIL: expected cache=-1 (domain default; @@[no_persist] field not restored), got \(c2.getCache())")
+} else {
+    print("PASS: 100_no_persist_field")
+}

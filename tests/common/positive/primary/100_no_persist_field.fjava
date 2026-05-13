@@ -1,0 +1,63 @@
+@@[target("java")]
+
+import java.util.*;
+
+// Test 100: @@[no_persist] domain fields (RFC-0016.1)
+
+@@[persist(String)]
+@@[save(save_op)]
+@@[load(load_op)]
+@@system NoPersistField {
+    interface:
+        bump()
+        set_cache(v: int)
+        set_note(s: String)
+        get_n(): int
+        get_cache(): int
+        get_note(): String
+
+    machine:
+        $Active {
+            bump() { this.n = this.n + 1; }
+            set_cache(v: int) { this.cache = v; }
+            set_note(s: String) { this.note = s; }
+            get_n(): int { @@:(this.n) }
+            get_cache(): int { @@:(this.cache) }
+            get_note(): String { @@:(this.note) }
+        }
+
+    domain:
+        n: int = 0
+        @@[no_persist]
+        cache: int = -1
+        note: String = "fresh"
+}
+
+class Main {
+    public static void main(String[] args) {
+        NoPersistField c1 = @@NoPersistField();
+        c1.bump();
+        c1.bump();
+        c1.bump();
+        c1.set_cache(99);
+        c1.set_note("hello");
+        String data = c1.save_op();
+
+        NoPersistField c2 = @@NoPersistField();
+        c2.load_op(data);
+
+        if (c2.get_n() != 3) {
+            System.out.println("FAIL: expected n=3, got " + c2.get_n());
+            return;
+        }
+        if (!c2.get_note().equals("hello")) {
+            System.out.println("FAIL: expected note=hello, got " + c2.get_note());
+            return;
+        }
+        if (c2.get_cache() != -1) {
+            System.out.println("FAIL: expected cache=-1 (domain default; @@[no_persist] field not restored), got " + c2.get_cache());
+            return;
+        }
+        System.out.println("PASS: 100_no_persist_field");
+    }
+}
