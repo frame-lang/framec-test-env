@@ -1,0 +1,60 @@
+@@[target("dart")]
+import 'dart:convert';
+
+// Test 100: @@[no_persist] domain fields (RFC-0016.1)
+
+@@[persist(String)]
+@@[save(saveOp)]
+@@[load(loadOp)]
+@@system NoPersistField {
+    interface:
+        bump()
+        setCache(v: int)
+        setNote(s: String)
+        getN(): int
+        getCache(): int
+        getNote(): String
+
+    machine:
+        $Active {
+            bump() { this.n = this.n + 1; }
+            setCache(v: int) { this.cache = v; }
+            setNote(s: String) { this.note = s; }
+            getN(): int { @@:(this.n) }
+            getCache(): int { @@:(this.cache) }
+            getNote(): String { @@:(this.note) }
+        }
+
+    domain:
+        n: int = 0
+        @@[no_persist]
+        cache: int = -1
+        note: String = "fresh"
+}
+
+void main() {
+    var c1 = @@NoPersistField();
+    c1.bump();
+    c1.bump();
+    c1.bump();
+    c1.setCache(99);
+    c1.setNote("hello");
+    var data = c1.saveOp();
+
+    var c2 = @@NoPersistField();
+    c2.loadOp(data);
+
+    if (c2.getN() != 3) {
+        print("FAIL: expected n=3, got ${c2.getN()}");
+        return;
+    }
+    if (c2.getNote() != "hello") {
+        print("FAIL: expected note=hello, got ${c2.getNote()}");
+        return;
+    }
+    if (c2.getCache() != -1) {
+        print("FAIL: expected cache=-1 (domain default; @@[no_persist] field not restored), got ${c2.getCache()}");
+        return;
+    }
+    print("PASS: 100_no_persist_field");
+}
