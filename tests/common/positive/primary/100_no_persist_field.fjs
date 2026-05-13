@@ -1,0 +1,61 @@
+@@[target("javascript")]
+
+// Test 100: @@[no_persist] domain fields (RFC-0016.1)
+
+@@[persist(string)]
+@@[save(saveOp)]
+@@[load(loadOp)]
+@@system NoPersistField {
+    interface:
+        bump()
+        setCache(v: number)
+        setNote(s: string)
+        getN(): number
+        getCache(): number
+        getNote(): string
+
+    machine:
+        $Active {
+            bump() { this.n = this.n + 1; }
+            setCache(v: number) { this.cache = v; }
+            setNote(s: string) { this.note = s; }
+            getN(): number { @@:(this.n) }
+            getCache(): number { @@:(this.cache) }
+            getNote(): string { @@:(this.note) }
+        }
+
+    domain:
+        n = 0
+        @@[no_persist]
+        cache = -1
+        note = "fresh"
+}
+
+function main() {
+    const c1 = @@NoPersistField();
+    c1.bump();
+    c1.bump();
+    c1.bump();
+    c1.setCache(99);
+    c1.setNote("hello");
+    const data = c1.saveOp();
+
+    const c2 = @@NoPersistField();
+    c2.loadOp(data);
+
+    if (c2.getN() !== 3) {
+        console.log(`FAIL: expected n=3, got ${c2.getN()}`);
+        return;
+    }
+    if (c2.getNote() !== "hello") {
+        console.log(`FAIL: expected note='hello', got ${c2.getNote()}`);
+        return;
+    }
+    if (c2.getCache() !== -1) {
+        console.log(`FAIL: expected cache=-1 (domain default; @@[no_persist] field not restored), got ${c2.getCache()}`);
+        return;
+    }
+    console.log("PASS: 100_no_persist_field");
+}
+
+main();
