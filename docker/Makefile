@@ -130,6 +130,14 @@ MATRIX_JOBS ?= 4
 
 test: $(STAMP_DIR)/framec-native build
 	@echo "=== Running all tests in parallel ($(words $(LANGS)) languages) ==="
+	@# Daemon preflight — fail fast if Docker is wedged before we
+	@# commit to a long matrix run. Docker Desktop on macOS has gone
+	@# unresponsive (still answering `compose ps` but not making
+	@# progress) for hours at a time; a 5s `docker info` probe
+	@# catches that before we start ~5-7 min of work.
+	@timeout 5 docker info >/dev/null 2>&1 || { \
+		echo "ERROR: Docker daemon unresponsive (timeout 5s on 'docker info')"; \
+		exit 2; }
 	@# --force-recreate: collect-results.sh greps `^not ok` lines from
 	@# the container's full log history. Persistent containers from
 	@# prior runs accumulate logs (one suite invocation per run); a
@@ -144,7 +152,7 @@ test: $(STAMP_DIR)/framec-native build
 	 GO_COMPILE_JOBS=$(MATRIX_JOBS) \
 	 RUST_EXEC_JOBS=$(MATRIX_JOBS) \
 	 SWIFT_COMPILE_JOBS=$(MATRIX_JOBS) \
-	 $(COMPOSE) up -d --force-recreate $(LANGS)
+	 timeout 300 $(COMPOSE) up -d --force-recreate $(LANGS)
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
 	 ./collect-results.sh $(LANGS)
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native $(COMPOSE) down --remove-orphans 2>/dev/null || true

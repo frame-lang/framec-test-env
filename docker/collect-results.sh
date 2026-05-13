@@ -10,25 +10,23 @@ TOTAL_PASS=0
 TOTAL_FAIL=0
 FAILURES=""
 
-# Wait for all containers to finish
+# Wait for all containers to finish.
+# `docker wait` blocks on the daemon's event stream (push-based, not
+# polling) until each container exits. Outer `timeout` bounds the
+# worst case — Docker Desktop on macOS has wedged for hours in the
+# past, freezing the previous `compose ps` polling loop indefinitely.
+# Trade-off: no live "N running:" indicator; we get it back later as
+# a separately-bounded best-effort progress reporter if missed.
 echo "Waiting for $(echo $LANGS | wc -w | tr -d ' ') containers..."
-while true; do
-    running=0
-    still=""
-    for lang in $LANGS; do
-        state=$($COMPOSE ps --format "{{.State}}" "$lang" 2>/dev/null)
-        if [ "$state" = "running" ]; then
-            running=$((running + 1))
-            still="$still $lang"
-        fi
-    done
-    if [ "$running" -eq 0 ]; then
-        break
-    fi
-    printf "\r  %d running:%s    " "$running" "$still"
-    sleep 3
+cids=()
+for lang in $LANGS; do
+    cid=$($COMPOSE ps -q "$lang" 2>/dev/null) || continue
+    [ -n "$cid" ] && cids+=("$cid")
 done
-printf "\r%80s\r" ""
+if [ "${#cids[@]}" -gt 0 ]; then
+    timeout 1800 docker wait "${cids[@]}" >/dev/null || \
+        echo "WARNING: docker wait timed out after 30 min or daemon unresponsive"
+fi
 
 echo ""
 echo "=========================================="
