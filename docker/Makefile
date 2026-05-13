@@ -138,6 +138,19 @@ test: $(STAMP_DIR)/framec-native build
 	@timeout 5 docker info >/dev/null 2>&1 || { \
 		echo "ERROR: Docker daemon unresponsive (timeout 5s on 'docker info')"; \
 		exit 2; }
+	@# framec_cache size warning — `framec_cached.sh` has LRU eviction
+	@# (keeps FRAMEC_CACHE_KEEP=3 most-recent framec hashes per lang),
+	@# but if eviction was disabled or hadn't been in place historically
+	@# the cache can carry 100+ GB. Warn at 5 GB/lang so the user can
+	@# `make clean-cache` before another run packs more in.
+	@for d in $(TEST_ENV_ROOT)/output/*/.framec_cache; do \
+		[ -d "$$d" ] || continue; \
+		kb=$$(du -sk "$$d" 2>/dev/null | cut -f1); \
+		mb=$$((kb / 1024)); \
+		if [ "$$mb" -gt 5000 ]; then \
+			echo "  WARNING: $$d is $${mb} MB — run 'make clean-cache' to reclaim"; \
+		fi; \
+	done
 	@# --force-recreate: collect-results.sh greps `^not ok` lines from
 	@# the container's full log history. Persistent containers from
 	@# prior runs accumulate logs (one suite invocation per run); a
@@ -183,6 +196,21 @@ clean:
 	rm -f framec-native
 	rm -rf $(STAMP_DIR)
 	rm -rf $(TEST_ENV_ROOT)/output/*/tests/*
+
+clean-cache:
+	@# Remove the framec transpile caches. Safe — they only memoise
+	@# `framec compile` output keyed by (framec-binary-sha, source-sha).
+	@# Next matrix run re-populates the current framec-hash entry on
+	@# first transpile (~30 s overhead for the whole run). See
+	@# docs/docker.md "framec transpile cache" for why this exists.
+	@echo "=== Cleaning framec transpile caches ==="
+	@for d in $(TEST_ENV_ROOT)/output/*/.framec_cache; do \
+		[ -d "$$d" ] || continue; \
+		kb=$$(du -sk "$$d" 2>/dev/null | cut -f1); \
+		mb=$$((kb / 1024)); \
+		echo "  rm  $$d  ($${mb} MB)"; \
+		rm -rf "$$d"; \
+	done
 
 clean-images: clean
 	@echo "=== Removing Docker images ==="
@@ -240,10 +268,11 @@ help:
 	@echo ""
 	@echo "Clean:"
 	@echo "  make clean              Remove binaries + stamps + output"
+	@echo "  make clean-cache        Remove framec transpile caches (output/*/.framec_cache)"
 	@echo "  make clean-images       Also remove Docker images"
 	@echo ""
 	@echo "Config:"
 	@echo "  FRAMEPILER_SRC=/path    Framepiler source (default: $(FRAMEPILER_SRC))"
 
-.PHONY: build framec test test-all compile clean clean-images rebuild status help
+.PHONY: build framec test test-all compile clean clean-cache clean-images rebuild status help
 .PHONY: $(foreach lang,$(LANGS),build-$(lang) test-$(lang) compile-$(lang) shell-$(lang))

@@ -19,6 +19,24 @@ FRAMEC_HASH=$(cat "$_FRAMEC_HASH_FILE" 2>/dev/null || echo unknown)
 _CACHE_ROOT="${FRAMEC_CACHE_DIR:-/output/.framec_cache}/${FRAMEC_HASH}"
 mkdir -p "$_CACHE_ROOT"
 
+# LRU eviction — keep only the FRAMEC_CACHE_KEEP most-recent framec-hash
+# subdirs under the cache parent; rm the rest. Set FRAMEC_CACHE_KEEP=0 to
+# disable. Without this, the cache grew unbounded — every framec rebuild
+# added a fresh generation, never reclaimed; C accumulated 100+ GB in
+# production. See docs/docker.md "framec transpile cache" for context.
+_FRAMEC_CACHE_PARENT="${FRAMEC_CACHE_DIR:-/output/.framec_cache}"
+_FRAMEC_CACHE_KEEP="${FRAMEC_CACHE_KEEP:-3}"
+if [ "$_FRAMEC_CACHE_KEEP" -gt 0 ] && [ -d "$_FRAMEC_CACHE_PARENT" ]; then
+    (
+        cd "$_FRAMEC_CACHE_PARENT" 2>/dev/null && \
+        ls -1t 2>/dev/null | \
+        tail -n +$((_FRAMEC_CACHE_KEEP + 1)) | \
+        while IFS= read -r _entry; do
+            [ -d "$_entry" ] && rm -rf -- "$_entry"
+        done
+    )
+fi
+
 framec_cached() {
     local target="$1"
     local out_dir="$2"
