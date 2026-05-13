@@ -1,0 +1,61 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+# Test 100: @@[no_persist] domain fields (RFC-0016.1)
+#
+# A @@[no_persist]-tagged domain field is skipped on save and holds its
+# `domain:` default after load; other domain fields round-trip normally.
+
+@@[persist(PackedByteArray)]
+@@[save(save_op)]
+@@[load(load_op)]
+@@system NoPersistField {
+    interface:
+        bump()
+        set_cache(v: int)
+        set_note(s: str)
+        get_n(): int
+        get_cache(): int
+        get_note(): str
+
+    machine:
+        $Active {
+            bump() { self.n = self.n + 1 }
+            set_cache(v: int) { self.cache = v }
+            set_note(s: str) { self.note = s }
+            get_n(): int { @@:(self.n) }
+            get_cache(): int { @@:(self.cache) }
+            get_note(): str { @@:(self.note) }
+        }
+
+    domain:
+        n: int = 0
+        @@[no_persist]
+        cache: int = -1
+        note: str = "fresh"
+}
+
+func _init():
+    var c1 = @@NoPersistField()
+    c1.bump()
+    c1.bump()
+    c1.bump()                 # n = 3 (persisted)
+    c1.set_cache(99)          # cache = 99 (transient — @@[no_persist])
+    c1.set_note("hello")      # note = "hello" (persisted)
+    var data = c1.save_op()
+
+    var c2 = @@NoPersistField()
+    c2.load_op(data)
+
+    if c2.get_n() != 3:
+        print("FAIL: expected n=3, got " + str(c2.get_n()))
+        quit()
+    if c2.get_note() != "hello":
+        print("FAIL: expected note=hello, got " + str(c2.get_note()))
+        quit()
+    if c2.get_cache() != -1:
+        print("FAIL: expected cache=-1 (domain default; @@[no_persist] field not restored), got " + str(c2.get_cache()))
+        quit()
+    print("PASS: 100_no_persist_field")
+    quit()
