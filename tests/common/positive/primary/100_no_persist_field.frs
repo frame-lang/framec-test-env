@@ -1,0 +1,59 @@
+@@[target("rust")]
+
+// Test 100: @@[no_persist] domain fields (RFC-0016.1)
+
+@@[persist(String)]
+@@[save(save_op)]
+@@[load(load_op)]
+@@system NoPersistField {
+    interface:
+        bump()
+        set_cache(v: i32)
+        set_note(s: String)
+        get_n(): i32
+        get_cache(): i32
+        get_note(): String
+
+    machine:
+        $Active {
+            bump() { self.n = self.n + 1; }
+            set_cache(v: i32) { self.cache = v; }
+            set_note(s: String) { self.note = s; }
+            get_n(): i32 { @@:(self.n) }
+            get_cache(): i32 { @@:(self.cache) }
+            get_note(): String { @@:(self.note.clone()) }
+        }
+
+    domain:
+        n: i32 = 0
+        @@[no_persist]
+        cache: i32 = -1
+        note: String = String::from("fresh")
+}
+
+fn main() {
+    let mut c1 = @@NoPersistField();
+    c1.bump();
+    c1.bump();
+    c1.bump();
+    c1.set_cache(99);
+    c1.set_note(String::from("hello"));
+    let data = c1.save_op();
+
+    let mut c2 = @@NoPersistField();
+    c2.load_op(data);
+
+    if c2.get_n() != 3 {
+        println!("FAIL: expected n=3, got {}", c2.get_n());
+        return;
+    }
+    if c2.get_note() != "hello" {
+        println!("FAIL: expected note=hello, got {}", c2.get_note());
+        return;
+    }
+    if c2.get_cache() != -1 {
+        println!("FAIL: expected cache=-1 (domain default; @@[no_persist] field not restored), got {}", c2.get_cache());
+        return;
+    }
+    println!("PASS: 100_no_persist_field");
+}
