@@ -1,0 +1,75 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+# Test 101: persist int/float fidelity (GDScript regression net).
+#
+# Locks the GDScript var_to_bytes fidelity exception against any future
+# attempt to migrate GDScript persist back to JSON. The bug it guards
+# against: Godot's JSON.parse_string returns every JSON number as
+# `float`, so a persisted `int`-typed domain field or list element
+# comes back as `float`, and `Array.has(typed_int)` returns false even
+# when the value is present (because Array.has uses type-equal match).
+# `var_to_bytes` round-trips Variants exactly (int stays int).
+#
+# Repro pattern from `_scratch/bug_json_int_float*` (2026-05-13).
+
+@@[persist(PackedByteArray)]
+@@[save(save_op)]
+@@[load(load_op)]
+@@system IntFidelity {
+    interface:
+        set_count(n: int)
+        get_count(): int
+        add_item(id: int)
+        contains(id: int): bool
+
+    machine:
+        $Active {
+            set_count(n: int)       { self.count = n }
+            get_count(): int        { @@:(self.count) }
+            add_item(id: int)       { self.items.append(id) }
+            contains(id: int): bool { @@:(self.items.has(id)) }
+        }
+
+    domain:
+        count: int = 0
+        items: list = []
+}
+
+func _init():
+    var a = @@IntFidelity()
+    a.set_count(101)
+    a.add_item(201)
+    a.add_item(202)
+
+    var bytes: PackedByteArray = a.save_op()
+
+    var b = @@IntFidelity()
+    b.load_op(bytes)
+
+    # Numeric value preserved either way — neither JSON nor var_to_bytes
+    # breaks this. Sanity check.
+    if b.get_count() != 101:
+        print("FAIL: get_count returned " + str(b.get_count()) + " (expected 101)")
+        quit()
+
+    # TYPE preserved: get_count must still return TYPE_INT after restore,
+    # not TYPE_FLOAT. JSON breaks this; var_to_bytes preserves it.
+    if typeof(b.get_count()) != TYPE_INT:
+        print("FAIL: get_count type is " + str(typeof(b.get_count())) + " (expected TYPE_INT=" + str(TYPE_INT) + ")")
+        quit()
+
+    # The headline regression: Array.has(typed_int) must succeed after
+    # restore. With JSON the list holds floats and `has(201)` returns
+    # false; with var_to_bytes the list holds ints and `has(201)`
+    # returns true.
+    if not b.contains(201):
+        print("FAIL: contains(201) returned false — list elements lost int type through persist round-trip")
+        quit()
+    if not b.contains(202):
+        print("FAIL: contains(202) returned false — list elements lost int type through persist round-trip")
+        quit()
+
+    print("PASS: 101_persist_int_fidelity")
+    quit()

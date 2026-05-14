@@ -1,0 +1,58 @@
+@@[target("lua")]
+
+-- Test 101: persist int/float fidelity probe (Lua).
+--
+-- Probes whether the framec Lua persist (cjson-based JSON wire format)
+-- preserves Lua 5.3+ integer subtype through save/load round-trip.
+-- Mirrors the GDScript test 101 probe — except Lua uses `math.type(x)`
+-- to inspect the subtype (Lua's `==` is numeric-equal regardless of
+-- subtype, so a value-equality test wouldn't surface the issue).
+--
+-- PASS = lua-cjson decodes integer-shaped JSON numbers as Lua
+-- integers (subtype preserved).
+-- FAIL = lua-cjson collapses everything to Lua float (subtype lost).
+-- Either outcome is informative; PASS lets us leave Lua on JSON,
+-- FAIL would prompt the same Erlang/GDScript native-fidelity treatment.
+
+@@[persist(string)]
+@@[save(save_op)]
+@@[load(load_op)]
+@@system IntFidelityLua {
+    interface:
+        set_count(n: number)
+        count_subtype(): string
+
+    machine:
+        $Active {
+            set_count(n: number)    { self.count = n }
+            count_subtype(): string { @@:(math.type(self.count)) }
+        }
+
+    domain:
+        count: number = 0
+}
+
+local a = @@IntFidelityLua()
+a:set_count(101)
+
+-- Pre-save subtype must be "integer" (the literal 101 is an int in Lua 5.3+).
+local pre_subtype = a:count_subtype()
+if pre_subtype ~= "integer" then
+    print("FAIL (pre-save): count subtype is " .. tostring(pre_subtype) ..
+          " (expected 'integer') — fixture assumption is wrong on this Lua build")
+    return
+end
+
+local blob = a:save_op()
+
+local b = @@IntFidelityLua()
+b:load_op(blob)
+
+local post_subtype = b:count_subtype()
+if post_subtype ~= "integer" then
+    print("FAIL (probe): count subtype is " .. tostring(post_subtype) ..
+          " after restore (expected 'integer') — lua-cjson collapses int->float through persist round-trip")
+    return
+end
+
+print("PASS: 101_persist_int_fidelity")
