@@ -1,0 +1,90 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <string>
+#include <cassert>
+#include <vector>
+#include <algorithm>
+
+// Test 104: RFC-0019 leaf-override of ancestor lifecycle
+//
+// A child with its own $> / <$ handler and NO `=> $^` forward
+// overrides the ancestor's lifecycle handler. Inverse of fixtures
+// 46/47/48 (which verify forwarding) — verifies non-forwarding:
+// when the leaf does not forward, the ancestor's $> / <$ MUST NOT run.
+
+@@system HSMOverride {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): std::vector<std::string>
+        get_state(): std::string
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): std::vector<std::string> { @@:(event_log) }
+            get_state(): std::string { @@:(std::string("Start")) }
+        }
+
+        $Child => $Parent {
+            $>() {
+                // NO `=> $^` — ancestor $> must NOT run.
+                event_log.push_back("Child:enter");
+            }
+
+            <$() {
+                // NO `=> $^` — ancestor <$ must NOT run.
+                event_log.push_back("Child:exit");
+            }
+
+            go_to_parent() { -> $Parent }
+            get_log(): std::vector<std::string> { @@:(event_log) }
+            get_state(): std::string { @@:(std::string("Child")) }
+        }
+
+        $Parent {
+            $>() {
+                event_log.push_back("Parent:enter");
+            }
+
+            <$() {
+                event_log.push_back("Parent:exit");
+            }
+
+            go_to_child() { -> $Child }
+            get_log(): std::vector<std::string> { @@:(event_log) }
+            get_state(): std::string { @@:(std::string("Parent")) }
+        }
+    domain:
+        event_log : std::vector<std::string> = {}
+}
+
+int main() {
+    printf("=== Test 104: RFC-0019 leaf-override of ancestor lifecycle ===\n");
+    auto s = @@HSMOverride();
+
+    // TC1: Entering $Child fires Child's $> only; Parent's $> must NOT fire.
+    s.go_to_child();
+    auto log = s.get_log();
+    if (s.get_state() != "Child") { printf("FAIL: Expected Child\n"); assert(false); }
+    if (std::find(log.begin(), log.end(), "Child:enter") == log.end()) { printf("FAIL: Expected Child:enter\n"); assert(false); }
+    if (std::find(log.begin(), log.end(), "Parent:enter") != log.end()) { printf("FAIL: Parent:enter MUST NOT fire when Child overrides\n"); assert(false); }
+    printf("TC1: Child's $> overrides Parent's $> (no forward) - PASS\n");
+
+    // TC2: Leaving $Child fires Child's <$ only; Parent's <$ must NOT fire.
+    s.go_to_parent();
+    log = s.get_log();
+    if (s.get_state() != "Parent") { printf("FAIL: Expected Parent\n"); assert(false); }
+    if (std::find(log.begin(), log.end(), "Child:exit") == log.end()) { printf("FAIL: Expected Child:exit\n"); assert(false); }
+    if (std::count(log.begin(), log.end(), "Parent:exit") != 0) { printf("FAIL: Parent:exit MUST NOT fire (Child overrides)\n"); assert(false); }
+    printf("TC2: Child's <$ overrides Parent's <$ (no forward) - PASS\n");
+
+    // TC3: Direct $Start -> $Parent transition fires Parent's $> exactly once.
+    if (std::count(log.begin(), log.end(), "Parent:enter") != 1) { printf("FAIL: Expected exactly 1 Parent:enter\n"); assert(false); }
+    printf("TC3: Direct Parent entry fires Parent's $> normally - PASS\n");
+
+    printf("PASS: RFC-0019 leaf-override semantics\n");
+    return 0;
+}

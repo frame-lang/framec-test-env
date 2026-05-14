@@ -1,0 +1,116 @@
+@@[target("c")]
+
+// Test 104: RFC-0019 leaf-override of ancestor lifecycle
+//
+// A child with its own $> / <$ handler and NO `=> $^` forward
+// overrides the ancestor's lifecycle handler. Inverse of fixtures
+// 46/47/48 (which verify forwarding) — verifies non-forwarding:
+// when the leaf does not forward, the ancestor's $> / <$ MUST NOT run.
+
+@@system HSMOverride {
+    interface:
+        go_to_child(): void
+        go_to_parent(): void
+        get_child_enter(): int
+        get_child_exit(): int
+        get_parent_enter(): int
+        get_parent_exit(): int
+        get_state(): char*
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_child_enter(): int { @@:(self->child_enter) return; }
+            get_child_exit(): int { @@:(self->child_exit) return; }
+            get_parent_enter(): int { @@:(self->parent_enter) return; }
+            get_parent_exit(): int { @@:(self->parent_exit) return; }
+            get_state(): char* { @@:("Start") return; }
+        }
+
+        $Child => $Parent {
+            $>() {
+                // NO `=> $^` — ancestor $> must NOT run.
+                self->child_enter = self->child_enter + 1;
+            }
+
+            <$() {
+                // NO `=> $^` — ancestor <$ must NOT run.
+                self->child_exit = self->child_exit + 1;
+            }
+
+            go_to_parent() { -> $Parent }
+            get_child_enter(): int { @@:(self->child_enter) return; }
+            get_child_exit(): int { @@:(self->child_exit) return; }
+            get_parent_enter(): int { @@:(self->parent_enter) return; }
+            get_parent_exit(): int { @@:(self->parent_exit) return; }
+            get_state(): char* { @@:("Child") return; }
+        }
+
+        $Parent {
+            $>() {
+                self->parent_enter = self->parent_enter + 1;
+            }
+
+            <$() {
+                self->parent_exit = self->parent_exit + 1;
+            }
+
+            go_to_child() { -> $Child }
+            get_child_enter(): int { @@:(self->child_enter) return; }
+            get_child_exit(): int { @@:(self->child_exit) return; }
+            get_parent_enter(): int { @@:(self->parent_enter) return; }
+            get_parent_exit(): int { @@:(self->parent_exit) return; }
+            get_state(): char* { @@:("Parent") return; }
+        }
+    domain:
+        child_enter  : int
+        child_exit   : int
+        parent_enter : int
+        parent_exit  : int
+}
+
+int main() {
+    printf("=== Test 104: RFC-0019 leaf-override of ancestor lifecycle ===\n");
+    HSMOverride* s = @@HSMOverride();
+
+    // TC1: Entering $Child fires Child's $> only; Parent's $> must NOT fire.
+    HSMOverride_go_to_child(s);
+    if (HSMOverride_get_child_enter(s) != 1) {
+        printf("FAIL: Expected Child:enter, got child_enter=%d\n", HSMOverride_get_child_enter(s));
+        HSMOverride_destroy(s);
+        return 1;
+    }
+    if (HSMOverride_get_parent_enter(s) != 0) {
+        printf("FAIL: Parent:enter MUST NOT fire when Child overrides, got parent_enter=%d\n", HSMOverride_get_parent_enter(s));
+        HSMOverride_destroy(s);
+        return 1;
+    }
+    printf("TC1: Child's $> overrides Parent's $> (no forward) - PASS\n");
+
+    // TC2: Leaving $Child fires Child's <$ only; Parent's <$ must NOT fire.
+    HSMOverride_go_to_parent(s);
+    if (HSMOverride_get_child_exit(s) != 1) {
+        printf("FAIL: Expected Child:exit, got child_exit=%d\n", HSMOverride_get_child_exit(s));
+        HSMOverride_destroy(s);
+        return 1;
+    }
+    if (HSMOverride_get_parent_exit(s) != 0) {
+        printf("FAIL: Parent:exit MUST NOT fire (Child overrides), got parent_exit=%d\n", HSMOverride_get_parent_exit(s));
+        HSMOverride_destroy(s);
+        return 1;
+    }
+    printf("TC2: Child's <$ overrides Parent's <$ (no forward) - PASS\n");
+
+    // TC3: Direct $Start -> $Parent transition fires Parent's $> exactly once.
+    if (HSMOverride_get_parent_enter(s) != 1) {
+        printf("FAIL: Expected exactly 1 Parent:enter (direct entry only), got parent_enter=%d\n", HSMOverride_get_parent_enter(s));
+        HSMOverride_destroy(s);
+        return 1;
+    }
+    printf("TC3: Direct Parent entry fires Parent's $> normally - PASS\n");
+
+    printf("PASS: RFC-0019 leaf-override semantics\n");
+    HSMOverride_destroy(s);
+    return 0;
+}
