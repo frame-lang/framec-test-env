@@ -1,0 +1,121 @@
+@@[target("python_3")]
+
+# Test 104: RFC-0019 leaf-override of ancestor lifecycle
+#
+# A child with its own $> / <$ handler and NO `=> $^` forward
+# overrides the ancestor's lifecycle handler. This is the inverse
+# of fixtures 46/47/48 (which verify forwarding) — it verifies
+# non-forwarding: when the leaf does not forward, the ancestor's
+# $> / <$ MUST NOT run.
+
+@@system HSMOverride {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Start")
+                return
+            }
+        }
+
+        $Child => $Parent {
+            $>() {
+                # NO `=> $^` — ancestor $> must NOT run.
+                self.log.append("Child:enter")
+            }
+
+            <$() {
+                # NO `=> $^` — ancestor <$ must NOT run.
+                self.log.append("Child:exit")
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Child")
+                return
+            }
+        }
+
+        $Parent {
+            $>() {
+                self.log.append("Parent:enter")
+            }
+
+            <$() {
+                self.log.append("Parent:exit")
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Parent")
+                return
+            }
+        }
+    domain:
+        log: list = []
+}
+
+def main():
+    print("=== Test 104: RFC-0019 leaf-override of ancestor lifecycle ===")
+    s = @@HSMOverride()
+
+    # TC1: Entering $Child fires Child's $> only; Parent's $> must NOT fire.
+    s.go_to_child()
+    log = s.get_log()
+    assert s.get_state() == "Child", f"Expected Child, got {s.get_state()}"
+    assert "Child:enter" in log, f"Expected Child:enter, got {log}"
+    assert "Parent:enter" not in log, f"Parent:enter MUST NOT fire when Child overrides, got {log}"
+    print("TC1: Child's $> overrides Parent's $> (no forward) - PASS")
+
+    # TC2: Leaving $Child fires Child's <$ only; Parent's <$ must NOT fire.
+    s.go_to_parent()
+    log = s.get_log()
+    assert s.get_state() == "Parent", f"Expected Parent, got {s.get_state()}"
+    assert "Child:exit" in log, f"Expected Child:exit, got {log}"
+    parent_exit_count = log.count("Parent:exit")
+    assert parent_exit_count == 0, f"Parent:exit MUST NOT fire (Child overrides), got {log}"
+    print("TC2: Child's <$ overrides Parent's <$ (no forward) - PASS")
+
+    # TC3: Direct $Start -> $Parent transition fires Parent's $> exactly once.
+    parent_enter_count = log.count("Parent:enter")
+    assert parent_enter_count == 1, f"Expected exactly 1 Parent:enter (direct entry only), got {parent_enter_count}: {log}"
+    print("TC3: Direct Parent entry fires Parent's $> normally - PASS")
+
+    print("PASS: RFC-0019 leaf-override semantics")
+
+if __name__ == '__main__':
+    main()
