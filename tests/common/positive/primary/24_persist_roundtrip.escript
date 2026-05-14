@@ -6,8 +6,9 @@ main(_) ->
     persist_roundtrip:set_counter(Pid1, 42),
     42 = persist_roundtrip:get_counter(Pid1),
     Saved = persist_roundtrip:save_state(Pid1),
-    active = maps:get(state, Saved),
-    42 = maps:get(counter, Saved),
+    %% ETF wire format: binary_to_term recovers {StateAtom, PersistedMap}.
+    {active, Persisted} = binary_to_term(Saved, [safe]),
+    42 = maps:get(counter, Persisted),
     {ok, Pid2} = persist_roundtrip:load_state(Saved),
     "active" = persist_roundtrip:get_state(Pid2),
     42 = persist_roundtrip:get_counter(Pid2),
