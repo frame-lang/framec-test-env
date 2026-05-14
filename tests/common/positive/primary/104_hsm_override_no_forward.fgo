@@ -1,0 +1,107 @@
+@@[target("go")]
+
+package main
+
+import "fmt"
+import "os"
+
+// Test 104: RFC-0019 leaf-override of ancestor lifecycle
+//
+// A child with its own $> / <$ handler and NO `=> $^` forward
+// overrides the ancestor's lifecycle handler. Inverse of fixtures
+// 46/47/48 (which verify forwarding) — verifies non-forwarding:
+// when the leaf does not forward, the ancestor's $> / <$ MUST NOT run.
+
+@@system HSMOverride {
+    interface:
+        GoToChild()
+        GoToParent()
+        GetLog(): []string
+        GetState(): string
+
+    machine:
+        $Start {
+            GoToChild() { -> $Child }
+            GoToParent() { -> $Parent }
+            GetLog(): []string { @@:(s.log) }
+            GetState(): string { @@:("Start") }
+        }
+
+        $Child => $Parent {
+            $>() {
+                // NO `=> $^` — ancestor $> must NOT run.
+                s.log = append(s.log, "Child:enter")
+            }
+
+            <$() {
+                // NO `=> $^` — ancestor <$ must NOT run.
+                s.log = append(s.log, "Child:exit")
+            }
+
+            GoToParent() { -> $Parent }
+            GetLog(): []string { @@:(s.log) }
+            GetState(): string { @@:("Child") }
+        }
+
+        $Parent {
+            $>() {
+                s.log = append(s.log, "Parent:enter")
+            }
+
+            <$() {
+                s.log = append(s.log, "Parent:exit")
+            }
+
+            GoToChild() { -> $Child }
+            GetLog(): []string { @@:(s.log) }
+            GetState(): string { @@:("Parent") }
+        }
+    domain:
+        log : []string
+}
+
+func containsStr(slice []string, item string) bool {
+	for _, v := range slice {
+		if v == item {
+			return true
+		}
+	}
+	return false
+}
+
+func countOccurrences(slice []string, item string) int {
+	count := 0
+	for _, v := range slice {
+		if v == item {
+			count++
+		}
+	}
+	return count
+}
+
+func main() {
+	fmt.Println("=== Test 104: RFC-0019 leaf-override of ancestor lifecycle ===")
+	sm := @@HSMOverride()
+
+	// TC1: Entering $Child fires Child's $> only; Parent's $> must NOT fire.
+	sm.GoToChild()
+	log := sm.GetLog()
+	if sm.GetState() != "Child" { fmt.Println("FAIL: Expected Child"); os.Exit(1) }
+	if !containsStr(log, "Child:enter") { fmt.Println("FAIL: Expected Child:enter"); os.Exit(1) }
+	if containsStr(log, "Parent:enter") { fmt.Println("FAIL: Parent:enter MUST NOT fire when Child overrides"); os.Exit(1) }
+	fmt.Println("TC1: Child's $> overrides Parent's $> (no forward) - PASS")
+
+	// TC2: Leaving $Child fires Child's <$ only; Parent's <$ must NOT fire.
+	sm.GoToParent()
+	log = sm.GetLog()
+	if sm.GetState() != "Parent" { fmt.Println("FAIL: Expected Parent"); os.Exit(1) }
+	if !containsStr(log, "Child:exit") { fmt.Println("FAIL: Expected Child:exit"); os.Exit(1) }
+	if countOccurrences(log, "Parent:exit") != 0 { fmt.Println("FAIL: Parent:exit MUST NOT fire (Child overrides)"); os.Exit(1) }
+	fmt.Println("TC2: Child's <$ overrides Parent's <$ (no forward) - PASS")
+
+	// TC3: Direct $Start -> $Parent transition fires Parent's $> exactly once.
+	if countOccurrences(log, "Parent:enter") != 1 { fmt.Println("FAIL: Expected exactly 1 Parent:enter"); os.Exit(1) }
+	fmt.Println("TC3: Direct Parent entry fires Parent's $> normally - PASS")
+
+	fmt.Println("PASS: RFC-0019 leaf-override semantics")
+}

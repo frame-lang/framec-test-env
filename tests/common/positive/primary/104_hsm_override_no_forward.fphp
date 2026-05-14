@@ -1,0 +1,78 @@
+<?php
+@@[target("php")]
+
+// Test 104: RFC-0019 leaf-override of ancestor lifecycle
+//
+// A child with its own $> / <$ handler and NO `=> $^` forward
+// overrides the ancestor's lifecycle handler. Inverse of fixtures
+// 46/47/48 (which verify forwarding) — verifies non-forwarding:
+// when the leaf does not forward, the ancestor's $> / <$ MUST NOT run.
+
+@@system HSMOverride {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): list { @@:($this->log) }
+            get_state(): str { @@:("Start") }
+        }
+
+        $Child => $Parent {
+            $>() {
+                // NO `=> $^` — ancestor $> must NOT run.
+                $this->log[] = "Child:enter";
+            }
+
+            <$() {
+                // NO `=> $^` — ancestor <$ must NOT run.
+                $this->log[] = "Child:exit";
+            }
+
+            go_to_parent() { -> $Parent }
+            get_log(): list { @@:($this->log) }
+            get_state(): str { @@:("Child") }
+        }
+
+        $Parent {
+            $>() { $this->log[] = "Parent:enter"; }
+            <$() { $this->log[] = "Parent:exit"; }
+            go_to_child() { -> $Child }
+            get_log(): list { @@:($this->log) }
+            get_state(): str { @@:("Parent") }
+        }
+    domain:
+        log = []
+}
+
+echo "=== Test 104: RFC-0019 leaf-override of ancestor lifecycle ===\n";
+$s = @@HSMOverride();
+
+// TC1: Entering $Child fires Child's $> only; Parent's $> must NOT fire.
+$s->go_to_child();
+$log = $s->get_log();
+if ($s->get_state() !== "Child") { echo "FAIL: Expected Child\n"; exit(1); }
+if (!in_array("Child:enter", $log, true)) { echo "FAIL: Expected Child:enter\n"; exit(1); }
+if (in_array("Parent:enter", $log, true)) { echo "FAIL: Parent:enter MUST NOT fire when Child overrides\n"; exit(1); }
+echo "TC1: Child's \$> overrides Parent's \$> (no forward) - PASS\n";
+
+// TC2: Leaving $Child fires Child's <$ only; Parent's <$ must NOT fire.
+$s->go_to_parent();
+$log = $s->get_log();
+if ($s->get_state() !== "Parent") { echo "FAIL: Expected Parent\n"; exit(1); }
+if (!in_array("Child:exit", $log, true)) { echo "FAIL: Expected Child:exit\n"; exit(1); }
+$parent_exit_count = count(array_filter($log, function($v) { return $v === "Parent:exit"; }));
+if ($parent_exit_count !== 0) { echo "FAIL: Parent:exit MUST NOT fire (Child overrides)\n"; exit(1); }
+echo "TC2: Child's <\$ overrides Parent's <\$ (no forward) - PASS\n";
+
+// TC3: Direct $Start -> $Parent transition fires Parent's $> exactly once.
+$parent_enter_count = count(array_filter($log, function($v) { return $v === "Parent:enter"; }));
+if ($parent_enter_count !== 1) { echo "FAIL: Expected exactly 1 Parent:enter\n"; exit(1); }
+echo "TC3: Direct Parent entry fires Parent's \$> normally - PASS\n";
+
+echo "PASS: RFC-0019 leaf-override semantics\n";
