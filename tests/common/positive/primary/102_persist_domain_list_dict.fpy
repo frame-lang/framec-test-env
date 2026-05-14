@@ -1,0 +1,73 @@
+@@[target("python_3")]
+
+# Test 102: list and dict as PERSISTED domain fields.
+#
+# Coverage gap closed: tests 73-80 exercise list/dict as state-args
+# (parameterized $Active(items: list)); their persisted state-args
+# round-trip via the state_vars dict path. This fixture puts list
+# AND dict directly in `domain:` with @@[persist], which exercises:
+#   - On C: the symbol-mangled `<sys>_persist_pack_field_list` /
+#     `_unpack_field_list` (and `_dict` variants) helpers.
+#   - On every other backend: the type-ignorant domain-field path
+#     through the target's native serializer (Jackson list adapter,
+#     Codable Array<…>, serde Vec<…>, etc.).
+# Both must round-trip the values and preserve order / key-value
+# associations.
+
+@@[persist(bytes)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system DomainListDict {
+    interface:
+        push(v: int)
+        size_l(): int
+        get_at(i: int): int
+        put(k: str, v: int)
+        size_d(): int
+        get_v(k: str): int
+
+    machine:
+        $Active {
+            push(v: int)         { self.items.append(v) }
+            size_l(): int        { @@:(len(self.items)) }
+            get_at(i: int): int  { @@:(self.items[i] if i < len(self.items) else -1) }
+            put(k: str, v: int)  { self.scores[k] = v }
+            size_d(): int        { @@:(len(self.scores)) }
+            get_v(k: str): int   { @@:(self.scores.get(k, -1)) }
+        }
+
+    domain:
+        items: list = []
+        scores: dict = {}
+}
+
+def main():
+    s1 = @@DomainListDict()
+    s1.push(10)
+    s1.push(20)
+    s1.push(30)
+    s1.put("a", 1)
+    s1.put("b", 2)
+    s1.put("c", 3)
+
+    assert s1.size_l() == 3
+    assert s1.get_at(0) == 10
+    assert s1.size_d() == 3
+    assert s1.get_v("b") == 2
+
+    snap = s1.save_state()
+    s2 = @@DomainListDict()
+    s2.restore_state(snap)
+
+    assert s2.size_l() == 3, f"size_l={s2.size_l()}"
+    assert s2.get_at(0) == 10, f"items[0]={s2.get_at(0)}"
+    assert s2.get_at(1) == 20, f"items[1]={s2.get_at(1)}"
+    assert s2.get_at(2) == 30, f"items[2]={s2.get_at(2)}"
+    assert s2.size_d() == 3, f"size_d={s2.size_d()}"
+    assert s2.get_v("a") == 1
+    assert s2.get_v("b") == 2
+    assert s2.get_v("c") == 3
+    print("PASS: 102_persist_domain_list_dict")
+
+if __name__ == "__main__":
+    main()

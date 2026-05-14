@@ -1,0 +1,81 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+// Test 102: list + dict as PERSISTED domain fields (C).
+//
+// Specifically exercises the `<sys>_persist_pack_field_list` /
+// `_unpack_field_list` and `_dict` variants in runtime.rs — the
+// symbol-mangled dispatcher path for list/dict-typed *domain* fields
+// (distinct from state-args, which round-trip via the state_vars
+// dict path tests 73-80 cover). Pre-existing C fixtures didn't
+// declare `list` or `dict` directly in `domain:`, so the helpers
+// were unverified. This locks them.
+
+@@[persist(char*)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system DomainListDict {
+    interface:
+        push(v: int)
+        size_l(): int
+        get_at(i: int): int
+        put(k: char*, v: int)
+        get_v(k: char*): int
+
+    machine:
+        $Active {
+            push(v: int) {
+                DomainListDict_FrameVec_push(self->items, (void*)(intptr_t)v);
+            }
+            size_l(): int {
+                @@:((int)DomainListDict_FrameVec_size(self->items))
+            }
+            get_at(i: int): int {
+                @@:((int)(intptr_t)DomainListDict_FrameVec_get(self->items, i))
+            }
+            put(k: char*, v: int) {
+                DomainListDict_FrameDict_set(self->scores, k, (void*)(intptr_t)v);
+            }
+            get_v(k: char*): int {
+                @@:((int)(intptr_t)DomainListDict_FrameDict_get(self->scores, k))
+            }
+        }
+
+    domain:
+        items: list = DomainListDict_FrameVec_new()
+        scores: dict = DomainListDict_FrameDict_new()
+}
+
+int main(void) {
+    DomainListDict* s1 = @@DomainListDict();
+    DomainListDict_push(s1, 10);
+    DomainListDict_push(s1, 20);
+    DomainListDict_push(s1, 30);
+    DomainListDict_put(s1, "a", 1);
+    DomainListDict_put(s1, "b", 2);
+
+    if (DomainListDict_size_l(s1) != 3) { printf("FAIL pre size_l=%d\n", DomainListDict_size_l(s1)); return 1; }
+    if (DomainListDict_get_v(s1, "b") != 2) { printf("FAIL pre b=%d\n", DomainListDict_get_v(s1, "b")); return 1; }
+
+    char* snap = DomainListDict_save_state(s1);
+
+    DomainListDict* s2 = @@DomainListDict();
+    DomainListDict_restore_state(s2, snap);
+
+    if (DomainListDict_size_l(s2) != 3) { printf("FAIL post size_l=%d\n", DomainListDict_size_l(s2)); return 1; }
+    if (DomainListDict_get_at(s2, 0) != 10) { printf("FAIL post items[0]=%d\n", DomainListDict_get_at(s2, 0)); return 1; }
+    if (DomainListDict_get_at(s2, 2) != 30) { printf("FAIL post items[2]=%d\n", DomainListDict_get_at(s2, 2)); return 1; }
+    if (DomainListDict_get_v(s2, "a") != 1) { printf("FAIL post dict[a]=%d\n", DomainListDict_get_v(s2, "a")); return 1; }
+    if (DomainListDict_get_v(s2, "b") != 2) { printf("FAIL post dict[b]=%d\n", DomainListDict_get_v(s2, "b")); return 1; }
+
+    printf("PASS: 102_persist_domain_list_dict\n");
+    free(snap);
+    DomainListDict_destroy(s1);
+    DomainListDict_destroy(s2);
+    return 0;
+}
