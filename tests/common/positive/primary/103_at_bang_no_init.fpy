@@ -1,0 +1,72 @@
+@@[target("python_3")]
+
+# Test 103: `@@!Foo()` no-init allocation (RFC-0017 D7).
+#
+# The headline RFC-0017 use case is `@@[load]` / restore, which the
+# matrix already covers via tests 23-25, 51, 56-60, 83-88, 93, 96, 98,
+# 99. What was NOT covered: the `@@!Foo()` *sigil* itself, as a
+# user-visible syntactic form that allocates a "naked shell" without
+# running the start state's `$Start(...)` body or `$>` enter handler.
+# This fixture exercises that path explicitly.
+#
+# Three paths share `Counter` to lock down the contract:
+#   1. `@@Counter()` (factory) — $> fires, lifecycle_count = 1.
+#   2. `@@!Counter()` (no-init shell) — $> does NOT fire, count = 0.
+#   3. `@@!Counter()` + restore_state(blob) — $> still does not fire
+#      (the blob's lifecycle_count is preserved verbatim).
+
+@@[persist(bytes)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Counter {
+    interface:
+        inc()
+        get_n(): int
+        get_lc(): int
+
+    machine:
+        $Active {
+            $> { self.lifecycle_count = self.lifecycle_count + 1 }
+            inc() { self.n = self.n + 1 }
+            get_n(): int { @@:(self.n) }
+            get_lc(): int { @@:(self.lifecycle_count) }
+        }
+
+    domain:
+        n: int = 0
+        lifecycle_count: int = 0
+}
+
+def main():
+    # Path 1: @@Counter() — normal construction; $> fires exactly once.
+    a = @@Counter()
+    assert a.get_lc() == 1, f"$> should fire once on factory path, got lc={a.get_lc()}"
+    a.inc(); a.inc(); a.inc()
+    assert a.get_n() == 3
+    blob = a.save_state()
+
+    # Path 2: @@!Counter() (naked shell, no init).
+    fresh = @@!Counter()
+    assert fresh.get_lc() == 0, f"$> must NOT fire on @@! path; got lc={fresh.get_lc()}"
+    assert fresh.get_n() == 0, f"domain default should hold; got n={fresh.get_n()}"
+
+    # Path 3: @@!Counter() + restore_state(blob).
+    # The blob's lifecycle_count (1) must be restored — not 0 (shell
+    # default) and not 2 (which would happen if $> fired during restore).
+    fresh.restore_state(blob)
+    assert fresh.get_n() == 3, f"restored n={fresh.get_n()}"
+    assert fresh.get_lc() == 1, f"restored lc should be 1 (blob value); got {fresh.get_lc()}"
+
+    # Path 4: @@!Counter() shell + post-construction method calls.
+    # The shell is functional even without $> having run — methods bind
+    # to the class, not to the init path. But lifecycle_count stays 0
+    # because $> never fired.
+    naked = @@!Counter()
+    naked.inc()
+    assert naked.get_n() == 1
+    assert naked.get_lc() == 0, f"$> never ran on naked shell; got lc={naked.get_lc()}"
+
+    print("PASS: 103_at_bang_no_init")
+
+if __name__ == "__main__":
+    main()

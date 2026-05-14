@@ -1,0 +1,57 @@
+@@[target("java")]
+
+import java.util.*;
+
+// Test 103: `@@!Foo()` no-init allocation (RFC-0017 D7).
+// See 103_at_bang_no_init.fpy for the full contract description.
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Counter {
+    interface:
+        inc()
+        get_n(): int
+        get_lc(): int
+
+    machine:
+        $Active {
+            $> { this.lifecycle_count = this.lifecycle_count + 1; }
+            inc() { this.n = this.n + 1; }
+            get_n(): int { @@:(this.n) }
+            get_lc(): int { @@:(this.lifecycle_count) }
+        }
+
+    domain:
+        n: int = 0
+        lifecycle_count: int = 0
+}
+
+class Main {
+    public static void main(String[] args) {
+        // Path 1: @@Counter() — factory; $> fires.
+        Counter a = @@Counter();
+        if (a.get_lc() != 1) { System.out.println("FAIL: factory lc=" + a.get_lc()); return; }
+        a.inc(); a.inc(); a.inc();
+        if (a.get_n() != 3) { System.out.println("FAIL: factory n=" + a.get_n()); return; }
+        String blob = a.save_state();
+
+        // Path 2: @@!Counter() — naked shell; $> does NOT fire.
+        Counter fresh = @@!Counter();
+        if (fresh.get_lc() != 0) { System.out.println("FAIL: bang lc=" + fresh.get_lc()); return; }
+        if (fresh.get_n() != 0) { System.out.println("FAIL: bang n=" + fresh.get_n()); return; }
+
+        // Path 3: @@!Counter() + restore — blob's lc is preserved.
+        fresh.restore_state(blob);
+        if (fresh.get_n() != 3) { System.out.println("FAIL: restored n=" + fresh.get_n()); return; }
+        if (fresh.get_lc() != 1) { System.out.println("FAIL: restored lc=" + fresh.get_lc()); return; }
+
+        // Path 4: @@!Counter() shell + method call — works without $>.
+        Counter naked = @@!Counter();
+        naked.inc();
+        if (naked.get_n() != 1) { System.out.println("FAIL: naked.inc n=" + naked.get_n()); return; }
+        if (naked.get_lc() != 0) { System.out.println("FAIL: naked still lc=0; got " + naked.get_lc()); return; }
+
+        System.out.println("PASS: 103_at_bang_no_init");
+    }
+}

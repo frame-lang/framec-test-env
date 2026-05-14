@@ -1,0 +1,75 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+# Test 103: `@@!Foo()` no-init allocation (RFC-0017 D7).
+# See 103_at_bang_no_init.fpy for the full contract description.
+# GDScript's `_init` would otherwise auto-fire on construction —
+# the bare-constructor path framec emits bypasses that.
+
+@@[persist(PackedByteArray)]
+@@[save(save_op)]
+@@[load(restore_state)]
+@@system Counter {
+    interface:
+        inc()
+        get_n(): int
+        get_lc(): int
+
+    machine:
+        $Active {
+            $> { self.lifecycle_count = self.lifecycle_count + 1 }
+            inc() { self.n = self.n + 1 }
+            get_n(): int { @@:(self.n) }
+            get_lc(): int { @@:(self.lifecycle_count) }
+        }
+
+    domain:
+        n: int = 0
+        lifecycle_count: int = 0
+}
+
+func _init():
+    # Path 1: @@Counter() factory.
+    var a = @@Counter()
+    if a.get_lc() != 1:
+        print("FAIL: factory lc=" + str(a.get_lc()))
+        quit()
+    a.inc()
+    a.inc()
+    a.inc()
+    if a.get_n() != 3:
+        print("FAIL: factory n=" + str(a.get_n()))
+        quit()
+    var blob = a.save_op()
+
+    # Path 2: @@!Counter() naked shell.
+    var fresh = @@!Counter()
+    if fresh.get_lc() != 0:
+        print("FAIL: bang lc=" + str(fresh.get_lc()))
+        quit()
+    if fresh.get_n() != 0:
+        print("FAIL: bang n=" + str(fresh.get_n()))
+        quit()
+
+    # Path 3: @@!Counter() + restore.
+    fresh.restore_state(blob)
+    if fresh.get_n() != 3:
+        print("FAIL: restored n=" + str(fresh.get_n()))
+        quit()
+    if fresh.get_lc() != 1:
+        print("FAIL: restored lc=" + str(fresh.get_lc()))
+        quit()
+
+    # Path 4: naked shell + method call.
+    var naked = @@!Counter()
+    naked.inc()
+    if naked.get_n() != 1:
+        print("FAIL: naked.inc n=" + str(naked.get_n()))
+        quit()
+    if naked.get_lc() != 0:
+        print("FAIL: naked still lc=0; got " + str(naked.get_lc()))
+        quit()
+
+    print("PASS: 103_at_bang_no_init")
+    quit()

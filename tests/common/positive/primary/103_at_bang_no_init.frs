@@ -1,0 +1,53 @@
+@@[target("rust")]
+
+// Test 103: `@@!Foo()` no-init allocation (RFC-0017 D7).
+// See 103_at_bang_no_init.fpy for the full contract description.
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Counter {
+    interface:
+        inc()
+        get_n(): i32
+        get_lc(): i32
+
+    machine:
+        $Active {
+            $> { self.lifecycle_count = self.lifecycle_count + 1; }
+            inc() { self.n = self.n + 1; }
+            get_n(): i32 { @@:(self.n) }
+            get_lc(): i32 { @@:(self.lifecycle_count) }
+        }
+
+    domain:
+        n: i32 = 0
+        lifecycle_count: i32 = 0
+}
+
+fn main() {
+    // Path 1: @@Counter() — factory; $> fires.
+    let mut a = @@Counter();
+    if a.get_lc() != 1 { println!("FAIL: factory lc={}", a.get_lc()); return; }
+    a.inc(); a.inc(); a.inc();
+    if a.get_n() != 3 { println!("FAIL: factory n={}", a.get_n()); return; }
+    let blob = a.save_state();
+
+    // Path 2: @@!Counter() — naked shell; $> does NOT fire.
+    let mut fresh = @@!Counter();
+    if fresh.get_lc() != 0 { println!("FAIL: bang lc={}", fresh.get_lc()); return; }
+    if fresh.get_n() != 0 { println!("FAIL: bang n={}", fresh.get_n()); return; }
+
+    // Path 3: @@!Counter() + restore — blob's lc is preserved.
+    fresh.restore_state(blob);
+    if fresh.get_n() != 3 { println!("FAIL: restored n={}", fresh.get_n()); return; }
+    if fresh.get_lc() != 1 { println!("FAIL: restored lc={}", fresh.get_lc()); return; }
+
+    // Path 4: @@!Counter() shell, then a method — works without $>.
+    let mut naked = @@!Counter();
+    naked.inc();
+    if naked.get_n() != 1 { println!("FAIL: naked.inc n={}", naked.get_n()); return; }
+    if naked.get_lc() != 0 { println!("FAIL: naked still lc=0; got {}", naked.get_lc()); return; }
+
+    println!("PASS: 103_at_bang_no_init");
+}
