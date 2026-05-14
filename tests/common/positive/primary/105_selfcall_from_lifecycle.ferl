@@ -1,0 +1,33 @@
+@@[target("erlang")]
+
+% Test 105: @@:self.method() from lifecycle handlers (F1 regression)
+%
+% Pre-fix the Erlang body processor for $> / <$ handler bodies did not
+% pass interface_names to the line classifier — so `@@:self.tick()` from
+% a $> would be misclassified as a record-field access and emit
+% `Data#data.tick();`, which is invalid Erlang. The fix routes
+% interface_names through `erlang_process_body_lines_with_params` so the
+% classifier reaches its `InterfaceCall` branch and emits
+% `{Data1, _} = frame_dispatch__(tick, [], Data)`.
+
+@@system LifecycleSelfCall {
+    interface:
+        tick()
+        go()
+        get_count(): int
+    machine:
+        $A {
+            $>() { @@:self.tick() }
+            <$() { @@:self.tick() }
+            go() { -> $B }
+            tick() { self.count = self.count + 1 }
+            get_count(): int { @@:(self.count) }
+        }
+        $B {
+            $>() { @@:self.tick() }
+            tick() { self.count = self.count + 1 }
+            get_count(): int { @@:(self.count) }
+        }
+    domain:
+        count = 0
+}
