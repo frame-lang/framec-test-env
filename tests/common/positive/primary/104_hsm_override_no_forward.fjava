@@ -1,0 +1,95 @@
+@@[target("java")]
+
+// Test 104: RFC-0019 leaf-override of ancestor lifecycle
+//
+// A child with its own $> / <$ handler and NO `=> $^` forward
+// overrides the ancestor's lifecycle handler. Inverse of fixtures
+// 46/47/48 (which verify forwarding) — verifies non-forwarding:
+// when the leaf does not forward, the ancestor's $> / <$ MUST NOT run.
+
+@@system HSMOverride {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): ArrayList
+        get_state(): String
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): ArrayList { @@:(this.log) }
+            get_state(): String { @@:("Start") }
+        }
+
+        $Child => $Parent {
+            $>() {
+                // NO `=> $^` — ancestor $> must NOT run.
+                this.log.add("Child:enter");
+            }
+
+            <$() {
+                // NO `=> $^` — ancestor <$ must NOT run.
+                this.log.add("Child:exit");
+            }
+
+            go_to_parent() { -> $Parent }
+            get_log(): ArrayList { @@:(this.log) }
+            get_state(): String { @@:("Child") }
+        }
+
+        $Parent {
+            $>() {
+                this.log.add("Parent:enter");
+            }
+
+            <$() {
+                this.log.add("Parent:exit");
+            }
+
+            go_to_child() { -> $Child }
+            get_log(): ArrayList { @@:(this.log) }
+            get_state(): String { @@:("Parent") }
+        }
+    domain:
+        log : ArrayList = new ArrayList()
+}
+
+class Main {
+    static int countOf(ArrayList log, String v) {
+        int n = 0;
+        for (Object item : log) if (item.equals(v)) n++;
+        return n;
+    }
+    static boolean contains(ArrayList log, String v) {
+        for (Object item : log) if (item.equals(v)) return true;
+        return false;
+    }
+
+    public static void main(String[] args) {
+        System.out.println("=== Test 104: RFC-0019 leaf-override of ancestor lifecycle ===");
+        var s = @@HSMOverride();
+
+        // TC1: Entering $Child fires Child's $> only; Parent's $> must NOT fire.
+        s.go_to_child();
+        ArrayList log = s.get_log();
+        if (!s.get_state().equals("Child")) { System.out.println("FAIL: Expected Child"); System.exit(1); }
+        if (!contains(log, "Child:enter")) { System.out.println("FAIL: Expected Child:enter"); System.exit(1); }
+        if (contains(log, "Parent:enter")) { System.out.println("FAIL: Parent:enter MUST NOT fire when Child overrides"); System.exit(1); }
+        System.out.println("TC1: Child's $> overrides Parent's $> (no forward) - PASS");
+
+        // TC2: Leaving $Child fires Child's <$ only; Parent's <$ must NOT fire.
+        s.go_to_parent();
+        log = s.get_log();
+        if (!s.get_state().equals("Parent")) { System.out.println("FAIL: Expected Parent"); System.exit(1); }
+        if (!contains(log, "Child:exit")) { System.out.println("FAIL: Expected Child:exit"); System.exit(1); }
+        if (countOf(log, "Parent:exit") != 0) { System.out.println("FAIL: Parent:exit MUST NOT fire (Child overrides)"); System.exit(1); }
+        System.out.println("TC2: Child's <$ overrides Parent's <$ (no forward) - PASS");
+
+        // TC3: Direct $Start -> $Parent transition fires Parent's $> exactly once.
+        if (countOf(log, "Parent:enter") != 1) { System.out.println("FAIL: Expected exactly 1 Parent:enter"); System.exit(1); }
+        System.out.println("TC3: Direct Parent entry fires Parent's $> normally - PASS");
+
+        System.out.println("PASS: RFC-0019 leaf-override semantics");
+    }
+}

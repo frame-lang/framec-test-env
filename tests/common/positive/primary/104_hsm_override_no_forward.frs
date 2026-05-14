@@ -1,0 +1,85 @@
+@@[target("rust")]
+
+// Test 104: RFC-0019 leaf-override of ancestor lifecycle
+//
+// A child with its own $> / <$ handler and NO `=> $^` forward
+// overrides the ancestor's lifecycle handler. Inverse of fixtures
+// 46/47/48 (which verify forwarding) — verifies non-forwarding:
+// when the leaf does not forward, the ancestor's $> / <$ MUST NOT run.
+
+@@system HSMOverride {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): Vec<String>
+        get_state(): String
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): Vec<String> { @@:(self.log.clone()) }
+            get_state(): String { @@:("Start".to_string()) }
+        }
+
+        $Child => $Parent {
+            $>() {
+                // NO `=> $^` — ancestor $> must NOT run.
+                self.log.push("Child:enter".to_string());
+            }
+
+            <$() {
+                // NO `=> $^` — ancestor <$ must NOT run.
+                self.log.push("Child:exit".to_string());
+            }
+
+            go_to_parent() { -> $Parent }
+            get_log(): Vec<String> { @@:(self.log.clone()) }
+            get_state(): String { @@:("Child".to_string()) }
+        }
+
+        $Parent {
+            $>() {
+                self.log.push("Parent:enter".to_string());
+            }
+
+            <$() {
+                self.log.push("Parent:exit".to_string());
+            }
+
+            go_to_child() { -> $Child }
+            get_log(): Vec<String> { @@:(self.log.clone()) }
+            get_state(): String { @@:("Parent".to_string()) }
+        }
+    domain:
+        log: Vec<String>
+}
+
+fn main() {
+    println!("=== Test 104: RFC-0019 leaf-override of ancestor lifecycle ===");
+    let mut s = @@HSMOverride();
+
+    // TC1: Entering $Child fires Child's $> only; Parent's $> must NOT fire.
+    s.go_to_child();
+    let log = s.get_log();
+    assert!(s.get_state() == "Child", "Expected Child");
+    assert!(log.iter().any(|x| x == "Child:enter"), "Expected Child:enter");
+    assert!(!log.iter().any(|x| x == "Parent:enter"), "Parent:enter MUST NOT fire when Child overrides");
+    println!("TC1: Child's $> overrides Parent's $> (no forward) - PASS");
+
+    // TC2: Leaving $Child fires Child's <$ only; Parent's <$ must NOT fire.
+    s.go_to_parent();
+    let log = s.get_log();
+    assert!(s.get_state() == "Parent", "Expected Parent");
+    assert!(log.iter().any(|x| x == "Child:exit"), "Expected Child:exit");
+    let parent_exit_count = log.iter().filter(|x| *x == "Parent:exit").count();
+    assert!(parent_exit_count == 0, "Parent:exit MUST NOT fire (Child overrides)");
+    println!("TC2: Child's <$ overrides Parent's <$ (no forward) - PASS");
+
+    // TC3: Direct $Start -> $Parent transition fires Parent's $> exactly once.
+    let parent_enter_count = log.iter().filter(|x| *x == "Parent:enter").count();
+    assert!(parent_enter_count == 1, "Expected exactly 1 Parent:enter (direct entry only)");
+    println!("TC3: Direct Parent entry fires Parent's $> normally - PASS");
+
+    println!("PASS: RFC-0019 leaf-override semantics");
+}

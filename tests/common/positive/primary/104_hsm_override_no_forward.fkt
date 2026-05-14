@@ -1,0 +1,95 @@
+@@[target("kotlin")]
+
+import kotlin.system.exitProcess
+
+// Test 104: RFC-0019 leaf-override of ancestor lifecycle
+//
+// A child with its own $> / <$ handler and NO `=> $^` forward
+// overrides the ancestor's lifecycle handler. Inverse of fixtures
+// 46/47/48 (which verify forwarding) — verifies non-forwarding:
+// when the leaf does not forward, the ancestor's $> / <$ MUST NOT run.
+
+@@system HSMOverride {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log(): MutableList<Any?>
+        get_state(): String
+
+    machine:
+        $Start {
+            go_to_child() { -> $Child }
+            go_to_parent() { -> $Parent }
+            get_log(): MutableList<Any?> { @@:(this.log) }
+            get_state(): String { @@:("Start") }
+        }
+
+        $Child => $Parent {
+            $>() {
+                // NO `=> $^` — ancestor $> must NOT run.
+                this.log.add("Child:enter")
+            }
+
+            <$() {
+                // NO `=> $^` — ancestor <$ must NOT run.
+                this.log.add("Child:exit")
+            }
+
+            go_to_parent() { -> $Parent }
+            get_log(): MutableList<Any?> { @@:(this.log) }
+            get_state(): String { @@:("Child") }
+        }
+
+        $Parent {
+            $>() {
+                this.log.add("Parent:enter")
+            }
+
+            <$() {
+                this.log.add("Parent:exit")
+            }
+
+            go_to_child() { -> $Child }
+            get_log(): MutableList<Any?> { @@:(this.log) }
+            get_state(): String { @@:("Parent") }
+        }
+    domain:
+        log = mutableListOf<String>()
+}
+
+fun countOf(log: MutableList<*>, v: String): Int {
+    var n = 0
+    for (item in log) if (item == v) n++
+    return n
+}
+fun contains(log: MutableList<*>, v: String): Boolean {
+    for (item in log) if (item == v) return true
+    return false
+}
+
+fun main() {
+    println("=== Test 104: RFC-0019 leaf-override of ancestor lifecycle ===")
+    val s = @@HSMOverride()
+
+    // TC1: Entering $Child fires Child's $> only; Parent's $> must NOT fire.
+    s.go_to_child()
+    var log = s.get_log() as MutableList<*>
+    if ((s.get_state() as String) != "Child") { println("FAIL: Expected Child"); exitProcess(1) }
+    if (!contains(log, "Child:enter")) { println("FAIL: Expected Child:enter"); exitProcess(1) }
+    if (contains(log, "Parent:enter")) { println("FAIL: Parent:enter MUST NOT fire when Child overrides"); exitProcess(1) }
+    println("TC1: Child's \$> overrides Parent's \$> (no forward) - PASS")
+
+    // TC2: Leaving $Child fires Child's <$ only; Parent's <$ must NOT fire.
+    s.go_to_parent()
+    log = s.get_log() as MutableList<*>
+    if ((s.get_state() as String) != "Parent") { println("FAIL: Expected Parent"); exitProcess(1) }
+    if (!contains(log, "Child:exit")) { println("FAIL: Expected Child:exit"); exitProcess(1) }
+    if (countOf(log, "Parent:exit") != 0) { println("FAIL: Parent:exit MUST NOT fire (Child overrides)"); exitProcess(1) }
+    println("TC2: Child's <\$ overrides Parent's <\$ (no forward) - PASS")
+
+    // TC3: Direct $Start -> $Parent transition fires Parent's $> exactly once.
+    if (countOf(log, "Parent:enter") != 1) { println("FAIL: Expected exactly 1 Parent:enter"); exitProcess(1) }
+    println("TC3: Direct Parent entry fires Parent's \$> normally - PASS")
+
+    println("PASS: RFC-0019 leaf-override semantics")
+}
