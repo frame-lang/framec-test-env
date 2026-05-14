@@ -1,0 +1,89 @@
+@@[target("python_3")]
+
+# Test 105: @@:self.method() from lifecycle handlers (F1 regression)
+#
+# `@@:self.method()` re-enters the kernel dispatcher — it builds a
+# FrameEvent, pushes a FrameContext, calls __router. Pre-RFC-0017,
+# the start state's $> ran *outside* the context stack, so an
+# @@:self call from within it crashed when the kernel tried to look
+# up the surrounding context. RFC-0017's `_frame_init` pushes a
+# context for the start $>; RFC-0019 keeps that contract for every
+# lifecycle handler ($> and <$).
+#
+# This fixture exercises:
+#   - @@:self from start state's $>
+#   - @@:self from <$ during a transition
+#   - @@:self from the post-transition state's $>
+# all in one trace.
+
+@@system LifecycleSelfCall {
+    interface:
+        tick()
+        go()
+        get_count(): int
+
+    machine:
+        $A {
+            $>() {
+                # F1 regression: @@:self from start state $>.
+                @@:self.tick()
+            }
+
+            <$() {
+                # F1 regression: @@:self from <$ during transition.
+                @@:self.tick()
+            }
+
+            go() {
+                -> $B
+            }
+
+            tick() {
+                self.count = self.count + 1
+            }
+
+            get_count(): int {
+                @@:(self.count)
+                return
+            }
+        }
+
+        $B {
+            $>() {
+                # F1 regression: @@:self from post-transition state's $>.
+                @@:self.tick()
+            }
+
+            tick() {
+                self.count = self.count + 1
+            }
+
+            get_count(): int {
+                @@:(self.count)
+                return
+            }
+        }
+
+    domain:
+        count: int = 0
+}
+
+def main():
+    print("=== Test 105: @@:self.method() from lifecycle handlers (F1 regression) ===")
+
+    # TC1: Construction fires $A.$> which calls @@:self.tick().
+    # Pre-RFC-0017, this crashed (no context on stack).
+    s = @@LifecycleSelfCall()
+    assert s.get_count() == 1, f"Expected 1 after start-state $>, got {s.get_count()}"
+    print("TC1: @@:self from start state $> - PASS")
+
+    # TC2 + TC3: go() fires $A.<$ then $B.$>. Both call @@:self.tick().
+    s.go()
+    assert s.get_count() == 3, f"Expected 3 after go() (<$ + $>), got {s.get_count()}"
+    print("TC2: @@:self from <$ during transition - PASS")
+    print("TC3: @@:self from post-transition state's $> - PASS")
+
+    print("PASS: F1 regression net for @@:self from $>/<$ lifecycle handlers")
+
+if __name__ == '__main__':
+    main()

@@ -1,0 +1,79 @@
+@@[target("typescript")]
+
+// Test 105: @@:self.method() from lifecycle handlers (F1 regression)
+//
+// `@@:self.method()` re-enters the kernel dispatcher — it builds a
+// FrameEvent, pushes a FrameContext, calls __router. Pre-RFC-0017,
+// the start state's $> ran *outside* the context stack, so an
+// @@:self call from within it crashed when the kernel tried to look
+// up the surrounding context. RFC-0017's `_frame_init` pushes a
+// context for the start $>; RFC-0019 keeps that contract for every
+// lifecycle handler ($> and <$).
+
+@@system LifecycleSelfCall {
+    interface:
+        tick()
+        go()
+        get_count(): number
+
+    machine:
+        $A {
+            $>() {
+                @@:self.tick()
+            }
+
+            <$() {
+                @@:self.tick()
+            }
+
+            go() {
+                -> $B
+            }
+
+            tick() {
+                this.count = this.count + 1;
+            }
+
+            get_count(): number {
+                @@:(this.count)
+                return;
+            }
+        }
+
+        $B {
+            $>() {
+                @@:self.tick()
+            }
+
+            tick() {
+                this.count = this.count + 1;
+            }
+
+            get_count(): number {
+                @@:(this.count)
+                return;
+            }
+        }
+
+    domain:
+        count: number = 0
+}
+
+function main(): void {
+    console.log("=== Test 105: @@:self.method() from lifecycle handlers (F1 regression) ===");
+
+    // TC1: Construction fires $A.$> which calls @@:self.tick().
+    const s = @@LifecycleSelfCall();
+    if (s.get_count() !== 1) throw new Error(`Expected 1 after start-state $>, got ${s.get_count()}`);
+    console.log("TC1: @@:self from start state $> - PASS");
+
+    // TC2 + TC3: go() fires $A.<$ then $B.$>. Both call @@:self.tick().
+    s.go();
+    if (s.get_count() !== 3) throw new Error(`Expected 3 after go(), got ${s.get_count()}`);
+    console.log("TC2: @@:self from <$ during transition - PASS");
+    console.log("TC3: @@:self from post-transition state's $> - PASS");
+
+    console.log("PASS: F1 regression net for @@:self from $>/<$ lifecycle handlers");
+}
+
+main();

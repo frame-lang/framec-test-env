@@ -1,0 +1,45 @@
+@@[target("javascript")]
+
+// Test 105: @@:self.method() from lifecycle handlers (F1 regression)
+//
+// @@:self.method() re-enters the kernel dispatcher; pre-RFC-0017 the
+// start state's $> ran outside the context stack and crashed on
+// any @@:self call. This fixture exercises @@:self from start-state
+// $>, transition <$, and post-transition $>.
+
+@@system LifecycleSelfCall {
+    interface:
+        tick()
+        go()
+        get_count()
+
+    machine:
+        $A {
+            $>() { @@:self.tick() }
+            <$() { @@:self.tick() }
+            go() { -> $B }
+            tick() { this.count = this.count + 1; }
+            get_count() { @@:(this.count) return; }
+        }
+
+        $B {
+            $>() { @@:self.tick() }
+            tick() { this.count = this.count + 1; }
+            get_count() { @@:(this.count) return; }
+        }
+
+    domain:
+        count = 0
+}
+
+function main() {
+    console.log("=== Test 105: @@:self.method() from lifecycle handlers (F1 regression) ===");
+    const s = @@LifecycleSelfCall();
+    if (s.get_count() !== 1) throw new Error(`Expected 1, got ${s.get_count()}`);
+    console.log("TC1: @@:self from start state $> - PASS");
+    s.go();
+    if (s.get_count() !== 3) throw new Error(`Expected 3, got ${s.get_count()}`);
+    console.log("TC2/TC3: @@:self from <$ + post-transition $> - PASS");
+    console.log("PASS: F1 regression");
+}
+main();

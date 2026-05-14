@@ -1,0 +1,44 @@
+@@[target("go")]
+
+package main
+
+import "fmt"
+import "os"
+
+// Test 105: @@:self.method() from lifecycle handlers (F1 regression)
+
+@@system LifecycleSelfCall {
+    interface:
+        Tick()
+        Go()
+        GetCount(): int
+
+    machine:
+        $A {
+            $>() { @@:self.Tick() }
+            <$() { @@:self.Tick() }
+            Go() { -> $B }
+            Tick() { s.count = s.count + 1 }
+            GetCount(): int { @@:(s.count) }
+        }
+
+        $B {
+            $>() { @@:self.Tick() }
+            Tick() { s.count = s.count + 1 }
+            GetCount(): int { @@:(s.count) }
+        }
+
+    domain:
+        count : int
+}
+
+func main() {
+    fmt.Println("=== Test 105: @@:self.method() from lifecycle handlers (F1 regression) ===")
+    sm := @@LifecycleSelfCall()
+    if sm.GetCount() != 1 { fmt.Println("FAIL: Expected 1"); os.Exit(1) }
+    fmt.Println("TC1: @@:self from start state $> - PASS")
+    sm.Go()
+    if sm.GetCount() != 3 { fmt.Println("FAIL: Expected 3"); os.Exit(1) }
+    fmt.Println("TC2/TC3: @@:self from <$ + post-transition $> - PASS")
+    fmt.Println("PASS: F1 regression")
+}

@@ -1,0 +1,41 @@
+@@[target("kotlin")]
+
+import kotlin.system.exitProcess
+
+// Test 105: @@:self.method() from lifecycle handlers (F1 regression)
+
+@@system LifecycleSelfCall {
+    interface:
+        tick()
+        go()
+        get_count(): Int
+
+    machine:
+        $A {
+            $>() { @@:self.tick() }
+            <$() { @@:self.tick() }
+            go() { -> $B }
+            tick() { this.count = this.count + 1 }
+            get_count(): Int { @@:(this.count) }
+        }
+
+        $B {
+            $>() { @@:self.tick() }
+            tick() { this.count = this.count + 1 }
+            get_count(): Int { @@:(this.count) }
+        }
+
+    domain:
+        count: Int = 0
+}
+
+fun main() {
+    println("=== Test 105: @@:self.method() from lifecycle handlers (F1 regression) ===")
+    val s = @@LifecycleSelfCall()
+    if ((s.get_count() as Int) != 1) { println("FAIL: Expected 1, got ${s.get_count()}"); exitProcess(1) }
+    println("TC1: @@:self from start state \$> - PASS")
+    s.go()
+    if ((s.get_count() as Int) != 3) { println("FAIL: Expected 3, got ${s.get_count()}"); exitProcess(1) }
+    println("TC2/TC3: @@:self from <\$ + post-transition \$> - PASS")
+    println("PASS: F1 regression")
+}

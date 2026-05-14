@@ -1,0 +1,49 @@
+@@[target("c")]
+
+// Test 105: @@:self.method() from lifecycle handlers (F1 regression)
+
+@@system LifecycleSelfCall {
+    interface:
+        tick(): void
+        go(): void
+        get_count(): int
+
+    machine:
+        $A {
+            $>() { @@:self.tick() }
+            <$() { @@:self.tick() }
+            go() { -> $B }
+            tick() { self->count = self->count + 1; }
+            get_count(): int { @@:(self->count) return; }
+        }
+
+        $B {
+            $>() { @@:self.tick() }
+            tick() { self->count = self->count + 1; }
+            get_count(): int { @@:(self->count) return; }
+        }
+
+    domain:
+        count : int
+}
+
+int main() {
+    printf("=== Test 105: @@:self.method() from lifecycle handlers (F1 regression) ===\n");
+    LifecycleSelfCall* s = @@LifecycleSelfCall();
+    if (LifecycleSelfCall_get_count(s) != 1) {
+        printf("FAIL: Expected 1, got %d\n", LifecycleSelfCall_get_count(s));
+        LifecycleSelfCall_destroy(s);
+        return 1;
+    }
+    printf("TC1: @@:self from start state $> - PASS\n");
+    LifecycleSelfCall_go(s);
+    if (LifecycleSelfCall_get_count(s) != 3) {
+        printf("FAIL: Expected 3, got %d\n", LifecycleSelfCall_get_count(s));
+        LifecycleSelfCall_destroy(s);
+        return 1;
+    }
+    printf("TC2/TC3: @@:self from <$ + post-transition $> - PASS\n");
+    printf("PASS: F1 regression\n");
+    LifecycleSelfCall_destroy(s);
+    return 0;
+}
