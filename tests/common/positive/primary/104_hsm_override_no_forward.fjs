@@ -1,0 +1,121 @@
+@@[target("javascript")]
+
+// Test 104: RFC-0019 leaf-override of ancestor lifecycle
+//
+// A child with its own $> / <$ handler and NO `=> $^` forward
+// overrides the ancestor's lifecycle handler. This is the inverse
+// of fixtures 46/47/48 (which verify forwarding) — it verifies
+// non-forwarding: when the leaf does not forward, the ancestor's
+// $> / <$ MUST NOT run.
+
+@@system HSMOverride {
+    interface:
+        go_to_child()
+        go_to_parent()
+        get_log()
+        get_state()
+
+    machine:
+        $Start {
+            go_to_child() {
+                -> $Child
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log() {
+                @@:(this.log)
+                return;
+            }
+
+            get_state() {
+                @@:("Start")
+                return;
+            }
+        }
+
+        $Child => $Parent {
+            $>() {
+                // NO `=> $^` — ancestor $> must NOT run.
+                this.log.push("Child:enter");
+            }
+
+            <$() {
+                // NO `=> $^` — ancestor <$ must NOT run.
+                this.log.push("Child:exit");
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log() {
+                @@:(this.log)
+                return;
+            }
+
+            get_state() {
+                @@:("Child")
+                return;
+            }
+        }
+
+        $Parent {
+            $>() {
+                this.log.push("Parent:enter");
+            }
+
+            <$() {
+                this.log.push("Parent:exit");
+            }
+
+            go_to_child() {
+                -> $Child
+            }
+
+            get_log() {
+                @@:(this.log)
+                return;
+            }
+
+            get_state() {
+                @@:("Parent")
+                return;
+            }
+        }
+    domain:
+        log = []
+}
+
+function main() {
+    console.log("=== Test 104: RFC-0019 leaf-override of ancestor lifecycle ===");
+    const s = @@HSMOverride();
+
+    // TC1: Entering $Child fires Child's $> only; Parent's $> must NOT fire.
+    s.go_to_child();
+    let log = s.get_log();
+    if (s.get_state() !== "Child") throw new Error(`Expected Child, got ${s.get_state()}`);
+    if (!log.includes("Child:enter")) throw new Error(`Expected Child:enter, got ${JSON.stringify(log)}`);
+    if (log.includes("Parent:enter")) throw new Error(`Parent:enter MUST NOT fire when Child overrides, got ${JSON.stringify(log)}`);
+    console.log("TC1: Child's $> overrides Parent's $> (no forward) - PASS");
+
+    // TC2: Leaving $Child fires Child's <$ only; Parent's <$ must NOT fire.
+    s.go_to_parent();
+    log = s.get_log();
+    if (s.get_state() !== "Parent") throw new Error(`Expected Parent, got ${s.get_state()}`);
+    if (!log.includes("Child:exit")) throw new Error(`Expected Child:exit, got ${JSON.stringify(log)}`);
+    const parentExitCount = log.filter(x => x === "Parent:exit").length;
+    if (parentExitCount !== 0) throw new Error(`Parent:exit MUST NOT fire (Child overrides), got ${JSON.stringify(log)}`);
+    console.log("TC2: Child's <$ overrides Parent's <$ (no forward) - PASS");
+
+    // TC3: Direct $Start -> $Parent transition fires Parent's $> exactly once.
+    const parentEnterCount = log.filter(x => x === "Parent:enter").length;
+    if (parentEnterCount !== 1) throw new Error(`Expected exactly 1 Parent:enter (direct entry only), got ${parentEnterCount}: ${JSON.stringify(log)}`);
+    console.log("TC3: Direct Parent entry fires Parent's $> normally - PASS");
+
+    console.log("PASS: RFC-0019 leaf-override semantics");
+}
+
+main();
