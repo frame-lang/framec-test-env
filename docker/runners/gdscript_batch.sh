@@ -283,32 +283,53 @@ while IFS=$'\t' read -r num status name rest; do
                 fail=$((fail+1))
             elif echo "$out" | grep -q "^not ok "; then
                 echo "not ok $num - $name"; fail=$((fail+1))
-            elif echo "$out" | grep -qE "^ok |PASS"; then
-                echo "ok $num - $name"; pass=$((pass+1))
-            elif [ -z "$out" ]; then
-                echo "ok $num - $name # clean exit"; pass=$((pass+1))
             else
-                # Defensive re-read: even with setsid --wait + sync,
-                # the matrix occasionally reads .out mid-write (likely
-                # Docker volume page-cache propagation under heavy
-                # parallel matrix load). Re-cat after a brief settle
-                # and re-classify; if the output is now recognizable,
-                # treat as PASS.
-                sleep 0.1
-                out=$(cat "$out_file" 2>/dev/null)
-                if echo "$out" | grep -qE "^ok |PASS"; then
-                    echo "ok $num - $name"; pass=$((pass+1))
-                elif echo "$out" | grep -q "^not ok "; then
-                    echo "not ok $num - $name"; fail=$((fail+1))
-                else
-                    # Still unrecognized after retry — preserve the
-                    # full output for post-hoc analysis.
-                    unrec_dir="/output/__unrecognized__"
-                    mkdir -p "$unrec_dir" 2>/dev/null
-                    cp "$out_file" "$unrec_dir/${sanitized}.out" 2>/dev/null
-                    echo "not ok $num - $name # unrecognized output (full: $unrec_dir/${sanitized}.out)"
-                    echo "$out" | head -3 | sed 's/^/  # /'
+                # Per-test exit code is always 0 here (the batch awk
+                # classifier slices stdout per test but only the
+                # whole-batch rc — timeout 124 — can produce non-zero).
+                # That means a Godot in-test SCRIPT ERROR or failed
+                # assert() is not detectable from the exit code alone.
+                # Distinguish two cases by where the error falls
+                # relative to the test's last PASS / "ok N -" marker:
+                #   - error LINE > last pass LINE: test printed
+                #     subtests as PASS then hit unrecoverable error
+                #     → FAIL.
+                #   - last pass LINE > error LINE: test printed a
+                #     Godot warning mid-run but ran to a final PASS
+                #     → still PASS.
+                last_pass_line=$(echo "$out" | grep -nE "^PASS:|^# PASS|^ok " | tail -1 | cut -d: -f1)
+                last_err_line=$(echo "$out" | grep -nE "^SCRIPT ERROR|Assertion failed:" | tail -1 | cut -d: -f1)
+                if [ -n "$last_err_line" ] && { [ -z "$last_pass_line" ] || [ "$last_err_line" -gt "$last_pass_line" ]; }; then
+                    echo "not ok $num - $name # godot error after last pass marker"
+                    echo "$out" | grep -E "^SCRIPT ERROR|Assertion failed:" | head -3 | sed 's/^/  # /'
                     fail=$((fail+1))
+                elif echo "$out" | grep -qE "^ok |PASS"; then
+                    echo "ok $num - $name"; pass=$((pass+1))
+                elif [ -z "$out" ]; then
+                    echo "ok $num - $name # clean exit"; pass=$((pass+1))
+                else
+                    # Defensive re-read: even with setsid --wait + sync,
+                    # the matrix occasionally reads .out mid-write (likely
+                    # Docker volume page-cache propagation under heavy
+                    # parallel matrix load). Re-cat after a brief settle
+                    # and re-classify; if the output is now recognizable,
+                    # treat as PASS.
+                    sleep 0.1
+                    out=$(cat "$out_file" 2>/dev/null)
+                    if echo "$out" | grep -qE "^ok |PASS"; then
+                        echo "ok $num - $name"; pass=$((pass+1))
+                    elif echo "$out" | grep -q "^not ok "; then
+                        echo "not ok $num - $name"; fail=$((fail+1))
+                    else
+                        # Still unrecognized after retry — preserve the
+                        # full output for post-hoc analysis.
+                        unrec_dir="/output/__unrecognized__"
+                        mkdir -p "$unrec_dir" 2>/dev/null
+                        cp "$out_file" "$unrec_dir/${sanitized}.out" 2>/dev/null
+                        echo "not ok $num - $name # unrecognized output (full: $unrec_dir/${sanitized}.out)"
+                        echo "$out" | head -3 | sed 's/^/  # /'
+                        fail=$((fail+1))
+                    fi
                 fi
             fi ;;
         *)
