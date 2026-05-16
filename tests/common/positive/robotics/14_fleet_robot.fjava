@@ -1,0 +1,122 @@
+@@[target("java")]
+
+// Cookbook 109: Fleet Robot (single-robot half of Fleet Dispatcher)
+// Each robot toggles Available <-> Busy.
+
+@@system FleetRobot(robot_id: String) {
+    interface:
+        assign_task(task_id: String)
+        task_complete()
+        task_failed()
+        tick()
+        state_name(): String
+        current_task_id(): String
+        id(): String
+
+    machine:
+        $Available {
+            assign_task(task_id: String) {
+                this.current_task = task_id;
+                -> $Busy
+            }
+            state_name(): String { @@:("available") }
+            current_task_id(): String { @@:(this.current_task) }
+            id(): String { @@:(this.rid) }
+        }
+
+        $Busy {
+            $>() { this.work_ticks = 0; }
+            tick() {
+                this.work_ticks = this.work_ticks + 1;
+                if (this.work_ticks >= this.task_duration) {
+                    @@:self.task_complete();
+                }
+            }
+            task_complete() {
+                this.completed_count = this.completed_count + 1;
+                this.current_task = "";
+                -> $Available
+            }
+            task_failed() {
+                this.failed_count = this.failed_count + 1;
+                this.current_task = "";
+                -> $Available
+            }
+            state_name(): String { @@:("busy") }
+            current_task_id(): String { @@:(this.current_task) }
+            id(): String { @@:(this.rid) }
+        }
+
+    domain:
+        rid: String = robot_id
+        current_task: String = ""
+        work_ticks: int = 0
+        task_duration: int = 5
+        completed_count: int = 0
+        failed_count: int = 0
+}
+
+
+class Main {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+
+    public static void main(String[] args) {
+        FleetRobot r = @@FleetRobot("bot-1");
+        check("available", r.state_name(), "available");
+        check("id preserved", r.id(), "bot-1");
+        check("no task", r.current_task_id(), "");
+
+        // Stray events in Available: task_complete / task_failed absorbed
+        r.task_complete();
+        r.task_failed();
+        check("available absorbs completions", r.state_name(), "available");
+
+        // Assign a task
+        r.assign_task("task-42");
+        check("busy", r.state_name(), "busy");
+        check("task captured", r.current_task_id(), "task-42");
+
+        // Cannot re-assign while busy — assign_task absent in Busy
+        r.assign_task("task-99");
+        check("busy absorbs new assign", r.state_name(), "busy");
+        check("task unchanged", r.current_task_id(), "task-42");
+
+        // Ticks accumulate; after task_duration=5, self-complete fires
+        r.tick();
+        r.tick();
+        check("still busy after 2 ticks", r.state_name(), "busy");
+        r.tick();
+        r.tick();
+        r.tick();
+        check("auto-complete at 5 ticks", r.state_name(), "available");
+        check("task cleared", r.current_task_id(), "");
+
+        // Explicit task_complete via event (different task)
+        r.assign_task("task-43");
+        r.task_complete();
+        check("explicit complete -> available", r.state_name(), "available");
+
+        // Explicit task_failed routes same way
+        r.assign_task("task-44");
+        r.task_failed();
+        check("failed -> available", r.state_name(), "available");
+
+        // A second robot with a different id
+        FleetRobot r2 = @@FleetRobot("bot-2");
+        check("bot-2 id", r2.id(), "bot-2");
+        check("bot-2 independent state", r2.state_name(), "available");
+
+        // Multiple task cycles
+        r.assign_task("t1"); r.task_complete();
+        r.assign_task("t2"); r.task_complete();
+        r.assign_task("t3"); r.task_complete();
+        check("available after 3 cycles", r.state_name(), "available");
+
+        System.out.println("PASS: fleet_robot");
+    }
+}

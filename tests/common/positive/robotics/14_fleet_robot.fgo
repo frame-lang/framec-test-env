@@ -1,0 +1,113 @@
+@@[target("go")]
+
+// Cookbook 109: Fleet Robot (single-robot half of Fleet Dispatcher)
+
+@@system FleetRobot(robot_id: string) {
+    interface:
+        AssignTask(task_id: string)
+        TaskComplete()
+        TaskFailed()
+        Tick()
+        StateName(): string
+        CurrentTaskId(): string
+        Id(): string
+
+    machine:
+        $Available {
+            AssignTask(task_id: string) {
+                s.currentTask = task_id
+                -> $Busy
+            }
+            StateName(): string { @@:("available") }
+            CurrentTaskId(): string { @@:(s.currentTask) }
+            Id(): string { @@:(s.rid) }
+        }
+
+        $Busy {
+            $>() { s.workTicks = 0 }
+            Tick() {
+                s.workTicks = s.workTicks + 1
+                if s.workTicks >= s.taskDuration {
+                    @@:self.TaskComplete()
+                }
+            }
+            TaskComplete() {
+                s.completedCount = s.completedCount + 1
+                s.currentTask = ""
+                -> $Available
+            }
+            TaskFailed() {
+                s.failedCount = s.failedCount + 1
+                s.currentTask = ""
+                -> $Available
+            }
+            StateName(): string { @@:("busy") }
+            CurrentTaskId(): string { @@:(s.currentTask) }
+            Id(): string { @@:(s.rid) }
+        }
+
+    domain:
+        rid: string = robot_id
+        currentTask: string = ""
+        workTicks: int = 0
+        taskDuration: int = 5
+        completedCount: int = 0
+        failedCount: int = 0
+}
+
+import "fmt"
+import "os"
+
+func check(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    r := @@FleetRobot("bot-1")
+    check("available", r.StateName(), "available")
+    check("id preserved", r.Id(), "bot-1")
+    check("no task", r.CurrentTaskId(), "")
+
+    r.TaskComplete()
+    r.TaskFailed()
+    check("available absorbs completions", r.StateName(), "available")
+
+    r.AssignTask("task-42")
+    check("busy", r.StateName(), "busy")
+    check("task captured", r.CurrentTaskId(), "task-42")
+
+    r.AssignTask("task-99")
+    check("busy absorbs new assign", r.StateName(), "busy")
+    check("task unchanged", r.CurrentTaskId(), "task-42")
+
+    r.Tick()
+    r.Tick()
+    check("still busy after 2 ticks", r.StateName(), "busy")
+    r.Tick()
+    r.Tick()
+    r.Tick()
+    check("auto-complete at 5 ticks", r.StateName(), "available")
+    check("task cleared", r.CurrentTaskId(), "")
+
+    r.AssignTask("task-43")
+    r.TaskComplete()
+    check("explicit complete -> available", r.StateName(), "available")
+
+    r.AssignTask("task-44")
+    r.TaskFailed()
+    check("failed -> available", r.StateName(), "available")
+
+    r2 := @@FleetRobot("bot-2")
+    check("bot-2 id", r2.Id(), "bot-2")
+    check("bot-2 independent state", r2.StateName(), "available")
+
+    r.AssignTask("t1"); r.TaskComplete()
+    r.AssignTask("t2"); r.TaskComplete()
+    r.AssignTask("t3"); r.TaskComplete()
+    check("available after 3 cycles", r.StateName(), "available")
+
+    fmt.Println("PASS: fleet_robot")
+}
