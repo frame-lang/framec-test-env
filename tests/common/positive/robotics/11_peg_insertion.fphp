@@ -1,0 +1,211 @@
+@@[target("php")]
+
+// Cookbook 106: Force-Controlled Insertion — Peg-in-Hole
+
+@@system PegInsertion {
+    interface:
+        start(target_depth: float)
+        force_reading(fz: float)
+        tick()
+        abort()
+        retracted()
+        status(): str
+        current_depth(): float
+        get_retries(): int
+
+    machine:
+        $Idle {
+            start(target_depth: float) {
+                $this->target_depth = $target_depth;
+                $this->depth = 0.0;
+                $this->retry_count = 0;
+                -> $Approaching
+            }
+            status(): str { @@:("idle") }
+            current_depth(): float { @@:($this->depth) }
+            get_retries(): int { @@:($this->retry_count) }
+        }
+
+        $Operation {
+            abort() { -> $Retracting }
+            current_depth(): float { @@:($this->depth) }
+            get_retries(): int { @@:($this->retry_count) }
+        }
+
+        $Approaching => $Operation {
+            force_reading(fz: float) {
+                if ($fz > $this->contact_threshold) {
+                    -> $Searching
+                }
+            }
+            status(): str { @@:("approaching") }
+            => $^
+        }
+
+        $Searching => $Operation {
+            $>() { $this->search_ticks = 0; }
+            force_reading(fz: float) {
+                if ($fz < $this->hole_threshold) {
+                    -> $Inserting
+                }
+            }
+            tick() {
+                $this->search_ticks = $this->search_ticks + 1;
+                if ($this->search_ticks > $this->search_timeout) {
+                    -> $Retreating
+                }
+            }
+            status(): str { @@:("searching") }
+            => $^
+        }
+
+        $Inserting => $Operation {
+            force_reading(fz: float) {
+                if ($fz > $this->jam_threshold) {
+                    -> $Jammed
+                }
+            }
+            tick() {
+                $this->depth = $this->depth + $this->insert_velocity * 0.01;
+                if ($this->depth >= $this->target_depth) {
+                    -> $Seated
+                }
+            }
+            status(): str { @@:("inserting") }
+            => $^
+        }
+
+        $Jammed => $Operation {
+            $>() { $this->retry_count = $this->retry_count + 1; }
+            tick() {
+                if ($this->retry_count >= $this->max_retries) {
+                    -> $Failed
+                } else {
+                    -> $Retreating
+                }
+            }
+            status(): str { @@:("jammed") }
+            => $^
+        }
+
+        $Retreating => $Operation {
+            tick() {
+                -> $Searching
+            }
+            status(): str { @@:("retreating") }
+            => $^
+        }
+
+        $Seated {
+            status(): str { @@:("seated") }
+            current_depth(): float { @@:($this->depth) }
+            get_retries(): int { @@:($this->retry_count) }
+        }
+
+        $Retracting {
+            retracted() { -> $Idle }
+            status(): str { @@:("retracting") }
+            current_depth(): float { @@:($this->depth) }
+            get_retries(): int { @@:($this->retry_count) }
+        }
+
+        $Failed {
+            start(target_depth: float) {
+                $this->target_depth = $target_depth;
+                $this->depth = 0.0;
+                $this->retry_count = 0;
+                -> $Approaching
+            }
+            status(): str { @@:("failed") }
+            current_depth(): float { @@:($this->depth) }
+            get_retries(): int { @@:($this->retry_count) }
+        }
+
+    domain:
+        target_depth = 10.0
+        depth = 0.0
+        retry_count = 0
+        max_retries = 2
+        search_ticks = 0
+        search_timeout = 30
+        contact_threshold = 1.0
+        hole_threshold = 0.2
+        jam_threshold = 10.0
+        insert_velocity = 5.0
+}
+
+
+function check_str($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label expected '$expected', got '$actual'\n";
+        exit(1);
+    }
+}
+function check_int($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label expected $expected, got $actual\n";
+        exit(1);
+    }
+}
+
+$p = @@PegInsertion();
+check_str("idle", $p->status(), "idle");
+
+$p->start(10.0);
+check_str("approaching", $p->status(), "approaching");
+
+$p->force_reading(2.0);
+check_str("searching", $p->status(), "searching");
+
+$p->force_reading(0.05);
+check_str("inserting", $p->status(), "inserting");
+
+$i = 0;
+while ($i < 220) {
+    $p->tick();
+    if ($p->status() === "seated") break;
+    $i = $i + 1;
+}
+check_str("seated", $p->status(), "seated");
+
+$p2 = @@PegInsertion();
+$p2->start(10.0);
+$p2->force_reading(2.0);
+$p2->force_reading(0.05);
+$p2->force_reading(15.0);
+check_str("jammed", $p2->status(), "jammed");
+check_int("retry counted", $p2->get_retries(), 1);
+
+$p2->tick();
+check_str("retreating", $p2->status(), "retreating");
+$p2->tick();
+check_str("back to searching", $p2->status(), "searching");
+
+$p2->force_reading(0.05);
+check_str("re-inserting", $p2->status(), "inserting");
+$p2->force_reading(15.0);
+check_str("jammed again", $p2->status(), "jammed");
+$p2->tick();
+check_str("exhausted -> failed", $p2->status(), "failed");
+
+$p3 = @@PegInsertion();
+$p3->start(10.0);
+$p3->force_reading(2.0);
+$j = 0;
+while ($j < 35) {
+    $p3->tick();
+    if ($p3->status() !== "searching") break;
+    $j = $j + 1;
+}
+check_str("search timeout -> retreating", $p3->status(), "retreating");
+
+$p4 = @@PegInsertion();
+$p4->start(10.0);
+$p4->force_reading(2.0);
+$p4->force_reading(0.05);
+$p4->abort();
+check_str("abort -> retracting", $p4->status(), "retracting");
+$p4->retracted();
+check_str("retracted -> idle", $p4->status(), "idle");
+
+echo "PASS: peg_insertion\n";

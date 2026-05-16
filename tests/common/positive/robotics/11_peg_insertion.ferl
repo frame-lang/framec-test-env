@@ -1,0 +1,139 @@
+@@[target("erlang")]
+
+%% Cookbook 106: Force-Controlled Insertion — Peg-in-Hole
+
+@@system PegInsertion {
+    interface:
+        start(target_depth: float)
+        force_reading(fz: float)
+        tick()
+        abort()
+        retracted()
+        status(): string
+        current_depth(): float
+        get_retries(): int
+
+    machine:
+        $Idle {
+            start(target_depth: float) {
+                self.target_depth = Target_depth,
+                self.depth = 0.0,
+                self.retry_count = 0,
+                -> $Approaching
+            }
+            status(): string { @@:("idle") }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+        $Operation {
+            abort() { -> $Retracting }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+        $Approaching => $Operation {
+            force_reading(fz: float) {
+                case Fz > self.contact_threshold of
+                    true -> -> $Searching;
+                    false -> ok
+                end
+            }
+            status(): string { @@:("approaching") }
+            => $^
+        }
+
+        $Searching => $Operation {
+            $>() { self.search_ticks = 0 }
+            force_reading(fz: float) {
+                case Fz < self.hole_threshold of
+                    true -> -> $Inserting;
+                    false -> ok
+                end
+            }
+            tick() {
+                self.search_ticks = self.search_ticks + 1,
+                case self.search_ticks > self.search_timeout of
+                    true -> -> $Retreating;
+                    false -> ok
+                end
+            }
+            status(): string { @@:("searching") }
+            => $^
+        }
+
+        $Inserting => $Operation {
+            force_reading(fz: float) {
+                case Fz > self.jam_threshold of
+                    true -> -> $Jammed;
+                    false -> ok
+                end
+            }
+            tick() {
+                self.depth = self.depth + self.insert_velocity * 0.01,
+                case self.depth >= self.target_depth of
+                    true -> -> $Seated;
+                    false -> ok
+                end
+            }
+            status(): string { @@:("inserting") }
+            => $^
+        }
+
+        $Jammed => $Operation {
+            $>() { self.retry_count = self.retry_count + 1 }
+            tick() {
+                case self.retry_count >= self.max_retries of
+                    true -> -> $Failed;
+                    false -> -> $Retreating
+                end
+            }
+            status(): string { @@:("jammed") }
+            => $^
+        }
+
+        $Retreating => $Operation {
+            tick() {
+                -> $Searching
+            }
+            status(): string { @@:("retreating") }
+            => $^
+        }
+
+        $Seated {
+            status(): string { @@:("seated") }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+        $Retracting {
+            retracted() { -> $Idle }
+            status(): string { @@:("retracting") }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+        $Failed {
+            start(target_depth: float) {
+                self.target_depth = Target_depth,
+                self.depth = 0.0,
+                self.retry_count = 0,
+                -> $Approaching
+            }
+            status(): string { @@:("failed") }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+    domain:
+        target_depth: float = 10.0
+        depth: float = 0.0
+        retry_count: int = 0
+        max_retries: int = 2
+        search_ticks: int = 0
+        search_timeout: int = 30
+        contact_threshold: float = 1.0
+        hole_threshold: float = 0.2
+        jam_threshold: float = 10.0
+        insert_velocity: float = 5.0
+}

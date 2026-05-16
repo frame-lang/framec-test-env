@@ -1,0 +1,217 @@
+@@[target("rust")]
+
+// Cookbook 106: Force-Controlled Insertion — Peg-in-Hole
+
+@@system PegInsertion {
+    interface:
+        start(target_depth: f64)
+        force_reading(fz: f64)
+        tick()
+        abort()
+        retracted()
+        status(): String
+        current_depth(): f64
+        get_retries(): i32
+
+    machine:
+        $Idle {
+            start(target_depth: f64) {
+                self.target_depth = target_depth;
+                self.depth = 0.0;
+                self.retry_count = 0;
+                -> $Approaching
+            }
+            status(): String { @@:(String::from("idle")) }
+            current_depth(): f64 { @@:(self.depth) }
+            get_retries(): i32 { @@:(self.retry_count) }
+        }
+
+        $Operation {
+            abort() { -> $Retracting }
+            current_depth(): f64 { @@:(self.depth) }
+            get_retries(): i32 { @@:(self.retry_count) }
+        }
+
+        $Approaching => $Operation {
+            force_reading(fz: f64) {
+                if fz > self.contact_threshold {
+                    -> $Searching
+                }
+            }
+            status(): String { @@:(String::from("approaching")) }
+            => $^
+        }
+
+        $Searching => $Operation {
+            $>() { self.search_ticks = 0; }
+            force_reading(fz: f64) {
+                if fz < self.hole_threshold {
+                    -> $Inserting
+                }
+            }
+            tick() {
+                self.search_ticks = self.search_ticks + 1;
+                if self.search_ticks > self.search_timeout {
+                    -> $Retreating
+                }
+            }
+            status(): String { @@:(String::from("searching")) }
+            => $^
+        }
+
+        $Inserting => $Operation {
+            force_reading(fz: f64) {
+                if fz > self.jam_threshold {
+                    -> $Jammed
+                }
+            }
+            tick() {
+                self.depth = self.depth + self.insert_velocity * 0.01;
+                if self.depth >= self.target_depth {
+                    -> $Seated
+                }
+            }
+            status(): String { @@:(String::from("inserting")) }
+            => $^
+        }
+
+        $Jammed => $Operation {
+            $>() { self.retry_count = self.retry_count + 1; }
+            tick() {
+                if self.retry_count >= self.max_retries {
+                    -> $Failed
+                } else {
+                    -> $Retreating
+                }
+            }
+            status(): String { @@:(String::from("jammed")) }
+            => $^
+        }
+
+        $Retreating => $Operation {
+            tick() {
+                -> $Searching
+            }
+            status(): String { @@:(String::from("retreating")) }
+            => $^
+        }
+
+        $Seated {
+            status(): String { @@:(String::from("seated")) }
+            current_depth(): f64 { @@:(self.depth) }
+            get_retries(): i32 { @@:(self.retry_count) }
+        }
+
+        $Retracting {
+            retracted() { -> $Idle }
+            status(): String { @@:(String::from("retracting")) }
+            current_depth(): f64 { @@:(self.depth) }
+            get_retries(): i32 { @@:(self.retry_count) }
+        }
+
+        $Failed {
+            start(target_depth: f64) {
+                self.target_depth = target_depth;
+                self.depth = 0.0;
+                self.retry_count = 0;
+                -> $Approaching
+            }
+            status(): String { @@:(String::from("failed")) }
+            current_depth(): f64 { @@:(self.depth) }
+            get_retries(): i32 { @@:(self.retry_count) }
+        }
+
+    domain:
+        target_depth: f64 = 10.0
+        depth: f64 = 0.0
+        retry_count: i32 = 0
+        max_retries: i32 = 2
+        search_ticks: i32 = 0
+        search_timeout: i32 = 30
+        contact_threshold: f64 = 1.0
+        hole_threshold: f64 = 0.2
+        jam_threshold: f64 = 10.0
+        insert_velocity: f64 = 5.0
+}
+
+
+fn check_str(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+fn check_int(label: &str, actual: i32, expected: i32) {
+    if actual != expected {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn main() {
+    let mut p = @@PegInsertion();
+    check_str("idle", &p.status(), "idle");
+
+    p.start(10.0);
+    check_str("approaching", &p.status(), "approaching");
+
+    p.force_reading(2.0);
+    check_str("searching", &p.status(), "searching");
+
+    p.force_reading(0.05);
+    check_str("inserting", &p.status(), "inserting");
+
+    let mut i = 0;
+    while i < 220 {
+        p.tick();
+        if p.status() == "seated" {
+            break;
+        }
+        i = i + 1;
+    }
+    check_str("seated", &p.status(), "seated");
+
+    let mut p2 = @@PegInsertion();
+    p2.start(10.0);
+    p2.force_reading(2.0);
+    p2.force_reading(0.05);
+    p2.force_reading(15.0);
+    check_str("jammed", &p2.status(), "jammed");
+    check_int("retry counted", p2.get_retries(), 1);
+
+    p2.tick();
+    check_str("retreating", &p2.status(), "retreating");
+    p2.tick();
+    check_str("back to searching", &p2.status(), "searching");
+
+    p2.force_reading(0.05);
+    check_str("re-inserting", &p2.status(), "inserting");
+    p2.force_reading(15.0);
+    check_str("jammed again", &p2.status(), "jammed");
+    p2.tick();
+    check_str("exhausted -> failed", &p2.status(), "failed");
+
+    let mut p3 = @@PegInsertion();
+    p3.start(10.0);
+    p3.force_reading(2.0);
+    let mut j = 0;
+    while j < 35 {
+        p3.tick();
+        if p3.status() != "searching" {
+            break;
+        }
+        j = j + 1;
+    }
+    check_str("search timeout -> retreating", &p3.status(), "retreating");
+
+    let mut p4 = @@PegInsertion();
+    p4.start(10.0);
+    p4.force_reading(2.0);
+    p4.force_reading(0.05);
+    p4.abort();
+    check_str("abort -> retracting", &p4.status(), "retracting");
+    p4.retracted();
+    check_str("retracted -> idle", &p4.status(), "idle");
+
+    println!("PASS: peg_insertion");
+}

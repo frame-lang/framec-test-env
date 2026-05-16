@@ -1,0 +1,213 @@
+@@[target("swift")]
+
+import Foundation
+
+// Cookbook 106: Force-Controlled Insertion — Peg-in-Hole
+
+@@system PegInsertion {
+    interface:
+        start(target_depth: Double)
+        force_reading(fz: Double)
+        tick()
+        abort()
+        retracted()
+        status(): String
+        current_depth(): Double
+        get_retries(): Int
+
+    machine:
+        $Idle {
+            start(target_depth: Double) {
+                self.target_depth = target_depth
+                self.depth = 0.0
+                self.retry_count = 0
+                -> $Approaching
+            }
+            status(): String { @@:("idle") }
+            current_depth(): Double { @@:(self.depth) }
+            get_retries(): Int { @@:(self.retry_count) }
+        }
+
+        $Operation {
+            abort() { -> $Retracting }
+            current_depth(): Double { @@:(self.depth) }
+            get_retries(): Int { @@:(self.retry_count) }
+        }
+
+        $Approaching => $Operation {
+            force_reading(fz: Double) {
+                if fz > self.contact_threshold {
+                    -> $Searching
+                }
+            }
+            status(): String { @@:("approaching") }
+            => $^
+        }
+
+        $Searching => $Operation {
+            $>() { self.search_ticks = 0 }
+            force_reading(fz: Double) {
+                if fz < self.hole_threshold {
+                    -> $Inserting
+                }
+            }
+            tick() {
+                self.search_ticks = self.search_ticks + 1
+                if self.search_ticks > self.search_timeout {
+                    -> $Retreating
+                }
+            }
+            status(): String { @@:("searching") }
+            => $^
+        }
+
+        $Inserting => $Operation {
+            force_reading(fz: Double) {
+                if fz > self.jam_threshold {
+                    -> $Jammed
+                }
+            }
+            tick() {
+                self.depth = self.depth + self.insert_velocity * 0.01
+                if self.depth >= self.target_depth {
+                    -> $Seated
+                }
+            }
+            status(): String { @@:("inserting") }
+            => $^
+        }
+
+        $Jammed => $Operation {
+            $>() { self.retry_count = self.retry_count + 1 }
+            tick() {
+                if self.retry_count >= self.max_retries {
+                    -> $Failed
+                } else {
+                    -> $Retreating
+                }
+            }
+            status(): String { @@:("jammed") }
+            => $^
+        }
+
+        $Retreating => $Operation {
+            tick() {
+                -> $Searching
+            }
+            status(): String { @@:("retreating") }
+            => $^
+        }
+
+        $Seated {
+            status(): String { @@:("seated") }
+            current_depth(): Double { @@:(self.depth) }
+            get_retries(): Int { @@:(self.retry_count) }
+        }
+
+        $Retracting {
+            retracted() { -> $Idle }
+            status(): String { @@:("retracting") }
+            current_depth(): Double { @@:(self.depth) }
+            get_retries(): Int { @@:(self.retry_count) }
+        }
+
+        $Failed {
+            start(target_depth: Double) {
+                self.target_depth = target_depth
+                self.depth = 0.0
+                self.retry_count = 0
+                -> $Approaching
+            }
+            status(): String { @@:("failed") }
+            current_depth(): Double { @@:(self.depth) }
+            get_retries(): Int { @@:(self.retry_count) }
+        }
+
+    domain:
+        target_depth: Double = 10.0
+        depth: Double = 0.0
+        retry_count: Int = 0
+        max_retries: Int = 2
+        search_ticks: Int = 0
+        search_timeout: Int = 30
+        contact_threshold: Double = 1.0
+        hole_threshold: Double = 0.2
+        jam_threshold: Double = 10.0
+        insert_velocity: Double = 5.0
+}
+
+
+func checkStr(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+func checkInt(_ label: String, _ actual: Int, _ expected: Int) {
+    if actual != expected {
+        print("FAIL: \(label) expected \(expected), got \(actual)")
+        exit(1)
+    }
+}
+
+let p = @@PegInsertion()
+checkStr("idle", p.status(), "idle")
+
+p.start(10.0)
+checkStr("approaching", p.status(), "approaching")
+
+p.force_reading(2.0)
+checkStr("searching", p.status(), "searching")
+
+p.force_reading(0.05)
+checkStr("inserting", p.status(), "inserting")
+
+var i = 0
+while i < 220 {
+    p.tick()
+    if p.status() == "seated" { break }
+    i = i + 1
+}
+checkStr("seated", p.status(), "seated")
+
+let p2 = @@PegInsertion()
+p2.start(10.0)
+p2.force_reading(2.0)
+p2.force_reading(0.05)
+p2.force_reading(15.0)
+checkStr("jammed", p2.status(), "jammed")
+checkInt("retry counted", p2.get_retries(), 1)
+
+p2.tick()
+checkStr("retreating", p2.status(), "retreating")
+p2.tick()
+checkStr("back to searching", p2.status(), "searching")
+
+p2.force_reading(0.05)
+checkStr("re-inserting", p2.status(), "inserting")
+p2.force_reading(15.0)
+checkStr("jammed again", p2.status(), "jammed")
+p2.tick()
+checkStr("exhausted -> failed", p2.status(), "failed")
+
+let p3 = @@PegInsertion()
+p3.start(10.0)
+p3.force_reading(2.0)
+var j = 0
+while j < 35 {
+    p3.tick()
+    if p3.status() != "searching" { break }
+    j = j + 1
+}
+checkStr("search timeout -> retreating", p3.status(), "retreating")
+
+let p4 = @@PegInsertion()
+p4.start(10.0)
+p4.force_reading(2.0)
+p4.force_reading(0.05)
+p4.abort()
+checkStr("abort -> retracting", p4.status(), "retracting")
+p4.retracted()
+checkStr("retracted -> idle", p4.status(), "idle")
+
+print("PASS: peg_insertion")

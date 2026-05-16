@@ -1,0 +1,211 @@
+@@[target("lua")]
+
+-- Cookbook 106: Force-Controlled Insertion — Peg-in-Hole
+
+@@system PegInsertion {
+    interface:
+        start(target_depth: float)
+        force_reading(fz: float)
+        tick()
+        abort()
+        retracted()
+        status(): str
+        current_depth(): float
+        get_retries(): int
+
+    machine:
+        $Idle {
+            start(target_depth: float) {
+                self.target_depth = target_depth
+                self.depth = 0.0
+                self.retry_count = 0
+                -> $Approaching
+            }
+            status(): str { @@:("idle") }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+        $Operation {
+            abort() { -> $Retracting }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+        $Approaching => $Operation {
+            force_reading(fz: float) {
+                if fz > self.contact_threshold then
+                    -> $Searching
+                end
+            }
+            status(): str { @@:("approaching") }
+            => $^
+        }
+
+        $Searching => $Operation {
+            $>() { self.search_ticks = 0 }
+            force_reading(fz: float) {
+                if fz < self.hole_threshold then
+                    -> $Inserting
+                end
+            }
+            tick() {
+                self.search_ticks = self.search_ticks + 1
+                if self.search_ticks > self.search_timeout then
+                    -> $Retreating
+                end
+            }
+            status(): str { @@:("searching") }
+            => $^
+        }
+
+        $Inserting => $Operation {
+            force_reading(fz: float) {
+                if fz > self.jam_threshold then
+                    -> $Jammed
+                end
+            }
+            tick() {
+                self.depth = self.depth + self.insert_velocity * 0.01
+                if self.depth >= self.target_depth then
+                    -> $Seated
+                end
+            }
+            status(): str { @@:("inserting") }
+            => $^
+        }
+
+        $Jammed => $Operation {
+            $>() { self.retry_count = self.retry_count + 1 }
+            tick() {
+                if self.retry_count >= self.max_retries then
+                    -> $Failed
+                else
+                    -> $Retreating
+                end
+            }
+            status(): str { @@:("jammed") }
+            => $^
+        }
+
+        $Retreating => $Operation {
+            tick() {
+                -> $Searching
+            }
+            status(): str { @@:("retreating") }
+            => $^
+        }
+
+        $Seated {
+            status(): str { @@:("seated") }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+        $Retracting {
+            retracted() { -> $Idle }
+            status(): str { @@:("retracting") }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+        $Failed {
+            start(target_depth: float) {
+                self.target_depth = target_depth
+                self.depth = 0.0
+                self.retry_count = 0
+                -> $Approaching
+            }
+            status(): str { @@:("failed") }
+            current_depth(): float { @@:(self.depth) }
+            get_retries(): int { @@:(self.retry_count) }
+        }
+
+    domain:
+        target_depth = 10.0
+        depth = 0.0
+        retry_count = 0
+        max_retries = 2
+        search_ticks = 0
+        search_timeout = 30
+        contact_threshold = 1.0
+        hole_threshold = 0.2
+        jam_threshold = 10.0
+        insert_velocity = 5.0
+}
+
+
+local function check_str(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " expected '" .. expected .. "', got '" .. actual .. "'")
+        os.exit(1)
+    end
+end
+local function check_int(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " expected " .. expected .. ", got " .. actual)
+        os.exit(1)
+    end
+end
+
+local p = @@PegInsertion()
+check_str("idle", p:status(), "idle")
+
+p:start(10.0)
+check_str("approaching", p:status(), "approaching")
+
+p:force_reading(2.0)
+check_str("searching", p:status(), "searching")
+
+p:force_reading(0.05)
+check_str("inserting", p:status(), "inserting")
+
+local i = 0
+while i < 220 do
+    p:tick()
+    if p:status() == "seated" then break end
+    i = i + 1
+end
+check_str("seated", p:status(), "seated")
+
+local p2 = @@PegInsertion()
+p2:start(10.0)
+p2:force_reading(2.0)
+p2:force_reading(0.05)
+p2:force_reading(15.0)
+check_str("jammed", p2:status(), "jammed")
+check_int("retry counted", p2:get_retries(), 1)
+
+p2:tick()
+check_str("retreating", p2:status(), "retreating")
+p2:tick()
+check_str("back to searching", p2:status(), "searching")
+
+p2:force_reading(0.05)
+check_str("re-inserting", p2:status(), "inserting")
+p2:force_reading(15.0)
+check_str("jammed again", p2:status(), "jammed")
+p2:tick()
+check_str("exhausted -> failed", p2:status(), "failed")
+
+local p3 = @@PegInsertion()
+p3:start(10.0)
+p3:force_reading(2.0)
+local j = 0
+while j < 35 do
+    p3:tick()
+    if p3:status() ~= "searching" then break end
+    j = j + 1
+end
+check_str("search timeout -> retreating", p3:status(), "retreating")
+
+local p4 = @@PegInsertion()
+p4:start(10.0)
+p4:force_reading(2.0)
+p4:force_reading(0.05)
+p4:abort()
+check_str("abort -> retracting", p4:status(), "retracting")
+p4:retracted()
+check_str("retracted -> idle", p4:status(), "idle")
+
+print("PASS: peg_insertion")

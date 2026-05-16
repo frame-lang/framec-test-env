@@ -1,0 +1,221 @@
+@@[target("c")]
+
+// Cookbook 106: Force-Controlled Insertion — Peg-in-Hole
+
+@@system PegInsertion {
+    interface:
+        start(target_depth: double)
+        force_reading(fz: double)
+        tick()
+        abort()
+        retracted()
+        status(): string
+        current_depth(): double
+        get_retries(): int
+
+    machine:
+        $Idle {
+            start(target_depth: double) {
+                self->target_depth = target_depth;
+                self->depth = 0.0;
+                self->retry_count = 0;
+                -> $Approaching
+            }
+            status(): string { @@:("idle") }
+            current_depth(): double { @@:(self->depth) }
+            get_retries(): int { @@:(self->retry_count) }
+        }
+
+        $Operation {
+            abort() { -> $Retracting }
+            current_depth(): double { @@:(self->depth) }
+            get_retries(): int { @@:(self->retry_count) }
+        }
+
+        $Approaching => $Operation {
+            force_reading(fz: double) {
+                if (fz > self->contact_threshold) {
+                    -> $Searching
+                }
+            }
+            status(): string { @@:("approaching") }
+            => $^
+        }
+
+        $Searching => $Operation {
+            $>() { self->search_ticks = 0; }
+            force_reading(fz: double) {
+                if (fz < self->hole_threshold) {
+                    -> $Inserting
+                }
+            }
+            tick() {
+                self->search_ticks = self->search_ticks + 1;
+                if (self->search_ticks > self->search_timeout) {
+                    -> $Retreating
+                }
+            }
+            status(): string { @@:("searching") }
+            => $^
+        }
+
+        $Inserting => $Operation {
+            force_reading(fz: double) {
+                if (fz > self->jam_threshold) {
+                    -> $Jammed
+                }
+            }
+            tick() {
+                self->depth = self->depth + self->insert_velocity * 0.01;
+                if (self->depth >= self->target_depth) {
+                    -> $Seated
+                }
+            }
+            status(): string { @@:("inserting") }
+            => $^
+        }
+
+        $Jammed => $Operation {
+            $>() { self->retry_count = self->retry_count + 1; }
+            tick() {
+                if (self->retry_count >= self->max_retries) {
+                    -> $Failed
+                } else {
+                    -> $Retreating
+                }
+            }
+            status(): string { @@:("jammed") }
+            => $^
+        }
+
+        $Retreating => $Operation {
+            tick() {
+                -> $Searching
+            }
+            status(): string { @@:("retreating") }
+            => $^
+        }
+
+        $Seated {
+            status(): string { @@:("seated") }
+            current_depth(): double { @@:(self->depth) }
+            get_retries(): int { @@:(self->retry_count) }
+        }
+
+        $Retracting {
+            retracted() { -> $Idle }
+            status(): string { @@:("retracting") }
+            current_depth(): double { @@:(self->depth) }
+            get_retries(): int { @@:(self->retry_count) }
+        }
+
+        $Failed {
+            start(target_depth: double) {
+                self->target_depth = target_depth;
+                self->depth = 0.0;
+                self->retry_count = 0;
+                -> $Approaching
+            }
+            status(): string { @@:("failed") }
+            current_depth(): double { @@:(self->depth) }
+            get_retries(): int { @@:(self->retry_count) }
+        }
+
+    domain:
+        target_depth: double = 10.0
+        depth: double = 0.0
+        retry_count: int = 0
+        max_retries: int = 2
+        search_ticks: int = 0
+        search_timeout: int = 30
+        contact_threshold: double = 1.0
+        hole_threshold: double = 0.2
+        jam_threshold: double = 10.0
+        insert_velocity: double = 5.0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_int(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    PegInsertion* p = @@PegInsertion();
+    check_str("idle", PegInsertion_status(p), "idle");
+
+    PegInsertion_start(p, 10.0);
+    check_str("approaching", PegInsertion_status(p), "approaching");
+
+    PegInsertion_force_reading(p, 2.0);
+    check_str("searching", PegInsertion_status(p), "searching");
+
+    PegInsertion_force_reading(p, 0.05);
+    check_str("inserting", PegInsertion_status(p), "inserting");
+
+    int i = 0;
+    while (i < 220) {
+        PegInsertion_tick(p);
+        if (strcmp(PegInsertion_status(p), "seated") == 0) break;
+        i = i + 1;
+    }
+    check_str("seated", PegInsertion_status(p), "seated");
+
+    PegInsertion* p2 = @@PegInsertion();
+    PegInsertion_start(p2, 10.0);
+    PegInsertion_force_reading(p2, 2.0);
+    PegInsertion_force_reading(p2, 0.05);
+    PegInsertion_force_reading(p2, 15.0);
+    check_str("jammed", PegInsertion_status(p2), "jammed");
+    check_int("retry counted", PegInsertion_get_retries(p2), 1);
+
+    PegInsertion_tick(p2);
+    check_str("retreating", PegInsertion_status(p2), "retreating");
+    PegInsertion_tick(p2);
+    check_str("back to searching", PegInsertion_status(p2), "searching");
+
+    PegInsertion_force_reading(p2, 0.05);
+    check_str("re-inserting", PegInsertion_status(p2), "inserting");
+    PegInsertion_force_reading(p2, 15.0);
+    check_str("jammed again", PegInsertion_status(p2), "jammed");
+    PegInsertion_tick(p2);
+    check_str("exhausted -> failed", PegInsertion_status(p2), "failed");
+
+    PegInsertion* p3 = @@PegInsertion();
+    PegInsertion_start(p3, 10.0);
+    PegInsertion_force_reading(p3, 2.0);
+    int j = 0;
+    while (j < 35) {
+        PegInsertion_tick(p3);
+        if (strcmp(PegInsertion_status(p3), "searching") != 0) break;
+        j = j + 1;
+    }
+    check_str("search timeout -> retreating", PegInsertion_status(p3), "retreating");
+
+    PegInsertion* p4 = @@PegInsertion();
+    PegInsertion_start(p4, 10.0);
+    PegInsertion_force_reading(p4, 2.0);
+    PegInsertion_force_reading(p4, 0.05);
+    PegInsertion_abort(p4);
+    check_str("abort -> retracting", PegInsertion_status(p4), "retracting");
+    PegInsertion_retracted(p4);
+    check_str("retracted -> idle", PegInsertion_status(p4), "idle");
+
+    printf("PASS: peg_insertion\n");
+    PegInsertion_destroy(p);
+    PegInsertion_destroy(p2);
+    PegInsertion_destroy(p3);
+    PegInsertion_destroy(p4);
+    return 0;
+}

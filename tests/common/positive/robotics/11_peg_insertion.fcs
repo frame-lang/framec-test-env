@@ -1,0 +1,217 @@
+@@[target("csharp")]
+
+// Cookbook 106: Force-Controlled Insertion — Peg-in-Hole
+
+using System;
+
+@@system PegInsertion {
+    interface:
+        start(target_depth: double)
+        force_reading(fz: double)
+        tick()
+        abort()
+        retracted()
+        status(): string
+        current_depth(): double
+        get_retries(): int
+
+    machine:
+        $Idle {
+            start(target_depth: double) {
+                this.target_depth = target_depth;
+                this.depth = 0.0;
+                this.retry_count = 0;
+                -> $Approaching
+            }
+            status(): string { @@:("idle") }
+            current_depth(): double { @@:(this.depth) }
+            get_retries(): int { @@:(this.retry_count) }
+        }
+
+        $Operation {
+            abort() { -> $Retracting }
+            current_depth(): double { @@:(this.depth) }
+            get_retries(): int { @@:(this.retry_count) }
+        }
+
+        $Approaching => $Operation {
+            force_reading(fz: double) {
+                if (fz > this.contact_threshold) {
+                    -> $Searching
+                }
+            }
+            status(): string { @@:("approaching") }
+            => $^
+        }
+
+        $Searching => $Operation {
+            $>() { this.search_ticks = 0; }
+            force_reading(fz: double) {
+                if (fz < this.hole_threshold) {
+                    -> $Inserting
+                }
+            }
+            tick() {
+                this.search_ticks = this.search_ticks + 1;
+                if (this.search_ticks > this.search_timeout) {
+                    -> $Retreating
+                }
+            }
+            status(): string { @@:("searching") }
+            => $^
+        }
+
+        $Inserting => $Operation {
+            force_reading(fz: double) {
+                if (fz > this.jam_threshold) {
+                    -> $Jammed
+                }
+            }
+            tick() {
+                this.depth = this.depth + this.insert_velocity * 0.01;
+                if (this.depth >= this.target_depth) {
+                    -> $Seated
+                }
+            }
+            status(): string { @@:("inserting") }
+            => $^
+        }
+
+        $Jammed => $Operation {
+            $>() { this.retry_count = this.retry_count + 1; }
+            tick() {
+                if (this.retry_count >= this.max_retries) {
+                    -> $Failed
+                } else {
+                    -> $Retreating
+                }
+            }
+            status(): string { @@:("jammed") }
+            => $^
+        }
+
+        $Retreating => $Operation {
+            tick() {
+                -> $Searching
+            }
+            status(): string { @@:("retreating") }
+            => $^
+        }
+
+        $Seated {
+            status(): string { @@:("seated") }
+            current_depth(): double { @@:(this.depth) }
+            get_retries(): int { @@:(this.retry_count) }
+        }
+
+        $Retracting {
+            retracted() { -> $Idle }
+            status(): string { @@:("retracting") }
+            current_depth(): double { @@:(this.depth) }
+            get_retries(): int { @@:(this.retry_count) }
+        }
+
+        $Failed {
+            start(target_depth: double) {
+                this.target_depth = target_depth;
+                this.depth = 0.0;
+                this.retry_count = 0;
+                -> $Approaching
+            }
+            status(): string { @@:("failed") }
+            current_depth(): double { @@:(this.depth) }
+            get_retries(): int { @@:(this.retry_count) }
+        }
+
+    domain:
+        target_depth: double = 10.0
+        depth: double = 0.0
+        retry_count: int = 0
+        max_retries: int = 2
+        search_ticks: int = 0
+        search_timeout: int = 30
+        contact_threshold: double = 1.0
+        hole_threshold: double = 0.2
+        jam_threshold: double = 10.0
+        insert_velocity: double = 5.0
+}
+
+
+class Program {
+    static void check_str(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+    static void check_int(string label, int actual, int expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}");
+            Environment.Exit(1);
+        }
+    }
+
+    public static void Main(string[] args) {
+        var p = @@PegInsertion();
+        check_str("idle", (string) p.status(), "idle");
+
+        p.start(10.0);
+        check_str("approaching", (string) p.status(), "approaching");
+
+        p.force_reading(2.0);
+        check_str("searching", (string) p.status(), "searching");
+
+        p.force_reading(0.05);
+        check_str("inserting", (string) p.status(), "inserting");
+
+        int i = 0;
+        while (i < 220) {
+            p.tick();
+            if (((string) p.status()) == "seated") break;
+            i = i + 1;
+        }
+        check_str("seated", (string) p.status(), "seated");
+
+        var p2 = @@PegInsertion();
+        p2.start(10.0);
+        p2.force_reading(2.0);
+        p2.force_reading(0.05);
+        p2.force_reading(15.0);
+        check_str("jammed", (string) p2.status(), "jammed");
+        check_int("retry counted", (int) p2.get_retries(), 1);
+
+        p2.tick();
+        check_str("retreating", (string) p2.status(), "retreating");
+        p2.tick();
+        check_str("back to searching", (string) p2.status(), "searching");
+
+        p2.force_reading(0.05);
+        check_str("re-inserting", (string) p2.status(), "inserting");
+        p2.force_reading(15.0);
+        check_str("jammed again", (string) p2.status(), "jammed");
+        p2.tick();
+        check_str("exhausted -> failed", (string) p2.status(), "failed");
+
+        var p3 = @@PegInsertion();
+        p3.start(10.0);
+        p3.force_reading(2.0);
+        int j = 0;
+        while (j < 35) {
+            p3.tick();
+            if (((string) p3.status()) != "searching") break;
+            j = j + 1;
+        }
+        check_str("search timeout -> retreating", (string) p3.status(), "retreating");
+
+        var p4 = @@PegInsertion();
+        p4.start(10.0);
+        p4.force_reading(2.0);
+        p4.force_reading(0.05);
+        p4.abort();
+        check_str("abort -> retracting", (string) p4.status(), "retracting");
+        p4.retracted();
+        check_str("retracted -> idle", (string) p4.status(), "idle");
+
+        Console.WriteLine("PASS: peg_insertion");
+    }
+}
