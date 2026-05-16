@@ -1,0 +1,120 @@
+@@[target("csharp")]
+
+// Cookbook 73: Water with Supercooling
+
+using System;
+
+@@system Water {
+    interface:
+        cool(delta: double)
+        heat(delta: double)
+        nucleate()
+        shake()
+        temperature(): double
+        phase(): string
+
+    machine:
+        $Liquid {
+            cool(delta: double) {
+                this.temp = this.temp - delta;
+                if (this.temp < 0.0) {
+                    -> $Supercooled
+                }
+            }
+            heat(delta: double) { this.temp = this.temp + delta; }
+            temperature(): double { @@:(this.temp) }
+            phase(): string { @@:("liquid") }
+        }
+
+        $Supercooled {
+            cool(delta: double) {
+                this.temp = this.temp - delta;
+                if (this.temp <= -42.0) {
+                    -> $Ice
+                }
+            }
+            heat(delta: double) {
+                this.temp = this.temp + delta;
+                if (this.temp >= 0.0) {
+                    -> $Liquid
+                }
+            }
+            nucleate() { -> $Ice }
+            shake() { -> $Ice }
+            temperature(): double { @@:(this.temp) }
+            phase(): string { @@:("supercooled liquid") }
+        }
+
+        $Ice {
+            heat(delta: double) {
+                this.temp = this.temp + delta;
+                if (this.temp >= 0.0) {
+                    -> $Liquid
+                }
+            }
+            cool(delta: double) { this.temp = this.temp - delta; }
+            temperature(): double { @@:(this.temp) }
+            phase(): string { @@:("ice") }
+        }
+
+    domain:
+        temp: double = 25.0
+}
+
+public class Program {
+    static void Check(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+    static void CheckF(string label, double actual, double expected) {
+        if (Math.Abs(actual - expected) > 1e-9) {
+            Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}");
+            Environment.Exit(1);
+        }
+    }
+
+    public static void Main() {
+        var w = @@Water();
+        Check("start", (string)w.phase(), "liquid");
+        w.cool(30.0);
+        Check("after big cool", (string)w.phase(), "supercooled liquid");
+        w.shake();
+        Check("shaken", (string)w.phase(), "ice");
+
+        var w2 = @@Water();
+        w2.cool(30.0);
+        Check("w2 supercooled", (string)w2.phase(), "supercooled liquid");
+        CheckF("same temp", (double)w.temperature(), (double)w2.temperature());
+        if ((string)w.phase() == (string)w2.phase()) {
+            Console.WriteLine("FAIL: phases should differ");
+            Environment.Exit(1);
+        }
+
+        var w3 = @@Water();
+        w3.cool(30.0);
+        w3.nucleate();
+        Check("nucleated", (string)w3.phase(), "ice");
+
+        var w4 = @@Water();
+        w4.cool(30.0);
+        Check("w4 supercooled", (string)w4.phase(), "supercooled liquid");
+        w4.cool(40.0);
+        Check("deep cool", (string)w4.phase(), "ice");
+        w4.heat(50.0);
+        Check("melted", (string)w4.phase(), "liquid");
+
+        var w5 = @@Water();
+        w5.shake();
+        Check("liquid shake ignored", (string)w5.phase(), "liquid");
+        var w6 = @@Water();
+        w6.cool(30.0);
+        w6.cool(40.0);
+        Check("w6 is ice", (string)w6.phase(), "ice");
+        w6.shake();
+        Check("ice shake ignored", (string)w6.phase(), "ice");
+
+        Console.WriteLine("PASS: water_supercooling");
+    }
+}

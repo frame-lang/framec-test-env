@@ -1,0 +1,121 @@
+@@[target("cpp")]
+
+// Cookbook 73: Water with Supercooling
+
+@@system Water {
+    interface:
+        cool(delta: double)
+        heat(delta: double)
+        nucleate()
+        shake()
+        temperature(): double
+        phase(): string
+
+    machine:
+        $Liquid {
+            cool(delta: double) {
+                this->temp = this->temp - delta;
+                if (this->temp < 0.0) {
+                    -> $Supercooled
+                }
+            }
+            heat(delta: double) { this->temp = this->temp + delta; }
+            temperature(): double { @@:(this->temp) }
+            phase(): string { @@:("liquid") }
+        }
+
+        $Supercooled {
+            cool(delta: double) {
+                this->temp = this->temp - delta;
+                if (this->temp <= -42.0) {
+                    -> $Ice
+                }
+            }
+            heat(delta: double) {
+                this->temp = this->temp + delta;
+                if (this->temp >= 0.0) {
+                    -> $Liquid
+                }
+            }
+            nucleate() { -> $Ice }
+            shake() { -> $Ice }
+            temperature(): double { @@:(this->temp) }
+            phase(): string { @@:("supercooled liquid") }
+        }
+
+        $Ice {
+            heat(delta: double) {
+                this->temp = this->temp + delta;
+                if (this->temp >= 0.0) {
+                    -> $Liquid
+                }
+            }
+            cool(delta: double) { this->temp = this->temp - delta; }
+            temperature(): double { @@:(this->temp) }
+            phase(): string { @@:("ice") }
+        }
+
+    domain:
+        temp: double = 25.0
+}
+
+#include <iostream>
+#include <cstdlib>
+#include <cmath>
+
+static void check_str(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " expected '" << expected << "', got '" << actual << "'\n";
+        std::exit(1);
+    }
+}
+static void check_f(const std::string& label, double actual, double expected) {
+    if (std::fabs(actual - expected) > 1e-9) {
+        std::cout << "FAIL: " << label << " expected " << expected << ", got " << actual << "\n";
+        std::exit(1);
+    }
+}
+
+int main() {
+    auto w = @@Water();
+    check_str("start", w.phase(), "liquid");
+    w.cool(30.0);
+    check_str("after big cool", w.phase(), "supercooled liquid");
+    w.shake();
+    check_str("shaken", w.phase(), "ice");
+
+    auto w2 = @@Water();
+    w2.cool(30.0);
+    check_str("w2 supercooled", w2.phase(), "supercooled liquid");
+    check_f("same temp", w.temperature(), w2.temperature());
+    if (w.phase() == w2.phase()) {
+        std::cout << "FAIL: phases should differ\n";
+        std::exit(1);
+    }
+
+    auto w3 = @@Water();
+    w3.cool(30.0);
+    w3.nucleate();
+    check_str("nucleated", w3.phase(), "ice");
+
+    auto w4 = @@Water();
+    w4.cool(30.0);
+    check_str("w4 supercooled", w4.phase(), "supercooled liquid");
+    w4.cool(40.0);
+    check_str("deep cool", w4.phase(), "ice");
+    w4.heat(50.0);
+    check_str("melted", w4.phase(), "liquid");
+
+    auto w5 = @@Water();
+    w5.shake();
+    check_str("liquid shake ignored", w5.phase(), "liquid");
+    auto w6 = @@Water();
+    w6.cool(30.0);
+    w6.cool(40.0);
+    check_str("w6 is ice", w6.phase(), "ice");
+    w6.shake();
+    check_str("ice shake ignored", w6.phase(), "ice");
+
+    std::cout << "PASS: water_supercooling\n";
+    return 0;
+}

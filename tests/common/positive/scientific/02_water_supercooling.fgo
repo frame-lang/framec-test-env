@@ -1,0 +1,124 @@
+@@[target("go")]
+
+// Cookbook 73: Water with Supercooling
+
+package main
+
+import (
+    "fmt"
+    "math"
+    "os"
+)
+
+@@system Water {
+    interface:
+        cool(delta: float64)
+        heat(delta: float64)
+        nucleate()
+        shake()
+        temperature(): float64
+        phase(): string
+
+    machine:
+        $Liquid {
+            cool(delta: float64) {
+                s.temp = s.temp - delta
+                if s.temp < 0.0 {
+                    -> $Supercooled
+                }
+            }
+            heat(delta: float64) { s.temp = s.temp + delta }
+            temperature(): float64 { @@:(s.temp) }
+            phase(): string { @@:("liquid") }
+        }
+
+        $Supercooled {
+            cool(delta: float64) {
+                s.temp = s.temp - delta
+                if s.temp <= -42.0 {
+                    -> $Ice
+                }
+            }
+            heat(delta: float64) {
+                s.temp = s.temp + delta
+                if s.temp >= 0.0 {
+                    -> $Liquid
+                }
+            }
+            nucleate() { -> $Ice }
+            shake() { -> $Ice }
+            temperature(): float64 { @@:(s.temp) }
+            phase(): string { @@:("supercooled liquid") }
+        }
+
+        $Ice {
+            heat(delta: float64) {
+                s.temp = s.temp + delta
+                if s.temp >= 0.0 {
+                    -> $Liquid
+                }
+            }
+            cool(delta: float64) { s.temp = s.temp - delta }
+            temperature(): float64 { @@:(s.temp) }
+            phase(): string { @@:("ice") }
+        }
+
+    domain:
+        temp: float64 = 25.0
+}
+
+func check(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+func checkF(label string, actual, expected float64) {
+    if math.Abs(actual-expected) > 1e-9 {
+        fmt.Printf("FAIL: %s expected %f, got %f\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    w := @@Water()
+    check("start", w.phase().(string), "liquid")
+    w.cool(30.0)
+    check("after big cool", w.phase().(string), "supercooled liquid")
+    w.shake()
+    check("shaken", w.phase().(string), "ice")
+
+    w2 := @@Water()
+    w2.cool(30.0)
+    check("w2 supercooled", w2.phase().(string), "supercooled liquid")
+    checkF("same temp", w.temperature().(float64), w2.temperature().(float64))
+    if w.phase().(string) == w2.phase().(string) {
+        fmt.Println("FAIL: phases should differ")
+        os.Exit(1)
+    }
+
+    w3 := @@Water()
+    w3.cool(30.0)
+    w3.nucleate()
+    check("nucleated", w3.phase().(string), "ice")
+
+    w4 := @@Water()
+    w4.cool(30.0)
+    check("w4 supercooled", w4.phase().(string), "supercooled liquid")
+    w4.cool(40.0)
+    check("deep cool", w4.phase().(string), "ice")
+    w4.heat(50.0)
+    check("melted", w4.phase().(string), "liquid")
+
+    w5 := @@Water()
+    w5.shake()
+    check("liquid shake ignored", w5.phase().(string), "liquid")
+    w6 := @@Water()
+    w6.cool(30.0)
+    w6.cool(40.0)
+    check("w6 is ice", w6.phase().(string), "ice")
+    w6.shake()
+    check("ice shake ignored", w6.phase().(string), "ice")
+
+    fmt.Println("PASS: water_supercooling")
+}

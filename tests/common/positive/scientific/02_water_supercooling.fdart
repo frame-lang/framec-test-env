@@ -1,0 +1,118 @@
+@@[target("dart")]
+
+// Cookbook 73: Water with Supercooling
+
+import 'dart:io';
+
+@@system Water {
+    interface:
+        cool(delta: double)
+        heat(delta: double)
+        nucleate()
+        shake()
+        temperature(): double
+        phase(): String
+
+    machine:
+        $Liquid {
+            cool(delta: double) {
+                this.temp = this.temp - delta;
+                if (this.temp < 0.0) {
+                    -> $Supercooled
+                }
+            }
+            heat(delta: double) { this.temp = this.temp + delta; }
+            temperature(): double { @@:(this.temp) }
+            phase(): String { @@:("liquid") }
+        }
+
+        $Supercooled {
+            cool(delta: double) {
+                this.temp = this.temp - delta;
+                if (this.temp <= -42.0) {
+                    -> $Ice
+                }
+            }
+            heat(delta: double) {
+                this.temp = this.temp + delta;
+                if (this.temp >= 0.0) {
+                    -> $Liquid
+                }
+            }
+            nucleate() { -> $Ice }
+            shake() { -> $Ice }
+            temperature(): double { @@:(this.temp) }
+            phase(): String { @@:("supercooled liquid") }
+        }
+
+        $Ice {
+            heat(delta: double) {
+                this.temp = this.temp + delta;
+                if (this.temp >= 0.0) {
+                    -> $Liquid
+                }
+            }
+            cool(delta: double) { this.temp = this.temp - delta; }
+            temperature(): double { @@:(this.temp) }
+            phase(): String { @@:("ice") }
+        }
+
+    domain:
+        temp: double = 25.0
+}
+
+void check(String label, dynamic actual, dynamic expected) {
+    if (actual != expected) {
+        print("FAIL: $label expected '$expected', got '$actual'");
+        exit(1);
+    }
+}
+void checkF(String label, double actual, double expected) {
+    if ((actual - expected).abs() > 1e-9) {
+        print("FAIL: $label expected $expected, got $actual");
+        exit(1);
+    }
+}
+
+void main() {
+    var w = @@Water();
+    check("start", w.phase(), "liquid");
+    w.cool(30.0);
+    check("after big cool", w.phase(), "supercooled liquid");
+    w.shake();
+    check("shaken", w.phase(), "ice");
+
+    var w2 = @@Water();
+    w2.cool(30.0);
+    check("w2 supercooled", w2.phase(), "supercooled liquid");
+    checkF("same temp", w.temperature() as double, w2.temperature() as double);
+    if (w.phase() == w2.phase()) {
+        print("FAIL: phases should differ");
+        exit(1);
+    }
+
+    var w3 = @@Water();
+    w3.cool(30.0);
+    w3.nucleate();
+    check("nucleated", w3.phase(), "ice");
+
+    var w4 = @@Water();
+    w4.cool(30.0);
+    check("w4 supercooled", w4.phase(), "supercooled liquid");
+    w4.cool(40.0);
+    check("deep cool", w4.phase(), "ice");
+    w4.heat(50.0);
+    check("melted", w4.phase(), "liquid");
+
+    var w5 = @@Water();
+    w5.shake();
+    check("liquid shake ignored", w5.phase(), "liquid");
+    var w6 = @@Water();
+    w6.cool(30.0);
+    w6.cool(40.0);
+    check("w6 is ice", w6.phase(), "ice");
+    w6.shake();
+    check("ice shake ignored", w6.phase(), "ice");
+
+    print("PASS: water_supercooling");
+}

@@ -1,0 +1,128 @@
+@@[target("c")]
+
+// Cookbook 73: Water with Supercooling
+
+@@system Water {
+    interface:
+        cool(delta: double)
+        heat(delta: double)
+        nucleate()
+        shake()
+        temperature(): double
+        phase(): string
+
+    machine:
+        $Liquid {
+            cool(delta: double) {
+                self->temp = self->temp - delta;
+                if (self->temp < 0.0) {
+                    -> $Supercooled
+                }
+            }
+            heat(delta: double) { self->temp = self->temp + delta; }
+            temperature(): double { @@:(self->temp) }
+            phase(): string { @@:("liquid") }
+        }
+
+        $Supercooled {
+            cool(delta: double) {
+                self->temp = self->temp - delta;
+                if (self->temp <= -42.0) {
+                    -> $Ice
+                }
+            }
+            heat(delta: double) {
+                self->temp = self->temp + delta;
+                if (self->temp >= 0.0) {
+                    -> $Liquid
+                }
+            }
+            nucleate() { -> $Ice }
+            shake() { -> $Ice }
+            temperature(): double { @@:(self->temp) }
+            phase(): string { @@:("supercooled liquid") }
+        }
+
+        $Ice {
+            heat(delta: double) {
+                self->temp = self->temp + delta;
+                if (self->temp >= 0.0) {
+                    -> $Liquid
+                }
+            }
+            cool(delta: double) { self->temp = self->temp - delta; }
+            temperature(): double { @@:(self->temp) }
+            phase(): string { @@:("ice") }
+        }
+
+    domain:
+        temp: double = 25.0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_f(const char* label, double actual, double expected) {
+    if (fabs(actual - expected) > 1e-9) {
+        printf("FAIL: %s expected %f, got %f\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    Water* w = @@Water();
+    check_str("start", Water_phase(w), "liquid");
+    Water_cool(w, 30.0);
+    check_str("after big cool", Water_phase(w), "supercooled liquid");
+    Water_shake(w);
+    check_str("shaken", Water_phase(w), "ice");
+
+    Water* w2 = @@Water();
+    Water_cool(w2, 30.0);
+    check_str("w2 supercooled", Water_phase(w2), "supercooled liquid");
+    check_f("same temp", Water_temperature(w), Water_temperature(w2));
+    if (strcmp(Water_phase(w), Water_phase(w2)) == 0) {
+        printf("FAIL: phases should differ\n");
+        exit(1);
+    }
+
+    Water* w3 = @@Water();
+    Water_cool(w3, 30.0);
+    Water_nucleate(w3);
+    check_str("nucleated", Water_phase(w3), "ice");
+
+    Water* w4 = @@Water();
+    Water_cool(w4, 30.0);
+    check_str("w4 supercooled", Water_phase(w4), "supercooled liquid");
+    Water_cool(w4, 40.0);
+    check_str("deep cool", Water_phase(w4), "ice");
+    Water_heat(w4, 50.0);
+    check_str("melted", Water_phase(w4), "liquid");
+
+    Water* w5 = @@Water();
+    Water_shake(w5);
+    check_str("liquid shake ignored", Water_phase(w5), "liquid");
+    Water* w6 = @@Water();
+    Water_cool(w6, 30.0);
+    Water_cool(w6, 40.0);
+    check_str("w6 is ice", Water_phase(w6), "ice");
+    Water_shake(w6);
+    check_str("ice shake ignored", Water_phase(w6), "ice");
+
+    printf("PASS: water_supercooling\n");
+    Water_destroy(w);
+    Water_destroy(w2);
+    Water_destroy(w3);
+    Water_destroy(w4);
+    Water_destroy(w5);
+    Water_destroy(w6);
+    return 0;
+}

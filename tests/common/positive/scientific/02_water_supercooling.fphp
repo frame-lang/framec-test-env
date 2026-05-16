@@ -1,0 +1,114 @@
+@@[target("php")]
+
+// Cookbook 73: Water with Supercooling
+
+@@system Water {
+    interface:
+        cool(delta)
+        heat(delta)
+        nucleate()
+        shake()
+        temperature()
+        phase()
+
+    machine:
+        $Liquid {
+            cool(delta) {
+                $this->temp = $this->temp - $delta;
+                if ($this->temp < 0.0) {
+                    -> $Supercooled
+                }
+            }
+            heat(delta) { $this->temp = $this->temp + $delta; }
+            temperature() { @@:($this->temp) }
+            phase() { @@:("liquid") }
+        }
+
+        $Supercooled {
+            cool(delta) {
+                $this->temp = $this->temp - $delta;
+                if ($this->temp <= -42.0) {
+                    -> $Ice
+                }
+            }
+            heat(delta) {
+                $this->temp = $this->temp + $delta;
+                if ($this->temp >= 0.0) {
+                    -> $Liquid
+                }
+            }
+            nucleate() { -> $Ice }
+            shake() { -> $Ice }
+            temperature() { @@:($this->temp) }
+            phase() { @@:("supercooled liquid") }
+        }
+
+        $Ice {
+            heat(delta) {
+                $this->temp = $this->temp + $delta;
+                if ($this->temp >= 0.0) {
+                    -> $Liquid
+                }
+            }
+            cool(delta) { $this->temp = $this->temp - $delta; }
+            temperature() { @@:($this->temp) }
+            phase() { @@:("ice") }
+        }
+
+    domain:
+        temp = 25.0
+}
+
+function check($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label expected '$expected', got '$actual'\n";
+        exit(1);
+    }
+}
+function check_f($label, $actual, $expected) {
+    if (abs($actual - $expected) > 1e-9) {
+        echo "FAIL: $label expected $expected, got $actual\n";
+        exit(1);
+    }
+}
+
+$w = @@Water();
+check("start", $w->phase(), "liquid");
+$w->cool(30.0);
+check("after big cool", $w->phase(), "supercooled liquid");
+$w->shake();
+check("shaken", $w->phase(), "ice");
+
+$w2 = @@Water();
+$w2->cool(30.0);
+check("w2 supercooled", $w2->phase(), "supercooled liquid");
+check_f("same temp", $w->temperature(), $w2->temperature());
+if ($w->phase() === $w2->phase()) {
+    echo "FAIL: phases should differ\n";
+    exit(1);
+}
+
+$w3 = @@Water();
+$w3->cool(30.0);
+$w3->nucleate();
+check("nucleated", $w3->phase(), "ice");
+
+$w4 = @@Water();
+$w4->cool(30.0);
+check("w4 supercooled", $w4->phase(), "supercooled liquid");
+$w4->cool(40.0);
+check("deep cool", $w4->phase(), "ice");
+$w4->heat(50.0);
+check("melted", $w4->phase(), "liquid");
+
+$w5 = @@Water();
+$w5->shake();
+check("liquid shake ignored", $w5->phase(), "liquid");
+$w6 = @@Water();
+$w6->cool(30.0);
+$w6->cool(40.0);
+check("w6 is ice", $w6->phase(), "ice");
+$w6->shake();
+check("ice shake ignored", $w6->phase(), "ice");
+
+echo "PASS: water_supercooling\n";
