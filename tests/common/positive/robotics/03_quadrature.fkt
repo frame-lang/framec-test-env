@@ -1,0 +1,164 @@
+@@[target("kotlin")]
+
+// Cookbook 98: Quadrature Encoder Decoder — Mealy Machine
+
+@@system QuadratureDecoder {
+    operations:
+        count(): Int { return this.count_val }
+        direction(): String { return this.last_dir }
+        errors_count(): Int { return this.errors }
+        reset() {
+            this.count_val = 0
+            this.errors = 0
+            this.last_dir = "none"
+        }
+
+    interface:
+        signal(a: Int, b: Int): Int
+
+    machine:
+        $S00 {
+            signal(a: Int, b: Int): Int {
+                if (a == 0 && b == 0) {
+                    @@:(0)
+                } else if (a == 1 && b == 0) {
+                    this.count_val = this.count_val + 1
+                    this.last_dir = "fwd"
+                    @@:(1)
+                    -> $S10
+                } else if (a == 0 && b == 1) {
+                    this.count_val = this.count_val - 1
+                    this.last_dir = "rev"
+                    @@:(-1)
+                    -> $S01
+                } else {
+                    this.errors = this.errors + 1
+                    @@:(0)
+                }
+            }
+        }
+
+        $S10 {
+            signal(a: Int, b: Int): Int {
+                if (a == 1 && b == 0) {
+                    @@:(0)
+                } else if (a == 1 && b == 1) {
+                    this.count_val = this.count_val + 1
+                    this.last_dir = "fwd"
+                    @@:(1)
+                    -> $S11
+                } else if (a == 0 && b == 0) {
+                    this.count_val = this.count_val - 1
+                    this.last_dir = "rev"
+                    @@:(-1)
+                    -> $S00
+                } else {
+                    this.errors = this.errors + 1
+                    @@:(0)
+                }
+            }
+        }
+
+        $S11 {
+            signal(a: Int, b: Int): Int {
+                if (a == 1 && b == 1) {
+                    @@:(0)
+                } else if (a == 0 && b == 1) {
+                    this.count_val = this.count_val + 1
+                    this.last_dir = "fwd"
+                    @@:(1)
+                    -> $S01
+                } else if (a == 1 && b == 0) {
+                    this.count_val = this.count_val - 1
+                    this.last_dir = "rev"
+                    @@:(-1)
+                    -> $S10
+                } else {
+                    this.errors = this.errors + 1
+                    @@:(0)
+                }
+            }
+        }
+
+        $S01 {
+            signal(a: Int, b: Int): Int {
+                if (a == 0 && b == 1) {
+                    @@:(0)
+                } else if (a == 0 && b == 0) {
+                    this.count_val = this.count_val + 1
+                    this.last_dir = "fwd"
+                    @@:(1)
+                    -> $S00
+                } else if (a == 1 && b == 1) {
+                    this.count_val = this.count_val - 1
+                    this.last_dir = "rev"
+                    @@:(-1)
+                    -> $S11
+                } else {
+                    this.errors = this.errors + 1
+                    @@:(0)
+                }
+            }
+        }
+
+    domain:
+        count_val: Int = 0
+        errors: Int = 0
+        last_dir: String = "none"
+}
+
+
+fun check_str(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+fun check_int(label: String, actual: Int, expected: Int) {
+    if (actual != expected) {
+        println("FAIL: $label expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun main() {
+    val q = @@QuadratureDecoder()
+    check_int("initial count 0", q.count() as Int, 0)
+    check_str("initial direction", q.direction() as String, "none")
+    check_int("initial errors 0", q.errors_count() as Int, 0)
+
+    check_int("idle 00", q.signal(0, 0) as Int, 0)
+    check_int("no count change on idle", q.count() as Int, 0)
+
+    check_int("00->10 fwd", q.signal(1, 0) as Int, 1)
+    check_int("10->11 fwd", q.signal(1, 1) as Int, 1)
+    check_int("11->01 fwd", q.signal(0, 1) as Int, 1)
+    check_int("01->00 fwd", q.signal(0, 0) as Int, 1)
+
+    check_int("four fwd ticks", q.count() as Int, 4)
+    check_str("direction fwd", q.direction() as String, "fwd")
+
+    check_int("00->01 rev", q.signal(0, 1) as Int, -1)
+    check_int("01->11 rev", q.signal(1, 1) as Int, -1)
+    check_int("11->10 rev", q.signal(1, 0) as Int, -1)
+    check_int("10->00 rev", q.signal(0, 0) as Int, -1)
+
+    check_int("net count 0", q.count() as Int, 0)
+    check_str("direction rev", q.direction() as String, "rev")
+
+    check_int("illegal 00->11", q.signal(1, 1) as Int, 0)
+    check_int("error counted", q.errors_count() as Int, 1)
+
+    check_int("still at 00", q.signal(1, 0) as Int, 1)
+
+    q.reset()
+    check_int("count reset", q.count() as Int, 0)
+    check_str("direction reset", q.direction() as String, "none")
+    check_int("errors reset", q.errors_count() as Int, 0)
+
+    q.signal(1, 0); q.signal(1, 1); q.signal(0, 1); q.signal(0, 0)
+    q.signal(1, 0); q.signal(1, 1); q.signal(0, 1); q.signal(0, 0)
+    check_int("8 signals starting idle = 7 fwd edges", q.count() as Int, 7)
+
+    println("PASS: quadrature")
+}

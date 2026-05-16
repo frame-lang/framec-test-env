@@ -1,0 +1,108 @@
+@@[target("erlang")]
+
+%% Cookbook 98: Quadrature Encoder Decoder — Mealy Machine
+
+@@system QuadratureDecoder {
+    operations:
+        count(): int { Data#data.count_val }
+        direction(): string { Data#data.last_dir }
+        errors_count(): int { Data#data.errors }
+        reset() {
+            self.count_val = 0,
+            self.errors = 0,
+            self.last_dir = "none"
+        }
+
+    interface:
+        signal(a: int, b: int): int
+
+    machine:
+        $S00 {
+            signal(a: int, b: int): int {
+                case {A, B} of
+                    {0, 0} -> @@:(0);
+                    {1, 0} ->
+                        self.count_val = self.count_val + 1,
+                        self.last_dir = "fwd",
+                        @@:(1),
+                        -> $S10;
+                    {0, 1} ->
+                        self.count_val = self.count_val - 1,
+                        self.last_dir = "rev",
+                        @@:(-1),
+                        -> $S01;
+                    _ ->
+                        self.errors = self.errors + 1,
+                        @@:(0)
+                end
+            }
+        }
+
+        $S10 {
+            signal(a: int, b: int): int {
+                case {A, B} of
+                    {1, 0} -> @@:(0);
+                    {1, 1} ->
+                        self.count_val = self.count_val + 1,
+                        self.last_dir = "fwd",
+                        @@:(1),
+                        -> $S11;
+                    {0, 0} ->
+                        self.count_val = self.count_val - 1,
+                        self.last_dir = "rev",
+                        @@:(-1),
+                        -> $S00;
+                    _ ->
+                        self.errors = self.errors + 1,
+                        @@:(0)
+                end
+            }
+        }
+
+        $S11 {
+            signal(a: int, b: int): int {
+                case {A, B} of
+                    {1, 1} -> @@:(0);
+                    {0, 1} ->
+                        self.count_val = self.count_val + 1,
+                        self.last_dir = "fwd",
+                        @@:(1),
+                        -> $S01;
+                    {1, 0} ->
+                        self.count_val = self.count_val - 1,
+                        self.last_dir = "rev",
+                        @@:(-1),
+                        -> $S10;
+                    _ ->
+                        self.errors = self.errors + 1,
+                        @@:(0)
+                end
+            }
+        }
+
+        $S01 {
+            signal(a: int, b: int): int {
+                case {A, B} of
+                    {0, 1} -> @@:(0);
+                    {0, 0} ->
+                        self.count_val = self.count_val + 1,
+                        self.last_dir = "fwd",
+                        @@:(1),
+                        -> $S00;
+                    {1, 1} ->
+                        self.count_val = self.count_val - 1,
+                        self.last_dir = "rev",
+                        @@:(-1),
+                        -> $S11;
+                    _ ->
+                        self.errors = self.errors + 1,
+                        @@:(0)
+                end
+            }
+        }
+
+    domain:
+        count_val: int = 0
+        errors: int = 0
+        last_dir: string = "none"
+}

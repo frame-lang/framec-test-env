@@ -1,0 +1,164 @@
+@@[target("rust")]
+
+// Cookbook 98: Quadrature Encoder Decoder — Mealy Machine
+
+@@system QuadratureDecoder {
+    operations:
+        count(): i32 { return self.count_val; }
+        direction(): String { return self.last_dir.clone(); }
+        errors_count(): i32 { return self.errors; }
+        reset() {
+            self.count_val = 0;
+            self.errors = 0;
+            self.last_dir = String::from("none");
+        }
+
+    interface:
+        signal(a: i32, b: i32): i32
+
+    machine:
+        $S00 {
+            signal(a: i32, b: i32): i32 {
+                if a == 0 && b == 0 {
+                    @@:(0)
+                } else if a == 1 && b == 0 {
+                    self.count_val = self.count_val + 1;
+                    self.last_dir = String::from("fwd");
+                    @@:(1)
+                    -> $S10
+                } else if a == 0 && b == 1 {
+                    self.count_val = self.count_val - 1;
+                    self.last_dir = String::from("rev");
+                    @@:(-1)
+                    -> $S01
+                } else {
+                    self.errors = self.errors + 1;
+                    @@:(0)
+                }
+            }
+        }
+
+        $S10 {
+            signal(a: i32, b: i32): i32 {
+                if a == 1 && b == 0 {
+                    @@:(0)
+                } else if a == 1 && b == 1 {
+                    self.count_val = self.count_val + 1;
+                    self.last_dir = String::from("fwd");
+                    @@:(1)
+                    -> $S11
+                } else if a == 0 && b == 0 {
+                    self.count_val = self.count_val - 1;
+                    self.last_dir = String::from("rev");
+                    @@:(-1)
+                    -> $S00
+                } else {
+                    self.errors = self.errors + 1;
+                    @@:(0)
+                }
+            }
+        }
+
+        $S11 {
+            signal(a: i32, b: i32): i32 {
+                if a == 1 && b == 1 {
+                    @@:(0)
+                } else if a == 0 && b == 1 {
+                    self.count_val = self.count_val + 1;
+                    self.last_dir = String::from("fwd");
+                    @@:(1)
+                    -> $S01
+                } else if a == 1 && b == 0 {
+                    self.count_val = self.count_val - 1;
+                    self.last_dir = String::from("rev");
+                    @@:(-1)
+                    -> $S10
+                } else {
+                    self.errors = self.errors + 1;
+                    @@:(0)
+                }
+            }
+        }
+
+        $S01 {
+            signal(a: i32, b: i32): i32 {
+                if a == 0 && b == 1 {
+                    @@:(0)
+                } else if a == 0 && b == 0 {
+                    self.count_val = self.count_val + 1;
+                    self.last_dir = String::from("fwd");
+                    @@:(1)
+                    -> $S00
+                } else if a == 1 && b == 1 {
+                    self.count_val = self.count_val - 1;
+                    self.last_dir = String::from("rev");
+                    @@:(-1)
+                    -> $S11
+                } else {
+                    self.errors = self.errors + 1;
+                    @@:(0)
+                }
+            }
+        }
+
+    domain:
+        count_val: i32 = 0
+        errors: i32 = 0
+        last_dir: String = String::from("none")
+}
+
+
+fn check_str(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+fn check_int(label: &str, actual: i32, expected: i32) {
+    if actual != expected {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn main() {
+    let mut q = @@QuadratureDecoder();
+    check_int("initial count 0", q.count(), 0);
+    check_str("initial direction", &q.direction(), "none");
+    check_int("initial errors 0", q.errors_count(), 0);
+
+    check_int("idle 00", q.signal(0, 0), 0);
+    check_int("no count change on idle", q.count(), 0);
+
+    check_int("00->10 fwd", q.signal(1, 0), 1);
+    check_int("10->11 fwd", q.signal(1, 1), 1);
+    check_int("11->01 fwd", q.signal(0, 1), 1);
+    check_int("01->00 fwd", q.signal(0, 0), 1);
+
+    check_int("four fwd ticks", q.count(), 4);
+    check_str("direction fwd", &q.direction(), "fwd");
+
+    check_int("00->01 rev", q.signal(0, 1), -1);
+    check_int("01->11 rev", q.signal(1, 1), -1);
+    check_int("11->10 rev", q.signal(1, 0), -1);
+    check_int("10->00 rev", q.signal(0, 0), -1);
+
+    check_int("net count 0", q.count(), 0);
+    check_str("direction rev", &q.direction(), "rev");
+
+    check_int("illegal 00->11", q.signal(1, 1), 0);
+    check_int("error counted", q.errors_count(), 1);
+
+    check_int("still at 00", q.signal(1, 0), 1);
+
+    q.reset();
+    check_int("count reset", q.count(), 0);
+    check_str("direction reset", &q.direction(), "none");
+    check_int("errors reset", q.errors_count(), 0);
+
+    q.signal(1, 0); q.signal(1, 1); q.signal(0, 1); q.signal(0, 0);
+    q.signal(1, 0); q.signal(1, 1); q.signal(0, 1); q.signal(0, 0);
+    check_int("8 signals starting idle = 7 fwd edges", q.count(), 7);
+
+    println!("PASS: quadrature");
+}

@@ -1,0 +1,168 @@
+@@[target("go")]
+
+package main
+
+import "fmt"
+import "os"
+
+// Cookbook 98: Quadrature Encoder Decoder — Mealy Machine
+
+@@system QuadratureDecoder {
+    operations:
+        Count(): int { return s.count_val }
+        Direction(): string { return s.last_dir }
+        ErrorsCount(): int { return s.errors }
+        Reset() {
+            s.count_val = 0
+            s.errors = 0
+            s.last_dir = "none"
+        }
+
+    interface:
+        Signal(a: int, b: int): int
+
+    machine:
+        $S00 {
+            Signal(a: int, b: int): int {
+                if a == 0 && b == 0 {
+                    @@:(0)
+                } else if a == 1 && b == 0 {
+                    s.count_val = s.count_val + 1
+                    s.last_dir = "fwd"
+                    @@:(1)
+                    -> $S10
+                } else if a == 0 && b == 1 {
+                    s.count_val = s.count_val - 1
+                    s.last_dir = "rev"
+                    @@:(-1)
+                    -> $S01
+                } else {
+                    s.errors = s.errors + 1
+                    @@:(0)
+                }
+            }
+        }
+
+        $S10 {
+            Signal(a: int, b: int): int {
+                if a == 1 && b == 0 {
+                    @@:(0)
+                } else if a == 1 && b == 1 {
+                    s.count_val = s.count_val + 1
+                    s.last_dir = "fwd"
+                    @@:(1)
+                    -> $S11
+                } else if a == 0 && b == 0 {
+                    s.count_val = s.count_val - 1
+                    s.last_dir = "rev"
+                    @@:(-1)
+                    -> $S00
+                } else {
+                    s.errors = s.errors + 1
+                    @@:(0)
+                }
+            }
+        }
+
+        $S11 {
+            Signal(a: int, b: int): int {
+                if a == 1 && b == 1 {
+                    @@:(0)
+                } else if a == 0 && b == 1 {
+                    s.count_val = s.count_val + 1
+                    s.last_dir = "fwd"
+                    @@:(1)
+                    -> $S01
+                } else if a == 1 && b == 0 {
+                    s.count_val = s.count_val - 1
+                    s.last_dir = "rev"
+                    @@:(-1)
+                    -> $S10
+                } else {
+                    s.errors = s.errors + 1
+                    @@:(0)
+                }
+            }
+        }
+
+        $S01 {
+            Signal(a: int, b: int): int {
+                if a == 0 && b == 1 {
+                    @@:(0)
+                } else if a == 0 && b == 0 {
+                    s.count_val = s.count_val + 1
+                    s.last_dir = "fwd"
+                    @@:(1)
+                    -> $S00
+                } else if a == 1 && b == 1 {
+                    s.count_val = s.count_val - 1
+                    s.last_dir = "rev"
+                    @@:(-1)
+                    -> $S11
+                } else {
+                    s.errors = s.errors + 1
+                    @@:(0)
+                }
+            }
+        }
+
+    domain:
+        count_val: int = 0
+        errors: int = 0
+        last_dir: string = "none"
+}
+
+func checkStr(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+func checkInt(label string, actual, expected int) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected %d, got %d\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    q := @@QuadratureDecoder()
+    checkInt("initial count 0", q.Count(), 0)
+    checkStr("initial direction", q.Direction(), "none")
+    checkInt("initial errors 0", q.ErrorsCount(), 0)
+
+    checkInt("idle 00", q.Signal(0, 0), 0)
+    checkInt("no count change on idle", q.Count(), 0)
+
+    checkInt("00->10 fwd", q.Signal(1, 0), 1)
+    checkInt("10->11 fwd", q.Signal(1, 1), 1)
+    checkInt("11->01 fwd", q.Signal(0, 1), 1)
+    checkInt("01->00 fwd", q.Signal(0, 0), 1)
+
+    checkInt("four fwd ticks", q.Count(), 4)
+    checkStr("direction fwd", q.Direction(), "fwd")
+
+    checkInt("00->01 rev", q.Signal(0, 1), -1)
+    checkInt("01->11 rev", q.Signal(1, 1), -1)
+    checkInt("11->10 rev", q.Signal(1, 0), -1)
+    checkInt("10->00 rev", q.Signal(0, 0), -1)
+
+    checkInt("net count 0", q.Count(), 0)
+    checkStr("direction rev", q.Direction(), "rev")
+
+    checkInt("illegal 00->11", q.Signal(1, 1), 0)
+    checkInt("error counted", q.ErrorsCount(), 1)
+
+    checkInt("still at 00", q.Signal(1, 0), 1)
+
+    q.Reset()
+    checkInt("count reset", q.Count(), 0)
+    checkStr("direction reset", q.Direction(), "none")
+    checkInt("errors reset", q.ErrorsCount(), 0)
+
+    q.Signal(1, 0); q.Signal(1, 1); q.Signal(0, 1); q.Signal(0, 0)
+    q.Signal(1, 0); q.Signal(1, 1); q.Signal(0, 1); q.Signal(0, 0)
+    checkInt("8 signals starting idle = 7 fwd edges", q.Count(), 7)
+
+    fmt.Println("PASS: quadrature")
+}
