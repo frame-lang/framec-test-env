@@ -1,0 +1,62 @@
+@@[target("erlang")]
+
+%% Cookbook 79: Titration Protocol
+
+@@system Titration {
+    interface:
+        add_drop(volume_mL: float)
+        observe_color(color: string)
+        record_endpoint()
+        new_trial()
+        result_mL(): float = 0.0
+        status(): string
+        volume_mL(): float
+
+    machine:
+        $Setup {
+            add_drop(volume_mL: float) {
+                self.volume = 0.0,
+                -> $Titrating
+            }
+            volume_mL(): float { @@:(self.volume) }
+            status(): string { @@:("setup") }
+        }
+
+        $Titrating {
+            add_drop(volume_mL: float) { self.volume = self.volume + Volume_mL }
+            observe_color(color: string) {
+                case Color == "pink" of
+                    true -> -> $NearEndpoint;
+                    false -> ok
+                end
+            }
+            volume_mL(): float { @@:(self.volume) }
+            status(): string { @@:("titrating") }
+        }
+
+        $NearEndpoint {
+            add_drop(volume_mL: float) { self.volume = self.volume + Volume_mL }
+            observe_color(color: string) {
+                case Color == "clear" of
+                    true -> -> $Titrating;
+                    false -> ok
+                end
+            }
+            record_endpoint() { -> $Complete }
+            volume_mL(): float { @@:(self.volume) }
+            status(): string { @@:("near endpoint") }
+        }
+
+        $Complete {
+            new_trial() {
+                self.volume = 0.0,
+                -> $Setup
+            }
+            result_mL(): float { @@:(self.volume) }
+            volume_mL(): float { @@:(self.volume) }
+            status(): string { @@:("complete") }
+        }
+
+    domain:
+        volume: float = 0.0
+}

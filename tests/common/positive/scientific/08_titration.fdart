@@ -1,0 +1,112 @@
+@@[target("dart")]
+
+// Cookbook 79: Titration Protocol
+
+import 'dart:io';
+
+@@system Titration {
+    interface:
+        add_drop(volume_mL: double)
+        observe_color(color: String)
+        record_endpoint()
+        new_trial()
+        result_mL(): double = 0.0
+        status(): String
+        volume_mL(): double
+
+    machine:
+        $Setup {
+            add_drop(volume_mL: double) {
+                this.volume = 0.0;
+                -> $Titrating
+            }
+            volume_mL(): double { @@:(this.volume) }
+            status(): String { @@:("setup") }
+        }
+
+        $Titrating {
+            add_drop(volume_mL: double) { this.volume = this.volume + volume_mL; }
+            observe_color(color: String) {
+                if (color == "pink") {
+                    -> $NearEndpoint
+                }
+            }
+            volume_mL(): double { @@:(this.volume) }
+            status(): String { @@:("titrating") }
+        }
+
+        $NearEndpoint {
+            add_drop(volume_mL: double) { this.volume = this.volume + volume_mL; }
+            observe_color(color: String) {
+                if (color == "clear") {
+                    -> $Titrating
+                }
+            }
+            record_endpoint() { -> $Complete }
+            volume_mL(): double { @@:(this.volume) }
+            status(): String { @@:("near endpoint") }
+        }
+
+        $Complete {
+            new_trial() {
+                this.volume = 0.0;
+                -> $Setup
+            }
+            result_mL(): double { @@:(this.volume) }
+            volume_mL(): double { @@:(this.volume) }
+            status(): String { @@:("complete") }
+        }
+
+    domain:
+        volume: double = 0.0
+}
+
+void check(String label, dynamic actual, dynamic expected) {
+    if (actual != expected) {
+        print("FAIL: $label expected '$expected', got '$actual'");
+        exit(1);
+    }
+}
+void checkF(String label, double actual, double expected) {
+    if ((actual - expected).abs() > 1e-9) {
+        print("FAIL: $label expected $expected, got $actual");
+        exit(1);
+    }
+}
+
+void main() {
+    var t = @@Titration();
+    check("start setup", t.status(), "setup");
+    t.add_drop(1.0);
+    check("titrating", t.status(), "titrating");
+    checkF("volume zeroed on first", t.volume_mL() as double, 0.0);
+    t.add_drop(5.0);
+    t.add_drop(3.0);
+    checkF("accumulating", t.volume_mL() as double, 8.0);
+    t.observe_color("pink");
+    check("near endpoint", t.status(), "near endpoint");
+    t.observe_color("clear");
+    check("back to titrating", t.status(), "titrating");
+    t.observe_color("pink");
+    check("near endpoint 2", t.status(), "near endpoint");
+    t.add_drop(0.05);
+    t.record_endpoint();
+    check("complete", t.status(), "complete");
+    checkF("recorded volume", t.result_mL() as double, 8.05);
+    t.add_drop(10.0);
+    checkF("endpoint locked", t.result_mL() as double, 8.05);
+    t.add_drop(5.0);
+    checkF("endpoint still locked", t.result_mL() as double, 8.05);
+    t.observe_color("pink");
+    t.record_endpoint();
+    checkF("still locked after ignored events", t.result_mL() as double, 8.05);
+    t.new_trial();
+    check("new trial back to setup", t.status(), "setup");
+    checkF("volume cleared", t.volume_mL() as double, 0.0);
+    t.add_drop(2.0);
+    t.add_drop(1.5);
+    t.observe_color("pink");
+    t.record_endpoint();
+    checkF("second endpoint", t.result_mL() as double, 1.5);
+    print("PASS: titration");
+}

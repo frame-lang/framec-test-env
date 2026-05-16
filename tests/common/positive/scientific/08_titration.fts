@@ -1,0 +1,108 @@
+@@[target("typescript")]
+
+// Cookbook 79: Titration Protocol
+
+@@system Titration {
+    interface:
+        add_drop(volume_mL: number)
+        observe_color(color: string)
+        record_endpoint()
+        new_trial()
+        result_mL(): number = 0.0
+        status(): string
+        volume_mL(): number
+
+    machine:
+        $Setup {
+            add_drop(volume_mL: number) {
+                this.volume = 0.0;
+                -> $Titrating
+            }
+            volume_mL(): number { @@:(this.volume) }
+            status(): string { @@:("setup") }
+        }
+
+        $Titrating {
+            add_drop(volume_mL: number) { this.volume = this.volume + volume_mL; }
+            observe_color(color: string) {
+                if (color === "pink") {
+                    -> $NearEndpoint
+                }
+            }
+            volume_mL(): number { @@:(this.volume) }
+            status(): string { @@:("titrating") }
+        }
+
+        $NearEndpoint {
+            add_drop(volume_mL: number) { this.volume = this.volume + volume_mL; }
+            observe_color(color: string) {
+                if (color === "clear") {
+                    -> $Titrating
+                }
+            }
+            record_endpoint() { -> $Complete }
+            volume_mL(): number { @@:(this.volume) }
+            status(): string { @@:("near endpoint") }
+        }
+
+        $Complete {
+            new_trial() {
+                this.volume = 0.0;
+                -> $Setup
+            }
+            result_mL(): number { @@:(this.volume) }
+            volume_mL(): number { @@:(this.volume) }
+            status(): string { @@:("complete") }
+        }
+
+    domain:
+        volume: number = 0.0
+}
+
+function check(label: string, actual: any, expected: any): void {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+        process.exit(1);
+    }
+}
+function checkF(label: string, actual: number, expected: number): void {
+    if (Math.abs(actual - expected) > 1e-9) {
+        console.log("FAIL: " + label + " expected " + expected + ", got " + actual);
+        process.exit(1);
+    }
+}
+
+const t = @@Titration();
+check("start setup", t.status(), "setup");
+t.add_drop(1.0);
+check("titrating", t.status(), "titrating");
+checkF("volume zeroed on first", t.volume_mL(), 0.0);
+t.add_drop(5.0);
+t.add_drop(3.0);
+checkF("accumulating", t.volume_mL(), 8.0);
+t.observe_color("pink");
+check("near endpoint", t.status(), "near endpoint");
+t.observe_color("clear");
+check("back to titrating", t.status(), "titrating");
+t.observe_color("pink");
+check("near endpoint 2", t.status(), "near endpoint");
+t.add_drop(0.05);
+t.record_endpoint();
+check("complete", t.status(), "complete");
+checkF("recorded volume", t.result_mL(), 8.05);
+t.add_drop(10.0);
+checkF("endpoint locked", t.result_mL(), 8.05);
+t.add_drop(5.0);
+checkF("endpoint still locked", t.result_mL(), 8.05);
+t.observe_color("pink");
+t.record_endpoint();
+checkF("still locked after ignored events", t.result_mL(), 8.05);
+t.new_trial();
+check("new trial back to setup", t.status(), "setup");
+checkF("volume cleared", t.volume_mL(), 0.0);
+t.add_drop(2.0);
+t.add_drop(1.5);
+t.observe_color("pink");
+t.record_endpoint();
+checkF("second endpoint", t.result_mL(), 1.5);
+console.log("PASS: titration");

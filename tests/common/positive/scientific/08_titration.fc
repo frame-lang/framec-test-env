@@ -1,0 +1,117 @@
+@@[target("c")]
+
+// Cookbook 79: Titration Protocol
+
+@@system Titration {
+    interface:
+        add_drop(volume_mL: double)
+        observe_color(color: string)
+        record_endpoint()
+        new_trial()
+        result_mL(): double = 0.0
+        status(): string
+        volume_mL(): double
+
+    machine:
+        $Setup {
+            add_drop(volume_mL: double) {
+                self->volume = 0.0;
+                -> $Titrating
+            }
+            volume_mL(): double { @@:(self->volume) }
+            status(): string { @@:("setup") }
+        }
+
+        $Titrating {
+            add_drop(volume_mL: double) { self->volume = self->volume + volume_mL; }
+            observe_color(color: string) {
+                if (strcmp(color, "pink") == 0) {
+                    -> $NearEndpoint
+                }
+            }
+            volume_mL(): double { @@:(self->volume) }
+            status(): string { @@:("titrating") }
+        }
+
+        $NearEndpoint {
+            add_drop(volume_mL: double) { self->volume = self->volume + volume_mL; }
+            observe_color(color: string) {
+                if (strcmp(color, "clear") == 0) {
+                    -> $Titrating
+                }
+            }
+            record_endpoint() { -> $Complete }
+            volume_mL(): double { @@:(self->volume) }
+            status(): string { @@:("near endpoint") }
+        }
+
+        $Complete {
+            new_trial() {
+                self->volume = 0.0;
+                -> $Setup
+            }
+            result_mL(): double { @@:(self->volume) }
+            volume_mL(): double { @@:(self->volume) }
+            status(): string { @@:("complete") }
+        }
+
+    domain:
+        volume: double = 0.0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_f(const char* label, double actual, double expected) {
+    if (fabs(actual - expected) > 1e-9) {
+        printf("FAIL: %s expected %f, got %f\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    Titration* t = @@Titration();
+    check_str("start setup", Titration_status(t), "setup");
+    Titration_add_drop(t, 1.0);
+    check_str("titrating", Titration_status(t), "titrating");
+    check_f("volume zeroed on first", Titration_volume_mL(t), 0.0);
+    Titration_add_drop(t, 5.0);
+    Titration_add_drop(t, 3.0);
+    check_f("accumulating", Titration_volume_mL(t), 8.0);
+    Titration_observe_color(t, "pink");
+    check_str("near endpoint", Titration_status(t), "near endpoint");
+    Titration_observe_color(t, "clear");
+    check_str("back to titrating", Titration_status(t), "titrating");
+    Titration_observe_color(t, "pink");
+    check_str("near endpoint 2", Titration_status(t), "near endpoint");
+    Titration_add_drop(t, 0.05);
+    Titration_record_endpoint(t);
+    check_str("complete", Titration_status(t), "complete");
+    check_f("recorded volume", Titration_result_mL(t), 8.05);
+    Titration_add_drop(t, 10.0);
+    check_f("endpoint locked", Titration_result_mL(t), 8.05);
+    Titration_add_drop(t, 5.0);
+    check_f("endpoint still locked", Titration_result_mL(t), 8.05);
+    Titration_observe_color(t, "pink");
+    Titration_record_endpoint(t);
+    check_f("still locked after ignored events", Titration_result_mL(t), 8.05);
+    Titration_new_trial(t);
+    check_str("new trial back to setup", Titration_status(t), "setup");
+    check_f("volume cleared", Titration_volume_mL(t), 0.0);
+    Titration_add_drop(t, 2.0);
+    Titration_add_drop(t, 1.5);
+    Titration_observe_color(t, "pink");
+    Titration_record_endpoint(t);
+    check_f("second endpoint", Titration_result_mL(t), 1.5);
+    printf("PASS: titration\n");
+    Titration_destroy(t);
+    return 0;
+}

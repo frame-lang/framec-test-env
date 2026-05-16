@@ -1,0 +1,118 @@
+@@[target("go")]
+
+// Cookbook 79: Titration Protocol
+
+package main
+
+import (
+    "fmt"
+    "math"
+    "os"
+)
+
+@@system Titration {
+    interface:
+        add_drop(volume_mL: float64)
+        observe_color(color: string)
+        record_endpoint()
+        new_trial()
+        result_mL(): float64 = 0.0
+        status(): string
+        volume_mL(): float64
+
+    machine:
+        $Setup {
+            add_drop(volume_mL: float64) {
+                s.volume = 0.0
+                -> $Titrating
+            }
+            volume_mL(): float64 { @@:(s.volume) }
+            status(): string { @@:("setup") }
+        }
+
+        $Titrating {
+            add_drop(volume_mL: float64) { s.volume = s.volume + volume_mL }
+            observe_color(color: string) {
+                if color == "pink" {
+                    -> $NearEndpoint
+                }
+            }
+            volume_mL(): float64 { @@:(s.volume) }
+            status(): string { @@:("titrating") }
+        }
+
+        $NearEndpoint {
+            add_drop(volume_mL: float64) { s.volume = s.volume + volume_mL }
+            observe_color(color: string) {
+                if color == "clear" {
+                    -> $Titrating
+                }
+            }
+            record_endpoint() { -> $Complete }
+            volume_mL(): float64 { @@:(s.volume) }
+            status(): string { @@:("near endpoint") }
+        }
+
+        $Complete {
+            new_trial() {
+                s.volume = 0.0
+                -> $Setup
+            }
+            result_mL(): float64 { @@:(s.volume) }
+            volume_mL(): float64 { @@:(s.volume) }
+            status(): string { @@:("complete") }
+        }
+
+    domain:
+        volume: float64 = 0.0
+}
+
+func check(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+func checkF(label string, actual, expected float64) {
+    if math.Abs(actual-expected) > 1e-9 {
+        fmt.Printf("FAIL: %s expected %f, got %f\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    t := @@Titration()
+    check("start setup", t.status().(string), "setup")
+    t.add_drop(1.0)
+    check("titrating", t.status().(string), "titrating")
+    checkF("volume zeroed on first", t.volume_mL().(float64), 0.0)
+    t.add_drop(5.0)
+    t.add_drop(3.0)
+    checkF("accumulating", t.volume_mL().(float64), 8.0)
+    t.observe_color("pink")
+    check("near endpoint", t.status().(string), "near endpoint")
+    t.observe_color("clear")
+    check("back to titrating", t.status().(string), "titrating")
+    t.observe_color("pink")
+    check("near endpoint 2", t.status().(string), "near endpoint")
+    t.add_drop(0.05)
+    t.record_endpoint()
+    check("complete", t.status().(string), "complete")
+    checkF("recorded volume", t.result_mL().(float64), 8.05)
+    t.add_drop(10.0)
+    checkF("endpoint locked", t.result_mL().(float64), 8.05)
+    t.add_drop(5.0)
+    checkF("endpoint still locked", t.result_mL().(float64), 8.05)
+    t.observe_color("pink")
+    t.record_endpoint()
+    checkF("still locked after ignored events", t.result_mL().(float64), 8.05)
+    t.new_trial()
+    check("new trial back to setup", t.status().(string), "setup")
+    checkF("volume cleared", t.volume_mL().(float64), 0.0)
+    t.add_drop(2.0)
+    t.add_drop(1.5)
+    t.observe_color("pink")
+    t.record_endpoint()
+    checkF("second endpoint", t.result_mL().(float64), 1.5)
+    fmt.Println("PASS: titration")
+}

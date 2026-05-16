@@ -1,0 +1,121 @@
+@@[target("rust")]
+
+// Cookbook 79: Titration Protocol
+
+@@system Titration {
+    interface:
+        add_drop(volume_mL: f64)
+        observe_color(color: String)
+        record_endpoint()
+        new_trial()
+        result_mL(): f64 = 0.0
+        status(): String
+        volume_mL(): f64
+
+    machine:
+        $Setup {
+            add_drop(volume_mL: f64) {
+                self.volume = 0.0;
+                -> $Titrating
+            }
+            volume_mL(): f64 { @@:(self.volume) }
+            status(): String { @@:(String::from("setup")) }
+        }
+
+        $Titrating {
+            add_drop(volume_mL: f64) { self.volume = self.volume + volume_mL; }
+            observe_color(color: String) {
+                if color == "pink" {
+                    -> $NearEndpoint
+                }
+            }
+            volume_mL(): f64 { @@:(self.volume) }
+            status(): String { @@:(String::from("titrating")) }
+        }
+
+        $NearEndpoint {
+            add_drop(volume_mL: f64) { self.volume = self.volume + volume_mL; }
+            observe_color(color: String) {
+                if color == "clear" {
+                    -> $Titrating
+                }
+            }
+            record_endpoint() { -> $Complete }
+            volume_mL(): f64 { @@:(self.volume) }
+            status(): String { @@:(String::from("near endpoint")) }
+        }
+
+        $Complete {
+            new_trial() {
+                self.volume = 0.0;
+                -> $Setup
+            }
+            result_mL(): f64 { @@:(self.volume) }
+            volume_mL(): f64 { @@:(self.volume) }
+            status(): String { @@:(String::from("complete")) }
+        }
+
+    domain:
+        volume: f64 = 0.0
+}
+
+fn check(label: &str, actual: String, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+fn check_f(label: &str, actual: f64, expected: f64) {
+    if (actual - expected).abs() > 1e-9 {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn main() {
+    let mut t = @@Titration();
+    check("start setup", t.status(), "setup");
+
+    t.add_drop(1.0);
+    check("titrating", t.status(), "titrating");
+    check_f("volume zeroed on first", t.volume_mL(), 0.0);
+
+    t.add_drop(5.0);
+    t.add_drop(3.0);
+    check_f("accumulating", t.volume_mL(), 8.0);
+
+    t.observe_color(String::from("pink"));
+    check("near endpoint", t.status(), "near endpoint");
+
+    t.observe_color(String::from("clear"));
+    check("back to titrating", t.status(), "titrating");
+
+    t.observe_color(String::from("pink"));
+    check("near endpoint 2", t.status(), "near endpoint");
+
+    t.add_drop(0.05);
+    t.record_endpoint();
+    check("complete", t.status(), "complete");
+    check_f("recorded volume", t.result_mL(), 8.05);
+
+    t.add_drop(10.0);
+    check_f("endpoint locked", t.result_mL(), 8.05);
+    t.add_drop(5.0);
+    check_f("endpoint still locked", t.result_mL(), 8.05);
+
+    t.observe_color(String::from("pink"));
+    t.record_endpoint();
+    check_f("still locked after ignored events", t.result_mL(), 8.05);
+
+    t.new_trial();
+    check("new trial back to setup", t.status(), "setup");
+    check_f("volume cleared", t.volume_mL(), 0.0);
+
+    t.add_drop(2.0);
+    t.add_drop(1.5);
+    t.observe_color(String::from("pink"));
+    t.record_endpoint();
+    check_f("second endpoint", t.result_mL(), 1.5);
+
+    println!("PASS: titration");
+}
