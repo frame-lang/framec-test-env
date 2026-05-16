@@ -1,0 +1,196 @@
+@@[target("javascript")]
+
+// Cookbook 97: Servo Homing Sequence
+
+@@system ServoHoming {
+    interface:
+        home()
+        tick()
+        limit_hit()
+        index_pulse()
+        fault(reason)
+        status()
+        get_attempts()
+
+    machine:
+        $Unhomed {
+            home() {
+                this.attempts = 0;
+                -> $SeekingLimit
+            }
+            status() { @@:("unhomed") }
+            get_attempts() { @@:(this.attempts) }
+        }
+
+        $Active {
+            get_attempts() { @@:(this.attempts) }
+        }
+
+        $Homing => $Active {
+            fault(reason) {
+                this.fault_reason = reason;
+                -> $Fault
+            }
+            => $^
+        }
+
+        $SeekingLimit => $Homing {
+            $>() {
+                this.attempts = this.attempts + 1;
+                this.travel = 0;
+            }
+
+            tick() {
+                this.travel = this.travel + this.seek_speed;
+                if (this.travel > this.max_travel) {
+                    if (this.attempts >= this.max_attempts) {
+                        @@:self.fault("limit not found")
+                    } else {
+                        -> $SeekingLimit
+                    }
+                }
+            }
+
+            limit_hit() { -> $BackingOff }
+
+            status() { @@:("seeking limit") }
+            => $^
+        }
+
+        $BackingOff => $Homing {
+            $>() {
+                this.backoff_remaining = this.backoff_distance;
+            }
+
+            tick() {
+                this.backoff_remaining = this.backoff_remaining - this.seek_speed;
+                if (this.backoff_remaining <= 0) {
+                    -> $FindingIndex
+                }
+            }
+
+            status() { @@:("backing off") }
+            => $^
+        }
+
+        $FindingIndex => $Homing {
+            $>() { this.index_travel = 0; }
+
+            tick() {
+                this.index_travel = this.index_travel + this.index_speed;
+                if (this.index_travel > this.index_window) {
+                    @@:self.fault("index pulse missing")
+                }
+            }
+
+            index_pulse() {
+                this.position = 0;
+                -> $Homed
+            }
+
+            status() { @@:("finding index") }
+            => $^
+        }
+
+        $Homed {
+            home() {
+                this.attempts = 0;
+                -> $SeekingLimit
+            }
+            status() { @@:("homed") }
+            get_attempts() { @@:(this.attempts) }
+        }
+
+        $Fault {
+            home() {
+                this.attempts = 0;
+                this.fault_reason = "";
+                -> $SeekingLimit
+            }
+            status() { @@:("fault") }
+            get_attempts() { @@:(this.attempts) }
+        }
+
+    domain:
+        attempts = 0
+        max_attempts = 3
+        travel = 0
+        max_travel = 100
+        backoff_remaining = 0
+        backoff_distance = 10
+        index_travel = 0
+        index_window = 30
+        seek_speed = 5
+        index_speed = 1
+        position = 0
+        fault_reason = ""
+}
+
+
+function checkStr(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+        process.exit(1);
+    }
+}
+function checkInt(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected " + expected + ", got " + actual);
+        process.exit(1);
+    }
+}
+
+const s = @@ServoHoming();
+checkStr("unhomed", s.status(), "unhomed");
+
+s.home();
+checkStr("seeking limit", s.status(), "seeking limit");
+checkInt("1 attempt", s.get_attempts(), 1);
+
+for (let i = 0; i < 3; i = i + 1) s.tick();
+s.limit_hit();
+checkStr("backing off", s.status(), "backing off");
+
+s.tick();
+s.tick();
+checkStr("finding index", s.status(), "finding index");
+
+s.index_pulse();
+checkStr("homed", s.status(), "homed");
+
+s.home();
+checkStr("re-homing from homed", s.status(), "seeking limit");
+checkInt("attempts reset on re-home", s.get_attempts(), 1);
+
+const s2 = @@ServoHoming();
+s2.home();
+for (let i = 0; i < 21; i = i + 1) s2.tick();
+checkStr("retry after overtravel", s2.status(), "seeking limit");
+checkInt("retry attempt 2", s2.get_attempts(), 2);
+
+for (let i = 0; i < 21; i = i + 1) s2.tick();
+checkInt("retry 3", s2.get_attempts(), 3);
+
+for (let i = 0; i < 21; i = i + 1) s2.tick();
+checkStr("fault after max attempts", s2.status(), "fault");
+
+s2.home();
+checkStr("fault cleared by home", s2.status(), "seeking limit");
+checkInt("attempts reset on clear", s2.get_attempts(), 1);
+
+const s3 = @@ServoHoming();
+s3.home();
+s3.limit_hit();
+s3.tick(); s3.tick();
+checkStr("in find index", s3.status(), "finding index");
+
+for (let i = 0; i < 31; i = i + 1) s3.tick();
+checkStr("index missing -> fault", s3.status(), "fault");
+
+const s4 = @@ServoHoming();
+s4.limit_hit();
+checkStr("unhomed absorbs limit_hit", s4.status(), "unhomed");
+s4.index_pulse();
+checkStr("unhomed absorbs index_pulse", s4.status(), "unhomed");
+
+console.log("PASS: servo_homing");

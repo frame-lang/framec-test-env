@@ -1,0 +1,202 @@
+@@[target("go")]
+
+package main
+
+import "fmt"
+import "os"
+
+// Cookbook 97: Servo Homing Sequence
+
+@@system ServoHoming {
+    interface:
+        Home()
+        Tick()
+        LimitHit()
+        IndexPulse()
+        Fault(reason: string)
+        Status(): string
+        GetAttempts(): int
+
+    machine:
+        $Unhomed {
+            Home() {
+                s.attempts = 0
+                -> $SeekingLimit
+            }
+            Status(): string { @@:("unhomed") }
+            GetAttempts(): int { @@:(s.attempts) }
+        }
+
+        $Active {
+            GetAttempts(): int { @@:(s.attempts) }
+        }
+
+        $Homing => $Active {
+            Fault(reason: string) {
+                s.fault_reason = reason
+                -> $Fault
+            }
+            => $^
+        }
+
+        $SeekingLimit => $Homing {
+            $>() {
+                s.attempts = s.attempts + 1
+                s.travel = 0
+            }
+
+            Tick() {
+                s.travel = s.travel + s.seek_speed
+                if s.travel > s.max_travel {
+                    if s.attempts >= s.max_attempts {
+                        @@:self.Fault("limit not found")
+                    } else {
+                        -> $SeekingLimit
+                    }
+                }
+            }
+
+            LimitHit() { -> $BackingOff }
+
+            Status(): string { @@:("seeking limit") }
+            => $^
+        }
+
+        $BackingOff => $Homing {
+            $>() {
+                s.backoff_remaining = s.backoff_distance
+            }
+
+            Tick() {
+                s.backoff_remaining = s.backoff_remaining - s.seek_speed
+                if s.backoff_remaining <= 0 {
+                    -> $FindingIndex
+                }
+            }
+
+            Status(): string { @@:("backing off") }
+            => $^
+        }
+
+        $FindingIndex => $Homing {
+            $>() { s.index_travel = 0 }
+
+            Tick() {
+                s.index_travel = s.index_travel + s.index_speed
+                if s.index_travel > s.index_window {
+                    @@:self.Fault("index pulse missing")
+                }
+            }
+
+            IndexPulse() {
+                s.position = 0
+                -> $Homed
+            }
+
+            Status(): string { @@:("finding index") }
+            => $^
+        }
+
+        $Homed {
+            Home() {
+                s.attempts = 0
+                -> $SeekingLimit
+            }
+            Status(): string { @@:("homed") }
+            GetAttempts(): int { @@:(s.attempts) }
+        }
+
+        $Fault {
+            Home() {
+                s.attempts = 0
+                s.fault_reason = ""
+                -> $SeekingLimit
+            }
+            Status(): string { @@:("fault") }
+            GetAttempts(): int { @@:(s.attempts) }
+        }
+
+    domain:
+        attempts: int = 0
+        max_attempts: int = 3
+        travel: int = 0
+        max_travel: int = 100
+        backoff_remaining: int = 0
+        backoff_distance: int = 10
+        index_travel: int = 0
+        index_window: int = 30
+        seek_speed: int = 5
+        index_speed: int = 1
+        position: int = 0
+        fault_reason: string = ""
+}
+
+func checkStr(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+func checkInt(label string, actual, expected int) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected %d, got %d\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    s := @@ServoHoming()
+    checkStr("unhomed", s.Status(), "unhomed")
+
+    s.Home()
+    checkStr("seeking limit", s.Status(), "seeking limit")
+    checkInt("1 attempt", s.GetAttempts(), 1)
+
+    for i := 0; i < 3; i = i + 1 { s.Tick() }
+    s.LimitHit()
+    checkStr("backing off", s.Status(), "backing off")
+
+    s.Tick()
+    s.Tick()
+    checkStr("finding index", s.Status(), "finding index")
+
+    s.IndexPulse()
+    checkStr("homed", s.Status(), "homed")
+
+    s.Home()
+    checkStr("re-homing from homed", s.Status(), "seeking limit")
+    checkInt("attempts reset on re-home", s.GetAttempts(), 1)
+
+    s2 := @@ServoHoming()
+    s2.Home()
+    for i := 0; i < 21; i = i + 1 { s2.Tick() }
+    checkStr("retry after overtravel", s2.Status(), "seeking limit")
+    checkInt("retry attempt 2", s2.GetAttempts(), 2)
+
+    for i := 0; i < 21; i = i + 1 { s2.Tick() }
+    checkInt("retry 3", s2.GetAttempts(), 3)
+
+    for i := 0; i < 21; i = i + 1 { s2.Tick() }
+    checkStr("fault after max attempts", s2.Status(), "fault")
+
+    s2.Home()
+    checkStr("fault cleared by home", s2.Status(), "seeking limit")
+    checkInt("attempts reset on clear", s2.GetAttempts(), 1)
+
+    s3 := @@ServoHoming()
+    s3.Home()
+    s3.LimitHit()
+    s3.Tick(); s3.Tick()
+    checkStr("in find index", s3.Status(), "finding index")
+
+    for i := 0; i < 31; i = i + 1 { s3.Tick() }
+    checkStr("index missing -> fault", s3.Status(), "fault")
+
+    s4 := @@ServoHoming()
+    s4.LimitHit()
+    checkStr("unhomed absorbs limit_hit", s4.Status(), "unhomed")
+    s4.IndexPulse()
+    checkStr("unhomed absorbs index_pulse", s4.Status(), "unhomed")
+
+    fmt.Println("PASS: servo_homing")
+}

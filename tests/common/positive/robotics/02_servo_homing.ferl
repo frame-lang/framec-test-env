@@ -1,0 +1,130 @@
+@@[target("erlang")]
+
+%% Cookbook 97: Servo Homing Sequence
+
+@@system ServoHoming {
+    interface:
+        home()
+        tick()
+        limit_hit()
+        index_pulse()
+        fault(reason: string)
+        status(): string
+        get_attempts(): int
+
+    machine:
+        $Unhomed {
+            home() {
+                self.attempts = 0,
+                -> $SeekingLimit
+            }
+            status(): string { @@:("unhomed") }
+            get_attempts(): int { @@:(self.attempts) }
+        }
+
+        $Active {
+            get_attempts(): int { @@:(self.attempts) }
+        }
+
+        $Homing => $Active {
+            fault(reason: string) {
+                self.fault_reason = Reason,
+                -> $Fault
+            }
+            => $^
+        }
+
+        $SeekingLimit => $Homing {
+            $>() {
+                self.attempts = self.attempts + 1,
+                self.travel = 0
+            }
+
+            tick() {
+                self.travel = self.travel + self.seek_speed,
+                case self.travel > self.max_travel of
+                    true ->
+                        case self.attempts >= self.max_attempts of
+                            true -> @@:self.fault("limit not found");
+                            false -> -> $SeekingLimit
+                        end;
+                    false -> ok
+                end
+            }
+
+            limit_hit() { -> $BackingOff }
+
+            status(): string { @@:("seeking limit") }
+            => $^
+        }
+
+        $BackingOff => $Homing {
+            $>() {
+                self.backoff_remaining = self.backoff_distance
+            }
+
+            tick() {
+                self.backoff_remaining = self.backoff_remaining - self.seek_speed,
+                case self.backoff_remaining =< 0 of
+                    true -> -> $FindingIndex;
+                    false -> ok
+                end
+            }
+
+            status(): string { @@:("backing off") }
+            => $^
+        }
+
+        $FindingIndex => $Homing {
+            $>() { self.index_travel = 0 }
+
+            tick() {
+                self.index_travel = self.index_travel + self.index_speed,
+                case self.index_travel > self.index_window of
+                    true -> @@:self.fault("index pulse missing");
+                    false -> ok
+                end
+            }
+
+            index_pulse() {
+                self.position = 0,
+                -> $Homed
+            }
+
+            status(): string { @@:("finding index") }
+            => $^
+        }
+
+        $Homed {
+            home() {
+                self.attempts = 0,
+                -> $SeekingLimit
+            }
+            status(): string { @@:("homed") }
+            get_attempts(): int { @@:(self.attempts) }
+        }
+
+        $Fault {
+            home() {
+                self.attempts = 0,
+                self.fault_reason = "",
+                -> $SeekingLimit
+            }
+            status(): string { @@:("fault") }
+            get_attempts(): int { @@:(self.attempts) }
+        }
+
+    domain:
+        attempts: int = 0
+        max_attempts: int = 3
+        travel: int = 0
+        max_travel: int = 100
+        backoff_remaining: int = 0
+        backoff_distance: int = 10
+        index_travel: int = 0
+        index_window: int = 30
+        seek_speed: int = 5
+        index_speed: int = 1
+        position: int = 0
+        fault_reason: string = ""
+}

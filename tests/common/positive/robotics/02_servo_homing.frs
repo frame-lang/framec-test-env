@@ -1,0 +1,218 @@
+@@[target("rust")]
+
+// Cookbook 97: Servo Homing Sequence
+
+@@system ServoHoming {
+    interface:
+        home()
+        tick()
+        limit_hit()
+        index_pulse()
+        fault(reason: String)
+        status(): String
+        get_attempts(): i32
+
+    machine:
+        $Unhomed {
+            home() {
+                self.attempts = 0;
+                -> $SeekingLimit
+            }
+            status(): String { @@:(String::from("unhomed")) }
+            get_attempts(): i32 { @@:(self.attempts) }
+        }
+
+        $Active {
+            get_attempts(): i32 { @@:(self.attempts) }
+        }
+
+        $Homing => $Active {
+            fault(reason: String) {
+                self.fault_reason = reason;
+                -> $Fault
+            }
+            => $^
+        }
+
+        $SeekingLimit => $Homing {
+            $>() {
+                self.attempts = self.attempts + 1;
+                self.travel = 0;
+            }
+
+            tick() {
+                self.travel = self.travel + self.seek_speed;
+                if self.travel > self.max_travel {
+                    if self.attempts >= self.max_attempts {
+                        @@:self.fault(String::from("limit not found"))
+                    } else {
+                        -> $SeekingLimit
+                    }
+                }
+            }
+
+            limit_hit() { -> $BackingOff }
+
+            status(): String { @@:(String::from("seeking limit")) }
+            => $^
+        }
+
+        $BackingOff => $Homing {
+            $>() {
+                self.backoff_remaining = self.backoff_distance;
+            }
+
+            tick() {
+                self.backoff_remaining = self.backoff_remaining - self.seek_speed;
+                if self.backoff_remaining <= 0 {
+                    -> $FindingIndex
+                }
+            }
+
+            status(): String { @@:(String::from("backing off")) }
+            => $^
+        }
+
+        $FindingIndex => $Homing {
+            $>() { self.index_travel = 0; }
+
+            tick() {
+                self.index_travel = self.index_travel + self.index_speed;
+                if self.index_travel > self.index_window {
+                    @@:self.fault(String::from("index pulse missing"))
+                }
+            }
+
+            index_pulse() {
+                self.position = 0;
+                -> $Homed
+            }
+
+            status(): String { @@:(String::from("finding index")) }
+            => $^
+        }
+
+        $Homed {
+            home() {
+                self.attempts = 0;
+                -> $SeekingLimit
+            }
+            status(): String { @@:(String::from("homed")) }
+            get_attempts(): i32 { @@:(self.attempts) }
+        }
+
+        $Fault {
+            home() {
+                self.attempts = 0;
+                self.fault_reason = String::new();
+                -> $SeekingLimit
+            }
+            status(): String { @@:(String::from("fault")) }
+            get_attempts(): i32 { @@:(self.attempts) }
+        }
+
+    domain:
+        attempts: i32 = 0
+        max_attempts: i32 = 3
+        travel: i32 = 0
+        max_travel: i32 = 100
+        backoff_remaining: i32 = 0
+        backoff_distance: i32 = 10
+        index_travel: i32 = 0
+        index_window: i32 = 30
+        seek_speed: i32 = 5
+        index_speed: i32 = 1
+        position: i32 = 0
+        fault_reason: String = String::new()
+}
+
+
+fn check_str(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+fn check_int(label: &str, actual: i32, expected: i32) {
+    if actual != expected {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn main() {
+    let mut s = @@ServoHoming();
+    check_str("unhomed", &s.status(), "unhomed");
+
+    s.home();
+    check_str("seeking limit", &s.status(), "seeking limit");
+    check_int("1 attempt", s.get_attempts(), 1);
+
+    let mut i = 0;
+    while i < 3 {
+        s.tick();
+        i = i + 1;
+    }
+    s.limit_hit();
+    check_str("backing off", &s.status(), "backing off");
+
+    s.tick();
+    s.tick();
+    check_str("finding index", &s.status(), "finding index");
+
+    s.index_pulse();
+    check_str("homed", &s.status(), "homed");
+
+    s.home();
+    check_str("re-homing from homed", &s.status(), "seeking limit");
+    check_int("attempts reset on re-home", s.get_attempts(), 1);
+
+    let mut s2 = @@ServoHoming();
+    s2.home();
+    let mut j = 0;
+    while j < 21 {
+        s2.tick();
+        j = j + 1;
+    }
+    check_str("retry after overtravel", &s2.status(), "seeking limit");
+    check_int("retry attempt 2", s2.get_attempts(), 2);
+
+    let mut k = 0;
+    while k < 21 {
+        s2.tick();
+        k = k + 1;
+    }
+    check_int("retry 3", s2.get_attempts(), 3);
+
+    let mut m = 0;
+    while m < 21 {
+        s2.tick();
+        m = m + 1;
+    }
+    check_str("fault after max attempts", &s2.status(), "fault");
+
+    s2.home();
+    check_str("fault cleared by home", &s2.status(), "seeking limit");
+    check_int("attempts reset on clear", s2.get_attempts(), 1);
+
+    let mut s3 = @@ServoHoming();
+    s3.home();
+    s3.limit_hit();
+    s3.tick(); s3.tick();
+    check_str("in find index", &s3.status(), "finding index");
+
+    let mut n = 0;
+    while n < 31 {
+        s3.tick();
+        n = n + 1;
+    }
+    check_str("index missing -> fault", &s3.status(), "fault");
+
+    let mut s4 = @@ServoHoming();
+    s4.limit_hit();
+    check_str("unhomed absorbs limit_hit", &s4.status(), "unhomed");
+    s4.index_pulse();
+    check_str("unhomed absorbs index_pulse", &s4.status(), "unhomed");
+
+    println!("PASS: servo_homing");
+}

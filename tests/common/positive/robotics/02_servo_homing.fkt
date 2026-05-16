@@ -1,0 +1,198 @@
+@@[target("kotlin")]
+
+// Cookbook 97: Servo Homing Sequence
+
+@@system ServoHoming {
+    interface:
+        home()
+        tick()
+        limit_hit()
+        index_pulse()
+        fault(reason: String)
+        status(): String
+        get_attempts(): Int
+
+    machine:
+        $Unhomed {
+            home() {
+                this.attempts = 0
+                -> $SeekingLimit
+            }
+            status(): String { @@:("unhomed") }
+            get_attempts(): Int { @@:(this.attempts) }
+        }
+
+        $Active {
+            get_attempts(): Int { @@:(this.attempts) }
+        }
+
+        $Homing => $Active {
+            fault(reason: String) {
+                this.fault_reason = reason
+                -> $Fault
+            }
+            => $^
+        }
+
+        $SeekingLimit => $Homing {
+            $>() {
+                this.attempts = this.attempts + 1
+                this.travel = 0
+            }
+
+            tick() {
+                this.travel = this.travel + this.seek_speed
+                if (this.travel > this.max_travel) {
+                    if (this.attempts >= this.max_attempts) {
+                        @@:self.fault("limit not found")
+                    } else {
+                        -> $SeekingLimit
+                    }
+                }
+            }
+
+            limit_hit() { -> $BackingOff }
+
+            status(): String { @@:("seeking limit") }
+            => $^
+        }
+
+        $BackingOff => $Homing {
+            $>() {
+                this.backoff_remaining = this.backoff_distance
+            }
+
+            tick() {
+                this.backoff_remaining = this.backoff_remaining - this.seek_speed
+                if (this.backoff_remaining <= 0) {
+                    -> $FindingIndex
+                }
+            }
+
+            status(): String { @@:("backing off") }
+            => $^
+        }
+
+        $FindingIndex => $Homing {
+            $>() { this.index_travel = 0 }
+
+            tick() {
+                this.index_travel = this.index_travel + this.index_speed
+                if (this.index_travel > this.index_window) {
+                    @@:self.fault("index pulse missing")
+                }
+            }
+
+            index_pulse() {
+                this.position = 0
+                -> $Homed
+            }
+
+            status(): String { @@:("finding index") }
+            => $^
+        }
+
+        $Homed {
+            home() {
+                this.attempts = 0
+                -> $SeekingLimit
+            }
+            status(): String { @@:("homed") }
+            get_attempts(): Int { @@:(this.attempts) }
+        }
+
+        $Fault {
+            home() {
+                this.attempts = 0
+                this.fault_reason = ""
+                -> $SeekingLimit
+            }
+            status(): String { @@:("fault") }
+            get_attempts(): Int { @@:(this.attempts) }
+        }
+
+    domain:
+        attempts: Int = 0
+        max_attempts: Int = 3
+        travel: Int = 0
+        max_travel: Int = 100
+        backoff_remaining: Int = 0
+        backoff_distance: Int = 10
+        index_travel: Int = 0
+        index_window: Int = 30
+        seek_speed: Int = 5
+        index_speed: Int = 1
+        position: Int = 0
+        fault_reason: String = ""
+}
+
+
+fun check_str(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+fun check_int(label: String, actual: Int, expected: Int) {
+    if (actual != expected) {
+        println("FAIL: $label expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun main() {
+    val s = @@ServoHoming()
+    check_str("unhomed", s.status() as String, "unhomed")
+
+    s.home()
+    check_str("seeking limit", s.status() as String, "seeking limit")
+    check_int("1 attempt", s.get_attempts() as Int, 1)
+
+    for (i in 0 until 3) s.tick()
+    s.limit_hit()
+    check_str("backing off", s.status() as String, "backing off")
+
+    s.tick()
+    s.tick()
+    check_str("finding index", s.status() as String, "finding index")
+
+    s.index_pulse()
+    check_str("homed", s.status() as String, "homed")
+
+    s.home()
+    check_str("re-homing from homed", s.status() as String, "seeking limit")
+    check_int("attempts reset on re-home", s.get_attempts() as Int, 1)
+
+    val s2 = @@ServoHoming()
+    s2.home()
+    for (i in 0 until 21) s2.tick()
+    check_str("retry after overtravel", s2.status() as String, "seeking limit")
+    check_int("retry attempt 2", s2.get_attempts() as Int, 2)
+
+    for (i in 0 until 21) s2.tick()
+    check_int("retry 3", s2.get_attempts() as Int, 3)
+
+    for (i in 0 until 21) s2.tick()
+    check_str("fault after max attempts", s2.status() as String, "fault")
+
+    s2.home()
+    check_str("fault cleared by home", s2.status() as String, "seeking limit")
+    check_int("attempts reset on clear", s2.get_attempts() as Int, 1)
+
+    val s3 = @@ServoHoming()
+    s3.home()
+    s3.limit_hit()
+    s3.tick(); s3.tick()
+    check_str("in find index", s3.status() as String, "finding index")
+
+    for (i in 0 until 31) s3.tick()
+    check_str("index missing -> fault", s3.status() as String, "fault")
+
+    val s4 = @@ServoHoming()
+    s4.limit_hit()
+    check_str("unhomed absorbs limit_hit", s4.status() as String, "unhomed")
+    s4.index_pulse()
+    check_str("unhomed absorbs index_pulse", s4.status() as String, "unhomed")
+
+    println("PASS: servo_homing")
+}

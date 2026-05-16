@@ -1,0 +1,206 @@
+@@[target("c")]
+
+// Cookbook 97: Servo Homing Sequence
+
+@@system ServoHoming {
+    interface:
+        home()
+        tick()
+        limit_hit()
+        index_pulse()
+        fault(reason: string)
+        status(): string
+        get_attempts(): int
+
+    machine:
+        $Unhomed {
+            home() {
+                self->attempts = 0;
+                -> $SeekingLimit
+            }
+            status(): string { @@:("unhomed") }
+            get_attempts(): int { @@:(self->attempts) }
+        }
+
+        $Active {
+            get_attempts(): int { @@:(self->attempts) }
+        }
+
+        $Homing => $Active {
+            fault(reason: string) {
+                self->fault_reason = reason;
+                -> $Fault
+            }
+            => $^
+        }
+
+        $SeekingLimit => $Homing {
+            $>() {
+                self->attempts = self->attempts + 1;
+                self->travel = 0;
+            }
+
+            tick() {
+                self->travel = self->travel + self->seek_speed;
+                if (self->travel > self->max_travel) {
+                    if (self->attempts >= self->max_attempts) {
+                        @@:self.fault("limit not found")
+                    } else {
+                        -> $SeekingLimit
+                    }
+                }
+            }
+
+            limit_hit() { -> $BackingOff }
+
+            status(): string { @@:("seeking limit") }
+            => $^
+        }
+
+        $BackingOff => $Homing {
+            $>() {
+                self->backoff_remaining = self->backoff_distance;
+            }
+
+            tick() {
+                self->backoff_remaining = self->backoff_remaining - self->seek_speed;
+                if (self->backoff_remaining <= 0) {
+                    -> $FindingIndex
+                }
+            }
+
+            status(): string { @@:("backing off") }
+            => $^
+        }
+
+        $FindingIndex => $Homing {
+            $>() { self->index_travel = 0; }
+
+            tick() {
+                self->index_travel = self->index_travel + self->index_speed;
+                if (self->index_travel > self->index_window) {
+                    @@:self.fault("index pulse missing")
+                }
+            }
+
+            index_pulse() {
+                self->position = 0;
+                -> $Homed
+            }
+
+            status(): string { @@:("finding index") }
+            => $^
+        }
+
+        $Homed {
+            home() {
+                self->attempts = 0;
+                -> $SeekingLimit
+            }
+            status(): string { @@:("homed") }
+            get_attempts(): int { @@:(self->attempts) }
+        }
+
+        $Fault {
+            home() {
+                self->attempts = 0;
+                self->fault_reason = "";
+                -> $SeekingLimit
+            }
+            status(): string { @@:("fault") }
+            get_attempts(): int { @@:(self->attempts) }
+        }
+
+    domain:
+        attempts: int = 0
+        max_attempts: int = 3
+        travel: int = 0
+        max_travel: int = 100
+        backoff_remaining: int = 0
+        backoff_distance: int = 10
+        index_travel: int = 0
+        index_window: int = 30
+        seek_speed: int = 5
+        index_speed: int = 1
+        position: int = 0
+        fault_reason: string = ""
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_int(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    ServoHoming* s = @@ServoHoming();
+    check_str("unhomed", ServoHoming_status(s), "unhomed");
+
+    ServoHoming_home(s);
+    check_str("seeking limit", ServoHoming_status(s), "seeking limit");
+    check_int("1 attempt", ServoHoming_get_attempts(s), 1);
+
+    for (int i = 0; i < 3; i = i + 1) ServoHoming_tick(s);
+    ServoHoming_limit_hit(s);
+    check_str("backing off", ServoHoming_status(s), "backing off");
+
+    ServoHoming_tick(s);
+    ServoHoming_tick(s);
+    check_str("finding index", ServoHoming_status(s), "finding index");
+
+    ServoHoming_index_pulse(s);
+    check_str("homed", ServoHoming_status(s), "homed");
+
+    ServoHoming_home(s);
+    check_str("re-homing from homed", ServoHoming_status(s), "seeking limit");
+    check_int("attempts reset on re-home", ServoHoming_get_attempts(s), 1);
+
+    ServoHoming* s2 = @@ServoHoming();
+    ServoHoming_home(s2);
+    for (int i = 0; i < 21; i = i + 1) ServoHoming_tick(s2);
+    check_str("retry after overtravel", ServoHoming_status(s2), "seeking limit");
+    check_int("retry attempt 2", ServoHoming_get_attempts(s2), 2);
+
+    for (int i = 0; i < 21; i = i + 1) ServoHoming_tick(s2);
+    check_int("retry 3", ServoHoming_get_attempts(s2), 3);
+
+    for (int i = 0; i < 21; i = i + 1) ServoHoming_tick(s2);
+    check_str("fault after max attempts", ServoHoming_status(s2), "fault");
+
+    ServoHoming_home(s2);
+    check_str("fault cleared by home", ServoHoming_status(s2), "seeking limit");
+    check_int("attempts reset on clear", ServoHoming_get_attempts(s2), 1);
+
+    ServoHoming* s3 = @@ServoHoming();
+    ServoHoming_home(s3);
+    ServoHoming_limit_hit(s3);
+    ServoHoming_tick(s3); ServoHoming_tick(s3);
+    check_str("in find index", ServoHoming_status(s3), "finding index");
+
+    for (int i = 0; i < 31; i = i + 1) ServoHoming_tick(s3);
+    check_str("index missing -> fault", ServoHoming_status(s3), "fault");
+
+    ServoHoming* s4 = @@ServoHoming();
+    ServoHoming_limit_hit(s4);
+    check_str("unhomed absorbs limit_hit", ServoHoming_status(s4), "unhomed");
+    ServoHoming_index_pulse(s4);
+    check_str("unhomed absorbs index_pulse", ServoHoming_status(s4), "unhomed");
+
+    printf("PASS: servo_homing\n");
+    ServoHoming_destroy(s);
+    ServoHoming_destroy(s2);
+    ServoHoming_destroy(s3);
+    ServoHoming_destroy(s4);
+    return 0;
+}

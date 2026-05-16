@@ -1,0 +1,196 @@
+@@[target("lua")]
+
+-- Cookbook 97: Servo Homing Sequence
+
+@@system ServoHoming {
+    interface:
+        home()
+        tick()
+        limit_hit()
+        index_pulse()
+        fault(reason: str)
+        status(): str
+        get_attempts(): int
+
+    machine:
+        $Unhomed {
+            home() {
+                self.attempts = 0
+                -> $SeekingLimit
+            }
+            status(): str { @@:("unhomed") }
+            get_attempts(): int { @@:(self.attempts) }
+        }
+
+        $Active {
+            get_attempts(): int { @@:(self.attempts) }
+        }
+
+        $Homing => $Active {
+            fault(reason: str) {
+                self.fault_reason = reason
+                -> $Fault
+            }
+            => $^
+        }
+
+        $SeekingLimit => $Homing {
+            $>() {
+                self.attempts = self.attempts + 1
+                self.travel = 0
+            }
+
+            tick() {
+                self.travel = self.travel + self.seek_speed
+                if self.travel > self.max_travel then
+                    if self.attempts >= self.max_attempts then
+                        @@:self.fault("limit not found")
+                    else
+                        -> $SeekingLimit
+                    end
+                end
+            }
+
+            limit_hit() { -> $BackingOff }
+
+            status(): str { @@:("seeking limit") }
+            => $^
+        }
+
+        $BackingOff => $Homing {
+            $>() {
+                self.backoff_remaining = self.backoff_distance
+            }
+
+            tick() {
+                self.backoff_remaining = self.backoff_remaining - self.seek_speed
+                if self.backoff_remaining <= 0 then
+                    -> $FindingIndex
+                end
+            }
+
+            status(): str { @@:("backing off") }
+            => $^
+        }
+
+        $FindingIndex => $Homing {
+            $>() { self.index_travel = 0 }
+
+            tick() {
+                self.index_travel = self.index_travel + self.index_speed
+                if self.index_travel > self.index_window then
+                    @@:self.fault("index pulse missing")
+                end
+            }
+
+            index_pulse() {
+                self.position = 0
+                -> $Homed
+            }
+
+            status(): str { @@:("finding index") }
+            => $^
+        }
+
+        $Homed {
+            home() {
+                self.attempts = 0
+                -> $SeekingLimit
+            }
+            status(): str { @@:("homed") }
+            get_attempts(): int { @@:(self.attempts) }
+        }
+
+        $Fault {
+            home() {
+                self.attempts = 0
+                self.fault_reason = ""
+                -> $SeekingLimit
+            }
+            status(): str { @@:("fault") }
+            get_attempts(): int { @@:(self.attempts) }
+        }
+
+    domain:
+        attempts = 0
+        max_attempts = 3
+        travel = 0
+        max_travel = 100
+        backoff_remaining = 0
+        backoff_distance = 10
+        index_travel = 0
+        index_window = 30
+        seek_speed = 5
+        index_speed = 1
+        position = 0
+        fault_reason = ""
+}
+
+
+local function check_str(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " expected '" .. expected .. "', got '" .. actual .. "'")
+        os.exit(1)
+    end
+end
+local function check_int(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " expected " .. expected .. ", got " .. actual)
+        os.exit(1)
+    end
+end
+
+local s = @@ServoHoming()
+check_str("unhomed", s:status(), "unhomed")
+
+s:home()
+check_str("seeking limit", s:status(), "seeking limit")
+check_int("1 attempt", s:get_attempts(), 1)
+
+for i = 1, 3 do s:tick() end
+s:limit_hit()
+check_str("backing off", s:status(), "backing off")
+
+s:tick()
+s:tick()
+check_str("finding index", s:status(), "finding index")
+
+s:index_pulse()
+check_str("homed", s:status(), "homed")
+
+s:home()
+check_str("re-homing from homed", s:status(), "seeking limit")
+check_int("attempts reset on re-home", s:get_attempts(), 1)
+
+local s2 = @@ServoHoming()
+s2:home()
+for i = 1, 21 do s2:tick() end
+check_str("retry after overtravel", s2:status(), "seeking limit")
+check_int("retry attempt 2", s2:get_attempts(), 2)
+
+for i = 1, 21 do s2:tick() end
+check_int("retry 3", s2:get_attempts(), 3)
+
+for i = 1, 21 do s2:tick() end
+check_str("fault after max attempts", s2:status(), "fault")
+
+s2:home()
+check_str("fault cleared by home", s2:status(), "seeking limit")
+check_int("attempts reset on clear", s2:get_attempts(), 1)
+
+local s3 = @@ServoHoming()
+s3:home()
+s3:limit_hit()
+s3:tick(); s3:tick()
+check_str("in find index", s3:status(), "finding index")
+
+for i = 1, 31 do s3:tick() end
+check_str("index missing -> fault", s3:status(), "fault")
+
+local s4 = @@ServoHoming()
+s4:limit_hit()
+check_str("unhomed absorbs limit_hit", s4:status(), "unhomed")
+s4:index_pulse()
+check_str("unhomed absorbs index_pulse", s4:status(), "unhomed")
+
+print("PASS: servo_homing")
