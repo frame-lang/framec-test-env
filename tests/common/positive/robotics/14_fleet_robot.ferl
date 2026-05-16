@@ -1,0 +1,57 @@
+@@[target("erlang")]
+
+%% Cookbook 109: Fleet Robot (single-robot half of Fleet Dispatcher)
+%% Each robot toggles Available <-> Busy.
+
+@@system FleetRobot(robot_id: string) {
+    interface:
+        assign_task(task_id: string)
+        task_complete()
+        task_failed()
+        tick()
+        state_name(): string
+        current_task_id(): string
+        id(): string
+
+    machine:
+        $Available {
+            assign_task(task_id: string) {
+                self.current_task = task_id
+                -> $Busy
+            }
+            state_name(): string { @@:("available") }
+            current_task_id(): string { @@:(self.current_task) }
+            id(): string { @@:(self.rid) }
+        }
+
+        $Busy {
+            $>() { self.work_ticks = 0 }
+            tick() {
+                self.work_ticks = self.work_ticks + 1
+                if self.work_ticks >= self.task_duration
+                    @@:self.task_complete()
+                end
+            }
+            task_complete() {
+                self.completed_count = self.completed_count + 1
+                self.current_task = ""
+                -> $Available
+            }
+            task_failed() {
+                self.failed_count = self.failed_count + 1
+                self.current_task = ""
+                -> $Available
+            }
+            state_name(): string { @@:("busy") }
+            current_task_id(): string { @@:(self.current_task) }
+            id(): string { @@:(self.rid) }
+        }
+
+    domain:
+        rid: string = robot_id
+        current_task: string = ""
+        work_ticks: int = 0
+        task_duration: int = 5
+        completed_count: int = 0
+        failed_count: int = 0
+}

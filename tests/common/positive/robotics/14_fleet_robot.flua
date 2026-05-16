@@ -1,0 +1,108 @@
+@@[target("lua")]
+
+-- Cookbook 109: Fleet Robot (single-robot half of Fleet Dispatcher)
+
+@@system FleetRobot(robot_id: string) {
+    interface:
+        assign_task(task_id: string)
+        task_complete()
+        task_failed()
+        tick()
+        state_name(): string
+        current_task_id(): string
+        id(): string
+
+    machine:
+        $Available {
+            assign_task(task_id: string) {
+                self.current_task = task_id
+                -> $Busy
+            }
+            state_name(): string { @@:("available") }
+            current_task_id(): string { @@:(self.current_task) }
+            id(): string { @@:(self.rid) }
+        }
+
+        $Busy {
+            $>() { self.work_ticks = 0 }
+            tick() {
+                self.work_ticks = self.work_ticks + 1
+                if self.work_ticks >= self.task_duration then
+                    @@:self.task_complete()
+                end
+            }
+            task_complete() {
+                self.completed_count = self.completed_count + 1
+                self.current_task = ""
+                -> $Available
+            }
+            task_failed() {
+                self.failed_count = self.failed_count + 1
+                self.current_task = ""
+                -> $Available
+            }
+            state_name(): string { @@:("busy") }
+            current_task_id(): string { @@:(self.current_task) }
+            id(): string { @@:(self.rid) }
+        }
+
+    domain:
+        rid: string = robot_id
+        current_task: string = ""
+        work_ticks: int = 0
+        task_duration: int = 5
+        completed_count: int = 0
+        failed_count: int = 0
+}
+
+local function check(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " expected '" .. expected .. "', got '" .. actual .. "'")
+        os.exit(1)
+    end
+end
+
+local r = @@FleetRobot("bot-1")
+check("available", r:state_name(), "available")
+check("id preserved", r:id(), "bot-1")
+check("no task", r:current_task_id(), "")
+
+r:task_complete()
+r:task_failed()
+check("available absorbs completions", r:state_name(), "available")
+
+r:assign_task("task-42")
+check("busy", r:state_name(), "busy")
+check("task captured", r:current_task_id(), "task-42")
+
+r:assign_task("task-99")
+check("busy absorbs new assign", r:state_name(), "busy")
+check("task unchanged", r:current_task_id(), "task-42")
+
+r:tick()
+r:tick()
+check("still busy after 2 ticks", r:state_name(), "busy")
+r:tick()
+r:tick()
+r:tick()
+check("auto-complete at 5 ticks", r:state_name(), "available")
+check("task cleared", r:current_task_id(), "")
+
+r:assign_task("task-43")
+r:task_complete()
+check("explicit complete -> available", r:state_name(), "available")
+
+r:assign_task("task-44")
+r:task_failed()
+check("failed -> available", r:state_name(), "available")
+
+local r2 = @@FleetRobot("bot-2")
+check("bot-2 id", r2:id(), "bot-2")
+check("bot-2 independent state", r2:state_name(), "available")
+
+r:assign_task("t1"); r:task_complete()
+r:assign_task("t2"); r:task_complete()
+r:assign_task("t3"); r:task_complete()
+check("available after 3 cycles", r:state_name(), "available")
+
+print("PASS: fleet_robot")

@@ -1,0 +1,117 @@
+@@[target("c")]
+
+// Cookbook 109: Fleet Robot (single-robot half of Fleet Dispatcher)
+
+@@system FleetRobot(robot_id: string) {
+    interface:
+        assign_task(task_id: string)
+        task_complete()
+        task_failed()
+        tick()
+        state_name(): string
+        current_task_id(): string
+        id(): string
+
+    machine:
+        $Available {
+            assign_task(task_id: string) {
+                self->current_task = task_id;
+                -> $Busy
+            }
+            state_name(): string { @@:("available") }
+            current_task_id(): string { @@:(self->current_task) }
+            id(): string { @@:(self->rid) }
+        }
+
+        $Busy {
+            $>() { self->work_ticks = 0; }
+            tick() {
+                self->work_ticks = self->work_ticks + 1;
+                if (self->work_ticks >= self->task_duration) {
+                    @@:self.task_complete();
+                }
+            }
+            task_complete() {
+                self->completed_count = self->completed_count + 1;
+                self->current_task = "";
+                -> $Available
+            }
+            task_failed() {
+                self->failed_count = self->failed_count + 1;
+                self->current_task = "";
+                -> $Available
+            }
+            state_name(): string { @@:("busy") }
+            current_task_id(): string { @@:(self->current_task) }
+            id(): string { @@:(self->rid) }
+        }
+
+    domain:
+        rid: string = robot_id
+        current_task: string = ""
+        work_ticks: int = 0
+        task_duration: int = 5
+        completed_count: int = 0
+        failed_count: int = 0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    FleetRobot* r = @@FleetRobot("bot-1");
+    check("available", FleetRobot_state_name(r), "available");
+    check("id preserved", FleetRobot_id(r), "bot-1");
+    check("no task", FleetRobot_current_task_id(r), "");
+
+    FleetRobot_task_complete(r);
+    FleetRobot_task_failed(r);
+    check("available absorbs completions", FleetRobot_state_name(r), "available");
+
+    FleetRobot_assign_task(r, "task-42");
+    check("busy", FleetRobot_state_name(r), "busy");
+    check("task captured", FleetRobot_current_task_id(r), "task-42");
+
+    FleetRobot_assign_task(r, "task-99");
+    check("busy absorbs new assign", FleetRobot_state_name(r), "busy");
+    check("task unchanged", FleetRobot_current_task_id(r), "task-42");
+
+    FleetRobot_tick(r);
+    FleetRobot_tick(r);
+    check("still busy after 2 ticks", FleetRobot_state_name(r), "busy");
+    FleetRobot_tick(r);
+    FleetRobot_tick(r);
+    FleetRobot_tick(r);
+    check("auto-complete at 5 ticks", FleetRobot_state_name(r), "available");
+    check("task cleared", FleetRobot_current_task_id(r), "");
+
+    FleetRobot_assign_task(r, "task-43");
+    FleetRobot_task_complete(r);
+    check("explicit complete -> available", FleetRobot_state_name(r), "available");
+
+    FleetRobot_assign_task(r, "task-44");
+    FleetRobot_task_failed(r);
+    check("failed -> available", FleetRobot_state_name(r), "available");
+
+    FleetRobot* r2 = @@FleetRobot("bot-2");
+    check("bot-2 id", FleetRobot_id(r2), "bot-2");
+    check("bot-2 independent state", FleetRobot_state_name(r2), "available");
+
+    FleetRobot_assign_task(r, "t1"); FleetRobot_task_complete(r);
+    FleetRobot_assign_task(r, "t2"); FleetRobot_task_complete(r);
+    FleetRobot_assign_task(r, "t3"); FleetRobot_task_complete(r);
+    check("available after 3 cycles", FleetRobot_state_name(r), "available");
+
+    printf("PASS: fleet_robot\n");
+    FleetRobot_destroy(r);
+    FleetRobot_destroy(r2);
+    return 0;
+}
