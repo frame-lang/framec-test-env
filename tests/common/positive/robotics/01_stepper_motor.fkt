@@ -1,0 +1,198 @@
+@@[target("kotlin")]
+
+// Cookbook 96: Stepper Motor Driver — Trapezoidal Motion Profile
+
+@@system StepperDriver {
+    interface:
+        move_to(target_steps: Int)
+        tick()
+        stop()
+        stall_detected()
+        status(): String
+        get_position(): Int
+        get_velocity(): Int
+
+    machine:
+        $Idle {
+            move_to(target_steps: Int) {
+                this.target = target_steps
+                this.position = 0
+                this.velocity = 0
+                this.accel_steps = 0
+                -> $Accelerating
+            }
+            tick() { }
+            status(): String { @@:("idle") }
+            get_position(): Int { @@:(this.position) }
+            get_velocity(): Int { @@:(this.velocity) }
+        }
+
+        $Active {
+            get_position(): Int { @@:(this.position) }
+            get_velocity(): Int { @@:(this.velocity) }
+        }
+
+        $Motion => $Active {
+            stop() { -> $Decelerating }
+            stall_detected() {
+                this.velocity = 0
+                -> $Stalled
+            }
+            => $^
+        }
+
+        $Accelerating => $Motion {
+            tick() {
+                this.velocity = this.velocity + this.accel_rate
+                this.position = this.position + this.velocity
+                this.accel_steps = this.accel_steps + this.velocity
+
+                if (this.velocity >= this.v_max) {
+                    this.velocity = this.v_max
+                    -> $Cruising
+                }
+
+                val remaining = this.target - this.position
+                if (remaining <= this.accel_steps) {
+                    -> $Decelerating
+                }
+            }
+            status(): String { @@:("accelerating") }
+            => $^
+        }
+
+        $Cruising => $Motion {
+            tick() {
+                this.position = this.position + this.velocity
+                val remaining = this.target - this.position
+                if (remaining <= this.accel_steps) {
+                    -> $Decelerating
+                }
+            }
+            status(): String { @@:("cruising") }
+            => $^
+        }
+
+        $Decelerating => $Motion {
+            tick() {
+                this.velocity = this.velocity - this.accel_rate
+                if (this.velocity <= 0) {
+                    this.velocity = 0
+                    -> $Idle
+                } else {
+                    this.position = this.position + this.velocity
+                }
+            }
+            status(): String { @@:("decelerating") }
+            => $^
+        }
+
+        $Stalled {
+            move_to(target_steps: Int) {
+                this.target = target_steps
+                this.position = 0
+                this.velocity = 0
+                this.accel_steps = 0
+                -> $Accelerating
+            }
+            status(): String { @@:("stalled") }
+            get_position(): Int { @@:(this.position) }
+            get_velocity(): Int { @@:(this.velocity) }
+        }
+
+    domain:
+        target: Int = 0
+        position: Int = 0
+        velocity: Int = 0
+        accel_steps: Int = 0
+        v_max: Int = 20
+        accel_rate: Int = 2
+}
+
+
+fun check_str(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+fun check_int(label: String, actual: Int, expected: Int) {
+    if (actual != expected) {
+        println("FAIL: $label expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+fun check_bool(label: String, actual: Boolean, expected: Boolean) {
+    if (actual != expected) {
+        println("FAIL: $label expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun main() {
+    val m = @@StepperDriver()
+    check_str("start idle", m.status() as String, "idle")
+    check_int("start position 0", m.get_position() as Int, 0)
+
+    m.move_to(300)
+    check_str("accelerating", m.status() as String, "accelerating")
+
+    var sawCruising = false
+    var finalStatus = ""
+    for (i in 0 until 40) {
+        m.tick()
+        val s = m.status() as String
+        if (s == "cruising") sawCruising = true
+        if (s == "idle") { finalStatus = s; break }
+    }
+    check_bool("long move visited cruising", sawCruising, true)
+    check_str("long move ended idle", finalStatus, "idle")
+    check_int("final velocity 0", m.get_velocity() as Int, 0)
+    check_bool("position advanced", (m.get_position() as Int) > 200, true)
+
+    val m2 = @@StepperDriver()
+    m2.move_to(40)
+    var sawCruising2 = false
+    var finalStatus2 = ""
+    for (j in 0 until 20) {
+        m2.tick()
+        val s = m2.status() as String
+        if (s == "cruising") sawCruising2 = true
+        if (s == "idle") { finalStatus2 = s; break }
+    }
+    check_bool("short move skips cruising", sawCruising2, false)
+    check_str("short move ended idle", finalStatus2, "idle")
+
+    val m3 = @@StepperDriver()
+    m3.move_to(1000)
+    for (k in 0 until 15) m3.tick()
+    check_str("in cruise", m3.status() as String, "cruising")
+
+    m3.stop()
+    check_str("stopped to decel", m3.status() as String, "decelerating")
+
+    for (n in 0 until 15) {
+        m3.tick()
+        if ((m3.status() as String) == "idle") break
+    }
+    check_str("decel completes after stop", m3.status() as String, "idle")
+    check_int("stopped velocity 0", m3.get_velocity() as Int, 0)
+
+    val m4 = @@StepperDriver()
+    m4.move_to(1000)
+    for (p in 0 until 3) m4.tick()
+    check_str("accel when stalled", m4.status() as String, "accelerating")
+    m4.stall_detected()
+    check_str("stalled", m4.status() as String, "stalled")
+    check_int("velocity cleared on stall", m4.get_velocity() as Int, 0)
+
+    m4.move_to(50)
+    check_str("stall cleared", m4.status() as String, "accelerating")
+
+    val m5 = @@StepperDriver()
+    m5.stop()
+    m5.stall_detected()
+    check_str("idle absorbs stop", m5.status() as String, "idle")
+
+    println("PASS: stepper_motor")
+}

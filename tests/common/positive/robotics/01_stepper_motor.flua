@@ -1,0 +1,196 @@
+@@[target("lua")]
+
+-- Cookbook 96: Stepper Motor Driver — Trapezoidal Motion Profile
+
+@@system StepperDriver {
+    interface:
+        move_to(target_steps: int)
+        tick()
+        stop()
+        stall_detected()
+        status(): str
+        get_position(): int
+        get_velocity(): int
+
+    machine:
+        $Idle {
+            move_to(target_steps: int) {
+                self.target = target_steps
+                self.position = 0
+                self.velocity = 0
+                self.accel_steps = 0
+                -> $Accelerating
+            }
+            tick() { }
+            status(): str { @@:("idle") }
+            get_position(): int { @@:(self.position) }
+            get_velocity(): int { @@:(self.velocity) }
+        }
+
+        $Active {
+            get_position(): int { @@:(self.position) }
+            get_velocity(): int { @@:(self.velocity) }
+        }
+
+        $Motion => $Active {
+            stop() { -> $Decelerating }
+            stall_detected() {
+                self.velocity = 0
+                -> $Stalled
+            }
+            => $^
+        }
+
+        $Accelerating => $Motion {
+            tick() {
+                self.velocity = self.velocity + self.accel_rate
+                self.position = self.position + self.velocity
+                self.accel_steps = self.accel_steps + self.velocity
+
+                if self.velocity >= self.v_max then
+                    self.velocity = self.v_max
+                    -> $Cruising
+                end
+
+                local remaining = self.target - self.position
+                if remaining <= self.accel_steps then
+                    -> $Decelerating
+                end
+            }
+            status(): str { @@:("accelerating") }
+            => $^
+        }
+
+        $Cruising => $Motion {
+            tick() {
+                self.position = self.position + self.velocity
+                local remaining = self.target - self.position
+                if remaining <= self.accel_steps then
+                    -> $Decelerating
+                end
+            }
+            status(): str { @@:("cruising") }
+            => $^
+        }
+
+        $Decelerating => $Motion {
+            tick() {
+                self.velocity = self.velocity - self.accel_rate
+                if self.velocity <= 0 then
+                    self.velocity = 0
+                    -> $Idle
+                else
+                    self.position = self.position + self.velocity
+                end
+            }
+            status(): str { @@:("decelerating") }
+            => $^
+        }
+
+        $Stalled {
+            move_to(target_steps: int) {
+                self.target = target_steps
+                self.position = 0
+                self.velocity = 0
+                self.accel_steps = 0
+                -> $Accelerating
+            }
+            status(): str { @@:("stalled") }
+            get_position(): int { @@:(self.position) }
+            get_velocity(): int { @@:(self.velocity) }
+        }
+
+    domain:
+        target = 0
+        position = 0
+        velocity = 0
+        accel_steps = 0
+        v_max = 20
+        accel_rate = 2
+}
+
+
+local function check_str(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " expected '" .. expected .. "', got '" .. actual .. "'")
+        os.exit(1)
+    end
+end
+local function check_int(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " expected " .. expected .. ", got " .. actual)
+        os.exit(1)
+    end
+end
+local function check_bool(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " expected " .. tostring(expected) .. ", got " .. tostring(actual))
+        os.exit(1)
+    end
+end
+
+local m = @@StepperDriver()
+check_str("start idle", m:status(), "idle")
+check_int("start position 0", m:get_position(), 0)
+
+m:move_to(300)
+check_str("accelerating", m:status(), "accelerating")
+
+local saw_cruising = false
+local final_status = ""
+for i = 1, 40 do
+    m:tick()
+    local s = m:status()
+    if s == "cruising" then saw_cruising = true end
+    if s == "idle" then final_status = s; break end
+end
+check_bool("long move visited cruising", saw_cruising, true)
+check_str("long move ended idle", final_status, "idle")
+check_int("final velocity 0", m:get_velocity(), 0)
+check_bool("position advanced", m:get_position() > 200, true)
+
+local m2 = @@StepperDriver()
+m2:move_to(40)
+local saw_cruising2 = false
+local final_status2 = ""
+for i = 1, 20 do
+    m2:tick()
+    local s = m2:status()
+    if s == "cruising" then saw_cruising2 = true end
+    if s == "idle" then final_status2 = s; break end
+end
+check_bool("short move skips cruising", saw_cruising2, false)
+check_str("short move ended idle", final_status2, "idle")
+
+local m3 = @@StepperDriver()
+m3:move_to(1000)
+for i = 1, 15 do m3:tick() end
+check_str("in cruise", m3:status(), "cruising")
+
+m3:stop()
+check_str("stopped to decel", m3:status(), "decelerating")
+
+for i = 1, 15 do
+    m3:tick()
+    if m3:status() == "idle" then break end
+end
+check_str("decel completes after stop", m3:status(), "idle")
+check_int("stopped velocity 0", m3:get_velocity(), 0)
+
+local m4 = @@StepperDriver()
+m4:move_to(1000)
+for i = 1, 3 do m4:tick() end
+check_str("accel when stalled", m4:status(), "accelerating")
+m4:stall_detected()
+check_str("stalled", m4:status(), "stalled")
+check_int("velocity cleared on stall", m4:get_velocity(), 0)
+
+m4:move_to(50)
+check_str("stall cleared", m4:status(), "accelerating")
+
+local m5 = @@StepperDriver()
+m5:stop()
+m5:stall_detected()
+check_str("idle absorbs stop", m5:status(), "idle")
+
+print("PASS: stepper_motor")

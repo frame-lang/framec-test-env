@@ -1,0 +1,197 @@
+@@[target("swift")]
+
+
+// Cookbook 96: Stepper Motor Driver — Trapezoidal Motion Profile
+
+@@system StepperDriver {
+    interface:
+        move_to(target_steps: Int)
+        tick()
+        stop()
+        stall_detected()
+        status(): String
+        get_position(): Int
+        get_velocity(): Int
+
+    machine:
+        $Idle {
+            move_to(target_steps: Int) {
+                self.target = target_steps
+                self.position = 0
+                self.velocity = 0
+                self.accel_steps = 0
+                -> $Accelerating
+            }
+            tick() { }
+            status(): String { @@:("idle") }
+            get_position(): Int { @@:(self.position) }
+            get_velocity(): Int { @@:(self.velocity) }
+        }
+
+        $Active {
+            get_position(): Int { @@:(self.position) }
+            get_velocity(): Int { @@:(self.velocity) }
+        }
+
+        $Motion => $Active {
+            stop() { -> $Decelerating }
+            stall_detected() {
+                self.velocity = 0
+                -> $Stalled
+            }
+            => $^
+        }
+
+        $Accelerating => $Motion {
+            tick() {
+                self.velocity = self.velocity + self.accel_rate
+                self.position = self.position + self.velocity
+                self.accel_steps = self.accel_steps + self.velocity
+
+                if self.velocity >= self.v_max {
+                    self.velocity = self.v_max
+                    -> $Cruising
+                }
+
+                let remaining = self.target - self.position
+                if remaining <= self.accel_steps {
+                    -> $Decelerating
+                }
+            }
+            status(): String { @@:("accelerating") }
+            => $^
+        }
+
+        $Cruising => $Motion {
+            tick() {
+                self.position = self.position + self.velocity
+                let remaining = self.target - self.position
+                if remaining <= self.accel_steps {
+                    -> $Decelerating
+                }
+            }
+            status(): String { @@:("cruising") }
+            => $^
+        }
+
+        $Decelerating => $Motion {
+            tick() {
+                self.velocity = self.velocity - self.accel_rate
+                if self.velocity <= 0 {
+                    self.velocity = 0
+                    -> $Idle
+                } else {
+                    self.position = self.position + self.velocity
+                }
+            }
+            status(): String { @@:("decelerating") }
+            => $^
+        }
+
+        $Stalled {
+            move_to(target_steps: Int) {
+                self.target = target_steps
+                self.position = 0
+                self.velocity = 0
+                self.accel_steps = 0
+                -> $Accelerating
+            }
+            status(): String { @@:("stalled") }
+            get_position(): Int { @@:(self.position) }
+            get_velocity(): Int { @@:(self.velocity) }
+        }
+
+    domain:
+        target: Int = 0
+        position: Int = 0
+        velocity: Int = 0
+        accel_steps: Int = 0
+        v_max: Int = 20
+        accel_rate: Int = 2
+}
+
+
+func checkStr(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+func checkInt(_ label: String, _ actual: Int, _ expected: Int) {
+    if actual != expected {
+        print("FAIL: \(label) expected \(expected), got \(actual)")
+        exit(1)
+    }
+}
+func checkBool(_ label: String, _ actual: Bool, _ expected: Bool) {
+    if actual != expected {
+        print("FAIL: \(label) expected \(expected), got \(actual)")
+        exit(1)
+    }
+}
+
+let m = @@StepperDriver()
+checkStr("start idle", m.status(), "idle")
+checkInt("start position 0", m.get_position(), 0)
+
+m.move_to(300)
+checkStr("accelerating", m.status(), "accelerating")
+
+var sawCruising = false
+var finalStatus = ""
+for _ in 0..<40 {
+    m.tick()
+    let s = m.status()
+    if s == "cruising" { sawCruising = true }
+    if s == "idle" { finalStatus = s; break }
+}
+checkBool("long move visited cruising", sawCruising, true)
+checkStr("long move ended idle", finalStatus, "idle")
+checkInt("final velocity 0", m.get_velocity(), 0)
+checkBool("position advanced", m.get_position() > 200, true)
+
+let m2 = @@StepperDriver()
+m2.move_to(40)
+var sawCruising2 = false
+var finalStatus2 = ""
+for _ in 0..<20 {
+    m2.tick()
+    let s = m2.status()
+    if s == "cruising" { sawCruising2 = true }
+    if s == "idle" { finalStatus2 = s; break }
+}
+checkBool("short move skips cruising", sawCruising2, false)
+checkStr("short move ended idle", finalStatus2, "idle")
+
+let m3 = @@StepperDriver()
+m3.move_to(1000)
+for _ in 0..<15 { m3.tick() }
+checkStr("in cruise", m3.status(), "cruising")
+
+m3.stop()
+checkStr("stopped to decel", m3.status(), "decelerating")
+
+for _ in 0..<15 {
+    m3.tick()
+    if m3.status() == "idle" { break }
+}
+checkStr("decel completes after stop", m3.status(), "idle")
+checkInt("stopped velocity 0", m3.get_velocity(), 0)
+
+let m4 = @@StepperDriver()
+m4.move_to(1000)
+for _ in 0..<3 { m4.tick() }
+checkStr("accel when stalled", m4.status(), "accelerating")
+m4.stall_detected()
+checkStr("stalled", m4.status(), "stalled")
+checkInt("velocity cleared on stall", m4.get_velocity(), 0)
+
+m4.move_to(50)
+checkStr("stall cleared", m4.status(), "accelerating")
+
+let m5 = @@StepperDriver()
+m5.stop()
+m5.stall_detected()
+checkStr("idle absorbs stop", m5.status(), "idle")
+
+print("PASS: stepper_motor")

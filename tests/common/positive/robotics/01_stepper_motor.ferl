@@ -1,0 +1,114 @@
+@@[target("erlang")]
+
+%% Cookbook 96: Stepper Motor Driver — Trapezoidal Motion Profile
+
+@@system StepperDriver {
+    interface:
+        move_to(target_steps: int)
+        tick()
+        stop()
+        stall_detected()
+        status(): string
+        get_position(): int
+        get_velocity(): int
+
+    machine:
+        $Idle {
+            move_to(target_steps: int) {
+                self.target = Target_steps,
+                self.position = 0,
+                self.velocity = 0,
+                self.accel_steps = 0,
+                -> $Accelerating
+            }
+            tick() { ok }
+            status(): string { @@:("idle") }
+            get_position(): int { @@:(self.position) }
+            get_velocity(): int { @@:(self.velocity) }
+        }
+
+        $Active {
+            get_position(): int { @@:(self.position) }
+            get_velocity(): int { @@:(self.velocity) }
+        }
+
+        $Motion => $Active {
+            stop() { -> $Decelerating }
+            stall_detected() {
+                self.velocity = 0,
+                -> $Stalled
+            }
+            => $^
+        }
+
+        $Accelerating => $Motion {
+            tick() {
+                self.velocity = self.velocity + self.accel_rate,
+                self.position = self.position + self.velocity,
+                self.accel_steps = self.accel_steps + self.velocity,
+
+                case self.velocity >= self.v_max of
+                    true ->
+                        self.velocity = self.v_max,
+                        -> $Cruising;
+                    false ->
+                        Remaining = self.target - self.position,
+                        case Remaining =< self.accel_steps of
+                            true -> -> $Decelerating;
+                            false -> ok
+                        end
+                end
+            }
+            status(): string { @@:("accelerating") }
+            => $^
+        }
+
+        $Cruising => $Motion {
+            tick() {
+                self.position = self.position + self.velocity,
+                Remaining = self.target - self.position,
+                case Remaining =< self.accel_steps of
+                    true -> -> $Decelerating;
+                    false -> ok
+                end
+            }
+            status(): string { @@:("cruising") }
+            => $^
+        }
+
+        $Decelerating => $Motion {
+            tick() {
+                self.velocity = self.velocity - self.accel_rate,
+                case self.velocity =< 0 of
+                    true ->
+                        self.velocity = 0,
+                        -> $Idle;
+                    false ->
+                        self.position = self.position + self.velocity
+                end
+            }
+            status(): string { @@:("decelerating") }
+            => $^
+        }
+
+        $Stalled {
+            move_to(target_steps: int) {
+                self.target = Target_steps,
+                self.position = 0,
+                self.velocity = 0,
+                self.accel_steps = 0,
+                -> $Accelerating
+            }
+            status(): string { @@:("stalled") }
+            get_position(): int { @@:(self.position) }
+            get_velocity(): int { @@:(self.velocity) }
+        }
+
+    domain:
+        target: int = 0
+        position: int = 0
+        velocity: int = 0
+        accel_steps: int = 0
+        v_max: int = 20
+        accel_rate: int = 2
+}

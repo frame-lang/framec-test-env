@@ -1,0 +1,218 @@
+@@[target("go")]
+
+package main
+
+import "fmt"
+import "os"
+
+// Cookbook 96: Stepper Motor Driver — Trapezoidal Motion Profile
+
+@@system StepperDriver {
+    interface:
+        MoveTo(target_steps: int)
+        Tick()
+        Stop()
+        StallDetected()
+        Status(): string
+        GetPosition(): int
+        GetVelocity(): int
+
+    machine:
+        $Idle {
+            MoveTo(target_steps: int) {
+                s.target = target_steps
+                s.position = 0
+                s.velocity = 0
+                s.accel_steps = 0
+                -> $Accelerating
+            }
+            Tick() { }
+            Status(): string { @@:("idle") }
+            GetPosition(): int { @@:(s.position) }
+            GetVelocity(): int { @@:(s.velocity) }
+        }
+
+        $Active {
+            GetPosition(): int { @@:(s.position) }
+            GetVelocity(): int { @@:(s.velocity) }
+        }
+
+        $Motion => $Active {
+            Stop() { -> $Decelerating }
+            StallDetected() {
+                s.velocity = 0
+                -> $Stalled
+            }
+            => $^
+        }
+
+        $Accelerating => $Motion {
+            Tick() {
+                s.velocity = s.velocity + s.accel_rate
+                s.position = s.position + s.velocity
+                s.accel_steps = s.accel_steps + s.velocity
+
+                if s.velocity >= s.v_max {
+                    s.velocity = s.v_max
+                    -> $Cruising
+                }
+
+                remaining := s.target - s.position
+                if remaining <= s.accel_steps {
+                    -> $Decelerating
+                }
+            }
+            Status(): string { @@:("accelerating") }
+            => $^
+        }
+
+        $Cruising => $Motion {
+            Tick() {
+                s.position = s.position + s.velocity
+                remaining := s.target - s.position
+                if remaining <= s.accel_steps {
+                    -> $Decelerating
+                }
+            }
+            Status(): string { @@:("cruising") }
+            => $^
+        }
+
+        $Decelerating => $Motion {
+            Tick() {
+                s.velocity = s.velocity - s.accel_rate
+                if s.velocity <= 0 {
+                    s.velocity = 0
+                    -> $Idle
+                } else {
+                    s.position = s.position + s.velocity
+                }
+            }
+            Status(): string { @@:("decelerating") }
+            => $^
+        }
+
+        $Stalled {
+            MoveTo(target_steps: int) {
+                s.target = target_steps
+                s.position = 0
+                s.velocity = 0
+                s.accel_steps = 0
+                -> $Accelerating
+            }
+            Status(): string { @@:("stalled") }
+            GetPosition(): int { @@:(s.position) }
+            GetVelocity(): int { @@:(s.velocity) }
+        }
+
+    domain:
+        target: int = 0
+        position: int = 0
+        velocity: int = 0
+        accel_steps: int = 0
+        v_max: int = 20
+        accel_rate: int = 2
+}
+
+func checkStr(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+func checkInt(label string, actual, expected int) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected %d, got %d\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+func checkBool(label string, actual, expected bool) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected %v, got %v\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    m := @@StepperDriver()
+    checkStr("start idle", m.Status(), "idle")
+    checkInt("start position 0", m.GetPosition(), 0)
+
+    m.MoveTo(300)
+    checkStr("accelerating", m.Status(), "accelerating")
+
+    sawCruising := false
+    finalStatus := ""
+    for i := 0; i < 40; i = i + 1 {
+        m.Tick()
+        s := m.Status()
+        if s == "cruising" {
+            sawCruising = true
+        }
+        if s == "idle" {
+            finalStatus = s
+            break
+        }
+    }
+    checkBool("long move visited cruising", sawCruising, true)
+    checkStr("long move ended idle", finalStatus, "idle")
+    checkInt("final velocity 0", m.GetVelocity(), 0)
+    checkBool("position advanced", m.GetPosition() > 200, true)
+
+    m2 := @@StepperDriver()
+    m2.MoveTo(40)
+    sawCruising2 := false
+    finalStatus2 := ""
+    for j := 0; j < 20; j = j + 1 {
+        m2.Tick()
+        s := m2.Status()
+        if s == "cruising" {
+            sawCruising2 = true
+        }
+        if s == "idle" {
+            finalStatus2 = s
+            break
+        }
+    }
+    checkBool("short move skips cruising", sawCruising2, false)
+    checkStr("short move ended idle", finalStatus2, "idle")
+
+    m3 := @@StepperDriver()
+    m3.MoveTo(1000)
+    for k := 0; k < 15; k = k + 1 {
+        m3.Tick()
+    }
+    checkStr("in cruise", m3.Status(), "cruising")
+
+    m3.Stop()
+    checkStr("stopped to decel", m3.Status(), "decelerating")
+
+    for n := 0; n < 15; n = n + 1 {
+        m3.Tick()
+        if m3.Status() == "idle" {
+            break
+        }
+    }
+    checkStr("decel completes after stop", m3.Status(), "idle")
+    checkInt("stopped velocity 0", m3.GetVelocity(), 0)
+
+    m4 := @@StepperDriver()
+    m4.MoveTo(1000)
+    for p := 0; p < 3; p = p + 1 {
+        m4.Tick()
+    }
+    checkStr("accel when stalled", m4.Status(), "accelerating")
+    m4.StallDetected()
+    checkStr("stalled", m4.Status(), "stalled")
+    checkInt("velocity cleared on stall", m4.GetVelocity(), 0)
+
+    m4.MoveTo(50)
+    checkStr("stall cleared", m4.Status(), "accelerating")
+
+    m5 := @@StepperDriver()
+    m5.Stop()
+    m5.StallDetected()
+    checkStr("idle absorbs stop", m5.Status(), "idle")
+
+    fmt.Println("PASS: stepper_motor")
+}

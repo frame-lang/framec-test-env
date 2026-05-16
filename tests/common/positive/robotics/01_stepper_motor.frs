@@ -1,0 +1,217 @@
+@@[target("rust")]
+
+// Cookbook 96: Stepper Motor Driver — Trapezoidal Motion Profile
+
+@@system StepperDriver {
+    interface:
+        move_to(target_steps: i32)
+        tick()
+        stop()
+        stall_detected()
+        status(): String
+        get_position(): i32
+        get_velocity(): i32
+
+    machine:
+        $Idle {
+            move_to(target_steps: i32) {
+                self.target = target_steps;
+                self.position = 0;
+                self.velocity = 0;
+                self.accel_steps = 0;
+                -> $Accelerating
+            }
+            tick() { }
+            status(): String { @@:(String::from("idle")) }
+            get_position(): i32 { @@:(self.position) }
+            get_velocity(): i32 { @@:(self.velocity) }
+        }
+
+        $Active {
+            get_position(): i32 { @@:(self.position) }
+            get_velocity(): i32 { @@:(self.velocity) }
+        }
+
+        $Motion => $Active {
+            stop() { -> $Decelerating }
+            stall_detected() {
+                self.velocity = 0;
+                -> $Stalled
+            }
+            => $^
+        }
+
+        $Accelerating => $Motion {
+            tick() {
+                self.velocity = self.velocity + self.accel_rate;
+                self.position = self.position + self.velocity;
+                self.accel_steps = self.accel_steps + self.velocity;
+
+                if self.velocity >= self.v_max {
+                    self.velocity = self.v_max;
+                    -> $Cruising
+                }
+
+                let remaining = self.target - self.position;
+                if remaining <= self.accel_steps {
+                    -> $Decelerating
+                }
+            }
+            status(): String { @@:(String::from("accelerating")) }
+            => $^
+        }
+
+        $Cruising => $Motion {
+            tick() {
+                self.position = self.position + self.velocity;
+                let remaining = self.target - self.position;
+                if remaining <= self.accel_steps {
+                    -> $Decelerating
+                }
+            }
+            status(): String { @@:(String::from("cruising")) }
+            => $^
+        }
+
+        $Decelerating => $Motion {
+            tick() {
+                self.velocity = self.velocity - self.accel_rate;
+                if self.velocity <= 0 {
+                    self.velocity = 0;
+                    -> $Idle
+                } else {
+                    self.position = self.position + self.velocity;
+                }
+            }
+            status(): String { @@:(String::from("decelerating")) }
+            => $^
+        }
+
+        $Stalled {
+            move_to(target_steps: i32) {
+                self.target = target_steps;
+                self.position = 0;
+                self.velocity = 0;
+                self.accel_steps = 0;
+                -> $Accelerating
+            }
+            status(): String { @@:(String::from("stalled")) }
+            get_position(): i32 { @@:(self.position) }
+            get_velocity(): i32 { @@:(self.velocity) }
+        }
+
+    domain:
+        target: i32 = 0
+        position: i32 = 0
+        velocity: i32 = 0
+        accel_steps: i32 = 0
+        v_max: i32 = 20
+        accel_rate: i32 = 2
+}
+
+
+fn check_str(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+fn check_int(label: &str, actual: i32, expected: i32) {
+    if actual != expected {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+fn check_bool(label: &str, actual: bool, expected: bool) {
+    if actual != expected {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn main() {
+    let mut m = @@StepperDriver();
+    check_str("start idle", &m.status(), "idle");
+    check_int("start position 0", m.get_position(), 0);
+
+    m.move_to(300);
+    check_str("accelerating", &m.status(), "accelerating");
+
+    // Drive through the full profile, tracking whether we saw cruise + final state
+    let mut saw_cruising = false;
+    let mut final_status = String::new();
+    let mut i = 0;
+    while i < 40 {
+        m.tick();
+        let s = m.status();
+        if s == "cruising" { saw_cruising = true; }
+        if s == "idle" { final_status = s; break; }
+        i = i + 1;
+    }
+    check_bool("long move visited cruising", saw_cruising, true);
+    check_str("long move ended idle", &final_status, "idle");
+    check_int("final velocity 0", m.get_velocity(), 0);
+    check_bool("position advanced", m.get_position() > 200, true);
+
+    // Short move: should skip cruise (decel fires before reaching v_max)
+    let mut m2 = @@StepperDriver();
+    m2.move_to(40);
+    let mut saw_cruising2 = false;
+    let mut final_status2 = String::new();
+    let mut j = 0;
+    while j < 20 {
+        m2.tick();
+        let s = m2.status();
+        if s == "cruising" { saw_cruising2 = true; }
+        if s == "idle" { final_status2 = s; break; }
+        j = j + 1;
+    }
+    check_bool("short move skips cruising", saw_cruising2, false);
+    check_str("short move ended idle", &final_status2, "idle");
+
+    // Stop mid-cruise: HSM $Motion.stop() forwards from $Cruising
+    let mut m3 = @@StepperDriver();
+    m3.move_to(1000);
+    let mut k = 0;
+    while k < 15 {
+        m3.tick();
+        k = k + 1;
+    }
+    check_str("in cruise", &m3.status(), "cruising");
+
+    m3.stop();
+    check_str("stopped to decel", &m3.status(), "decelerating");
+
+    let mut n = 0;
+    while n < 15 {
+        m3.tick();
+        if m3.status() == "idle" { break; }
+        n = n + 1;
+    }
+    check_str("decel completes after stop", &m3.status(), "idle");
+    check_int("stopped velocity 0", m3.get_velocity(), 0);
+
+    // Stall detection
+    let mut m4 = @@StepperDriver();
+    m4.move_to(1000);
+    let mut p = 0;
+    while p < 3 {
+        m4.tick();
+        p = p + 1;
+    }
+    check_str("accel when stalled", &m4.status(), "accelerating");
+    m4.stall_detected();
+    check_str("stalled", &m4.status(), "stalled");
+    check_int("velocity cleared on stall", m4.get_velocity(), 0);
+
+    m4.move_to(50);
+    check_str("stall cleared", &m4.status(), "accelerating");
+
+    // Idle absorbs stop/stall_detected (not under $Motion)
+    let mut m5 = @@StepperDriver();
+    m5.stop();
+    m5.stall_detected();
+    check_str("idle absorbs stop", &m5.status(), "idle");
+
+    println!("PASS: stepper_motor");
+}

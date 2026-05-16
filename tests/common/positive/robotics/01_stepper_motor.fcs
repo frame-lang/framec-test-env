@@ -1,0 +1,201 @@
+@@[target("csharp")]
+
+// Cookbook 96: Stepper Motor Driver — Trapezoidal Motion Profile
+
+
+@@system StepperDriver {
+    interface:
+        move_to(target_steps: int)
+        tick()
+        stop()
+        stall_detected()
+        status(): string
+        get_position(): int
+        get_velocity(): int
+
+    machine:
+        $Idle {
+            move_to(target_steps: int) {
+                this.target = target_steps;
+                this.position = 0;
+                this.velocity = 0;
+                this.accel_steps = 0;
+                -> $Accelerating
+            }
+            tick() { }
+            status(): string { @@:("idle") }
+            get_position(): int { @@:(this.position) }
+            get_velocity(): int { @@:(this.velocity) }
+        }
+
+        $Active {
+            get_position(): int { @@:(this.position) }
+            get_velocity(): int { @@:(this.velocity) }
+        }
+
+        $Motion => $Active {
+            stop() { -> $Decelerating }
+            stall_detected() {
+                this.velocity = 0;
+                -> $Stalled
+            }
+            => $^
+        }
+
+        $Accelerating => $Motion {
+            tick() {
+                this.velocity = this.velocity + this.accel_rate;
+                this.position = this.position + this.velocity;
+                this.accel_steps = this.accel_steps + this.velocity;
+
+                if (this.velocity >= this.v_max) {
+                    this.velocity = this.v_max;
+                    -> $Cruising
+                }
+
+                int remaining = this.target - this.position;
+                if (remaining <= this.accel_steps) {
+                    -> $Decelerating
+                }
+            }
+            status(): string { @@:("accelerating") }
+            => $^
+        }
+
+        $Cruising => $Motion {
+            tick() {
+                this.position = this.position + this.velocity;
+                int remaining = this.target - this.position;
+                if (remaining <= this.accel_steps) {
+                    -> $Decelerating
+                }
+            }
+            status(): string { @@:("cruising") }
+            => $^
+        }
+
+        $Decelerating => $Motion {
+            tick() {
+                this.velocity = this.velocity - this.accel_rate;
+                if (this.velocity <= 0) {
+                    this.velocity = 0;
+                    -> $Idle
+                } else {
+                    this.position = this.position + this.velocity;
+                }
+            }
+            status(): string { @@:("decelerating") }
+            => $^
+        }
+
+        $Stalled {
+            move_to(target_steps: int) {
+                this.target = target_steps;
+                this.position = 0;
+                this.velocity = 0;
+                this.accel_steps = 0;
+                -> $Accelerating
+            }
+            status(): string { @@:("stalled") }
+            get_position(): int { @@:(this.position) }
+            get_velocity(): int { @@:(this.velocity) }
+        }
+
+    domain:
+        target: int = 0
+        position: int = 0
+        velocity: int = 0
+        accel_steps: int = 0
+        v_max: int = 20
+        accel_rate: int = 2
+}
+
+
+class Program {
+    static void check_str(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+    static void check_int(string label, int actual, int expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}");
+            Environment.Exit(1);
+        }
+    }
+    static void check_bool(string label, bool actual, bool expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}");
+            Environment.Exit(1);
+        }
+    }
+
+    public static void Main(string[] args) {
+        var m = @@StepperDriver();
+        check_str("start idle", (string) m.status(), "idle");
+        check_int("start position 0", (int) m.get_position(), 0);
+
+        m.move_to(300);
+        check_str("accelerating", (string) m.status(), "accelerating");
+
+        bool sawCruising = false;
+        string finalStatus = "";
+        for (int i = 0; i < 40; i = i + 1) {
+            m.tick();
+            string s = (string) m.status();
+            if (s == "cruising") sawCruising = true;
+            if (s == "idle") { finalStatus = s; break; }
+        }
+        check_bool("long move visited cruising", sawCruising, true);
+        check_str("long move ended idle", finalStatus, "idle");
+        check_int("final velocity 0", (int) m.get_velocity(), 0);
+        check_bool("position advanced", (int) m.get_position() > 200, true);
+
+        var m2 = @@StepperDriver();
+        m2.move_to(40);
+        bool sawCruising2 = false;
+        string finalStatus2 = "";
+        for (int j = 0; j < 20; j = j + 1) {
+            m2.tick();
+            string s = (string) m2.status();
+            if (s == "cruising") sawCruising2 = true;
+            if (s == "idle") { finalStatus2 = s; break; }
+        }
+        check_bool("short move skips cruising", sawCruising2, false);
+        check_str("short move ended idle", finalStatus2, "idle");
+
+        var m3 = @@StepperDriver();
+        m3.move_to(1000);
+        for (int k = 0; k < 15; k = k + 1) m3.tick();
+        check_str("in cruise", (string) m3.status(), "cruising");
+
+        m3.stop();
+        check_str("stopped to decel", (string) m3.status(), "decelerating");
+
+        for (int n = 0; n < 15; n = n + 1) {
+            m3.tick();
+            if (((string) m3.status()) == "idle") break;
+        }
+        check_str("decel completes after stop", (string) m3.status(), "idle");
+        check_int("stopped velocity 0", (int) m3.get_velocity(), 0);
+
+        var m4 = @@StepperDriver();
+        m4.move_to(1000);
+        for (int p = 0; p < 3; p = p + 1) m4.tick();
+        check_str("accel when stalled", (string) m4.status(), "accelerating");
+        m4.stall_detected();
+        check_str("stalled", (string) m4.status(), "stalled");
+        check_int("velocity cleared on stall", (int) m4.get_velocity(), 0);
+
+        m4.move_to(50);
+        check_str("stall cleared", (string) m4.status(), "accelerating");
+
+        var m5 = @@StepperDriver();
+        m5.stop();
+        m5.stall_detected();
+        check_str("idle absorbs stop", (string) m5.status(), "idle");
+
+        Console.WriteLine("PASS: stepper_motor");
+    }
+}

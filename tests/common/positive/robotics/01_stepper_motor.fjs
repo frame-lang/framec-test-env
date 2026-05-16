@@ -1,0 +1,196 @@
+@@[target("javascript")]
+
+// Cookbook 96: Stepper Motor Driver — Trapezoidal Motion Profile
+
+@@system StepperDriver {
+    interface:
+        move_to(target_steps)
+        tick()
+        stop()
+        stall_detected()
+        status()
+        get_position()
+        get_velocity()
+
+    machine:
+        $Idle {
+            move_to(target_steps) {
+                this.target = target_steps;
+                this.position = 0;
+                this.velocity = 0;
+                this.accel_steps = 0;
+                -> $Accelerating
+            }
+            tick() { }
+            status() { @@:("idle") }
+            get_position() { @@:(this.position) }
+            get_velocity() { @@:(this.velocity) }
+        }
+
+        $Active {
+            get_position() { @@:(this.position) }
+            get_velocity() { @@:(this.velocity) }
+        }
+
+        $Motion => $Active {
+            stop() { -> $Decelerating }
+            stall_detected() {
+                this.velocity = 0;
+                -> $Stalled
+            }
+            => $^
+        }
+
+        $Accelerating => $Motion {
+            tick() {
+                this.velocity = this.velocity + this.accel_rate;
+                this.position = this.position + this.velocity;
+                this.accel_steps = this.accel_steps + this.velocity;
+
+                if (this.velocity >= this.v_max) {
+                    this.velocity = this.v_max;
+                    -> $Cruising
+                }
+
+                const remaining = this.target - this.position;
+                if (remaining <= this.accel_steps) {
+                    -> $Decelerating
+                }
+            }
+            status() { @@:("accelerating") }
+            => $^
+        }
+
+        $Cruising => $Motion {
+            tick() {
+                this.position = this.position + this.velocity;
+                const remaining = this.target - this.position;
+                if (remaining <= this.accel_steps) {
+                    -> $Decelerating
+                }
+            }
+            status() { @@:("cruising") }
+            => $^
+        }
+
+        $Decelerating => $Motion {
+            tick() {
+                this.velocity = this.velocity - this.accel_rate;
+                if (this.velocity <= 0) {
+                    this.velocity = 0;
+                    -> $Idle
+                } else {
+                    this.position = this.position + this.velocity;
+                }
+            }
+            status() { @@:("decelerating") }
+            => $^
+        }
+
+        $Stalled {
+            move_to(target_steps) {
+                this.target = target_steps;
+                this.position = 0;
+                this.velocity = 0;
+                this.accel_steps = 0;
+                -> $Accelerating
+            }
+            status() { @@:("stalled") }
+            get_position() { @@:(this.position) }
+            get_velocity() { @@:(this.velocity) }
+        }
+
+    domain:
+        target = 0
+        position = 0
+        velocity = 0
+        accel_steps = 0
+        v_max = 20
+        accel_rate = 2
+}
+
+
+function checkStr(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+        process.exit(1);
+    }
+}
+function checkInt(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected " + expected + ", got " + actual);
+        process.exit(1);
+    }
+}
+function checkBool(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected " + expected + ", got " + actual);
+        process.exit(1);
+    }
+}
+
+const m = @@StepperDriver();
+checkStr("start idle", m.status(), "idle");
+checkInt("start position 0", m.get_position(), 0);
+
+m.move_to(300);
+checkStr("accelerating", m.status(), "accelerating");
+
+let sawCruising = false;
+let finalStatus = "";
+for (let i = 0; i < 40; i = i + 1) {
+    m.tick();
+    const s = m.status();
+    if (s === "cruising") sawCruising = true;
+    if (s === "idle") { finalStatus = s; break; }
+}
+checkBool("long move visited cruising", sawCruising, true);
+checkStr("long move ended idle", finalStatus, "idle");
+checkInt("final velocity 0", m.get_velocity(), 0);
+checkBool("position advanced", m.get_position() > 200, true);
+
+const m2 = @@StepperDriver();
+m2.move_to(40);
+let sawCruising2 = false;
+let finalStatus2 = "";
+for (let j = 0; j < 20; j = j + 1) {
+    m2.tick();
+    const s = m2.status();
+    if (s === "cruising") sawCruising2 = true;
+    if (s === "idle") { finalStatus2 = s; break; }
+}
+checkBool("short move skips cruising", sawCruising2, false);
+checkStr("short move ended idle", finalStatus2, "idle");
+
+const m3 = @@StepperDriver();
+m3.move_to(1000);
+for (let k = 0; k < 15; k = k + 1) m3.tick();
+checkStr("in cruise", m3.status(), "cruising");
+
+m3.stop();
+checkStr("stopped to decel", m3.status(), "decelerating");
+
+for (let n = 0; n < 15; n = n + 1) {
+    m3.tick();
+    if (m3.status() === "idle") break;
+}
+checkStr("decel completes after stop", m3.status(), "idle");
+checkInt("stopped velocity 0", m3.get_velocity(), 0);
+
+const m4 = @@StepperDriver();
+m4.move_to(1000);
+for (let p = 0; p < 3; p = p + 1) m4.tick();
+checkStr("accel when stalled", m4.status(), "accelerating");
+m4.stall_detected();
+checkStr("stalled", m4.status(), "stalled");
+checkInt("velocity cleared on stall", m4.get_velocity(), 0);
+
+m4.move_to(50);
+checkStr("stall cleared", m4.status(), "accelerating");
+
+const m5 = @@StepperDriver();
+m5.stop();
+m5.stall_detected();
+checkStr("idle absorbs stop", m5.status(), "idle");
+
+console.log("PASS: stepper_motor");

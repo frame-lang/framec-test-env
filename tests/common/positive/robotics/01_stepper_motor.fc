@@ -1,0 +1,207 @@
+@@[target("c")]
+
+// Cookbook 96: Stepper Motor Driver — Trapezoidal Motion Profile
+
+@@system StepperDriver {
+    interface:
+        move_to(target_steps: int)
+        tick()
+        stop()
+        stall_detected()
+        status(): string
+        get_position(): int
+        get_velocity(): int
+
+    machine:
+        $Idle {
+            move_to(target_steps: int) {
+                self->target = target_steps;
+                self->position = 0;
+                self->velocity = 0;
+                self->accel_steps = 0;
+                -> $Accelerating
+            }
+            tick() { }
+            status(): string { @@:("idle") }
+            get_position(): int { @@:(self->position) }
+            get_velocity(): int { @@:(self->velocity) }
+        }
+
+        $Active {
+            get_position(): int { @@:(self->position) }
+            get_velocity(): int { @@:(self->velocity) }
+        }
+
+        $Motion => $Active {
+            stop() { -> $Decelerating }
+            stall_detected() {
+                self->velocity = 0;
+                -> $Stalled
+            }
+            => $^
+        }
+
+        $Accelerating => $Motion {
+            tick() {
+                self->velocity = self->velocity + self->accel_rate;
+                self->position = self->position + self->velocity;
+                self->accel_steps = self->accel_steps + self->velocity;
+
+                if (self->velocity >= self->v_max) {
+                    self->velocity = self->v_max;
+                    -> $Cruising
+                }
+
+                int remaining = self->target - self->position;
+                if (remaining <= self->accel_steps) {
+                    -> $Decelerating
+                }
+            }
+            status(): string { @@:("accelerating") }
+            => $^
+        }
+
+        $Cruising => $Motion {
+            tick() {
+                self->position = self->position + self->velocity;
+                int remaining = self->target - self->position;
+                if (remaining <= self->accel_steps) {
+                    -> $Decelerating
+                }
+            }
+            status(): string { @@:("cruising") }
+            => $^
+        }
+
+        $Decelerating => $Motion {
+            tick() {
+                self->velocity = self->velocity - self->accel_rate;
+                if (self->velocity <= 0) {
+                    self->velocity = 0;
+                    -> $Idle
+                } else {
+                    self->position = self->position + self->velocity;
+                }
+            }
+            status(): string { @@:("decelerating") }
+            => $^
+        }
+
+        $Stalled {
+            move_to(target_steps: int) {
+                self->target = target_steps;
+                self->position = 0;
+                self->velocity = 0;
+                self->accel_steps = 0;
+                -> $Accelerating
+            }
+            status(): string { @@:("stalled") }
+            get_position(): int { @@:(self->position) }
+            get_velocity(): int { @@:(self->velocity) }
+        }
+
+    domain:
+        target: int = 0
+        position: int = 0
+        velocity: int = 0
+        accel_steps: int = 0
+        v_max: int = 20
+        accel_rate: int = 2
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_int(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_bool(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    StepperDriver* m = @@StepperDriver();
+    check_str("start idle", StepperDriver_status(m), "idle");
+    check_int("start position 0", StepperDriver_get_position(m), 0);
+
+    StepperDriver_move_to(m, 300);
+    check_str("accelerating", StepperDriver_status(m), "accelerating");
+
+    int saw_cruising = 0;
+    const char* final_status = "";
+    for (int i = 0; i < 40; i = i + 1) {
+        StepperDriver_tick(m);
+        const char* s = StepperDriver_status(m);
+        if (strcmp(s, "cruising") == 0) saw_cruising = 1;
+        if (strcmp(s, "idle") == 0) { final_status = s; break; }
+    }
+    check_bool("long move visited cruising", saw_cruising, 1);
+    check_str("long move ended idle", final_status, "idle");
+    check_int("final velocity 0", StepperDriver_get_velocity(m), 0);
+    check_bool("position advanced", StepperDriver_get_position(m) > 200, 1);
+
+    StepperDriver* m2 = @@StepperDriver();
+    StepperDriver_move_to(m2, 40);
+    int saw_cruising2 = 0;
+    const char* final_status2 = "";
+    for (int j = 0; j < 20; j = j + 1) {
+        StepperDriver_tick(m2);
+        const char* s = StepperDriver_status(m2);
+        if (strcmp(s, "cruising") == 0) saw_cruising2 = 1;
+        if (strcmp(s, "idle") == 0) { final_status2 = s; break; }
+    }
+    check_bool("short move skips cruising", saw_cruising2, 0);
+    check_str("short move ended idle", final_status2, "idle");
+
+    StepperDriver* m3 = @@StepperDriver();
+    StepperDriver_move_to(m3, 1000);
+    for (int k = 0; k < 15; k = k + 1) StepperDriver_tick(m3);
+    check_str("in cruise", StepperDriver_status(m3), "cruising");
+
+    StepperDriver_stop(m3);
+    check_str("stopped to decel", StepperDriver_status(m3), "decelerating");
+
+    for (int n = 0; n < 15; n = n + 1) {
+        StepperDriver_tick(m3);
+        if (strcmp(StepperDriver_status(m3), "idle") == 0) break;
+    }
+    check_str("decel completes after stop", StepperDriver_status(m3), "idle");
+    check_int("stopped velocity 0", StepperDriver_get_velocity(m3), 0);
+
+    StepperDriver* m4 = @@StepperDriver();
+    StepperDriver_move_to(m4, 1000);
+    for (int p = 0; p < 3; p = p + 1) StepperDriver_tick(m4);
+    check_str("accel when stalled", StepperDriver_status(m4), "accelerating");
+    StepperDriver_stall_detected(m4);
+    check_str("stalled", StepperDriver_status(m4), "stalled");
+    check_int("velocity cleared on stall", StepperDriver_get_velocity(m4), 0);
+
+    StepperDriver_move_to(m4, 50);
+    check_str("stall cleared", StepperDriver_status(m4), "accelerating");
+
+    StepperDriver* m5 = @@StepperDriver();
+    StepperDriver_stop(m5);
+    StepperDriver_stall_detected(m5);
+    check_str("idle absorbs stop", StepperDriver_status(m5), "idle");
+
+    printf("PASS: stepper_motor\n");
+    StepperDriver_destroy(m);
+    StepperDriver_destroy(m2);
+    StepperDriver_destroy(m3);
+    StepperDriver_destroy(m4);
+    StepperDriver_destroy(m5);
+    return 0;
+}

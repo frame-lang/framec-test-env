@@ -1,0 +1,200 @@
+@@[target("dart")]
+
+import 'dart:io';
+
+// Cookbook 96: Stepper Motor Driver — Trapezoidal Motion Profile
+
+@@system StepperDriver {
+    interface:
+        move_to(target_steps: int)
+        tick()
+        stop()
+        stall_detected()
+        status(): String
+        get_position(): int
+        get_velocity(): int
+
+    machine:
+        $Idle {
+            move_to(target_steps: int) {
+                this.target = target_steps;
+                this.position = 0;
+                this.velocity = 0;
+                this.accel_steps = 0;
+                -> $Accelerating
+            }
+            tick() { }
+            status(): String { @@:("idle") }
+            get_position(): int { @@:(this.position) }
+            get_velocity(): int { @@:(this.velocity) }
+        }
+
+        $Active {
+            get_position(): int { @@:(this.position) }
+            get_velocity(): int { @@:(this.velocity) }
+        }
+
+        $Motion => $Active {
+            stop() { -> $Decelerating }
+            stall_detected() {
+                this.velocity = 0;
+                -> $Stalled
+            }
+            => $^
+        }
+
+        $Accelerating => $Motion {
+            tick() {
+                this.velocity = this.velocity + this.accel_rate;
+                this.position = this.position + this.velocity;
+                this.accel_steps = this.accel_steps + this.velocity;
+
+                if (this.velocity >= this.v_max) {
+                    this.velocity = this.v_max;
+                    -> $Cruising
+                }
+
+                int remaining = this.target - this.position;
+                if (remaining <= this.accel_steps) {
+                    -> $Decelerating
+                }
+            }
+            status(): String { @@:("accelerating") }
+            => $^
+        }
+
+        $Cruising => $Motion {
+            tick() {
+                this.position = this.position + this.velocity;
+                int remaining = this.target - this.position;
+                if (remaining <= this.accel_steps) {
+                    -> $Decelerating
+                }
+            }
+            status(): String { @@:("cruising") }
+            => $^
+        }
+
+        $Decelerating => $Motion {
+            tick() {
+                this.velocity = this.velocity - this.accel_rate;
+                if (this.velocity <= 0) {
+                    this.velocity = 0;
+                    -> $Idle
+                } else {
+                    this.position = this.position + this.velocity;
+                }
+            }
+            status(): String { @@:("decelerating") }
+            => $^
+        }
+
+        $Stalled {
+            move_to(target_steps: int) {
+                this.target = target_steps;
+                this.position = 0;
+                this.velocity = 0;
+                this.accel_steps = 0;
+                -> $Accelerating
+            }
+            status(): String { @@:("stalled") }
+            get_position(): int { @@:(this.position) }
+            get_velocity(): int { @@:(this.velocity) }
+        }
+
+    domain:
+        target: int = 0
+        position: int = 0
+        velocity: int = 0
+        accel_steps: int = 0
+        v_max: int = 20
+        accel_rate: int = 2
+}
+
+
+void checkStr(String label, String actual, String expected) {
+    if (actual != expected) {
+        print("FAIL: $label expected '$expected', got '$actual'");
+        exit(1);
+    }
+}
+void checkInt(String label, int actual, int expected) {
+    if (actual != expected) {
+        print("FAIL: $label expected $expected, got $actual");
+        exit(1);
+    }
+}
+void checkBool(String label, bool actual, bool expected) {
+    if (actual != expected) {
+        print("FAIL: $label expected $expected, got $actual");
+        exit(1);
+    }
+}
+
+void main() {
+    var m = @@StepperDriver();
+    checkStr("start idle", m.status(), "idle");
+    checkInt("start position 0", m.get_position(), 0);
+
+    m.move_to(300);
+    checkStr("accelerating", m.status(), "accelerating");
+
+    bool sawCruising = false;
+    String finalStatus = "";
+    for (int i = 0; i < 40; i = i + 1) {
+        m.tick();
+        String s = m.status();
+        if (s == "cruising") sawCruising = true;
+        if (s == "idle") { finalStatus = s; break; }
+    }
+    checkBool("long move visited cruising", sawCruising, true);
+    checkStr("long move ended idle", finalStatus, "idle");
+    checkInt("final velocity 0", m.get_velocity(), 0);
+    checkBool("position advanced", m.get_position() > 200, true);
+
+    var m2 = @@StepperDriver();
+    m2.move_to(40);
+    bool sawCruising2 = false;
+    String finalStatus2 = "";
+    for (int j = 0; j < 20; j = j + 1) {
+        m2.tick();
+        String s = m2.status();
+        if (s == "cruising") sawCruising2 = true;
+        if (s == "idle") { finalStatus2 = s; break; }
+    }
+    checkBool("short move skips cruising", sawCruising2, false);
+    checkStr("short move ended idle", finalStatus2, "idle");
+
+    var m3 = @@StepperDriver();
+    m3.move_to(1000);
+    for (int k = 0; k < 15; k = k + 1) m3.tick();
+    checkStr("in cruise", m3.status(), "cruising");
+
+    m3.stop();
+    checkStr("stopped to decel", m3.status(), "decelerating");
+
+    for (int n = 0; n < 15; n = n + 1) {
+        m3.tick();
+        if (m3.status() == "idle") break;
+    }
+    checkStr("decel completes after stop", m3.status(), "idle");
+    checkInt("stopped velocity 0", m3.get_velocity(), 0);
+
+    var m4 = @@StepperDriver();
+    m4.move_to(1000);
+    for (int p = 0; p < 3; p = p + 1) m4.tick();
+    checkStr("accel when stalled", m4.status(), "accelerating");
+    m4.stall_detected();
+    checkStr("stalled", m4.status(), "stalled");
+    checkInt("velocity cleared on stall", m4.get_velocity(), 0);
+
+    m4.move_to(50);
+    checkStr("stall cleared", m4.status(), "accelerating");
+
+    var m5 = @@StepperDriver();
+    m5.stop();
+    m5.stall_detected();
+    checkStr("idle absorbs stop", m5.status(), "idle");
+
+    print("PASS: stepper_motor");
+}
