@@ -1,0 +1,183 @@
+@@[target("go")]
+
+package main
+
+import "fmt"
+import "os"
+
+// Cookbook 105: Tool Changer — Interlocked Coupling Sequence
+
+@@system ToolChanger {
+    interface:
+        RequestCouple(tool_id: string)
+        RequestUncouple()
+        LockConfirmed()
+        LockLost()
+        ToolEnergized()
+        ToolDeenergized()
+        Abort()
+        Status(): string
+        IsEnergized(): int
+        AttachedTool(): string
+
+    machine:
+        $NoTool {
+            RequestCouple(tool_id: string) {
+                s.tool_id = tool_id
+                -> $Approaching
+            }
+            RequestUncouple() { }
+            Status(): string { @@:("no_tool") }
+            IsEnergized(): int { @@:(s.energized) }
+            AttachedTool(): string { @@:(s.tool_id) }
+        }
+
+        $Transitioning {
+            IsEnergized(): int { @@:(s.energized) }
+            AttachedTool(): string { @@:(s.tool_id) }
+        }
+
+        $Coupling => $Transitioning {
+            LockLost() {
+                s.tool_id = ""
+                -> $NoTool
+            }
+            => $^
+        }
+
+        $Approaching => $Coupling {
+            LockConfirmed() { -> $Coupled }
+            Abort() {
+                s.tool_id = ""
+                -> $NoTool
+            }
+            Status(): string { @@:("approaching") }
+            => $^
+        }
+
+        $Coupled {
+            ToolEnergized() {
+                s.energized = 1
+                -> $Working
+            }
+            RequestUncouple() { -> $Uncoupling }
+            LockLost() { -> $Fault }
+            Status(): string { @@:("coupled") }
+            IsEnergized(): int { @@:(s.energized) }
+            AttachedTool(): string { @@:(s.tool_id) }
+        }
+
+        $Working {
+            ToolDeenergized() {
+                s.energized = 0
+                -> $Coupled
+            }
+            LockLost() {
+                s.energized = 0
+                -> $Fault
+            }
+            Status(): string { @@:("working") }
+            IsEnergized(): int { @@:(s.energized) }
+            AttachedTool(): string { @@:(s.tool_id) }
+        }
+
+        $Uncoupling => $Transitioning {
+            LockLost() {
+                s.tool_id = ""
+                -> $NoTool
+            }
+            Status(): string { @@:("uncoupling") }
+            => $^
+        }
+
+        $Fault {
+            Abort() {
+                s.tool_id = ""
+                s.energized = 0
+                -> $NoTool
+            }
+            Status(): string { @@:("fault") }
+            IsEnergized(): int { @@:(s.energized) }
+            AttachedTool(): string { @@:(s.tool_id) }
+        }
+
+    domain:
+        tool_id: string = ""
+        energized: int = 0
+}
+
+func checkStr(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+func checkInt(label string, actual, expected int) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected %d, got %d\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    tc := @@ToolChanger()
+    checkStr("no tool", tc.Status(), "no_tool")
+    checkStr("no tool stored", tc.AttachedTool(), "")
+    checkInt("not energized", tc.IsEnergized(), 0)
+
+    tc.RequestCouple("drill_8mm")
+    checkStr("approaching", tc.Status(), "approaching")
+    checkStr("tool captured", tc.AttachedTool(), "drill_8mm")
+
+    tc.LockConfirmed()
+    checkStr("coupled", tc.Status(), "coupled")
+
+    tc.ToolEnergized()
+    checkStr("working", tc.Status(), "working")
+    checkInt("energized", tc.IsEnergized(), 1)
+
+    tc.RequestUncouple()
+    checkStr("working absorbs uncouple", tc.Status(), "working")
+    checkStr("still attached", tc.AttachedTool(), "drill_8mm")
+    checkInt("still energized", tc.IsEnergized(), 1)
+
+    tc.ToolDeenergized()
+    checkStr("coupled de-energized", tc.Status(), "coupled")
+    checkInt("not energized", tc.IsEnergized(), 0)
+
+    tc.RequestUncouple()
+    checkStr("uncoupling", tc.Status(), "uncoupling")
+
+    tc.LockLost()
+    checkStr("no tool again", tc.Status(), "no_tool")
+    checkStr("tool cleared", tc.AttachedTool(), "")
+
+    tc2 := @@ToolChanger()
+    tc2.RequestCouple("router")
+    tc2.LockConfirmed()
+    tc2.LockLost()
+    checkStr("lock_lost in coupled -> fault", tc2.Status(), "fault")
+
+    tc3 := @@ToolChanger()
+    tc3.RequestCouple("saw")
+    tc3.LockConfirmed()
+    tc3.ToolEnergized()
+    tc3.LockLost()
+    checkStr("lock_lost in working -> fault", tc3.Status(), "fault")
+    checkInt("fault de-energizes", tc3.IsEnergized(), 0)
+
+    tc3.Abort()
+    checkStr("abort clears fault", tc3.Status(), "no_tool")
+
+    tc4 := @@ToolChanger()
+    tc4.RequestCouple("probe")
+    tc4.Abort()
+    checkStr("abort during approach", tc4.Status(), "no_tool")
+
+    tc5 := @@ToolChanger()
+    tc5.RequestCouple("clamp")
+    tc5.LockLost()
+    checkStr("lock_lost in approaching -> no_tool", tc5.Status(), "no_tool")
+
+    fmt.Println("PASS: tool_changer")
+}

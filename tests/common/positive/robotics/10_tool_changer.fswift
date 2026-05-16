@@ -1,0 +1,179 @@
+@@[target("swift")]
+
+import Foundation
+
+// Cookbook 105: Tool Changer — Interlocked Coupling Sequence
+
+@@system ToolChanger {
+    interface:
+        request_couple(tool_id: String)
+        request_uncouple()
+        lock_confirmed()
+        lock_lost()
+        tool_energized()
+        tool_deenergized()
+        abort()
+        status(): String
+        is_energized(): Int
+        attached_tool(): String
+
+    machine:
+        $NoTool {
+            request_couple(tool_id: String) {
+                self.tool_id = tool_id
+                -> $Approaching
+            }
+            request_uncouple() { }
+            status(): String { @@:("no_tool") }
+            is_energized(): Int { @@:(self.energized) }
+            attached_tool(): String { @@:(self.tool_id) }
+        }
+
+        $Transitioning {
+            is_energized(): Int { @@:(self.energized) }
+            attached_tool(): String { @@:(self.tool_id) }
+        }
+
+        $Coupling => $Transitioning {
+            lock_lost() {
+                self.tool_id = ""
+                -> $NoTool
+            }
+            => $^
+        }
+
+        $Approaching => $Coupling {
+            lock_confirmed() { -> $Coupled }
+            abort() {
+                self.tool_id = ""
+                -> $NoTool
+            }
+            status(): String { @@:("approaching") }
+            => $^
+        }
+
+        $Coupled {
+            tool_energized() {
+                self.energized = 1
+                -> $Working
+            }
+            request_uncouple() { -> $Uncoupling }
+            lock_lost() { -> $Fault }
+            status(): String { @@:("coupled") }
+            is_energized(): Int { @@:(self.energized) }
+            attached_tool(): String { @@:(self.tool_id) }
+        }
+
+        $Working {
+            tool_deenergized() {
+                self.energized = 0
+                -> $Coupled
+            }
+            lock_lost() {
+                self.energized = 0
+                -> $Fault
+            }
+            status(): String { @@:("working") }
+            is_energized(): Int { @@:(self.energized) }
+            attached_tool(): String { @@:(self.tool_id) }
+        }
+
+        $Uncoupling => $Transitioning {
+            lock_lost() {
+                self.tool_id = ""
+                -> $NoTool
+            }
+            status(): String { @@:("uncoupling") }
+            => $^
+        }
+
+        $Fault {
+            abort() {
+                self.tool_id = ""
+                self.energized = 0
+                -> $NoTool
+            }
+            status(): String { @@:("fault") }
+            is_energized(): Int { @@:(self.energized) }
+            attached_tool(): String { @@:(self.tool_id) }
+        }
+
+    domain:
+        tool_id: String = ""
+        energized: Int = 0
+}
+
+
+func checkStr(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+func checkInt(_ label: String, _ actual: Int, _ expected: Int) {
+    if actual != expected {
+        print("FAIL: \(label) expected \(expected), got \(actual)")
+        exit(1)
+    }
+}
+
+let tc = @@ToolChanger()
+checkStr("no tool", tc.status(), "no_tool")
+checkStr("no tool stored", tc.attached_tool(), "")
+checkInt("not energized", tc.is_energized(), 0)
+
+tc.request_couple("drill_8mm")
+checkStr("approaching", tc.status(), "approaching")
+checkStr("tool captured", tc.attached_tool(), "drill_8mm")
+
+tc.lock_confirmed()
+checkStr("coupled", tc.status(), "coupled")
+
+tc.tool_energized()
+checkStr("working", tc.status(), "working")
+checkInt("energized", tc.is_energized(), 1)
+
+tc.request_uncouple()
+checkStr("working absorbs uncouple", tc.status(), "working")
+checkStr("still attached", tc.attached_tool(), "drill_8mm")
+checkInt("still energized", tc.is_energized(), 1)
+
+tc.tool_deenergized()
+checkStr("coupled de-energized", tc.status(), "coupled")
+checkInt("not energized", tc.is_energized(), 0)
+
+tc.request_uncouple()
+checkStr("uncoupling", tc.status(), "uncoupling")
+
+tc.lock_lost()
+checkStr("no tool again", tc.status(), "no_tool")
+checkStr("tool cleared", tc.attached_tool(), "")
+
+let tc2 = @@ToolChanger()
+tc2.request_couple("router")
+tc2.lock_confirmed()
+tc2.lock_lost()
+checkStr("lock_lost in coupled -> fault", tc2.status(), "fault")
+
+let tc3 = @@ToolChanger()
+tc3.request_couple("saw")
+tc3.lock_confirmed()
+tc3.tool_energized()
+tc3.lock_lost()
+checkStr("lock_lost in working -> fault", tc3.status(), "fault")
+checkInt("fault de-energizes", tc3.is_energized(), 0)
+
+tc3.abort()
+checkStr("abort clears fault", tc3.status(), "no_tool")
+
+let tc4 = @@ToolChanger()
+tc4.request_couple("probe")
+tc4.abort()
+checkStr("abort during approach", tc4.status(), "no_tool")
+
+let tc5 = @@ToolChanger()
+tc5.request_couple("clamp")
+tc5.lock_lost()
+checkStr("lock_lost in approaching -> no_tool", tc5.status(), "no_tool")
+
+print("PASS: tool_changer")

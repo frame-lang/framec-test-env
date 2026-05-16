@@ -1,0 +1,188 @@
+@@[target("c")]
+
+// Cookbook 105: Tool Changer — Interlocked Coupling Sequence
+
+@@system ToolChanger {
+    interface:
+        request_couple(tool_id: string)
+        request_uncouple()
+        lock_confirmed()
+        lock_lost()
+        tool_energized()
+        tool_deenergized()
+        abort()
+        status(): string
+        is_energized(): int
+        attached_tool(): string
+
+    machine:
+        $NoTool {
+            request_couple(tool_id: string) {
+                self->tool_id = tool_id;
+                -> $Approaching
+            }
+            request_uncouple() { }
+            status(): string { @@:("no_tool") }
+            is_energized(): int { @@:(self->energized) }
+            attached_tool(): string { @@:(self->tool_id) }
+        }
+
+        $Transitioning {
+            is_energized(): int { @@:(self->energized) }
+            attached_tool(): string { @@:(self->tool_id) }
+        }
+
+        $Coupling => $Transitioning {
+            lock_lost() {
+                self->tool_id = "";
+                -> $NoTool
+            }
+            => $^
+        }
+
+        $Approaching => $Coupling {
+            lock_confirmed() { -> $Coupled }
+            abort() {
+                self->tool_id = "";
+                -> $NoTool
+            }
+            status(): string { @@:("approaching") }
+            => $^
+        }
+
+        $Coupled {
+            tool_energized() {
+                self->energized = 1;
+                -> $Working
+            }
+            request_uncouple() { -> $Uncoupling }
+            lock_lost() { -> $Fault }
+            status(): string { @@:("coupled") }
+            is_energized(): int { @@:(self->energized) }
+            attached_tool(): string { @@:(self->tool_id) }
+        }
+
+        $Working {
+            tool_deenergized() {
+                self->energized = 0;
+                -> $Coupled
+            }
+            lock_lost() {
+                self->energized = 0;
+                -> $Fault
+            }
+            status(): string { @@:("working") }
+            is_energized(): int { @@:(self->energized) }
+            attached_tool(): string { @@:(self->tool_id) }
+        }
+
+        $Uncoupling => $Transitioning {
+            lock_lost() {
+                self->tool_id = "";
+                -> $NoTool
+            }
+            status(): string { @@:("uncoupling") }
+            => $^
+        }
+
+        $Fault {
+            abort() {
+                self->tool_id = "";
+                self->energized = 0;
+                -> $NoTool
+            }
+            status(): string { @@:("fault") }
+            is_energized(): int { @@:(self->energized) }
+            attached_tool(): string { @@:(self->tool_id) }
+        }
+
+    domain:
+        tool_id: string = ""
+        energized: int = 0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_int(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    ToolChanger* tc = @@ToolChanger();
+    check_str("no tool", ToolChanger_status(tc), "no_tool");
+    check_str("no tool stored", ToolChanger_attached_tool(tc), "");
+    check_int("not energized", ToolChanger_is_energized(tc), 0);
+
+    ToolChanger_request_couple(tc, "drill_8mm");
+    check_str("approaching", ToolChanger_status(tc), "approaching");
+    check_str("tool captured", ToolChanger_attached_tool(tc), "drill_8mm");
+
+    ToolChanger_lock_confirmed(tc);
+    check_str("coupled", ToolChanger_status(tc), "coupled");
+
+    ToolChanger_tool_energized(tc);
+    check_str("working", ToolChanger_status(tc), "working");
+    check_int("energized", ToolChanger_is_energized(tc), 1);
+
+    ToolChanger_request_uncouple(tc);
+    check_str("working absorbs uncouple", ToolChanger_status(tc), "working");
+    check_str("still attached", ToolChanger_attached_tool(tc), "drill_8mm");
+    check_int("still energized", ToolChanger_is_energized(tc), 1);
+
+    ToolChanger_tool_deenergized(tc);
+    check_str("coupled de-energized", ToolChanger_status(tc), "coupled");
+    check_int("not energized", ToolChanger_is_energized(tc), 0);
+
+    ToolChanger_request_uncouple(tc);
+    check_str("uncoupling", ToolChanger_status(tc), "uncoupling");
+
+    ToolChanger_lock_lost(tc);
+    check_str("no tool again", ToolChanger_status(tc), "no_tool");
+    check_str("tool cleared", ToolChanger_attached_tool(tc), "");
+
+    ToolChanger* tc2 = @@ToolChanger();
+    ToolChanger_request_couple(tc2, "router");
+    ToolChanger_lock_confirmed(tc2);
+    ToolChanger_lock_lost(tc2);
+    check_str("lock_lost in coupled -> fault", ToolChanger_status(tc2), "fault");
+
+    ToolChanger* tc3 = @@ToolChanger();
+    ToolChanger_request_couple(tc3, "saw");
+    ToolChanger_lock_confirmed(tc3);
+    ToolChanger_tool_energized(tc3);
+    ToolChanger_lock_lost(tc3);
+    check_str("lock_lost in working -> fault", ToolChanger_status(tc3), "fault");
+    check_int("fault de-energizes", ToolChanger_is_energized(tc3), 0);
+
+    ToolChanger_abort(tc3);
+    check_str("abort clears fault", ToolChanger_status(tc3), "no_tool");
+
+    ToolChanger* tc4 = @@ToolChanger();
+    ToolChanger_request_couple(tc4, "probe");
+    ToolChanger_abort(tc4);
+    check_str("abort during approach", ToolChanger_status(tc4), "no_tool");
+
+    ToolChanger* tc5 = @@ToolChanger();
+    ToolChanger_request_couple(tc5, "clamp");
+    ToolChanger_lock_lost(tc5);
+    check_str("lock_lost in approaching -> no_tool", ToolChanger_status(tc5), "no_tool");
+
+    printf("PASS: tool_changer\n");
+    ToolChanger_destroy(tc);
+    ToolChanger_destroy(tc2);
+    ToolChanger_destroy(tc3);
+    ToolChanger_destroy(tc4);
+    ToolChanger_destroy(tc5);
+    return 0;
+}

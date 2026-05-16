@@ -1,0 +1,102 @@
+@@[target("erlang")]
+
+%% Cookbook 105: Tool Changer — Interlocked Coupling Sequence
+
+@@system ToolChanger {
+    interface:
+        request_couple(tool_id: string)
+        request_uncouple()
+        lock_confirmed()
+        lock_lost()
+        tool_energized()
+        tool_deenergized()
+        abort()
+        status(): string
+        is_energized(): int
+        attached_tool(): string
+
+    machine:
+        $NoTool {
+            request_couple(tool_id: string) {
+                self.tool_id = Tool_id,
+                -> $Approaching
+            }
+            request_uncouple() { ok }
+            status(): string { @@:("no_tool") }
+            is_energized(): int { @@:(self.energized) }
+            attached_tool(): string { @@:(self.tool_id) }
+        }
+
+        $Transitioning {
+            is_energized(): int { @@:(self.energized) }
+            attached_tool(): string { @@:(self.tool_id) }
+        }
+
+        $Coupling => $Transitioning {
+            lock_lost() {
+                self.tool_id = "",
+                -> $NoTool
+            }
+            => $^
+        }
+
+        $Approaching => $Coupling {
+            lock_confirmed() { -> $Coupled }
+            abort() {
+                self.tool_id = "",
+                -> $NoTool
+            }
+            status(): string { @@:("approaching") }
+            => $^
+        }
+
+        $Coupled {
+            tool_energized() {
+                self.energized = 1,
+                -> $Working
+            }
+            request_uncouple() { -> $Uncoupling }
+            lock_lost() { -> $Fault }
+            status(): string { @@:("coupled") }
+            is_energized(): int { @@:(self.energized) }
+            attached_tool(): string { @@:(self.tool_id) }
+        }
+
+        $Working {
+            tool_deenergized() {
+                self.energized = 0,
+                -> $Coupled
+            }
+            lock_lost() {
+                self.energized = 0,
+                -> $Fault
+            }
+            status(): string { @@:("working") }
+            is_energized(): int { @@:(self.energized) }
+            attached_tool(): string { @@:(self.tool_id) }
+        }
+
+        $Uncoupling => $Transitioning {
+            lock_lost() {
+                self.tool_id = "",
+                -> $NoTool
+            }
+            status(): string { @@:("uncoupling") }
+            => $^
+        }
+
+        $Fault {
+            abort() {
+                self.tool_id = "",
+                self.energized = 0,
+                -> $NoTool
+            }
+            status(): string { @@:("fault") }
+            is_energized(): int { @@:(self.energized) }
+            attached_tool(): string { @@:(self.tool_id) }
+        }
+
+    domain:
+        tool_id: string = ""
+        energized: int = 0
+}

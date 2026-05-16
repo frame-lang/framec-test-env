@@ -1,0 +1,179 @@
+@@[target("rust")]
+
+// Cookbook 105: Tool Changer — Interlocked Coupling Sequence
+
+@@system ToolChanger {
+    interface:
+        request_couple(tool_id: String)
+        request_uncouple()
+        lock_confirmed()
+        lock_lost()
+        tool_energized()
+        tool_deenergized()
+        abort()
+        status(): String
+        is_energized(): i32
+        attached_tool(): String
+
+    machine:
+        $NoTool {
+            request_couple(tool_id: String) {
+                self.tool_id = tool_id;
+                -> $Approaching
+            }
+            request_uncouple() { }
+            status(): String { @@:(String::from("no_tool")) }
+            is_energized(): i32 { @@:(self.energized) }
+            attached_tool(): String { @@:(self.tool_id.clone()) }
+        }
+
+        $Transitioning {
+            is_energized(): i32 { @@:(self.energized) }
+            attached_tool(): String { @@:(self.tool_id.clone()) }
+        }
+
+        $Coupling => $Transitioning {
+            lock_lost() {
+                self.tool_id = String::new();
+                -> $NoTool
+            }
+            => $^
+        }
+
+        $Approaching => $Coupling {
+            lock_confirmed() { -> $Coupled }
+            abort() {
+                self.tool_id = String::new();
+                -> $NoTool
+            }
+            status(): String { @@:(String::from("approaching")) }
+            => $^
+        }
+
+        $Coupled {
+            tool_energized() {
+                self.energized = 1;
+                -> $Working
+            }
+            request_uncouple() { -> $Uncoupling }
+            lock_lost() { -> $Fault }
+            status(): String { @@:(String::from("coupled")) }
+            is_energized(): i32 { @@:(self.energized) }
+            attached_tool(): String { @@:(self.tool_id.clone()) }
+        }
+
+        $Working {
+            tool_deenergized() {
+                self.energized = 0;
+                -> $Coupled
+            }
+            lock_lost() {
+                self.energized = 0;
+                -> $Fault
+            }
+            status(): String { @@:(String::from("working")) }
+            is_energized(): i32 { @@:(self.energized) }
+            attached_tool(): String { @@:(self.tool_id.clone()) }
+        }
+
+        $Uncoupling => $Transitioning {
+            lock_lost() {
+                self.tool_id = String::new();
+                -> $NoTool
+            }
+            status(): String { @@:(String::from("uncoupling")) }
+            => $^
+        }
+
+        $Fault {
+            abort() {
+                self.tool_id = String::new();
+                self.energized = 0;
+                -> $NoTool
+            }
+            status(): String { @@:(String::from("fault")) }
+            is_energized(): i32 { @@:(self.energized) }
+            attached_tool(): String { @@:(self.tool_id.clone()) }
+        }
+
+    domain:
+        tool_id: String = String::new()
+        energized: i32 = 0
+}
+
+
+fn check_str(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+fn check_int(label: &str, actual: i32, expected: i32) {
+    if actual != expected {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn main() {
+    let mut tc = @@ToolChanger();
+    check_str("no tool", &tc.status(), "no_tool");
+    check_str("no tool stored", &tc.attached_tool(), "");
+    check_int("not energized", tc.is_energized(), 0);
+
+    tc.request_couple(String::from("drill_8mm"));
+    check_str("approaching", &tc.status(), "approaching");
+    check_str("tool captured", &tc.attached_tool(), "drill_8mm");
+
+    tc.lock_confirmed();
+    check_str("coupled", &tc.status(), "coupled");
+
+    tc.tool_energized();
+    check_str("working", &tc.status(), "working");
+    check_int("energized", tc.is_energized(), 1);
+
+    tc.request_uncouple();
+    check_str("working absorbs uncouple", &tc.status(), "working");
+    check_str("still attached", &tc.attached_tool(), "drill_8mm");
+    check_int("still energized", tc.is_energized(), 1);
+
+    tc.tool_deenergized();
+    check_str("coupled de-energized", &tc.status(), "coupled");
+    check_int("not energized", tc.is_energized(), 0);
+
+    tc.request_uncouple();
+    check_str("uncoupling", &tc.status(), "uncoupling");
+
+    tc.lock_lost();
+    check_str("no tool again", &tc.status(), "no_tool");
+    check_str("tool cleared", &tc.attached_tool(), "");
+
+    let mut tc2 = @@ToolChanger();
+    tc2.request_couple(String::from("router"));
+    tc2.lock_confirmed();
+    tc2.lock_lost();
+    check_str("lock_lost in coupled -> fault", &tc2.status(), "fault");
+
+    let mut tc3 = @@ToolChanger();
+    tc3.request_couple(String::from("saw"));
+    tc3.lock_confirmed();
+    tc3.tool_energized();
+    tc3.lock_lost();
+    check_str("lock_lost in working -> fault", &tc3.status(), "fault");
+    check_int("fault de-energizes", tc3.is_energized(), 0);
+
+    tc3.abort();
+    check_str("abort clears fault", &tc3.status(), "no_tool");
+
+    let mut tc4 = @@ToolChanger();
+    tc4.request_couple(String::from("probe"));
+    tc4.abort();
+    check_str("abort during approach", &tc4.status(), "no_tool");
+
+    let mut tc5 = @@ToolChanger();
+    tc5.request_couple(String::from("clamp"));
+    tc5.lock_lost();
+    check_str("lock_lost in approaching -> no_tool", &tc5.status(), "no_tool");
+
+    println!("PASS: tool_changer");
+}

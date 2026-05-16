@@ -1,0 +1,179 @@
+@@[target("kotlin")]
+
+// Cookbook 105: Tool Changer — Interlocked Coupling Sequence
+
+@@system ToolChanger {
+    interface:
+        request_couple(tool_id: String)
+        request_uncouple()
+        lock_confirmed()
+        lock_lost()
+        tool_energized()
+        tool_deenergized()
+        abort()
+        status(): String
+        is_energized(): Int
+        attached_tool(): String
+
+    machine:
+        $NoTool {
+            request_couple(tool_id: String) {
+                this.tool_id = tool_id
+                -> $Approaching
+            }
+            request_uncouple() { }
+            status(): String { @@:("no_tool") }
+            is_energized(): Int { @@:(this.energized) }
+            attached_tool(): String { @@:(this.tool_id) }
+        }
+
+        $Transitioning {
+            is_energized(): Int { @@:(this.energized) }
+            attached_tool(): String { @@:(this.tool_id) }
+        }
+
+        $Coupling => $Transitioning {
+            lock_lost() {
+                this.tool_id = ""
+                -> $NoTool
+            }
+            => $^
+        }
+
+        $Approaching => $Coupling {
+            lock_confirmed() { -> $Coupled }
+            abort() {
+                this.tool_id = ""
+                -> $NoTool
+            }
+            status(): String { @@:("approaching") }
+            => $^
+        }
+
+        $Coupled {
+            tool_energized() {
+                this.energized = 1
+                -> $Working
+            }
+            request_uncouple() { -> $Uncoupling }
+            lock_lost() { -> $Fault }
+            status(): String { @@:("coupled") }
+            is_energized(): Int { @@:(this.energized) }
+            attached_tool(): String { @@:(this.tool_id) }
+        }
+
+        $Working {
+            tool_deenergized() {
+                this.energized = 0
+                -> $Coupled
+            }
+            lock_lost() {
+                this.energized = 0
+                -> $Fault
+            }
+            status(): String { @@:("working") }
+            is_energized(): Int { @@:(this.energized) }
+            attached_tool(): String { @@:(this.tool_id) }
+        }
+
+        $Uncoupling => $Transitioning {
+            lock_lost() {
+                this.tool_id = ""
+                -> $NoTool
+            }
+            status(): String { @@:("uncoupling") }
+            => $^
+        }
+
+        $Fault {
+            abort() {
+                this.tool_id = ""
+                this.energized = 0
+                -> $NoTool
+            }
+            status(): String { @@:("fault") }
+            is_energized(): Int { @@:(this.energized) }
+            attached_tool(): String { @@:(this.tool_id) }
+        }
+
+    domain:
+        tool_id: String = ""
+        energized: Int = 0
+}
+
+
+fun check_str(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+fun check_int(label: String, actual: Int, expected: Int) {
+    if (actual != expected) {
+        println("FAIL: $label expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun main() {
+    val tc = @@ToolChanger()
+    check_str("no tool", tc.status() as String, "no_tool")
+    check_str("no tool stored", tc.attached_tool() as String, "")
+    check_int("not energized", tc.is_energized() as Int, 0)
+
+    tc.request_couple("drill_8mm")
+    check_str("approaching", tc.status() as String, "approaching")
+    check_str("tool captured", tc.attached_tool() as String, "drill_8mm")
+
+    tc.lock_confirmed()
+    check_str("coupled", tc.status() as String, "coupled")
+
+    tc.tool_energized()
+    check_str("working", tc.status() as String, "working")
+    check_int("energized", tc.is_energized() as Int, 1)
+
+    tc.request_uncouple()
+    check_str("working absorbs uncouple", tc.status() as String, "working")
+    check_str("still attached", tc.attached_tool() as String, "drill_8mm")
+    check_int("still energized", tc.is_energized() as Int, 1)
+
+    tc.tool_deenergized()
+    check_str("coupled de-energized", tc.status() as String, "coupled")
+    check_int("not energized", tc.is_energized() as Int, 0)
+
+    tc.request_uncouple()
+    check_str("uncoupling", tc.status() as String, "uncoupling")
+
+    tc.lock_lost()
+    check_str("no tool again", tc.status() as String, "no_tool")
+    check_str("tool cleared", tc.attached_tool() as String, "")
+
+    val tc2 = @@ToolChanger()
+    tc2.request_couple("router")
+    tc2.lock_confirmed()
+    tc2.lock_lost()
+    check_str("lock_lost in coupled -> fault", tc2.status() as String, "fault")
+
+    val tc3 = @@ToolChanger()
+    tc3.request_couple("saw")
+    tc3.lock_confirmed()
+    tc3.tool_energized()
+    tc3.lock_lost()
+    check_str("lock_lost in working -> fault", tc3.status() as String, "fault")
+    check_int("fault de-energizes", tc3.is_energized() as Int, 0)
+
+    tc3.abort()
+    check_str("abort clears fault", tc3.status() as String, "no_tool")
+
+    val tc4 = @@ToolChanger()
+    tc4.request_couple("probe")
+    tc4.abort()
+    check_str("abort during approach", tc4.status() as String, "no_tool")
+
+    val tc5 = @@ToolChanger()
+    tc5.request_couple("clamp")
+    tc5.lock_lost()
+    check_str("lock_lost in approaching -> no_tool", tc5.status() as String, "no_tool")
+
+    println("PASS: tool_changer")
+}
