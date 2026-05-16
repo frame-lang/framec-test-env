@@ -1,0 +1,146 @@
+@@[target("swift")]
+
+import Foundation
+
+// Cookbook 99: PID Loop Supervisor
+
+@@system PidSupervisor {
+    interface:
+        enable()
+        disable()
+        set_setpoint(sp: Double)
+        start_autotune()
+        tune_step_done()
+        tick(measurement: Double): Double
+        saturate_detected()
+        clear_saturation()
+        status(): String
+        integrator_val(): Double
+
+    machine:
+        $Disabled {
+            enable() { -> $Holding }
+            tick(measurement: Double): Double { @@:(0.0) }
+            status(): String { @@:("disabled") }
+            integrator_val(): Double { @@:(self.integrator) }
+        }
+
+        $Enabled {
+            disable() {
+                self.integrator = 0.0
+                self.last_error = 0.0
+                -> $Disabled
+            }
+            saturate_detected() { -> $Saturated }
+            integrator_val(): Double { @@:(self.integrator) }
+        }
+
+        $Tuning => $Enabled {
+            tick(measurement: Double): Double { @@:(0.0) }
+            tune_step_done() { -> $Holding }
+            status(): String { @@:("tuning") }
+            => $^
+        }
+
+        $Holding => $Enabled {
+            set_setpoint(sp: Double) { self.setpoint = sp }
+            start_autotune() { -> $Tuning }
+            tick(measurement: Double): Double {
+                let error = self.setpoint - measurement
+                self.integrator = self.integrator + error
+                let derivative = error - self.last_error
+                self.last_error = error
+                @@:(self.kp * error + self.ki * self.integrator + self.kd * derivative)
+            }
+            status(): String { @@:("holding") }
+            => $^
+        }
+
+        $Saturated => $Enabled {
+            tick(measurement: Double): Double {
+                let error = self.setpoint - measurement
+                let derivative = error - self.last_error
+                self.last_error = error
+                @@:(self.kp * error + self.kd * derivative)
+            }
+            clear_saturation() { -> $Holding }
+            status(): String { @@:("saturated") }
+            => $^
+        }
+
+    domain:
+        kp: Double = 1.0
+        ki: Double = 0.1
+        kd: Double = 0.01
+        setpoint: Double = 0.0
+        integrator: Double = 0.0
+        last_error: Double = 0.0
+}
+
+
+func checkStr(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+func checkFloat(_ label: String, _ actual: Double, _ expected: Double) {
+    if abs(actual - expected) > 1e-9 {
+        print("FAIL: \(label) expected \(expected), got \(actual)")
+        exit(1)
+    }
+}
+
+let p = @@PidSupervisor()
+checkStr("disabled initially", p.status(), "disabled")
+
+checkFloat("disabled tick 0", p.tick(10.0), 0.0)
+p.set_setpoint(100.0)
+checkStr("disabled absorbs setpoint", p.status(), "disabled")
+
+p.enable()
+checkStr("enabled -> holding", p.status(), "holding")
+
+p.set_setpoint(10.0)
+let out1 = p.tick(0.0)
+checkFloat("first pid step", out1, 11.1)
+checkFloat("integrator accumulated", p.integrator_val(), 10.0)
+
+let out2 = p.tick(5.0)
+checkFloat("second pid step", out2, 6.45)
+checkFloat("integrator grew", p.integrator_val(), 15.0)
+
+p.saturate_detected()
+checkStr("saturated", p.status(), "saturated")
+let out3 = p.tick(6.0)
+checkFloat("saturated pid no-I", out3, 3.99)
+checkFloat("integrator frozen", p.integrator_val(), 15.0)
+
+p.clear_saturation()
+checkStr("holding after clear", p.status(), "holding")
+checkFloat("integrator survives", p.integrator_val(), 15.0)
+
+p.start_autotune()
+checkStr("tuning", p.status(), "tuning")
+p.set_setpoint(50.0)
+checkStr("tuning absorbs setpoint", p.status(), "tuning")
+
+p.tune_step_done()
+checkStr("tuning done -> holding", p.status(), "holding")
+
+p.disable()
+checkStr("disabled", p.status(), "disabled")
+checkFloat("integrator cleared on disable", p.integrator_val(), 0.0)
+
+let p2 = @@PidSupervisor()
+p2.enable()
+p2.saturate_detected()
+checkStr("holding->saturated via HSM", p2.status(), "saturated")
+
+let p3 = @@PidSupervisor()
+p3.enable()
+p3.start_autotune()
+p3.saturate_detected()
+checkStr("tuning->saturated via HSM", p3.status(), "saturated")
+
+print("PASS: pid_supervisor")

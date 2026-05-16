@@ -1,0 +1,154 @@
+@@[target("c")]
+
+// Cookbook 99: PID Loop Supervisor
+
+@@system PidSupervisor {
+    interface:
+        enable()
+        disable()
+        set_setpoint(sp: double)
+        start_autotune()
+        tune_step_done()
+        tick(measurement: double): double
+        saturate_detected()
+        clear_saturation()
+        status(): string
+        integrator_val(): double
+
+    machine:
+        $Disabled {
+            enable() { -> $Holding }
+            tick(measurement: double): double { @@:(0.0) }
+            status(): string { @@:("disabled") }
+            integrator_val(): double { @@:(self->integrator) }
+        }
+
+        $Enabled {
+            disable() {
+                self->integrator = 0.0;
+                self->last_error = 0.0;
+                -> $Disabled
+            }
+            saturate_detected() { -> $Saturated }
+            integrator_val(): double { @@:(self->integrator) }
+        }
+
+        $Tuning => $Enabled {
+            tick(measurement: double): double { @@:(0.0) }
+            tune_step_done() { -> $Holding }
+            status(): string { @@:("tuning") }
+            => $^
+        }
+
+        $Holding => $Enabled {
+            set_setpoint(sp: double) { self->setpoint = sp; }
+            start_autotune() { -> $Tuning }
+            tick(measurement: double): double {
+                double error = self->setpoint - measurement;
+                self->integrator = self->integrator + error;
+                double derivative = error - self->last_error;
+                self->last_error = error;
+                @@:(self->kp * error + self->ki * self->integrator + self->kd * derivative)
+            }
+            status(): string { @@:("holding") }
+            => $^
+        }
+
+        $Saturated => $Enabled {
+            tick(measurement: double): double {
+                double error = self->setpoint - measurement;
+                double derivative = error - self->last_error;
+                self->last_error = error;
+                @@:(self->kp * error + self->kd * derivative)
+            }
+            clear_saturation() { -> $Holding }
+            status(): string { @@:("saturated") }
+            => $^
+        }
+
+    domain:
+        kp: double = 1.0
+        ki: double = 0.1
+        kd: double = 0.01
+        setpoint: double = 0.0
+        integrator: double = 0.0
+        last_error: double = 0.0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_float(const char* label, double actual, double expected) {
+    if (fabs(actual - expected) > 1e-9) {
+        printf("FAIL: %s expected %g, got %g\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    PidSupervisor* p = @@PidSupervisor();
+    check_str("disabled initially", PidSupervisor_status(p), "disabled");
+
+    check_float("disabled tick 0", PidSupervisor_tick(p, 10.0), 0.0);
+    PidSupervisor_set_setpoint(p, 100.0);
+    check_str("disabled absorbs setpoint", PidSupervisor_status(p), "disabled");
+
+    PidSupervisor_enable(p);
+    check_str("enabled -> holding", PidSupervisor_status(p), "holding");
+
+    PidSupervisor_set_setpoint(p, 10.0);
+    double out1 = PidSupervisor_tick(p, 0.0);
+    check_float("first pid step", out1, 11.1);
+    check_float("integrator accumulated", PidSupervisor_integrator_val(p), 10.0);
+
+    double out2 = PidSupervisor_tick(p, 5.0);
+    check_float("second pid step", out2, 6.45);
+    check_float("integrator grew", PidSupervisor_integrator_val(p), 15.0);
+
+    PidSupervisor_saturate_detected(p);
+    check_str("saturated", PidSupervisor_status(p), "saturated");
+    double out3 = PidSupervisor_tick(p, 6.0);
+    check_float("saturated pid no-I", out3, 3.99);
+    check_float("integrator frozen", PidSupervisor_integrator_val(p), 15.0);
+
+    PidSupervisor_clear_saturation(p);
+    check_str("holding after clear", PidSupervisor_status(p), "holding");
+    check_float("integrator survives", PidSupervisor_integrator_val(p), 15.0);
+
+    PidSupervisor_start_autotune(p);
+    check_str("tuning", PidSupervisor_status(p), "tuning");
+    PidSupervisor_set_setpoint(p, 50.0);
+    check_str("tuning absorbs setpoint", PidSupervisor_status(p), "tuning");
+
+    PidSupervisor_tune_step_done(p);
+    check_str("tuning done -> holding", PidSupervisor_status(p), "holding");
+
+    PidSupervisor_disable(p);
+    check_str("disabled", PidSupervisor_status(p), "disabled");
+    check_float("integrator cleared on disable", PidSupervisor_integrator_val(p), 0.0);
+
+    PidSupervisor* p2 = @@PidSupervisor();
+    PidSupervisor_enable(p2);
+    PidSupervisor_saturate_detected(p2);
+    check_str("holding->saturated via HSM", PidSupervisor_status(p2), "saturated");
+
+    PidSupervisor* p3 = @@PidSupervisor();
+    PidSupervisor_enable(p3);
+    PidSupervisor_start_autotune(p3);
+    PidSupervisor_saturate_detected(p3);
+    check_str("tuning->saturated via HSM", PidSupervisor_status(p3), "saturated");
+
+    printf("PASS: pid_supervisor\n");
+    PidSupervisor_destroy(p);
+    PidSupervisor_destroy(p2);
+    PidSupervisor_destroy(p3);
+    return 0;
+}

@@ -1,0 +1,151 @@
+@@[target("go")]
+
+package main
+
+import "fmt"
+import "math"
+import "os"
+
+// Cookbook 99: PID Loop Supervisor
+
+@@system PidSupervisor {
+    interface:
+        Enable()
+        Disable()
+        SetSetpoint(sp: float64)
+        StartAutotune()
+        TuneStepDone()
+        Tick(measurement: float64): float64
+        SaturateDetected()
+        ClearSaturation()
+        Status(): string
+        IntegratorVal(): float64
+
+    machine:
+        $Disabled {
+            Enable() { -> $Holding }
+            Tick(measurement: float64): float64 { @@:(0.0) }
+            Status(): string { @@:("disabled") }
+            IntegratorVal(): float64 { @@:(s.integrator) }
+        }
+
+        $Enabled {
+            Disable() {
+                s.integrator = 0.0
+                s.last_error = 0.0
+                -> $Disabled
+            }
+            SaturateDetected() { -> $Saturated }
+            IntegratorVal(): float64 { @@:(s.integrator) }
+        }
+
+        $Tuning => $Enabled {
+            Tick(measurement: float64): float64 { @@:(0.0) }
+            TuneStepDone() { -> $Holding }
+            Status(): string { @@:("tuning") }
+            => $^
+        }
+
+        $Holding => $Enabled {
+            SetSetpoint(sp: float64) { s.setpoint = sp }
+            StartAutotune() { -> $Tuning }
+            Tick(measurement: float64): float64 {
+                err := s.setpoint - measurement
+                s.integrator = s.integrator + err
+                derivative := err - s.last_error
+                s.last_error = err
+                @@:(s.kp * err + s.ki * s.integrator + s.kd * derivative)
+            }
+            Status(): string { @@:("holding") }
+            => $^
+        }
+
+        $Saturated => $Enabled {
+            Tick(measurement: float64): float64 {
+                err := s.setpoint - measurement
+                derivative := err - s.last_error
+                s.last_error = err
+                @@:(s.kp * err + s.kd * derivative)
+            }
+            ClearSaturation() { -> $Holding }
+            Status(): string { @@:("saturated") }
+            => $^
+        }
+
+    domain:
+        kp: float64 = 1.0
+        ki: float64 = 0.1
+        kd: float64 = 0.01
+        setpoint: float64 = 0.0
+        integrator: float64 = 0.0
+        last_error: float64 = 0.0
+}
+
+func checkStr(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+func checkFloat(label string, actual, expected float64) {
+    if math.Abs(actual-expected) > 1e-9 {
+        fmt.Printf("FAIL: %s expected %v, got %v\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    p := @@PidSupervisor()
+    checkStr("disabled initially", p.Status(), "disabled")
+
+    checkFloat("disabled tick 0", p.Tick(10.0), 0.0)
+    p.SetSetpoint(100.0)
+    checkStr("disabled absorbs setpoint", p.Status(), "disabled")
+
+    p.Enable()
+    checkStr("enabled -> holding", p.Status(), "holding")
+
+    p.SetSetpoint(10.0)
+    out1 := p.Tick(0.0)
+    checkFloat("first pid step", out1, 11.1)
+    checkFloat("integrator accumulated", p.IntegratorVal(), 10.0)
+
+    out2 := p.Tick(5.0)
+    checkFloat("second pid step", out2, 6.45)
+    checkFloat("integrator grew", p.IntegratorVal(), 15.0)
+
+    p.SaturateDetected()
+    checkStr("saturated", p.Status(), "saturated")
+    out3 := p.Tick(6.0)
+    checkFloat("saturated pid no-I", out3, 3.99)
+    checkFloat("integrator frozen", p.IntegratorVal(), 15.0)
+
+    p.ClearSaturation()
+    checkStr("holding after clear", p.Status(), "holding")
+    checkFloat("integrator survives", p.IntegratorVal(), 15.0)
+
+    p.StartAutotune()
+    checkStr("tuning", p.Status(), "tuning")
+    p.SetSetpoint(50.0)
+    checkStr("tuning absorbs setpoint", p.Status(), "tuning")
+
+    p.TuneStepDone()
+    checkStr("tuning done -> holding", p.Status(), "holding")
+
+    p.Disable()
+    checkStr("disabled", p.Status(), "disabled")
+    checkFloat("integrator cleared on disable", p.IntegratorVal(), 0.0)
+
+    p2 := @@PidSupervisor()
+    p2.Enable()
+    p2.SaturateDetected()
+    checkStr("holding->saturated via HSM", p2.Status(), "saturated")
+
+    p3 := @@PidSupervisor()
+    p3.Enable()
+    p3.StartAutotune()
+    p3.SaturateDetected()
+    checkStr("tuning->saturated via HSM", p3.Status(), "saturated")
+
+    fmt.Println("PASS: pid_supervisor")
+}

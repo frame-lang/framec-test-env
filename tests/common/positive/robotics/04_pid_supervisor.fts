@@ -1,0 +1,144 @@
+@@[target("typescript")]
+
+// Cookbook 99: PID Loop Supervisor
+
+@@system PidSupervisor {
+    interface:
+        enable()
+        disable()
+        set_setpoint(sp: number)
+        start_autotune()
+        tune_step_done()
+        tick(measurement: number): number
+        saturate_detected()
+        clear_saturation()
+        status(): string
+        integrator_val(): number
+
+    machine:
+        $Disabled {
+            enable() { -> $Holding }
+            tick(measurement: number): number { @@:(0.0) }
+            status(): string { @@:("disabled") }
+            integrator_val(): number { @@:(this.integrator) }
+        }
+
+        $Enabled {
+            disable() {
+                this.integrator = 0.0;
+                this.last_error = 0.0;
+                -> $Disabled
+            }
+            saturate_detected() { -> $Saturated }
+            integrator_val(): number { @@:(this.integrator) }
+        }
+
+        $Tuning => $Enabled {
+            tick(measurement: number): number { @@:(0.0) }
+            tune_step_done() { -> $Holding }
+            status(): string { @@:("tuning") }
+            => $^
+        }
+
+        $Holding => $Enabled {
+            set_setpoint(sp: number) { this.setpoint = sp; }
+            start_autotune() { -> $Tuning }
+            tick(measurement: number): number {
+                const error = this.setpoint - measurement;
+                this.integrator = this.integrator + error;
+                const derivative = error - this.last_error;
+                this.last_error = error;
+                @@:(this.kp * error + this.ki * this.integrator + this.kd * derivative)
+            }
+            status(): string { @@:("holding") }
+            => $^
+        }
+
+        $Saturated => $Enabled {
+            tick(measurement: number): number {
+                const error = this.setpoint - measurement;
+                const derivative = error - this.last_error;
+                this.last_error = error;
+                @@:(this.kp * error + this.kd * derivative)
+            }
+            clear_saturation() { -> $Holding }
+            status(): string { @@:("saturated") }
+            => $^
+        }
+
+    domain:
+        kp: number = 1.0
+        ki: number = 0.1
+        kd: number = 0.01
+        setpoint: number = 0.0
+        integrator: number = 0.0
+        last_error: number = 0.0
+}
+
+
+function checkStr(label: string, actual: string, expected: string) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+        process.exit(1);
+    }
+}
+function checkFloat(label: string, actual: number, expected: number) {
+    if (Math.abs(actual - expected) > 1e-9) {
+        console.log("FAIL: " + label + " expected " + expected + ", got " + actual);
+        process.exit(1);
+    }
+}
+
+const p = @@PidSupervisor();
+checkStr("disabled initially", p.status(), "disabled");
+
+checkFloat("disabled tick 0", p.tick(10.0), 0.0);
+p.set_setpoint(100.0);
+checkStr("disabled absorbs setpoint", p.status(), "disabled");
+
+p.enable();
+checkStr("enabled -> holding", p.status(), "holding");
+
+p.set_setpoint(10.0);
+const out1 = p.tick(0.0);
+checkFloat("first pid step", out1, 11.1);
+checkFloat("integrator accumulated", p.integrator_val(), 10.0);
+
+const out2 = p.tick(5.0);
+checkFloat("second pid step", out2, 6.45);
+checkFloat("integrator grew", p.integrator_val(), 15.0);
+
+p.saturate_detected();
+checkStr("saturated", p.status(), "saturated");
+const out3 = p.tick(6.0);
+checkFloat("saturated pid no-I", out3, 3.99);
+checkFloat("integrator frozen", p.integrator_val(), 15.0);
+
+p.clear_saturation();
+checkStr("holding after clear", p.status(), "holding");
+checkFloat("integrator survives", p.integrator_val(), 15.0);
+
+p.start_autotune();
+checkStr("tuning", p.status(), "tuning");
+p.set_setpoint(50.0);
+checkStr("tuning absorbs setpoint", p.status(), "tuning");
+
+p.tune_step_done();
+checkStr("tuning done -> holding", p.status(), "holding");
+
+p.disable();
+checkStr("disabled", p.status(), "disabled");
+checkFloat("integrator cleared on disable", p.integrator_val(), 0.0);
+
+const p2 = @@PidSupervisor();
+p2.enable();
+p2.saturate_detected();
+checkStr("holding->saturated via HSM", p2.status(), "saturated");
+
+const p3 = @@PidSupervisor();
+p3.enable();
+p3.start_autotune();
+p3.saturate_detected();
+checkStr("tuning->saturated via HSM", p3.status(), "saturated");
+
+console.log("PASS: pid_supervisor");

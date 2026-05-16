@@ -1,0 +1,76 @@
+@@[target("erlang")]
+
+%% Cookbook 99: PID Loop Supervisor
+
+@@system PidSupervisor {
+    interface:
+        enable()
+        disable()
+        set_setpoint(sp: float)
+        start_autotune()
+        tune_step_done()
+        tick(measurement: float): float
+        saturate_detected()
+        clear_saturation()
+        status(): string
+        integrator_val(): float
+
+    machine:
+        $Disabled {
+            enable() { -> $Holding }
+            tick(measurement: float): float { @@:(0.0) }
+            status(): string { @@:("disabled") }
+            integrator_val(): float { @@:(self.integrator) }
+        }
+
+        $Enabled {
+            disable() {
+                self.integrator = 0.0,
+                self.last_error = 0.0,
+                -> $Disabled
+            }
+            saturate_detected() { -> $Saturated }
+            integrator_val(): float { @@:(self.integrator) }
+        }
+
+        $Tuning => $Enabled {
+            tick(measurement: float): float { @@:(0.0) }
+            tune_step_done() { -> $Holding }
+            status(): string { @@:("tuning") }
+            => $^
+        }
+
+        $Holding => $Enabled {
+            set_setpoint(sp: float) { self.setpoint = Sp }
+            start_autotune() { -> $Tuning }
+            tick(measurement: float): float {
+                Error = self.setpoint - Measurement,
+                self.integrator = self.integrator + Error,
+                Derivative = Error - self.last_error,
+                self.last_error = Error,
+                @@:(self.kp * Error + self.ki * self.integrator + self.kd * Derivative)
+            }
+            status(): string { @@:("holding") }
+            => $^
+        }
+
+        $Saturated => $Enabled {
+            tick(measurement: float): float {
+                Error = self.setpoint - Measurement,
+                Derivative = Error - self.last_error,
+                self.last_error = Error,
+                @@:(self.kp * Error + self.kd * Derivative)
+            }
+            clear_saturation() { -> $Holding }
+            status(): string { @@:("saturated") }
+            => $^
+        }
+
+    domain:
+        kp: float = 1.0
+        ki: float = 0.1
+        kd: float = 0.01
+        setpoint: float = 0.0
+        integrator: float = 0.0
+        last_error: float = 0.0
+}

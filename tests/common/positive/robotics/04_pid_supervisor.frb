@@ -1,0 +1,144 @@
+@@[target("ruby")]
+
+# Cookbook 99: PID Loop Supervisor
+
+@@system PidSupervisor {
+    interface:
+        enable()
+        disable()
+        set_setpoint(sp: float)
+        start_autotune()
+        tune_step_done()
+        tick(measurement: float): float
+        saturate_detected()
+        clear_saturation()
+        status(): str
+        integrator_val(): float
+
+    machine:
+        $Disabled {
+            enable() { -> $Holding }
+            tick(measurement: float): float { @@:(0.0) }
+            status(): str { @@:("disabled") }
+            integrator_val(): float { @@:(self.integrator) }
+        }
+
+        $Enabled {
+            disable() {
+                self.integrator = 0.0
+                self.last_error = 0.0
+                -> $Disabled
+            }
+            saturate_detected() { -> $Saturated }
+            integrator_val(): float { @@:(self.integrator) }
+        }
+
+        $Tuning => $Enabled {
+            tick(measurement: float): float { @@:(0.0) }
+            tune_step_done() { -> $Holding }
+            status(): str { @@:("tuning") }
+            => $^
+        }
+
+        $Holding => $Enabled {
+            set_setpoint(sp: float) { self.setpoint = sp }
+            start_autotune() { -> $Tuning }
+            tick(measurement: float): float {
+                error = self.setpoint - measurement
+                self.integrator = self.integrator + error
+                derivative = error - self.last_error
+                self.last_error = error
+                @@:(self.kp * error + self.ki * self.integrator + self.kd * derivative)
+            }
+            status(): str { @@:("holding") }
+            => $^
+        }
+
+        $Saturated => $Enabled {
+            tick(measurement: float): float {
+                error = self.setpoint - measurement
+                derivative = error - self.last_error
+                self.last_error = error
+                @@:(self.kp * error + self.kd * derivative)
+            }
+            clear_saturation() { -> $Holding }
+            status(): str { @@:("saturated") }
+            => $^
+        }
+
+    domain:
+        kp = 1.0
+        ki = 0.1
+        kd = 0.01
+        setpoint = 0.0
+        integrator = 0.0
+        last_error = 0.0
+}
+
+
+def check_str(label, actual, expected)
+  if actual != expected
+    puts "FAIL: #{label} expected '#{expected}', got '#{actual}'"
+    exit 1
+  end
+end
+def check_float(label, actual, expected)
+  if (actual - expected).abs > 1e-9
+    puts "FAIL: #{label} expected #{expected}, got #{actual}"
+    exit 1
+  end
+end
+
+p_ = @@PidSupervisor()
+check_str("disabled initially", p_.status, "disabled")
+
+check_float("disabled tick 0", p_.tick(10.0), 0.0)
+p_.set_setpoint(100.0)
+check_str("disabled absorbs setpoint", p_.status, "disabled")
+
+p_.enable
+check_str("enabled -> holding", p_.status, "holding")
+
+p_.set_setpoint(10.0)
+out1 = p_.tick(0.0)
+check_float("first pid step", out1, 11.1)
+check_float("integrator accumulated", p_.integrator_val, 10.0)
+
+out2 = p_.tick(5.0)
+check_float("second pid step", out2, 6.45)
+check_float("integrator grew", p_.integrator_val, 15.0)
+
+p_.saturate_detected
+check_str("saturated", p_.status, "saturated")
+out3 = p_.tick(6.0)
+check_float("saturated pid no-I", out3, 3.99)
+check_float("integrator frozen", p_.integrator_val, 15.0)
+
+p_.clear_saturation
+check_str("holding after clear", p_.status, "holding")
+check_float("integrator survives", p_.integrator_val, 15.0)
+
+p_.start_autotune
+check_str("tuning", p_.status, "tuning")
+p_.set_setpoint(50.0)
+check_str("tuning absorbs setpoint", p_.status, "tuning")
+
+p_.tune_step_done
+check_str("tuning done -> holding", p_.status, "holding")
+
+p_.disable
+check_str("disabled", p_.status, "disabled")
+check_float("integrator cleared on disable", p_.integrator_val, 0.0)
+
+p2 = @@PidSupervisor()
+p2.enable
+p2.saturate_detected
+check_str("holding->saturated via HSM", p2.status, "saturated")
+
+p3 = @@PidSupervisor()
+p3.enable
+p3.start_autotune
+p3.saturate_detected
+check_str("tuning->saturated via HSM", p3.status, "saturated")
+
+puts "PASS: pid_supervisor"

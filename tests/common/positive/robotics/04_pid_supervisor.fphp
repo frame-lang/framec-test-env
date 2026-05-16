@@ -1,0 +1,144 @@
+@@[target("php")]
+
+// Cookbook 99: PID Loop Supervisor
+
+@@system PidSupervisor {
+    interface:
+        enable()
+        disable()
+        set_setpoint(sp: float)
+        start_autotune()
+        tune_step_done()
+        tick(measurement: float): float
+        saturate_detected()
+        clear_saturation()
+        status(): str
+        integrator_val(): float
+
+    machine:
+        $Disabled {
+            enable() { -> $Holding }
+            tick(measurement: float): float { @@:(0.0) }
+            status(): str { @@:("disabled") }
+            integrator_val(): float { @@:($this->integrator) }
+        }
+
+        $Enabled {
+            disable() {
+                $this->integrator = 0.0;
+                $this->last_error = 0.0;
+                -> $Disabled
+            }
+            saturate_detected() { -> $Saturated }
+            integrator_val(): float { @@:($this->integrator) }
+        }
+
+        $Tuning => $Enabled {
+            tick(measurement: float): float { @@:(0.0) }
+            tune_step_done() { -> $Holding }
+            status(): str { @@:("tuning") }
+            => $^
+        }
+
+        $Holding => $Enabled {
+            set_setpoint(sp: float) { $this->setpoint = $sp; }
+            start_autotune() { -> $Tuning }
+            tick(measurement: float): float {
+                $error = $this->setpoint - $measurement;
+                $this->integrator = $this->integrator + $error;
+                $derivative = $error - $this->last_error;
+                $this->last_error = $error;
+                @@:($this->kp * $error + $this->ki * $this->integrator + $this->kd * $derivative)
+            }
+            status(): str { @@:("holding") }
+            => $^
+        }
+
+        $Saturated => $Enabled {
+            tick(measurement: float): float {
+                $error = $this->setpoint - $measurement;
+                $derivative = $error - $this->last_error;
+                $this->last_error = $error;
+                @@:($this->kp * $error + $this->kd * $derivative)
+            }
+            clear_saturation() { -> $Holding }
+            status(): str { @@:("saturated") }
+            => $^
+        }
+
+    domain:
+        kp = 1.0
+        ki = 0.1
+        kd = 0.01
+        setpoint = 0.0
+        integrator = 0.0
+        last_error = 0.0
+}
+
+
+function check_str($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label expected '$expected', got '$actual'\n";
+        exit(1);
+    }
+}
+function check_float($label, $actual, $expected) {
+    if (abs($actual - $expected) > 1e-9) {
+        echo "FAIL: $label expected $expected, got $actual\n";
+        exit(1);
+    }
+}
+
+$p = @@PidSupervisor();
+check_str("disabled initially", $p->status(), "disabled");
+
+check_float("disabled tick 0", $p->tick(10.0), 0.0);
+$p->set_setpoint(100.0);
+check_str("disabled absorbs setpoint", $p->status(), "disabled");
+
+$p->enable();
+check_str("enabled -> holding", $p->status(), "holding");
+
+$p->set_setpoint(10.0);
+$out1 = $p->tick(0.0);
+check_float("first pid step", $out1, 11.1);
+check_float("integrator accumulated", $p->integrator_val(), 10.0);
+
+$out2 = $p->tick(5.0);
+check_float("second pid step", $out2, 6.45);
+check_float("integrator grew", $p->integrator_val(), 15.0);
+
+$p->saturate_detected();
+check_str("saturated", $p->status(), "saturated");
+$out3 = $p->tick(6.0);
+check_float("saturated pid no-I", $out3, 3.99);
+check_float("integrator frozen", $p->integrator_val(), 15.0);
+
+$p->clear_saturation();
+check_str("holding after clear", $p->status(), "holding");
+check_float("integrator survives", $p->integrator_val(), 15.0);
+
+$p->start_autotune();
+check_str("tuning", $p->status(), "tuning");
+$p->set_setpoint(50.0);
+check_str("tuning absorbs setpoint", $p->status(), "tuning");
+
+$p->tune_step_done();
+check_str("tuning done -> holding", $p->status(), "holding");
+
+$p->disable();
+check_str("disabled", $p->status(), "disabled");
+check_float("integrator cleared on disable", $p->integrator_val(), 0.0);
+
+$p2 = @@PidSupervisor();
+$p2->enable();
+$p2->saturate_detected();
+check_str("holding->saturated via HSM", $p2->status(), "saturated");
+
+$p3 = @@PidSupervisor();
+$p3->enable();
+$p3->start_autotune();
+$p3->saturate_detected();
+check_str("tuning->saturated via HSM", $p3->status(), "saturated");
+
+echo "PASS: pid_supervisor\n";
