@@ -1,0 +1,166 @@
+@@[target("java")]
+
+// Cookbook 102: Dock-and-Charge — Negotiated Resource Lifecycle
+
+@@system DockController {
+    interface:
+        battery_low()
+        dock_visible(range: double)
+        dock_lost()
+        contact_made()
+        charging_started()
+        charging_fault()
+        fully_charged()
+        undock_complete()
+        tick()
+        status(): String
+        get_battery(): int
+
+    machine:
+        $Discharging {
+            battery_low() {
+                this.align_attempts = 0;
+                -> $SeekingDock
+            }
+            tick() { this.battery_pct = this.battery_pct - 1; }
+            status(): String { @@:("discharging") }
+            get_battery(): int { @@:(this.battery_pct) }
+        }
+
+        $DockingFlow {
+            dock_lost() { -> $Discharging }
+            get_battery(): int { @@:(this.battery_pct) }
+        }
+
+        $SeekingDock => $DockingFlow {
+            dock_visible(range: double) {
+                if (range < 0.2) {
+                    -> $Aligning
+                }
+            }
+            status(): String { @@:("seeking") }
+            => $^
+        }
+
+        $Aligning => $DockingFlow {
+            $>() { this.align_attempts = this.align_attempts + 1; }
+            tick() {
+                if (this.align_attempts >= this.max_align_attempts) {
+                    -> $Failed
+                }
+            }
+            dock_visible(range: double) {
+                if (range < 0.05) {
+                    -> $MakingContact
+                }
+            }
+            status(): String { @@:("aligning") }
+            => $^
+        }
+
+        $MakingContact => $DockingFlow {
+            contact_made() { -> $VerifyingCharge }
+            status(): String { @@:("making_contact") }
+            => $^
+        }
+
+        $VerifyingCharge => $DockingFlow {
+            charging_started() { -> $Charging }
+            charging_fault() { -> $Failed }
+            status(): String { @@:("verifying_charge") }
+            => $^
+        }
+
+        $Charging {
+            tick() {
+                this.battery_pct = this.battery_pct + 1;
+                if (this.battery_pct >= 100) {
+                    -> $Undocking
+                }
+            }
+            fully_charged() { -> $Undocking }
+            status(): String { @@:("charging") }
+            get_battery(): int { @@:(this.battery_pct) }
+        }
+
+        $Undocking {
+            undock_complete() { -> $Discharging }
+            status(): String { @@:("undocking") }
+            get_battery(): int { @@:(this.battery_pct) }
+        }
+
+        $Failed {
+            battery_low() {
+                this.align_attempts = 0;
+                -> $SeekingDock
+            }
+            status(): String { @@:("failed") }
+            get_battery(): int { @@:(this.battery_pct) }
+        }
+
+    domain:
+        battery_pct: int = 50
+        align_attempts: int = 0
+        max_align_attempts: int = 3
+}
+
+
+class Main {
+    static void check_str(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+
+    public static void main(String[] args) {
+        DockController d = @@DockController();
+        check_str("discharging", d.status(), "discharging");
+
+        d.battery_low();
+        check_str("seeking", d.status(), "seeking");
+
+        d.dock_visible(0.1);
+        check_str("aligning", d.status(), "aligning");
+
+        d.dock_visible(0.01);
+        check_str("contact", d.status(), "making_contact");
+
+        d.contact_made();
+        check_str("verifying", d.status(), "verifying_charge");
+
+        d.charging_started();
+        check_str("charging", d.status(), "charging");
+
+        int i = 0;
+        while (i < 100) {
+            d.tick();
+            if (((String) d.status()).equals("undocking")) {
+                break;
+            }
+            i = i + 1;
+        }
+        check_str("undocking", d.status(), "undocking");
+
+        d.undock_complete();
+        check_str("back to discharging", d.status(), "discharging");
+
+        DockController d2 = @@DockController();
+        d2.battery_low();
+        d2.dock_visible(0.1);
+        d2.dock_lost();
+        check_str("dock lost -> discharging", d2.status(), "discharging");
+
+        DockController d4 = @@DockController();
+        d4.battery_low();
+        d4.dock_visible(0.1);
+        d4.dock_visible(0.01);
+        d4.contact_made();
+        d4.charging_fault();
+        check_str("charge fault -> failed", d4.status(), "failed");
+        d4.battery_low();
+        check_str("failed re-seeks on battery_low", d4.status(), "seeking");
+
+        System.out.println("PASS: dock_charge");
+    }
+}

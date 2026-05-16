@@ -1,0 +1,109 @@
+@@[target("erlang")]
+
+%% Cookbook 102: Dock-and-Charge — Negotiated Resource Lifecycle
+
+@@system DockController {
+    interface:
+        battery_low()
+        dock_visible(range: float)
+        dock_lost()
+        contact_made()
+        charging_started()
+        charging_fault()
+        fully_charged()
+        undock_complete()
+        tick()
+        status(): string
+        get_battery(): int
+
+    machine:
+        $Discharging {
+            battery_low() {
+                self.align_attempts = 0,
+                -> $SeekingDock
+            }
+            tick() { self.battery_pct = self.battery_pct - 1 }
+            status(): string { @@:("discharging") }
+            get_battery(): int { @@:(self.battery_pct) }
+        }
+
+        $DockingFlow {
+            dock_lost() { -> $Discharging }
+            get_battery(): int { @@:(self.battery_pct) }
+        }
+
+        $SeekingDock => $DockingFlow {
+            dock_visible(range: float) {
+                case Range < 0.2 of
+                    true -> -> $Aligning;
+                    false -> ok
+                end
+            }
+            status(): string { @@:("seeking") }
+            => $^
+        }
+
+        $Aligning => $DockingFlow {
+            $>() { self.align_attempts = self.align_attempts + 1 }
+            tick() {
+                case self.align_attempts >= self.max_align_attempts of
+                    true -> -> $Failed;
+                    false -> ok
+                end
+            }
+            dock_visible(range: float) {
+                case Range < 0.05 of
+                    true -> -> $MakingContact;
+                    false -> ok
+                end
+            }
+            status(): string { @@:("aligning") }
+            => $^
+        }
+
+        $MakingContact => $DockingFlow {
+            contact_made() { -> $VerifyingCharge }
+            status(): string { @@:("making_contact") }
+            => $^
+        }
+
+        $VerifyingCharge => $DockingFlow {
+            charging_started() { -> $Charging }
+            charging_fault() { -> $Failed }
+            status(): string { @@:("verifying_charge") }
+            => $^
+        }
+
+        $Charging {
+            tick() {
+                self.battery_pct = self.battery_pct + 1,
+                case self.battery_pct >= 100 of
+                    true -> -> $Undocking;
+                    false -> ok
+                end
+            }
+            fully_charged() { -> $Undocking }
+            status(): string { @@:("charging") }
+            get_battery(): int { @@:(self.battery_pct) }
+        }
+
+        $Undocking {
+            undock_complete() { -> $Discharging }
+            status(): string { @@:("undocking") }
+            get_battery(): int { @@:(self.battery_pct) }
+        }
+
+        $Failed {
+            battery_low() {
+                self.align_attempts = 0,
+                -> $SeekingDock
+            }
+            status(): string { @@:("failed") }
+            get_battery(): int { @@:(self.battery_pct) }
+        }
+
+    domain:
+        battery_pct: int = 50
+        align_attempts: int = 0
+        max_align_attempts: int = 3
+}

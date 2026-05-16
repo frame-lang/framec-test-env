@@ -1,0 +1,160 @@
+@@[target("ruby")]
+
+# Cookbook 102: Dock-and-Charge — Negotiated Resource Lifecycle
+
+@@system DockController {
+    interface:
+        battery_low()
+        dock_visible(range: float)
+        dock_lost()
+        contact_made()
+        charging_started()
+        charging_fault()
+        fully_charged()
+        undock_complete()
+        tick()
+        status(): str
+        get_battery(): int
+
+    machine:
+        $Discharging {
+            battery_low() {
+                self.align_attempts = 0
+                -> $SeekingDock
+            }
+            tick() { self.battery_pct = self.battery_pct - 1 }
+            status(): str { @@:("discharging") }
+            get_battery(): int { @@:(self.battery_pct) }
+        }
+
+        $DockingFlow {
+            dock_lost() { -> $Discharging }
+            get_battery(): int { @@:(self.battery_pct) }
+        }
+
+        $SeekingDock => $DockingFlow {
+            dock_visible(range: float) {
+                if range < 0.2
+                    -> $Aligning
+                end
+            }
+            status(): str { @@:("seeking") }
+            => $^
+        }
+
+        $Aligning => $DockingFlow {
+            $>() { self.align_attempts = self.align_attempts + 1 }
+            tick() {
+                if self.align_attempts >= self.max_align_attempts
+                    -> $Failed
+                end
+            }
+            dock_visible(range: float) {
+                if range < 0.05
+                    -> $MakingContact
+                end
+            }
+            status(): str { @@:("aligning") }
+            => $^
+        }
+
+        $MakingContact => $DockingFlow {
+            contact_made() { -> $VerifyingCharge }
+            status(): str { @@:("making_contact") }
+            => $^
+        }
+
+        $VerifyingCharge => $DockingFlow {
+            charging_started() { -> $Charging }
+            charging_fault() { -> $Failed }
+            status(): str { @@:("verifying_charge") }
+            => $^
+        }
+
+        $Charging {
+            tick() {
+                self.battery_pct = self.battery_pct + 1
+                if self.battery_pct >= 100
+                    -> $Undocking
+                end
+            }
+            fully_charged() { -> $Undocking }
+            status(): str { @@:("charging") }
+            get_battery(): int { @@:(self.battery_pct) }
+        }
+
+        $Undocking {
+            undock_complete() { -> $Discharging }
+            status(): str { @@:("undocking") }
+            get_battery(): int { @@:(self.battery_pct) }
+        }
+
+        $Failed {
+            battery_low() {
+                self.align_attempts = 0
+                -> $SeekingDock
+            }
+            status(): str { @@:("failed") }
+            get_battery(): int { @@:(self.battery_pct) }
+        }
+
+    domain:
+        battery_pct = 50
+        align_attempts = 0
+        max_align_attempts = 3
+}
+
+
+def check_str(label, actual, expected)
+  if actual != expected
+    puts "FAIL: #{label} expected '#{expected}', got '#{actual}'"
+    exit 1
+  end
+end
+
+d = @@DockController()
+check_str("discharging", d.status, "discharging")
+
+d.battery_low
+check_str("seeking", d.status, "seeking")
+
+d.dock_visible(0.1)
+check_str("aligning", d.status, "aligning")
+
+d.dock_visible(0.01)
+check_str("contact", d.status, "making_contact")
+
+d.contact_made
+check_str("verifying", d.status, "verifying_charge")
+
+d.charging_started
+check_str("charging", d.status, "charging")
+
+i = 0
+while i < 100
+  d.tick
+  break if d.status == "undocking"
+  i = i + 1
+end
+check_str("undocking", d.status, "undocking")
+
+d.undock_complete
+check_str("back to discharging", d.status, "discharging")
+
+d2 = @@DockController()
+d2.battery_low
+d2.dock_visible(0.1)
+d2.dock_lost
+check_str("dock lost -> discharging", d2.status, "discharging")
+
+d4 = @@DockController()
+d4.battery_low
+d4.dock_visible(0.1)
+d4.dock_visible(0.01)
+d4.contact_made
+d4.charging_fault
+check_str("charge fault -> failed", d4.status, "failed")
+d4.battery_low
+check_str("failed re-seeks on battery_low", d4.status, "seeking")
+
+puts "PASS: dock_charge"

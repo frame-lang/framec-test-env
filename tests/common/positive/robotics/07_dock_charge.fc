@@ -1,0 +1,171 @@
+@@[target("c")]
+
+// Cookbook 102: Dock-and-Charge — Negotiated Resource Lifecycle
+
+@@system DockController {
+    interface:
+        battery_low()
+        dock_visible(range: double)
+        dock_lost()
+        contact_made()
+        charging_started()
+        charging_fault()
+        fully_charged()
+        undock_complete()
+        tick()
+        status(): string
+        get_battery(): int
+
+    machine:
+        $Discharging {
+            battery_low() {
+                self->align_attempts = 0;
+                -> $SeekingDock
+            }
+            tick() { self->battery_pct = self->battery_pct - 1; }
+            status(): string { @@:("discharging") }
+            get_battery(): int { @@:(self->battery_pct) }
+        }
+
+        $DockingFlow {
+            dock_lost() { -> $Discharging }
+            get_battery(): int { @@:(self->battery_pct) }
+        }
+
+        $SeekingDock => $DockingFlow {
+            dock_visible(range: double) {
+                if (range < 0.2) {
+                    -> $Aligning
+                }
+            }
+            status(): string { @@:("seeking") }
+            => $^
+        }
+
+        $Aligning => $DockingFlow {
+            $>() { self->align_attempts = self->align_attempts + 1; }
+            tick() {
+                if (self->align_attempts >= self->max_align_attempts) {
+                    -> $Failed
+                }
+            }
+            dock_visible(range: double) {
+                if (range < 0.05) {
+                    -> $MakingContact
+                }
+            }
+            status(): string { @@:("aligning") }
+            => $^
+        }
+
+        $MakingContact => $DockingFlow {
+            contact_made() { -> $VerifyingCharge }
+            status(): string { @@:("making_contact") }
+            => $^
+        }
+
+        $VerifyingCharge => $DockingFlow {
+            charging_started() { -> $Charging }
+            charging_fault() { -> $Failed }
+            status(): string { @@:("verifying_charge") }
+            => $^
+        }
+
+        $Charging {
+            tick() {
+                self->battery_pct = self->battery_pct + 1;
+                if (self->battery_pct >= 100) {
+                    -> $Undocking
+                }
+            }
+            fully_charged() { -> $Undocking }
+            status(): string { @@:("charging") }
+            get_battery(): int { @@:(self->battery_pct) }
+        }
+
+        $Undocking {
+            undock_complete() { -> $Discharging }
+            status(): string { @@:("undocking") }
+            get_battery(): int { @@:(self->battery_pct) }
+        }
+
+        $Failed {
+            battery_low() {
+                self->align_attempts = 0;
+                -> $SeekingDock
+            }
+            status(): string { @@:("failed") }
+            get_battery(): int { @@:(self->battery_pct) }
+        }
+
+    domain:
+        battery_pct: int = 50
+        align_attempts: int = 0
+        max_align_attempts: int = 3
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    DockController* d = @@DockController();
+    check_str("discharging", DockController_status(d), "discharging");
+
+    DockController_battery_low(d);
+    check_str("seeking", DockController_status(d), "seeking");
+
+    DockController_dock_visible(d, 0.1);
+    check_str("aligning", DockController_status(d), "aligning");
+
+    DockController_dock_visible(d, 0.01);
+    check_str("contact", DockController_status(d), "making_contact");
+
+    DockController_contact_made(d);
+    check_str("verifying", DockController_status(d), "verifying_charge");
+
+    DockController_charging_started(d);
+    check_str("charging", DockController_status(d), "charging");
+
+    int i = 0;
+    while (i < 100) {
+        DockController_tick(d);
+        if (strcmp(DockController_status(d), "undocking") == 0) {
+            break;
+        }
+        i = i + 1;
+    }
+    check_str("undocking", DockController_status(d), "undocking");
+
+    DockController_undock_complete(d);
+    check_str("back to discharging", DockController_status(d), "discharging");
+
+    DockController* d2 = @@DockController();
+    DockController_battery_low(d2);
+    DockController_dock_visible(d2, 0.1);
+    DockController_dock_lost(d2);
+    check_str("dock lost -> discharging", DockController_status(d2), "discharging");
+
+    DockController* d4 = @@DockController();
+    DockController_battery_low(d4);
+    DockController_dock_visible(d4, 0.1);
+    DockController_dock_visible(d4, 0.01);
+    DockController_contact_made(d4);
+    DockController_charging_fault(d4);
+    check_str("charge fault -> failed", DockController_status(d4), "failed");
+    DockController_battery_low(d4);
+    check_str("failed re-seeks on battery_low", DockController_status(d4), "seeking");
+
+    printf("PASS: dock_charge\n");
+    DockController_destroy(d);
+    DockController_destroy(d2);
+    DockController_destroy(d4);
+    return 0;
+}

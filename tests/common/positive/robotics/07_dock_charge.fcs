@@ -1,0 +1,168 @@
+@@[target("csharp")]
+
+// Cookbook 102: Dock-and-Charge — Negotiated Resource Lifecycle
+
+using System;
+
+@@system DockController {
+    interface:
+        battery_low()
+        dock_visible(range: double)
+        dock_lost()
+        contact_made()
+        charging_started()
+        charging_fault()
+        fully_charged()
+        undock_complete()
+        tick()
+        status(): string
+        get_battery(): int
+
+    machine:
+        $Discharging {
+            battery_low() {
+                this.align_attempts = 0;
+                -> $SeekingDock
+            }
+            tick() { this.battery_pct = this.battery_pct - 1; }
+            status(): string { @@:("discharging") }
+            get_battery(): int { @@:(this.battery_pct) }
+        }
+
+        $DockingFlow {
+            dock_lost() { -> $Discharging }
+            get_battery(): int { @@:(this.battery_pct) }
+        }
+
+        $SeekingDock => $DockingFlow {
+            dock_visible(range: double) {
+                if (range < 0.2) {
+                    -> $Aligning
+                }
+            }
+            status(): string { @@:("seeking") }
+            => $^
+        }
+
+        $Aligning => $DockingFlow {
+            $>() { this.align_attempts = this.align_attempts + 1; }
+            tick() {
+                if (this.align_attempts >= this.max_align_attempts) {
+                    -> $Failed
+                }
+            }
+            dock_visible(range: double) {
+                if (range < 0.05) {
+                    -> $MakingContact
+                }
+            }
+            status(): string { @@:("aligning") }
+            => $^
+        }
+
+        $MakingContact => $DockingFlow {
+            contact_made() { -> $VerifyingCharge }
+            status(): string { @@:("making_contact") }
+            => $^
+        }
+
+        $VerifyingCharge => $DockingFlow {
+            charging_started() { -> $Charging }
+            charging_fault() { -> $Failed }
+            status(): string { @@:("verifying_charge") }
+            => $^
+        }
+
+        $Charging {
+            tick() {
+                this.battery_pct = this.battery_pct + 1;
+                if (this.battery_pct >= 100) {
+                    -> $Undocking
+                }
+            }
+            fully_charged() { -> $Undocking }
+            status(): string { @@:("charging") }
+            get_battery(): int { @@:(this.battery_pct) }
+        }
+
+        $Undocking {
+            undock_complete() { -> $Discharging }
+            status(): string { @@:("undocking") }
+            get_battery(): int { @@:(this.battery_pct) }
+        }
+
+        $Failed {
+            battery_low() {
+                this.align_attempts = 0;
+                -> $SeekingDock
+            }
+            status(): string { @@:("failed") }
+            get_battery(): int { @@:(this.battery_pct) }
+        }
+
+    domain:
+        battery_pct: int = 50
+        align_attempts: int = 0
+        max_align_attempts: int = 3
+}
+
+
+class Program {
+    static void check_str(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+
+    public static void Main(string[] args) {
+        var d = @@DockController();
+        check_str("discharging", (string) d.status(), "discharging");
+
+        d.battery_low();
+        check_str("seeking", (string) d.status(), "seeking");
+
+        d.dock_visible(0.1);
+        check_str("aligning", (string) d.status(), "aligning");
+
+        d.dock_visible(0.01);
+        check_str("contact", (string) d.status(), "making_contact");
+
+        d.contact_made();
+        check_str("verifying", (string) d.status(), "verifying_charge");
+
+        d.charging_started();
+        check_str("charging", (string) d.status(), "charging");
+
+        int i = 0;
+        while (i < 100) {
+            d.tick();
+            if (((string) d.status()) == "undocking") {
+                break;
+            }
+            i = i + 1;
+        }
+        check_str("undocking", (string) d.status(), "undocking");
+
+        d.undock_complete();
+        check_str("back to discharging", (string) d.status(), "discharging");
+
+        var d2 = @@DockController();
+        d2.battery_low();
+        d2.dock_visible(0.1);
+        d2.dock_lost();
+        check_str("dock lost -> discharging", (string) d2.status(), "discharging");
+
+        var d4 = @@DockController();
+        d4.battery_low();
+        d4.dock_visible(0.1);
+        d4.dock_visible(0.01);
+        d4.contact_made();
+        d4.charging_fault();
+        check_str("charge fault -> failed", (string) d4.status(), "failed");
+        d4.battery_low();
+        check_str("failed re-seeks on battery_low", (string) d4.status(), "seeking");
+
+        Console.WriteLine("PASS: dock_charge");
+    }
+}

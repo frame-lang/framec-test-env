@@ -1,0 +1,168 @@
+@@[target("go")]
+
+package main
+
+import "fmt"
+import "os"
+
+// Cookbook 102: Dock-and-Charge — Negotiated Resource Lifecycle
+
+@@system DockController {
+    interface:
+        BatteryLow()
+        DockVisible(range: float64)
+        DockLost()
+        ContactMade()
+        ChargingStarted()
+        ChargingFault()
+        FullyCharged()
+        UndockComplete()
+        Tick()
+        Status(): string
+        GetBattery(): int
+
+    machine:
+        $Discharging {
+            BatteryLow() {
+                s.align_attempts = 0
+                -> $SeekingDock
+            }
+            Tick() { s.battery_pct = s.battery_pct - 1 }
+            Status(): string { @@:("discharging") }
+            GetBattery(): int { @@:(s.battery_pct) }
+        }
+
+        $DockingFlow {
+            DockLost() { -> $Discharging }
+            GetBattery(): int { @@:(s.battery_pct) }
+        }
+
+        $SeekingDock => $DockingFlow {
+            DockVisible(range: float64) {
+                if range < 0.2 {
+                    -> $Aligning
+                }
+            }
+            Status(): string { @@:("seeking") }
+            => $^
+        }
+
+        $Aligning => $DockingFlow {
+            $>() { s.align_attempts = s.align_attempts + 1 }
+            Tick() {
+                if s.align_attempts >= s.max_align_attempts {
+                    -> $Failed
+                }
+            }
+            DockVisible(range: float64) {
+                if range < 0.05 {
+                    -> $MakingContact
+                }
+            }
+            Status(): string { @@:("aligning") }
+            => $^
+        }
+
+        $MakingContact => $DockingFlow {
+            ContactMade() { -> $VerifyingCharge }
+            Status(): string { @@:("making_contact") }
+            => $^
+        }
+
+        $VerifyingCharge => $DockingFlow {
+            ChargingStarted() { -> $Charging }
+            ChargingFault() { -> $Failed }
+            Status(): string { @@:("verifying_charge") }
+            => $^
+        }
+
+        $Charging {
+            Tick() {
+                s.battery_pct = s.battery_pct + 1
+                if s.battery_pct >= 100 {
+                    -> $Undocking
+                }
+            }
+            FullyCharged() { -> $Undocking }
+            Status(): string { @@:("charging") }
+            GetBattery(): int { @@:(s.battery_pct) }
+        }
+
+        $Undocking {
+            UndockComplete() { -> $Discharging }
+            Status(): string { @@:("undocking") }
+            GetBattery(): int { @@:(s.battery_pct) }
+        }
+
+        $Failed {
+            BatteryLow() {
+                s.align_attempts = 0
+                -> $SeekingDock
+            }
+            Status(): string { @@:("failed") }
+            GetBattery(): int { @@:(s.battery_pct) }
+        }
+
+    domain:
+        battery_pct: int = 50
+        align_attempts: int = 0
+        max_align_attempts: int = 3
+}
+
+func checkStr(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    d := @@DockController()
+    checkStr("discharging", d.Status(), "discharging")
+
+    d.BatteryLow()
+    checkStr("seeking", d.Status(), "seeking")
+
+    d.DockVisible(0.1)
+    checkStr("aligning", d.Status(), "aligning")
+
+    d.DockVisible(0.01)
+    checkStr("contact", d.Status(), "making_contact")
+
+    d.ContactMade()
+    checkStr("verifying", d.Status(), "verifying_charge")
+
+    d.ChargingStarted()
+    checkStr("charging", d.Status(), "charging")
+
+    i := 0
+    for i < 100 {
+        d.Tick()
+        if d.Status() == "undocking" {
+            break
+        }
+        i = i + 1
+    }
+    checkStr("undocking", d.Status(), "undocking")
+
+    d.UndockComplete()
+    checkStr("back to discharging", d.Status(), "discharging")
+
+    d2 := @@DockController()
+    d2.BatteryLow()
+    d2.DockVisible(0.1)
+    d2.DockLost()
+    checkStr("dock lost -> discharging", d2.Status(), "discharging")
+
+    d4 := @@DockController()
+    d4.BatteryLow()
+    d4.DockVisible(0.1)
+    d4.DockVisible(0.01)
+    d4.ContactMade()
+    d4.ChargingFault()
+    checkStr("charge fault -> failed", d4.Status(), "failed")
+    d4.BatteryLow()
+    checkStr("failed re-seeks on battery_low", d4.Status(), "seeking")
+
+    fmt.Println("PASS: dock_charge")
+}
