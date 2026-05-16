@@ -128,6 +128,16 @@ $(foreach lang,$(LANGS),$(eval $(call LANG_TEST_RULE,$(lang))))
 # if you want a different cap.
 MATRIX_JOBS ?= 4
 
+coverage-check:
+	@# Report-only coverage check: every fixture stem under
+	@# tests/common/positive/<cat>/ must have either a real
+	@# `<stem>.f<ext>` file or a `<stem>.f<ext>.skip.md` markdown
+	@# placeholder for each of the 17 backends. Currently a warning
+	@# (does not fail the build); flip to a hard `exit 1` once the
+	@# corpus is fully categorized.
+	@python3 $(TEST_ENV_ROOT)/scripts/check_coverage.py || \
+		echo "(coverage check above is currently advisory — does not fail the build)"
+
 test: $(STAMP_DIR)/framec-native build
 	@echo "=== Running all tests in parallel ($(words $(LANGS)) languages) ==="
 	@# Daemon preflight — fail fast if Docker is wedged before we
@@ -274,5 +284,5 @@ help:
 	@echo "Config:"
 	@echo "  FRAMEPILER_SRC=/path    Framepiler source (default: $(FRAMEPILER_SRC))"
 
-.PHONY: build framec test test-all compile clean clean-cache clean-images rebuild status help
+.PHONY: build framec test test-all compile clean clean-cache clean-images rebuild status help coverage-check
 .PHONY: $(foreach lang,$(LANGS),build-$(lang) test-$(lang) compile-$(lang) shell-$(lang))
