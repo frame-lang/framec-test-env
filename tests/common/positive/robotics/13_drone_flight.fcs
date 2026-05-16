@@ -1,0 +1,245 @@
+@@[target("csharp")]
+
+// Cookbook 108: Drone Flight Modes — Failsafe from Any Phase
+
+using System;
+
+@@system DroneFlightMode {
+    interface:
+        arm(preflight_ok: int)
+        takeoff(altitude: double)
+        set_mission(waypoints_ok: int)
+        return_to_home()
+        land()
+        disarm()
+        takeoff_complete()
+        mission_complete()
+        home_reached()
+        touchdown()
+        battery_critical()
+        gps_lost()
+        rc_lost()
+        geofence_breach()
+        tick()
+        status(): string
+        altitude(): double
+        failsafe_reason(): string
+
+    machine:
+        $Disarmed {
+            arm(preflight_ok: int) {
+                if (preflight_ok == 1) {
+                    -> $Armed
+                }
+            }
+            status(): string { @@:("disarmed") }
+            altitude(): double { @@:(this.current_altitude) }
+            failsafe_reason(): string { @@:(this.reason) }
+        }
+
+        $Armed {
+            takeoff(altitude: double) {
+                this.target_altitude = altitude;
+                -> $TakingOff
+            }
+            disarm() { -> $Disarmed }
+            status(): string { @@:("armed") }
+            altitude(): double { @@:(this.current_altitude) }
+            failsafe_reason(): string { @@:(this.reason) }
+        }
+
+        $Flying {
+            altitude(): double { @@:(this.current_altitude) }
+            failsafe_reason(): string { @@:(this.reason) }
+        }
+
+        $InFlight => $Flying {
+            battery_critical() {
+                this.reason = "battery";
+                -> $EmergencyLand
+            }
+            rc_lost() {
+                this.reason = "rc_lost";
+                -> $ReturningHome
+            }
+            gps_lost() {
+                this.reason = "gps_lost";
+                -> $AltitudeHold
+            }
+            geofence_breach() {
+                this.reason = "geofence";
+                -> $ReturningHome
+            }
+            => $^
+        }
+
+        $TakingOff => $InFlight {
+            $>() { this.current_altitude = 0.0; }
+            tick() {
+                this.current_altitude = this.current_altitude + 1.0;
+                if (this.current_altitude >= this.target_altitude) {
+                    @@:self.takeoff_complete();
+                }
+            }
+            takeoff_complete() { -> $Hovering }
+            status(): string { @@:("taking_off") }
+            => $^
+        }
+
+        $Hovering => $InFlight {
+            set_mission(waypoints_ok: int) {
+                if (waypoints_ok == 1) {
+                    -> $OnMission
+                }
+            }
+            land() { -> $Landing }
+            return_to_home() { -> $ReturningHome }
+            status(): string { @@:("hovering") }
+            => $^
+        }
+
+        $OnMission => $InFlight {
+            mission_complete() { -> $Hovering }
+            return_to_home() { -> $ReturningHome }
+            status(): string { @@:("on_mission") }
+            => $^
+        }
+
+        $ReturningHome => $InFlight {
+            home_reached() { -> $Landing }
+            status(): string { @@:("returning") }
+            => $^
+        }
+
+        $AltitudeHold => $InFlight {
+            status(): string { @@:("altitude_hold") }
+            => $^
+        }
+
+        $Landing {
+            touchdown() {
+                this.current_altitude = 0.0;
+                -> $Armed
+            }
+            status(): string { @@:("landing") }
+            altitude(): double { @@:(this.current_altitude) }
+            failsafe_reason(): string { @@:(this.reason) }
+        }
+
+        $EmergencyLand {
+            touchdown() {
+                this.current_altitude = 0.0;
+                -> $Armed
+            }
+            status(): string { @@:("emergency_land") }
+            altitude(): double { @@:(this.current_altitude) }
+            failsafe_reason(): string { @@:(this.reason) }
+        }
+
+    domain:
+        target_altitude: double = 0.0
+        current_altitude: double = 0.0
+        reason: string = ""
+}
+
+public class Program {
+    static void Check(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+    static void CheckDouble(string label, double actual, double expected) {
+        if (Math.Abs(actual - expected) > 1e-6) {
+            Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}");
+            Environment.Exit(1);
+        }
+    }
+
+    public static void Main() {
+        var d = @@DroneFlightMode();
+        Check("disarmed", (string)d.status(), "disarmed");
+        d.arm(0);
+        Check("preflight fail", (string)d.status(), "disarmed");
+        d.arm(1);
+        Check("armed", (string)d.status(), "armed");
+        d.takeoff(5.0);
+        Check("taking off", (string)d.status(), "taking_off");
+
+        int i = 0;
+        while (i < 10) {
+            d.tick();
+            if ((string)d.status() == "hovering") break;
+            i = i + 1;
+        }
+        Check("hovering", (string)d.status(), "hovering");
+        CheckDouble("at altitude", (double)d.altitude(), 5.0);
+
+        d.set_mission(1);
+        Check("on mission", (string)d.status(), "on_mission");
+        d.mission_complete();
+        Check("back to hovering", (string)d.status(), "hovering");
+
+        d.land();
+        Check("landing", (string)d.status(), "landing");
+        d.touchdown();
+        Check("back to armed", (string)d.status(), "armed");
+
+        var d2 = @@DroneFlightMode();
+        d2.arm(1);
+        d2.takeoff(100.0);
+        d2.battery_critical();
+        Check("battery -> emergency", (string)d2.status(), "emergency_land");
+        Check("battery reason", (string)d2.failsafe_reason(), "battery");
+
+        var d3 = @@DroneFlightMode();
+        d3.arm(1);
+        d3.takeoff(5.0);
+        i = 0;
+        while (i < 10) {
+            d3.tick();
+            if ((string)d3.status() == "hovering") break;
+            i = i + 1;
+        }
+        d3.rc_lost();
+        Check("rc lost -> returning", (string)d3.status(), "returning");
+        d3.home_reached();
+        Check("home reached -> landing", (string)d3.status(), "landing");
+
+        var d4 = @@DroneFlightMode();
+        d4.arm(1);
+        d4.takeoff(5.0);
+        i = 0;
+        while (i < 10) {
+            d4.tick();
+            if ((string)d4.status() == "hovering") break;
+            i = i + 1;
+        }
+        d4.set_mission(1);
+        d4.gps_lost();
+        Check("gps lost -> altitude hold", (string)d4.status(), "altitude_hold");
+
+        var d5 = @@DroneFlightMode();
+        d5.arm(1);
+        d5.takeoff(5.0);
+        i = 0;
+        while (i < 10) {
+            d5.tick();
+            if ((string)d5.status() == "hovering") break;
+            i = i + 1;
+        }
+        d5.set_mission(1);
+        d5.geofence_breach();
+        Check("geofence -> returning", (string)d5.status(), "returning");
+        Check("geofence reason", (string)d5.failsafe_reason(), "geofence");
+
+        var d6 = @@DroneFlightMode();
+        d6.battery_critical();
+        d6.rc_lost();
+        d6.gps_lost();
+        d6.geofence_breach();
+        Check("disarmed ignores failsafes", (string)d6.status(), "disarmed");
+
+        Console.WriteLine("PASS: drone_flight");
+    }
+}
