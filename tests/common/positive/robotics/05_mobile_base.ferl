@@ -1,0 +1,158 @@
+@@[target("erlang")]
+
+%% Cookbook 100: Mobile Base — Teleop/Autonomy + Safety Bumper
+
+@@system MobileBase {
+    interface:
+        set_teleop()
+        set_autonomous()
+        drive(linear: float, angular: float)
+        follow_waypoints(count: int)
+        waypoint_reached()
+        e_stop()
+        clear_e_stop()
+        bumper_hit(side: string)
+        cliff_detected()
+        clear_safety()
+        tick()
+        status(): string
+        get_x(): float
+        get_v(): float
+        get_wp_index(): int
+
+    machine:
+        $TeleopIdle => $Teleop {
+            drive(linear: float, angular: float) {
+                self.v_linear = Linear,
+                self.v_angular = Angular,
+                -> $TeleopDriving
+            }
+            set_autonomous() { -> $AutoIdle }
+            status(): string { @@:("teleop_idle") }
+            => $^
+        }
+
+        $Safety {
+            get_x(): float { @@:(self.pos_x) }
+            get_v(): float { @@:(self.v_linear) }
+            get_wp_index(): int { @@:(self.wp_index) }
+        }
+
+        $Operational => $Safety {
+            e_stop() {
+                self.v_linear = 0.0,
+                self.v_angular = 0.0,
+                -> $EStopped
+            }
+            bumper_hit(side: string) {
+                self.v_linear = 0.0,
+                self.v_angular = 0.0,
+                self.safety_reason = "bumper",
+                -> $ProtectiveStop
+            }
+            cliff_detected() {
+                self.v_linear = 0.0,
+                self.v_angular = 0.0,
+                self.safety_reason = "cliff",
+                -> $ProtectiveStop
+            }
+            => $^
+        }
+
+        $EStopped {
+            clear_e_stop() { -> $TeleopIdle }
+            status(): string { @@:("e_stop") }
+            get_x(): float { @@:(self.pos_x) }
+            get_v(): float { @@:(self.v_linear) }
+            get_wp_index(): int { @@:(self.wp_index) }
+        }
+
+        $ProtectiveStop {
+            clear_safety() {
+                self.safety_reason = "",
+                -> $TeleopIdle
+            }
+            status(): string { @@:("protective_stop") }
+            get_x(): float { @@:(self.pos_x) }
+            get_v(): float { @@:(self.v_linear) }
+            get_wp_index(): int { @@:(self.wp_index) }
+        }
+
+        $Teleop => $Operational {
+            follow_waypoints(count: int) { ok }
+            => $^
+        }
+
+        $TeleopDriving => $Teleop {
+            $>() {
+                case self.v_linear > self.teleop_speed_limit of
+                    true -> self.v_linear = self.teleop_speed_limit;
+                    false -> ok
+                end
+            }
+            drive(linear: float, angular: float) {
+                case (Linear == 0.0) andalso (Angular == 0.0) of
+                    true ->
+                        self.v_linear = 0.0,
+                        self.v_angular = 0.0,
+                        -> $TeleopIdle;
+                    false ->
+                        self.v_linear = Linear,
+                        self.v_angular = Angular
+                end
+            }
+            tick() {
+                self.pos_x = self.pos_x + self.v_linear * 0.1
+            }
+            status(): string { @@:("teleop_driving") }
+            => $^
+        }
+
+        $Auto => $Operational {
+            drive(linear: float, angular: float) { ok }
+            set_teleop() { -> $TeleopIdle }
+            => $^
+        }
+
+        $AutoIdle => $Auto {
+            follow_waypoints(count: int) {
+                self.wp_count = Count,
+                self.wp_index = 0,
+                -> $AutoDriving
+            }
+            status(): string { @@:("auto_idle") }
+            => $^
+        }
+
+        $AutoDriving => $Auto {
+            $>() {
+                case self.wp_index >= self.wp_count of
+                    true -> -> $AutoIdle;
+                    false -> self.v_linear = self.auto_speed_limit
+                end
+            }
+            tick() {
+                self.pos_x = self.pos_x + self.v_linear * 0.1,
+                case self.pos_x >= (self.wp_index + 1) * 5.0 of
+                    true -> @@:self.waypoint_reached();
+                    false -> ok
+                end
+            }
+            waypoint_reached() {
+                self.wp_index = self.wp_index + 1,
+                -> $AutoDriving
+            }
+            status(): string { @@:("auto_driving") }
+            => $^
+        }
+
+    domain:
+        pos_x: float = 0.0
+        v_linear: float = 0.0
+        v_angular: float = 0.0
+        teleop_speed_limit: float = 0.5
+        auto_speed_limit: float = 1.0
+        wp_count: int = 0
+        wp_index: int = 0
+        safety_reason: string = ""
+}
