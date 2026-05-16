@@ -1,0 +1,220 @@
+@@[target("go")]
+
+package main
+
+import "fmt"
+import "os"
+
+// Cookbook 104: Pick-and-Place with Vision Retry
+
+@@system PickPlace {
+    interface:
+        StartTask(place_x: float64, place_y: float64)
+        VisionResult(detections: int)
+        GraspPlanReady()
+        GraspPlanFailed()
+        GripperClosed()
+        GripperReleased()
+        AtWaypoint()
+        SlipDetected()
+        Abort()
+        Status(): string
+        GetVisionRetries(): int
+        GetGraspRetries(): int
+
+    machine:
+        $Idle {
+            StartTask(place_x: float64, place_y: float64) {
+                s.place_x = place_x
+                s.place_y = place_y
+                s.vision_retries = 0
+                s.grasp_retries = 0
+                -> $Scanning
+            }
+            Status(): string { @@:("idle") }
+            GetVisionRetries(): int { @@:(s.vision_retries) }
+            GetGraspRetries(): int { @@:(s.grasp_retries) }
+        }
+
+        $Task {
+            Abort() { -> $Aborted }
+            GetVisionRetries(): int { @@:(s.vision_retries) }
+            GetGraspRetries(): int { @@:(s.grasp_retries) }
+        }
+
+        $Scanning => $Task {
+            $>() { s.vision_retries = s.vision_retries + 1 }
+            VisionResult(detections: int) {
+                if detections == 0 {
+                    if s.vision_retries >= s.max_vision_retries {
+                        -> $Failed
+                    } else {
+                        -> $Scanning
+                    }
+                } else {
+                    -> $PlanningGrasp
+                }
+            }
+            Status(): string { @@:("scanning") }
+            => $^
+        }
+
+        $PlanningGrasp => $Task {
+            $>() { s.grasp_retries = s.grasp_retries + 1 }
+            GraspPlanReady() { -> $Approaching }
+            GraspPlanFailed() {
+                if s.grasp_retries >= s.max_grasp_retries {
+                    s.grasp_retries = 0
+                    -> $Scanning
+                } else {
+                    -> $PlanningGrasp
+                }
+            }
+            Status(): string { @@:("planning_grasp") }
+            => $^
+        }
+
+        $Approaching => $Task {
+            AtWaypoint() { -> $Grasping }
+            Status(): string { @@:("approaching") }
+            => $^
+        }
+
+        $Grasping => $Task {
+            GripperClosed() { -> $Lifting }
+            Status(): string { @@:("grasping") }
+            => $^
+        }
+
+        $Lifting => $Task {
+            AtWaypoint() { -> $MovingToPlace }
+            SlipDetected() {
+                s.grasp_retries = 0
+                -> $Scanning
+            }
+            Status(): string { @@:("lifting") }
+            => $^
+        }
+
+        $MovingToPlace => $Task {
+            AtWaypoint() { -> $Placing }
+            SlipDetected() {
+                s.grasp_retries = 0
+                -> $Scanning
+            }
+            Status(): string { @@:("moving_to_place") }
+            => $^
+        }
+
+        $Placing => $Task {
+            GripperReleased() { -> $Idle }
+            Status(): string { @@:("placing") }
+            => $^
+        }
+
+        $Aborted {
+            StartTask(place_x: float64, place_y: float64) {
+                s.place_x = place_x
+                s.place_y = place_y
+                s.vision_retries = 0
+                s.grasp_retries = 0
+                -> $Scanning
+            }
+            Status(): string { @@:("aborted") }
+            GetVisionRetries(): int { @@:(s.vision_retries) }
+            GetGraspRetries(): int { @@:(s.grasp_retries) }
+        }
+
+        $Failed {
+            StartTask(place_x: float64, place_y: float64) {
+                s.place_x = place_x
+                s.place_y = place_y
+                s.vision_retries = 0
+                s.grasp_retries = 0
+                -> $Scanning
+            }
+            Status(): string { @@:("failed") }
+            GetVisionRetries(): int { @@:(s.vision_retries) }
+            GetGraspRetries(): int { @@:(s.grasp_retries) }
+        }
+
+    domain:
+        place_x: float64 = 0.0
+        place_y: float64 = 0.0
+        vision_retries: int = 0
+        grasp_retries: int = 0
+        max_vision_retries: int = 3
+        max_grasp_retries: int = 2
+}
+
+func checkStr(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+func checkInt(label string, actual, expected int) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected %d, got %d\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    p := @@PickPlace()
+    p.StartTask(1.0, 2.0)
+    checkStr("scanning", p.Status(), "scanning")
+    p.VisionResult(1)
+    checkStr("planning", p.Status(), "planning_grasp")
+    p.GraspPlanReady()
+    checkStr("approaching", p.Status(), "approaching")
+    p.AtWaypoint()
+    checkStr("grasping", p.Status(), "grasping")
+    p.GripperClosed()
+    checkStr("lifting", p.Status(), "lifting")
+    p.AtWaypoint()
+    checkStr("moving", p.Status(), "moving_to_place")
+    p.AtWaypoint()
+    checkStr("placing", p.Status(), "placing")
+    p.GripperReleased()
+    checkStr("back to idle", p.Status(), "idle")
+
+    p2 := @@PickPlace()
+    p2.StartTask(1.0, 2.0)
+    p2.VisionResult(0)
+    checkStr("retry scanning", p2.Status(), "scanning")
+    checkInt("retry 2", p2.GetVisionRetries(), 2)
+    p2.VisionResult(0)
+    p2.VisionResult(0)
+    checkStr("vision exhausted -> failed", p2.Status(), "failed")
+
+    p3 := @@PickPlace()
+    p3.StartTask(1.0, 2.0)
+    p3.VisionResult(1)
+    p3.GraspPlanFailed()
+    checkStr("grasp retry", p3.Status(), "planning_grasp")
+    checkInt("grasp attempt 2", p3.GetGraspRetries(), 2)
+    p3.GraspPlanFailed()
+    checkStr("grasp exhausted -> rescan", p3.Status(), "scanning")
+    checkInt("grasp retries cleared on rescan", p3.GetGraspRetries(), 0)
+
+    p4 := @@PickPlace()
+    p4.StartTask(1.0, 2.0)
+    p4.VisionResult(1)
+    p4.GraspPlanReady()
+    p4.AtWaypoint()
+    p4.GripperClosed()
+    p4.SlipDetected()
+    checkStr("slip -> scanning", p4.Status(), "scanning")
+
+    p5 := @@PickPlace()
+    p5.StartTask(1.0, 2.0)
+    p5.VisionResult(1)
+    p5.Abort()
+    checkStr("abort -> aborted", p5.Status(), "aborted")
+
+    p5.StartTask(3.0, 4.0)
+    checkStr("aborted restart -> scanning", p5.Status(), "scanning")
+
+    fmt.Println("PASS: pick_place")
+}

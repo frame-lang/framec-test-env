@@ -1,0 +1,214 @@
+@@[target("php")]
+
+// Cookbook 104: Pick-and-Place with Vision Retry
+
+@@system PickPlace {
+    interface:
+        start_task(place_x: float, place_y: float)
+        vision_result(detections: int)
+        grasp_plan_ready()
+        grasp_plan_failed()
+        gripper_closed()
+        gripper_released()
+        at_waypoint()
+        slip_detected()
+        abort()
+        status(): str
+        get_vision_retries(): int
+        get_grasp_retries(): int
+
+    machine:
+        $Idle {
+            start_task(place_x: float, place_y: float) {
+                $this->place_x = $place_x;
+                $this->place_y = $place_y;
+                $this->vision_retries = 0;
+                $this->grasp_retries = 0;
+                -> $Scanning
+            }
+            status(): str { @@:("idle") }
+            get_vision_retries(): int { @@:($this->vision_retries) }
+            get_grasp_retries(): int { @@:($this->grasp_retries) }
+        }
+
+        $Task {
+            abort() { -> $Aborted }
+            get_vision_retries(): int { @@:($this->vision_retries) }
+            get_grasp_retries(): int { @@:($this->grasp_retries) }
+        }
+
+        $Scanning => $Task {
+            $>() { $this->vision_retries = $this->vision_retries + 1; }
+            vision_result(detections: int) {
+                if ($detections == 0) {
+                    if ($this->vision_retries >= $this->max_vision_retries) {
+                        -> $Failed
+                    } else {
+                        -> $Scanning
+                    }
+                } else {
+                    -> $PlanningGrasp
+                }
+            }
+            status(): str { @@:("scanning") }
+            => $^
+        }
+
+        $PlanningGrasp => $Task {
+            $>() { $this->grasp_retries = $this->grasp_retries + 1; }
+            grasp_plan_ready() { -> $Approaching }
+            grasp_plan_failed() {
+                if ($this->grasp_retries >= $this->max_grasp_retries) {
+                    $this->grasp_retries = 0;
+                    -> $Scanning
+                } else {
+                    -> $PlanningGrasp
+                }
+            }
+            status(): str { @@:("planning_grasp") }
+            => $^
+        }
+
+        $Approaching => $Task {
+            at_waypoint() { -> $Grasping }
+            status(): str { @@:("approaching") }
+            => $^
+        }
+
+        $Grasping => $Task {
+            gripper_closed() { -> $Lifting }
+            status(): str { @@:("grasping") }
+            => $^
+        }
+
+        $Lifting => $Task {
+            at_waypoint() { -> $MovingToPlace }
+            slip_detected() {
+                $this->grasp_retries = 0;
+                -> $Scanning
+            }
+            status(): str { @@:("lifting") }
+            => $^
+        }
+
+        $MovingToPlace => $Task {
+            at_waypoint() { -> $Placing }
+            slip_detected() {
+                $this->grasp_retries = 0;
+                -> $Scanning
+            }
+            status(): str { @@:("moving_to_place") }
+            => $^
+        }
+
+        $Placing => $Task {
+            gripper_released() { -> $Idle }
+            status(): str { @@:("placing") }
+            => $^
+        }
+
+        $Aborted {
+            start_task(place_x: float, place_y: float) {
+                $this->place_x = $place_x;
+                $this->place_y = $place_y;
+                $this->vision_retries = 0;
+                $this->grasp_retries = 0;
+                -> $Scanning
+            }
+            status(): str { @@:("aborted") }
+            get_vision_retries(): int { @@:($this->vision_retries) }
+            get_grasp_retries(): int { @@:($this->grasp_retries) }
+        }
+
+        $Failed {
+            start_task(place_x: float, place_y: float) {
+                $this->place_x = $place_x;
+                $this->place_y = $place_y;
+                $this->vision_retries = 0;
+                $this->grasp_retries = 0;
+                -> $Scanning
+            }
+            status(): str { @@:("failed") }
+            get_vision_retries(): int { @@:($this->vision_retries) }
+            get_grasp_retries(): int { @@:($this->grasp_retries) }
+        }
+
+    domain:
+        place_x = 0.0
+        place_y = 0.0
+        vision_retries = 0
+        grasp_retries = 0
+        max_vision_retries = 3
+        max_grasp_retries = 2
+}
+
+
+function check_str($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label expected '$expected', got '$actual'\n";
+        exit(1);
+    }
+}
+function check_int($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label expected $expected, got $actual\n";
+        exit(1);
+    }
+}
+
+$p = @@PickPlace();
+$p->start_task(1.0, 2.0);
+check_str("scanning", $p->status(), "scanning");
+$p->vision_result(1);
+check_str("planning", $p->status(), "planning_grasp");
+$p->grasp_plan_ready();
+check_str("approaching", $p->status(), "approaching");
+$p->at_waypoint();
+check_str("grasping", $p->status(), "grasping");
+$p->gripper_closed();
+check_str("lifting", $p->status(), "lifting");
+$p->at_waypoint();
+check_str("moving", $p->status(), "moving_to_place");
+$p->at_waypoint();
+check_str("placing", $p->status(), "placing");
+$p->gripper_released();
+check_str("back to idle", $p->status(), "idle");
+
+$p2 = @@PickPlace();
+$p2->start_task(1.0, 2.0);
+$p2->vision_result(0);
+check_str("retry scanning", $p2->status(), "scanning");
+check_int("retry 2", $p2->get_vision_retries(), 2);
+$p2->vision_result(0);
+$p2->vision_result(0);
+check_str("vision exhausted -> failed", $p2->status(), "failed");
+
+$p3 = @@PickPlace();
+$p3->start_task(1.0, 2.0);
+$p3->vision_result(1);
+$p3->grasp_plan_failed();
+check_str("grasp retry", $p3->status(), "planning_grasp");
+check_int("grasp attempt 2", $p3->get_grasp_retries(), 2);
+$p3->grasp_plan_failed();
+check_str("grasp exhausted -> rescan", $p3->status(), "scanning");
+check_int("grasp retries cleared on rescan", $p3->get_grasp_retries(), 0);
+
+$p4 = @@PickPlace();
+$p4->start_task(1.0, 2.0);
+$p4->vision_result(1);
+$p4->grasp_plan_ready();
+$p4->at_waypoint();
+$p4->gripper_closed();
+$p4->slip_detected();
+check_str("slip -> scanning", $p4->status(), "scanning");
+
+$p5 = @@PickPlace();
+$p5->start_task(1.0, 2.0);
+$p5->vision_result(1);
+$p5->abort();
+check_str("abort -> aborted", $p5->status(), "aborted");
+
+$p5->start_task(3.0, 4.0);
+check_str("aborted restart -> scanning", $p5->status(), "scanning");
+
+echo "PASS: pick_place\n";

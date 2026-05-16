@@ -1,0 +1,214 @@
+@@[target("javascript")]
+
+// Cookbook 104: Pick-and-Place with Vision Retry
+
+@@system PickPlace {
+    interface:
+        start_task(place_x, place_y)
+        vision_result(detections)
+        grasp_plan_ready()
+        grasp_plan_failed()
+        gripper_closed()
+        gripper_released()
+        at_waypoint()
+        slip_detected()
+        abort()
+        status()
+        get_vision_retries()
+        get_grasp_retries()
+
+    machine:
+        $Idle {
+            start_task(place_x, place_y) {
+                this.place_x = place_x;
+                this.place_y = place_y;
+                this.vision_retries = 0;
+                this.grasp_retries = 0;
+                -> $Scanning
+            }
+            status() { @@:("idle") }
+            get_vision_retries() { @@:(this.vision_retries) }
+            get_grasp_retries() { @@:(this.grasp_retries) }
+        }
+
+        $Task {
+            abort() { -> $Aborted }
+            get_vision_retries() { @@:(this.vision_retries) }
+            get_grasp_retries() { @@:(this.grasp_retries) }
+        }
+
+        $Scanning => $Task {
+            $>() { this.vision_retries = this.vision_retries + 1; }
+            vision_result(detections) {
+                if (detections === 0) {
+                    if (this.vision_retries >= this.max_vision_retries) {
+                        -> $Failed
+                    } else {
+                        -> $Scanning
+                    }
+                } else {
+                    -> $PlanningGrasp
+                }
+            }
+            status() { @@:("scanning") }
+            => $^
+        }
+
+        $PlanningGrasp => $Task {
+            $>() { this.grasp_retries = this.grasp_retries + 1; }
+            grasp_plan_ready() { -> $Approaching }
+            grasp_plan_failed() {
+                if (this.grasp_retries >= this.max_grasp_retries) {
+                    this.grasp_retries = 0;
+                    -> $Scanning
+                } else {
+                    -> $PlanningGrasp
+                }
+            }
+            status() { @@:("planning_grasp") }
+            => $^
+        }
+
+        $Approaching => $Task {
+            at_waypoint() { -> $Grasping }
+            status() { @@:("approaching") }
+            => $^
+        }
+
+        $Grasping => $Task {
+            gripper_closed() { -> $Lifting }
+            status() { @@:("grasping") }
+            => $^
+        }
+
+        $Lifting => $Task {
+            at_waypoint() { -> $MovingToPlace }
+            slip_detected() {
+                this.grasp_retries = 0;
+                -> $Scanning
+            }
+            status() { @@:("lifting") }
+            => $^
+        }
+
+        $MovingToPlace => $Task {
+            at_waypoint() { -> $Placing }
+            slip_detected() {
+                this.grasp_retries = 0;
+                -> $Scanning
+            }
+            status() { @@:("moving_to_place") }
+            => $^
+        }
+
+        $Placing => $Task {
+            gripper_released() { -> $Idle }
+            status() { @@:("placing") }
+            => $^
+        }
+
+        $Aborted {
+            start_task(place_x, place_y) {
+                this.place_x = place_x;
+                this.place_y = place_y;
+                this.vision_retries = 0;
+                this.grasp_retries = 0;
+                -> $Scanning
+            }
+            status() { @@:("aborted") }
+            get_vision_retries() { @@:(this.vision_retries) }
+            get_grasp_retries() { @@:(this.grasp_retries) }
+        }
+
+        $Failed {
+            start_task(place_x, place_y) {
+                this.place_x = place_x;
+                this.place_y = place_y;
+                this.vision_retries = 0;
+                this.grasp_retries = 0;
+                -> $Scanning
+            }
+            status() { @@:("failed") }
+            get_vision_retries() { @@:(this.vision_retries) }
+            get_grasp_retries() { @@:(this.grasp_retries) }
+        }
+
+    domain:
+        place_x = 0.0
+        place_y = 0.0
+        vision_retries = 0
+        grasp_retries = 0
+        max_vision_retries = 3
+        max_grasp_retries = 2
+}
+
+
+function checkStr(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+        process.exit(1);
+    }
+}
+function checkInt(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected " + expected + ", got " + actual);
+        process.exit(1);
+    }
+}
+
+const p = @@PickPlace();
+p.start_task(1.0, 2.0);
+checkStr("scanning", p.status(), "scanning");
+p.vision_result(1);
+checkStr("planning", p.status(), "planning_grasp");
+p.grasp_plan_ready();
+checkStr("approaching", p.status(), "approaching");
+p.at_waypoint();
+checkStr("grasping", p.status(), "grasping");
+p.gripper_closed();
+checkStr("lifting", p.status(), "lifting");
+p.at_waypoint();
+checkStr("moving", p.status(), "moving_to_place");
+p.at_waypoint();
+checkStr("placing", p.status(), "placing");
+p.gripper_released();
+checkStr("back to idle", p.status(), "idle");
+
+const p2 = @@PickPlace();
+p2.start_task(1.0, 2.0);
+p2.vision_result(0);
+checkStr("retry scanning", p2.status(), "scanning");
+checkInt("retry 2", p2.get_vision_retries(), 2);
+p2.vision_result(0);
+p2.vision_result(0);
+checkStr("vision exhausted -> failed", p2.status(), "failed");
+
+const p3 = @@PickPlace();
+p3.start_task(1.0, 2.0);
+p3.vision_result(1);
+p3.grasp_plan_failed();
+checkStr("grasp retry", p3.status(), "planning_grasp");
+checkInt("grasp attempt 2", p3.get_grasp_retries(), 2);
+p3.grasp_plan_failed();
+checkStr("grasp exhausted -> rescan", p3.status(), "scanning");
+checkInt("grasp retries cleared on rescan", p3.get_grasp_retries(), 0);
+
+const p4 = @@PickPlace();
+p4.start_task(1.0, 2.0);
+p4.vision_result(1);
+p4.grasp_plan_ready();
+p4.at_waypoint();
+p4.gripper_closed();
+p4.slip_detected();
+checkStr("slip -> scanning", p4.status(), "scanning");
+
+const p5 = @@PickPlace();
+p5.start_task(1.0, 2.0);
+p5.vision_result(1);
+p5.abort();
+checkStr("abort -> aborted", p5.status(), "aborted");
+
+p5.start_task(3.0, 4.0);
+checkStr("aborted restart -> scanning", p5.status(), "scanning");
+
+console.log("PASS: pick_place");

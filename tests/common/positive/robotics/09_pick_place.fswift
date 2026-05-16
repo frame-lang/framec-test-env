@@ -1,0 +1,216 @@
+@@[target("swift")]
+
+import Foundation
+
+// Cookbook 104: Pick-and-Place with Vision Retry
+
+@@system PickPlace {
+    interface:
+        start_task(place_x: Double, place_y: Double)
+        vision_result(detections: Int)
+        grasp_plan_ready()
+        grasp_plan_failed()
+        gripper_closed()
+        gripper_released()
+        at_waypoint()
+        slip_detected()
+        abort()
+        status(): String
+        get_vision_retries(): Int
+        get_grasp_retries(): Int
+
+    machine:
+        $Idle {
+            start_task(place_x: Double, place_y: Double) {
+                self.place_x = place_x
+                self.place_y = place_y
+                self.vision_retries = 0
+                self.grasp_retries = 0
+                -> $Scanning
+            }
+            status(): String { @@:("idle") }
+            get_vision_retries(): Int { @@:(self.vision_retries) }
+            get_grasp_retries(): Int { @@:(self.grasp_retries) }
+        }
+
+        $Task {
+            abort() { -> $Aborted }
+            get_vision_retries(): Int { @@:(self.vision_retries) }
+            get_grasp_retries(): Int { @@:(self.grasp_retries) }
+        }
+
+        $Scanning => $Task {
+            $>() { self.vision_retries = self.vision_retries + 1 }
+            vision_result(detections: Int) {
+                if detections == 0 {
+                    if self.vision_retries >= self.max_vision_retries {
+                        -> $Failed
+                    } else {
+                        -> $Scanning
+                    }
+                } else {
+                    -> $PlanningGrasp
+                }
+            }
+            status(): String { @@:("scanning") }
+            => $^
+        }
+
+        $PlanningGrasp => $Task {
+            $>() { self.grasp_retries = self.grasp_retries + 1 }
+            grasp_plan_ready() { -> $Approaching }
+            grasp_plan_failed() {
+                if self.grasp_retries >= self.max_grasp_retries {
+                    self.grasp_retries = 0
+                    -> $Scanning
+                } else {
+                    -> $PlanningGrasp
+                }
+            }
+            status(): String { @@:("planning_grasp") }
+            => $^
+        }
+
+        $Approaching => $Task {
+            at_waypoint() { -> $Grasping }
+            status(): String { @@:("approaching") }
+            => $^
+        }
+
+        $Grasping => $Task {
+            gripper_closed() { -> $Lifting }
+            status(): String { @@:("grasping") }
+            => $^
+        }
+
+        $Lifting => $Task {
+            at_waypoint() { -> $MovingToPlace }
+            slip_detected() {
+                self.grasp_retries = 0
+                -> $Scanning
+            }
+            status(): String { @@:("lifting") }
+            => $^
+        }
+
+        $MovingToPlace => $Task {
+            at_waypoint() { -> $Placing }
+            slip_detected() {
+                self.grasp_retries = 0
+                -> $Scanning
+            }
+            status(): String { @@:("moving_to_place") }
+            => $^
+        }
+
+        $Placing => $Task {
+            gripper_released() { -> $Idle }
+            status(): String { @@:("placing") }
+            => $^
+        }
+
+        $Aborted {
+            start_task(place_x: Double, place_y: Double) {
+                self.place_x = place_x
+                self.place_y = place_y
+                self.vision_retries = 0
+                self.grasp_retries = 0
+                -> $Scanning
+            }
+            status(): String { @@:("aborted") }
+            get_vision_retries(): Int { @@:(self.vision_retries) }
+            get_grasp_retries(): Int { @@:(self.grasp_retries) }
+        }
+
+        $Failed {
+            start_task(place_x: Double, place_y: Double) {
+                self.place_x = place_x
+                self.place_y = place_y
+                self.vision_retries = 0
+                self.grasp_retries = 0
+                -> $Scanning
+            }
+            status(): String { @@:("failed") }
+            get_vision_retries(): Int { @@:(self.vision_retries) }
+            get_grasp_retries(): Int { @@:(self.grasp_retries) }
+        }
+
+    domain:
+        place_x: Double = 0.0
+        place_y: Double = 0.0
+        vision_retries: Int = 0
+        grasp_retries: Int = 0
+        max_vision_retries: Int = 3
+        max_grasp_retries: Int = 2
+}
+
+
+func checkStr(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+func checkInt(_ label: String, _ actual: Int, _ expected: Int) {
+    if actual != expected {
+        print("FAIL: \(label) expected \(expected), got \(actual)")
+        exit(1)
+    }
+}
+
+let p = @@PickPlace()
+p.start_task(1.0, 2.0)
+checkStr("scanning", p.status(), "scanning")
+p.vision_result(1)
+checkStr("planning", p.status(), "planning_grasp")
+p.grasp_plan_ready()
+checkStr("approaching", p.status(), "approaching")
+p.at_waypoint()
+checkStr("grasping", p.status(), "grasping")
+p.gripper_closed()
+checkStr("lifting", p.status(), "lifting")
+p.at_waypoint()
+checkStr("moving", p.status(), "moving_to_place")
+p.at_waypoint()
+checkStr("placing", p.status(), "placing")
+p.gripper_released()
+checkStr("back to idle", p.status(), "idle")
+
+let p2 = @@PickPlace()
+p2.start_task(1.0, 2.0)
+p2.vision_result(0)
+checkStr("retry scanning", p2.status(), "scanning")
+checkInt("retry 2", p2.get_vision_retries(), 2)
+p2.vision_result(0)
+p2.vision_result(0)
+checkStr("vision exhausted -> failed", p2.status(), "failed")
+
+let p3 = @@PickPlace()
+p3.start_task(1.0, 2.0)
+p3.vision_result(1)
+p3.grasp_plan_failed()
+checkStr("grasp retry", p3.status(), "planning_grasp")
+checkInt("grasp attempt 2", p3.get_grasp_retries(), 2)
+p3.grasp_plan_failed()
+checkStr("grasp exhausted -> rescan", p3.status(), "scanning")
+checkInt("grasp retries cleared on rescan", p3.get_grasp_retries(), 0)
+
+let p4 = @@PickPlace()
+p4.start_task(1.0, 2.0)
+p4.vision_result(1)
+p4.grasp_plan_ready()
+p4.at_waypoint()
+p4.gripper_closed()
+p4.slip_detected()
+checkStr("slip -> scanning", p4.status(), "scanning")
+
+let p5 = @@PickPlace()
+p5.start_task(1.0, 2.0)
+p5.vision_result(1)
+p5.abort()
+checkStr("abort -> aborted", p5.status(), "aborted")
+
+p5.start_task(3.0, 4.0)
+checkStr("aborted restart -> scanning", p5.status(), "scanning")
+
+print("PASS: pick_place")
