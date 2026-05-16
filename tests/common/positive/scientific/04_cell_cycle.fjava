@@ -1,0 +1,133 @@
+@@[target("java")]
+
+// Cookbook 75: Cell Cycle with Checkpoints
+
+@@system CellCycle {
+    interface:
+        tick()
+        dna_damage_detected()
+        damage_repaired()
+        nutrients_low()
+        nutrients_restored()
+        spindle_misaligned()
+        spindle_aligned()
+        apoptosis_signal()
+        phase(): String
+
+    machine:
+        $G1 => $Cycling {
+            $>() { this.mass = this.mass * 1.1; }
+            tick() {
+                if (this.mass >= this.g1_threshold) {
+                    -> $S
+                }
+            }
+            phase(): String { @@:("G1") }
+            => $^
+        }
+
+        $S => $Cycling {
+            $>() { this.dna_content = 1.0; }
+            tick() {
+                this.dna_content = this.dna_content + 0.1;
+                if (this.dna_content >= 2.0) {
+                    this.dna_content = 2.0;
+                    -> $G2
+                }
+            }
+            phase(): String { @@:("S") }
+            => $^
+        }
+
+        $G2 => $Cycling {
+            tick() {
+                this.g2_counter = this.g2_counter + 1;
+                if (this.g2_counter >= 3) {
+                    this.g2_counter = 0;
+                    -> $M
+                }
+            }
+            phase(): String { @@:("G2") }
+            => $^
+        }
+
+        $M => $Cycling {
+            tick() {
+                this.mass = this.mass / 2.0;
+                this.dna_content = 1.0;
+                -> $G1
+            }
+            spindle_misaligned() { -> $M_Arrested }
+            phase(): String { @@:("M") }
+            => $^
+        }
+
+        $Cycling {
+            dna_damage_detected() { -> $G1_Arrested }
+            nutrients_low() { -> $G0_Quiescent }
+            apoptosis_signal() { -> $Apoptotic }
+        }
+
+        $G1_Arrested {
+            damage_repaired() { -> $G1 }
+            apoptosis_signal() { -> $Apoptotic }
+            phase(): String { @@:("G1-arrested") }
+        }
+
+        $M_Arrested {
+            spindle_aligned() { -> $M }
+            apoptosis_signal() { -> $Apoptotic }
+            phase(): String { @@:("M-arrested") }
+        }
+
+        $G0_Quiescent {
+            nutrients_restored() { -> $G1 }
+            phase(): String { @@:("G0") }
+        }
+
+        $Apoptotic {
+            phase(): String { @@:("apoptotic") }
+        }
+
+    domain:
+        mass: double = 1.0
+        g1_threshold: double = 1.8
+        dna_content: double = 1.0
+        g2_counter: int = 0
+}
+
+public class CellCycle04Test {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+
+    public static void main(String[] args) {
+        CellCycle c = @@CellCycle();
+        check("initial G1", (String) c.phase(), "G1");
+        c.dna_damage_detected();
+        check("arrested on damage", (String) c.phase(), "G1-arrested");
+        c.tick();
+        check("tick while arrested is a no-op", (String) c.phase(), "G1-arrested");
+        c.damage_repaired();
+        check("repaired -> G1", (String) c.phase(), "G1");
+        c.nutrients_low();
+        check("quiescent on starve", (String) c.phase(), "G0");
+        c.nutrients_restored();
+        check("nourished -> G1", (String) c.phase(), "G1");
+        c.apoptosis_signal();
+        check("apoptotic", (String) c.phase(), "apoptotic");
+        c.tick();
+        c.nutrients_restored();
+        c.damage_repaired();
+        check("apoptotic absorbs everything", (String) c.phase(), "apoptotic");
+
+        CellCycle c2 = @@CellCycle();
+        c2.spindle_misaligned();
+        check("spindle signal in G1 ignored", (String) c2.phase(), "G1");
+
+        System.out.println("PASS: cell_cycle");
+    }
+}
