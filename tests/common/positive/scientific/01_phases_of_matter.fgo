@@ -1,0 +1,163 @@
+@@[target("go")]
+
+// Cookbook 72: Phases of Matter
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system Substance(melting_point: float64, boiling_point: float64, ionization_point: float64) {
+    interface:
+        add_heat(joules: float64)
+        remove_heat(joules: float64)
+        temperature(): float64
+        phase(): string
+
+    machine:
+        $Solid {
+            add_heat(joules: float64) {
+                s.temp = s.temp + joules / s.heat_capacity
+                if s.temp >= s.mp {
+                    s.temp = s.mp
+                    s.latent_absorbed = 0.0
+                    -> $Melting
+                }
+            }
+            remove_heat(joules: float64) {
+                s.temp = s.temp - joules / s.heat_capacity
+            }
+            temperature(): float64 { @@:(s.temp) }
+            phase(): string { @@:("solid") }
+        }
+
+        $Melting {
+            add_heat(joules: float64) {
+                s.latent_absorbed = s.latent_absorbed + joules
+                if s.latent_absorbed >= s.latent_fusion {
+                    -> $Liquid
+                }
+            }
+            remove_heat(joules: float64) {
+                s.latent_absorbed = s.latent_absorbed - joules
+                if s.latent_absorbed <= 0.0 {
+                    -> $Solid
+                }
+            }
+            temperature(): float64 { @@:(s.mp) }
+            phase(): string { @@:("melting") }
+        }
+
+        $Liquid {
+            add_heat(joules: float64) {
+                s.temp = s.temp + joules / s.heat_capacity
+                if s.temp >= s.bp {
+                    s.temp = s.bp
+                    s.latent_absorbed = 0.0
+                    -> $Boiling
+                }
+            }
+            remove_heat(joules: float64) {
+                s.temp = s.temp - joules / s.heat_capacity
+                if s.temp <= s.mp {
+                    s.temp = s.mp
+                    s.latent_absorbed = s.latent_fusion
+                    -> $Melting
+                }
+            }
+            temperature(): float64 { @@:(s.temp) }
+            phase(): string { @@:("liquid") }
+        }
+
+        $Boiling {
+            add_heat(joules: float64) {
+                s.latent_absorbed = s.latent_absorbed + joules
+                if s.latent_absorbed >= s.latent_vaporization {
+                    -> $Gas
+                }
+            }
+            remove_heat(joules: float64) {
+                s.latent_absorbed = s.latent_absorbed - joules
+                if s.latent_absorbed <= 0.0 {
+                    -> $Liquid
+                }
+            }
+            temperature(): float64 { @@:(s.bp) }
+            phase(): string { @@:("boiling") }
+        }
+
+        $Gas {
+            add_heat(joules: float64) {
+                s.temp = s.temp + joules / s.heat_capacity
+                if s.temp >= s.ip {
+                    -> $Plasma
+                }
+            }
+            remove_heat(joules: float64) {
+                s.temp = s.temp - joules / s.heat_capacity
+                if s.temp <= s.bp {
+                    s.temp = s.bp
+                    s.latent_absorbed = s.latent_vaporization
+                    -> $Boiling
+                }
+            }
+            temperature(): float64 { @@:(s.temp) }
+            phase(): string { @@:("gas") }
+        }
+
+        $Plasma {
+            remove_heat(joules: float64) {
+                s.temp = s.temp - joules / s.heat_capacity
+                if s.temp <= s.ip {
+                    -> $Gas
+                }
+            }
+            temperature(): float64 { @@:(s.temp) }
+            phase(): string { @@:("plasma") }
+        }
+
+    domain:
+        mp: float64 = melting_point
+        bp: float64 = boiling_point
+        ip: float64 = ionization_point
+        temp: float64 = -50.0
+        heat_capacity: float64 = 4.18
+        latent_fusion: float64 = 334.0
+        latent_vaporization: float64 = 2260.0
+        latent_absorbed: float64 = 0.0
+}
+
+func check(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    water := @@Substance(0.0, 100.0, 10000.0)
+    check("initial phase", water.phase().(string), "solid")
+    water.add_heat(209.0)
+    check("after 209J", water.phase().(string), "melting")
+    water.add_heat(334.0)
+    check("after fusion", water.phase().(string), "liquid")
+    water.add_heat(418.0)
+    check("at boiling", water.phase().(string), "boiling")
+    water.add_heat(2260.0)
+    check("vaporised", water.phase().(string), "gas")
+    water.add_heat(41382.0)
+    check("ionised", water.phase().(string), "plasma")
+    water.remove_heat(1.0)
+    check("plasma cooled", water.phase().(string), "gas")
+    water.remove_heat(41400.0)
+    check("gas -> boiling", water.phase().(string), "boiling")
+    water.remove_heat(2260.0)
+    check("liquid again", water.phase().(string), "liquid")
+    water.remove_heat(418.0)
+    check("melting again", water.phase().(string), "melting")
+    water.remove_heat(334.0)
+    check("frozen", water.phase().(string), "solid")
+    fmt.Println("PASS: phases_of_matter")
+}

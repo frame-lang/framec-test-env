@@ -1,0 +1,162 @@
+@@[target("c")]
+
+// Cookbook 72: Phases of Matter
+
+@@system Substance(melting_point: double, boiling_point: double, ionization_point: double) {
+    interface:
+        add_heat(joules: double)
+        remove_heat(joules: double)
+        temperature(): double
+        phase(): string
+
+    machine:
+        $Solid {
+            add_heat(joules: double) {
+                self->temp = self->temp + joules / self->heat_capacity;
+                if (self->temp >= self->mp) {
+                    self->temp = self->mp;
+                    self->latent_absorbed = 0.0;
+                    -> $Melting
+                }
+            }
+            remove_heat(joules: double) {
+                self->temp = self->temp - joules / self->heat_capacity;
+            }
+            temperature(): double { @@:(self->temp) }
+            phase(): string { @@:("solid") }
+        }
+
+        $Melting {
+            add_heat(joules: double) {
+                self->latent_absorbed = self->latent_absorbed + joules;
+                if (self->latent_absorbed >= self->latent_fusion) {
+                    -> $Liquid
+                }
+            }
+            remove_heat(joules: double) {
+                self->latent_absorbed = self->latent_absorbed - joules;
+                if (self->latent_absorbed <= 0.0) {
+                    -> $Solid
+                }
+            }
+            temperature(): double { @@:(self->mp) }
+            phase(): string { @@:("melting") }
+        }
+
+        $Liquid {
+            add_heat(joules: double) {
+                self->temp = self->temp + joules / self->heat_capacity;
+                if (self->temp >= self->bp) {
+                    self->temp = self->bp;
+                    self->latent_absorbed = 0.0;
+                    -> $Boiling
+                }
+            }
+            remove_heat(joules: double) {
+                self->temp = self->temp - joules / self->heat_capacity;
+                if (self->temp <= self->mp) {
+                    self->temp = self->mp;
+                    self->latent_absorbed = self->latent_fusion;
+                    -> $Melting
+                }
+            }
+            temperature(): double { @@:(self->temp) }
+            phase(): string { @@:("liquid") }
+        }
+
+        $Boiling {
+            add_heat(joules: double) {
+                self->latent_absorbed = self->latent_absorbed + joules;
+                if (self->latent_absorbed >= self->latent_vaporization) {
+                    -> $Gas
+                }
+            }
+            remove_heat(joules: double) {
+                self->latent_absorbed = self->latent_absorbed - joules;
+                if (self->latent_absorbed <= 0.0) {
+                    -> $Liquid
+                }
+            }
+            temperature(): double { @@:(self->bp) }
+            phase(): string { @@:("boiling") }
+        }
+
+        $Gas {
+            add_heat(joules: double) {
+                self->temp = self->temp + joules / self->heat_capacity;
+                if (self->temp >= self->ip) {
+                    -> $Plasma
+                }
+            }
+            remove_heat(joules: double) {
+                self->temp = self->temp - joules / self->heat_capacity;
+                if (self->temp <= self->bp) {
+                    self->temp = self->bp;
+                    self->latent_absorbed = self->latent_vaporization;
+                    -> $Boiling
+                }
+            }
+            temperature(): double { @@:(self->temp) }
+            phase(): string { @@:("gas") }
+        }
+
+        $Plasma {
+            remove_heat(joules: double) {
+                self->temp = self->temp - joules / self->heat_capacity;
+                if (self->temp <= self->ip) {
+                    -> $Gas
+                }
+            }
+            temperature(): double { @@:(self->temp) }
+            phase(): string { @@:("plasma") }
+        }
+
+    domain:
+        mp: double = melting_point
+        bp: double = boiling_point
+        ip: double = ionization_point
+        temp: double = -50.0
+        heat_capacity: double = 4.18
+        latent_fusion: double = 334.0
+        latent_vaporization: double = 2260.0
+        latent_absorbed: double = 0.0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    Substance* water = @@Substance(0.0, 100.0, 10000.0);
+    check_str("initial phase", Substance_phase(water), "solid");
+    Substance_add_heat(water, 209.0);
+    check_str("after 209J", Substance_phase(water), "melting");
+    Substance_add_heat(water, 334.0);
+    check_str("after fusion", Substance_phase(water), "liquid");
+    Substance_add_heat(water, 418.0);
+    check_str("at boiling", Substance_phase(water), "boiling");
+    Substance_add_heat(water, 2260.0);
+    check_str("vaporised", Substance_phase(water), "gas");
+    Substance_add_heat(water, 41382.0);
+    check_str("ionised", Substance_phase(water), "plasma");
+    Substance_remove_heat(water, 1.0);
+    check_str("plasma cooled", Substance_phase(water), "gas");
+    Substance_remove_heat(water, 41400.0);
+    check_str("gas -> boiling", Substance_phase(water), "boiling");
+    Substance_remove_heat(water, 2260.0);
+    check_str("liquid again", Substance_phase(water), "liquid");
+    Substance_remove_heat(water, 418.0);
+    check_str("melting again", Substance_phase(water), "melting");
+    Substance_remove_heat(water, 334.0);
+    check_str("frozen", Substance_phase(water), "solid");
+    printf("PASS: phases_of_matter\n");
+    Substance_destroy(water);
+    return 0;
+}
