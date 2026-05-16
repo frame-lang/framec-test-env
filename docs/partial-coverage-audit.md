@@ -35,7 +35,7 @@ family.)
 | `55_nested_frame_args` | py | **Single-target** | Python-only smoke for nested `@@SystemName($(arg))` calls |
 | `75_nested_list_state_arg` | 16 (no erl) | **Intentional** | Wave 8 nested-system test; Erlang multi-system 🚫[k] |
 | `78_nested_dict_state_arg` | 16 (no erl) | **Intentional** | Same — Erlang multi-system 🚫[k] |
-| `81_persist_async_basic` | cpp, cs, gd, go, java, js, kt, py, rs, swift, ts | **Stale** | Async-✅ langs per matrix: 11 (py, ts, js, rs, cpp, cs, java, kt, swift, dart, gd). Fixture has go (which is 🚫[g] async) but missing dart (which is ✅ async). Two anomalies — see below. |
+| `81_persist_async_basic` | cpp, cs, gd, go, java, js, kt, py, rs, swift, ts | **Stale (1 port)** | Async-✅ langs per matrix: 11 (py, ts, js, rs, cpp, cs, java, kt, swift, dart, gd). Go is present but as a `@@skip`-marked stub — print-and-exit, no actual async test (the matrix's 🚫[g] is correct; fixture is for test-count uniformity). **Dart is missing as a real port and should be added.** |
 | `82_persist_multi_system` | js, py, ts | **Stale** | Multi-system × persist test from Wave 7. Matrix says multi-system works on 15 langs (Java/Erlang 🚫). Fixture only on dynamic 3 — should be ported to ~12 more. |
 | `84_persist_nested_hsm` | 16 (no erl) | **Intentional** | Erlang multi-system 🚫[k] |
 | `85_persist_three_level_nested` | 16 (no erl) | **Intentional** | Erlang multi-system 🚫[k] |
@@ -115,10 +115,10 @@ Same pattern as `data_types/` — pre-port deferral.
 
 The stale category is the actionable porting list. Aggregated:
 
-1. **`81_persist_async_basic`**: investigate the Go anomaly (matrix
-   says 🚫 async but fixture exists; either a stub or the matrix is
-   wrong); add Dart coverage (matrix says ✅). Open question, not
-   yet resolved by this audit.
+1. **`81_persist_async_basic`**: add Dart coverage (matrix says ✅).
+   Go anomaly resolved during audit — the `.fgo` is a
+   `@@skip`-marked stub for test-count uniformity; matrix's
+   🚫[g] is correct.
 2. **`82_persist_multi_system`**: port to 12 more backends (c, cpp,
    cs, dart, gd, go, kt, lua, php, rb, rs, swift). Matrix expects
    ✅ on all 15 multi-system backends; only 3 covered.
@@ -138,9 +138,8 @@ The stale category is the actionable porting list. Aggregated:
    ports.
 
 Total stale-fix work: ~52 fixture ports. Each is mechanical (the
-feature works on the target; just add the `.f<ext>` variant). The
-remaining 1 open question is the Go async anomaly in #1 — worth
-a 10-min poke before doing the Dart port.
+feature works on the target; just add the `.f<ext>` variant). All
+verdicts resolved within this audit; no open questions remain.
 
 ## Methodology
 
