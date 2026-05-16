@@ -1,0 +1,146 @@
+@@[target("cpp")]
+
+// Cookbook 80: PCR Thermal Cycler
+
+@@system PCRCycler(total_cycles: int) {
+    interface:
+        start()
+        tick_minute()
+        temperature(): double
+        current_cycle(): int
+        phase(): string
+
+    machine:
+        $Idle {
+            start() {
+                this->cycle = 0;
+                -> $Denature
+            }
+            temperature(): double { @@:(25.0) }
+            current_cycle(): int { @@:(this->cycle) }
+            phase(): string { @@:("idle") }
+        }
+
+        $Running {
+            current_cycle(): int { @@:(this->cycle) }
+        }
+
+        $Denature => $Running {
+            $>() {
+                this->cycle = this->cycle + 1;
+                this->phase_min = 0;
+            }
+            tick_minute() {
+                this->phase_min = this->phase_min + 1;
+                if (this->phase_min >= 1) {
+                    -> $Anneal
+                }
+            }
+            temperature(): double { @@:(95.0) }
+            phase(): string { @@:("denature") }
+            => $^
+        }
+
+        $Anneal => $Running {
+            $>() { this->phase_min = 0; }
+            tick_minute() {
+                this->phase_min = this->phase_min + 1;
+                if (this->phase_min >= 1) {
+                    -> $Extend
+                }
+            }
+            temperature(): double { @@:(55.0) }
+            phase(): string { @@:("anneal") }
+            => $^
+        }
+
+        $Extend => $Running {
+            $>() { this->phase_min = 0; }
+            tick_minute() {
+                this->phase_min = this->phase_min + 1;
+                if (this->phase_min >= 2) {
+                    if (this->cycle >= this->target) {
+                        -> $FinalHold
+                    } else {
+                        -> $Denature
+                    }
+                }
+            }
+            temperature(): double { @@:(72.0) }
+            phase(): string { @@:("extend") }
+            => $^
+        }
+
+        $FinalHold {
+            temperature(): double { @@:(4.0) }
+            current_cycle(): int { @@:(this->cycle) }
+            phase(): string { @@:("final hold") }
+        }
+
+    domain:
+        target: int = total_cycles
+        cycle: int = 0
+        phase_min: int = 0
+}
+
+#include <iostream>
+#include <cstdlib>
+#include <cmath>
+
+static void check_str(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " expected '" << expected << "', got '" << actual << "'\n";
+        std::exit(1);
+    }
+}
+static void check_f(const std::string& label, double actual, double expected) {
+    if (std::fabs(actual - expected) > 1e-9) {
+        std::cout << "FAIL: " << label << " expected " << expected << ", got " << actual << "\n";
+        std::exit(1);
+    }
+}
+static void check_i(const std::string& label, int actual, int expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " expected " << expected << ", got " << actual << "\n";
+        std::exit(1);
+    }
+}
+
+int main() {
+    auto p = @@PCRCycler(3);
+    check_str("idle", p.phase(), "idle");
+    check_f("idle temperature", p.temperature(), 25.0);
+    check_i("idle cycle", p.current_cycle(), 0);
+    p.tick_minute();
+    check_str("idle absorbs tick", p.phase(), "idle");
+    p.start();
+    check_str("denature 1", p.phase(), "denature");
+    check_i("cycle 1", p.current_cycle(), 1);
+    check_f("95C", p.temperature(), 95.0);
+    p.tick_minute();
+    check_str("anneal 1", p.phase(), "anneal");
+    check_f("55C", p.temperature(), 55.0);
+    p.tick_minute();
+    check_str("extend 1", p.phase(), "extend");
+    check_f("72C", p.temperature(), 72.0);
+    p.tick_minute();
+    check_str("extend partway", p.phase(), "extend");
+    p.tick_minute();
+    check_str("denature 2", p.phase(), "denature");
+    check_i("cycle 2", p.current_cycle(), 2);
+    p.tick_minute(); check_str("anneal 2", p.phase(), "anneal");
+    p.tick_minute(); check_str("extend 2", p.phase(), "extend");
+    p.tick_minute(); p.tick_minute();
+    check_str("denature 3", p.phase(), "denature");
+    check_i("cycle 3", p.current_cycle(), 3);
+    p.tick_minute(); p.tick_minute(); p.tick_minute();
+    p.tick_minute();
+    check_str("final hold", p.phase(), "final hold");
+    check_f("4C", p.temperature(), 4.0);
+    p.tick_minute();
+    check_str("hold absorbs tick", p.phase(), "final hold");
+    p.start();
+    check_str("hold absorbs start", p.phase(), "final hold");
+    std::cout << "PASS: pcr_cycler\n";
+    return 0;
+}

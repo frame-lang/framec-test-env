@@ -1,0 +1,87 @@
+@@[target("erlang")]
+
+%% Cookbook 80: PCR Thermal Cycler
+
+@@system PCRCycler(total_cycles: int) {
+    interface:
+        start()
+        tick_minute()
+        temperature(): float
+        current_cycle(): int
+        phase(): string
+
+    machine:
+        $Idle {
+            start() {
+                self.cycle = 0,
+                -> $Denature
+            }
+            temperature(): float { @@:(25.0) }
+            current_cycle(): int { @@:(self.cycle) }
+            phase(): string { @@:("idle") }
+        }
+
+        $Running {
+            current_cycle(): int { @@:(self.cycle) }
+        }
+
+        $Denature => $Running {
+            $>() {
+                self.cycle = self.cycle + 1,
+                self.phase_min = 0
+            }
+            tick_minute() {
+                self.phase_min = self.phase_min + 1,
+                case self.phase_min >= 1 of
+                    true -> -> $Anneal;
+                    false -> ok
+                end
+            }
+            temperature(): float { @@:(95.0) }
+            phase(): string { @@:("denature") }
+            => $^
+        }
+
+        $Anneal => $Running {
+            $>() { self.phase_min = 0 }
+            tick_minute() {
+                self.phase_min = self.phase_min + 1,
+                case self.phase_min >= 1 of
+                    true -> -> $Extend;
+                    false -> ok
+                end
+            }
+            temperature(): float { @@:(55.0) }
+            phase(): string { @@:("anneal") }
+            => $^
+        }
+
+        $Extend => $Running {
+            $>() { self.phase_min = 0 }
+            tick_minute() {
+                self.phase_min = self.phase_min + 1,
+                case self.phase_min >= 2 of
+                    true ->
+                        case self.cycle >= self.target of
+                            true -> -> $FinalHold;
+                            false -> -> $Denature
+                        end;
+                    false -> ok
+                end
+            }
+            temperature(): float { @@:(72.0) }
+            phase(): string { @@:("extend") }
+            => $^
+        }
+
+        $FinalHold {
+            temperature(): float { @@:(4.0) }
+            current_cycle(): int { @@:(self.cycle) }
+            phase(): string { @@:("final hold") }
+        }
+
+    domain:
+        target: int = total_cycles
+        cycle: int = 0
+        phase_min: int = 0
+}
