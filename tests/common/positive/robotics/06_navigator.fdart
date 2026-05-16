@@ -1,0 +1,214 @@
+@@[target("dart")]
+
+// Cookbook 101: Go-To-Goal with Obstacle Avoidance
+
+import 'dart:io';
+
+@@system Navigator {
+    interface:
+        navigate_to(goal_x: double, goal_y: double)
+        tick(obstacle_distance: double, at_goal: int)
+        plan_ready(path_len: int)
+        plan_failed()
+        abort()
+        status(): String
+        get_replans(): int
+        get_path_index(): int
+
+    machine:
+        $Idle {
+            navigate_to(goal_x: double, goal_y: double) {
+                this.goal_x = goal_x;
+                this.goal_y = goal_y;
+                this.replan_count = 0;
+                -> $Planning
+            }
+            status(): String { @@:("idle") }
+            get_replans(): int { @@:(this.replan_count) }
+            get_path_index(): int { @@:(this.path_index) }
+        }
+
+        $Active {
+            get_replans(): int { @@:(this.replan_count) }
+            get_path_index(): int { @@:(this.path_index) }
+        }
+
+        $Mission => $Active {
+            abort() { -> $Idle }
+            => $^
+        }
+
+        $Planning => $Mission {
+            plan_ready(path_len: int) {
+                if (path_len == 0) {
+                    @@:this.plan_failed();
+                } else {
+                    this.path_len = path_len;
+                    this.path_index = 0;
+                    -> $Driving
+                }
+            }
+            plan_failed() {
+                this.replan_count = this.replan_count + 1;
+                if (this.replan_count >= this.max_replans) {
+                    -> $Failed
+                } else {
+                    -> $Planning
+                }
+            }
+            status(): String { @@:("planning") }
+            => $^
+        }
+
+        $Driving => $Mission {
+            tick(obstacle_distance: double, at_goal: int) {
+                if (at_goal == 1) {
+                    -> $Arrived
+                } else if (obstacle_distance < this.obstacle_threshold) {
+                    -> $Avoiding
+                } else {
+                    this.path_index = this.path_index + 1;
+                    if (this.path_index >= this.path_len) {
+                        -> $Planning
+                    }
+                }
+            }
+            status(): String { @@:("driving") }
+            => $^
+        }
+
+        $Avoiding => $Mission {
+            $>() { this.avoid_ticks = 0; }
+            tick(obstacle_distance: double, at_goal: int) {
+                this.avoid_ticks = this.avoid_ticks + 1;
+                if (obstacle_distance >= this.obstacle_threshold) {
+                    -> $Planning
+                } else if (this.avoid_ticks > this.max_avoid_ticks) {
+                    -> $Failed
+                }
+            }
+            status(): String { @@:("avoiding") }
+            => $^
+        }
+
+        $Arrived {
+            navigate_to(goal_x: double, goal_y: double) {
+                this.goal_x = goal_x;
+                this.goal_y = goal_y;
+                this.replan_count = 0;
+                -> $Planning
+            }
+            status(): String { @@:("arrived") }
+            get_replans(): int { @@:(this.replan_count) }
+            get_path_index(): int { @@:(this.path_index) }
+        }
+
+        $Failed {
+            navigate_to(goal_x: double, goal_y: double) {
+                this.goal_x = goal_x;
+                this.goal_y = goal_y;
+                this.replan_count = 0;
+                -> $Planning
+            }
+            status(): String { @@:("failed") }
+            get_replans(): int { @@:(this.replan_count) }
+            get_path_index(): int { @@:(this.path_index) }
+        }
+
+    domain:
+        goal_x: double = 0.0
+        goal_y: double = 0.0
+        path_len: int = 0
+        path_index: int = 0
+        replan_count: int = 0
+        max_replans: int = 3
+        obstacle_threshold: double = 0.5
+        avoid_ticks: int = 0
+        max_avoid_ticks: int = 30
+}
+
+void check(String label, dynamic actual, dynamic expected) {
+    if (actual != expected) {
+        print("FAIL: $label expected '$expected', got '$actual'");
+        exit(1);
+    }
+}
+
+void main() {
+    var n = @@Navigator();
+    check("idle", n.status(), "idle");
+    n.navigate_to(5.0, 0.0);
+    check("planning", n.status(), "planning");
+    n.plan_ready(3);
+    check("driving", n.status(), "driving");
+    n.tick(10.0, 0);
+    check("still driving 1", n.status(), "driving");
+    n.tick(10.0, 0);
+    check("still driving 2", n.status(), "driving");
+    n.tick(10.0, 1);
+    check("arrived", n.status(), "arrived");
+
+    var n2 = @@Navigator();
+    n2.navigate_to(5.0, 0.0);
+    n2.plan_failed();
+    check("re-planning", n2.status(), "planning");
+    check("1 replan", n2.get_replans(), 1);
+    n2.plan_failed();
+    check("2 replans", n2.get_replans(), 2);
+    n2.plan_failed();
+    check("exceeded -> failed", n2.status(), "failed");
+
+    var n3 = @@Navigator();
+    n3.navigate_to(5.0, 0.0);
+    n3.plan_ready(0);
+    check("empty plan -> re-planning", n3.status(), "planning");
+    check("empty counted as failure", n3.get_replans(), 1);
+
+    var n4 = @@Navigator();
+    n4.navigate_to(5.0, 0.0);
+    n4.plan_ready(5);
+    n4.tick(10.0, 0);
+    n4.tick(0.3, 0);
+    check("avoiding", n4.status(), "avoiding");
+    n4.tick(10.0, 0);
+    check("cleared -> planning (freshness)", n4.status(), "planning");
+
+    var n5 = @@Navigator();
+    n5.navigate_to(5.0, 0.0);
+    n5.plan_ready(5);
+    n5.tick(0.3, 0);
+    check("avoiding start", n5.status(), "avoiding");
+    int i = 0;
+    while (i < 35) {
+        n5.tick(0.3, 0);
+        if (n5.status() == "failed") break;
+        i = i + 1;
+    }
+    check("trapped -> failed", n5.status(), "failed");
+
+    var n6 = @@Navigator();
+    n6.navigate_to(5.0, 0.0);
+    n6.plan_ready(2);
+    n6.tick(10.0, 0);
+    n6.tick(10.0, 0);
+    check("exhausted -> replan", n6.status(), "planning");
+
+    var n7 = @@Navigator();
+    n7.navigate_to(5.0, 0.0);
+    n7.plan_ready(3);
+    n7.abort();
+    check("aborted -> idle", n7.status(), "idle");
+
+    var n8 = @@Navigator();
+    n8.navigate_to(5.0, 0.0);
+    n8.plan_ready(5);
+    n8.tick(0.3, 0);
+    n8.abort();
+    check("abort from avoiding", n8.status(), "idle");
+
+    n2.navigate_to(10.0, 0.0);
+    check("re-navigate from failed", n2.status(), "planning");
+    check("replan counter reset", n2.get_replans(), 0);
+
+    print("PASS: navigator");
+}

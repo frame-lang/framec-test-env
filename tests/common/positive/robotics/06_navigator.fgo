@@ -1,0 +1,227 @@
+@@[target("go")]
+
+// Cookbook 101: Go-To-Goal with Obstacle Avoidance
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system Navigator {
+    interface:
+        navigate_to(goal_x: float64, goal_y: float64)
+        tick(obstacle_distance: float64, at_goal: int)
+        plan_ready(path_len: int)
+        plan_failed()
+        abort()
+        status(): string
+        get_replans(): int
+        get_path_index(): int
+
+    machine:
+        $Idle {
+            navigate_to(goal_x: float64, goal_y: float64) {
+                s.goal_x = goal_x
+                s.goal_y = goal_y
+                s.replan_count = 0
+                -> $Planning
+            }
+            status(): string { @@:("idle") }
+            get_replans(): int { @@:(s.replan_count) }
+            get_path_index(): int { @@:(s.path_index) }
+        }
+
+        $Active {
+            get_replans(): int { @@:(s.replan_count) }
+            get_path_index(): int { @@:(s.path_index) }
+        }
+
+        $Mission => $Active {
+            abort() { -> $Idle }
+            => $^
+        }
+
+        $Planning => $Mission {
+            plan_ready(path_len: int) {
+                if path_len == 0 {
+                    @@:s.plan_failed()
+                } else {
+                    s.path_len = path_len
+                    s.path_index = 0
+                    -> $Driving
+                }
+            }
+            plan_failed() {
+                s.replan_count = s.replan_count + 1
+                if s.replan_count >= s.max_replans {
+                    -> $Failed
+                } else {
+                    -> $Planning
+                }
+            }
+            status(): string { @@:("planning") }
+            => $^
+        }
+
+        $Driving => $Mission {
+            tick(obstacle_distance: float64, at_goal: int) {
+                if at_goal == 1 {
+                    -> $Arrived
+                } else if obstacle_distance < s.obstacle_threshold {
+                    -> $Avoiding
+                } else {
+                    s.path_index = s.path_index + 1
+                    if s.path_index >= s.path_len {
+                        -> $Planning
+                    }
+                }
+            }
+            status(): string { @@:("driving") }
+            => $^
+        }
+
+        $Avoiding => $Mission {
+            $>() { s.avoid_ticks = 0 }
+            tick(obstacle_distance: float64, at_goal: int) {
+                s.avoid_ticks = s.avoid_ticks + 1
+                if obstacle_distance >= s.obstacle_threshold {
+                    -> $Planning
+                } else if s.avoid_ticks > s.max_avoid_ticks {
+                    -> $Failed
+                }
+            }
+            status(): string { @@:("avoiding") }
+            => $^
+        }
+
+        $Arrived {
+            navigate_to(goal_x: float64, goal_y: float64) {
+                s.goal_x = goal_x
+                s.goal_y = goal_y
+                s.replan_count = 0
+                -> $Planning
+            }
+            status(): string { @@:("arrived") }
+            get_replans(): int { @@:(s.replan_count) }
+            get_path_index(): int { @@:(s.path_index) }
+        }
+
+        $Failed {
+            navigate_to(goal_x: float64, goal_y: float64) {
+                s.goal_x = goal_x
+                s.goal_y = goal_y
+                s.replan_count = 0
+                -> $Planning
+            }
+            status(): string { @@:("failed") }
+            get_replans(): int { @@:(s.replan_count) }
+            get_path_index(): int { @@:(s.path_index) }
+        }
+
+    domain:
+        goal_x: float64 = 0.0
+        goal_y: float64 = 0.0
+        path_len: int = 0
+        path_index: int = 0
+        replan_count: int = 0
+        max_replans: int = 3
+        obstacle_threshold: float64 = 0.5
+        avoid_ticks: int = 0
+        max_avoid_ticks: int = 30
+}
+
+func check(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+func checkInt(label string, actual, expected int) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected %d, got %d\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    n := @@Navigator()
+    check("idle", n.status().(string), "idle")
+    n.navigate_to(5.0, 0.0)
+    check("planning", n.status().(string), "planning")
+    n.plan_ready(3)
+    check("driving", n.status().(string), "driving")
+    n.tick(10.0, 0)
+    check("still driving 1", n.status().(string), "driving")
+    n.tick(10.0, 0)
+    check("still driving 2", n.status().(string), "driving")
+    n.tick(10.0, 1)
+    check("arrived", n.status().(string), "arrived")
+
+    n2 := @@Navigator()
+    n2.navigate_to(5.0, 0.0)
+    n2.plan_failed()
+    check("re-planning", n2.status().(string), "planning")
+    checkInt("1 replan", n2.get_replans().(int), 1)
+    n2.plan_failed()
+    checkInt("2 replans", n2.get_replans().(int), 2)
+    n2.plan_failed()
+    check("exceeded -> failed", n2.status().(string), "failed")
+
+    n3 := @@Navigator()
+    n3.navigate_to(5.0, 0.0)
+    n3.plan_ready(0)
+    check("empty plan -> re-planning", n3.status().(string), "planning")
+    checkInt("empty counted as failure", n3.get_replans().(int), 1)
+
+    n4 := @@Navigator()
+    n4.navigate_to(5.0, 0.0)
+    n4.plan_ready(5)
+    n4.tick(10.0, 0)
+    n4.tick(0.3, 0)
+    check("avoiding", n4.status().(string), "avoiding")
+    n4.tick(10.0, 0)
+    check("cleared -> planning (freshness)", n4.status().(string), "planning")
+
+    n5 := @@Navigator()
+    n5.navigate_to(5.0, 0.0)
+    n5.plan_ready(5)
+    n5.tick(0.3, 0)
+    check("avoiding start", n5.status().(string), "avoiding")
+    i := 0
+    for i < 35 {
+        n5.tick(0.3, 0)
+        if n5.status().(string) == "failed" {
+            break
+        }
+        i = i + 1
+    }
+    check("trapped -> failed", n5.status().(string), "failed")
+
+    n6 := @@Navigator()
+    n6.navigate_to(5.0, 0.0)
+    n6.plan_ready(2)
+    n6.tick(10.0, 0)
+    n6.tick(10.0, 0)
+    check("exhausted -> replan", n6.status().(string), "planning")
+
+    n7 := @@Navigator()
+    n7.navigate_to(5.0, 0.0)
+    n7.plan_ready(3)
+    n7.abort()
+    check("aborted -> idle", n7.status().(string), "idle")
+
+    n8 := @@Navigator()
+    n8.navigate_to(5.0, 0.0)
+    n8.plan_ready(5)
+    n8.tick(0.3, 0)
+    n8.abort()
+    check("abort from avoiding", n8.status().(string), "idle")
+
+    n2.navigate_to(10.0, 0.0)
+    check("re-navigate from failed", n2.status().(string), "planning")
+    checkInt("replan counter reset", n2.get_replans().(int), 0)
+
+    fmt.Println("PASS: navigator")
+}

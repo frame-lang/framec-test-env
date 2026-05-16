@@ -1,0 +1,231 @@
+@@[target("rust")]
+
+// Cookbook 101: Go-To-Goal with Obstacle Avoidance
+// Deliberative ($Planning) + reactive ($Driving, $Avoiding).
+// After $Avoiding clears, the robot MUST re-plan — it cannot drop
+// back into $Driving with a stale path. Plan failures counted by
+// replan_count; exceed max_replans -> $Failed.
+
+@@system Navigator {
+    interface:
+        navigate_to(goal_x: f64, goal_y: f64)
+        tick(obstacle_distance: f64, at_goal: i32)
+        plan_ready(path_len: i32)
+        plan_failed()
+        abort()
+        status(): String
+        get_replans(): i32
+        get_path_index(): i32
+
+    machine:
+        $Idle {
+            navigate_to(goal_x: f64, goal_y: f64) {
+                self.goal_x = goal_x;
+                self.goal_y = goal_y;
+                self.replan_count = 0;
+                -> $Planning
+            }
+            status(): String { @@:(String::from("idle")) }
+            get_replans(): i32 { @@:(self.replan_count) }
+            get_path_index(): i32 { @@:(self.path_index) }
+        }
+
+        $Active {
+            get_replans(): i32 { @@:(self.replan_count) }
+            get_path_index(): i32 { @@:(self.path_index) }
+        }
+
+        $Mission => $Active {
+            abort() { -> $Idle }
+            => $^
+        }
+
+        $Planning => $Mission {
+            plan_ready(path_len: i32) {
+                if path_len == 0 {
+                    @@:self.plan_failed()
+                } else {
+                    self.path_len = path_len;
+                    self.path_index = 0;
+                    -> $Driving
+                }
+            }
+            plan_failed() {
+                self.replan_count = self.replan_count + 1;
+                if self.replan_count >= self.max_replans {
+                    -> $Failed
+                } else {
+                    -> $Planning
+                }
+            }
+            status(): String { @@:(String::from("planning")) }
+            => $^
+        }
+
+        $Driving => $Mission {
+            tick(obstacle_distance: f64, at_goal: i32) {
+                if at_goal == 1 {
+                    -> $Arrived
+                } else if obstacle_distance < self.obstacle_threshold {
+                    -> $Avoiding
+                } else {
+                    self.path_index = self.path_index + 1;
+                    if self.path_index >= self.path_len {
+                        -> $Planning
+                    }
+                }
+            }
+            status(): String { @@:(String::from("driving")) }
+            => $^
+        }
+
+        $Avoiding => $Mission {
+            $>() { self.avoid_ticks = 0; }
+            tick(obstacle_distance: f64, at_goal: i32) {
+                self.avoid_ticks = self.avoid_ticks + 1;
+                if obstacle_distance >= self.obstacle_threshold {
+                    -> $Planning
+                } else if self.avoid_ticks > self.max_avoid_ticks {
+                    -> $Failed
+                }
+            }
+            status(): String { @@:(String::from("avoiding")) }
+            => $^
+        }
+
+        $Arrived {
+            navigate_to(goal_x: f64, goal_y: f64) {
+                self.goal_x = goal_x;
+                self.goal_y = goal_y;
+                self.replan_count = 0;
+                -> $Planning
+            }
+            status(): String { @@:(String::from("arrived")) }
+            get_replans(): i32 { @@:(self.replan_count) }
+            get_path_index(): i32 { @@:(self.path_index) }
+        }
+
+        $Failed {
+            navigate_to(goal_x: f64, goal_y: f64) {
+                self.goal_x = goal_x;
+                self.goal_y = goal_y;
+                self.replan_count = 0;
+                -> $Planning
+            }
+            status(): String { @@:(String::from("failed")) }
+            get_replans(): i32 { @@:(self.replan_count) }
+            get_path_index(): i32 { @@:(self.path_index) }
+        }
+
+    domain:
+        goal_x: f64 = 0.0
+        goal_y: f64 = 0.0
+        path_len: i32 = 0
+        path_index: i32 = 0
+        replan_count: i32 = 0
+        max_replans: i32 = 3
+        obstacle_threshold: f64 = 0.5
+        avoid_ticks: i32 = 0
+        max_avoid_ticks: i32 = 30
+}
+
+fn check(label: &str, actual: String, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn check_i32(label: &str, actual: i32, expected: i32) {
+    if actual != expected {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn main() {
+    let mut n = @@Navigator();
+    check("idle", n.status(), "idle");
+
+    n.navigate_to(5.0, 0.0);
+    check("planning", n.status(), "planning");
+
+    n.plan_ready(3);
+    check("driving", n.status(), "driving");
+
+    n.tick(10.0, 0);
+    check("still driving 1", n.status(), "driving");
+    n.tick(10.0, 0);
+    check("still driving 2", n.status(), "driving");
+
+    n.tick(10.0, 1);
+    check("arrived", n.status(), "arrived");
+
+    let mut n2 = @@Navigator();
+    n2.navigate_to(5.0, 0.0);
+    n2.plan_failed();
+    check("re-planning", n2.status(), "planning");
+    check_i32("1 replan", n2.get_replans(), 1);
+    n2.plan_failed();
+    check_i32("2 replans", n2.get_replans(), 2);
+    n2.plan_failed();
+    check("exceeded -> failed", n2.status(), "failed");
+
+    let mut n3 = @@Navigator();
+    n3.navigate_to(5.0, 0.0);
+    n3.plan_ready(0);
+    check("empty plan -> re-planning", n3.status(), "planning");
+    check_i32("empty counted as failure", n3.get_replans(), 1);
+
+    let mut n4 = @@Navigator();
+    n4.navigate_to(5.0, 0.0);
+    n4.plan_ready(5);
+    n4.tick(10.0, 0);
+    n4.tick(0.3, 0);
+    check("avoiding", n4.status(), "avoiding");
+
+    n4.tick(10.0, 0);
+    check("cleared -> planning (freshness)", n4.status(), "planning");
+
+    let mut n5 = @@Navigator();
+    n5.navigate_to(5.0, 0.0);
+    n5.plan_ready(5);
+    n5.tick(0.3, 0);
+    check("avoiding start", n5.status(), "avoiding");
+
+    let mut i = 0;
+    while i < 35 {
+        n5.tick(0.3, 0);
+        if n5.status() == "failed" {
+            break;
+        }
+        i = i + 1;
+    }
+    check("trapped -> failed", n5.status(), "failed");
+
+    let mut n6 = @@Navigator();
+    n6.navigate_to(5.0, 0.0);
+    n6.plan_ready(2);
+    n6.tick(10.0, 0);
+    n6.tick(10.0, 0);
+    check("exhausted -> replan", n6.status(), "planning");
+
+    let mut n7 = @@Navigator();
+    n7.navigate_to(5.0, 0.0);
+    n7.plan_ready(3);
+    n7.abort();
+    check("aborted -> idle", n7.status(), "idle");
+
+    let mut n8 = @@Navigator();
+    n8.navigate_to(5.0, 0.0);
+    n8.plan_ready(5);
+    n8.tick(0.3, 0);
+    n8.abort();
+    check("abort from avoiding", n8.status(), "idle");
+
+    n2.navigate_to(10.0, 0.0);
+    check("re-navigate from failed", n2.status(), "planning");
+    check_i32("replan counter reset", n2.get_replans(), 0);
+
+    println!("PASS: navigator");
+}
