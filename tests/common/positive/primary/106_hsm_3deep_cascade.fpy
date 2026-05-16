@@ -1,0 +1,149 @@
+@@[target("python_3")]
+
+# Test 106: RFC-0019 three-level HSM cascade
+#
+# Three-deep chain: $Grandchild => $Child => $Parent. Each level has
+# $> / <$ handlers and forwards via `=> $^`. Verifies that:
+#
+#   * Entering $Grandchild fires all three $> handlers in order
+#     Parent -> Child -> Grandchild (each leaf forwards FIRST,
+#     so the deepest forward unwinds outermost-first).
+#
+#   * Leaving $Grandchild fires all three <$ handlers in order
+#     Grandchild -> Child -> Parent (each leaf forwards LAST,
+#     so the deepest exit body runs first, then unwinds).
+#
+#   * Cross-cutting matrix fixtures 40/42/46/47/48 cover the 2-level
+#     case; this fixture is the 3-level gap closer from the
+#     RFC-0019 impl tracker.
+
+@@system HSM3Deep {
+    interface:
+        go_to_grandchild()
+        go_to_parent()
+        get_log(): list
+        get_state(): str
+
+    machine:
+        $Start {
+            go_to_grandchild() {
+                -> $Grandchild
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Start")
+                return
+            }
+        }
+
+        $Grandchild => $Child {
+            $>() {
+                # `=> $^` first → Parent.$>, Child.$> run before this body.
+                # Order: Parent:enter, Child:enter, Grandchild:enter.
+                => $^
+                self.log.append("Grandchild:enter")
+            }
+
+            <$() {
+                # `=> $^` last → this body runs before Child.<$, Parent.<$.
+                # Order: Grandchild:exit, Child:exit, Parent:exit.
+                self.log.append("Grandchild:exit")
+                => $^
+            }
+
+            go_to_parent() {
+                -> $Parent
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Grandchild")
+                return
+            }
+        }
+
+        $Child => $Parent {
+            $>() {
+                => $^
+                self.log.append("Child:enter")
+            }
+
+            <$() {
+                self.log.append("Child:exit")
+                => $^
+            }
+        }
+
+        $Parent {
+            $>() {
+                self.log.append("Parent:enter")
+            }
+
+            <$() {
+                self.log.append("Parent:exit")
+            }
+
+            go_to_grandchild() {
+                -> $Grandchild
+            }
+
+            get_log(): list {
+                @@:(self.log)
+                return
+            }
+
+            get_state(): str {
+                @@:("Parent")
+                return
+            }
+        }
+    domain:
+        log: list = []
+}
+
+def main():
+    print("=== Test 106: RFC-0019 three-level HSM cascade ===")
+    s = @@HSM3Deep()
+
+    # TC1: Entering $Grandchild from $Start fires all three $> handlers
+    # in parent-first order (each leaf's `=> $^` runs first).
+    s.go_to_grandchild()
+    log = s.get_log()
+    assert s.get_state() == "Grandchild", f"Expected Grandchild, got {s.get_state()}"
+    expected_enter = ["Parent:enter", "Child:enter", "Grandchild:enter"]
+    assert log == expected_enter, f"Enter cascade order wrong.\n  expected: {expected_enter}\n  got:      {log}"
+    print("TC1: Three-level $> cascade parent-first - PASS")
+
+    # TC2: Leaving $Grandchild fires all three <$ handlers in
+    # child-first order (each leaf's `=> $^` runs last).
+    s.go_to_parent()
+    log = s.get_log()
+    assert s.get_state() == "Parent", f"Expected Parent, got {s.get_state()}"
+    # After TC1 the log is [Parent:enter, Child:enter, Grandchild:enter].
+    # TC2 adds the exit cascade (3 entries) then Parent's $> fires
+    # once on the direct transition into $Parent.
+    expected_after_tc2 = [
+        "Parent:enter", "Child:enter", "Grandchild:enter",
+        "Grandchild:exit", "Child:exit", "Parent:exit",
+        "Parent:enter",
+    ]
+    assert log == expected_after_tc2, f"Exit cascade order wrong.\n  expected: {expected_after_tc2}\n  got:      {log}"
+    print("TC2: Three-level <$ cascade child-first - PASS")
+
+    print("PASS: RFC-0019 three-level HSM cascade")
+
+if __name__ == '__main__':
+    main()
