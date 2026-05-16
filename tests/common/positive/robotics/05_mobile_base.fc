@@ -1,0 +1,253 @@
+@@[target("c")]
+
+// Cookbook 100: Mobile Base — Teleop/Autonomy + Safety Bumper
+
+@@system MobileBase {
+    interface:
+        set_teleop()
+        set_autonomous()
+        drive(linear: double, angular: double)
+        follow_waypoints(count: int)
+        waypoint_reached()
+        e_stop()
+        clear_e_stop()
+        bumper_hit(side: string)
+        cliff_detected()
+        clear_safety()
+        tick()
+        status(): string
+        get_x(): double
+        get_v(): double
+        get_wp_index(): int
+
+    machine:
+        $TeleopIdle => $Teleop {
+            drive(linear: double, angular: double) {
+                self->v_linear = linear;
+                self->v_angular = angular;
+                -> $TeleopDriving
+            }
+            set_autonomous() { -> $AutoIdle }
+            status(): string { @@:("teleop_idle") }
+            => $^
+        }
+
+        $Safety {
+            get_x(): double { @@:(self->pos_x) }
+            get_v(): double { @@:(self->v_linear) }
+            get_wp_index(): int { @@:(self->wp_index) }
+        }
+
+        $Operational => $Safety {
+            e_stop() {
+                self->v_linear = 0.0;
+                self->v_angular = 0.0;
+                -> $EStopped
+            }
+            bumper_hit(side: string) {
+                self->v_linear = 0.0;
+                self->v_angular = 0.0;
+                self->safety_reason = "bumper";
+                -> $ProtectiveStop
+            }
+            cliff_detected() {
+                self->v_linear = 0.0;
+                self->v_angular = 0.0;
+                self->safety_reason = "cliff";
+                -> $ProtectiveStop
+            }
+            => $^
+        }
+
+        $EStopped {
+            clear_e_stop() { -> $TeleopIdle }
+            status(): string { @@:("e_stop") }
+            get_x(): double { @@:(self->pos_x) }
+            get_v(): double { @@:(self->v_linear) }
+            get_wp_index(): int { @@:(self->wp_index) }
+        }
+
+        $ProtectiveStop {
+            clear_safety() {
+                self->safety_reason = "";
+                -> $TeleopIdle
+            }
+            status(): string { @@:("protective_stop") }
+            get_x(): double { @@:(self->pos_x) }
+            get_v(): double { @@:(self->v_linear) }
+            get_wp_index(): int { @@:(self->wp_index) }
+        }
+
+        $Teleop => $Operational {
+            follow_waypoints(count: int) { }
+            => $^
+        }
+
+        $TeleopDriving => $Teleop {
+            $>() {
+                if (self->v_linear > self->teleop_speed_limit) {
+                    self->v_linear = self->teleop_speed_limit;
+                }
+            }
+            drive(linear: double, angular: double) {
+                if (linear == 0.0 && angular == 0.0) {
+                    self->v_linear = 0.0;
+                    self->v_angular = 0.0;
+                    -> $TeleopIdle
+                } else {
+                    self->v_linear = linear;
+                    self->v_angular = angular;
+                }
+            }
+            tick() {
+                self->pos_x = self->pos_x + self->v_linear * 0.1;
+            }
+            status(): string { @@:("teleop_driving") }
+            => $^
+        }
+
+        $Auto => $Operational {
+            drive(linear: double, angular: double) { }
+            set_teleop() { -> $TeleopIdle }
+            => $^
+        }
+
+        $AutoIdle => $Auto {
+            follow_waypoints(count: int) {
+                self->wp_count = count;
+                self->wp_index = 0;
+                -> $AutoDriving
+            }
+            status(): string { @@:("auto_idle") }
+            => $^
+        }
+
+        $AutoDriving => $Auto {
+            $>() {
+                if (self->wp_index >= self->wp_count) {
+                    -> $AutoIdle
+                } else {
+                    self->v_linear = self->auto_speed_limit;
+                }
+            }
+            tick() {
+                self->pos_x = self->pos_x + self->v_linear * 0.1;
+                if (self->pos_x >= (self->wp_index + 1) * 5.0) {
+                    @@:self.waypoint_reached()
+                }
+            }
+            waypoint_reached() {
+                self->wp_index = self->wp_index + 1;
+                -> $AutoDriving
+            }
+            status(): string { @@:("auto_driving") }
+            => $^
+        }
+
+    domain:
+        pos_x: double = 0.0
+        v_linear: double = 0.0
+        v_angular: double = 0.0
+        teleop_speed_limit: double = 0.5
+        auto_speed_limit: double = 1.0
+        wp_count: int = 0
+        wp_index: int = 0
+        safety_reason: string = ""
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_d(const char* label, double actual, double expected) {
+    if (fabs(actual - expected) > 1e-9) {
+        printf("FAIL: %s expected %f, got %f\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_i(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    MobileBase* b = @@MobileBase();
+    check_str("teleop_idle", MobileBase_status(b), "teleop_idle");
+
+    MobileBase_drive(b, 0.3, 0.0);
+    check_str("teleop_driving", MobileBase_status(b), "teleop_driving");
+    check_d("velocity set", MobileBase_get_v(b), 0.3);
+
+    MobileBase_tick(b);
+    MobileBase_tick(b);
+    check_d("position advanced", MobileBase_get_x(b), 0.06);
+
+    MobileBase_drive(b, 0.0, 0.0);
+    check_str("stopped -> idle", MobileBase_status(b), "teleop_idle");
+
+    MobileBase_drive(b, 2.0, 0.0);
+    check_d("speed limited on entry", MobileBase_get_v(b), 0.5);
+    MobileBase_drive(b, 0.0, 0.0);
+
+    MobileBase_drive(b, 0.3, 0.0);
+    MobileBase_bumper_hit(b, "front");
+    check_str("bumper -> protective_stop", MobileBase_status(b), "protective_stop");
+    check_d("velocity zeroed on bump", MobileBase_get_v(b), 0.0);
+
+    double pos_before = MobileBase_get_x(b);
+    MobileBase_tick(b);
+    check_d("protective absorbs tick", MobileBase_get_x(b), pos_before);
+
+    MobileBase_clear_safety(b);
+    check_str("cleared to teleop_idle", MobileBase_status(b), "teleop_idle");
+
+    MobileBase_drive(b, 0.3, 0.0);
+    MobileBase_cliff_detected(b);
+    check_str("cliff -> protective_stop", MobileBase_status(b), "protective_stop");
+    MobileBase_clear_safety(b);
+
+    MobileBase_drive(b, 0.3, 0.0);
+    MobileBase_e_stop(b);
+    check_str("e_stop", MobileBase_status(b), "e_stop");
+    MobileBase_clear_e_stop(b);
+    check_str("cleared e_stop to teleop_idle", MobileBase_status(b), "teleop_idle");
+
+    MobileBase_set_autonomous(b);
+    check_str("auto_idle", MobileBase_status(b), "auto_idle");
+
+    MobileBase_drive(b, 0.3, 0.0);
+    check_str("auto rejects drive", MobileBase_status(b), "auto_idle");
+
+    MobileBase_follow_waypoints(b, 3);
+    check_str("auto_driving", MobileBase_status(b), "auto_driving");
+    check_i("0 wp reached initially", MobileBase_get_wp_index(b), 0);
+
+    int i = 0;
+    while (i < 250) {
+        MobileBase_tick(b);
+        if (strcmp(MobileBase_status(b), "auto_idle") == 0) break;
+        i = i + 1;
+    }
+    check_str("auto complete -> auto_idle", MobileBase_status(b), "auto_idle");
+    check_i("3 waypoints tracked", MobileBase_get_wp_index(b), 3);
+
+    MobileBase_set_teleop(b);
+    check_str("back to teleop_idle", MobileBase_status(b), "teleop_idle");
+    int wp_before = MobileBase_get_wp_index(b);
+    MobileBase_follow_waypoints(b, 5);
+    check_str("teleop rejects follow", MobileBase_status(b), "teleop_idle");
+    check_i("wp_index unchanged", MobileBase_get_wp_index(b), wp_before);
+
+    printf("PASS: mobile_base\n");
+    MobileBase_destroy(b);
+    return 0;
+}

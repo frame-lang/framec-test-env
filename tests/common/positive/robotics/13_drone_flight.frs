@@ -1,0 +1,248 @@
+@@[target("rust")]
+
+// Cookbook 108: Drone Flight Modes — Failsafe from Any Phase
+// HSM: $InFlight parent catches battery_critical, rc_lost, gps_lost,
+// geofence_breach — all four failsafes apply to TakingOff/Hovering/
+// Mission/Returning uniformly via => $^.
+
+@@system DroneFlightMode {
+    interface:
+        arm(preflight_ok: i32)
+        takeoff(altitude: f64)
+        set_mission(waypoints_ok: i32)
+        return_to_home()
+        land()
+        disarm()
+        takeoff_complete()
+        mission_complete()
+        home_reached()
+        touchdown()
+        battery_critical()
+        gps_lost()
+        rc_lost()
+        geofence_breach()
+        tick()
+        status(): String
+        altitude(): f64
+        failsafe_reason(): String
+
+    machine:
+        $Disarmed {
+            arm(preflight_ok: i32) {
+                if preflight_ok == 1 {
+                    -> $Armed
+                }
+            }
+            status(): String { @@:(String::from("disarmed")) }
+            altitude(): f64 { @@:(self.current_altitude) }
+            failsafe_reason(): String { @@:(self.reason.clone()) }
+        }
+
+        $Armed {
+            takeoff(altitude: f64) {
+                self.target_altitude = altitude;
+                -> $TakingOff
+            }
+            disarm() { -> $Disarmed }
+            status(): String { @@:(String::from("armed")) }
+            altitude(): f64 { @@:(self.current_altitude) }
+            failsafe_reason(): String { @@:(self.reason.clone()) }
+        }
+
+        $Flying {
+            altitude(): f64 { @@:(self.current_altitude) }
+            failsafe_reason(): String { @@:(self.reason.clone()) }
+        }
+
+        $InFlight => $Flying {
+            battery_critical() {
+                self.reason = String::from("battery");
+                -> $EmergencyLand
+            }
+            rc_lost() {
+                self.reason = String::from("rc_lost");
+                -> $ReturningHome
+            }
+            gps_lost() {
+                self.reason = String::from("gps_lost");
+                -> $AltitudeHold
+            }
+            geofence_breach() {
+                self.reason = String::from("geofence");
+                -> $ReturningHome
+            }
+            => $^
+        }
+
+        $TakingOff => $InFlight {
+            $>() { self.current_altitude = 0.0; }
+            tick() {
+                self.current_altitude = self.current_altitude + 1.0;
+                if self.current_altitude >= self.target_altitude {
+                    @@:self.takeoff_complete()
+                }
+            }
+            takeoff_complete() { -> $Hovering }
+            status(): String { @@:(String::from("taking_off")) }
+            => $^
+        }
+
+        $Hovering => $InFlight {
+            set_mission(waypoints_ok: i32) {
+                if waypoints_ok == 1 {
+                    -> $OnMission
+                }
+            }
+            land() { -> $Landing }
+            return_to_home() { -> $ReturningHome }
+            status(): String { @@:(String::from("hovering")) }
+            => $^
+        }
+
+        $OnMission => $InFlight {
+            mission_complete() { -> $Hovering }
+            return_to_home() { -> $ReturningHome }
+            status(): String { @@:(String::from("on_mission")) }
+            => $^
+        }
+
+        $ReturningHome => $InFlight {
+            home_reached() { -> $Landing }
+            status(): String { @@:(String::from("returning")) }
+            => $^
+        }
+
+        $AltitudeHold => $InFlight {
+            status(): String { @@:(String::from("altitude_hold")) }
+            => $^
+        }
+
+        $Landing {
+            touchdown() {
+                self.current_altitude = 0.0;
+                -> $Armed
+            }
+            status(): String { @@:(String::from("landing")) }
+            altitude(): f64 { @@:(self.current_altitude) }
+            failsafe_reason(): String { @@:(self.reason.clone()) }
+        }
+
+        $EmergencyLand {
+            touchdown() {
+                self.current_altitude = 0.0;
+                -> $Armed
+            }
+            status(): String { @@:(String::from("emergency_land")) }
+            altitude(): f64 { @@:(self.current_altitude) }
+            failsafe_reason(): String { @@:(self.reason.clone()) }
+        }
+
+    domain:
+        target_altitude: f64 = 0.0
+        current_altitude: f64 = 0.0
+        reason: String = String::new()
+}
+
+fn check(label: &str, actual: String, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+fn check_f64(label: &str, actual: f64, expected: f64) {
+    if (actual - expected).abs() > 1e-6 {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn main() {
+    let mut d = @@DroneFlightMode();
+    check("disarmed", d.status(), "disarmed");
+
+    d.arm(0);
+    check("preflight fail", d.status(), "disarmed");
+
+    d.arm(1);
+    check("armed", d.status(), "armed");
+
+    d.takeoff(5.0);
+    check("taking off", d.status(), "taking_off");
+
+    let mut i = 0;
+    while i < 10 {
+        d.tick();
+        if d.status() == "hovering" { break; }
+        i = i + 1;
+    }
+    check("hovering", d.status(), "hovering");
+    check_f64("at altitude", d.altitude(), 5.0);
+
+    d.set_mission(1);
+    check("on mission", d.status(), "on_mission");
+    d.mission_complete();
+    check("back to hovering", d.status(), "hovering");
+
+    d.land();
+    check("landing", d.status(), "landing");
+    d.touchdown();
+    check("back to armed", d.status(), "armed");
+
+    let mut d2 = @@DroneFlightMode();
+    d2.arm(1);
+    d2.takeoff(100.0);
+    d2.battery_critical();
+    check("battery -> emergency", d2.status(), "emergency_land");
+    check("battery reason", d2.failsafe_reason(), "battery");
+
+    let mut d3 = @@DroneFlightMode();
+    d3.arm(1);
+    d3.takeoff(5.0);
+    let mut i = 0;
+    while i < 10 {
+        d3.tick();
+        if d3.status() == "hovering" { break; }
+        i = i + 1;
+    }
+    d3.rc_lost();
+    check("rc lost -> returning", d3.status(), "returning");
+
+    d3.home_reached();
+    check("home reached -> landing", d3.status(), "landing");
+
+    let mut d4 = @@DroneFlightMode();
+    d4.arm(1);
+    d4.takeoff(5.0);
+    let mut i = 0;
+    while i < 10 {
+        d4.tick();
+        if d4.status() == "hovering" { break; }
+        i = i + 1;
+    }
+    d4.set_mission(1);
+    d4.gps_lost();
+    check("gps lost -> altitude hold", d4.status(), "altitude_hold");
+
+    let mut d5 = @@DroneFlightMode();
+    d5.arm(1);
+    d5.takeoff(5.0);
+    let mut i = 0;
+    while i < 10 {
+        d5.tick();
+        if d5.status() == "hovering" { break; }
+        i = i + 1;
+    }
+    d5.set_mission(1);
+    d5.geofence_breach();
+    check("geofence -> returning", d5.status(), "returning");
+    check("geofence reason", d5.failsafe_reason(), "geofence");
+
+    let mut d6 = @@DroneFlightMode();
+    d6.battery_critical();
+    d6.rc_lost();
+    d6.gps_lost();
+    d6.geofence_breach();
+    check("disarmed ignores failsafes", d6.status(), "disarmed");
+
+    println!("PASS: drone_flight");
+}

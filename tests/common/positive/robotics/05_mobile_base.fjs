@@ -1,0 +1,238 @@
+@@[target("javascript")]
+
+// Cookbook 100: Mobile Base — Teleop/Autonomy + Safety Bumper
+
+@@system MobileBase {
+    interface:
+        set_teleop()
+        set_autonomous()
+        drive(linear, angular)
+        follow_waypoints(count)
+        waypoint_reached()
+        e_stop()
+        clear_e_stop()
+        bumper_hit(side)
+        cliff_detected()
+        clear_safety()
+        tick()
+        status()
+        get_x()
+        get_v()
+        get_wp_index()
+
+    machine:
+        $TeleopIdle => $Teleop {
+            drive(linear, angular) {
+                this.v_linear = linear;
+                this.v_angular = angular;
+                -> $TeleopDriving
+            }
+            set_autonomous() { -> $AutoIdle }
+            status() { @@:("teleop_idle") }
+            => $^
+        }
+
+        $Safety {
+            get_x() { @@:(this.pos_x) }
+            get_v() { @@:(this.v_linear) }
+            get_wp_index() { @@:(this.wp_index) }
+        }
+
+        $Operational => $Safety {
+            e_stop() {
+                this.v_linear = 0.0;
+                this.v_angular = 0.0;
+                -> $EStopped
+            }
+            bumper_hit(side) {
+                this.v_linear = 0.0;
+                this.v_angular = 0.0;
+                this.safety_reason = "bumper";
+                -> $ProtectiveStop
+            }
+            cliff_detected() {
+                this.v_linear = 0.0;
+                this.v_angular = 0.0;
+                this.safety_reason = "cliff";
+                -> $ProtectiveStop
+            }
+            => $^
+        }
+
+        $EStopped {
+            clear_e_stop() { -> $TeleopIdle }
+            status() { @@:("e_stop") }
+            get_x() { @@:(this.pos_x) }
+            get_v() { @@:(this.v_linear) }
+            get_wp_index() { @@:(this.wp_index) }
+        }
+
+        $ProtectiveStop {
+            clear_safety() {
+                this.safety_reason = "";
+                -> $TeleopIdle
+            }
+            status() { @@:("protective_stop") }
+            get_x() { @@:(this.pos_x) }
+            get_v() { @@:(this.v_linear) }
+            get_wp_index() { @@:(this.wp_index) }
+        }
+
+        $Teleop => $Operational {
+            follow_waypoints(count) { }
+            => $^
+        }
+
+        $TeleopDriving => $Teleop {
+            $>() {
+                if (this.v_linear > this.teleop_speed_limit) {
+                    this.v_linear = this.teleop_speed_limit;
+                }
+            }
+            drive(linear, angular) {
+                if (linear == 0.0 && angular == 0.0) {
+                    this.v_linear = 0.0;
+                    this.v_angular = 0.0;
+                    -> $TeleopIdle
+                } else {
+                    this.v_linear = linear;
+                    this.v_angular = angular;
+                }
+            }
+            tick() {
+                this.pos_x = this.pos_x + this.v_linear * 0.1;
+            }
+            status() { @@:("teleop_driving") }
+            => $^
+        }
+
+        $Auto => $Operational {
+            drive(linear, angular) { }
+            set_teleop() { -> $TeleopIdle }
+            => $^
+        }
+
+        $AutoIdle => $Auto {
+            follow_waypoints(count) {
+                this.wp_count = count;
+                this.wp_index = 0;
+                -> $AutoDriving
+            }
+            status() { @@:("auto_idle") }
+            => $^
+        }
+
+        $AutoDriving => $Auto {
+            $>() {
+                if (this.wp_index >= this.wp_count) {
+                    -> $AutoIdle
+                } else {
+                    this.v_linear = this.auto_speed_limit;
+                }
+            }
+            tick() {
+                this.pos_x = this.pos_x + this.v_linear * 0.1;
+                if (this.pos_x >= (this.wp_index + 1) * 5.0) {
+                    @@:self.waypoint_reached();
+                }
+            }
+            waypoint_reached() {
+                this.wp_index = this.wp_index + 1;
+                -> $AutoDriving
+            }
+            status() { @@:("auto_driving") }
+            => $^
+        }
+
+    domain:
+        pos_x = 0.0
+        v_linear = 0.0
+        v_angular = 0.0
+        teleop_speed_limit = 0.5
+        auto_speed_limit = 1.0
+        wp_count = 0
+        wp_index = 0
+        safety_reason = ""
+}
+
+function check(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+        process.exit(1);
+    }
+}
+function checkD(label, actual, expected) {
+    if (Math.abs(actual - expected) > 1e-9) {
+        console.log("FAIL: " + label + " expected " + expected + ", got " + actual);
+        process.exit(1);
+    }
+}
+
+const b = @@MobileBase();
+check("teleop_idle", b.status(), "teleop_idle");
+
+b.drive(0.3, 0.0);
+check("teleop_driving", b.status(), "teleop_driving");
+checkD("velocity set", b.get_v(), 0.3);
+
+b.tick();
+b.tick();
+checkD("position advanced", b.get_x(), 0.06);
+
+b.drive(0.0, 0.0);
+check("stopped -> idle", b.status(), "teleop_idle");
+
+b.drive(2.0, 0.0);
+checkD("speed limited on entry", b.get_v(), 0.5);
+b.drive(0.0, 0.0);
+
+b.drive(0.3, 0.0);
+b.bumper_hit("front");
+check("bumper -> protective_stop", b.status(), "protective_stop");
+checkD("velocity zeroed on bump", b.get_v(), 0.0);
+
+const posBefore = b.get_x();
+b.tick();
+checkD("protective absorbs tick", b.get_x(), posBefore);
+
+b.clear_safety();
+check("cleared to teleop_idle", b.status(), "teleop_idle");
+
+b.drive(0.3, 0.0);
+b.cliff_detected();
+check("cliff -> protective_stop", b.status(), "protective_stop");
+b.clear_safety();
+
+b.drive(0.3, 0.0);
+b.e_stop();
+check("e_stop", b.status(), "e_stop");
+b.clear_e_stop();
+check("cleared e_stop to teleop_idle", b.status(), "teleop_idle");
+
+b.set_autonomous();
+check("auto_idle", b.status(), "auto_idle");
+
+b.drive(0.3, 0.0);
+check("auto rejects drive", b.status(), "auto_idle");
+
+b.follow_waypoints(3);
+check("auto_driving", b.status(), "auto_driving");
+check("0 wp reached initially", b.get_wp_index(), 0);
+
+let i = 0;
+while (i < 250) {
+    b.tick();
+    if (b.status() === "auto_idle") break;
+    i = i + 1;
+}
+check("auto complete -> auto_idle", b.status(), "auto_idle");
+check("3 waypoints tracked", b.get_wp_index(), 3);
+
+b.set_teleop();
+check("back to teleop_idle", b.status(), "teleop_idle");
+const wpBefore = b.get_wp_index();
+b.follow_waypoints(5);
+check("teleop rejects follow", b.status(), "teleop_idle");
+check("wp_index unchanged", b.get_wp_index(), wpBefore);
+
+console.log("PASS: mobile_base");

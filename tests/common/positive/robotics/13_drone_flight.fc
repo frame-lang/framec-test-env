@@ -1,0 +1,253 @@
+@@[target("c")]
+
+// Cookbook 108: Drone Flight Modes — Failsafe from Any Phase
+
+@@system DroneFlightMode {
+    interface:
+        arm(preflight_ok: int)
+        takeoff(altitude: double)
+        set_mission(waypoints_ok: int)
+        return_to_home()
+        land()
+        disarm()
+        takeoff_complete()
+        mission_complete()
+        home_reached()
+        touchdown()
+        battery_critical()
+        gps_lost()
+        rc_lost()
+        geofence_breach()
+        tick()
+        status(): string
+        altitude(): double
+        failsafe_reason(): string
+
+    machine:
+        $Disarmed {
+            arm(preflight_ok: int) {
+                if (preflight_ok == 1) {
+                    -> $Armed
+                }
+            }
+            status(): string { @@:("disarmed") }
+            altitude(): double { @@:(self->current_altitude) }
+            failsafe_reason(): string { @@:(self->reason) }
+        }
+
+        $Armed {
+            takeoff(altitude: double) {
+                self->target_altitude = altitude;
+                -> $TakingOff
+            }
+            disarm() { -> $Disarmed }
+            status(): string { @@:("armed") }
+            altitude(): double { @@:(self->current_altitude) }
+            failsafe_reason(): string { @@:(self->reason) }
+        }
+
+        $Flying {
+            altitude(): double { @@:(self->current_altitude) }
+            failsafe_reason(): string { @@:(self->reason) }
+        }
+
+        $InFlight => $Flying {
+            battery_critical() {
+                self->reason = "battery";
+                -> $EmergencyLand
+            }
+            rc_lost() {
+                self->reason = "rc_lost";
+                -> $ReturningHome
+            }
+            gps_lost() {
+                self->reason = "gps_lost";
+                -> $AltitudeHold
+            }
+            geofence_breach() {
+                self->reason = "geofence";
+                -> $ReturningHome
+            }
+            => $^
+        }
+
+        $TakingOff => $InFlight {
+            $>() { self->current_altitude = 0.0; }
+            tick() {
+                self->current_altitude = self->current_altitude + 1.0;
+                if (self->current_altitude >= self->target_altitude) {
+                    @@:self.takeoff_complete()
+                }
+            }
+            takeoff_complete() { -> $Hovering }
+            status(): string { @@:("taking_off") }
+            => $^
+        }
+
+        $Hovering => $InFlight {
+            set_mission(waypoints_ok: int) {
+                if (waypoints_ok == 1) {
+                    -> $OnMission
+                }
+            }
+            land() { -> $Landing }
+            return_to_home() { -> $ReturningHome }
+            status(): string { @@:("hovering") }
+            => $^
+        }
+
+        $OnMission => $InFlight {
+            mission_complete() { -> $Hovering }
+            return_to_home() { -> $ReturningHome }
+            status(): string { @@:("on_mission") }
+            => $^
+        }
+
+        $ReturningHome => $InFlight {
+            home_reached() { -> $Landing }
+            status(): string { @@:("returning") }
+            => $^
+        }
+
+        $AltitudeHold => $InFlight {
+            status(): string { @@:("altitude_hold") }
+            => $^
+        }
+
+        $Landing {
+            touchdown() {
+                self->current_altitude = 0.0;
+                -> $Armed
+            }
+            status(): string { @@:("landing") }
+            altitude(): double { @@:(self->current_altitude) }
+            failsafe_reason(): string { @@:(self->reason) }
+        }
+
+        $EmergencyLand {
+            touchdown() {
+                self->current_altitude = 0.0;
+                -> $Armed
+            }
+            status(): string { @@:("emergency_land") }
+            altitude(): double { @@:(self->current_altitude) }
+            failsafe_reason(): string { @@:(self->reason) }
+        }
+
+    domain:
+        target_altitude: double = 0.0
+        current_altitude: double = 0.0
+        reason: string = ""
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_alt(const char* label, double actual, double expected) {
+    if (fabs(actual - expected) > 1e-6) {
+        printf("FAIL: %s expected %f, got %f\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    DroneFlightMode* d = @@DroneFlightMode();
+    check_str("disarmed", DroneFlightMode_status(d), "disarmed");
+    DroneFlightMode_arm(d, 0);
+    check_str("preflight fail", DroneFlightMode_status(d), "disarmed");
+    DroneFlightMode_arm(d, 1);
+    check_str("armed", DroneFlightMode_status(d), "armed");
+    DroneFlightMode_takeoff(d, 5.0);
+    check_str("taking off", DroneFlightMode_status(d), "taking_off");
+
+    int i = 0;
+    while (i < 10) {
+        DroneFlightMode_tick(d);
+        if (strcmp(DroneFlightMode_status(d), "hovering") == 0) break;
+        i = i + 1;
+    }
+    check_str("hovering", DroneFlightMode_status(d), "hovering");
+    check_alt("at altitude", DroneFlightMode_altitude(d), 5.0);
+
+    DroneFlightMode_set_mission(d, 1);
+    check_str("on mission", DroneFlightMode_status(d), "on_mission");
+    DroneFlightMode_mission_complete(d);
+    check_str("back to hovering", DroneFlightMode_status(d), "hovering");
+
+    DroneFlightMode_land(d);
+    check_str("landing", DroneFlightMode_status(d), "landing");
+    DroneFlightMode_touchdown(d);
+    check_str("back to armed", DroneFlightMode_status(d), "armed");
+
+    DroneFlightMode* d2 = @@DroneFlightMode();
+    DroneFlightMode_arm(d2, 1);
+    DroneFlightMode_takeoff(d2, 100.0);
+    DroneFlightMode_battery_critical(d2);
+    check_str("battery -> emergency", DroneFlightMode_status(d2), "emergency_land");
+    check_str("battery reason", DroneFlightMode_failsafe_reason(d2), "battery");
+
+    DroneFlightMode* d3 = @@DroneFlightMode();
+    DroneFlightMode_arm(d3, 1);
+    DroneFlightMode_takeoff(d3, 5.0);
+    i = 0;
+    while (i < 10) {
+        DroneFlightMode_tick(d3);
+        if (strcmp(DroneFlightMode_status(d3), "hovering") == 0) break;
+        i = i + 1;
+    }
+    DroneFlightMode_rc_lost(d3);
+    check_str("rc lost -> returning", DroneFlightMode_status(d3), "returning");
+    DroneFlightMode_home_reached(d3);
+    check_str("home reached -> landing", DroneFlightMode_status(d3), "landing");
+
+    DroneFlightMode* d4 = @@DroneFlightMode();
+    DroneFlightMode_arm(d4, 1);
+    DroneFlightMode_takeoff(d4, 5.0);
+    i = 0;
+    while (i < 10) {
+        DroneFlightMode_tick(d4);
+        if (strcmp(DroneFlightMode_status(d4), "hovering") == 0) break;
+        i = i + 1;
+    }
+    DroneFlightMode_set_mission(d4, 1);
+    DroneFlightMode_gps_lost(d4);
+    check_str("gps lost -> altitude hold", DroneFlightMode_status(d4), "altitude_hold");
+
+    DroneFlightMode* d5 = @@DroneFlightMode();
+    DroneFlightMode_arm(d5, 1);
+    DroneFlightMode_takeoff(d5, 5.0);
+    i = 0;
+    while (i < 10) {
+        DroneFlightMode_tick(d5);
+        if (strcmp(DroneFlightMode_status(d5), "hovering") == 0) break;
+        i = i + 1;
+    }
+    DroneFlightMode_set_mission(d5, 1);
+    DroneFlightMode_geofence_breach(d5);
+    check_str("geofence -> returning", DroneFlightMode_status(d5), "returning");
+    check_str("geofence reason", DroneFlightMode_failsafe_reason(d5), "geofence");
+
+    DroneFlightMode* d6 = @@DroneFlightMode();
+    DroneFlightMode_battery_critical(d6);
+    DroneFlightMode_rc_lost(d6);
+    DroneFlightMode_gps_lost(d6);
+    DroneFlightMode_geofence_breach(d6);
+    check_str("disarmed ignores failsafes", DroneFlightMode_status(d6), "disarmed");
+
+    printf("PASS: drone_flight\n");
+    DroneFlightMode_destroy(d);
+    DroneFlightMode_destroy(d2);
+    DroneFlightMode_destroy(d3);
+    DroneFlightMode_destroy(d4);
+    DroneFlightMode_destroy(d5);
+    DroneFlightMode_destroy(d6);
+    return 0;
+}
