@@ -1,0 +1,107 @@
+@@[target("dart")]
+
+// Cookbook 77: Neuron Action Potential
+
+import 'dart:io';
+
+@@system Neuron {
+    interface:
+        stimulate(input: double)
+        tick()
+        voltage(): double
+        phase(): String
+
+    machine:
+        $Resting {
+            stimulate(input: double) {
+                this.v = this.v + input;
+                if (this.v >= this.threshold) {
+                    -> $Depolarizing
+                }
+            }
+            tick() { this.v = this.v + (this.v_rest - this.v) * 0.2; }
+            voltage(): double { @@:(this.v) }
+            phase(): String { @@:("resting") }
+        }
+
+        $Depolarizing {
+            $>() { this.v = this.v_peak; }
+            tick() { -> $Repolarizing }
+            voltage(): double { @@:(this.v) }
+            phase(): String { @@:("spike") }
+        }
+
+        $Repolarizing {
+            tick() {
+                this.v = this.v_hyper;
+                -> $Refractory
+            }
+            voltage(): double { @@:(this.v) }
+            phase(): String { @@:("repolarizing") }
+        }
+
+        $Refractory {
+            stimulate(input: double) { }
+            tick() {
+                this.ref_ticks = this.ref_ticks + 1;
+                if (this.ref_ticks >= 3) {
+                    this.ref_ticks = 0;
+                    -> $Resting
+                }
+            }
+            voltage(): double { @@:(this.v) }
+            phase(): String { @@:("refractory") }
+        }
+
+    domain:
+        v: double = -70.0
+        v_rest: double = -70.0
+        v_peak: double = 40.0
+        v_hyper: double = -80.0
+        threshold: double = -55.0
+        ref_ticks: int = 0
+}
+
+void check(String label, dynamic actual, dynamic expected) {
+    if (actual != expected) {
+        print("FAIL: $label expected '$expected', got '$actual'");
+        exit(1);
+    }
+}
+void checkF(String label, double actual, double expected) {
+    if ((actual - expected).abs() > 1e-9) {
+        print("FAIL: $label expected $expected, got $actual");
+        exit(1);
+    }
+}
+
+void main() {
+    var n = @@Neuron();
+    check("start resting", n.phase(), "resting");
+    checkF("start voltage", n.voltage() as double, -70.0);
+    n.stimulate(5.0);
+    check("sub-threshold stays resting", n.phase(), "resting");
+    checkF("sub-threshold voltage", n.voltage() as double, -65.0);
+    n.stimulate(5.0);
+    check("still resting", n.phase(), "resting");
+    n.stimulate(6.0);
+    check("spike", n.phase(), "spike");
+    checkF("peak voltage", n.voltage() as double, 40.0);
+    n.tick();
+    check("repolarizing", n.phase(), "repolarizing");
+    n.tick();
+    check("refractory", n.phase(), "refractory");
+    checkF("hyperpolarized", n.voltage() as double, -80.0);
+    n.stimulate(100.0);
+    check("refractory absorbs stim", n.phase(), "refractory");
+    checkF("refractory voltage unchanged", n.voltage() as double, -80.0);
+    n.tick();
+    check("still refractory t+1", n.phase(), "refractory");
+    n.tick();
+    check("still refractory t+2", n.phase(), "refractory");
+    n.tick();
+    check("resting after t+3", n.phase(), "resting");
+    n.stimulate(30.0);
+    check("second spike", n.phase(), "spike");
+    print("PASS: neuron_action");
+}

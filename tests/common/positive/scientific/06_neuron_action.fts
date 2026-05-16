@@ -1,0 +1,103 @@
+@@[target("typescript")]
+
+// Cookbook 77: Neuron Action Potential
+
+@@system Neuron {
+    interface:
+        stimulate(input: number)
+        tick()
+        voltage(): number
+        phase(): string
+
+    machine:
+        $Resting {
+            stimulate(input: number) {
+                this.v = this.v + input;
+                if (this.v >= this.threshold) {
+                    -> $Depolarizing
+                }
+            }
+            tick() { this.v = this.v + (this.v_rest - this.v) * 0.2; }
+            voltage(): number { @@:(this.v) }
+            phase(): string { @@:("resting") }
+        }
+
+        $Depolarizing {
+            $>() { this.v = this.v_peak; }
+            tick() { -> $Repolarizing }
+            voltage(): number { @@:(this.v) }
+            phase(): string { @@:("spike") }
+        }
+
+        $Repolarizing {
+            tick() {
+                this.v = this.v_hyper;
+                -> $Refractory
+            }
+            voltage(): number { @@:(this.v) }
+            phase(): string { @@:("repolarizing") }
+        }
+
+        $Refractory {
+            stimulate(input: number) { }
+            tick() {
+                this.ref_ticks = this.ref_ticks + 1;
+                if (this.ref_ticks >= 3) {
+                    this.ref_ticks = 0;
+                    -> $Resting
+                }
+            }
+            voltage(): number { @@:(this.v) }
+            phase(): string { @@:("refractory") }
+        }
+
+    domain:
+        v: number = -70.0
+        v_rest: number = -70.0
+        v_peak: number = 40.0
+        v_hyper: number = -80.0
+        threshold: number = -55.0
+        ref_ticks: number = 0
+}
+
+function check(label: string, actual: any, expected: any): void {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+        process.exit(1);
+    }
+}
+function checkF(label: string, actual: number, expected: number): void {
+    if (Math.abs(actual - expected) > 1e-9) {
+        console.log("FAIL: " + label + " expected " + expected + ", got " + actual);
+        process.exit(1);
+    }
+}
+
+const n = @@Neuron();
+check("start resting", n.phase(), "resting");
+checkF("start voltage", n.voltage(), -70.0);
+n.stimulate(5.0);
+check("sub-threshold stays resting", n.phase(), "resting");
+checkF("sub-threshold voltage", n.voltage(), -65.0);
+n.stimulate(5.0);
+check("still resting", n.phase(), "resting");
+n.stimulate(6.0);
+check("spike", n.phase(), "spike");
+checkF("peak voltage", n.voltage(), 40.0);
+n.tick();
+check("repolarizing", n.phase(), "repolarizing");
+n.tick();
+check("refractory", n.phase(), "refractory");
+checkF("hyperpolarized", n.voltage(), -80.0);
+n.stimulate(100.0);
+check("refractory absorbs stim", n.phase(), "refractory");
+checkF("refractory voltage unchanged", n.voltage(), -80.0);
+n.tick();
+check("still refractory t+1", n.phase(), "refractory");
+n.tick();
+check("still refractory t+2", n.phase(), "refractory");
+n.tick();
+check("resting after t+3", n.phase(), "resting");
+n.stimulate(30.0);
+check("second spike", n.phase(), "spike");
+console.log("PASS: neuron_action");

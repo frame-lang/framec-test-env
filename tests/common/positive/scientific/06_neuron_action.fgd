@@ -1,0 +1,99 @@
+@@[target("gdscript")]
+
+# Cookbook 77: Neuron Action Potential
+
+@@system Neuron : RefCounted {
+    interface:
+        stimulate(input: float)
+        tick()
+        voltage(): float
+        phase(): String
+
+    machine:
+        $Resting {
+            stimulate(input: float) {
+                self.v = self.v + input
+                if self.v >= self.threshold:
+                    -> $Depolarizing
+            }
+            tick() { self.v = self.v + (self.v_rest - self.v) * 0.2 }
+            voltage(): float { @@:(self.v) }
+            phase(): String { @@:("resting") }
+        }
+
+        $Depolarizing {
+            $>() { self.v = self.v_peak }
+            tick() { -> $Repolarizing }
+            voltage(): float { @@:(self.v) }
+            phase(): String { @@:("spike") }
+        }
+
+        $Repolarizing {
+            tick() {
+                self.v = self.v_hyper
+                -> $Refractory
+            }
+            voltage(): float { @@:(self.v) }
+            phase(): String { @@:("repolarizing") }
+        }
+
+        $Refractory {
+            stimulate(input: float) { }
+            tick() {
+                self.ref_ticks = self.ref_ticks + 1
+                if self.ref_ticks >= 3:
+                    self.ref_ticks = 0
+                    -> $Resting
+            }
+            voltage(): float { @@:(self.v) }
+            phase(): String { @@:("refractory") }
+        }
+
+    domain:
+        v: float = -70.0
+        v_rest: float = -70.0
+        v_peak: float = 40.0
+        v_hyper: float = -80.0
+        threshold: float = -55.0
+        ref_ticks: int = 0
+}
+
+func check_str(label: String, actual: String, expected: String) -> void:
+    if actual != expected:
+        print("FAIL: %s expected '%s', got '%s'" % [label, expected, actual])
+        quit(1)
+func check_f(label: String, actual: float, expected: float) -> void:
+    if abs(actual - expected) > 1e-9:
+        print("FAIL: %s expected %f, got %f" % [label, expected, actual])
+        quit(1)
+
+func _init() -> void:
+    var n = @@Neuron()
+    check_str("start resting", n.phase(), "resting")
+    check_f("start voltage", n.voltage(), -70.0)
+    n.stimulate(5.0)
+    check_str("sub-threshold stays resting", n.phase(), "resting")
+    check_f("sub-threshold voltage", n.voltage(), -65.0)
+    n.stimulate(5.0)
+    check_str("still resting", n.phase(), "resting")
+    n.stimulate(6.0)
+    check_str("spike", n.phase(), "spike")
+    check_f("peak voltage", n.voltage(), 40.0)
+    n.tick()
+    check_str("repolarizing", n.phase(), "repolarizing")
+    n.tick()
+    check_str("refractory", n.phase(), "refractory")
+    check_f("hyperpolarized", n.voltage(), -80.0)
+    n.stimulate(100.0)
+    check_str("refractory absorbs stim", n.phase(), "refractory")
+    check_f("refractory voltage unchanged", n.voltage(), -80.0)
+    n.tick()
+    check_str("still refractory t+1", n.phase(), "refractory")
+    n.tick()
+    check_str("still refractory t+2", n.phase(), "refractory")
+    n.tick()
+    check_str("resting after t+3", n.phase(), "resting")
+    n.stimulate(30.0)
+    check_str("second spike", n.phase(), "spike")
+    print("PASS: neuron_action")
+    quit(0)

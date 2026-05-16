@@ -1,0 +1,115 @@
+@@[target("java")]
+
+// Cookbook 77: Neuron Action Potential
+
+@@system Neuron {
+    interface:
+        stimulate(input: double)
+        tick()
+        voltage(): double
+        phase(): String
+
+    machine:
+        $Resting {
+            stimulate(input: double) {
+                this.v = this.v + input;
+                if (this.v >= this.threshold) {
+                    -> $Depolarizing
+                }
+            }
+            tick() { this.v = this.v + (this.v_rest - this.v) * 0.2; }
+            voltage(): double { @@:(this.v) }
+            phase(): String { @@:("resting") }
+        }
+
+        $Depolarizing {
+            $>() { this.v = this.v_peak; }
+            tick() { -> $Repolarizing }
+            voltage(): double { @@:(this.v) }
+            phase(): String { @@:("spike") }
+        }
+
+        $Repolarizing {
+            tick() {
+                this.v = this.v_hyper;
+                -> $Refractory
+            }
+            voltage(): double { @@:(this.v) }
+            phase(): String { @@:("repolarizing") }
+        }
+
+        $Refractory {
+            stimulate(input: double) { }
+            tick() {
+                this.ref_ticks = this.ref_ticks + 1;
+                if (this.ref_ticks >= 3) {
+                    this.ref_ticks = 0;
+                    -> $Resting
+                }
+            }
+            voltage(): double { @@:(this.v) }
+            phase(): String { @@:("refractory") }
+        }
+
+    domain:
+        v: double = -70.0
+        v_rest: double = -70.0
+        v_peak: double = 40.0
+        v_hyper: double = -80.0
+        threshold: double = -55.0
+        ref_ticks: int = 0
+}
+
+public class Neuron06Test {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+    static void checkF(String label, double actual, double expected) {
+        if (Math.abs(actual - expected) > 1e-9) {
+            System.out.println("FAIL: " + label + " expected " + expected + ", got " + actual);
+            System.exit(1);
+        }
+    }
+
+    public static void main(String[] args) {
+        Neuron n = @@Neuron();
+        check("start resting", (String) n.phase(), "resting");
+        checkF("start voltage", (double) n.voltage(), -70.0);
+
+        n.stimulate(5.0);
+        check("sub-threshold stays resting", (String) n.phase(), "resting");
+        checkF("sub-threshold voltage", (double) n.voltage(), -65.0);
+
+        n.stimulate(5.0);
+        check("still resting", (String) n.phase(), "resting");
+
+        n.stimulate(6.0);
+        check("spike", (String) n.phase(), "spike");
+        checkF("peak voltage", (double) n.voltage(), 40.0);
+
+        n.tick();
+        check("repolarizing", (String) n.phase(), "repolarizing");
+        n.tick();
+        check("refractory", (String) n.phase(), "refractory");
+        checkF("hyperpolarized", (double) n.voltage(), -80.0);
+
+        n.stimulate(100.0);
+        check("refractory absorbs stim", (String) n.phase(), "refractory");
+        checkF("refractory voltage unchanged", (double) n.voltage(), -80.0);
+
+        n.tick();
+        check("still refractory t+1", (String) n.phase(), "refractory");
+        n.tick();
+        check("still refractory t+2", (String) n.phase(), "refractory");
+        n.tick();
+        check("resting after t+3", (String) n.phase(), "resting");
+
+        n.stimulate(30.0);
+        check("second spike", (String) n.phase(), "spike");
+
+        System.out.println("PASS: neuron_action");
+    }
+}

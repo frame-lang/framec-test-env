@@ -1,0 +1,103 @@
+@@[target("ruby")]
+
+# Cookbook 77: Neuron Action Potential
+
+@@system Neuron {
+    interface:
+        stimulate(input)
+        tick()
+        voltage()
+        phase()
+
+    machine:
+        $Resting {
+            stimulate(input) {
+                @v = @v + input
+                if @v >= @threshold
+                    -> $Depolarizing
+                end
+            }
+            tick() { @v = @v + (@v_rest - @v) * 0.2 }
+            voltage() { @@:(@v) }
+            phase() { @@:("resting") }
+        }
+
+        $Depolarizing {
+            $>() { @v = @v_peak }
+            tick() { -> $Repolarizing }
+            voltage() { @@:(@v) }
+            phase() { @@:("spike") }
+        }
+
+        $Repolarizing {
+            tick() {
+                @v = @v_hyper
+                -> $Refractory
+            }
+            voltage() { @@:(@v) }
+            phase() { @@:("repolarizing") }
+        }
+
+        $Refractory {
+            stimulate(input) { }
+            tick() {
+                @ref_ticks = @ref_ticks + 1
+                if @ref_ticks >= 3
+                    @ref_ticks = 0
+                    -> $Resting
+                end
+            }
+            voltage() { @@:(@v) }
+            phase() { @@:("refractory") }
+        }
+
+    domain:
+        v = -70.0
+        v_rest = -70.0
+        v_peak = 40.0
+        v_hyper = -80.0
+        threshold = -55.0
+        ref_ticks = 0
+}
+
+def check(label, actual, expected)
+    if actual != expected
+        puts "FAIL: #{label} expected '#{expected}', got '#{actual}'"
+        exit(1)
+    end
+end
+def check_f(label, actual, expected)
+    if (actual - expected).abs > 1e-9
+        puts "FAIL: #{label} expected #{expected}, got #{actual}"
+        exit(1)
+    end
+end
+
+n = @@Neuron()
+check("start resting", n.phase, "resting")
+check_f("start voltage", n.voltage, -70.0)
+n.stimulate(5.0)
+check("sub-threshold stays resting", n.phase, "resting")
+check_f("sub-threshold voltage", n.voltage, -65.0)
+n.stimulate(5.0)
+check("still resting", n.phase, "resting")
+n.stimulate(6.0)
+check("spike", n.phase, "spike")
+check_f("peak voltage", n.voltage, 40.0)
+n.tick
+check("repolarizing", n.phase, "repolarizing")
+n.tick
+check("refractory", n.phase, "refractory")
+check_f("hyperpolarized", n.voltage, -80.0)
+n.stimulate(100.0)
+check("refractory absorbs stim", n.phase, "refractory")
+check_f("refractory voltage unchanged", n.voltage, -80.0)
+n.tick
+check("still refractory t+1", n.phase, "refractory")
+n.tick
+check("still refractory t+2", n.phase, "refractory")
+n.tick
+check("resting after t+3", n.phase, "resting")
+n.stimulate(30.0)
+check("second spike", n.phase, "spike")
+puts "PASS: neuron_action"

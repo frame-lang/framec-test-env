@@ -1,0 +1,64 @@
+@@[target("erlang")]
+
+%% Cookbook 77: Neuron Action Potential
+
+@@system Neuron {
+    interface:
+        stimulate(input: float)
+        tick()
+        voltage(): float
+        phase(): string
+
+    machine:
+        $Resting {
+            stimulate(input: float) {
+                self.v = self.v + Input,
+                case self.v >= self.threshold of
+                    true -> -> $Depolarizing;
+                    false -> ok
+                end
+            }
+            tick() { self.v = self.v + (self.v_rest - self.v) * 0.2 }
+            voltage(): float { @@:(self.v) }
+            phase(): string { @@:("resting") }
+        }
+
+        $Depolarizing {
+            $>() { self.v = self.v_peak }
+            tick() { -> $Repolarizing }
+            voltage(): float { @@:(self.v) }
+            phase(): string { @@:("spike") }
+        }
+
+        $Repolarizing {
+            tick() {
+                self.v = self.v_hyper,
+                -> $Refractory
+            }
+            voltage(): float { @@:(self.v) }
+            phase(): string { @@:("repolarizing") }
+        }
+
+        $Refractory {
+            stimulate(input: float) { ok }
+            tick() {
+                self.ref_ticks = self.ref_ticks + 1,
+                case self.ref_ticks >= 3 of
+                    true ->
+                        self.ref_ticks = 0,
+                        -> $Resting;
+                    false -> ok
+                end
+            }
+            voltage(): float { @@:(self.v) }
+            phase(): string { @@:("refractory") }
+        }
+
+    domain:
+        v: float = -70.0
+        v_rest: float = -70.0
+        v_peak: float = 40.0
+        v_hyper: float = -80.0
+        threshold: float = -55.0
+        ref_ticks: int = 0
+}

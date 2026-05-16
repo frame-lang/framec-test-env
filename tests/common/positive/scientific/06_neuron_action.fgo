@@ -1,0 +1,113 @@
+@@[target("go")]
+
+// Cookbook 77: Neuron Action Potential
+
+package main
+
+import (
+    "fmt"
+    "math"
+    "os"
+)
+
+@@system Neuron {
+    interface:
+        stimulate(input: float64)
+        tick()
+        voltage(): float64
+        phase(): string
+
+    machine:
+        $Resting {
+            stimulate(input: float64) {
+                s.v = s.v + input
+                if s.v >= s.threshold {
+                    -> $Depolarizing
+                }
+            }
+            tick() { s.v = s.v + (s.v_rest - s.v) * 0.2 }
+            voltage(): float64 { @@:(s.v) }
+            phase(): string { @@:("resting") }
+        }
+
+        $Depolarizing {
+            $>() { s.v = s.v_peak }
+            tick() { -> $Repolarizing }
+            voltage(): float64 { @@:(s.v) }
+            phase(): string { @@:("spike") }
+        }
+
+        $Repolarizing {
+            tick() {
+                s.v = s.v_hyper
+                -> $Refractory
+            }
+            voltage(): float64 { @@:(s.v) }
+            phase(): string { @@:("repolarizing") }
+        }
+
+        $Refractory {
+            stimulate(input: float64) { }
+            tick() {
+                s.ref_ticks = s.ref_ticks + 1
+                if s.ref_ticks >= 3 {
+                    s.ref_ticks = 0
+                    -> $Resting
+                }
+            }
+            voltage(): float64 { @@:(s.v) }
+            phase(): string { @@:("refractory") }
+        }
+
+    domain:
+        v: float64 = -70.0
+        v_rest: float64 = -70.0
+        v_peak: float64 = 40.0
+        v_hyper: float64 = -80.0
+        threshold: float64 = -55.0
+        ref_ticks: int = 0
+}
+
+func check(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+func checkF(label string, actual, expected float64) {
+    if math.Abs(actual-expected) > 1e-9 {
+        fmt.Printf("FAIL: %s expected %f, got %f\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    n := @@Neuron()
+    check("start resting", n.phase().(string), "resting")
+    checkF("start voltage", n.voltage().(float64), -70.0)
+    n.stimulate(5.0)
+    check("sub-threshold stays resting", n.phase().(string), "resting")
+    checkF("sub-threshold voltage", n.voltage().(float64), -65.0)
+    n.stimulate(5.0)
+    check("still resting", n.phase().(string), "resting")
+    n.stimulate(6.0)
+    check("spike", n.phase().(string), "spike")
+    checkF("peak voltage", n.voltage().(float64), 40.0)
+    n.tick()
+    check("repolarizing", n.phase().(string), "repolarizing")
+    n.tick()
+    check("refractory", n.phase().(string), "refractory")
+    checkF("hyperpolarized", n.voltage().(float64), -80.0)
+    n.stimulate(100.0)
+    check("refractory absorbs stim", n.phase().(string), "refractory")
+    checkF("refractory voltage unchanged", n.voltage().(float64), -80.0)
+    n.tick()
+    check("still refractory t+1", n.phase().(string), "refractory")
+    n.tick()
+    check("still refractory t+2", n.phase().(string), "refractory")
+    n.tick()
+    check("resting after t+3", n.phase().(string), "resting")
+    n.stimulate(30.0)
+    check("second spike", n.phase().(string), "spike")
+    fmt.Println("PASS: neuron_action")
+}
