@@ -1,0 +1,112 @@
+@@[target("go")]
+
+package main
+
+import "fmt"
+import "os"
+
+// Cookbook 103: Multi-Floor Delivery Robot
+
+@@system DeliveryRobot {
+    interface:
+        Deliver(from_floor: int, to_floor: int)
+        AtElevator()
+        CarArrived()
+        Boarded()
+        AtDestinationFloor()
+        Exited()
+        DroppedOff()
+        Status(): string
+        PickupFloor(): int
+        DropFloor(): int
+
+    machine:
+        $Idle {
+            Deliver(from_floor: int, to_floor: int) {
+                s.pickup = from_floor
+                s.dropoff = to_floor
+                -> $Approaching
+            }
+            Status(): string { @@:("idle") }
+            PickupFloor(): int { @@:(s.pickup) }
+            DropFloor(): int { @@:(s.dropoff) }
+        }
+        $Approaching {
+            AtElevator() { -> $Boarding }
+            Status(): string { @@:("approaching") }
+            PickupFloor(): int { @@:(s.pickup) }
+            DropFloor(): int { @@:(s.dropoff) }
+        }
+        $Boarding {
+            Boarded() { -> $Riding }
+            Status(): string { @@:("boarding") }
+            PickupFloor(): int { @@:(s.pickup) }
+            DropFloor(): int { @@:(s.dropoff) }
+        }
+        $Riding {
+            AtDestinationFloor() { -> $Exiting }
+            Status(): string { @@:("riding") }
+            PickupFloor(): int { @@:(s.pickup) }
+            DropFloor(): int { @@:(s.dropoff) }
+        }
+        $Exiting {
+            Exited() { -> $Dropping }
+            Status(): string { @@:("exiting") }
+            PickupFloor(): int { @@:(s.pickup) }
+            DropFloor(): int { @@:(s.dropoff) }
+        }
+        $Dropping {
+            DroppedOff() { -> $Idle }
+            Status(): string { @@:("dropping") }
+            PickupFloor(): int { @@:(s.pickup) }
+            DropFloor(): int { @@:(s.dropoff) }
+        }
+    domain:
+        pickup: int = 0
+        dropoff: int = 0
+}
+
+func checkStr(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+func checkInt(label string, actual, expected int) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected %d, got %d\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    r := @@DeliveryRobot()
+    checkStr("idle", r.Status(), "idle")
+    r.Deliver(1, 5)
+    checkStr("approaching", r.Status(), "approaching")
+    checkInt("pickup stored", r.PickupFloor(), 1)
+    checkInt("drop stored", r.DropFloor(), 5)
+    r.Boarded()
+    checkStr("approaching absorbs boarded", r.Status(), "approaching")
+    r.Exited()
+    checkStr("approaching absorbs exited", r.Status(), "approaching")
+    r.AtElevator()
+    checkStr("boarding", r.Status(), "boarding")
+    r.Boarded()
+    checkStr("riding", r.Status(), "riding")
+    r.AtDestinationFloor()
+    checkStr("exiting", r.Status(), "exiting")
+    r.Exited()
+    checkStr("dropping", r.Status(), "dropping")
+    r.DroppedOff()
+    checkStr("idle again", r.Status(), "idle")
+    r.Deliver(5, 1)
+    checkInt("second pickup", r.PickupFloor(), 5)
+    checkInt("second drop", r.DropFloor(), 1)
+    r2 := @@DeliveryRobot()
+    r2.AtElevator()
+    r2.Boarded()
+    r2.DroppedOff()
+    checkStr("idle absorbs all", r2.Status(), "idle")
+    fmt.Println("PASS: delivery_robot")
+}

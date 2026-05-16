@@ -1,0 +1,107 @@
+@@[target("kotlin")]
+
+// Cookbook 103: Multi-Floor Delivery Robot
+
+@@system DeliveryRobot {
+    interface:
+        deliver(from_floor: Int, to_floor: Int)
+        at_elevator()
+        car_arrived()
+        boarded()
+        at_destination_floor()
+        exited()
+        dropped_off()
+        status(): String
+        pickup_floor(): Int
+        drop_floor(): Int
+
+    machine:
+        $Idle {
+            deliver(from_floor: Int, to_floor: Int) {
+                this.pickup = from_floor
+                this.dropoff = to_floor
+                -> $Approaching
+            }
+            status(): String { @@:("idle") }
+            pickup_floor(): Int { @@:(this.pickup) }
+            drop_floor(): Int { @@:(this.dropoff) }
+        }
+        $Approaching {
+            at_elevator() { -> $Boarding }
+            status(): String { @@:("approaching") }
+            pickup_floor(): Int { @@:(this.pickup) }
+            drop_floor(): Int { @@:(this.dropoff) }
+        }
+        $Boarding {
+            boarded() { -> $Riding }
+            status(): String { @@:("boarding") }
+            pickup_floor(): Int { @@:(this.pickup) }
+            drop_floor(): Int { @@:(this.dropoff) }
+        }
+        $Riding {
+            at_destination_floor() { -> $Exiting }
+            status(): String { @@:("riding") }
+            pickup_floor(): Int { @@:(this.pickup) }
+            drop_floor(): Int { @@:(this.dropoff) }
+        }
+        $Exiting {
+            exited() { -> $Dropping }
+            status(): String { @@:("exiting") }
+            pickup_floor(): Int { @@:(this.pickup) }
+            drop_floor(): Int { @@:(this.dropoff) }
+        }
+        $Dropping {
+            dropped_off() { -> $Idle }
+            status(): String { @@:("dropping") }
+            pickup_floor(): Int { @@:(this.pickup) }
+            drop_floor(): Int { @@:(this.dropoff) }
+        }
+    domain:
+        pickup: Int = 0
+        dropoff: Int = 0
+}
+
+fun checkStr(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+fun checkInt(label: String, actual: Int, expected: Int) {
+    if (actual != expected) {
+        println("FAIL: $label expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun main() {
+    val r = @@DeliveryRobot()
+    checkStr("idle", r.status(), "idle")
+    r.deliver(1, 5)
+    checkStr("approaching", r.status(), "approaching")
+    checkInt("pickup stored", r.pickup_floor(), 1)
+    checkInt("drop stored", r.drop_floor(), 5)
+    r.boarded()
+    checkStr("approaching absorbs boarded", r.status(), "approaching")
+    r.exited()
+    checkStr("approaching absorbs exited", r.status(), "approaching")
+    r.at_elevator()
+    checkStr("boarding", r.status(), "boarding")
+    r.boarded()
+    checkStr("riding", r.status(), "riding")
+    r.at_destination_floor()
+    checkStr("exiting", r.status(), "exiting")
+    r.exited()
+    checkStr("dropping", r.status(), "dropping")
+    r.dropped_off()
+    checkStr("idle again", r.status(), "idle")
+    r.deliver(5, 1)
+    checkInt("second pickup", r.pickup_floor(), 5)
+    checkInt("second drop", r.drop_floor(), 1)
+    val r2 = @@DeliveryRobot()
+    r2.at_elevator()
+    r2.boarded()
+    r2.dropped_off()
+    checkStr("idle absorbs all", r2.status(), "idle")
+    println("PASS: delivery_robot")
+}

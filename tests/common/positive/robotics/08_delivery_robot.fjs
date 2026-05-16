@@ -1,0 +1,105 @@
+@@[target("javascript")]
+
+// Cookbook 103: Multi-Floor Delivery Robot
+
+@@system DeliveryRobot {
+    interface:
+        deliver(from_floor: number, to_floor: number)
+        at_elevator()
+        car_arrived()
+        boarded()
+        at_destination_floor()
+        exited()
+        dropped_off()
+        status(): string
+        pickup_floor(): number
+        drop_floor(): number
+
+    machine:
+        $Idle {
+            deliver(from_floor: number, to_floor: number) {
+                this.pickup = from_floor;
+                this.dropoff = to_floor;
+                -> $Approaching
+            }
+            status(): string { @@:("idle") }
+            pickup_floor(): number { @@:(this.pickup) }
+            drop_floor(): number { @@:(this.dropoff) }
+        }
+        $Approaching {
+            at_elevator() { -> $Boarding }
+            status(): string { @@:("approaching") }
+            pickup_floor(): number { @@:(this.pickup) }
+            drop_floor(): number { @@:(this.dropoff) }
+        }
+        $Boarding {
+            boarded() { -> $Riding }
+            status(): string { @@:("boarding") }
+            pickup_floor(): number { @@:(this.pickup) }
+            drop_floor(): number { @@:(this.dropoff) }
+        }
+        $Riding {
+            at_destination_floor() { -> $Exiting }
+            status(): string { @@:("riding") }
+            pickup_floor(): number { @@:(this.pickup) }
+            drop_floor(): number { @@:(this.dropoff) }
+        }
+        $Exiting {
+            exited() { -> $Dropping }
+            status(): string { @@:("exiting") }
+            pickup_floor(): number { @@:(this.pickup) }
+            drop_floor(): number { @@:(this.dropoff) }
+        }
+        $Dropping {
+            dropped_off() { -> $Idle }
+            status(): string { @@:("dropping") }
+            pickup_floor(): number { @@:(this.pickup) }
+            drop_floor(): number { @@:(this.dropoff) }
+        }
+    domain:
+        pickup: number = 0
+        dropoff: number = 0
+}
+
+function checkStr(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+        process.exit(1);
+    }
+}
+function checkInt(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected " + expected + ", got " + actual);
+        process.exit(1);
+    }
+}
+
+const r = @@DeliveryRobot();
+checkStr("idle", r.status(), "idle");
+r.deliver(1, 5);
+checkStr("approaching", r.status(), "approaching");
+checkInt("pickup stored", r.pickup_floor(), 1);
+checkInt("drop stored", r.drop_floor(), 5);
+r.boarded();
+checkStr("approaching absorbs boarded", r.status(), "approaching");
+r.exited();
+checkStr("approaching absorbs exited", r.status(), "approaching");
+r.at_elevator();
+checkStr("boarding", r.status(), "boarding");
+r.boarded();
+checkStr("riding", r.status(), "riding");
+r.at_destination_floor();
+checkStr("exiting", r.status(), "exiting");
+r.exited();
+checkStr("dropping", r.status(), "dropping");
+r.dropped_off();
+checkStr("idle again", r.status(), "idle");
+r.deliver(5, 1);
+checkInt("second pickup", r.pickup_floor(), 5);
+checkInt("second drop", r.drop_floor(), 1);
+const r2 = @@DeliveryRobot();
+r2.at_elevator();
+r2.boarded();
+r2.dropped_off();
+checkStr("idle absorbs all", r2.status(), "idle");
+console.log("PASS: delivery_robot");

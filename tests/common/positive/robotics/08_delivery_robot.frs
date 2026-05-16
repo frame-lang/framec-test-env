@@ -1,0 +1,126 @@
+@@[target("rust")]
+
+// Cookbook 103: Multi-Floor Delivery Robot
+// Approaching -> Boarding -> Riding -> Exiting -> Dropping -> Idle.
+
+@@system DeliveryRobot {
+    interface:
+        deliver(from_floor: i32, to_floor: i32)
+        at_elevator()
+        car_arrived()
+        boarded()
+        at_destination_floor()
+        exited()
+        dropped_off()
+        status(): String
+        pickup_floor(): i32
+        drop_floor(): i32
+
+    machine:
+        $Idle {
+            deliver(from_floor: i32, to_floor: i32) {
+                self.pickup = from_floor;
+                self.dropoff = to_floor;
+                -> $Approaching
+            }
+            status(): String { @@:(String::from("idle")) }
+            pickup_floor(): i32 { @@:(self.pickup) }
+            drop_floor(): i32 { @@:(self.dropoff) }
+        }
+
+        $Approaching {
+            at_elevator() { -> $Boarding }
+            status(): String { @@:(String::from("approaching")) }
+            pickup_floor(): i32 { @@:(self.pickup) }
+            drop_floor(): i32 { @@:(self.dropoff) }
+        }
+
+        $Boarding {
+            boarded() { -> $Riding }
+            status(): String { @@:(String::from("boarding")) }
+            pickup_floor(): i32 { @@:(self.pickup) }
+            drop_floor(): i32 { @@:(self.dropoff) }
+        }
+
+        $Riding {
+            at_destination_floor() { -> $Exiting }
+            status(): String { @@:(String::from("riding")) }
+            pickup_floor(): i32 { @@:(self.pickup) }
+            drop_floor(): i32 { @@:(self.dropoff) }
+        }
+
+        $Exiting {
+            exited() { -> $Dropping }
+            status(): String { @@:(String::from("exiting")) }
+            pickup_floor(): i32 { @@:(self.pickup) }
+            drop_floor(): i32 { @@:(self.dropoff) }
+        }
+
+        $Dropping {
+            dropped_off() { -> $Idle }
+            status(): String { @@:(String::from("dropping")) }
+            pickup_floor(): i32 { @@:(self.pickup) }
+            drop_floor(): i32 { @@:(self.dropoff) }
+        }
+
+    domain:
+        pickup: i32 = 0
+        dropoff: i32 = 0
+}
+
+
+fn check_str(label: &str, actual: &str, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn check_int(label: &str, actual: i32, expected: i32) {
+    if actual != expected {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn main() {
+    let mut r = @@DeliveryRobot();
+    check_str("idle", &r.status(), "idle");
+
+    r.deliver(1, 5);
+    check_str("approaching", &r.status(), "approaching");
+    check_int("pickup stored", r.pickup_floor(), 1);
+    check_int("drop stored", r.drop_floor(), 5);
+
+    r.boarded();
+    check_str("approaching absorbs boarded", &r.status(), "approaching");
+    r.exited();
+    check_str("approaching absorbs exited", &r.status(), "approaching");
+
+    r.at_elevator();
+    check_str("boarding", &r.status(), "boarding");
+
+    r.boarded();
+    check_str("riding", &r.status(), "riding");
+
+    r.at_destination_floor();
+    check_str("exiting", &r.status(), "exiting");
+
+    r.exited();
+    check_str("dropping", &r.status(), "dropping");
+
+    r.dropped_off();
+    check_str("idle again", &r.status(), "idle");
+
+    r.deliver(5, 1);
+    check_int("second pickup", r.pickup_floor(), 5);
+    check_int("second drop", r.drop_floor(), 1);
+
+    let mut r2 = @@DeliveryRobot();
+    r2.at_elevator();
+    r2.boarded();
+    r2.dropped_off();
+    check_str("idle absorbs all", &r2.status(), "idle");
+
+    println!("PASS: delivery_robot");
+}

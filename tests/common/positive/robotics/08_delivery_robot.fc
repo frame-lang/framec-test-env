@@ -1,0 +1,114 @@
+@@[target("c")]
+
+// Cookbook 103: Multi-Floor Delivery Robot
+
+@@system DeliveryRobot {
+    interface:
+        deliver(from_floor: int, to_floor: int)
+        at_elevator()
+        car_arrived()
+        boarded()
+        at_destination_floor()
+        exited()
+        dropped_off()
+        status(): string
+        pickup_floor(): int
+        drop_floor(): int
+
+    machine:
+        $Idle {
+            deliver(from_floor: int, to_floor: int) {
+                self->pickup = from_floor;
+                self->dropoff = to_floor;
+                -> $Approaching
+            }
+            status(): string { @@:("idle") }
+            pickup_floor(): int { @@:(self->pickup) }
+            drop_floor(): int { @@:(self->dropoff) }
+        }
+        $Approaching {
+            at_elevator() { -> $Boarding }
+            status(): string { @@:("approaching") }
+            pickup_floor(): int { @@:(self->pickup) }
+            drop_floor(): int { @@:(self->dropoff) }
+        }
+        $Boarding {
+            boarded() { -> $Riding }
+            status(): string { @@:("boarding") }
+            pickup_floor(): int { @@:(self->pickup) }
+            drop_floor(): int { @@:(self->dropoff) }
+        }
+        $Riding {
+            at_destination_floor() { -> $Exiting }
+            status(): string { @@:("riding") }
+            pickup_floor(): int { @@:(self->pickup) }
+            drop_floor(): int { @@:(self->dropoff) }
+        }
+        $Exiting {
+            exited() { -> $Dropping }
+            status(): string { @@:("exiting") }
+            pickup_floor(): int { @@:(self->pickup) }
+            drop_floor(): int { @@:(self->dropoff) }
+        }
+        $Dropping {
+            dropped_off() { -> $Idle }
+            status(): string { @@:("dropping") }
+            pickup_floor(): int { @@:(self->pickup) }
+            drop_floor(): int { @@:(self->dropoff) }
+        }
+    domain:
+        pickup: int = 0
+        dropoff: int = 0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_int(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    DeliveryRobot* r = @@DeliveryRobot();
+    check_str("idle", DeliveryRobot_status(r), "idle");
+    DeliveryRobot_deliver(r, 1, 5);
+    check_str("approaching", DeliveryRobot_status(r), "approaching");
+    check_int("pickup stored", DeliveryRobot_pickup_floor(r), 1);
+    check_int("drop stored", DeliveryRobot_drop_floor(r), 5);
+    DeliveryRobot_boarded(r);
+    check_str("approaching absorbs boarded", DeliveryRobot_status(r), "approaching");
+    DeliveryRobot_exited(r);
+    check_str("approaching absorbs exited", DeliveryRobot_status(r), "approaching");
+    DeliveryRobot_at_elevator(r);
+    check_str("boarding", DeliveryRobot_status(r), "boarding");
+    DeliveryRobot_boarded(r);
+    check_str("riding", DeliveryRobot_status(r), "riding");
+    DeliveryRobot_at_destination_floor(r);
+    check_str("exiting", DeliveryRobot_status(r), "exiting");
+    DeliveryRobot_exited(r);
+    check_str("dropping", DeliveryRobot_status(r), "dropping");
+    DeliveryRobot_dropped_off(r);
+    check_str("idle again", DeliveryRobot_status(r), "idle");
+    DeliveryRobot_deliver(r, 5, 1);
+    check_int("second pickup", DeliveryRobot_pickup_floor(r), 5);
+    check_int("second drop", DeliveryRobot_drop_floor(r), 1);
+    DeliveryRobot* r2 = @@DeliveryRobot();
+    DeliveryRobot_at_elevator(r2);
+    DeliveryRobot_boarded(r2);
+    DeliveryRobot_dropped_off(r2);
+    check_str("idle absorbs all", DeliveryRobot_status(r2), "idle");
+    printf("PASS: delivery_robot\n");
+    DeliveryRobot_destroy(r);
+    DeliveryRobot_destroy(r2);
+    return 0;
+}

@@ -1,0 +1,105 @@
+@@[target("php")]
+
+// Cookbook 103: Multi-Floor Delivery Robot
+
+@@system DeliveryRobot {
+    interface:
+        deliver(from_floor: int, to_floor: int)
+        at_elevator()
+        car_arrived()
+        boarded()
+        at_destination_floor()
+        exited()
+        dropped_off()
+        status(): string
+        pickup_floor(): int
+        drop_floor(): int
+
+    machine:
+        $Idle {
+            deliver(from_floor: int, to_floor: int) {
+                $this->pickup = from_floor;
+                $this->dropoff = to_floor;
+                -> $Approaching
+            }
+            status(): string { @@:("idle") }
+            pickup_floor(): int { @@:($this->pickup) }
+            drop_floor(): int { @@:($this->dropoff) }
+        }
+        $Approaching {
+            at_elevator() { -> $Boarding }
+            status(): string { @@:("approaching") }
+            pickup_floor(): int { @@:($this->pickup) }
+            drop_floor(): int { @@:($this->dropoff) }
+        }
+        $Boarding {
+            boarded() { -> $Riding }
+            status(): string { @@:("boarding") }
+            pickup_floor(): int { @@:($this->pickup) }
+            drop_floor(): int { @@:($this->dropoff) }
+        }
+        $Riding {
+            at_destination_floor() { -> $Exiting }
+            status(): string { @@:("riding") }
+            pickup_floor(): int { @@:($this->pickup) }
+            drop_floor(): int { @@:($this->dropoff) }
+        }
+        $Exiting {
+            exited() { -> $Dropping }
+            status(): string { @@:("exiting") }
+            pickup_floor(): int { @@:($this->pickup) }
+            drop_floor(): int { @@:($this->dropoff) }
+        }
+        $Dropping {
+            dropped_off() { -> $Idle }
+            status(): string { @@:("dropping") }
+            pickup_floor(): int { @@:($this->pickup) }
+            drop_floor(): int { @@:($this->dropoff) }
+        }
+    domain:
+        pickup: int = 0
+        dropoff: int = 0
+}
+
+function check_str($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label expected '$expected', got '$actual'\n";
+        exit(1);
+    }
+}
+function check_int($label, $actual, $expected) {
+    if ($actual !== $expected) {
+        echo "FAIL: $label expected $expected, got $actual\n";
+        exit(1);
+    }
+}
+
+$r = @@DeliveryRobot();
+check_str("idle", $r->status(), "idle");
+$r->deliver(1, 5);
+check_str("approaching", $r->status(), "approaching");
+check_int("pickup stored", $r->pickup_floor(), 1);
+check_int("drop stored", $r->drop_floor(), 5);
+$r->boarded();
+check_str("approaching absorbs boarded", $r->status(), "approaching");
+$r->exited();
+check_str("approaching absorbs exited", $r->status(), "approaching");
+$r->at_elevator();
+check_str("boarding", $r->status(), "boarding");
+$r->boarded();
+check_str("riding", $r->status(), "riding");
+$r->at_destination_floor();
+check_str("exiting", $r->status(), "exiting");
+$r->exited();
+check_str("dropping", $r->status(), "dropping");
+$r->dropped_off();
+check_str("idle again", $r->status(), "idle");
+$r->deliver(5, 1);
+check_int("second pickup", $r->pickup_floor(), 5);
+check_int("second drop", $r->drop_floor(), 1);
+$r2 = @@DeliveryRobot();
+$r2->at_elevator();
+$r2->boarded();
+$r2->dropped_off();
+check_str("idle absorbs all", $r2->status(), "idle");
+echo "PASS: delivery_robot\n";
