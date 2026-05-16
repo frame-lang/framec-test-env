@@ -1,0 +1,96 @@
+@@[target("erlang")]
+
+%% Cookbook 107: Mission Controller (BT-alternative)
+
+@@system MissionController {
+    interface:
+        start_mission(mission_id: string, site_count: int)
+        arrived_at_site()
+        inspection_complete()
+        inspection_failed()
+        report_sent()
+        docked()
+        abort()
+        tick()
+        status(): string
+        get_site(): int
+        get_total(): int
+        get_retries(): int
+
+    machine:
+        $Idle {
+            start_mission(mission_id: string, site_count: int) {
+                self.mission_id = mission_id,
+                self.site_total = site_count,
+                self.site_index = 0,
+                self.findings_count = 0,
+                self.inspection_retries = 0,
+                -> $TravelingToSite
+            }
+            status(): string { @@:("idle") }
+            get_site(): int { @@:(self.site_index) }
+            get_total(): int { @@:(self.site_total) }
+            get_retries(): int { @@:(self.inspection_retries) }
+        }
+
+        $Mission {
+            abort() { -> $ReturningToDock }
+            get_site(): int { @@:(self.site_index) }
+            get_total(): int { @@:(self.site_total) }
+            get_retries(): int { @@:(self.inspection_retries) }
+        }
+
+        $TravelingToSite => $Mission {
+            $>() {
+                case self.site_index >= self.site_total of
+                    true -> -> $ReturningToDock;
+                    false -> ok
+                end
+            }
+            arrived_at_site() { -> $Inspecting }
+            status(): string { @@:("traveling") }
+            => $^
+        }
+
+        $Inspecting => $Mission {
+            $>() { self.inspection_retries = self.inspection_retries + 1 }
+            inspection_complete() {
+                self.findings_count = self.findings_count + 1,
+                self.inspection_retries = 0,
+                self.site_index = self.site_index + 1,
+                -> $TravelingToSite
+            }
+            inspection_failed() {
+                case self.inspection_retries >= self.max_inspection_retries of
+                    true ->
+                        self.inspection_retries = 0,
+                        self.site_index = self.site_index + 1,
+                        -> $TravelingToSite;
+                    false ->
+                        -> $Inspecting
+                end
+            }
+            status(): string { @@:("inspecting") }
+            => $^
+        }
+
+        $ReturningToDock => $Mission {
+            docked() { -> $SendingReport }
+            status(): string { @@:("returning") }
+            => $^
+        }
+
+        $SendingReport => $Mission {
+            report_sent() { -> $Idle }
+            status(): string { @@:("sending_report") }
+            => $^
+        }
+
+    domain:
+        mission_id: string = ""
+        site_total: int = 0
+        site_index: int = 0
+        findings_count: int = 0
+        inspection_retries: int = 0
+        max_inspection_retries: int = 3
+}

@@ -1,0 +1,158 @@
+@@[target("ruby")]
+
+# Cookbook 107: Mission Controller (BT-alternative)
+
+@@system MissionController {
+    interface:
+        start_mission(mission_id: str, site_count: int)
+        arrived_at_site()
+        inspection_complete()
+        inspection_failed()
+        report_sent()
+        docked()
+        abort()
+        tick()
+        status(): str
+        get_site(): int
+        get_total(): int
+        get_retries(): int
+
+    machine:
+        $Idle {
+            start_mission(mission_id: str, site_count: int) {
+                self.mission_id = mission_id
+                self.site_total = site_count
+                self.site_index = 0
+                self.findings_count = 0
+                self.inspection_retries = 0
+                -> $TravelingToSite
+            }
+            status(): str { @@:("idle") }
+            get_site(): int { @@:(self.site_index) }
+            get_total(): int { @@:(self.site_total) }
+            get_retries(): int { @@:(self.inspection_retries) }
+        }
+
+        $Mission {
+            abort() { -> $ReturningToDock }
+            get_site(): int { @@:(self.site_index) }
+            get_total(): int { @@:(self.site_total) }
+            get_retries(): int { @@:(self.inspection_retries) }
+        }
+
+        $TravelingToSite => $Mission {
+            $>() {
+                if self.site_index >= self.site_total
+                    -> $ReturningToDock
+                end
+            }
+            arrived_at_site() { -> $Inspecting }
+            status(): str { @@:("traveling") }
+            => $^
+        }
+
+        $Inspecting => $Mission {
+            $>() { self.inspection_retries = self.inspection_retries + 1 }
+            inspection_complete() {
+                self.findings_count = self.findings_count + 1
+                self.inspection_retries = 0
+                self.site_index = self.site_index + 1
+                -> $TravelingToSite
+            }
+            inspection_failed() {
+                if self.inspection_retries >= self.max_inspection_retries
+                    self.inspection_retries = 0
+                    self.site_index = self.site_index + 1
+                    -> $TravelingToSite
+                else
+                    -> $Inspecting
+                end
+            }
+            status(): str { @@:("inspecting") }
+            => $^
+        }
+
+        $ReturningToDock => $Mission {
+            docked() { -> $SendingReport }
+            status(): str { @@:("returning") }
+            => $^
+        }
+
+        $SendingReport => $Mission {
+            report_sent() { -> $Idle }
+            status(): str { @@:("sending_report") }
+            => $^
+        }
+
+    domain:
+        mission_id = ""
+        site_total = 0
+        site_index = 0
+        findings_count = 0
+        inspection_retries = 0
+        max_inspection_retries = 3
+}
+
+
+def check_str(label, actual, expected)
+  if actual != expected
+    puts "FAIL: #{label} expected '#{expected}', got '#{actual}'"
+    exit 1
+  end
+end
+def check_int(label, actual, expected)
+  if actual != expected
+    puts "FAIL: #{label} expected #{expected}, got #{actual}"
+    exit 1
+  end
+end
+
+m = @@MissionController()
+check_str("idle", m.status, "idle")
+
+m.start_mission("M-1", 3)
+check_str("traveling", m.status, "traveling")
+check_int("site 0", m.get_site, 0)
+check_int("3 total", m.get_total, 3)
+
+m.arrived_at_site
+check_str("inspecting", m.status, "inspecting")
+check_int("attempt 1", m.get_retries, 1)
+m.inspection_complete
+check_int("advancing", m.get_site, 1)
+check_str("back to traveling", m.status, "traveling")
+check_int("retries reset", m.get_retries, 0)
+
+m.arrived_at_site
+m.inspection_failed
+check_str("retry same site", m.status, "inspecting")
+check_int("still site 1", m.get_site, 1)
+check_int("attempt 2", m.get_retries, 2)
+m.inspection_complete
+check_int("site 2 done", m.get_site, 2)
+
+m.arrived_at_site
+m.inspection_failed
+m.inspection_failed
+m.inspection_failed
+check_int("skipped site after max retries", m.get_site, 3)
+
+m.arrived_at_site
+check_str("returning to dock", m.status, "returning")
+
+m.docked
+check_str("sending report", m.status, "sending_report")
+
+m.report_sent
+check_str("back to idle", m.status, "idle")
+
+m2 = @@MissionController()
+m2.start_mission("M-2", 5)
+m2.arrived_at_site
+m2.abort
+check_str("abort -> returning", m2.status, "returning")
+m2.docked
+m2.report_sent
+check_str("abort completes to idle", m2.status, "idle")
+
+puts "PASS: mission_controller"

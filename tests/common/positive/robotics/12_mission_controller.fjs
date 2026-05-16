@@ -1,0 +1,158 @@
+@@[target("javascript")]
+
+// Cookbook 107: Mission Controller (BT-alternative)
+
+@@system MissionController {
+    interface:
+        start_mission(mission_id, site_count)
+        arrived_at_site()
+        inspection_complete()
+        inspection_failed()
+        report_sent()
+        docked()
+        abort()
+        tick()
+        status()
+        get_site()
+        get_total()
+        get_retries()
+
+    machine:
+        $Idle {
+            start_mission(mission_id, site_count) {
+                this.mission_id = mission_id;
+                this.site_total = site_count;
+                this.site_index = 0;
+                this.findings_count = 0;
+                this.inspection_retries = 0;
+                -> $TravelingToSite
+            }
+            status() { @@:("idle") }
+            get_site() { @@:(this.site_index) }
+            get_total() { @@:(this.site_total) }
+            get_retries() { @@:(this.inspection_retries) }
+        }
+
+        $Mission {
+            abort() { -> $ReturningToDock }
+            get_site() { @@:(this.site_index) }
+            get_total() { @@:(this.site_total) }
+            get_retries() { @@:(this.inspection_retries) }
+        }
+
+        $TravelingToSite => $Mission {
+            $>() {
+                if (this.site_index >= this.site_total) {
+                    -> $ReturningToDock
+                }
+            }
+            arrived_at_site() { -> $Inspecting }
+            status() { @@:("traveling") }
+            => $^
+        }
+
+        $Inspecting => $Mission {
+            $>() { this.inspection_retries = this.inspection_retries + 1; }
+            inspection_complete() {
+                this.findings_count = this.findings_count + 1;
+                this.inspection_retries = 0;
+                this.site_index = this.site_index + 1;
+                -> $TravelingToSite
+            }
+            inspection_failed() {
+                if (this.inspection_retries >= this.max_inspection_retries) {
+                    this.inspection_retries = 0;
+                    this.site_index = this.site_index + 1;
+                    -> $TravelingToSite
+                } else {
+                    -> $Inspecting
+                }
+            }
+            status() { @@:("inspecting") }
+            => $^
+        }
+
+        $ReturningToDock => $Mission {
+            docked() { -> $SendingReport }
+            status() { @@:("returning") }
+            => $^
+        }
+
+        $SendingReport => $Mission {
+            report_sent() { -> $Idle }
+            status() { @@:("sending_report") }
+            => $^
+        }
+
+    domain:
+        mission_id = ""
+        site_total = 0
+        site_index = 0
+        findings_count = 0
+        inspection_retries = 0
+        max_inspection_retries = 3
+}
+
+
+function checkStr(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+        process.exit(1);
+    }
+}
+function checkInt(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected " + expected + ", got " + actual);
+        process.exit(1);
+    }
+}
+
+const m = @@MissionController();
+checkStr("idle", m.status(), "idle");
+
+m.start_mission("M-1", 3);
+checkStr("traveling", m.status(), "traveling");
+checkInt("site 0", m.get_site(), 0);
+checkInt("3 total", m.get_total(), 3);
+
+m.arrived_at_site();
+checkStr("inspecting", m.status(), "inspecting");
+checkInt("attempt 1", m.get_retries(), 1);
+m.inspection_complete();
+checkInt("advancing", m.get_site(), 1);
+checkStr("back to traveling", m.status(), "traveling");
+checkInt("retries reset", m.get_retries(), 0);
+
+m.arrived_at_site();
+m.inspection_failed();
+checkStr("retry same site", m.status(), "inspecting");
+checkInt("still site 1", m.get_site(), 1);
+checkInt("attempt 2", m.get_retries(), 2);
+m.inspection_complete();
+checkInt("site 2 done", m.get_site(), 2);
+
+m.arrived_at_site();
+m.inspection_failed();
+m.inspection_failed();
+m.inspection_failed();
+checkInt("skipped site after max retries", m.get_site(), 3);
+
+m.arrived_at_site();
+checkStr("returning to dock", m.status(), "returning");
+
+m.docked();
+checkStr("sending report", m.status(), "sending_report");
+
+m.report_sent();
+checkStr("back to idle", m.status(), "idle");
+
+const m2 = @@MissionController();
+m2.start_mission("M-2", 5);
+m2.arrived_at_site();
+m2.abort();
+checkStr("abort -> returning", m2.status(), "returning");
+m2.docked();
+m2.report_sent();
+checkStr("abort completes to idle", m2.status(), "idle");
+
+console.log("PASS: mission_controller");

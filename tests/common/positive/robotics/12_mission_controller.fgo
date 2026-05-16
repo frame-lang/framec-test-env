@@ -1,0 +1,164 @@
+@@[target("go")]
+
+package main
+
+import "fmt"
+import "os"
+
+// Cookbook 107: Mission Controller (BT-alternative)
+
+@@system MissionController {
+    interface:
+        StartMission(mission_id: string, site_count: int)
+        ArrivedAtSite()
+        InspectionComplete()
+        InspectionFailed()
+        ReportSent()
+        Docked()
+        Abort()
+        Tick()
+        Status(): string
+        GetSite(): int
+        GetTotal(): int
+        GetRetries(): int
+
+    machine:
+        $Idle {
+            StartMission(mission_id: string, site_count: int) {
+                s.mission_id = mission_id
+                s.site_total = site_count
+                s.site_index = 0
+                s.findings_count = 0
+                s.inspection_retries = 0
+                -> $TravelingToSite
+            }
+            Status(): string { @@:("idle") }
+            GetSite(): int { @@:(s.site_index) }
+            GetTotal(): int { @@:(s.site_total) }
+            GetRetries(): int { @@:(s.inspection_retries) }
+        }
+
+        $Mission {
+            Abort() { -> $ReturningToDock }
+            GetSite(): int { @@:(s.site_index) }
+            GetTotal(): int { @@:(s.site_total) }
+            GetRetries(): int { @@:(s.inspection_retries) }
+        }
+
+        $TravelingToSite => $Mission {
+            $>() {
+                if s.site_index >= s.site_total {
+                    -> $ReturningToDock
+                }
+            }
+            ArrivedAtSite() { -> $Inspecting }
+            Status(): string { @@:("traveling") }
+            => $^
+        }
+
+        $Inspecting => $Mission {
+            $>() { s.inspection_retries = s.inspection_retries + 1 }
+            InspectionComplete() {
+                s.findings_count = s.findings_count + 1
+                s.inspection_retries = 0
+                s.site_index = s.site_index + 1
+                -> $TravelingToSite
+            }
+            InspectionFailed() {
+                if s.inspection_retries >= s.max_inspection_retries {
+                    s.inspection_retries = 0
+                    s.site_index = s.site_index + 1
+                    -> $TravelingToSite
+                } else {
+                    -> $Inspecting
+                }
+            }
+            Status(): string { @@:("inspecting") }
+            => $^
+        }
+
+        $ReturningToDock => $Mission {
+            Docked() { -> $SendingReport }
+            Status(): string { @@:("returning") }
+            => $^
+        }
+
+        $SendingReport => $Mission {
+            ReportSent() { -> $Idle }
+            Status(): string { @@:("sending_report") }
+            => $^
+        }
+
+    domain:
+        mission_id: string = ""
+        site_total: int = 0
+        site_index: int = 0
+        findings_count: int = 0
+        inspection_retries: int = 0
+        max_inspection_retries: int = 3
+}
+
+func checkStr(label, actual, expected string) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+func checkInt(label string, actual, expected int) {
+    if actual != expected {
+        fmt.Printf("FAIL: %s expected %d, got %d\n", label, expected, actual)
+        os.Exit(1)
+    }
+}
+
+func main() {
+    m := @@MissionController()
+    checkStr("idle", m.Status(), "idle")
+
+    m.StartMission("M-1", 3)
+    checkStr("traveling", m.Status(), "traveling")
+    checkInt("site 0", m.GetSite(), 0)
+    checkInt("3 total", m.GetTotal(), 3)
+
+    m.ArrivedAtSite()
+    checkStr("inspecting", m.Status(), "inspecting")
+    checkInt("attempt 1", m.GetRetries(), 1)
+    m.InspectionComplete()
+    checkInt("advancing", m.GetSite(), 1)
+    checkStr("back to traveling", m.Status(), "traveling")
+    checkInt("retries reset", m.GetRetries(), 0)
+
+    m.ArrivedAtSite()
+    m.InspectionFailed()
+    checkStr("retry same site", m.Status(), "inspecting")
+    checkInt("still site 1", m.GetSite(), 1)
+    checkInt("attempt 2", m.GetRetries(), 2)
+    m.InspectionComplete()
+    checkInt("site 2 done", m.GetSite(), 2)
+
+    m.ArrivedAtSite()
+    m.InspectionFailed()
+    m.InspectionFailed()
+    m.InspectionFailed()
+    checkInt("skipped site after max retries", m.GetSite(), 3)
+
+    m.ArrivedAtSite()
+    checkStr("returning to dock", m.Status(), "returning")
+
+    m.Docked()
+    checkStr("sending report", m.Status(), "sending_report")
+
+    m.ReportSent()
+    checkStr("back to idle", m.Status(), "idle")
+
+    m2 := @@MissionController()
+    m2.StartMission("M-2", 5)
+    m2.ArrivedAtSite()
+    m2.Abort()
+    checkStr("abort -> returning", m2.Status(), "returning")
+    m2.Docked()
+    m2.ReportSent()
+    checkStr("abort completes to idle", m2.Status(), "idle")
+
+    fmt.Println("PASS: mission_controller")
+}
