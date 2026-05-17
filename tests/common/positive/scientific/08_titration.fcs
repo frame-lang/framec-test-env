@@ -1,0 +1,114 @@
+@@[target("csharp")]
+
+// Cookbook 79: Titration Protocol
+
+using System;
+
+@@system Titration {
+    interface:
+        add_drop(volume_mL: double)
+        observe_color(color: string)
+        record_endpoint()
+        new_trial()
+        result_mL(): double = 0.0
+        status(): string
+        volume_mL(): double
+
+    machine:
+        $Setup {
+            add_drop(volume_mL: double) {
+                this.volume = 0.0;
+                -> $Titrating
+            }
+            volume_mL(): double { @@:(this.volume) }
+            status(): string { @@:("setup") }
+        }
+
+        $Titrating {
+            add_drop(volume_mL: double) { this.volume = this.volume + volume_mL; }
+            observe_color(color: string) {
+                if (color == "pink") {
+                    -> $NearEndpoint
+                }
+            }
+            volume_mL(): double { @@:(this.volume) }
+            status(): string { @@:("titrating") }
+        }
+
+        $NearEndpoint {
+            add_drop(volume_mL: double) { this.volume = this.volume + volume_mL; }
+            observe_color(color: string) {
+                if (color == "clear") {
+                    -> $Titrating
+                }
+            }
+            record_endpoint() { -> $Complete }
+            volume_mL(): double { @@:(this.volume) }
+            status(): string { @@:("near endpoint") }
+        }
+
+        $Complete {
+            new_trial() {
+                this.volume = 0.0;
+                -> $Setup
+            }
+            result_mL(): double { @@:(this.volume) }
+            volume_mL(): double { @@:(this.volume) }
+            status(): string { @@:("complete") }
+        }
+
+    domain:
+        volume: double = 0.0
+}
+
+public class Program {
+    static void Check(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+    static void CheckF(string label, double actual, double expected) {
+        if (Math.Abs(actual - expected) > 1e-9) {
+            Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}");
+            Environment.Exit(1);
+        }
+    }
+
+    public static void Main() {
+        var t = @@Titration();
+        Check("start setup", (string)t.status(), "setup");
+        t.add_drop(1.0);
+        Check("titrating", (string)t.status(), "titrating");
+        CheckF("volume zeroed on first", (double)t.volume_mL(), 0.0);
+        t.add_drop(5.0);
+        t.add_drop(3.0);
+        CheckF("accumulating", (double)t.volume_mL(), 8.0);
+        t.observe_color("pink");
+        Check("near endpoint", (string)t.status(), "near endpoint");
+        t.observe_color("clear");
+        Check("back to titrating", (string)t.status(), "titrating");
+        t.observe_color("pink");
+        Check("near endpoint 2", (string)t.status(), "near endpoint");
+        t.add_drop(0.05);
+        t.record_endpoint();
+        Check("complete", (string)t.status(), "complete");
+        CheckF("recorded volume", (double)t.result_mL(), 8.05);
+        t.add_drop(10.0);
+        CheckF("endpoint locked", (double)t.result_mL(), 8.05);
+        t.add_drop(5.0);
+        CheckF("endpoint still locked", (double)t.result_mL(), 8.05);
+        t.observe_color("pink");
+        t.record_endpoint();
+        CheckF("still locked after ignored events", (double)t.result_mL(), 8.05);
+        t.new_trial();
+        Check("new trial back to setup", (string)t.status(), "setup");
+        CheckF("volume cleared", (double)t.volume_mL(), 0.0);
+        t.add_drop(2.0);
+        t.add_drop(1.5);
+        t.observe_color("pink");
+        t.record_endpoint();
+        CheckF("second endpoint", (double)t.result_mL(), 1.5);
+        Console.WriteLine("PASS: titration");
+    }
+}

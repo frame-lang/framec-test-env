@@ -1,0 +1,104 @@
+@@[target("gdscript")]
+
+# Cookbook 79: Titration Protocol
+
+@@system Titration : RefCounted {
+    interface:
+        add_drop(volume_mL: float)
+        observe_color(color: String)
+        record_endpoint()
+        new_trial()
+        result_mL(): float = 0.0
+        status(): String
+        volume_mL(): float
+
+    machine:
+        $Setup {
+            add_drop(volume_mL: float) {
+                self.volume = 0.0
+                -> $Titrating
+            }
+            volume_mL(): float { @@:(self.volume) }
+            status(): String { @@:("setup") }
+        }
+
+        $Titrating {
+            add_drop(volume_mL: float) { self.volume = self.volume + volume_mL }
+            observe_color(color: String) {
+                if color == "pink":
+                    -> $NearEndpoint
+            }
+            volume_mL(): float { @@:(self.volume) }
+            status(): String { @@:("titrating") }
+        }
+
+        $NearEndpoint {
+            add_drop(volume_mL: float) { self.volume = self.volume + volume_mL }
+            observe_color(color: String) {
+                if color == "clear":
+                    -> $Titrating
+            }
+            record_endpoint() { -> $Complete }
+            volume_mL(): float { @@:(self.volume) }
+            status(): String { @@:("near endpoint") }
+        }
+
+        $Complete {
+            new_trial() {
+                self.volume = 0.0
+                -> $Setup
+            }
+            result_mL(): float { @@:(self.volume) }
+            volume_mL(): float { @@:(self.volume) }
+            status(): String { @@:("complete") }
+        }
+
+    domain:
+        volume: float = 0.0
+}
+
+func check_str(label: String, actual: String, expected: String) -> void:
+    if actual != expected:
+        print("FAIL: %s expected '%s', got '%s'" % [label, expected, actual])
+        quit(1)
+func check_f(label: String, actual: float, expected: float) -> void:
+    if abs(actual - expected) > 1e-9:
+        print("FAIL: %s expected %f, got %f" % [label, expected, actual])
+        quit(1)
+
+func _init() -> void:
+    var t = @@Titration()
+    check_str("start setup", t.status(), "setup")
+    t.add_drop(1.0)
+    check_str("titrating", t.status(), "titrating")
+    check_f("volume zeroed on first", t.volume_mL(), 0.0)
+    t.add_drop(5.0)
+    t.add_drop(3.0)
+    check_f("accumulating", t.volume_mL(), 8.0)
+    t.observe_color("pink")
+    check_str("near endpoint", t.status(), "near endpoint")
+    t.observe_color("clear")
+    check_str("back to titrating", t.status(), "titrating")
+    t.observe_color("pink")
+    check_str("near endpoint 2", t.status(), "near endpoint")
+    t.add_drop(0.05)
+    t.record_endpoint()
+    check_str("complete", t.status(), "complete")
+    check_f("recorded volume", t.result_mL(), 8.05)
+    t.add_drop(10.0)
+    check_f("endpoint locked", t.result_mL(), 8.05)
+    t.add_drop(5.0)
+    check_f("endpoint still locked", t.result_mL(), 8.05)
+    t.observe_color("pink")
+    t.record_endpoint()
+    check_f("still locked after ignored events", t.result_mL(), 8.05)
+    t.new_trial()
+    check_str("new trial back to setup", t.status(), "setup")
+    check_f("volume cleared", t.volume_mL(), 0.0)
+    t.add_drop(2.0)
+    t.add_drop(1.5)
+    t.observe_color("pink")
+    t.record_endpoint()
+    check_f("second endpoint", t.result_mL(), 1.5)
+    print("PASS: titration")
+    quit(0)

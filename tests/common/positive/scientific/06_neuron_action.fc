@@ -1,0 +1,112 @@
+@@[target("c")]
+
+// Cookbook 77: Neuron Action Potential
+
+@@system Neuron {
+    interface:
+        stimulate(input: double)
+        tick()
+        voltage(): double
+        phase(): string
+
+    machine:
+        $Resting {
+            stimulate(input: double) {
+                self->v = self->v + input;
+                if (self->v >= self->threshold) {
+                    -> $Depolarizing
+                }
+            }
+            tick() { self->v = self->v + (self->v_rest - self->v) * 0.2; }
+            voltage(): double { @@:(self->v) }
+            phase(): string { @@:("resting") }
+        }
+
+        $Depolarizing {
+            $>() { self->v = self->v_peak; }
+            tick() { -> $Repolarizing }
+            voltage(): double { @@:(self->v) }
+            phase(): string { @@:("spike") }
+        }
+
+        $Repolarizing {
+            tick() {
+                self->v = self->v_hyper;
+                -> $Refractory
+            }
+            voltage(): double { @@:(self->v) }
+            phase(): string { @@:("repolarizing") }
+        }
+
+        $Refractory {
+            stimulate(input: double) { }
+            tick() {
+                self->ref_ticks = self->ref_ticks + 1;
+                if (self->ref_ticks >= 3) {
+                    self->ref_ticks = 0;
+                    -> $Resting
+                }
+            }
+            voltage(): double { @@:(self->v) }
+            phase(): string { @@:("refractory") }
+        }
+
+    domain:
+        v: double = -70.0
+        v_rest: double = -70.0
+        v_peak: double = 40.0
+        v_hyper: double = -80.0
+        threshold: double = -55.0
+        ref_ticks: int = 0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_f(const char* label, double actual, double expected) {
+    if (fabs(actual - expected) > 1e-9) {
+        printf("FAIL: %s expected %f, got %f\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    Neuron* n = @@Neuron();
+    check_str("start resting", Neuron_phase(n), "resting");
+    check_f("start voltage", Neuron_voltage(n), -70.0);
+    Neuron_stimulate(n, 5.0);
+    check_str("sub-threshold stays resting", Neuron_phase(n), "resting");
+    check_f("sub-threshold voltage", Neuron_voltage(n), -65.0);
+    Neuron_stimulate(n, 5.0);
+    check_str("still resting", Neuron_phase(n), "resting");
+    Neuron_stimulate(n, 6.0);
+    check_str("spike", Neuron_phase(n), "spike");
+    check_f("peak voltage", Neuron_voltage(n), 40.0);
+    Neuron_tick(n);
+    check_str("repolarizing", Neuron_phase(n), "repolarizing");
+    Neuron_tick(n);
+    check_str("refractory", Neuron_phase(n), "refractory");
+    check_f("hyperpolarized", Neuron_voltage(n), -80.0);
+    Neuron_stimulate(n, 100.0);
+    check_str("refractory absorbs stim", Neuron_phase(n), "refractory");
+    check_f("refractory voltage unchanged", Neuron_voltage(n), -80.0);
+    Neuron_tick(n);
+    check_str("still refractory t+1", Neuron_phase(n), "refractory");
+    Neuron_tick(n);
+    check_str("still refractory t+2", Neuron_phase(n), "refractory");
+    Neuron_tick(n);
+    check_str("resting after t+3", Neuron_phase(n), "resting");
+    Neuron_stimulate(n, 30.0);
+    check_str("second spike", Neuron_phase(n), "spike");
+    printf("PASS: neuron_action\n");
+    Neuron_destroy(n);
+    return 0;
+}

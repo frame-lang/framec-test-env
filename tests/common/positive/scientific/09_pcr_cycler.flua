@@ -1,0 +1,133 @@
+@@[target("lua")]
+
+-- Cookbook 80: PCR Thermal Cycler
+
+@@system PCRCycler(total_cycles) {
+    interface:
+        start()
+        tick_minute()
+        temperature()
+        current_cycle()
+        phase()
+
+    machine:
+        $Idle {
+            start() {
+                self.cycle = 0
+                -> $Denature
+            }
+            temperature() { @@:(25.0) }
+            current_cycle() { @@:(self.cycle) }
+            phase() { @@:("idle") }
+        }
+
+        $Running {
+            current_cycle() { @@:(self.cycle) }
+        }
+
+        $Denature => $Running {
+            $>() {
+                self.cycle = self.cycle + 1
+                self.phase_min = 0
+            }
+            tick_minute() {
+                self.phase_min = self.phase_min + 1
+                if self.phase_min >= 1 then
+                    -> $Anneal
+                end
+            }
+            temperature() { @@:(95.0) }
+            phase() { @@:("denature") }
+            => $^
+        }
+
+        $Anneal => $Running {
+            $>() { self.phase_min = 0 }
+            tick_minute() {
+                self.phase_min = self.phase_min + 1
+                if self.phase_min >= 1 then
+                    -> $Extend
+                end
+            }
+            temperature() { @@:(55.0) }
+            phase() { @@:("anneal") }
+            => $^
+        }
+
+        $Extend => $Running {
+            $>() { self.phase_min = 0 }
+            tick_minute() {
+                self.phase_min = self.phase_min + 1
+                if self.phase_min >= 2 then
+                    if self.cycle >= self.target then
+                        -> $FinalHold
+                    else
+                        -> $Denature
+                    end
+                end
+            }
+            temperature() { @@:(72.0) }
+            phase() { @@:("extend") }
+            => $^
+        }
+
+        $FinalHold {
+            temperature() { @@:(4.0) }
+            current_cycle() { @@:(self.cycle) }
+            phase() { @@:("final hold") }
+        }
+
+    domain:
+        target = total_cycles
+        cycle = 0
+        phase_min = 0
+}
+
+local function check(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " expected '" .. tostring(expected) .. "', got '" .. tostring(actual) .. "'")
+        os.exit(1)
+    end
+end
+local function check_f(label, actual, expected)
+    if math.abs(actual - expected) > 1e-9 then
+        print("FAIL: " .. label .. " expected " .. tostring(expected) .. ", got " .. tostring(actual))
+        os.exit(1)
+    end
+end
+
+local p = @@PCRCycler(3)
+check("idle", p:phase(), "idle")
+check_f("idle temperature", p:temperature(), 25.0)
+check("idle cycle", p:current_cycle(), 0)
+p:tick_minute()
+check("idle absorbs tick", p:phase(), "idle")
+p:start()
+check("denature 1", p:phase(), "denature")
+check("cycle 1", p:current_cycle(), 1)
+check_f("95C", p:temperature(), 95.0)
+p:tick_minute()
+check("anneal 1", p:phase(), "anneal")
+check_f("55C", p:temperature(), 55.0)
+p:tick_minute()
+check("extend 1", p:phase(), "extend")
+check_f("72C", p:temperature(), 72.0)
+p:tick_minute()
+check("extend partway", p:phase(), "extend")
+p:tick_minute()
+check("denature 2", p:phase(), "denature")
+check("cycle 2", p:current_cycle(), 2)
+p:tick_minute(); check("anneal 2", p:phase(), "anneal")
+p:tick_minute(); check("extend 2", p:phase(), "extend")
+p:tick_minute(); p:tick_minute()
+check("denature 3", p:phase(), "denature")
+check("cycle 3", p:current_cycle(), 3)
+p:tick_minute(); p:tick_minute(); p:tick_minute()
+p:tick_minute()
+check("final hold", p:phase(), "final hold")
+check_f("4C", p:temperature(), 4.0)
+p:tick_minute()
+check("hold absorbs tick", p:phase(), "final hold")
+p:start()
+check("hold absorbs start", p:phase(), "final hold")
+print("PASS: pcr_cycler")

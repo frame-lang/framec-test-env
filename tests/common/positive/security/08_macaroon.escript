@@ -1,0 +1,48 @@
+#!/usr/bin/env escript
+main(_) ->
+    {ok, V} = macaroonverifier:start_link(),
+    "idle" = macaroonverifier:get_status(V),
+    "denied" = macaroonverifier:perform(V, "read", "doc", 1),
+    macaroonverifier:present(V, "TOK", 3),
+    "checking_sig" = macaroonverifier:get_status(V),
+    "denied" = macaroonverifier:perform(V, "read", "doc", 1),
+    macaroonverifier:sig_verified(V, 1),
+    "checking_caveats" = macaroonverifier:get_status(V),
+    "denied" = macaroonverifier:perform(V, "read", "doc", 1),
+    macaroonverifier:caveat_verified(V, 1, 0),
+    1 = macaroonverifier:get_caveat_index(V),
+    macaroonverifier:caveat_verified(V, 1, 1),
+    macaroonverifier:caveat_verified(V, 1, 2),
+    "authorized" = macaroonverifier:get_status(V),
+    "allowed" = macaroonverifier:perform(V, "read", "doc", 1),
+    "denied" = macaroonverifier:perform(V, "write", "doc", 0),
+    macaroonverifier:caveat_verified(V, 1, 99),
+    "authorized" = macaroonverifier:get_status(V),
+
+    {ok, V2} = macaroonverifier:start_link(),
+    macaroonverifier:present(V2, "TOK", 2),
+    macaroonverifier:sig_verified(V2, 0),
+    "rejected" = macaroonverifier:get_status(V2),
+    "denied" = macaroonverifier:perform(V2, "read", "doc", 1),
+
+    {ok, V3} = macaroonverifier:start_link(),
+    macaroonverifier:present(V3, "TOK", 3),
+    macaroonverifier:sig_verified(V3, 1),
+    macaroonverifier:caveat_verified(V3, 1, 0),
+    macaroonverifier:caveat_verified(V3, 0, 1),
+    "rejected" = macaroonverifier:get_status(V3),
+
+    {ok, V4} = macaroonverifier:start_link(),
+    macaroonverifier:present(V4, "TOK", 3),
+    macaroonverifier:sig_verified(V4, 1),
+    macaroonverifier:caveat_verified(V4, 1, 0),
+    macaroonverifier:caveat_verified(V4, 1, 2),
+    "rejected" = macaroonverifier:get_status(V4),
+
+    {ok, V5} = macaroonverifier:start_link(),
+    macaroonverifier:present(V5, "TOK", 0),
+    macaroonverifier:sig_verified(V5, 1),
+    "authorized" = macaroonverifier:get_status(V5),
+
+    io:format("PASS: macaroon~n"),
+    halt(0).

@@ -1,0 +1,131 @@
+@@[target("erlang")]
+
+%% Cookbook 101: Go-To-Goal with Obstacle Avoidance
+
+@@system Navigator {
+    interface:
+        navigate_to(goal_x: float, goal_y: float)
+        tick(obstacle_distance: float, at_goal: int)
+        plan_ready(path_len: int)
+        plan_failed()
+        abort()
+        status(): string
+        get_replans(): int
+        get_path_index(): int
+
+    machine:
+        $Idle {
+            navigate_to(goal_x: float, goal_y: float) {
+                self.goal_x = Goal_x,
+                self.goal_y = Goal_y,
+                self.replan_count = 0,
+                -> $Planning
+            }
+            status(): string { @@:("idle") }
+            get_replans(): int { @@:(self.replan_count) }
+            get_path_index(): int { @@:(self.path_index) }
+        }
+
+        $Active {
+            get_replans(): int { @@:(self.replan_count) }
+            get_path_index(): int { @@:(self.path_index) }
+        }
+
+        $Mission => $Active {
+            abort() { -> $Idle }
+            => $^
+        }
+
+        $Planning => $Mission {
+            plan_ready(path_len: int) {
+                case Path_len == 0 of
+                    true -> @@:self.plan_failed();
+                    false ->
+                        self.path_len = Path_len,
+                        self.path_index = 0,
+                        -> $Driving
+                end
+            }
+            plan_failed() {
+                self.replan_count = self.replan_count + 1,
+                case self.replan_count >= self.max_replans of
+                    true -> -> $Failed;
+                    false -> -> $Planning
+                end
+            }
+            status(): string { @@:("planning") }
+            => $^
+        }
+
+        $Driving => $Mission {
+            tick(obstacle_distance: float, at_goal: int) {
+                case At_goal == 1 of
+                    true -> -> $Arrived;
+                    false ->
+                        case Obstacle_distance < self.obstacle_threshold of
+                            true -> -> $Avoiding;
+                            false ->
+                                self.path_index = self.path_index + 1,
+                                case self.path_index >= self.path_len of
+                                    true -> -> $Planning;
+                                    false -> ok
+                                end
+                        end
+                end
+            }
+            status(): string { @@:("driving") }
+            => $^
+        }
+
+        $Avoiding => $Mission {
+            $>() { self.avoid_ticks = 0 }
+            tick(obstacle_distance: float, at_goal: int) {
+                self.avoid_ticks = self.avoid_ticks + 1,
+                case Obstacle_distance >= self.obstacle_threshold of
+                    true -> -> $Planning;
+                    false ->
+                        case self.avoid_ticks > self.max_avoid_ticks of
+                            true -> -> $Failed;
+                            false -> ok
+                        end
+                end
+            }
+            status(): string { @@:("avoiding") }
+            => $^
+        }
+
+        $Arrived {
+            navigate_to(goal_x: float, goal_y: float) {
+                self.goal_x = Goal_x,
+                self.goal_y = Goal_y,
+                self.replan_count = 0,
+                -> $Planning
+            }
+            status(): string { @@:("arrived") }
+            get_replans(): int { @@:(self.replan_count) }
+            get_path_index(): int { @@:(self.path_index) }
+        }
+
+        $Failed {
+            navigate_to(goal_x: float, goal_y: float) {
+                self.goal_x = Goal_x,
+                self.goal_y = Goal_y,
+                self.replan_count = 0,
+                -> $Planning
+            }
+            status(): string { @@:("failed") }
+            get_replans(): int { @@:(self.replan_count) }
+            get_path_index(): int { @@:(self.path_index) }
+        }
+
+    domain:
+        goal_x: float = 0.0
+        goal_y: float = 0.0
+        path_len: int = 0
+        path_index: int = 0
+        replan_count: int = 0
+        max_replans: int = 3
+        obstacle_threshold: float = 0.5
+        avoid_ticks: int = 0
+        max_avoid_ticks: int = 30
+}

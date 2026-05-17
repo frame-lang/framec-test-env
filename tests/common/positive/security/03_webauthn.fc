@@ -1,0 +1,172 @@
+@@[target("c")]
+
+// Cookbook 88: WebAuthn / FIDO2
+
+@@system WebAuthnCeremony {
+    interface:
+        begin_registration(user_id: string, rp_id: string)
+        registration_response(chal_ok: int, origin_ok: int, att_ok: int)
+        begin_authentication(user_id: string, rp_id: string, uv_required: int)
+        assertion_response(chal_ok: int, origin_ok: int, uv_ok: int, sig_ok: int, counter_ok: int)
+        timeout()
+        get_status(): string = "idle"
+        get_user(): string
+        get_rp(): string
+
+    machine:
+        $Idle {
+            begin_registration(user_id: string, rp_id: string) {
+                self->user_id = user_id;
+                self->rp_id = rp_id;
+                self->uv_required = 1;
+                -> $AwaitingRegistration
+            }
+            begin_authentication(user_id: string, rp_id: string, uv_required: int) {
+                self->user_id = user_id;
+                self->rp_id = rp_id;
+                self->uv_required = uv_required;
+                -> $AwaitingAssertion
+            }
+            get_status(): string { @@:("idle") }
+            get_user(): string { @@:(self->user_id) }
+            get_rp(): string { @@:(self->rp_id) }
+        }
+
+        $AwaitingRegistration {
+            registration_response(chal_ok: int, origin_ok: int, att_ok: int) {
+                if (chal_ok == 0) { -> $Failed }
+                else if (origin_ok == 0) { -> $Failed }
+                else if (att_ok == 0) { -> $Failed }
+                else { -> $Registered }
+            }
+            timeout() { -> $Failed }
+            get_status(): string { @@:("awaiting_registration") }
+            get_user(): string { @@:(self->user_id) }
+            get_rp(): string { @@:(self->rp_id) }
+        }
+
+        $AwaitingAssertion {
+            assertion_response(chal_ok: int, origin_ok: int, uv_ok: int, sig_ok: int, counter_ok: int) {
+                if (chal_ok == 0) { -> $Failed }
+                else if (origin_ok == 0) { -> $Failed }
+                else if (self->uv_required == 1 && uv_ok == 0) { -> $Failed }
+                else if (sig_ok == 0) { -> $Failed }
+                else if (counter_ok == 0) { -> $Failed }
+                else { -> $Authenticated }
+            }
+            timeout() { -> $Failed }
+            get_status(): string { @@:("awaiting_assertion") }
+            get_user(): string { @@:(self->user_id) }
+            get_rp(): string { @@:(self->rp_id) }
+        }
+
+        $Registered {
+            get_status(): string { @@:("registered") }
+            get_user(): string { @@:(self->user_id) }
+            get_rp(): string { @@:(self->rp_id) }
+        }
+
+        $Authenticated {
+            get_status(): string { @@:("authenticated") }
+            get_user(): string { @@:(self->user_id) }
+            get_rp(): string { @@:(self->rp_id) }
+        }
+
+        $Failed {
+            get_status(): string { @@:("failed") }
+            get_user(): string { @@:(self->user_id) }
+            get_rp(): string { @@:(self->rp_id) }
+        }
+
+    domain:
+        user_id: string = ""
+        rp_id: string = ""
+        uv_required: int = 0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) { printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual); exit(1); }
+}
+
+int main(void) {
+    WebAuthnCeremony* w = @@WebAuthnCeremony();
+    check("idle", WebAuthnCeremony_get_status(w), "idle");
+    WebAuthnCeremony_begin_registration(w, "alice", "example.com");
+    check("awaiting registration", WebAuthnCeremony_get_status(w), "awaiting_registration");
+    check("user captured", WebAuthnCeremony_get_user(w), "alice");
+    check("rp captured", WebAuthnCeremony_get_rp(w), "example.com");
+    WebAuthnCeremony_registration_response(w, 1, 1, 1);
+    check("registered", WebAuthnCeremony_get_status(w), "registered");
+    WebAuthnCeremony_registration_response(w, 1, 1, 1);
+    check("registered absorbs replay", WebAuthnCeremony_get_status(w), "registered");
+
+    WebAuthnCeremony* w2 = @@WebAuthnCeremony();
+    WebAuthnCeremony_begin_registration(w2, "bob", "example.com");
+    WebAuthnCeremony_registration_response(w2, 0, 1, 1);
+    check("reg chal mismatch", WebAuthnCeremony_get_status(w2), "failed");
+
+    WebAuthnCeremony* w3 = @@WebAuthnCeremony();
+    WebAuthnCeremony_begin_registration(w3, "carol", "evil.com");
+    WebAuthnCeremony_registration_response(w3, 1, 0, 1);
+    check("reg origin mismatch", WebAuthnCeremony_get_status(w3), "failed");
+
+    WebAuthnCeremony* w4 = @@WebAuthnCeremony();
+    WebAuthnCeremony_begin_registration(w4, "dave", "example.com");
+    WebAuthnCeremony_registration_response(w4, 1, 1, 0);
+    check("reg attestation failed", WebAuthnCeremony_get_status(w4), "failed");
+
+    WebAuthnCeremony* w5 = @@WebAuthnCeremony();
+    WebAuthnCeremony_begin_registration(w5, "eve", "example.com");
+    WebAuthnCeremony_timeout(w5);
+    check("reg timeout", WebAuthnCeremony_get_status(w5), "failed");
+
+    WebAuthnCeremony* w6 = @@WebAuthnCeremony();
+    WebAuthnCeremony_begin_authentication(w6, "alice", "example.com", 1);
+    check("awaiting assertion", WebAuthnCeremony_get_status(w6), "awaiting_assertion");
+    WebAuthnCeremony_assertion_response(w6, 1, 1, 1, 1, 1);
+    check("authenticated", WebAuthnCeremony_get_status(w6), "authenticated");
+
+    WebAuthnCeremony* w7 = @@WebAuthnCeremony();
+    WebAuthnCeremony_begin_authentication(w7, "alice", "example.com", 1);
+    WebAuthnCeremony_assertion_response(w7, 1, 1, 0, 1, 1);
+    check("uv gate", WebAuthnCeremony_get_status(w7), "failed");
+
+    WebAuthnCeremony* w8 = @@WebAuthnCeremony();
+    WebAuthnCeremony_begin_authentication(w8, "alice", "example.com", 0);
+    WebAuthnCeremony_assertion_response(w8, 1, 1, 0, 1, 1);
+    check("uv not required", WebAuthnCeremony_get_status(w8), "authenticated");
+
+    WebAuthnCeremony* w9 = @@WebAuthnCeremony();
+    WebAuthnCeremony_begin_authentication(w9, "alice", "example.com", 1);
+    WebAuthnCeremony_assertion_response(w9, 1, 0, 1, 1, 1);
+    check("origin confusion", WebAuthnCeremony_get_status(w9), "failed");
+
+    WebAuthnCeremony* w10 = @@WebAuthnCeremony();
+    WebAuthnCeremony_begin_authentication(w10, "alice", "example.com", 1);
+    WebAuthnCeremony_assertion_response(w10, 1, 1, 1, 0, 1);
+    check("signature fail", WebAuthnCeremony_get_status(w10), "failed");
+
+    WebAuthnCeremony* w11 = @@WebAuthnCeremony();
+    WebAuthnCeremony_begin_authentication(w11, "alice", "example.com", 1);
+    WebAuthnCeremony_assertion_response(w11, 1, 1, 1, 1, 0);
+    check("counter regression", WebAuthnCeremony_get_status(w11), "failed");
+
+    WebAuthnCeremony* w12 = @@WebAuthnCeremony();
+    WebAuthnCeremony_begin_authentication(w12, "alice", "example.com", 1);
+    WebAuthnCeremony_assertion_response(w12, 0, 1, 1, 1, 1);
+    check("challenge replay", WebAuthnCeremony_get_status(w12), "failed");
+
+    WebAuthnCeremony_assertion_response(w6, 0, 0, 0, 0, 0);
+    check("authenticated absorbs replay", WebAuthnCeremony_get_status(w6), "authenticated");
+
+    printf("PASS: webauthn\n");
+    WebAuthnCeremony_destroy(w); WebAuthnCeremony_destroy(w2); WebAuthnCeremony_destroy(w3);
+    WebAuthnCeremony_destroy(w4); WebAuthnCeremony_destroy(w5); WebAuthnCeremony_destroy(w6);
+    WebAuthnCeremony_destroy(w7); WebAuthnCeremony_destroy(w8); WebAuthnCeremony_destroy(w9);
+    WebAuthnCeremony_destroy(w10); WebAuthnCeremony_destroy(w11); WebAuthnCeremony_destroy(w12);
+    return 0;
+}

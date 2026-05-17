@@ -1,0 +1,144 @@
+@@[target("erlang")]
+
+%% Cookbook 108: Drone Flight Modes — Failsafe from Any Phase
+
+@@system DroneFlightMode {
+    interface:
+        arm(preflight_ok: int)
+        takeoff(altitude: float)
+        set_mission(waypoints_ok: int)
+        return_to_home()
+        land()
+        disarm()
+        takeoff_complete()
+        mission_complete()
+        home_reached()
+        touchdown()
+        battery_critical()
+        gps_lost()
+        rc_lost()
+        geofence_breach()
+        tick()
+        status(): string
+        altitude(): float
+        failsafe_reason(): string
+
+    machine:
+        $Disarmed {
+            arm(preflight_ok: int) {
+                case Preflight_ok == 1 of
+                    true -> -> $Armed;
+                    false -> ok
+                end
+            }
+            status(): string { @@:("disarmed") }
+            altitude(): float { @@:(self.current_altitude) }
+            failsafe_reason(): string { @@:(self.reason) }
+        }
+
+        $Armed {
+            takeoff(altitude: float) {
+                self.target_altitude = Altitude,
+                -> $TakingOff
+            }
+            disarm() { -> $Disarmed }
+            status(): string { @@:("armed") }
+            altitude(): float { @@:(self.current_altitude) }
+            failsafe_reason(): string { @@:(self.reason) }
+        }
+
+        $Flying {
+            altitude(): float { @@:(self.current_altitude) }
+            failsafe_reason(): string { @@:(self.reason) }
+        }
+
+        $InFlight => $Flying {
+            battery_critical() {
+                self.reason = "battery",
+                -> $EmergencyLand
+            }
+            rc_lost() {
+                self.reason = "rc_lost",
+                -> $ReturningHome
+            }
+            gps_lost() {
+                self.reason = "gps_lost",
+                -> $AltitudeHold
+            }
+            geofence_breach() {
+                self.reason = "geofence",
+                -> $ReturningHome
+            }
+            => $^
+        }
+
+        $TakingOff => $InFlight {
+            $>() { self.current_altitude = 0.0 }
+            tick() {
+                self.current_altitude = self.current_altitude + 1.0,
+                case self.current_altitude >= self.target_altitude of
+                    true -> @@:self.takeoff_complete();
+                    false -> ok
+                end
+            }
+            takeoff_complete() { -> $Hovering }
+            status(): string { @@:("taking_off") }
+            => $^
+        }
+
+        $Hovering => $InFlight {
+            set_mission(waypoints_ok: int) {
+                case Waypoints_ok == 1 of
+                    true -> -> $OnMission;
+                    false -> ok
+                end
+            }
+            land() { -> $Landing }
+            return_to_home() { -> $ReturningHome }
+            status(): string { @@:("hovering") }
+            => $^
+        }
+
+        $OnMission => $InFlight {
+            mission_complete() { -> $Hovering }
+            return_to_home() { -> $ReturningHome }
+            status(): string { @@:("on_mission") }
+            => $^
+        }
+
+        $ReturningHome => $InFlight {
+            home_reached() { -> $Landing }
+            status(): string { @@:("returning") }
+            => $^
+        }
+
+        $AltitudeHold => $InFlight {
+            status(): string { @@:("altitude_hold") }
+            => $^
+        }
+
+        $Landing {
+            touchdown() {
+                self.current_altitude = 0.0,
+                -> $Armed
+            }
+            status(): string { @@:("landing") }
+            altitude(): float { @@:(self.current_altitude) }
+            failsafe_reason(): string { @@:(self.reason) }
+        }
+
+        $EmergencyLand {
+            touchdown() {
+                self.current_altitude = 0.0,
+                -> $Armed
+            }
+            status(): string { @@:("emergency_land") }
+            altitude(): float { @@:(self.current_altitude) }
+            failsafe_reason(): string { @@:(self.reason) }
+        }
+
+    domain:
+        target_altitude: float = 0.0
+        current_altitude: float = 0.0
+        reason: string = ""
+}

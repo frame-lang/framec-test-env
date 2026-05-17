@@ -1,0 +1,231 @@
+@@[target("c")]
+
+// Cookbook 101: Go-To-Goal with Obstacle Avoidance
+
+@@system Navigator {
+    interface:
+        navigate_to(goal_x: double, goal_y: double)
+        tick(obstacle_distance: double, at_goal: int)
+        plan_ready(path_len: int)
+        plan_failed()
+        abort()
+        status(): string
+        get_replans(): int
+        get_path_index(): int
+
+    machine:
+        $Idle {
+            navigate_to(goal_x: double, goal_y: double) {
+                self->goal_x = goal_x;
+                self->goal_y = goal_y;
+                self->replan_count = 0;
+                -> $Planning
+            }
+            status(): string { @@:("idle") }
+            get_replans(): int { @@:(self->replan_count) }
+            get_path_index(): int { @@:(self->path_index) }
+        }
+
+        $Active {
+            get_replans(): int { @@:(self->replan_count) }
+            get_path_index(): int { @@:(self->path_index) }
+        }
+
+        $Mission => $Active {
+            abort() { -> $Idle }
+            => $^
+        }
+
+        $Planning => $Mission {
+            plan_ready(path_len: int) {
+                if (path_len == 0) {
+                    @@:self.plan_failed()
+                } else {
+                    self->path_len = path_len;
+                    self->path_index = 0;
+                    -> $Driving
+                }
+            }
+            plan_failed() {
+                self->replan_count = self->replan_count + 1;
+                if (self->replan_count >= self->max_replans) {
+                    -> $Failed
+                } else {
+                    -> $Planning
+                }
+            }
+            status(): string { @@:("planning") }
+            => $^
+        }
+
+        $Driving => $Mission {
+            tick(obstacle_distance: double, at_goal: int) {
+                if (at_goal == 1) {
+                    -> $Arrived
+                } else if (obstacle_distance < self->obstacle_threshold) {
+                    -> $Avoiding
+                } else {
+                    self->path_index = self->path_index + 1;
+                    if (self->path_index >= self->path_len) {
+                        -> $Planning
+                    }
+                }
+            }
+            status(): string { @@:("driving") }
+            => $^
+        }
+
+        $Avoiding => $Mission {
+            $>() { self->avoid_ticks = 0; }
+            tick(obstacle_distance: double, at_goal: int) {
+                self->avoid_ticks = self->avoid_ticks + 1;
+                if (obstacle_distance >= self->obstacle_threshold) {
+                    -> $Planning
+                } else if (self->avoid_ticks > self->max_avoid_ticks) {
+                    -> $Failed
+                }
+            }
+            status(): string { @@:("avoiding") }
+            => $^
+        }
+
+        $Arrived {
+            navigate_to(goal_x: double, goal_y: double) {
+                self->goal_x = goal_x;
+                self->goal_y = goal_y;
+                self->replan_count = 0;
+                -> $Planning
+            }
+            status(): string { @@:("arrived") }
+            get_replans(): int { @@:(self->replan_count) }
+            get_path_index(): int { @@:(self->path_index) }
+        }
+
+        $Failed {
+            navigate_to(goal_x: double, goal_y: double) {
+                self->goal_x = goal_x;
+                self->goal_y = goal_y;
+                self->replan_count = 0;
+                -> $Planning
+            }
+            status(): string { @@:("failed") }
+            get_replans(): int { @@:(self->replan_count) }
+            get_path_index(): int { @@:(self->path_index) }
+        }
+
+    domain:
+        goal_x: double = 0.0
+        goal_y: double = 0.0
+        path_len: int = 0
+        path_index: int = 0
+        replan_count: int = 0
+        max_replans: int = 3
+        obstacle_threshold: double = 0.5
+        avoid_ticks: int = 0
+        max_avoid_ticks: int = 30
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_int(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    Navigator* n = @@Navigator();
+    check_str("idle", Navigator_status(n), "idle");
+    Navigator_navigate_to(n, 5.0, 0.0);
+    check_str("planning", Navigator_status(n), "planning");
+    Navigator_plan_ready(n, 3);
+    check_str("driving", Navigator_status(n), "driving");
+    Navigator_tick(n, 10.0, 0);
+    check_str("still driving 1", Navigator_status(n), "driving");
+    Navigator_tick(n, 10.0, 0);
+    check_str("still driving 2", Navigator_status(n), "driving");
+    Navigator_tick(n, 10.0, 1);
+    check_str("arrived", Navigator_status(n), "arrived");
+
+    Navigator* n2 = @@Navigator();
+    Navigator_navigate_to(n2, 5.0, 0.0);
+    Navigator_plan_failed(n2);
+    check_str("re-planning", Navigator_status(n2), "planning");
+    check_int("1 replan", Navigator_get_replans(n2), 1);
+    Navigator_plan_failed(n2);
+    check_int("2 replans", Navigator_get_replans(n2), 2);
+    Navigator_plan_failed(n2);
+    check_str("exceeded -> failed", Navigator_status(n2), "failed");
+
+    Navigator* n3 = @@Navigator();
+    Navigator_navigate_to(n3, 5.0, 0.0);
+    Navigator_plan_ready(n3, 0);
+    check_str("empty plan -> re-planning", Navigator_status(n3), "planning");
+    check_int("empty counted as failure", Navigator_get_replans(n3), 1);
+
+    Navigator* n4 = @@Navigator();
+    Navigator_navigate_to(n4, 5.0, 0.0);
+    Navigator_plan_ready(n4, 5);
+    Navigator_tick(n4, 10.0, 0);
+    Navigator_tick(n4, 0.3, 0);
+    check_str("avoiding", Navigator_status(n4), "avoiding");
+    Navigator_tick(n4, 10.0, 0);
+    check_str("cleared -> planning (freshness)", Navigator_status(n4), "planning");
+
+    Navigator* n5 = @@Navigator();
+    Navigator_navigate_to(n5, 5.0, 0.0);
+    Navigator_plan_ready(n5, 5);
+    Navigator_tick(n5, 0.3, 0);
+    check_str("avoiding start", Navigator_status(n5), "avoiding");
+    int i = 0;
+    while (i < 35) {
+        Navigator_tick(n5, 0.3, 0);
+        if (strcmp(Navigator_status(n5), "failed") == 0) break;
+        i = i + 1;
+    }
+    check_str("trapped -> failed", Navigator_status(n5), "failed");
+
+    Navigator* n6 = @@Navigator();
+    Navigator_navigate_to(n6, 5.0, 0.0);
+    Navigator_plan_ready(n6, 2);
+    Navigator_tick(n6, 10.0, 0);
+    Navigator_tick(n6, 10.0, 0);
+    check_str("exhausted -> replan", Navigator_status(n6), "planning");
+
+    Navigator* n7 = @@Navigator();
+    Navigator_navigate_to(n7, 5.0, 0.0);
+    Navigator_plan_ready(n7, 3);
+    Navigator_abort(n7);
+    check_str("aborted -> idle", Navigator_status(n7), "idle");
+
+    Navigator* n8 = @@Navigator();
+    Navigator_navigate_to(n8, 5.0, 0.0);
+    Navigator_plan_ready(n8, 5);
+    Navigator_tick(n8, 0.3, 0);
+    Navigator_abort(n8);
+    check_str("abort from avoiding", Navigator_status(n8), "idle");
+
+    Navigator_navigate_to(n2, 10.0, 0.0);
+    check_str("re-navigate from failed", Navigator_status(n2), "planning");
+    check_int("replan counter reset", Navigator_get_replans(n2), 0);
+
+    printf("PASS: navigator\n");
+    Navigator_destroy(n);
+    Navigator_destroy(n2);
+    Navigator_destroy(n3);
+    Navigator_destroy(n4);
+    Navigator_destroy(n5);
+    Navigator_destroy(n6);
+    Navigator_destroy(n7);
+    Navigator_destroy(n8);
+    return 0;
+}

@@ -1,0 +1,167 @@
+@@[target("swift")]
+
+// Cookbook 86: TLS 1.3 Handshake (Client Side)
+
+import Foundation
+
+@@system TlsClient {
+    interface:
+        connect(server_name: String)
+        server_hello_received(supported_versions_ext: Int, downgrade_flag: Int, cipher: String)
+        encrypted_extensions_received()
+        certificate_received(cert_valid: Int)
+        cert_verify_received(sig_valid: Int)
+        server_finished_received(mac_valid: Int)
+        send_app_data(data: String): String = "not_ready"
+        close()
+        timeout()
+        get_status(): String = "idle"
+
+    machine:
+        $Idle {
+            connect(server_name: String) {
+                self.server_name = server_name
+                -> $WaitingServerHello
+            }
+            get_status(): String { @@:("idle") }
+        }
+
+        $WaitingServerHello {
+            server_hello_received(supported_versions_ext: Int, downgrade_flag: Int, cipher: String) {
+                if supported_versions_ext != 772 { -> $Aborted }
+                else if downgrade_flag != 0 { -> $Aborted }
+                else if cipher == "RC4" { -> $Aborted }
+                else { -> $WaitingEncryptedExtensions }
+            }
+            timeout() { -> $Aborted }
+            get_status(): String { @@:("waiting server_hello") }
+        }
+
+        $WaitingEncryptedExtensions {
+            encrypted_extensions_received() { -> $WaitingCertificate }
+            timeout() { -> $Aborted }
+            get_status(): String { @@:("waiting ee") }
+        }
+
+        $WaitingCertificate {
+            certificate_received(cert_valid: Int) {
+                if cert_valid == 1 { -> $WaitingCertVerify } else { -> $Aborted }
+            }
+            timeout() { -> $Aborted }
+            get_status(): String { @@:("waiting cert") }
+        }
+
+        $WaitingCertVerify {
+            cert_verify_received(sig_valid: Int) {
+                if sig_valid == 1 { -> $WaitingServerFinished } else { -> $Aborted }
+            }
+            timeout() { -> $Aborted }
+            get_status(): String { @@:("waiting cert_verify") }
+        }
+
+        $WaitingServerFinished {
+            server_finished_received(mac_valid: Int) {
+                if mac_valid == 1 { -> $Established } else { -> $Aborted }
+            }
+            timeout() { -> $Aborted }
+            get_status(): String { @@:("waiting server_finished") }
+        }
+
+        $Established {
+            send_app_data(data: String): String { @@:("sent") }
+            close() { -> $Closed }
+            get_status(): String { @@:("established") }
+        }
+
+        $Aborted {
+            get_status(): String { @@:("aborted") }
+        }
+
+        $Closed {
+            get_status(): String { @@:("closed") }
+        }
+
+    domain:
+        server_name: String = ""
+}
+
+func check(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected { print("FAIL: \(label) expected '\(expected)', got '\(actual)'"); exit(1) }
+}
+
+let c = @@TlsClient()
+check("start idle", c.get_status() as! String, "idle")
+check("idle app_data denied", c.send_app_data(data: "hello") as! String, "not_ready")
+c.connect(server_name: "example.com")
+check("waiting SH", c.get_status() as! String, "waiting server_hello")
+check("waiting SH app_data denied", c.send_app_data(data: "hello") as! String, "not_ready")
+c.server_hello_received(supported_versions_ext: 772, downgrade_flag: 0, cipher: "AES-GCM")
+check("waiting EE", c.get_status() as! String, "waiting ee")
+check("waiting EE app_data denied", c.send_app_data(data: "hello") as! String, "not_ready")
+c.encrypted_extensions_received()
+check("waiting cert", c.get_status() as! String, "waiting cert")
+c.certificate_received(cert_valid: 1)
+check("waiting cert_verify", c.get_status() as! String, "waiting cert_verify")
+c.cert_verify_received(sig_valid: 1)
+check("waiting finished", c.get_status() as! String, "waiting server_finished")
+check("still denied pre-finished", c.send_app_data(data: "hello") as! String, "not_ready")
+c.server_finished_received(mac_valid: 1)
+check("established", c.get_status() as! String, "established")
+check("app_data allowed", c.send_app_data(data: "hello") as! String, "sent")
+c.close()
+check("closed", c.get_status() as! String, "closed")
+check("closed denies app_data", c.send_app_data(data: "hello") as! String, "not_ready")
+
+let c2 = @@TlsClient()
+c2.connect(server_name: "example.com")
+c2.server_hello_received(supported_versions_ext: 772, downgrade_flag: 1, cipher: "AES-GCM")
+check("downgrade aborts", c2.get_status() as! String, "aborted")
+check("aborted denies app_data", c2.send_app_data(data: "hello") as! String, "not_ready")
+
+let c3 = @@TlsClient()
+c3.connect(server_name: "example.com")
+c3.server_hello_received(supported_versions_ext: 771, downgrade_flag: 0, cipher: "AES-GCM")
+check("version mismatch aborts", c3.get_status() as! String, "aborted")
+
+let c4 = @@TlsClient()
+c4.connect(server_name: "example.com")
+c4.server_hello_received(supported_versions_ext: 772, downgrade_flag: 0, cipher: "RC4")
+check("weak cipher aborts", c4.get_status() as! String, "aborted")
+
+let c5 = @@TlsClient()
+c5.connect(server_name: "example.com")
+c5.server_hello_received(supported_versions_ext: 772, downgrade_flag: 0, cipher: "AES-GCM")
+c5.encrypted_extensions_received()
+c5.certificate_received(cert_valid: 0)
+check("cert fail aborts", c5.get_status() as! String, "aborted")
+
+let c6 = @@TlsClient()
+c6.connect(server_name: "example.com")
+c6.server_hello_received(supported_versions_ext: 772, downgrade_flag: 0, cipher: "AES-GCM")
+c6.encrypted_extensions_received()
+c6.certificate_received(cert_valid: 1)
+c6.cert_verify_received(sig_valid: 0)
+check("sig fail aborts", c6.get_status() as! String, "aborted")
+
+let c7 = @@TlsClient()
+c7.connect(server_name: "example.com")
+c7.server_hello_received(supported_versions_ext: 772, downgrade_flag: 0, cipher: "AES-GCM")
+c7.encrypted_extensions_received()
+c7.certificate_received(cert_valid: 1)
+c7.cert_verify_received(sig_valid: 1)
+c7.server_finished_received(mac_valid: 0)
+check("mac fail aborts", c7.get_status() as! String, "aborted")
+check("failed mac denies app_data", c7.send_app_data(data: "hello") as! String, "not_ready")
+
+let c8 = @@TlsClient()
+c8.connect(server_name: "example.com")
+c8.timeout()
+check("timeout from SH", c8.get_status() as! String, "aborted")
+
+let c9 = @@TlsClient()
+c9.connect(server_name: "example.com")
+c9.server_hello_received(supported_versions_ext: 772, downgrade_flag: 0, cipher: "AES-GCM")
+c9.timeout()
+check("timeout from EE", c9.get_status() as! String, "aborted")
+
+print("PASS: tls_client")

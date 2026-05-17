@@ -1,0 +1,106 @@
+@@[target("typescript")]
+
+// Cookbook 92: Signal / Double Ratchet Session
+
+@@system DoubleRatchetSession {
+    interface:
+        initialize(shared_secret: string, remote_pub: string)
+        send_plaintext(m: string): string = ""
+        receive_ciphertext(header: string, ct: string, ratchet: number, valid: number): string = ""
+        close()
+        get_status(): string = "uninit"
+        get_sends(): number
+        get_recvs(): number
+        get_ratchets(): number
+        get_zeroized(): number
+
+    machine:
+        $Uninit {
+            initialize(shared_secret: string, remote_pub: string) {
+                this.root_key = shared_secret;
+                this.remote_pub = remote_pub;
+                -> $Active
+            }
+            get_status(): string { @@:("uninit") }
+            get_sends(): number { @@:(this.sends) }
+            get_recvs(): number { @@:(this.recvs) }
+            get_ratchets(): number { @@:(this.ratchets) }
+            get_zeroized(): number { @@:(this.zeroized) }
+        }
+
+        $Active {
+            send_plaintext(m: string): string {
+                this.sends = this.sends + 1;
+                this.zeroized = this.zeroized + 1;
+                @@:("ct-send")
+            }
+            receive_ciphertext(header: string, ct: string, ratchet: number, valid: number): string {
+                if (ratchet == 1) { this.ratchets = this.ratchets + 1; }
+                if (valid == 0) {
+                    @@:("decryption_failed")
+                } else {
+                    this.recvs = this.recvs + 1;
+                    this.zeroized = this.zeroized + 1;
+                    @@:("pt")
+                }
+            }
+            close() { -> $Closed }
+            get_status(): string { @@:("active") }
+            get_sends(): number { @@:(this.sends) }
+            get_recvs(): number { @@:(this.recvs) }
+            get_ratchets(): number { @@:(this.ratchets) }
+            get_zeroized(): number { @@:(this.zeroized) }
+        }
+
+        $Closed {
+            get_status(): string { @@:("closed") }
+            get_sends(): number { @@:(this.sends) }
+            get_recvs(): number { @@:(this.recvs) }
+            get_ratchets(): number { @@:(this.ratchets) }
+            get_zeroized(): number { @@:(this.zeroized) }
+        }
+
+    domain:
+        root_key: string = ""
+        remote_pub: string = ""
+        sends: number = 0
+        recvs: number = 0
+        ratchets: number = 0
+        zeroized: number = 0
+}
+
+function check(label: string, actual: any, expected: any): void {
+    if (actual !== expected) { console.log("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'"); process.exit(1); }
+}
+
+const s = @@DoubleRatchetSession();
+check("uninit", s.get_status(), "uninit");
+check("uninit send default", s.send_plaintext("hi"), "");
+check("uninit recv default", s.receive_ciphertext("h", "ct", 0, 1), "");
+s.initialize("root-secret", "remote-pub");
+check("active", s.get_status(), "active");
+check("sent", s.send_plaintext("m1"), "ct-send");
+check("sent 2", s.send_plaintext("m2"), "ct-send");
+check("2 sends", s.get_sends(), 2);
+check("zeroised == sends", s.get_zeroized(), s.get_sends());
+check("received", s.receive_ciphertext("h1", "c1", 0, 1), "pt");
+check("1 recv", s.get_recvs(), 1);
+check("0 ratchets", s.get_ratchets(), 0);
+check("received with ratchet", s.receive_ciphertext("h2", "c2", 1, 1), "pt");
+check("1 ratchet", s.get_ratchets(), 1);
+check("2 recvs", s.get_recvs(), 2);
+check("zeroise invariant", s.get_zeroized(), s.get_sends() + s.get_recvs());
+const beforeRecvs = s.get_recvs();
+const beforeZeroized = s.get_zeroized();
+check("bad decrypt", s.receive_ciphertext("bad", "bad", 0, 0), "decryption_failed");
+check("recvs unchanged", s.get_recvs(), beforeRecvs);
+check("zeroized unchanged", s.get_zeroized(), beforeZeroized);
+s.close();
+check("closed", s.get_status(), "closed");
+check("closed send default", s.send_plaintext("hi"), "");
+check("closed recv default", s.receive_ciphertext("h", "ct", 0, 1), "");
+const finalSends = s.get_sends();
+const finalRecvs = s.get_recvs();
+check("sends frozen post-close", s.get_sends(), finalSends);
+check("recvs frozen post-close", s.get_recvs(), finalRecvs);
+console.log("PASS: double_ratchet");

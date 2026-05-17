@@ -1,0 +1,115 @@
+@@[target("cpp")]
+
+// Cookbook 79: Titration Protocol
+
+@@system Titration {
+    interface:
+        add_drop(volume_mL: double)
+        observe_color(color: string)
+        record_endpoint()
+        new_trial()
+        result_mL(): double = 0.0
+        status(): string
+        volume_mL(): double
+
+    machine:
+        $Setup {
+            add_drop(volume_mL: double) {
+                this->volume = 0.0;
+                -> $Titrating
+            }
+            volume_mL(): double { @@:(this->volume) }
+            status(): string { @@:("setup") }
+        }
+
+        $Titrating {
+            add_drop(volume_mL: double) { this->volume = this->volume + volume_mL; }
+            observe_color(color: string) {
+                if (color == "pink") {
+                    -> $NearEndpoint
+                }
+            }
+            volume_mL(): double { @@:(this->volume) }
+            status(): string { @@:("titrating") }
+        }
+
+        $NearEndpoint {
+            add_drop(volume_mL: double) { this->volume = this->volume + volume_mL; }
+            observe_color(color: string) {
+                if (color == "clear") {
+                    -> $Titrating
+                }
+            }
+            record_endpoint() { -> $Complete }
+            volume_mL(): double { @@:(this->volume) }
+            status(): string { @@:("near endpoint") }
+        }
+
+        $Complete {
+            new_trial() {
+                this->volume = 0.0;
+                -> $Setup
+            }
+            result_mL(): double { @@:(this->volume) }
+            volume_mL(): double { @@:(this->volume) }
+            status(): string { @@:("complete") }
+        }
+
+    domain:
+        volume: double = 0.0
+}
+
+#include <iostream>
+#include <cstdlib>
+#include <cmath>
+
+static void check_str(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " expected '" << expected << "', got '" << actual << "'\n";
+        std::exit(1);
+    }
+}
+static void check_f(const std::string& label, double actual, double expected) {
+    if (std::fabs(actual - expected) > 1e-9) {
+        std::cout << "FAIL: " << label << " expected " << expected << ", got " << actual << "\n";
+        std::exit(1);
+    }
+}
+
+int main() {
+    auto t = @@Titration();
+    check_str("start setup", t.status(), "setup");
+    t.add_drop(1.0);
+    check_str("titrating", t.status(), "titrating");
+    check_f("volume zeroed on first", t.volume_mL(), 0.0);
+    t.add_drop(5.0);
+    t.add_drop(3.0);
+    check_f("accumulating", t.volume_mL(), 8.0);
+    t.observe_color("pink");
+    check_str("near endpoint", t.status(), "near endpoint");
+    t.observe_color("clear");
+    check_str("back to titrating", t.status(), "titrating");
+    t.observe_color("pink");
+    check_str("near endpoint 2", t.status(), "near endpoint");
+    t.add_drop(0.05);
+    t.record_endpoint();
+    check_str("complete", t.status(), "complete");
+    check_f("recorded volume", t.result_mL(), 8.05);
+    t.add_drop(10.0);
+    check_f("endpoint locked", t.result_mL(), 8.05);
+    t.add_drop(5.0);
+    check_f("endpoint still locked", t.result_mL(), 8.05);
+    t.observe_color("pink");
+    t.record_endpoint();
+    check_f("still locked after ignored events", t.result_mL(), 8.05);
+    t.new_trial();
+    check_str("new trial back to setup", t.status(), "setup");
+    check_f("volume cleared", t.volume_mL(), 0.0);
+    t.add_drop(2.0);
+    t.add_drop(1.5);
+    t.observe_color("pink");
+    t.record_endpoint();
+    check_f("second endpoint", t.result_mL(), 1.5);
+    std::cout << "PASS: titration\n";
+    return 0;
+}

@@ -1,0 +1,111 @@
+@@[target("swift")]
+
+// Cookbook 92: Signal / Double Ratchet Session
+
+import Foundation
+
+@@system DoubleRatchetSession {
+    interface:
+        initialize(shared_secret: String, remote_pub: String)
+        send_plaintext(m: String): String = ""
+        receive_ciphertext(header: String, ct: String, ratchet: Int, valid: Int): String = ""
+        close()
+        get_status(): String = "uninit"
+        get_sends(): Int
+        get_recvs(): Int
+        get_ratchets(): Int
+        get_zeroized(): Int
+
+    machine:
+        $Uninit {
+            initialize(shared_secret: String, remote_pub: String) {
+                self.root_key = shared_secret
+                self.remote_pub = remote_pub
+                -> $Active
+            }
+            get_status(): String { @@:("uninit") }
+            get_sends(): Int { @@:(self.sends) }
+            get_recvs(): Int { @@:(self.recvs) }
+            get_ratchets(): Int { @@:(self.ratchets) }
+            get_zeroized(): Int { @@:(self.zeroized) }
+        }
+
+        $Active {
+            send_plaintext(m: String): String {
+                self.sends = self.sends + 1
+                self.zeroized = self.zeroized + 1
+                @@:("ct-send")
+            }
+            receive_ciphertext(header: String, ct: String, ratchet: Int, valid: Int): String {
+                if ratchet == 1 { self.ratchets = self.ratchets + 1 }
+                if valid == 0 {
+                    @@:("decryption_failed")
+                } else {
+                    self.recvs = self.recvs + 1
+                    self.zeroized = self.zeroized + 1
+                    @@:("pt")
+                }
+            }
+            close() { -> $Closed }
+            get_status(): String { @@:("active") }
+            get_sends(): Int { @@:(self.sends) }
+            get_recvs(): Int { @@:(self.recvs) }
+            get_ratchets(): Int { @@:(self.ratchets) }
+            get_zeroized(): Int { @@:(self.zeroized) }
+        }
+
+        $Closed {
+            get_status(): String { @@:("closed") }
+            get_sends(): Int { @@:(self.sends) }
+            get_recvs(): Int { @@:(self.recvs) }
+            get_ratchets(): Int { @@:(self.ratchets) }
+            get_zeroized(): Int { @@:(self.zeroized) }
+        }
+
+    domain:
+        root_key: String = ""
+        remote_pub: String = ""
+        sends: Int = 0
+        recvs: Int = 0
+        ratchets: Int = 0
+        zeroized: Int = 0
+}
+
+func check(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected { print("FAIL: \(label) expected '\(expected)', got '\(actual)'"); exit(1) }
+}
+func checkI(_ label: String, _ actual: Int, _ expected: Int) {
+    if actual != expected { print("FAIL: \(label) expected \(expected), got \(actual)"); exit(1) }
+}
+
+let s = @@DoubleRatchetSession()
+check("uninit", s.get_status() as! String, "uninit")
+check("uninit send default", s.send_plaintext(m: "hi") as! String, "")
+check("uninit recv default", s.receive_ciphertext(header: "h", ct: "ct", ratchet: 0, valid: 1) as! String, "")
+s.initialize(shared_secret: "root-secret", remote_pub: "remote-pub")
+check("active", s.get_status() as! String, "active")
+check("sent", s.send_plaintext(m: "m1") as! String, "ct-send")
+check("sent 2", s.send_plaintext(m: "m2") as! String, "ct-send")
+checkI("2 sends", s.get_sends() as! Int, 2)
+checkI("zeroised == sends", s.get_zeroized() as! Int, s.get_sends() as! Int)
+check("received", s.receive_ciphertext(header: "h1", ct: "c1", ratchet: 0, valid: 1) as! String, "pt")
+checkI("1 recv", s.get_recvs() as! Int, 1)
+checkI("0 ratchets", s.get_ratchets() as! Int, 0)
+check("received with ratchet", s.receive_ciphertext(header: "h2", ct: "c2", ratchet: 1, valid: 1) as! String, "pt")
+checkI("1 ratchet", s.get_ratchets() as! Int, 1)
+checkI("2 recvs", s.get_recvs() as! Int, 2)
+checkI("zeroise invariant", s.get_zeroized() as! Int, (s.get_sends() as! Int) + (s.get_recvs() as! Int))
+let beforeRecvs = s.get_recvs() as! Int
+let beforeZeroized = s.get_zeroized() as! Int
+check("bad decrypt", s.receive_ciphertext(header: "bad", ct: "bad", ratchet: 0, valid: 0) as! String, "decryption_failed")
+checkI("recvs unchanged", s.get_recvs() as! Int, beforeRecvs)
+checkI("zeroized unchanged", s.get_zeroized() as! Int, beforeZeroized)
+s.close()
+check("closed", s.get_status() as! String, "closed")
+check("closed send default", s.send_plaintext(m: "hi") as! String, "")
+check("closed recv default", s.receive_ciphertext(header: "h", ct: "ct", ratchet: 0, valid: 1) as! String, "")
+let finalSends = s.get_sends() as! Int
+let finalRecvs = s.get_recvs() as! Int
+checkI("sends frozen post-close", s.get_sends() as! Int, finalSends)
+checkI("recvs frozen post-close", s.get_recvs() as! Int, finalRecvs)
+print("PASS: double_ratchet")

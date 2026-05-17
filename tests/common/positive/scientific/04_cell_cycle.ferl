@@ -1,0 +1,102 @@
+@@[target("erlang")]
+
+%% Cookbook 75: Cell Cycle with Checkpoints
+
+@@system CellCycle {
+    interface:
+        tick()
+        dna_damage_detected()
+        damage_repaired()
+        nutrients_low()
+        nutrients_restored()
+        spindle_misaligned()
+        spindle_aligned()
+        apoptosis_signal()
+        phase(): string
+
+    machine:
+        $G1 => $Cycling {
+            $>() { self.mass = self.mass * 1.1 }
+            tick() {
+                case self.mass >= self.g1_threshold of
+                    true -> -> $S;
+                    false -> ok
+                end
+            }
+            phase(): string { @@:("G1") }
+            => $^
+        }
+
+        $S => $Cycling {
+            $>() { self.dna_content = 1.0 }
+            tick() {
+                self.dna_content = self.dna_content + 0.1,
+                case self.dna_content >= 2.0 of
+                    true ->
+                        self.dna_content = 2.0,
+                        -> $G2;
+                    false -> ok
+                end
+            }
+            phase(): string { @@:("S") }
+            => $^
+        }
+
+        $G2 => $Cycling {
+            tick() {
+                self.g2_counter = self.g2_counter + 1,
+                case self.g2_counter >= 3 of
+                    true ->
+                        self.g2_counter = 0,
+                        -> $M;
+                    false -> ok
+                end
+            }
+            phase(): string { @@:("G2") }
+            => $^
+        }
+
+        $M => $Cycling {
+            tick() {
+                self.mass = self.mass / 2.0,
+                self.dna_content = 1.0,
+                -> $G1
+            }
+            spindle_misaligned() { -> $M_Arrested }
+            phase(): string { @@:("M") }
+            => $^
+        }
+
+        $Cycling {
+            dna_damage_detected() { -> $G1_Arrested }
+            nutrients_low() { -> $G0_Quiescent }
+            apoptosis_signal() { -> $Apoptotic }
+        }
+
+        $G1_Arrested {
+            damage_repaired() { -> $G1 }
+            apoptosis_signal() { -> $Apoptotic }
+            phase(): string { @@:("G1-arrested") }
+        }
+
+        $M_Arrested {
+            spindle_aligned() { -> $M }
+            apoptosis_signal() { -> $Apoptotic }
+            phase(): string { @@:("M-arrested") }
+        }
+
+        $G0_Quiescent {
+            nutrients_restored() { -> $G1 }
+            phase(): string { @@:("G0") }
+        }
+
+        $Apoptotic {
+            phase(): string { @@:("apoptotic") }
+        }
+
+    domain:
+        mass: float = 1.0
+        g1_threshold: float = 1.8
+        dna_content: float = 1.0
+        g2_counter: int = 0
+}

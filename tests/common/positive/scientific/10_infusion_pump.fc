@@ -1,0 +1,137 @@
+@@[target("c")]
+
+// Cookbook 81: Infusion Pump (safety-critical)
+
+@@system InfusionPump {
+    interface:
+        power_on()
+        set_rate(ml_per_hr: double)
+        prime()
+        start_infusion()
+        occlusion_detected()
+        acknowledge_alarm()
+        tick_minute()
+        volume_delivered(): double = 0.0
+        rate_mL_per_hr(): double
+        alarm_reason(): string
+        status(): string
+
+    machine:
+        $Off {
+            power_on() { -> $Idle }
+            status(): string { @@:("off") }
+            rate_mL_per_hr(): double { @@:(self->rate) }
+            volume_delivered(): double { @@:(self->volume) }
+            alarm_reason(): string { @@:("") }
+        }
+
+        $Operational {
+            occlusion_detected() { -> ("occlusion") $Alarm }
+        }
+
+        $Idle => $Operational {
+            set_rate(ml_per_hr: double) { self->rate = ml_per_hr; }
+            prime() {
+                if (self->rate > 0.0) {
+                    -> $Primed
+                }
+            }
+            status(): string { @@:("idle") }
+            rate_mL_per_hr(): double { @@:(self->rate) }
+            volume_delivered(): double { @@:(self->volume) }
+            alarm_reason(): string { @@:("") }
+            => $^
+        }
+
+        $Primed => $Operational {
+            start_infusion() { -> $Running }
+            status(): string { @@:("primed") }
+            rate_mL_per_hr(): double { @@:(self->rate) }
+            volume_delivered(): double { @@:(self->volume) }
+            alarm_reason(): string { @@:("") }
+            => $^
+        }
+
+        $Running => $Operational {
+            tick_minute() { self->volume = self->volume + self->rate / 60.0; }
+            status(): string { @@:("running") }
+            rate_mL_per_hr(): double { @@:(self->rate) }
+            volume_delivered(): double { @@:(self->volume) }
+            alarm_reason(): string { @@:("") }
+            => $^
+        }
+
+        $Alarm {
+            $.reason: string = "unknown"
+            $>(reason: string) { $.reason = reason; }
+            acknowledge_alarm() { -> $Idle }
+            status(): string { @@:("alarm") }
+            alarm_reason(): string { @@:($.reason) }
+            rate_mL_per_hr(): double { @@:(self->rate) }
+            volume_delivered(): double { @@:(self->volume) }
+        }
+
+    domain:
+        rate: double = 0.0
+        volume: double = 0.0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <math.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_f(const char* label, double actual, double expected) {
+    if (fabs(actual - expected) > 1e-9) {
+        printf("FAIL: %s expected %f, got %f\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    InfusionPump* p = @@InfusionPump();
+    check_str("start off", InfusionPump_status(p), "off");
+    InfusionPump_set_rate(p, 100.0);
+    check_f("rate unchanged in Off", InfusionPump_rate_mL_per_hr(p), 0.0);
+    InfusionPump_start_infusion(p);
+    check_str("still off", InfusionPump_status(p), "off");
+    InfusionPump_power_on(p);
+    check_str("idle", InfusionPump_status(p), "idle");
+    InfusionPump_set_rate(p, 100.0);
+    check_f("rate set", InfusionPump_rate_mL_per_hr(p), 100.0);
+    InfusionPump_start_infusion(p);
+    check_str("idle cannot start", InfusionPump_status(p), "idle");
+    check_f("no volume yet", InfusionPump_volume_delivered(p), 0.0);
+    InfusionPump_prime(p);
+    check_str("primed", InfusionPump_status(p), "primed");
+    InfusionPump_start_infusion(p);
+    check_str("running", InfusionPump_status(p), "running");
+    for (int i = 0; i < 10; i = i + 1) InfusionPump_tick_minute(p);
+    check_str("running still", InfusionPump_status(p), "running");
+    double vol_after_10 = InfusionPump_volume_delivered(p);
+    check_f("volume ~= 10*100/60", vol_after_10, 10.0 * 100.0 / 60.0);
+    InfusionPump_occlusion_detected(p);
+    check_str("alarm on occlusion", InfusionPump_status(p), "alarm");
+    check_str("alarm reason via state var", InfusionPump_alarm_reason(p), "occlusion");
+    InfusionPump_start_infusion(p);
+    InfusionPump_prime(p);
+    InfusionPump_tick_minute(p);
+    check_str("alarm still alarm", InfusionPump_status(p), "alarm");
+    check_f("volume locked in alarm", InfusionPump_volume_delivered(p), vol_after_10);
+    InfusionPump_acknowledge_alarm(p);
+    check_str("ack returns to idle", InfusionPump_status(p), "idle");
+    check_f("rate persisted across alarm", InfusionPump_rate_mL_per_hr(p), 100.0);
+    InfusionPump_prime(p);
+    InfusionPump_start_infusion(p);
+    InfusionPump_tick_minute(p);
+    check_f("volume continues from prior", InfusionPump_volume_delivered(p), vol_after_10 + 100.0 / 60.0);
+    printf("PASS: infusion_pump\n");
+    InfusionPump_destroy(p);
+    return 0;
+}

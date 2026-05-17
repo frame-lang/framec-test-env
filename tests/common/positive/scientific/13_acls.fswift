@@ -1,0 +1,144 @@
+@@[target("swift")]
+
+// Cookbook 84: ACLS Cardiac Arrest Algorithm
+
+import Foundation
+
+@@system ACLS {
+    interface:
+        start_code()
+        rhythm_check(rhythm: String)
+        cpr_cycle_complete()
+        give_epinephrine()
+        rosc_achieved()
+        pronounce()
+        phase(): String
+        shocks_given(): Int
+        cpr_cycles_done(): Int
+
+    machine:
+        $PreArrest {
+            start_code() {
+                self.shocks = 0
+                self.cpr_cycles = 0
+                -> $Analyzing
+            }
+            phase(): String { @@:("pre-arrest") }
+            shocks_given(): Int { @@:(self.shocks) }
+            cpr_cycles_done(): Int { @@:(self.cpr_cycles) }
+        }
+
+        $Coding {
+            rosc_achieved() { -> $ROSC }
+            pronounce() { -> $Terminated }
+            shocks_given(): Int { @@:(self.shocks) }
+            cpr_cycles_done(): Int { @@:(self.cpr_cycles) }
+        }
+
+        $Analyzing => $Coding {
+            rhythm_check(rhythm: String) {
+                self.last_rhythm = rhythm
+                if rhythm == "VF" || rhythm == "pulseless_VT" {
+                    self.shocks = self.shocks + 1
+                    -> $CPR_Shockable
+                } else {
+                    -> $CPR_NonShockable
+                }
+            }
+            phase(): String { @@:("analyzing") }
+            => $^
+        }
+
+        $CPR_Shockable => $Coding {
+            give_epinephrine() { }
+            cpr_cycle_complete() {
+                self.cpr_cycles = self.cpr_cycles + 1
+                -> $Analyzing
+            }
+            phase(): String { @@:("cpr shockable") }
+            => $^
+        }
+
+        $CPR_NonShockable => $Coding {
+            give_epinephrine() { }
+            cpr_cycle_complete() {
+                self.cpr_cycles = self.cpr_cycles + 1
+                -> $Analyzing
+            }
+            phase(): String { @@:("cpr non-shockable") }
+            => $^
+        }
+
+        $ROSC {
+            phase(): String { @@:("rosc") }
+            shocks_given(): Int { @@:(self.shocks) }
+            cpr_cycles_done(): Int { @@:(self.cpr_cycles) }
+        }
+
+        $Terminated {
+            phase(): String { @@:("terminated") }
+            shocks_given(): Int { @@:(self.shocks) }
+            cpr_cycles_done(): Int { @@:(self.cpr_cycles) }
+        }
+
+    domain:
+        last_rhythm: String = ""
+        shocks: Int = 0
+        cpr_cycles: Int = 0
+}
+
+func check(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+func checkI(_ label: String, _ actual: Int, _ expected: Int) {
+    if actual != expected {
+        print("FAIL: \(label) expected \(expected), got \(actual)")
+        exit(1)
+    }
+}
+
+let c = @@ACLS()
+check("pre-arrest", c.phase() as! String, "pre-arrest")
+c.rhythm_check(rhythm: "VF")
+c.cpr_cycle_complete()
+c.rosc_achieved()
+check("pre-arrest absorbs", c.phase() as! String, "pre-arrest")
+c.start_code()
+check("analyzing", c.phase() as! String, "analyzing")
+c.rhythm_check(rhythm: "VF")
+check("cpr shockable", c.phase() as! String, "cpr shockable")
+checkI("1 shock", c.shocks_given() as! Int, 1)
+c.give_epinephrine()
+check("epi no-op", c.phase() as! String, "cpr shockable")
+c.cpr_cycle_complete()
+check("back to analyzing", c.phase() as! String, "analyzing")
+checkI("1 cycle done", c.cpr_cycles_done() as! Int, 1)
+c.rhythm_check(rhythm: "asystole")
+check("non-shockable cpr", c.phase() as! String, "cpr non-shockable")
+checkI("still 1 shock", c.shocks_given() as! Int, 1)
+c.cpr_cycle_complete()
+checkI("2 cycles done", c.cpr_cycles_done() as! Int, 2)
+c.rhythm_check(rhythm: "pulseless_VT")
+check("shockable via VT", c.phase() as! String, "cpr shockable")
+checkI("2 shocks", c.shocks_given() as! Int, 2)
+c.rosc_achieved()
+check("rosc reached", c.phase() as! String, "rosc")
+c.rhythm_check(rhythm: "VF")
+c.cpr_cycle_complete()
+c.rosc_achieved()
+check("rosc absorbs all", c.phase() as! String, "rosc")
+checkI("final shock count", c.shocks_given() as! Int, 2)
+
+let c2 = @@ACLS()
+c2.start_code()
+c2.rhythm_check(rhythm: "asystole")
+c2.pronounce()
+check("pronounced", c2.phase() as! String, "terminated")
+c2.rosc_achieved()
+c2.rhythm_check(rhythm: "VF")
+check("terminated absorbs", c2.phase() as! String, "terminated")
+
+print("PASS: acls")

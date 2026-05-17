@@ -1,0 +1,53 @@
+@@[target("erlang")]
+
+%% Cookbook 91: Noise Protocol XX Handshake (Initiator)
+
+@@system NoiseXxInitiator {
+    interface:
+        start(remote_endpoint: string)
+        msg2_received(valid: int)
+        msg3_ack()
+        send(plaintext: string): string = "not_ready"
+        recv(ciphertext: string): string = ""
+        timeout()
+        get_status(): string = "idle"
+
+    machine:
+        $Idle {
+            start(remote_endpoint: string) {
+                self.remote = Remote_endpoint,
+                -> $AwaitingMsg2
+            }
+            get_status(): string { @@:("idle") }
+        }
+
+        $AwaitingMsg2 {
+            msg2_received(valid: int) {
+                case Valid == 1 of
+                    true -> -> $AwaitingAck;
+                    false -> -> $Aborted
+                end
+            }
+            timeout() { -> $Aborted }
+            get_status(): string { @@:("awaiting_msg2") }
+        }
+
+        $AwaitingAck {
+            msg3_ack() { -> $Transport }
+            timeout() { -> $Aborted }
+            get_status(): string { @@:("awaiting_ack") }
+        }
+
+        $Transport {
+            send(plaintext: string): string { @@:("sent") }
+            recv(ciphertext: string): string { @@:("decrypted") }
+            get_status(): string { @@:("transport") }
+        }
+
+        $Aborted {
+            get_status(): string { @@:("aborted") }
+        }
+
+    domain:
+        remote: string = ""
+}

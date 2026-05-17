@@ -1,0 +1,74 @@
+@@[target("erlang")]
+
+%% Cookbook 82: Ventilator Breath Cycle
+
+@@system Ventilator {
+    interface:
+        power_on()
+        tick_ms(ms: int)
+        patient_effort_detected()
+        stop()
+        phase(): string
+        breath_count(): int
+
+    machine:
+        $Off {
+            power_on() { -> $Inspiration }
+            phase(): string { @@:("off") }
+            breath_count(): int { @@:(self.breaths) }
+        }
+
+        $Ventilating {
+            stop() { -> $Off }
+            breath_count(): int { @@:(self.breaths) }
+        }
+
+        $Inspiration => $Ventilating {
+            $>() {
+                self.phase_ms = 0,
+                self.breaths = self.breaths + 1
+            }
+            tick_ms(ms: int) {
+                self.phase_ms = self.phase_ms + Ms,
+                case self.phase_ms >= 1000 of
+                    true -> -> $Expiration;
+                    false -> ok
+                end
+            }
+            patient_effort_detected() { ok }
+            phase(): string { @@:("inspiration") }
+            => $^
+        }
+
+        $Expiration => $Ventilating {
+            $>() { self.phase_ms = 0 }
+            tick_ms(ms: int) {
+                self.phase_ms = self.phase_ms + Ms,
+                case self.phase_ms >= 1500 of
+                    true -> -> $Pause;
+                    false -> ok
+                end
+            }
+            patient_effort_detected() { ok }
+            phase(): string { @@:("expiration") }
+            => $^
+        }
+
+        $Pause => $Ventilating {
+            $>() { self.phase_ms = 0 }
+            tick_ms(ms: int) {
+                self.phase_ms = self.phase_ms + Ms,
+                case self.phase_ms >= 500 of
+                    true -> -> $Inspiration;
+                    false -> ok
+                end
+            }
+            patient_effort_detected() { -> $Inspiration }
+            phase(): string { @@:("pause") }
+            => $^
+        }
+
+    domain:
+        phase_ms: int = 0
+        breaths: int = 0
+}

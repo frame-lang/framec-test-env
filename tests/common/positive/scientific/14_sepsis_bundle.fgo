@@ -1,0 +1,179 @@
+@@[target("go")]
+
+// Cookbook 85: Sepsis Hour-1 Bundle
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system SepsisBundle {
+    interface:
+        recognize_sepsis()
+        lactate_drawn(value: float64)
+        cultures_drawn()
+        antibiotics_given()
+        fluids_complete()
+        reassess_map(map_mmhg: int)
+        pressors_started()
+        tick_minute()
+        status(): string
+        bundle_complete(): bool = false
+        elapsed_min(): int
+        pressors_indicated(): bool
+
+    machine:
+        $PreRecognition {
+            recognize_sepsis() {
+                s.elapsed = 0
+                s.lactate = 0.0
+                s.cultures = false
+                s.abx = false
+                s.fluids = false
+                s.reassessed = false
+                s.pressors_needed = false
+                s.pressors = false
+                -> $BundleActive
+            }
+            status(): string { @@:("pre-recognition") }
+            elapsed_min(): int { @@:(s.elapsed) }
+            pressors_indicated(): bool { @@:(s.pressors_needed) }
+        }
+
+        $BundleActive {
+            lactate_drawn(value: float64) {
+                s.lactate = value
+                if s.is_complete() {
+                    if s.elapsed <= 60 { -> $OnTime } else { -> $Late }
+                }
+            }
+            cultures_drawn() {
+                s.cultures = true
+                if s.is_complete() {
+                    if s.elapsed <= 60 { -> $OnTime } else { -> $Late }
+                }
+            }
+            antibiotics_given() {
+                s.abx = true
+                if s.is_complete() {
+                    if s.elapsed <= 60 { -> $OnTime } else { -> $Late }
+                }
+            }
+            fluids_complete() {
+                s.fluids = true
+                if s.is_complete() {
+                    if s.elapsed <= 60 { -> $OnTime } else { -> $Late }
+                }
+            }
+            reassess_map(map_mmhg: int) {
+                s.reassessed = true
+                s.pressors_needed = map_mmhg < 65
+                if s.is_complete() {
+                    if s.elapsed <= 60 { -> $OnTime } else { -> $Late }
+                }
+            }
+            pressors_started() {
+                s.pressors = true
+                if s.is_complete() {
+                    if s.elapsed <= 60 { -> $OnTime } else { -> $Late }
+                }
+            }
+            tick_minute() { s.elapsed = s.elapsed + 1 }
+            status(): string { @@:("active") }
+            elapsed_min(): int { @@:(s.elapsed) }
+            pressors_indicated(): bool { @@:(s.pressors_needed) }
+        }
+
+        $OnTime {
+            bundle_complete(): bool { @@:(true) }
+            status(): string { @@:("on time") }
+            elapsed_min(): int { @@:(s.elapsed) }
+            pressors_indicated(): bool { @@:(s.pressors_needed) }
+        }
+
+        $Late {
+            bundle_complete(): bool { @@:(true) }
+            status(): string { @@:("late") }
+            elapsed_min(): int { @@:(s.elapsed) }
+            pressors_indicated(): bool { @@:(s.pressors_needed) }
+        }
+
+    actions:
+        is_complete(): bool {
+            base := s.cultures && s.abx && s.fluids && s.lactate > 0.0 && s.reassessed
+            if s.pressors_needed {
+                return base && s.pressors
+            }
+            return base
+        }
+
+    domain:
+        elapsed: int = 0
+        lactate: float64 = 0.0
+        cultures: bool = false
+        abx: bool = false
+        fluids: bool = false
+        reassessed: bool = false
+        pressors_needed: bool = false
+        pressors: bool = false
+}
+
+func check(label, actual, expected string) {
+    if actual != expected { fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual); os.Exit(1) }
+}
+func checkB(label string, actual, expected bool) {
+    if actual != expected { fmt.Printf("FAIL: %s expected %v, got %v\n", label, expected, actual); os.Exit(1) }
+}
+
+func main() {
+    a := @@SepsisBundle()
+    check("pre-recognition", a.status().(string), "pre-recognition")
+    checkB("bundle_complete default false before recognize", a.bundle_complete().(bool), false)
+    a.lactate_drawn(3.4)
+    a.antibiotics_given()
+    check("pre-rec absorbs events", a.status().(string), "pre-recognition")
+    a.recognize_sepsis()
+    check("active", a.status().(string), "active")
+    a.lactate_drawn(3.4)
+    a.cultures_drawn()
+    for i := 0; i < 15; i = i + 1 { a.tick_minute() }
+    a.antibiotics_given()
+    a.fluids_complete()
+    check("still active after fluids", a.status().(string), "active")
+    a.reassess_map(75)
+    check("on time", a.status().(string), "on time")
+    checkB("complete", a.bundle_complete().(bool), true)
+    checkB("no pressors indicated", a.pressors_indicated().(bool), false)
+    if a.elapsed_min().(int) > 60 { fmt.Println("FAIL: over 60"); os.Exit(1) }
+    a.antibiotics_given()
+    a.tick_minute()
+    check("on time absorbs events", a.status().(string), "on time")
+
+    b := @@SepsisBundle()
+    b.recognize_sepsis()
+    b.lactate_drawn(4.2)
+    b.cultures_drawn()
+    b.antibiotics_given()
+    b.fluids_complete()
+    for i := 0; i < 70; i = i + 1 { b.tick_minute() }
+    b.reassess_map(58)
+    check("active — pressors pending", b.status().(string), "active")
+    checkB("pressors flagged", b.pressors_indicated().(bool), true)
+    b.pressors_started()
+    check("late terminal", b.status().(string), "late")
+    checkB("complete (late)", b.bundle_complete().(bool), true)
+    if b.elapsed_min().(int) <= 60 { fmt.Println("FAIL: under 60"); os.Exit(1) }
+
+    c := @@SepsisBundle()
+    c.recognize_sepsis()
+    c.lactate_drawn(2.0)
+    c.cultures_drawn()
+    c.antibiotics_given()
+    c.fluids_complete()
+    c.reassess_map(80)
+    check("reassess completes w/o pressors", c.status().(string), "on time")
+
+    fmt.Println("PASS: sepsis_bundle")
+}

@@ -1,0 +1,114 @@
+@@[target("rust")]
+
+// Cookbook 77: Neuron Action Potential
+
+@@system Neuron {
+    interface:
+        stimulate(input: f64)
+        tick()
+        voltage(): f64
+        phase(): String
+
+    machine:
+        $Resting {
+            stimulate(input: f64) {
+                self.v = self.v + input;
+                if self.v >= self.threshold {
+                    -> $Depolarizing
+                }
+            }
+            tick() { self.v = self.v + (self.v_rest - self.v) * 0.2; }
+            voltage(): f64 { @@:(self.v) }
+            phase(): String { @@:(String::from("resting")) }
+        }
+
+        $Depolarizing {
+            $>() { self.v = self.v_peak; }
+            tick() { -> $Repolarizing }
+            voltage(): f64 { @@:(self.v) }
+            phase(): String { @@:(String::from("spike")) }
+        }
+
+        $Repolarizing {
+            tick() {
+                self.v = self.v_hyper;
+                -> $Refractory
+            }
+            voltage(): f64 { @@:(self.v) }
+            phase(): String { @@:(String::from("repolarizing")) }
+        }
+
+        $Refractory {
+            stimulate(input: f64) { }
+            tick() {
+                self.ref_ticks = self.ref_ticks + 1;
+                if self.ref_ticks >= 3 {
+                    self.ref_ticks = 0;
+                    -> $Resting
+                }
+            }
+            voltage(): f64 { @@:(self.v) }
+            phase(): String { @@:(String::from("refractory")) }
+        }
+
+    domain:
+        v: f64 = -70.0
+        v_rest: f64 = -70.0
+        v_peak: f64 = 40.0
+        v_hyper: f64 = -80.0
+        threshold: f64 = -55.0
+        ref_ticks: i32 = 0
+}
+
+fn check(label: &str, actual: String, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+fn check_f(label: &str, actual: f64, expected: f64) {
+    if (actual - expected).abs() > 1e-9 {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn main() {
+    let mut n = @@Neuron();
+    check("start resting", n.phase(), "resting");
+    check_f("start voltage", n.voltage(), -70.0);
+
+    n.stimulate(5.0);
+    check("sub-threshold stays resting", n.phase(), "resting");
+    check_f("sub-threshold voltage", n.voltage(), -65.0);
+
+    n.stimulate(5.0);
+    check("still resting", n.phase(), "resting");
+
+    n.stimulate(6.0);
+    check("spike", n.phase(), "spike");
+    check_f("peak voltage", n.voltage(), 40.0);
+
+    n.tick();
+    check("repolarizing", n.phase(), "repolarizing");
+
+    n.tick();
+    check("refractory", n.phase(), "refractory");
+    check_f("hyperpolarized", n.voltage(), -80.0);
+
+    n.stimulate(100.0);
+    check("refractory absorbs stim", n.phase(), "refractory");
+    check_f("refractory voltage unchanged", n.voltage(), -80.0);
+
+    n.tick();
+    check("still refractory t+1", n.phase(), "refractory");
+    n.tick();
+    check("still refractory t+2", n.phase(), "refractory");
+    n.tick();
+    check("resting after t+3", n.phase(), "resting");
+
+    n.stimulate(30.0);
+    check("second spike", n.phase(), "spike");
+
+    println!("PASS: neuron_action");
+}

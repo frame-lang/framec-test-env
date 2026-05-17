@@ -1,0 +1,111 @@
+@@[target("lua")]
+
+-- Cookbook 92: Signal / Double Ratchet Session
+
+@@system DoubleRatchetSession {
+    interface:
+        initialize(shared_secret, remote_pub)
+        send_plaintext(m) = ""
+        receive_ciphertext(header, ct, ratchet, valid) = ""
+        close()
+        get_status() = "uninit"
+        get_sends()
+        get_recvs()
+        get_ratchets()
+        get_zeroized()
+
+    machine:
+        $Uninit {
+            initialize(shared_secret, remote_pub) {
+                self.root_key = shared_secret
+                self.remote_pub = remote_pub
+                -> $Active
+            }
+            get_status() { @@:("uninit") }
+            get_sends() { @@:(self.sends) }
+            get_recvs() { @@:(self.recvs) }
+            get_ratchets() { @@:(self.ratchets) }
+            get_zeroized() { @@:(self.zeroized) }
+        }
+
+        $Active {
+            send_plaintext(m) {
+                self.sends = self.sends + 1
+                self.zeroized = self.zeroized + 1
+                @@:("ct-send")
+            }
+            receive_ciphertext(header, ct, ratchet, valid) {
+                if ratchet == 1 then
+                    self.ratchets = self.ratchets + 1
+                end
+                if valid == 0 then
+                    @@:("decryption_failed")
+                else
+                    self.recvs = self.recvs + 1
+                    self.zeroized = self.zeroized + 1
+                    @@:("pt")
+                end
+            }
+            close() { -> $Closed }
+            get_status() { @@:("active") }
+            get_sends() { @@:(self.sends) }
+            get_recvs() { @@:(self.recvs) }
+            get_ratchets() { @@:(self.ratchets) }
+            get_zeroized() { @@:(self.zeroized) }
+        }
+
+        $Closed {
+            get_status() { @@:("closed") }
+            get_sends() { @@:(self.sends) }
+            get_recvs() { @@:(self.recvs) }
+            get_ratchets() { @@:(self.ratchets) }
+            get_zeroized() { @@:(self.zeroized) }
+        }
+
+    domain:
+        root_key = ""
+        remote_pub = ""
+        sends = 0
+        recvs = 0
+        ratchets = 0
+        zeroized = 0
+}
+
+local function check(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " expected '" .. tostring(expected) .. "', got '" .. tostring(actual) .. "'")
+        os.exit(1)
+    end
+end
+
+local s = @@DoubleRatchetSession()
+check("uninit", s:get_status(), "uninit")
+check("uninit send default", s:send_plaintext("hi"), "")
+check("uninit recv default", s:receive_ciphertext("h", "ct", 0, 1), "")
+s:initialize("root-secret", "remote-pub")
+check("active", s:get_status(), "active")
+check("sent", s:send_plaintext("m1"), "ct-send")
+check("sent 2", s:send_plaintext("m2"), "ct-send")
+check("2 sends", s:get_sends(), 2)
+check("zeroised == sends", s:get_zeroized(), s:get_sends())
+check("received", s:receive_ciphertext("h1", "c1", 0, 1), "pt")
+check("1 recv", s:get_recvs(), 1)
+check("0 ratchets", s:get_ratchets(), 0)
+check("received with ratchet", s:receive_ciphertext("h2", "c2", 1, 1), "pt")
+check("1 ratchet", s:get_ratchets(), 1)
+check("2 recvs", s:get_recvs(), 2)
+check("zeroise invariant", s:get_zeroized(), s:get_sends() + s:get_recvs())
+local before_recvs = s:get_recvs()
+local before_zeroized = s:get_zeroized()
+check("bad decrypt", s:receive_ciphertext("bad", "bad", 0, 0), "decryption_failed")
+check("recvs unchanged", s:get_recvs(), before_recvs)
+check("zeroized unchanged", s:get_zeroized(), before_zeroized)
+s:close()
+check("closed", s:get_status(), "closed")
+check("closed send default", s:send_plaintext("hi"), "")
+check("closed recv default", s:receive_ciphertext("h", "ct", 0, 1), "")
+local final_sends = s:get_sends()
+local final_recvs = s:get_recvs()
+check("sends frozen post-close", s:get_sends(), final_sends)
+check("recvs frozen post-close", s:get_recvs(), final_recvs)
+print("PASS: double_ratchet")

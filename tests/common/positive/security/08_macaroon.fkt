@@ -1,0 +1,124 @@
+@@[target("kotlin")]
+
+// Cookbook 93: Macaroon-Style Capability Token Verifier
+
+@@system MacaroonVerifier {
+    interface:
+        present(token: String, caveat_count: Int)
+        caveat_verified(passed: Int, caveat_index: Int)
+        sig_verified(passed: Int)
+        perform(action: String, resource: String, allowed: Int): String = "denied"
+        get_status(): String = ""
+        get_caveat_index(): Int
+
+    machine:
+        $Idle {
+            present(token: String, caveat_count: Int) {
+                this.token = token
+                this.caveats = caveat_count
+                this.caveat_index = 0
+                -> $CheckingSignature
+            }
+            get_status(): String { @@:("idle") }
+            get_caveat_index(): Int { @@:(this.caveat_index) }
+        }
+
+        $CheckingSignature {
+            sig_verified(passed: Int) {
+                if (passed == 1) { -> $CheckingCaveats } else { -> $Rejected }
+            }
+            get_status(): String { @@:("checking_sig") }
+            get_caveat_index(): Int { @@:(this.caveat_index) }
+        }
+
+        $CheckingCaveats {
+            $>() {
+                if (this.caveat_index >= this.caveats) { -> $Authorized }
+            }
+            caveat_verified(passed: Int, caveat_index: Int) {
+                if (caveat_index != this.caveat_index) {
+                    -> $Rejected
+                } else if (passed == 0) {
+                    -> $Rejected
+                } else {
+                    this.caveat_index = this.caveat_index + 1
+                    -> $CheckingCaveats
+                }
+            }
+            get_status(): String { @@:("checking_caveats") }
+            get_caveat_index(): Int { @@:(this.caveat_index) }
+        }
+
+        $Authorized {
+            perform(action: String, resource: String, allowed: Int): String {
+                if (allowed == 1) { @@:("allowed") } else { @@:("denied") }
+            }
+            get_status(): String { @@:("authorized") }
+            get_caveat_index(): Int { @@:(this.caveat_index) }
+        }
+
+        $Rejected {
+            get_status(): String { @@:("rejected") }
+            get_caveat_index(): Int { @@:(this.caveat_index) }
+        }
+
+    domain:
+        token: String = ""
+        caveats: Int = 0
+        caveat_index: Int = 0
+}
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) { println("FAIL: $label expected '$expected', got '$actual'"); kotlin.system.exitProcess(1) }
+}
+fun checkI(label: String, actual: Int, expected: Int) {
+    if (actual != expected) { println("FAIL: $label expected $expected, got $actual"); kotlin.system.exitProcess(1) }
+}
+
+fun main() {
+    val v = @@MacaroonVerifier()
+    check("idle", v.get_status() as String, "idle")
+    check("idle perform denied", v.perform("read", "doc", 1) as String, "denied")
+    v.present("TOK", 3)
+    check("checking sig", v.get_status() as String, "checking_sig")
+    check("sig-check perform denied", v.perform("read", "doc", 1) as String, "denied")
+    v.sig_verified(1)
+    check("checking caveats", v.get_status() as String, "checking_caveats")
+    check("caveat-check perform denied", v.perform("read", "doc", 1) as String, "denied")
+    v.caveat_verified(1, 0)
+    checkI("caveat 0 done, index advanced", v.get_caveat_index() as Int, 1)
+    v.caveat_verified(1, 1)
+    v.caveat_verified(1, 2)
+    check("authorized", v.get_status() as String, "authorized")
+    check("in-scope perform", v.perform("read", "doc", 1) as String, "allowed")
+    check("out-of-scope perform", v.perform("write", "doc", 0) as String, "denied")
+    v.caveat_verified(1, 99)
+    check("authorized absorbs caveat", v.get_status() as String, "authorized")
+
+    val v2 = @@MacaroonVerifier()
+    v2.present("TOK", 2)
+    v2.sig_verified(0)
+    check("sig failed", v2.get_status() as String, "rejected")
+    check("rejected denies perform", v2.perform("read", "doc", 1) as String, "denied")
+
+    val v3 = @@MacaroonVerifier()
+    v3.present("TOK", 3)
+    v3.sig_verified(1)
+    v3.caveat_verified(1, 0)
+    v3.caveat_verified(0, 1)
+    check("caveat failed -> rejected", v3.get_status() as String, "rejected")
+
+    val v4 = @@MacaroonVerifier()
+    v4.present("TOK", 3)
+    v4.sig_verified(1)
+    v4.caveat_verified(1, 0)
+    v4.caveat_verified(1, 2)
+    check("out-of-order -> rejected", v4.get_status() as String, "rejected")
+
+    val v5 = @@MacaroonVerifier()
+    v5.present("TOK", 0)
+    v5.sig_verified(1)
+    check("no caveats -> authorized", v5.get_status() as String, "authorized")
+
+    println("PASS: macaroon")
+}

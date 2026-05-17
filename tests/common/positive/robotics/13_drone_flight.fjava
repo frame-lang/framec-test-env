@@ -1,0 +1,243 @@
+@@[target("java")]
+
+// Cookbook 108: Drone Flight Modes — Failsafe from Any Phase
+
+@@system DroneFlightMode {
+    interface:
+        arm(preflight_ok: int)
+        takeoff(altitude: double)
+        set_mission(waypoints_ok: int)
+        return_to_home()
+        land()
+        disarm()
+        takeoff_complete()
+        mission_complete()
+        home_reached()
+        touchdown()
+        battery_critical()
+        gps_lost()
+        rc_lost()
+        geofence_breach()
+        tick()
+        status(): String
+        altitude(): double
+        failsafe_reason(): String
+
+    machine:
+        $Disarmed {
+            arm(preflight_ok: int) {
+                if (preflight_ok == 1) {
+                    -> $Armed
+                }
+            }
+            status(): String { @@:("disarmed") }
+            altitude(): double { @@:(this.current_altitude) }
+            failsafe_reason(): String { @@:(this.reason) }
+        }
+
+        $Armed {
+            takeoff(altitude: double) {
+                this.target_altitude = altitude;
+                -> $TakingOff
+            }
+            disarm() { -> $Disarmed }
+            status(): String { @@:("armed") }
+            altitude(): double { @@:(this.current_altitude) }
+            failsafe_reason(): String { @@:(this.reason) }
+        }
+
+        $Flying {
+            altitude(): double { @@:(this.current_altitude) }
+            failsafe_reason(): String { @@:(this.reason) }
+        }
+
+        $InFlight => $Flying {
+            battery_critical() {
+                this.reason = "battery";
+                -> $EmergencyLand
+            }
+            rc_lost() {
+                this.reason = "rc_lost";
+                -> $ReturningHome
+            }
+            gps_lost() {
+                this.reason = "gps_lost";
+                -> $AltitudeHold
+            }
+            geofence_breach() {
+                this.reason = "geofence";
+                -> $ReturningHome
+            }
+            => $^
+        }
+
+        $TakingOff => $InFlight {
+            $>() { this.current_altitude = 0.0; }
+            tick() {
+                this.current_altitude = this.current_altitude + 1.0;
+                if (this.current_altitude >= this.target_altitude) {
+                    @@:self.takeoff_complete();
+                }
+            }
+            takeoff_complete() { -> $Hovering }
+            status(): String { @@:("taking_off") }
+            => $^
+        }
+
+        $Hovering => $InFlight {
+            set_mission(waypoints_ok: int) {
+                if (waypoints_ok == 1) {
+                    -> $OnMission
+                }
+            }
+            land() { -> $Landing }
+            return_to_home() { -> $ReturningHome }
+            status(): String { @@:("hovering") }
+            => $^
+        }
+
+        $OnMission => $InFlight {
+            mission_complete() { -> $Hovering }
+            return_to_home() { -> $ReturningHome }
+            status(): String { @@:("on_mission") }
+            => $^
+        }
+
+        $ReturningHome => $InFlight {
+            home_reached() { -> $Landing }
+            status(): String { @@:("returning") }
+            => $^
+        }
+
+        $AltitudeHold => $InFlight {
+            status(): String { @@:("altitude_hold") }
+            => $^
+        }
+
+        $Landing {
+            touchdown() {
+                this.current_altitude = 0.0;
+                -> $Armed
+            }
+            status(): String { @@:("landing") }
+            altitude(): double { @@:(this.current_altitude) }
+            failsafe_reason(): String { @@:(this.reason) }
+        }
+
+        $EmergencyLand {
+            touchdown() {
+                this.current_altitude = 0.0;
+                -> $Armed
+            }
+            status(): String { @@:("emergency_land") }
+            altitude(): double { @@:(this.current_altitude) }
+            failsafe_reason(): String { @@:(this.reason) }
+        }
+
+    domain:
+        target_altitude: double = 0.0
+        current_altitude: double = 0.0
+        reason: String = ""
+}
+
+public class DroneFlight13Test {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+    static void checkDouble(String label, double actual, double expected) {
+        if (Math.abs(actual - expected) > 1e-6) {
+            System.out.println("FAIL: " + label + " expected " + expected + ", got " + actual);
+            System.exit(1);
+        }
+    }
+
+    public static void main(String[] args) {
+        DroneFlightMode d = @@DroneFlightMode();
+        check("disarmed", (String) d.status(), "disarmed");
+        d.arm(0);
+        check("preflight fail", (String) d.status(), "disarmed");
+        d.arm(1);
+        check("armed", (String) d.status(), "armed");
+        d.takeoff(5.0);
+        check("taking off", (String) d.status(), "taking_off");
+
+        int i = 0;
+        while (i < 10) {
+            d.tick();
+            if (((String) d.status()).equals("hovering")) break;
+            i = i + 1;
+        }
+        check("hovering", (String) d.status(), "hovering");
+        checkDouble("at altitude", (double) d.altitude(), 5.0);
+
+        d.set_mission(1);
+        check("on mission", (String) d.status(), "on_mission");
+        d.mission_complete();
+        check("back to hovering", (String) d.status(), "hovering");
+
+        d.land();
+        check("landing", (String) d.status(), "landing");
+        d.touchdown();
+        check("back to armed", (String) d.status(), "armed");
+
+        DroneFlightMode d2 = @@DroneFlightMode();
+        d2.arm(1);
+        d2.takeoff(100.0);
+        d2.battery_critical();
+        check("battery -> emergency", (String) d2.status(), "emergency_land");
+        check("battery reason", (String) d2.failsafe_reason(), "battery");
+
+        DroneFlightMode d3 = @@DroneFlightMode();
+        d3.arm(1);
+        d3.takeoff(5.0);
+        i = 0;
+        while (i < 10) {
+            d3.tick();
+            if (((String) d3.status()).equals("hovering")) break;
+            i = i + 1;
+        }
+        d3.rc_lost();
+        check("rc lost -> returning", (String) d3.status(), "returning");
+        d3.home_reached();
+        check("home reached -> landing", (String) d3.status(), "landing");
+
+        DroneFlightMode d4 = @@DroneFlightMode();
+        d4.arm(1);
+        d4.takeoff(5.0);
+        i = 0;
+        while (i < 10) {
+            d4.tick();
+            if (((String) d4.status()).equals("hovering")) break;
+            i = i + 1;
+        }
+        d4.set_mission(1);
+        d4.gps_lost();
+        check("gps lost -> altitude hold", (String) d4.status(), "altitude_hold");
+
+        DroneFlightMode d5 = @@DroneFlightMode();
+        d5.arm(1);
+        d5.takeoff(5.0);
+        i = 0;
+        while (i < 10) {
+            d5.tick();
+            if (((String) d5.status()).equals("hovering")) break;
+            i = i + 1;
+        }
+        d5.set_mission(1);
+        d5.geofence_breach();
+        check("geofence -> returning", (String) d5.status(), "returning");
+        check("geofence reason", (String) d5.failsafe_reason(), "geofence");
+
+        DroneFlightMode d6 = @@DroneFlightMode();
+        d6.battery_critical();
+        d6.rc_lost();
+        d6.gps_lost();
+        d6.geofence_breach();
+        check("disarmed ignores failsafes", (String) d6.status(), "disarmed");
+
+        System.out.println("PASS: drone_flight");
+    }
+}

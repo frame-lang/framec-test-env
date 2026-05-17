@@ -1,0 +1,113 @@
+@@[target("kotlin")]
+
+// Cookbook 77: Neuron Action Potential
+
+@@system Neuron {
+    interface:
+        stimulate(input: Double)
+        tick()
+        voltage(): Double
+        phase(): String
+
+    machine:
+        $Resting {
+            stimulate(input: Double) {
+                this.v = this.v + input
+                if (this.v >= this.threshold) {
+                    -> $Depolarizing
+                }
+            }
+            tick() { this.v = this.v + (this.v_rest - this.v) * 0.2 }
+            voltage(): Double { @@:(this.v) }
+            phase(): String { @@:("resting") }
+        }
+
+        $Depolarizing {
+            $>() { this.v = this.v_peak }
+            tick() { -> $Repolarizing }
+            voltage(): Double { @@:(this.v) }
+            phase(): String { @@:("spike") }
+        }
+
+        $Repolarizing {
+            tick() {
+                this.v = this.v_hyper
+                -> $Refractory
+            }
+            voltage(): Double { @@:(this.v) }
+            phase(): String { @@:("repolarizing") }
+        }
+
+        $Refractory {
+            stimulate(input: Double) { }
+            tick() {
+                this.ref_ticks = this.ref_ticks + 1
+                if (this.ref_ticks >= 3) {
+                    this.ref_ticks = 0
+                    -> $Resting
+                }
+            }
+            voltage(): Double { @@:(this.v) }
+            phase(): String { @@:("refractory") }
+        }
+
+    domain:
+        v: Double = -70.0
+        v_rest: Double = -70.0
+        v_peak: Double = 40.0
+        v_hyper: Double = -80.0
+        threshold: Double = -55.0
+        ref_ticks: Int = 0
+}
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+fun checkF(label: String, actual: Double, expected: Double) {
+    if (kotlin.math.abs(actual - expected) > 1e-9) {
+        println("FAIL: $label expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun main() {
+    val n = @@Neuron()
+    check("start resting", n.phase() as String, "resting")
+    checkF("start voltage", n.voltage() as Double, -70.0)
+
+    n.stimulate(5.0)
+    check("sub-threshold stays resting", n.phase() as String, "resting")
+    checkF("sub-threshold voltage", n.voltage() as Double, -65.0)
+
+    n.stimulate(5.0)
+    check("still resting", n.phase() as String, "resting")
+
+    n.stimulate(6.0)
+    check("spike", n.phase() as String, "spike")
+    checkF("peak voltage", n.voltage() as Double, 40.0)
+
+    n.tick()
+    check("repolarizing", n.phase() as String, "repolarizing")
+    n.tick()
+    check("refractory", n.phase() as String, "refractory")
+    checkF("hyperpolarized", n.voltage() as Double, -80.0)
+
+    n.stimulate(100.0)
+    check("refractory absorbs stim", n.phase() as String, "refractory")
+    checkF("refractory voltage unchanged", n.voltage() as Double, -80.0)
+
+    n.tick()
+    check("still refractory t+1", n.phase() as String, "refractory")
+    n.tick()
+    check("still refractory t+2", n.phase() as String, "refractory")
+    n.tick()
+    check("resting after t+3", n.phase() as String, "resting")
+
+    n.stimulate(30.0)
+    check("second spike", n.phase() as String, "spike")
+
+    println("PASS: neuron_action")
+}

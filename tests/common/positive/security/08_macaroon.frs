@@ -1,0 +1,134 @@
+@@[target("rust")]
+
+// Cookbook 93: Macaroon-Style Capability Token Verifier
+
+@@system MacaroonVerifier {
+    interface:
+        present(token: String, caveat_count: i32)
+        caveat_verified(passed: i32, caveat_index: i32)
+        sig_verified(passed: i32)
+        perform(action: String, resource: String, allowed: i32): String = "denied"
+        get_status(): String = ""
+        get_caveat_index(): i32
+
+    machine:
+        $Idle {
+            present(token: String, caveat_count: i32) {
+                self.token = token;
+                self.caveats = caveat_count;
+                self.caveat_index = 0;
+                -> $CheckingSignature
+            }
+            get_status(): String { @@:(String::from("idle")) }
+            get_caveat_index(): i32 { @@:(self.caveat_index) }
+        }
+
+        $CheckingSignature {
+            sig_verified(passed: i32) {
+                if passed == 1 {
+                    -> $CheckingCaveats
+                } else {
+                    -> $Rejected
+                }
+            }
+            get_status(): String { @@:(String::from("checking_sig")) }
+            get_caveat_index(): i32 { @@:(self.caveat_index) }
+        }
+
+        $CheckingCaveats {
+            $>() {
+                if self.caveat_index >= self.caveats {
+                    -> $Authorized
+                }
+            }
+            caveat_verified(passed: i32, caveat_index: i32) {
+                if caveat_index != self.caveat_index {
+                    -> $Rejected
+                } else if passed == 0 {
+                    -> $Rejected
+                } else {
+                    self.caveat_index = self.caveat_index + 1;
+                    -> $CheckingCaveats
+                }
+            }
+            get_status(): String { @@:(String::from("checking_caveats")) }
+            get_caveat_index(): i32 { @@:(self.caveat_index) }
+        }
+
+        $Authorized {
+            perform(action: String, resource: String, allowed: i32): String {
+                if allowed == 1 {
+                    @@:(String::from("allowed"))
+                } else {
+                    @@:(String::from("denied"))
+                }
+            }
+            get_status(): String { @@:(String::from("authorized")) }
+            get_caveat_index(): i32 { @@:(self.caveat_index) }
+        }
+
+        $Rejected {
+            get_status(): String { @@:(String::from("rejected")) }
+            get_caveat_index(): i32 { @@:(self.caveat_index) }
+        }
+
+    domain:
+        token: String = String::new()
+        caveats: i32 = 0
+        caveat_index: i32 = 0
+}
+
+fn check(label: &str, actual: String, expected: &str) {
+    if actual != expected { println!("FAIL: {} expected '{}', got '{}'", label, expected, actual); std::process::exit(1); }
+}
+fn check_i(label: &str, actual: i32, expected: i32) {
+    if actual != expected { println!("FAIL: {} expected {}, got {}", label, expected, actual); std::process::exit(1); }
+}
+
+fn main() {
+    let mut v = @@MacaroonVerifier();
+    check("idle", v.get_status(), "idle");
+    check("idle perform denied", v.perform(String::from("read"), String::from("doc"), 1), "denied");
+    v.present(String::from("TOK"), 3);
+    check("checking sig", v.get_status(), "checking_sig");
+    check("sig-check perform denied", v.perform(String::from("read"), String::from("doc"), 1), "denied");
+    v.sig_verified(1);
+    check("checking caveats", v.get_status(), "checking_caveats");
+    check("caveat-check perform denied", v.perform(String::from("read"), String::from("doc"), 1), "denied");
+    v.caveat_verified(1, 0);
+    check_i("caveat 0 done, index advanced", v.get_caveat_index(), 1);
+    v.caveat_verified(1, 1);
+    v.caveat_verified(1, 2);
+    check("authorized", v.get_status(), "authorized");
+    check("in-scope perform", v.perform(String::from("read"), String::from("doc"), 1), "allowed");
+    check("out-of-scope perform", v.perform(String::from("write"), String::from("doc"), 0), "denied");
+    v.caveat_verified(1, 99);
+    check("authorized absorbs caveat", v.get_status(), "authorized");
+
+    let mut v2 = @@MacaroonVerifier();
+    v2.present(String::from("TOK"), 2);
+    v2.sig_verified(0);
+    check("sig failed", v2.get_status(), "rejected");
+    check("rejected denies perform", v2.perform(String::from("read"), String::from("doc"), 1), "denied");
+
+    let mut v3 = @@MacaroonVerifier();
+    v3.present(String::from("TOK"), 3);
+    v3.sig_verified(1);
+    v3.caveat_verified(1, 0);
+    v3.caveat_verified(0, 1);
+    check("caveat failed -> rejected", v3.get_status(), "rejected");
+
+    let mut v4 = @@MacaroonVerifier();
+    v4.present(String::from("TOK"), 3);
+    v4.sig_verified(1);
+    v4.caveat_verified(1, 0);
+    v4.caveat_verified(1, 2);
+    check("out-of-order -> rejected", v4.get_status(), "rejected");
+
+    let mut v5 = @@MacaroonVerifier();
+    v5.present(String::from("TOK"), 0);
+    v5.sig_verified(1);
+    check("no caveats -> authorized", v5.get_status(), "authorized");
+
+    println!("PASS: macaroon");
+}

@@ -1,0 +1,110 @@
+@@[target("cpp")]
+
+// Cookbook 77: Neuron Action Potential
+
+@@system Neuron {
+    interface:
+        stimulate(input: double)
+        tick()
+        voltage(): double
+        phase(): string
+
+    machine:
+        $Resting {
+            stimulate(input: double) {
+                this->v = this->v + input;
+                if (this->v >= this->threshold) {
+                    -> $Depolarizing
+                }
+            }
+            tick() { this->v = this->v + (this->v_rest - this->v) * 0.2; }
+            voltage(): double { @@:(this->v) }
+            phase(): string { @@:("resting") }
+        }
+
+        $Depolarizing {
+            $>() { this->v = this->v_peak; }
+            tick() { -> $Repolarizing }
+            voltage(): double { @@:(this->v) }
+            phase(): string { @@:("spike") }
+        }
+
+        $Repolarizing {
+            tick() {
+                this->v = this->v_hyper;
+                -> $Refractory
+            }
+            voltage(): double { @@:(this->v) }
+            phase(): string { @@:("repolarizing") }
+        }
+
+        $Refractory {
+            stimulate(input: double) { }
+            tick() {
+                this->ref_ticks = this->ref_ticks + 1;
+                if (this->ref_ticks >= 3) {
+                    this->ref_ticks = 0;
+                    -> $Resting
+                }
+            }
+            voltage(): double { @@:(this->v) }
+            phase(): string { @@:("refractory") }
+        }
+
+    domain:
+        v: double = -70.0
+        v_rest: double = -70.0
+        v_peak: double = 40.0
+        v_hyper: double = -80.0
+        threshold: double = -55.0
+        ref_ticks: int = 0
+}
+
+#include <iostream>
+#include <cstdlib>
+#include <cmath>
+
+static void check_str(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " expected '" << expected << "', got '" << actual << "'\n";
+        std::exit(1);
+    }
+}
+static void check_f(const std::string& label, double actual, double expected) {
+    if (std::fabs(actual - expected) > 1e-9) {
+        std::cout << "FAIL: " << label << " expected " << expected << ", got " << actual << "\n";
+        std::exit(1);
+    }
+}
+
+int main() {
+    auto n = @@Neuron();
+    check_str("start resting", n.phase(), "resting");
+    check_f("start voltage", n.voltage(), -70.0);
+    n.stimulate(5.0);
+    check_str("sub-threshold stays resting", n.phase(), "resting");
+    check_f("sub-threshold voltage", n.voltage(), -65.0);
+    n.stimulate(5.0);
+    check_str("still resting", n.phase(), "resting");
+    n.stimulate(6.0);
+    check_str("spike", n.phase(), "spike");
+    check_f("peak voltage", n.voltage(), 40.0);
+    n.tick();
+    check_str("repolarizing", n.phase(), "repolarizing");
+    n.tick();
+    check_str("refractory", n.phase(), "refractory");
+    check_f("hyperpolarized", n.voltage(), -80.0);
+    n.stimulate(100.0);
+    check_str("refractory absorbs stim", n.phase(), "refractory");
+    check_f("refractory voltage unchanged", n.voltage(), -80.0);
+    n.tick();
+    check_str("still refractory t+1", n.phase(), "refractory");
+    n.tick();
+    check_str("still refractory t+2", n.phase(), "refractory");
+    n.tick();
+    check_str("resting after t+3", n.phase(), "resting");
+    n.stimulate(30.0);
+    check_str("second spike", n.phase(), "spike");
+    std::cout << "PASS: neuron_action\n";
+    return 0;
+}

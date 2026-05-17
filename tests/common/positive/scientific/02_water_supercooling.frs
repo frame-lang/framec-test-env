@@ -1,0 +1,118 @@
+@@[target("rust")]
+
+// Cookbook 73: Water with Supercooling
+
+@@system Water {
+    interface:
+        cool(delta: f64)
+        heat(delta: f64)
+        nucleate()
+        shake()
+        temperature(): f64
+        phase(): String
+
+    machine:
+        $Liquid {
+            cool(delta: f64) {
+                self.temp = self.temp - delta;
+                if self.temp < 0.0 {
+                    -> $Supercooled
+                }
+            }
+            heat(delta: f64) { self.temp = self.temp + delta; }
+            temperature(): f64 { @@:(self.temp) }
+            phase(): String { @@:(String::from("liquid")) }
+        }
+
+        $Supercooled {
+            cool(delta: f64) {
+                self.temp = self.temp - delta;
+                if self.temp <= -42.0 {
+                    -> $Ice
+                }
+            }
+            heat(delta: f64) {
+                self.temp = self.temp + delta;
+                if self.temp >= 0.0 {
+                    -> $Liquid
+                }
+            }
+            nucleate() { -> $Ice }
+            shake() { -> $Ice }
+            temperature(): f64 { @@:(self.temp) }
+            phase(): String { @@:(String::from("supercooled liquid")) }
+        }
+
+        $Ice {
+            heat(delta: f64) {
+                self.temp = self.temp + delta;
+                if self.temp >= 0.0 {
+                    -> $Liquid
+                }
+            }
+            cool(delta: f64) { self.temp = self.temp - delta; }
+            temperature(): f64 { @@:(self.temp) }
+            phase(): String { @@:(String::from("ice")) }
+        }
+
+    domain:
+        temp: f64 = 25.0
+}
+
+fn check(label: &str, actual: String, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+fn check_f(label: &str, actual: f64, expected: f64) {
+    if (actual - expected).abs() > 1e-9 {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn main() {
+    let mut w = @@Water();
+    check("start", w.phase(), "liquid");
+    w.cool(30.0);
+    check("after big cool", w.phase(), "supercooled liquid");
+
+    w.shake();
+    check("shaken", w.phase(), "ice");
+
+    let mut w2 = @@Water();
+    w2.cool(30.0);
+    check("w2 supercooled", w2.phase(), "supercooled liquid");
+    check_f("same temp", w.temperature(), w2.temperature());
+    if w.phase() == w2.phase() {
+        println!("FAIL: phases should differ");
+        std::process::exit(1);
+    }
+
+    let mut w3 = @@Water();
+    w3.cool(30.0);
+    w3.nucleate();
+    check("nucleated", w3.phase(), "ice");
+
+    let mut w4 = @@Water();
+    w4.cool(30.0);
+    check("w4 supercooled", w4.phase(), "supercooled liquid");
+    w4.cool(40.0);
+    check("deep cool", w4.phase(), "ice");
+
+    w4.heat(50.0);
+    check("melted", w4.phase(), "liquid");
+
+    let mut w5 = @@Water();
+    w5.shake();
+    check("liquid shake ignored", w5.phase(), "liquid");
+    let mut w6 = @@Water();
+    w6.cool(30.0);
+    w6.cool(40.0);
+    check("w6 is ice", w6.phase(), "ice");
+    w6.shake();
+    check("ice shake ignored", w6.phase(), "ice");
+
+    println!("PASS: water_supercooling");
+}

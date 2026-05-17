@@ -1,0 +1,144 @@
+@@[target("java")]
+
+// Cookbook 89: MFA with Lockout
+
+@@system MfaAuth {
+    interface:
+        submit_username(u: String)
+        submit_password(p: String)
+        submit_second_factor(code: String)
+        cooldown_elapsed()
+        logout()
+        get_status(): String = ""
+        get_failures(): int
+
+    machine:
+        $Idle {
+            submit_username(u: String) {
+                this.username = u;
+                -> $AwaitingPassword
+            }
+            get_status(): String { @@:("idle") }
+            get_failures(): int { @@:(this.failures) }
+        }
+
+        $AwaitingPassword {
+            submit_password(p: String) {
+                if (this.username.equals("alice") && p.equals("hunter2")) {
+                    -> $AwaitingSecondFactor
+                } else {
+                    this.failures = this.failures + 1;
+                    if (this.failures >= this.lockout_threshold) {
+                        -> $Locked
+                    }
+                }
+            }
+            get_status(): String { @@:("awaiting_password") }
+            get_failures(): int { @@:(this.failures) }
+        }
+
+        $AwaitingSecondFactor {
+            $.attempts: int = 0
+
+            submit_second_factor(code: String) {
+                $.attempts = $.attempts + 1;
+                if (code.equals("123456")) {
+                    this.failures = 0;
+                    -> $Authenticated
+                } else if ($.attempts >= 3) {
+                    this.failures = this.failures + 1;
+                    if (this.failures >= this.lockout_threshold) {
+                        -> $Locked
+                    } else {
+                        -> $AwaitingPassword
+                    }
+                }
+            }
+            get_status(): String { @@:("awaiting_2fa") }
+            get_failures(): int { @@:(this.failures) }
+        }
+
+        $Authenticated {
+            logout() { -> $Idle }
+            get_status(): String { @@:("authenticated") }
+            get_failures(): int { @@:(this.failures) }
+        }
+
+        $Locked {
+            cooldown_elapsed() {
+                this.failures = this.lockout_threshold - 1;
+                -> $Idle
+            }
+            get_status(): String { @@:("locked") }
+            get_failures(): int { @@:(this.failures) }
+        }
+
+    domain:
+        username: String = ""
+        failures: int = 0
+        lockout_threshold: int = 5
+}
+
+public class MfaLockout04Test {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) { System.out.println("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'"); System.exit(1); }
+    }
+    static void checkI(String label, int actual, int expected) {
+        if (actual != expected) { System.out.println("FAIL: " + label + " expected " + expected + ", got " + actual); System.exit(1); }
+    }
+
+    public static void main(String[] args) {
+        MfaAuth m = @@MfaAuth();
+        check("idle", (String) m.get_status(), "idle");
+        m.submit_second_factor("123456");
+        check("idle absorbs 2fa", (String) m.get_status(), "idle");
+        m.submit_username("alice");
+        check("awaiting password", (String) m.get_status(), "awaiting_password");
+        m.submit_second_factor("123456");
+        check("awaiting_password absorbs 2fa", (String) m.get_status(), "awaiting_password");
+        m.submit_password("hunter2");
+        check("awaiting 2fa", (String) m.get_status(), "awaiting_2fa");
+        checkI("no failures on correct password", (int) m.get_failures(), 0);
+        m.submit_second_factor("123456");
+        check("authenticated", (String) m.get_status(), "authenticated");
+        checkI("failure counter reset on success", (int) m.get_failures(), 0);
+        m.logout();
+        check("logged out", (String) m.get_status(), "idle");
+
+        MfaAuth m2 = @@MfaAuth();
+        m2.submit_username("alice");
+        m2.submit_password("wrong");
+        checkI("1 failure", (int) m2.get_failures(), 1);
+        check("still awaiting password", (String) m2.get_status(), "awaiting_password");
+        m2.submit_password("wrong");
+        m2.submit_password("wrong");
+        m2.submit_password("wrong");
+        checkI("4 failures", (int) m2.get_failures(), 4);
+        m2.submit_password("wrong");
+        check("locked", (String) m2.get_status(), "locked");
+        checkI("5 failures", (int) m2.get_failures(), 5);
+        m2.submit_username("alice");
+        m2.submit_password("hunter2");
+        m2.submit_second_factor("123456");
+        check("locked absorbs all", (String) m2.get_status(), "locked");
+        m2.cooldown_elapsed();
+        check("back to idle after cooldown", (String) m2.get_status(), "idle");
+        checkI("partial reset to threshold-1", (int) m2.get_failures(), 4);
+
+        MfaAuth m3 = @@MfaAuth();
+        m3.submit_username("alice");
+        m3.submit_password("hunter2");
+        check("2fa active", (String) m3.get_status(), "awaiting_2fa");
+        m3.submit_second_factor("bad1");
+        check("2fa after 1 wrong still active", (String) m3.get_status(), "awaiting_2fa");
+        m3.submit_second_factor("bad2");
+        m3.submit_second_factor("bad3");
+        check("2fa gave up", (String) m3.get_status(), "awaiting_password");
+        checkI("one failure bumped", (int) m3.get_failures(), 1);
+        m3.submit_password("hunter2");
+        m3.submit_second_factor("bad");
+        check("new session, new attempts counter", (String) m3.get_status(), "awaiting_2fa");
+
+        System.out.println("PASS: mfa_lockout");
+    }
+}

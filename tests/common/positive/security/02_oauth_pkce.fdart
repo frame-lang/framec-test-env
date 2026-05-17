@@ -1,0 +1,180 @@
+@@[target("dart")]
+
+// Cookbook 87: OAuth 2.0 Authorization Code + PKCE
+
+import 'dart:io';
+
+@@system OAuthPkceFlow {
+    interface:
+        start(client_id: String, redirect_uri: String, scope: String, nonce: String)
+        authorization_redirect(code: String, state: String)
+        exchange_response(access_token: String, refresh_token: String)
+        exchange_error(reason: String)
+        use_token(): String = "no_token"
+        refresh()
+        revoke()
+        timeout()
+        get_status(): String = "idle"
+        get_auth_code(): String
+        get_code_verifier(): String
+
+    machine:
+        $Idle {
+            start(client_id: String, redirect_uri: String, scope: String, nonce: String) {
+                this.client_id = client_id;
+                this.redirect_uri = redirect_uri;
+                this.scope = scope;
+                this.code_verifier = nonce;
+                this.code_challenge = nonce;
+                this.state_nonce = nonce;
+                -> $AwaitingRedirect
+            }
+            get_status(): String { @@:("idle") }
+            get_auth_code(): String { @@:(this.auth_code) }
+            get_code_verifier(): String { @@:(this.code_verifier) }
+        }
+
+        $AwaitingRedirect {
+            authorization_redirect(code: String, state: String) {
+                if (state != this.state_nonce) {
+                    -> $Failed
+                } else {
+                    this.auth_code = code;
+                    -> $ExchangingCode
+                }
+            }
+            timeout() { -> $Failed }
+            get_status(): String { @@:("awaiting_redirect") }
+            get_auth_code(): String { @@:(this.auth_code) }
+            get_code_verifier(): String { @@:(this.code_verifier) }
+        }
+
+        $ExchangingCode {
+            <$() {
+                this.auth_code = "";
+                this.code_verifier = "";
+            }
+            exchange_response(access_token: String, refresh_token: String) {
+                this.access_token = access_token;
+                this.refresh_token = refresh_token;
+                -> $Authorized
+            }
+            exchange_error(reason: String) { -> $Failed }
+            timeout() { -> $Failed }
+            get_status(): String { @@:("exchanging") }
+            get_auth_code(): String { @@:(this.auth_code) }
+            get_code_verifier(): String { @@:(this.code_verifier) }
+        }
+
+        $Authorized {
+            use_token(): String { @@:(this.access_token) }
+            refresh() { -> $Refreshing }
+            revoke() { -> $Revoked }
+            get_status(): String { @@:("authorized") }
+            get_auth_code(): String { @@:(this.auth_code) }
+            get_code_verifier(): String { @@:(this.code_verifier) }
+        }
+
+        $Refreshing {
+            exchange_response(access_token: String, refresh_token: String) {
+                this.access_token = access_token;
+                this.refresh_token = refresh_token;
+                -> $Authorized
+            }
+            exchange_error(reason: String) { -> $Failed }
+            timeout() { -> $Failed }
+            get_status(): String { @@:("refreshing") }
+            get_auth_code(): String { @@:(this.auth_code) }
+            get_code_verifier(): String { @@:(this.code_verifier) }
+        }
+
+        $Failed {
+            get_status(): String { @@:("failed") }
+            get_auth_code(): String { @@:(this.auth_code) }
+            get_code_verifier(): String { @@:(this.code_verifier) }
+        }
+
+        $Revoked {
+            get_status(): String { @@:("revoked") }
+            get_auth_code(): String { @@:(this.auth_code) }
+            get_code_verifier(): String { @@:(this.code_verifier) }
+        }
+
+    domain:
+        client_id: String = ""
+        redirect_uri: String = ""
+        scope: String = ""
+        code_verifier: String = ""
+        code_challenge: String = ""
+        state_nonce: String = ""
+        auth_code: String = ""
+        access_token: String = ""
+        refresh_token: String = ""
+}
+
+void ck(String label, String actual, String expected) {
+    if (actual != expected) { print("FAIL: $label expected '$expected', got '$actual'"); exit(1); }
+}
+
+void main() {
+    var f = @@OAuthPkceFlow();
+    ck("idle", f.get_status(), "idle");
+    ck("idle use_token default", f.use_token(), "no_token");
+    f.start("myclient", "https://app/cb", "read", "nonce123");
+    ck("awaiting redirect", f.get_status(), "awaiting_redirect");
+    ck("PKCE verifier generated", f.get_code_verifier(), "nonce123");
+    ck("use_token still denied", f.use_token(), "no_token");
+    f.authorization_redirect("authcode-XYZ", "nonce123");
+    ck("exchanging", f.get_status(), "exchanging");
+    ck("auth code captured", f.get_auth_code(), "authcode-XYZ");
+    f.exchange_response("TOKEN-A", "REFRESH-B");
+    ck("authorized", f.get_status(), "authorized");
+    ck("token usable", f.use_token(), "TOKEN-A");
+    ck("auth_code zeroed", f.get_auth_code(), "");
+    ck("code_verifier zeroed", f.get_code_verifier(), "");
+    f.authorization_redirect("authcode-XYZ", "nonce123");
+    ck("authorized absorbs replay", f.get_status(), "authorized");
+    ck("token still usable", f.use_token(), "TOKEN-A");
+    f.refresh();
+    ck("refreshing", f.get_status(), "refreshing");
+    f.exchange_response("TOKEN-A2", "REFRESH-B2");
+    ck("authorized post-refresh", f.get_status(), "authorized");
+    ck("new token", f.use_token(), "TOKEN-A2");
+    f.revoke();
+    ck("revoked", f.get_status(), "revoked");
+    ck("revoked denies token", f.use_token(), "no_token");
+
+    var f2 = @@OAuthPkceFlow();
+    f2.start("myclient", "https://app/cb", "read", "nonce123");
+    f2.authorization_redirect("attacker-code", "WRONG-NONCE");
+    ck("CSRF mismatch -> failed", f2.get_status(), "failed");
+    ck("CSRF denies token", f2.use_token(), "no_token");
+
+    var f3 = @@OAuthPkceFlow();
+    f3.start("myclient", "https://app/cb", "read", "nonce123");
+    f3.timeout();
+    ck("timeout failed", f3.get_status(), "failed");
+
+    var f4 = @@OAuthPkceFlow();
+    f4.start("myclient", "https://app/cb", "read", "nonce123");
+    f4.authorization_redirect("authcode", "nonce123");
+    f4.exchange_error("invalid_grant");
+    ck("exchange error failed", f4.get_status(), "failed");
+    ck("no token on exchange error", f4.use_token(), "no_token");
+
+    var f5 = @@OAuthPkceFlow();
+    f5.start("myclient", "https://app/cb", "read", "nonce123");
+    f5.authorization_redirect("authcode", "nonce123");
+    f5.timeout();
+    ck("exchange timeout failed", f5.get_status(), "failed");
+
+    var f6 = @@OAuthPkceFlow();
+    f6.start("myclient", "https://app/cb", "read", "nonce123");
+    f6.authorization_redirect("authcode", "nonce123");
+    f6.exchange_response("TOKEN", "REFRESH");
+    f6.refresh();
+    f6.exchange_error("invalid_refresh_token");
+    ck("refresh error failed", f6.get_status(), "failed");
+
+    print("PASS: oauth_pkce");
+}

@@ -1,0 +1,147 @@
+@@[target("rust")]
+
+// Cookbook 81: Infusion Pump (safety-critical)
+
+@@system InfusionPump {
+    interface:
+        power_on()
+        set_rate(ml_per_hr: f64)
+        prime()
+        start_infusion()
+        occlusion_detected()
+        acknowledge_alarm()
+        tick_minute()
+        volume_delivered(): f64 = 0.0
+        rate_mL_per_hr(): f64
+        alarm_reason(): String
+        status(): String
+
+    machine:
+        $Off {
+            power_on() { -> $Idle }
+            status(): String { @@:(String::from("off")) }
+            rate_mL_per_hr(): f64 { @@:(self.rate) }
+            volume_delivered(): f64 { @@:(self.volume) }
+            alarm_reason(): String { @@:(String::from("")) }
+        }
+
+        $Operational {
+            occlusion_detected() { -> (String::from("occlusion")) $Alarm }
+        }
+
+        $Idle => $Operational {
+            set_rate(ml_per_hr: f64) { self.rate = ml_per_hr; }
+            prime() {
+                if self.rate > 0.0 {
+                    -> $Primed
+                }
+            }
+            status(): String { @@:(String::from("idle")) }
+            rate_mL_per_hr(): f64 { @@:(self.rate) }
+            volume_delivered(): f64 { @@:(self.volume) }
+            alarm_reason(): String { @@:(String::from("")) }
+            => $^
+        }
+
+        $Primed => $Operational {
+            start_infusion() { -> $Running }
+            status(): String { @@:(String::from("primed")) }
+            rate_mL_per_hr(): f64 { @@:(self.rate) }
+            volume_delivered(): f64 { @@:(self.volume) }
+            alarm_reason(): String { @@:(String::from("")) }
+            => $^
+        }
+
+        $Running => $Operational {
+            tick_minute() { self.volume = self.volume + self.rate / 60.0; }
+            status(): String { @@:(String::from("running")) }
+            rate_mL_per_hr(): f64 { @@:(self.rate) }
+            volume_delivered(): f64 { @@:(self.volume) }
+            alarm_reason(): String { @@:(String::from("")) }
+            => $^
+        }
+
+        $Alarm {
+            $.reason: String = "unknown"
+            $>(reason: String) { $.reason = reason; }
+            acknowledge_alarm() { -> $Idle }
+            status(): String { @@:(String::from("alarm")) }
+            alarm_reason(): String { @@:($.reason.clone()) }
+            rate_mL_per_hr(): f64 { @@:(self.rate) }
+            volume_delivered(): f64 { @@:(self.volume) }
+        }
+
+    domain:
+        rate: f64 = 0.0
+        volume: f64 = 0.0
+}
+
+fn check(label: &str, actual: String, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+fn check_f(label: &str, actual: f64, expected: f64) {
+    if (actual - expected).abs() > 1e-9 {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn main() {
+    let mut p = @@InfusionPump();
+    check("start off", p.status(), "off");
+
+    p.set_rate(100.0);
+    check_f("rate unchanged in Off", p.rate_mL_per_hr(), 0.0);
+    p.start_infusion();
+    check("still off", p.status(), "off");
+
+    p.power_on();
+    check("idle", p.status(), "idle");
+
+    p.set_rate(100.0);
+    check_f("rate set", p.rate_mL_per_hr(), 100.0);
+
+    p.start_infusion();
+    check("idle cannot start", p.status(), "idle");
+    check_f("no volume yet", p.volume_delivered(), 0.0);
+
+    p.prime();
+    check("primed", p.status(), "primed");
+
+    p.start_infusion();
+    check("running", p.status(), "running");
+
+    let mut i = 0;
+    while i < 10 {
+        p.tick_minute();
+        i = i + 1;
+    }
+    check("running still", p.status(), "running");
+    let vol_after_10 = p.volume_delivered();
+    check_f("volume ≈ 10*100/60", vol_after_10, 10.0 * 100.0 / 60.0);
+
+    p.occlusion_detected();
+    check("alarm on occlusion", p.status(), "alarm");
+    check("alarm reason via state var", p.alarm_reason(), "occlusion");
+
+    p.start_infusion();
+    p.prime();
+    p.tick_minute();
+    check("alarm still alarm", p.status(), "alarm");
+    check_f("volume locked in alarm", p.volume_delivered(), vol_after_10);
+
+    p.acknowledge_alarm();
+    check("ack returns to idle", p.status(), "idle");
+
+    check_f("rate persisted across alarm", p.rate_mL_per_hr(), 100.0);
+
+    p.prime();
+    p.start_infusion();
+    p.tick_minute();
+    check_f("volume continues from prior", p.volume_delivered(), vol_after_10 + 100.0 / 60.0);
+
+    println!("PASS: infusion_pump");
+}

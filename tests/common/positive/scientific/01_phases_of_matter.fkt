@@ -1,0 +1,159 @@
+@@[target("kotlin")]
+
+// Cookbook 72: Phases of Matter
+
+@@system Substance(melting_point: Double, boiling_point: Double, ionization_point: Double) {
+    interface:
+        add_heat(joules: Double)
+        remove_heat(joules: Double)
+        temperature(): Double
+        phase(): String
+
+    machine:
+        $Solid {
+            add_heat(joules: Double) {
+                this.temp = this.temp + joules / this.heat_capacity
+                if (this.temp >= this.mp) {
+                    this.temp = this.mp
+                    this.latent_absorbed = 0.0
+                    -> $Melting
+                }
+            }
+            remove_heat(joules: Double) {
+                this.temp = this.temp - joules / this.heat_capacity
+            }
+            temperature(): Double { @@:(this.temp) }
+            phase(): String { @@:("solid") }
+        }
+
+        $Melting {
+            add_heat(joules: Double) {
+                this.latent_absorbed = this.latent_absorbed + joules
+                if (this.latent_absorbed >= this.latent_fusion) {
+                    -> $Liquid
+                }
+            }
+            remove_heat(joules: Double) {
+                this.latent_absorbed = this.latent_absorbed - joules
+                if (this.latent_absorbed <= 0.0) {
+                    -> $Solid
+                }
+            }
+            temperature(): Double { @@:(this.mp) }
+            phase(): String { @@:("melting") }
+        }
+
+        $Liquid {
+            add_heat(joules: Double) {
+                this.temp = this.temp + joules / this.heat_capacity
+                if (this.temp >= this.bp) {
+                    this.temp = this.bp
+                    this.latent_absorbed = 0.0
+                    -> $Boiling
+                }
+            }
+            remove_heat(joules: Double) {
+                this.temp = this.temp - joules / this.heat_capacity
+                if (this.temp <= this.mp) {
+                    this.temp = this.mp
+                    this.latent_absorbed = this.latent_fusion
+                    -> $Melting
+                }
+            }
+            temperature(): Double { @@:(this.temp) }
+            phase(): String { @@:("liquid") }
+        }
+
+        $Boiling {
+            add_heat(joules: Double) {
+                this.latent_absorbed = this.latent_absorbed + joules
+                if (this.latent_absorbed >= this.latent_vaporization) {
+                    -> $Gas
+                }
+            }
+            remove_heat(joules: Double) {
+                this.latent_absorbed = this.latent_absorbed - joules
+                if (this.latent_absorbed <= 0.0) {
+                    -> $Liquid
+                }
+            }
+            temperature(): Double { @@:(this.bp) }
+            phase(): String { @@:("boiling") }
+        }
+
+        $Gas {
+            add_heat(joules: Double) {
+                this.temp = this.temp + joules / this.heat_capacity
+                if (this.temp >= this.ip) {
+                    -> $Plasma
+                }
+            }
+            remove_heat(joules: Double) {
+                this.temp = this.temp - joules / this.heat_capacity
+                if (this.temp <= this.bp) {
+                    this.temp = this.bp
+                    this.latent_absorbed = this.latent_vaporization
+                    -> $Boiling
+                }
+            }
+            temperature(): Double { @@:(this.temp) }
+            phase(): String { @@:("gas") }
+        }
+
+        $Plasma {
+            remove_heat(joules: Double) {
+                this.temp = this.temp - joules / this.heat_capacity
+                if (this.temp <= this.ip) {
+                    -> $Gas
+                }
+            }
+            temperature(): Double { @@:(this.temp) }
+            phase(): String { @@:("plasma") }
+        }
+
+    domain:
+        mp: Double = melting_point
+        bp: Double = boiling_point
+        ip: Double = ionization_point
+        temp: Double = -50.0
+        heat_capacity: Double = 4.18
+        latent_fusion: Double = 334.0
+        latent_vaporization: Double = 2260.0
+        latent_absorbed: Double = 0.0
+}
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun main() {
+    val water = @@Substance(0.0, 100.0, 10000.0)
+    check("initial phase", water.phase() as String, "solid")
+
+    water.add_heat(209.0)
+    check("after 209J", water.phase() as String, "melting")
+    water.add_heat(334.0)
+    check("after fusion", water.phase() as String, "liquid")
+    water.add_heat(418.0)
+    check("at boiling", water.phase() as String, "boiling")
+    water.add_heat(2260.0)
+    check("vaporised", water.phase() as String, "gas")
+    water.add_heat(41382.0)
+    check("ionised", water.phase() as String, "plasma")
+
+    water.remove_heat(1.0)
+    check("plasma cooled", water.phase() as String, "gas")
+    water.remove_heat(41400.0)
+    check("gas -> boiling", water.phase() as String, "boiling")
+    water.remove_heat(2260.0)
+    check("liquid again", water.phase() as String, "liquid")
+    water.remove_heat(418.0)
+    check("melting again", water.phase() as String, "melting")
+    water.remove_heat(334.0)
+    check("frozen", water.phase() as String, "solid")
+
+    println("PASS: phases_of_matter")
+}

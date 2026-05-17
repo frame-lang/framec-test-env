@@ -1,0 +1,115 @@
+@@[target("csharp")]
+
+// Cookbook 92: Signal / Double Ratchet Session
+
+using System;
+
+@@system DoubleRatchetSession {
+    interface:
+        initialize(shared_secret: string, remote_pub: string)
+        send_plaintext(m: string): string = ""
+        receive_ciphertext(header: string, ct: string, ratchet: int, valid: int): string = ""
+        close()
+        get_status(): string = "uninit"
+        get_sends(): int
+        get_recvs(): int
+        get_ratchets(): int
+        get_zeroized(): int
+
+    machine:
+        $Uninit {
+            initialize(shared_secret: string, remote_pub: string) {
+                this.root_key = shared_secret;
+                this.remote_pub = remote_pub;
+                -> $Active
+            }
+            get_status(): string { @@:("uninit") }
+            get_sends(): int { @@:(this.sends) }
+            get_recvs(): int { @@:(this.recvs) }
+            get_ratchets(): int { @@:(this.ratchets) }
+            get_zeroized(): int { @@:(this.zeroized) }
+        }
+
+        $Active {
+            send_plaintext(m: string): string {
+                this.sends = this.sends + 1;
+                this.zeroized = this.zeroized + 1;
+                @@:("ct-send")
+            }
+            receive_ciphertext(header: string, ct: string, ratchet: int, valid: int): string {
+                if (ratchet == 1) { this.ratchets = this.ratchets + 1; }
+                if (valid == 0) {
+                    @@:("decryption_failed")
+                } else {
+                    this.recvs = this.recvs + 1;
+                    this.zeroized = this.zeroized + 1;
+                    @@:("pt")
+                }
+            }
+            close() { -> $Closed }
+            get_status(): string { @@:("active") }
+            get_sends(): int { @@:(this.sends) }
+            get_recvs(): int { @@:(this.recvs) }
+            get_ratchets(): int { @@:(this.ratchets) }
+            get_zeroized(): int { @@:(this.zeroized) }
+        }
+
+        $Closed {
+            get_status(): string { @@:("closed") }
+            get_sends(): int { @@:(this.sends) }
+            get_recvs(): int { @@:(this.recvs) }
+            get_ratchets(): int { @@:(this.ratchets) }
+            get_zeroized(): int { @@:(this.zeroized) }
+        }
+
+    domain:
+        root_key: string = ""
+        remote_pub: string = ""
+        sends: int = 0
+        recvs: int = 0
+        ratchets: int = 0
+        zeroized: int = 0
+}
+
+public class Program {
+    static void Check(string label, string actual, string expected) {
+        if (actual != expected) { Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'"); Environment.Exit(1); }
+    }
+    static void CheckI(string label, int actual, int expected) {
+        if (actual != expected) { Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}"); Environment.Exit(1); }
+    }
+
+    public static void Main() {
+        var s = @@DoubleRatchetSession();
+        Check("uninit", (string)s.get_status(), "uninit");
+        Check("uninit send default", (string)s.send_plaintext("hi"), "");
+        Check("uninit recv default", (string)s.receive_ciphertext("h", "ct", 0, 1), "");
+        s.initialize("root-secret", "remote-pub");
+        Check("active", (string)s.get_status(), "active");
+        Check("sent", (string)s.send_plaintext("m1"), "ct-send");
+        Check("sent 2", (string)s.send_plaintext("m2"), "ct-send");
+        CheckI("2 sends", (int)s.get_sends(), 2);
+        CheckI("zeroised == sends", (int)s.get_zeroized(), (int)s.get_sends());
+        Check("received", (string)s.receive_ciphertext("h1", "c1", 0, 1), "pt");
+        CheckI("1 recv", (int)s.get_recvs(), 1);
+        CheckI("0 ratchets", (int)s.get_ratchets(), 0);
+        Check("received with ratchet", (string)s.receive_ciphertext("h2", "c2", 1, 1), "pt");
+        CheckI("1 ratchet", (int)s.get_ratchets(), 1);
+        CheckI("2 recvs", (int)s.get_recvs(), 2);
+        CheckI("zeroise invariant", (int)s.get_zeroized(), (int)s.get_sends() + (int)s.get_recvs());
+        int beforeRecvs = (int)s.get_recvs();
+        int beforeZeroized = (int)s.get_zeroized();
+        Check("bad decrypt", (string)s.receive_ciphertext("bad", "bad", 0, 0), "decryption_failed");
+        CheckI("recvs unchanged", (int)s.get_recvs(), beforeRecvs);
+        CheckI("zeroized unchanged", (int)s.get_zeroized(), beforeZeroized);
+        s.close();
+        Check("closed", (string)s.get_status(), "closed");
+        Check("closed send default", (string)s.send_plaintext("hi"), "");
+        Check("closed recv default", (string)s.receive_ciphertext("h", "ct", 0, 1), "");
+        int finalSends = (int)s.get_sends();
+        int finalRecvs = (int)s.get_recvs();
+        CheckI("sends frozen post-close", (int)s.get_sends(), finalSends);
+        CheckI("recvs frozen post-close", (int)s.get_recvs(), finalRecvs);
+        Console.WriteLine("PASS: double_ratchet");
+    }
+}

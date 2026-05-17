@@ -1,0 +1,187 @@
+@@[target("csharp")]
+
+// Cookbook 90: Kerberos Ticket Lifecycle (HSM)
+
+using System;
+
+@@system KerberosClient {
+    interface:
+        authenticate(user: string, password: string)
+        preauth_accepted(tgt: string, session_key: string, expiry: int)
+        preauth_rejected(reason: string)
+        request_service(spn: string)
+        service_ticket_received(st: string, expiry: int)
+        service_ticket_rejected(reason: string)
+        tick(now: int)
+        logout()
+        get_status(): string = ""
+        get_tgt(): string
+        get_service_ticket(): string
+
+    machine:
+        $Idle {
+            authenticate(user: string, password: string) {
+                this.user = user;
+                -> $AwaitingTgt
+            }
+            get_status(): string { @@:("idle") }
+            get_tgt(): string { @@:((string) this.tgt) }
+            get_service_ticket(): string { @@:((string) this.service_ticket) }
+        }
+
+        $AwaitingTgt {
+            preauth_accepted(tgt: string, session_key: string, expiry: int) {
+                this.tgt = tgt;
+                this.session_key = session_key;
+                this.tgt_expiry = expiry;
+                -> $HasTgt
+            }
+            preauth_rejected(reason: string) { -> $Failed }
+            get_status(): string { @@:("awaiting_tgt") }
+            get_tgt(): string { @@:((string) this.tgt) }
+            get_service_ticket(): string { @@:((string) this.service_ticket) }
+        }
+
+        $HasValidTgt {
+            tick(now: int) {
+                if (now >= (int) this.tgt_expiry) {
+                    this.tgt = "";
+                    this.session_key = "";
+                    this.tgt_expiry = 0;
+                    this.service_ticket = "";
+                    this.st_expiry = 0;
+                    -> $Idle
+                }
+            }
+            logout() {
+                this.tgt = "";
+                this.session_key = "";
+                this.tgt_expiry = 0;
+                this.service_ticket = "";
+                this.st_expiry = 0;
+                -> $Idle
+            }
+            get_tgt(): string { @@:((string) this.tgt) }
+            get_service_ticket(): string { @@:((string) this.service_ticket) }
+        }
+
+        $HasTgt => $HasValidTgt {
+            request_service(spn: string) { -> $AwaitingServiceTicket }
+            get_status(): string { @@:("has_tgt") }
+            => $^
+        }
+
+        $AwaitingServiceTicket => $HasValidTgt {
+            service_ticket_received(st: string, expiry: int) {
+                this.service_ticket = st;
+                this.st_expiry = expiry;
+                -> $HasServiceTicket
+            }
+            service_ticket_rejected(reason: string) { -> $HasTgt }
+            get_status(): string { @@:("awaiting_st") }
+            => $^
+        }
+
+        $HasServiceTicket => $HasValidTgt {
+            tick(now: int) {
+                if (now >= (int) this.tgt_expiry) {
+                    this.tgt = "";
+                    this.session_key = "";
+                    this.tgt_expiry = 0;
+                    this.service_ticket = "";
+                    this.st_expiry = 0;
+                    -> $Idle
+                } else if (now >= (int) this.st_expiry) {
+                    this.service_ticket = "";
+                    -> $HasTgt
+                }
+            }
+            request_service(spn: string) { -> $AwaitingServiceTicket }
+            get_status(): string { @@:("has_st") }
+            => $^
+        }
+
+        $Failed {
+            get_status(): string { @@:("failed") }
+            get_tgt(): string { @@:((string) this.tgt) }
+            get_service_ticket(): string { @@:((string) this.service_ticket) }
+        }
+
+    domain:
+        user: string = ""
+        tgt: string = ""
+        session_key: string = ""
+        tgt_expiry: int = 0
+        service_ticket: string = ""
+        st_expiry: int = 0
+}
+
+public class Program {
+    static void Check(string label, string actual, string expected) {
+        if (actual != expected) { Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'"); Environment.Exit(1); }
+    }
+
+    public static void Main() {
+        var k = @@KerberosClient();
+        Check("idle", (string) k.get_status(), "idle");
+        k.request_service("HTTP/web");
+        Check("idle absorbs request_service", (string) k.get_status(), "idle");
+        Check("no service ticket in idle", (string) k.get_service_ticket(), "");
+        k.authenticate("alice", "pw");
+        Check("awaiting tgt", (string) k.get_status(), "awaiting_tgt");
+        k.request_service("HTTP/web");
+        Check("awaiting absorbs request_service", (string) k.get_status(), "awaiting_tgt");
+        k.preauth_accepted("TGT-abc", "K-123", 100);
+        Check("has tgt", (string) k.get_status(), "has_tgt");
+        Check("tgt stored", (string) k.get_tgt(), "TGT-abc");
+        k.tick(50);
+        Check("still has tgt pre-expiry", (string) k.get_status(), "has_tgt");
+        k.request_service("HTTP/web");
+        Check("awaiting st", (string) k.get_status(), "awaiting_st");
+        k.service_ticket_received("ST-xyz", 80);
+        Check("has st", (string) k.get_status(), "has_st");
+        Check("st stored", (string) k.get_service_ticket(), "ST-xyz");
+        k.tick(85);
+        Check("ST expired -> has_tgt", (string) k.get_status(), "has_tgt");
+        Check("st cleared", (string) k.get_service_ticket(), "");
+        Check("tgt still there", (string) k.get_tgt(), "TGT-abc");
+        k.request_service("HTTP/web");
+        k.service_ticket_received("ST-2", 95);
+        Check("has st 2", (string) k.get_status(), "has_st");
+        k.tick(100);
+        Check("tgt expired -> idle", (string) k.get_status(), "idle");
+        Check("tgt zeroed", (string) k.get_tgt(), "");
+        Check("st zeroed", (string) k.get_service_ticket(), "");
+
+        var k2 = @@KerberosClient();
+        k2.authenticate("alice", "pw");
+        k2.preauth_accepted("TGT-xx", "K-yy", 200);
+        k2.logout();
+        Check("logout from has_tgt -> idle", (string) k2.get_status(), "idle");
+        Check("logout cleared tgt", (string) k2.get_tgt(), "");
+
+        var k3 = @@KerberosClient();
+        k3.authenticate("alice", "pw");
+        k3.preauth_accepted("TGT-1", "K-1", 500);
+        k3.request_service("spn");
+        k3.service_ticket_received("ST-1", 300);
+        k3.logout();
+        Check("logout from has_st -> idle", (string) k3.get_status(), "idle");
+        Check("logout cleared st", (string) k3.get_service_ticket(), "");
+
+        var k4 = @@KerberosClient();
+        k4.authenticate("bob", "wrong");
+        k4.preauth_rejected("invalid_password");
+        Check("preauth rejected", (string) k4.get_status(), "failed");
+
+        var k5 = @@KerberosClient();
+        k5.authenticate("alice", "pw");
+        k5.preauth_accepted("TGT-q", "K-q", 500);
+        k5.request_service("deny_me");
+        k5.service_ticket_rejected("no_access");
+        Check("st rejected -> has_tgt", (string) k5.get_status(), "has_tgt");
+        Check("tgt retained", (string) k5.get_tgt(), "TGT-q");
+
+        Console.WriteLine("PASS: kerberos");
+    }
+}

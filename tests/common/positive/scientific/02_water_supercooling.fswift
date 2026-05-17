@@ -1,0 +1,116 @@
+@@[target("swift")]
+
+// Cookbook 73: Water with Supercooling
+
+import Foundation
+
+@@system Water {
+    interface:
+        cool(delta: Double)
+        heat(delta: Double)
+        nucleate()
+        shake()
+        temperature(): Double
+        phase(): String
+
+    machine:
+        $Liquid {
+            cool(delta: Double) {
+                self.temp = self.temp - delta
+                if self.temp < 0.0 {
+                    -> $Supercooled
+                }
+            }
+            heat(delta: Double) { self.temp = self.temp + delta }
+            temperature(): Double { @@:(self.temp) }
+            phase(): String { @@:("liquid") }
+        }
+
+        $Supercooled {
+            cool(delta: Double) {
+                self.temp = self.temp - delta
+                if self.temp <= -42.0 {
+                    -> $Ice
+                }
+            }
+            heat(delta: Double) {
+                self.temp = self.temp + delta
+                if self.temp >= 0.0 {
+                    -> $Liquid
+                }
+            }
+            nucleate() { -> $Ice }
+            shake() { -> $Ice }
+            temperature(): Double { @@:(self.temp) }
+            phase(): String { @@:("supercooled liquid") }
+        }
+
+        $Ice {
+            heat(delta: Double) {
+                self.temp = self.temp + delta
+                if self.temp >= 0.0 {
+                    -> $Liquid
+                }
+            }
+            cool(delta: Double) { self.temp = self.temp - delta }
+            temperature(): Double { @@:(self.temp) }
+            phase(): String { @@:("ice") }
+        }
+
+    domain:
+        temp: Double = 25.0
+}
+
+func check(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+func checkF(_ label: String, _ actual: Double, _ expected: Double) {
+    if abs(actual - expected) > 1e-9 {
+        print("FAIL: \(label) expected \(expected), got \(actual)")
+        exit(1)
+    }
+}
+
+let w = @@Water()
+check("start", w.phase() as! String, "liquid")
+w.cool(delta: 30.0)
+check("after big cool", w.phase() as! String, "supercooled liquid")
+w.shake()
+check("shaken", w.phase() as! String, "ice")
+
+let w2 = @@Water()
+w2.cool(delta: 30.0)
+check("w2 supercooled", w2.phase() as! String, "supercooled liquid")
+checkF("same temp", w.temperature() as! Double, w2.temperature() as! Double)
+if (w.phase() as! String) == (w2.phase() as! String) {
+    print("FAIL: phases should differ")
+    exit(1)
+}
+
+let w3 = @@Water()
+w3.cool(delta: 30.0)
+w3.nucleate()
+check("nucleated", w3.phase() as! String, "ice")
+
+let w4 = @@Water()
+w4.cool(delta: 30.0)
+check("w4 supercooled", w4.phase() as! String, "supercooled liquid")
+w4.cool(delta: 40.0)
+check("deep cool", w4.phase() as! String, "ice")
+w4.heat(delta: 50.0)
+check("melted", w4.phase() as! String, "liquid")
+
+let w5 = @@Water()
+w5.shake()
+check("liquid shake ignored", w5.phase() as! String, "liquid")
+let w6 = @@Water()
+w6.cool(delta: 30.0)
+w6.cool(delta: 40.0)
+check("w6 is ice", w6.phase() as! String, "ice")
+w6.shake()
+check("ice shake ignored", w6.phase() as! String, "ice")
+
+print("PASS: water_supercooling")

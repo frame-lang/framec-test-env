@@ -1,0 +1,110 @@
+@@[target("go")]
+
+// Cookbook 91: Noise Protocol XX Handshake (Initiator)
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system NoiseXxInitiator {
+    interface:
+        start(remote_endpoint: string)
+        msg2_received(valid: int)
+        msg3_ack()
+        send(plaintext: string): string = "not_ready"
+        recv(ciphertext: string): string = ""
+        timeout()
+        get_status(): string = "idle"
+
+    machine:
+        $Idle {
+            start(remote_endpoint: string) {
+                s.remote = remote_endpoint
+                -> $AwaitingMsg2
+            }
+            get_status(): string { @@:("idle") }
+        }
+
+        $AwaitingMsg2 {
+            msg2_received(valid: int) {
+                if valid == 1 { -> $AwaitingAck } else { -> $Aborted }
+            }
+            timeout() { -> $Aborted }
+            get_status(): string { @@:("awaiting_msg2") }
+        }
+
+        $AwaitingAck {
+            msg3_ack() { -> $Transport }
+            timeout() { -> $Aborted }
+            get_status(): string { @@:("awaiting_ack") }
+        }
+
+        $Transport {
+            send(plaintext: string): string { @@:("sent") }
+            recv(ciphertext: string): string { @@:("decrypted") }
+            get_status(): string { @@:("transport") }
+        }
+
+        $Aborted {
+            get_status(): string { @@:("aborted") }
+        }
+
+    domain:
+        remote: string = ""
+}
+
+func check(label, actual, expected string) {
+    if actual != expected { fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual); os.Exit(1) }
+}
+
+func main() {
+    n := @@NoiseXxInitiator()
+    check("idle", n.get_status().(string), "idle")
+    check("idle send default", n.send("hi").(string), "not_ready")
+    check("idle recv default", n.recv("ct").(string), "")
+    n.msg2_received(1)
+    check("idle absorbs msg2", n.get_status().(string), "idle")
+    n.msg3_ack()
+    check("idle absorbs msg3_ack", n.get_status().(string), "idle")
+    n.start("peer")
+    check("awaiting msg2", n.get_status().(string), "awaiting_msg2")
+    check("awaiting_msg2 send default", n.send("hi").(string), "not_ready")
+    n.msg3_ack()
+    check("awaiting_msg2 absorbs msg3_ack", n.get_status().(string), "awaiting_msg2")
+    n.msg2_received(1)
+    check("awaiting ack", n.get_status().(string), "awaiting_ack")
+    check("awaiting_ack send default", n.send("hi").(string), "not_ready")
+    n.msg2_received(1)
+    check("awaiting_ack absorbs msg2", n.get_status().(string), "awaiting_ack")
+    n.msg3_ack()
+    check("transport", n.get_status().(string), "transport")
+    check("transport sends", n.send("hi").(string), "sent")
+    check("transport recvs", n.recv("ct").(string), "decrypted")
+
+    n2 := @@NoiseXxInitiator()
+    n2.start("peer")
+    n2.msg2_received(0)
+    check("invalid msg2 -> aborted", n2.get_status().(string), "aborted")
+    check("aborted send default", n2.send("hi").(string), "not_ready")
+    check("aborted recv default", n2.recv("ct").(string), "")
+
+    n3 := @@NoiseXxInitiator()
+    n3.start("peer")
+    n3.timeout()
+    check("timeout at msg2 -> aborted", n3.get_status().(string), "aborted")
+
+    n4 := @@NoiseXxInitiator()
+    n4.start("peer")
+    n4.msg2_received(1)
+    n4.timeout()
+    check("timeout at ack -> aborted", n4.get_status().(string), "aborted")
+    n4.start("peer")
+    n4.msg2_received(1)
+    n4.msg3_ack()
+    check("aborted absorbs all", n4.get_status().(string), "aborted")
+
+    fmt.Println("PASS: noise_xx")
+}

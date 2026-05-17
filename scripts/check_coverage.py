@@ -57,11 +57,9 @@ def categorize(filename: str) -> tuple[str, str, bool] | None:
     """
     if filename in IGNORED_NAMES:
         return None
-    for suffix in IGNORED_SUFFIXES:
-        if filename.endswith(suffix):
-            return None
 
-    # Try skip form first: <stem>.f<ext>.skip.md
+    # Try skip form first: <stem>.f<ext>.skip.md (must come before
+    # the generic ".md" filter below or .skip.md files get dropped).
     if filename.endswith(".skip.md"):
         body = filename[:-len(".skip.md")]
         if "." not in body:
@@ -70,6 +68,10 @@ def categorize(filename: str) -> tuple[str, str, bool] | None:
         if ext in BACKENDS:
             return (stem, ext, True)
         return None
+
+    for suffix in IGNORED_SUFFIXES:
+        if filename.endswith(suffix):
+            return None
 
     # Real port: <stem>.f<ext>
     if "." not in filename:

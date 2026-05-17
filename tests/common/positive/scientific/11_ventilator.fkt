@@ -1,0 +1,119 @@
+@@[target("kotlin")]
+
+// Cookbook 82: Ventilator Breath Cycle
+
+@@system Ventilator {
+    interface:
+        power_on()
+        tick_ms(ms: Int)
+        patient_effort_detected()
+        stop()
+        phase(): String
+        breath_count(): Int
+
+    machine:
+        $Off {
+            power_on() { -> $Inspiration }
+            phase(): String { @@:("off") }
+            breath_count(): Int { @@:(this.breaths) }
+        }
+
+        $Ventilating {
+            stop() { -> $Off }
+            breath_count(): Int { @@:(this.breaths) }
+        }
+
+        $Inspiration => $Ventilating {
+            $>() {
+                this.phase_ms = 0
+                this.breaths = this.breaths + 1
+            }
+            tick_ms(ms: Int) {
+                this.phase_ms = this.phase_ms + ms
+                if (this.phase_ms >= 1000) {
+                    -> $Expiration
+                }
+            }
+            patient_effort_detected() { }
+            phase(): String { @@:("inspiration") }
+            => $^
+        }
+
+        $Expiration => $Ventilating {
+            $>() { this.phase_ms = 0 }
+            tick_ms(ms: Int) {
+                this.phase_ms = this.phase_ms + ms
+                if (this.phase_ms >= 1500) {
+                    -> $Pause
+                }
+            }
+            patient_effort_detected() { }
+            phase(): String { @@:("expiration") }
+            => $^
+        }
+
+        $Pause => $Ventilating {
+            $>() { this.phase_ms = 0 }
+            tick_ms(ms: Int) {
+                this.phase_ms = this.phase_ms + ms
+                if (this.phase_ms >= 500) {
+                    -> $Inspiration
+                }
+            }
+            patient_effort_detected() { -> $Inspiration }
+            phase(): String { @@:("pause") }
+            => $^
+        }
+
+    domain:
+        phase_ms: Int = 0
+        breaths: Int = 0
+}
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+fun checkI(label: String, actual: Int, expected: Int) {
+    if (actual != expected) {
+        println("FAIL: $label expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun main() {
+    val v = @@Ventilator()
+    check("start off", v.phase() as String, "off")
+    v.power_on()
+    check("inspiration on power-on", v.phase() as String, "inspiration")
+    checkI("first breath counted", v.breath_count() as Int, 1)
+    v.patient_effort_detected()
+    check("inspiration absorbs effort", v.phase() as String, "inspiration")
+    v.tick_ms(500)
+    check("mid inspiration", v.phase() as String, "inspiration")
+    v.tick_ms(500)
+    check("expiration", v.phase() as String, "expiration")
+    v.patient_effort_detected()
+    check("expiration absorbs effort", v.phase() as String, "expiration")
+    v.tick_ms(1500)
+    check("pause", v.phase() as String, "pause")
+    v.patient_effort_detected()
+    check("pause triggers next breath", v.phase() as String, "inspiration")
+    checkI("breath 2 counted", v.breath_count() as Int, 2)
+    v.tick_ms(1000)
+    check("expiration 2", v.phase() as String, "expiration")
+    v.tick_ms(1500)
+    check("pause 2", v.phase() as String, "pause")
+    v.tick_ms(500)
+    check("inspiration 3 passive", v.phase() as String, "inspiration")
+    checkI("breath 3 counted", v.breath_count() as Int, 3)
+    v.stop()
+    check("stopped", v.phase() as String, "off")
+    checkI("breath count persists across stop", v.breath_count() as Int, 3)
+    v.tick_ms(10000)
+    v.patient_effort_detected()
+    check("off absorbs ticks and effort", v.phase() as String, "off")
+    println("PASS: ventilator")
+}

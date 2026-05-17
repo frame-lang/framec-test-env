@@ -1,0 +1,123 @@
+@@[target("csharp")]
+
+// Cookbook 82: Ventilator Breath Cycle
+
+using System;
+
+@@system Ventilator {
+    interface:
+        power_on()
+        tick_ms(ms: int)
+        patient_effort_detected()
+        stop()
+        phase(): string
+        breath_count(): int
+
+    machine:
+        $Off {
+            power_on() { -> $Inspiration }
+            phase(): string { @@:("off") }
+            breath_count(): int { @@:(this.breaths) }
+        }
+
+        $Ventilating {
+            stop() { -> $Off }
+            breath_count(): int { @@:(this.breaths) }
+        }
+
+        $Inspiration => $Ventilating {
+            $>() {
+                this.phase_ms = 0;
+                this.breaths = this.breaths + 1;
+            }
+            tick_ms(ms: int) {
+                this.phase_ms = this.phase_ms + ms;
+                if (this.phase_ms >= 1000) {
+                    -> $Expiration
+                }
+            }
+            patient_effort_detected() { }
+            phase(): string { @@:("inspiration") }
+            => $^
+        }
+
+        $Expiration => $Ventilating {
+            $>() { this.phase_ms = 0; }
+            tick_ms(ms: int) {
+                this.phase_ms = this.phase_ms + ms;
+                if (this.phase_ms >= 1500) {
+                    -> $Pause
+                }
+            }
+            patient_effort_detected() { }
+            phase(): string { @@:("expiration") }
+            => $^
+        }
+
+        $Pause => $Ventilating {
+            $>() { this.phase_ms = 0; }
+            tick_ms(ms: int) {
+                this.phase_ms = this.phase_ms + ms;
+                if (this.phase_ms >= 500) {
+                    -> $Inspiration
+                }
+            }
+            patient_effort_detected() { -> $Inspiration }
+            phase(): string { @@:("pause") }
+            => $^
+        }
+
+    domain:
+        phase_ms: int = 0
+        breaths: int = 0
+}
+
+public class Program {
+    static void Check(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+    static void CheckI(string label, int actual, int expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}");
+            Environment.Exit(1);
+        }
+    }
+
+    public static void Main() {
+        var v = @@Ventilator();
+        Check("start off", (string)v.phase(), "off");
+        v.power_on();
+        Check("inspiration on power-on", (string)v.phase(), "inspiration");
+        CheckI("first breath counted", (int)v.breath_count(), 1);
+        v.patient_effort_detected();
+        Check("inspiration absorbs effort", (string)v.phase(), "inspiration");
+        v.tick_ms(500);
+        Check("mid inspiration", (string)v.phase(), "inspiration");
+        v.tick_ms(500);
+        Check("expiration", (string)v.phase(), "expiration");
+        v.patient_effort_detected();
+        Check("expiration absorbs effort", (string)v.phase(), "expiration");
+        v.tick_ms(1500);
+        Check("pause", (string)v.phase(), "pause");
+        v.patient_effort_detected();
+        Check("pause triggers next breath", (string)v.phase(), "inspiration");
+        CheckI("breath 2 counted", (int)v.breath_count(), 2);
+        v.tick_ms(1000);
+        Check("expiration 2", (string)v.phase(), "expiration");
+        v.tick_ms(1500);
+        Check("pause 2", (string)v.phase(), "pause");
+        v.tick_ms(500);
+        Check("inspiration 3 passive", (string)v.phase(), "inspiration");
+        CheckI("breath 3 counted", (int)v.breath_count(), 3);
+        v.stop();
+        Check("stopped", (string)v.phase(), "off");
+        CheckI("breath count persists across stop", (int)v.breath_count(), 3);
+        v.tick_ms(10000);
+        v.patient_effort_detected();
+        Check("off absorbs ticks and effort", (string)v.phase(), "off");
+        Console.WriteLine("PASS: ventilator");
+    }
+}

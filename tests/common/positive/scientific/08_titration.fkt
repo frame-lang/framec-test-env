@@ -1,0 +1,110 @@
+@@[target("kotlin")]
+
+// Cookbook 79: Titration Protocol
+
+@@system Titration {
+    interface:
+        add_drop(volume_mL: Double)
+        observe_color(color: String)
+        record_endpoint()
+        new_trial()
+        result_mL(): Double = 0.0
+        status(): String
+        volume_mL(): Double
+
+    machine:
+        $Setup {
+            add_drop(volume_mL: Double) {
+                this.volume = 0.0
+                -> $Titrating
+            }
+            volume_mL(): Double { @@:(this.volume) }
+            status(): String { @@:("setup") }
+        }
+
+        $Titrating {
+            add_drop(volume_mL: Double) { this.volume = this.volume + volume_mL }
+            observe_color(color: String) {
+                if (color == "pink") {
+                    -> $NearEndpoint
+                }
+            }
+            volume_mL(): Double { @@:(this.volume) }
+            status(): String { @@:("titrating") }
+        }
+
+        $NearEndpoint {
+            add_drop(volume_mL: Double) { this.volume = this.volume + volume_mL }
+            observe_color(color: String) {
+                if (color == "clear") {
+                    -> $Titrating
+                }
+            }
+            record_endpoint() { -> $Complete }
+            volume_mL(): Double { @@:(this.volume) }
+            status(): String { @@:("near endpoint") }
+        }
+
+        $Complete {
+            new_trial() {
+                this.volume = 0.0
+                -> $Setup
+            }
+            result_mL(): Double { @@:(this.volume) }
+            volume_mL(): Double { @@:(this.volume) }
+            status(): String { @@:("complete") }
+        }
+
+    domain:
+        volume: Double = 0.0
+}
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+fun checkF(label: String, actual: Double, expected: Double) {
+    if (kotlin.math.abs(actual - expected) > 1e-9) {
+        println("FAIL: $label expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun main() {
+    val t = @@Titration()
+    check("start setup", t.status() as String, "setup")
+    t.add_drop(1.0)
+    check("titrating", t.status() as String, "titrating")
+    checkF("volume zeroed on first", t.volume_mL() as Double, 0.0)
+    t.add_drop(5.0)
+    t.add_drop(3.0)
+    checkF("accumulating", t.volume_mL() as Double, 8.0)
+    t.observe_color("pink")
+    check("near endpoint", t.status() as String, "near endpoint")
+    t.observe_color("clear")
+    check("back to titrating", t.status() as String, "titrating")
+    t.observe_color("pink")
+    check("near endpoint 2", t.status() as String, "near endpoint")
+    t.add_drop(0.05)
+    t.record_endpoint()
+    check("complete", t.status() as String, "complete")
+    checkF("recorded volume", t.result_mL() as Double, 8.05)
+    t.add_drop(10.0)
+    checkF("endpoint locked", t.result_mL() as Double, 8.05)
+    t.add_drop(5.0)
+    checkF("endpoint still locked", t.result_mL() as Double, 8.05)
+    t.observe_color("pink")
+    t.record_endpoint()
+    checkF("still locked after ignored events", t.result_mL() as Double, 8.05)
+    t.new_trial()
+    check("new trial back to setup", t.status() as String, "setup")
+    checkF("volume cleared", t.volume_mL() as Double, 0.0)
+    t.add_drop(2.0)
+    t.add_drop(1.5)
+    t.observe_color("pink")
+    t.record_endpoint()
+    checkF("second endpoint", t.result_mL() as Double, 1.5)
+    println("PASS: titration")
+}

@@ -1,0 +1,141 @@
+@@[target("swift")]
+
+// Cookbook 80: PCR Thermal Cycler
+
+import Foundation
+
+@@system PCRCycler(total_cycles: Int) {
+    interface:
+        start()
+        tick_minute()
+        temperature(): Double
+        current_cycle(): Int
+        phase(): String
+
+    machine:
+        $Idle {
+            start() {
+                self.cycle = 0
+                -> $Denature
+            }
+            temperature(): Double { @@:(25.0) }
+            current_cycle(): Int { @@:(self.cycle) }
+            phase(): String { @@:("idle") }
+        }
+
+        $Running {
+            current_cycle(): Int { @@:(self.cycle) }
+        }
+
+        $Denature => $Running {
+            $>() {
+                self.cycle = self.cycle + 1
+                self.phase_min = 0
+            }
+            tick_minute() {
+                self.phase_min = self.phase_min + 1
+                if self.phase_min >= 1 {
+                    -> $Anneal
+                }
+            }
+            temperature(): Double { @@:(95.0) }
+            phase(): String { @@:("denature") }
+            => $^
+        }
+
+        $Anneal => $Running {
+            $>() { self.phase_min = 0 }
+            tick_minute() {
+                self.phase_min = self.phase_min + 1
+                if self.phase_min >= 1 {
+                    -> $Extend
+                }
+            }
+            temperature(): Double { @@:(55.0) }
+            phase(): String { @@:("anneal") }
+            => $^
+        }
+
+        $Extend => $Running {
+            $>() { self.phase_min = 0 }
+            tick_minute() {
+                self.phase_min = self.phase_min + 1
+                if self.phase_min >= 2 {
+                    if self.cycle >= self.target {
+                        -> $FinalHold
+                    } else {
+                        -> $Denature
+                    }
+                }
+            }
+            temperature(): Double { @@:(72.0) }
+            phase(): String { @@:("extend") }
+            => $^
+        }
+
+        $FinalHold {
+            temperature(): Double { @@:(4.0) }
+            current_cycle(): Int { @@:(self.cycle) }
+            phase(): String { @@:("final hold") }
+        }
+
+    domain:
+        target: Int = total_cycles
+        cycle: Int = 0
+        phase_min: Int = 0
+}
+
+func check(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+func checkF(_ label: String, _ actual: Double, _ expected: Double) {
+    if abs(actual - expected) > 1e-9 {
+        print("FAIL: \(label) expected \(expected), got \(actual)")
+        exit(1)
+    }
+}
+func checkI(_ label: String, _ actual: Int, _ expected: Int) {
+    if actual != expected {
+        print("FAIL: \(label) expected \(expected), got \(actual)")
+        exit(1)
+    }
+}
+
+let p = @@PCRCycler(total_cycles: 3)
+check("idle", p.phase() as! String, "idle")
+checkF("idle temperature", p.temperature() as! Double, 25.0)
+checkI("idle cycle", p.current_cycle() as! Int, 0)
+p.tick_minute()
+check("idle absorbs tick", p.phase() as! String, "idle")
+p.start()
+check("denature 1", p.phase() as! String, "denature")
+checkI("cycle 1", p.current_cycle() as! Int, 1)
+checkF("95C", p.temperature() as! Double, 95.0)
+p.tick_minute()
+check("anneal 1", p.phase() as! String, "anneal")
+checkF("55C", p.temperature() as! Double, 55.0)
+p.tick_minute()
+check("extend 1", p.phase() as! String, "extend")
+checkF("72C", p.temperature() as! Double, 72.0)
+p.tick_minute()
+check("extend partway", p.phase() as! String, "extend")
+p.tick_minute()
+check("denature 2", p.phase() as! String, "denature")
+checkI("cycle 2", p.current_cycle() as! Int, 2)
+p.tick_minute(); check("anneal 2", p.phase() as! String, "anneal")
+p.tick_minute(); check("extend 2", p.phase() as! String, "extend")
+p.tick_minute(); p.tick_minute()
+check("denature 3", p.phase() as! String, "denature")
+checkI("cycle 3", p.current_cycle() as! Int, 3)
+p.tick_minute(); p.tick_minute(); p.tick_minute()
+p.tick_minute()
+check("final hold", p.phase() as! String, "final hold")
+checkF("4C", p.temperature() as! Double, 4.0)
+p.tick_minute()
+check("hold absorbs tick", p.phase() as! String, "final hold")
+p.start()
+check("hold absorbs start", p.phase() as! String, "final hold")
+print("PASS: pcr_cycler")

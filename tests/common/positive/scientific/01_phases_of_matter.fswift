@@ -1,0 +1,156 @@
+@@[target("swift")]
+
+// Cookbook 72: Phases of Matter
+
+import Foundation
+
+@@system Substance(melting_point: Double, boiling_point: Double, ionization_point: Double) {
+    interface:
+        add_heat(joules: Double)
+        remove_heat(joules: Double)
+        temperature(): Double
+        phase(): String
+
+    machine:
+        $Solid {
+            add_heat(joules: Double) {
+                self.temp = self.temp + joules / self.heat_capacity
+                if self.temp >= self.mp {
+                    self.temp = self.mp
+                    self.latent_absorbed = 0.0
+                    -> $Melting
+                }
+            }
+            remove_heat(joules: Double) {
+                self.temp = self.temp - joules / self.heat_capacity
+            }
+            temperature(): Double { @@:(self.temp) }
+            phase(): String { @@:("solid") }
+        }
+
+        $Melting {
+            add_heat(joules: Double) {
+                self.latent_absorbed = self.latent_absorbed + joules
+                if self.latent_absorbed >= self.latent_fusion {
+                    -> $Liquid
+                }
+            }
+            remove_heat(joules: Double) {
+                self.latent_absorbed = self.latent_absorbed - joules
+                if self.latent_absorbed <= 0.0 {
+                    -> $Solid
+                }
+            }
+            temperature(): Double { @@:(self.mp) }
+            phase(): String { @@:("melting") }
+        }
+
+        $Liquid {
+            add_heat(joules: Double) {
+                self.temp = self.temp + joules / self.heat_capacity
+                if self.temp >= self.bp {
+                    self.temp = self.bp
+                    self.latent_absorbed = 0.0
+                    -> $Boiling
+                }
+            }
+            remove_heat(joules: Double) {
+                self.temp = self.temp - joules / self.heat_capacity
+                if self.temp <= self.mp {
+                    self.temp = self.mp
+                    self.latent_absorbed = self.latent_fusion
+                    -> $Melting
+                }
+            }
+            temperature(): Double { @@:(self.temp) }
+            phase(): String { @@:("liquid") }
+        }
+
+        $Boiling {
+            add_heat(joules: Double) {
+                self.latent_absorbed = self.latent_absorbed + joules
+                if self.latent_absorbed >= self.latent_vaporization {
+                    -> $Gas
+                }
+            }
+            remove_heat(joules: Double) {
+                self.latent_absorbed = self.latent_absorbed - joules
+                if self.latent_absorbed <= 0.0 {
+                    -> $Liquid
+                }
+            }
+            temperature(): Double { @@:(self.bp) }
+            phase(): String { @@:("boiling") }
+        }
+
+        $Gas {
+            add_heat(joules: Double) {
+                self.temp = self.temp + joules / self.heat_capacity
+                if self.temp >= self.ip {
+                    -> $Plasma
+                }
+            }
+            remove_heat(joules: Double) {
+                self.temp = self.temp - joules / self.heat_capacity
+                if self.temp <= self.bp {
+                    self.temp = self.bp
+                    self.latent_absorbed = self.latent_vaporization
+                    -> $Boiling
+                }
+            }
+            temperature(): Double { @@:(self.temp) }
+            phase(): String { @@:("gas") }
+        }
+
+        $Plasma {
+            remove_heat(joules: Double) {
+                self.temp = self.temp - joules / self.heat_capacity
+                if self.temp <= self.ip {
+                    -> $Gas
+                }
+            }
+            temperature(): Double { @@:(self.temp) }
+            phase(): String { @@:("plasma") }
+        }
+
+    domain:
+        mp: Double = melting_point
+        bp: Double = boiling_point
+        ip: Double = ionization_point
+        temp: Double = -50.0
+        heat_capacity: Double = 4.18
+        latent_fusion: Double = 334.0
+        latent_vaporization: Double = 2260.0
+        latent_absorbed: Double = 0.0
+}
+
+func check(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+
+let water = @@Substance(melting_point: 0.0, boiling_point: 100.0, ionization_point: 10000.0)
+check("initial phase", water.phase() as! String, "solid")
+water.add_heat(joules: 209.0)
+check("after 209J", water.phase() as! String, "melting")
+water.add_heat(joules: 334.0)
+check("after fusion", water.phase() as! String, "liquid")
+water.add_heat(joules: 418.0)
+check("at boiling", water.phase() as! String, "boiling")
+water.add_heat(joules: 2260.0)
+check("vaporised", water.phase() as! String, "gas")
+water.add_heat(joules: 41382.0)
+check("ionised", water.phase() as! String, "plasma")
+water.remove_heat(joules: 1.0)
+check("plasma cooled", water.phase() as! String, "gas")
+water.remove_heat(joules: 41400.0)
+check("gas -> boiling", water.phase() as! String, "boiling")
+water.remove_heat(joules: 2260.0)
+check("liquid again", water.phase() as! String, "liquid")
+water.remove_heat(joules: 418.0)
+check("melting again", water.phase() as! String, "melting")
+water.remove_heat(joules: 334.0)
+check("frozen", water.phase() as! String, "solid")
+print("PASS: phases_of_matter")

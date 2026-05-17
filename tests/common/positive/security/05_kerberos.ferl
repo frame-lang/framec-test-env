@@ -1,0 +1,117 @@
+@@[target("erlang")]
+
+%% Cookbook 90: Kerberos Ticket Lifecycle (HSM)
+
+@@system KerberosClient {
+    interface:
+        authenticate(user, password)
+        preauth_accepted(tgt, session_key, expiry)
+        preauth_rejected(reason)
+        request_service(spn)
+        service_ticket_received(st, expiry)
+        service_ticket_rejected(reason)
+        tick(now)
+        logout()
+        get_status() = ""
+        get_tgt()
+        get_service_ticket()
+
+    machine:
+        $Idle {
+            authenticate(user, password) {
+                self.user = User
+                -> $AwaitingTgt
+            }
+            get_status() { @@:("idle") }
+            get_tgt() { @@:(self.tgt) }
+            get_service_ticket() { @@:(self.service_ticket) }
+        }
+
+        $AwaitingTgt {
+            preauth_accepted(tgt, session_key, expiry) {
+                self.tgt = Tgt
+                self.session_key = Session_key
+                self.tgt_expiry = Expiry
+                -> $HasTgt
+            }
+            preauth_rejected(reason) { -> $Failed }
+            get_status() { @@:("awaiting_tgt") }
+            get_tgt() { @@:(self.tgt) }
+            get_service_ticket() { @@:(self.service_ticket) }
+        }
+
+        $HasValidTgt {
+            tick(now) {
+                if Now >= self.tgt_expiry
+                    self.tgt = ""
+                    self.session_key = ""
+                    self.tgt_expiry = 0
+                    self.service_ticket = ""
+                    self.st_expiry = 0
+                    -> $Idle
+                end
+            }
+            logout() {
+                self.tgt = ""
+                self.session_key = ""
+                self.tgt_expiry = 0
+                self.service_ticket = ""
+                self.st_expiry = 0
+                -> $Idle
+            }
+            get_tgt() { @@:(self.tgt) }
+            get_service_ticket() { @@:(self.service_ticket) }
+        }
+
+        $HasTgt => $HasValidTgt {
+            request_service(spn) { -> $AwaitingServiceTicket }
+            get_status() { @@:("has_tgt") }
+            => $^
+        }
+
+        $AwaitingServiceTicket => $HasValidTgt {
+            service_ticket_received(st, expiry) {
+                self.service_ticket = St
+                self.st_expiry = Expiry
+                -> $HasServiceTicket
+            }
+            service_ticket_rejected(reason) { -> $HasTgt }
+            get_status() { @@:("awaiting_st") }
+            => $^
+        }
+
+        $HasServiceTicket => $HasValidTgt {
+            tick(now) {
+                if Now >= self.tgt_expiry
+                    self.tgt = ""
+                    self.session_key = ""
+                    self.tgt_expiry = 0
+                    self.service_ticket = ""
+                    self.st_expiry = 0
+                    -> $Idle
+                else
+                    if Now >= self.st_expiry
+                        self.service_ticket = ""
+                        -> $HasTgt
+                    end
+                end
+            }
+            request_service(spn) { -> $AwaitingServiceTicket }
+            get_status() { @@:("has_st") }
+            => $^
+        }
+
+        $Failed {
+            get_status() { @@:("failed") }
+            get_tgt() { @@:(self.tgt) }
+            get_service_ticket() { @@:(self.service_ticket) }
+        }
+
+    domain:
+        user = ""
+        tgt = ""
+        session_key = ""
+        tgt_expiry = 0
+        service_ticket = ""
+        st_expiry = 0
+}

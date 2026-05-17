@@ -1,0 +1,116 @@
+@@[target("kotlin")]
+
+// Cookbook 73: Water with Supercooling
+
+@@system Water {
+    interface:
+        cool(delta: Double)
+        heat(delta: Double)
+        nucleate()
+        shake()
+        temperature(): Double
+        phase(): String
+
+    machine:
+        $Liquid {
+            cool(delta: Double) {
+                this.temp = this.temp - delta
+                if (this.temp < 0.0) {
+                    -> $Supercooled
+                }
+            }
+            heat(delta: Double) { this.temp = this.temp + delta }
+            temperature(): Double { @@:(this.temp) }
+            phase(): String { @@:("liquid") }
+        }
+
+        $Supercooled {
+            cool(delta: Double) {
+                this.temp = this.temp - delta
+                if (this.temp <= -42.0) {
+                    -> $Ice
+                }
+            }
+            heat(delta: Double) {
+                this.temp = this.temp + delta
+                if (this.temp >= 0.0) {
+                    -> $Liquid
+                }
+            }
+            nucleate() { -> $Ice }
+            shake() { -> $Ice }
+            temperature(): Double { @@:(this.temp) }
+            phase(): String { @@:("supercooled liquid") }
+        }
+
+        $Ice {
+            heat(delta: Double) {
+                this.temp = this.temp + delta
+                if (this.temp >= 0.0) {
+                    -> $Liquid
+                }
+            }
+            cool(delta: Double) { this.temp = this.temp - delta }
+            temperature(): Double { @@:(this.temp) }
+            phase(): String { @@:("ice") }
+        }
+
+    domain:
+        temp: Double = 25.0
+}
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+fun checkF(label: String, actual: Double, expected: Double) {
+    if (kotlin.math.abs(actual - expected) > 1e-9) {
+        println("FAIL: $label expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun main() {
+    val w = @@Water()
+    check("start", w.phase() as String, "liquid")
+    w.cool(30.0)
+    check("after big cool", w.phase() as String, "supercooled liquid")
+    w.shake()
+    check("shaken", w.phase() as String, "ice")
+
+    val w2 = @@Water()
+    w2.cool(30.0)
+    check("w2 supercooled", w2.phase() as String, "supercooled liquid")
+    checkF("same temp", w.temperature() as Double, w2.temperature() as Double)
+    if ((w.phase() as String) == (w2.phase() as String)) {
+        println("FAIL: phases should differ")
+        kotlin.system.exitProcess(1)
+    }
+
+    val w3 = @@Water()
+    w3.cool(30.0)
+    w3.nucleate()
+    check("nucleated", w3.phase() as String, "ice")
+
+    val w4 = @@Water()
+    w4.cool(30.0)
+    check("w4 supercooled", w4.phase() as String, "supercooled liquid")
+    w4.cool(40.0)
+    check("deep cool", w4.phase() as String, "ice")
+    w4.heat(50.0)
+    check("melted", w4.phase() as String, "liquid")
+
+    val w5 = @@Water()
+    w5.shake()
+    check("liquid shake ignored", w5.phase() as String, "liquid")
+    val w6 = @@Water()
+    w6.cool(30.0)
+    w6.cool(40.0)
+    check("w6 is ice", w6.phase() as String, "ice")
+    w6.shake()
+    check("ice shake ignored", w6.phase() as String, "ice")
+
+    println("PASS: water_supercooling")
+}

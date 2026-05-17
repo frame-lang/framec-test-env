@@ -1,0 +1,109 @@
+@@[target("csharp")]
+
+// Cookbook 77: Neuron Action Potential
+
+using System;
+
+@@system Neuron {
+    interface:
+        stimulate(input: double)
+        tick()
+        voltage(): double
+        phase(): string
+
+    machine:
+        $Resting {
+            stimulate(input: double) {
+                this.v = this.v + input;
+                if (this.v >= this.threshold) {
+                    -> $Depolarizing
+                }
+            }
+            tick() { this.v = this.v + (this.v_rest - this.v) * 0.2; }
+            voltage(): double { @@:(this.v) }
+            phase(): string { @@:("resting") }
+        }
+
+        $Depolarizing {
+            $>() { this.v = this.v_peak; }
+            tick() { -> $Repolarizing }
+            voltage(): double { @@:(this.v) }
+            phase(): string { @@:("spike") }
+        }
+
+        $Repolarizing {
+            tick() {
+                this.v = this.v_hyper;
+                -> $Refractory
+            }
+            voltage(): double { @@:(this.v) }
+            phase(): string { @@:("repolarizing") }
+        }
+
+        $Refractory {
+            stimulate(input: double) { }
+            tick() {
+                this.ref_ticks = this.ref_ticks + 1;
+                if (this.ref_ticks >= 3) {
+                    this.ref_ticks = 0;
+                    -> $Resting
+                }
+            }
+            voltage(): double { @@:(this.v) }
+            phase(): string { @@:("refractory") }
+        }
+
+    domain:
+        v: double = -70.0
+        v_rest: double = -70.0
+        v_peak: double = 40.0
+        v_hyper: double = -80.0
+        threshold: double = -55.0
+        ref_ticks: int = 0
+}
+
+public class Program {
+    static void Check(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+    static void CheckF(string label, double actual, double expected) {
+        if (Math.Abs(actual - expected) > 1e-9) {
+            Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}");
+            Environment.Exit(1);
+        }
+    }
+
+    public static void Main() {
+        var n = @@Neuron();
+        Check("start resting", (string)n.phase(), "resting");
+        CheckF("start voltage", (double)n.voltage(), -70.0);
+        n.stimulate(5.0);
+        Check("sub-threshold stays resting", (string)n.phase(), "resting");
+        CheckF("sub-threshold voltage", (double)n.voltage(), -65.0);
+        n.stimulate(5.0);
+        Check("still resting", (string)n.phase(), "resting");
+        n.stimulate(6.0);
+        Check("spike", (string)n.phase(), "spike");
+        CheckF("peak voltage", (double)n.voltage(), 40.0);
+        n.tick();
+        Check("repolarizing", (string)n.phase(), "repolarizing");
+        n.tick();
+        Check("refractory", (string)n.phase(), "refractory");
+        CheckF("hyperpolarized", (double)n.voltage(), -80.0);
+        n.stimulate(100.0);
+        Check("refractory absorbs stim", (string)n.phase(), "refractory");
+        CheckF("refractory voltage unchanged", (double)n.voltage(), -80.0);
+        n.tick();
+        Check("still refractory t+1", (string)n.phase(), "refractory");
+        n.tick();
+        Check("still refractory t+2", (string)n.phase(), "refractory");
+        n.tick();
+        Check("resting after t+3", (string)n.phase(), "resting");
+        n.stimulate(30.0);
+        Check("second spike", (string)n.phase(), "spike");
+        Console.WriteLine("PASS: neuron_action");
+    }
+}

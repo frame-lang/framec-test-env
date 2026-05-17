@@ -1,0 +1,184 @@
+@@[target("rust")]
+
+// Cookbook 86: TLS 1.3 Handshake (Client Side)
+
+@@system TlsClient {
+    interface:
+        connect(server_name: String)
+        server_hello_received(supported_versions_ext: i32, downgrade_flag: i32, cipher: String)
+        encrypted_extensions_received()
+        certificate_received(cert_valid: i32)
+        cert_verify_received(sig_valid: i32)
+        server_finished_received(mac_valid: i32)
+        send_app_data(data: String): String = "not_ready"
+        close()
+        timeout()
+        get_status(): String = "idle"
+
+    machine:
+        $Idle {
+            connect(server_name: String) {
+                self.server_name = server_name;
+                -> $WaitingServerHello
+            }
+            get_status(): String { @@:(String::from("idle")) }
+        }
+
+        $WaitingServerHello {
+            server_hello_received(supported_versions_ext: i32, downgrade_flag: i32, cipher: String) {
+                if supported_versions_ext != 772 {
+                    -> $Aborted
+                } else if downgrade_flag != 0 {
+                    -> $Aborted
+                } else if cipher == String::from("RC4") {
+                    -> $Aborted
+                } else {
+                    -> $WaitingEncryptedExtensions
+                }
+            }
+            timeout() { -> $Aborted }
+            get_status(): String { @@:(String::from("waiting server_hello")) }
+        }
+
+        $WaitingEncryptedExtensions {
+            encrypted_extensions_received() { -> $WaitingCertificate }
+            timeout() { -> $Aborted }
+            get_status(): String { @@:(String::from("waiting ee")) }
+        }
+
+        $WaitingCertificate {
+            certificate_received(cert_valid: i32) {
+                if cert_valid == 1 {
+                    -> $WaitingCertVerify
+                } else {
+                    -> $Aborted
+                }
+            }
+            timeout() { -> $Aborted }
+            get_status(): String { @@:(String::from("waiting cert")) }
+        }
+
+        $WaitingCertVerify {
+            cert_verify_received(sig_valid: i32) {
+                if sig_valid == 1 {
+                    -> $WaitingServerFinished
+                } else {
+                    -> $Aborted
+                }
+            }
+            timeout() { -> $Aborted }
+            get_status(): String { @@:(String::from("waiting cert_verify")) }
+        }
+
+        $WaitingServerFinished {
+            server_finished_received(mac_valid: i32) {
+                if mac_valid == 1 {
+                    -> $Established
+                } else {
+                    -> $Aborted
+                }
+            }
+            timeout() { -> $Aborted }
+            get_status(): String { @@:(String::from("waiting server_finished")) }
+        }
+
+        $Established {
+            send_app_data(data: String): String { @@:(String::from("sent")) }
+            close() { -> $Closed }
+            get_status(): String { @@:(String::from("established")) }
+        }
+
+        $Aborted {
+            get_status(): String { @@:(String::from("aborted")) }
+        }
+
+        $Closed {
+            get_status(): String { @@:(String::from("closed")) }
+        }
+
+    domain:
+        server_name: String = String::new()
+}
+
+fn check(label: &str, actual: String, expected: &str) {
+    if actual != expected { println!("FAIL: {} expected '{}', got '{}'", label, expected, actual); std::process::exit(1); }
+}
+
+fn main() {
+    let mut c = @@TlsClient();
+    check("start idle", c.get_status(), "idle");
+    check("idle app_data denied", c.send_app_data(String::from("hello")), "not_ready");
+    c.connect(String::from("example.com"));
+    check("waiting SH", c.get_status(), "waiting server_hello");
+    check("waiting SH app_data denied", c.send_app_data(String::from("hello")), "not_ready");
+    c.server_hello_received(772, 0, String::from("AES-GCM"));
+    check("waiting EE", c.get_status(), "waiting ee");
+    check("waiting EE app_data denied", c.send_app_data(String::from("hello")), "not_ready");
+    c.encrypted_extensions_received();
+    check("waiting cert", c.get_status(), "waiting cert");
+    c.certificate_received(1);
+    check("waiting cert_verify", c.get_status(), "waiting cert_verify");
+    c.cert_verify_received(1);
+    check("waiting finished", c.get_status(), "waiting server_finished");
+    check("still denied pre-finished", c.send_app_data(String::from("hello")), "not_ready");
+    c.server_finished_received(1);
+    check("established", c.get_status(), "established");
+    check("app_data allowed", c.send_app_data(String::from("hello")), "sent");
+    c.close();
+    check("closed", c.get_status(), "closed");
+    check("closed denies app_data", c.send_app_data(String::from("hello")), "not_ready");
+
+    let mut c2 = @@TlsClient();
+    c2.connect(String::from("example.com"));
+    c2.server_hello_received(772, 1, String::from("AES-GCM"));
+    check("downgrade aborts", c2.get_status(), "aborted");
+    check("aborted denies app_data", c2.send_app_data(String::from("hello")), "not_ready");
+
+    let mut c3 = @@TlsClient();
+    c3.connect(String::from("example.com"));
+    c3.server_hello_received(771, 0, String::from("AES-GCM"));
+    check("version mismatch aborts", c3.get_status(), "aborted");
+
+    let mut c4 = @@TlsClient();
+    c4.connect(String::from("example.com"));
+    c4.server_hello_received(772, 0, String::from("RC4"));
+    check("weak cipher aborts", c4.get_status(), "aborted");
+
+    let mut c5 = @@TlsClient();
+    c5.connect(String::from("example.com"));
+    c5.server_hello_received(772, 0, String::from("AES-GCM"));
+    c5.encrypted_extensions_received();
+    c5.certificate_received(0);
+    check("cert fail aborts", c5.get_status(), "aborted");
+
+    let mut c6 = @@TlsClient();
+    c6.connect(String::from("example.com"));
+    c6.server_hello_received(772, 0, String::from("AES-GCM"));
+    c6.encrypted_extensions_received();
+    c6.certificate_received(1);
+    c6.cert_verify_received(0);
+    check("sig fail aborts", c6.get_status(), "aborted");
+
+    let mut c7 = @@TlsClient();
+    c7.connect(String::from("example.com"));
+    c7.server_hello_received(772, 0, String::from("AES-GCM"));
+    c7.encrypted_extensions_received();
+    c7.certificate_received(1);
+    c7.cert_verify_received(1);
+    c7.server_finished_received(0);
+    check("mac fail aborts", c7.get_status(), "aborted");
+    check("failed mac denies app_data", c7.send_app_data(String::from("hello")), "not_ready");
+
+    let mut c8 = @@TlsClient();
+    c8.connect(String::from("example.com"));
+    c8.timeout();
+    check("timeout from SH", c8.get_status(), "aborted");
+
+    let mut c9 = @@TlsClient();
+    c9.connect(String::from("example.com"));
+    c9.server_hello_received(772, 0, String::from("AES-GCM"));
+    c9.timeout();
+    check("timeout from EE", c9.get_status(), "aborted");
+
+    println!("PASS: tls_client");
+}

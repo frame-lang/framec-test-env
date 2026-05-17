@@ -1,0 +1,154 @@
+@@[target("ruby")]
+
+# Cookbook 72: Phases of Matter
+
+@@system Substance(melting_point, boiling_point, ionization_point) {
+    interface:
+        add_heat(joules)
+        remove_heat(joules)
+        temperature()
+        phase()
+
+    machine:
+        $Solid {
+            add_heat(joules) {
+                @temp = @temp + joules / @heat_capacity
+                if @temp >= @mp
+                    @temp = @mp
+                    @latent_absorbed = 0.0
+                    -> $Melting
+                end
+            }
+            remove_heat(joules) {
+                @temp = @temp - joules / @heat_capacity
+            }
+            temperature() { @@:(@temp) }
+            phase() { @@:("solid") }
+        }
+
+        $Melting {
+            add_heat(joules) {
+                @latent_absorbed = @latent_absorbed + joules
+                if @latent_absorbed >= @latent_fusion
+                    -> $Liquid
+                end
+            }
+            remove_heat(joules) {
+                @latent_absorbed = @latent_absorbed - joules
+                if @latent_absorbed <= 0.0
+                    -> $Solid
+                end
+            }
+            temperature() { @@:(@mp) }
+            phase() { @@:("melting") }
+        }
+
+        $Liquid {
+            add_heat(joules) {
+                @temp = @temp + joules / @heat_capacity
+                if @temp >= @bp
+                    @temp = @bp
+                    @latent_absorbed = 0.0
+                    -> $Boiling
+                end
+            }
+            remove_heat(joules) {
+                @temp = @temp - joules / @heat_capacity
+                if @temp <= @mp
+                    @temp = @mp
+                    @latent_absorbed = @latent_fusion
+                    -> $Melting
+                end
+            }
+            temperature() { @@:(@temp) }
+            phase() { @@:("liquid") }
+        }
+
+        $Boiling {
+            add_heat(joules) {
+                @latent_absorbed = @latent_absorbed + joules
+                if @latent_absorbed >= @latent_vaporization
+                    -> $Gas
+                end
+            }
+            remove_heat(joules) {
+                @latent_absorbed = @latent_absorbed - joules
+                if @latent_absorbed <= 0.0
+                    -> $Liquid
+                end
+            }
+            temperature() { @@:(@bp) }
+            phase() { @@:("boiling") }
+        }
+
+        $Gas {
+            add_heat(joules) {
+                @temp = @temp + joules / @heat_capacity
+                if @temp >= @ip
+                    -> $Plasma
+                end
+            }
+            remove_heat(joules) {
+                @temp = @temp - joules / @heat_capacity
+                if @temp <= @bp
+                    @temp = @bp
+                    @latent_absorbed = @latent_vaporization
+                    -> $Boiling
+                end
+            }
+            temperature() { @@:(@temp) }
+            phase() { @@:("gas") }
+        }
+
+        $Plasma {
+            remove_heat(joules) {
+                @temp = @temp - joules / @heat_capacity
+                if @temp <= @ip
+                    -> $Gas
+                end
+            }
+            temperature() { @@:(@temp) }
+            phase() { @@:("plasma") }
+        }
+
+    domain:
+        mp = melting_point
+        bp = boiling_point
+        ip = ionization_point
+        temp = -50.0
+        heat_capacity = 4.18
+        latent_fusion = 334.0
+        latent_vaporization = 2260.0
+        latent_absorbed = 0.0
+}
+
+def check(label, actual, expected)
+    if actual != expected
+        puts "FAIL: #{label} expected '#{expected}', got '#{actual}'"
+        exit(1)
+    end
+end
+
+water = @@Substance(0.0, 100.0, 10000.0)
+check("initial phase", water.phase, "solid")
+water.add_heat(209.0)
+check("after 209J", water.phase, "melting")
+water.add_heat(334.0)
+check("after fusion", water.phase, "liquid")
+water.add_heat(418.0)
+check("at boiling", water.phase, "boiling")
+water.add_heat(2260.0)
+check("vaporised", water.phase, "gas")
+water.add_heat(41382.0)
+check("ionised", water.phase, "plasma")
+water.remove_heat(1.0)
+check("plasma cooled", water.phase, "gas")
+water.remove_heat(41400.0)
+check("gas -> boiling", water.phase, "boiling")
+water.remove_heat(2260.0)
+check("liquid again", water.phase, "liquid")
+water.remove_heat(418.0)
+check("melting again", water.phase, "melting")
+water.remove_heat(334.0)
+check("frozen", water.phase, "solid")
+puts "PASS: phases_of_matter"

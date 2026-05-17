@@ -1,0 +1,137 @@
+@@[target("php")]
+
+// Cookbook 89: MFA with Lockout
+
+@@system MfaAuth {
+    interface:
+        submit_username(u)
+        submit_password(p)
+        submit_second_factor(code)
+        cooldown_elapsed()
+        logout()
+        get_status() = ""
+        get_failures()
+
+    machine:
+        $Idle {
+            submit_username(u) {
+                $this->username = $u;
+                -> $AwaitingPassword
+            }
+            get_status() { @@:("idle") }
+            get_failures() { @@:($this->failures) }
+        }
+
+        $AwaitingPassword {
+            submit_password(p) {
+                if ($this->username === "alice" && $p === "hunter2") {
+                    -> $AwaitingSecondFactor
+                } else {
+                    $this->failures = $this->failures + 1;
+                    if ($this->failures >= $this->lockout_threshold) {
+                        -> $Locked
+                    }
+                }
+            }
+            get_status() { @@:("awaiting_password") }
+            get_failures() { @@:($this->failures) }
+        }
+
+        $AwaitingSecondFactor {
+            $.attempts = 0
+
+            submit_second_factor(code) {
+                $.attempts = $.attempts + 1;
+                if ($code === "123456") {
+                    $this->failures = 0;
+                    -> $Authenticated
+                } else if ($.attempts >= 3) {
+                    $this->failures = $this->failures + 1;
+                    if ($this->failures >= $this->lockout_threshold) {
+                        -> $Locked
+                    } else {
+                        -> $AwaitingPassword
+                    }
+                }
+            }
+            get_status() { @@:("awaiting_2fa") }
+            get_failures() { @@:($this->failures) }
+        }
+
+        $Authenticated {
+            logout() { -> $Idle }
+            get_status() { @@:("authenticated") }
+            get_failures() { @@:($this->failures) }
+        }
+
+        $Locked {
+            cooldown_elapsed() {
+                $this->failures = $this->lockout_threshold - 1;
+                -> $Idle
+            }
+            get_status() { @@:("locked") }
+            get_failures() { @@:($this->failures) }
+        }
+
+    domain:
+        username = ""
+        failures = 0
+        lockout_threshold = 5
+}
+
+function check($label, $actual, $expected) {
+    if ($actual !== $expected) { echo "FAIL: $label expected '$expected', got '$actual'\n"; exit(1); }
+}
+
+$m = @@MfaAuth();
+check("idle", $m->get_status(), "idle");
+$m->submit_second_factor("123456");
+check("idle absorbs 2fa", $m->get_status(), "idle");
+$m->submit_username("alice");
+check("awaiting password", $m->get_status(), "awaiting_password");
+$m->submit_second_factor("123456");
+check("awaiting_password absorbs 2fa", $m->get_status(), "awaiting_password");
+$m->submit_password("hunter2");
+check("awaiting 2fa", $m->get_status(), "awaiting_2fa");
+check("no failures on correct password", $m->get_failures(), 0);
+$m->submit_second_factor("123456");
+check("authenticated", $m->get_status(), "authenticated");
+check("failure counter reset on success", $m->get_failures(), 0);
+$m->logout();
+check("logged out", $m->get_status(), "idle");
+
+$m2 = @@MfaAuth();
+$m2->submit_username("alice");
+$m2->submit_password("wrong");
+check("1 failure", $m2->get_failures(), 1);
+check("still awaiting password", $m2->get_status(), "awaiting_password");
+$m2->submit_password("wrong");
+$m2->submit_password("wrong");
+$m2->submit_password("wrong");
+check("4 failures", $m2->get_failures(), 4);
+$m2->submit_password("wrong");
+check("locked", $m2->get_status(), "locked");
+check("5 failures", $m2->get_failures(), 5);
+$m2->submit_username("alice");
+$m2->submit_password("hunter2");
+$m2->submit_second_factor("123456");
+check("locked absorbs all", $m2->get_status(), "locked");
+$m2->cooldown_elapsed();
+check("back to idle after cooldown", $m2->get_status(), "idle");
+check("partial reset to threshold-1", $m2->get_failures(), 4);
+
+$m3 = @@MfaAuth();
+$m3->submit_username("alice");
+$m3->submit_password("hunter2");
+check("2fa active", $m3->get_status(), "awaiting_2fa");
+$m3->submit_second_factor("bad1");
+check("2fa after 1 wrong still active", $m3->get_status(), "awaiting_2fa");
+$m3->submit_second_factor("bad2");
+$m3->submit_second_factor("bad3");
+check("2fa gave up", $m3->get_status(), "awaiting_password");
+check("one failure bumped", $m3->get_failures(), 1);
+$m3->submit_password("hunter2");
+$m3->submit_second_factor("bad");
+check("new session, new attempts counter", $m3->get_status(), "awaiting_2fa");
+
+echo "PASS: mfa_lockout\n";

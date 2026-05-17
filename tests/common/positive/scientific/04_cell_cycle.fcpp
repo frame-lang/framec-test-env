@@ -1,0 +1,135 @@
+@@[target("cpp")]
+
+// Cookbook 75: Cell Cycle with Checkpoints
+
+@@system CellCycle {
+    interface:
+        tick()
+        dna_damage_detected()
+        damage_repaired()
+        nutrients_low()
+        nutrients_restored()
+        spindle_misaligned()
+        spindle_aligned()
+        apoptosis_signal()
+        phase(): string
+
+    machine:
+        $G1 => $Cycling {
+            $>() { this->mass = this->mass * 1.1; }
+            tick() {
+                if (this->mass >= this->g1_threshold) {
+                    -> $S
+                }
+            }
+            phase(): string { @@:("G1") }
+            => $^
+        }
+
+        $S => $Cycling {
+            $>() { this->dna_content = 1.0; }
+            tick() {
+                this->dna_content = this->dna_content + 0.1;
+                if (this->dna_content >= 2.0) {
+                    this->dna_content = 2.0;
+                    -> $G2
+                }
+            }
+            phase(): string { @@:("S") }
+            => $^
+        }
+
+        $G2 => $Cycling {
+            tick() {
+                this->g2_counter = this->g2_counter + 1;
+                if (this->g2_counter >= 3) {
+                    this->g2_counter = 0;
+                    -> $M
+                }
+            }
+            phase(): string { @@:("G2") }
+            => $^
+        }
+
+        $M => $Cycling {
+            tick() {
+                this->mass = this->mass / 2.0;
+                this->dna_content = 1.0;
+                -> $G1
+            }
+            spindle_misaligned() { -> $M_Arrested }
+            phase(): string { @@:("M") }
+            => $^
+        }
+
+        $Cycling {
+            dna_damage_detected() { -> $G1_Arrested }
+            nutrients_low() { -> $G0_Quiescent }
+            apoptosis_signal() { -> $Apoptotic }
+        }
+
+        $G1_Arrested {
+            damage_repaired() { -> $G1 }
+            apoptosis_signal() { -> $Apoptotic }
+            phase(): string { @@:("G1-arrested") }
+        }
+
+        $M_Arrested {
+            spindle_aligned() { -> $M }
+            apoptosis_signal() { -> $Apoptotic }
+            phase(): string { @@:("M-arrested") }
+        }
+
+        $G0_Quiescent {
+            nutrients_restored() { -> $G1 }
+            phase(): string { @@:("G0") }
+        }
+
+        $Apoptotic {
+            phase(): string { @@:("apoptotic") }
+        }
+
+    domain:
+        mass: double = 1.0
+        g1_threshold: double = 1.8
+        dna_content: double = 1.0
+        g2_counter: int = 0
+}
+
+#include <iostream>
+#include <cstdlib>
+
+static void check_str(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) {
+        std::cout << "FAIL: " << label << " expected '" << expected << "', got '" << actual << "'\n";
+        std::exit(1);
+    }
+}
+
+int main() {
+    auto c = @@CellCycle();
+    check_str("initial G1", c.phase(), "G1");
+    c.dna_damage_detected();
+    check_str("arrested on damage", c.phase(), "G1-arrested");
+    c.tick();
+    check_str("tick while arrested is a no-op", c.phase(), "G1-arrested");
+    c.damage_repaired();
+    check_str("repaired -> G1", c.phase(), "G1");
+    c.nutrients_low();
+    check_str("quiescent on starve", c.phase(), "G0");
+    c.nutrients_restored();
+    check_str("nourished -> G1", c.phase(), "G1");
+    c.apoptosis_signal();
+    check_str("apoptotic", c.phase(), "apoptotic");
+    c.tick();
+    c.nutrients_restored();
+    c.damage_repaired();
+    check_str("apoptotic absorbs everything", c.phase(), "apoptotic");
+
+    auto c2 = @@CellCycle();
+    c2.spindle_misaligned();
+    check_str("spindle signal in G1 ignored", c2.phase(), "G1");
+
+    std::cout << "PASS: cell_cycle\n";
+    return 0;
+}

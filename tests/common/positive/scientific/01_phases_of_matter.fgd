@@ -1,0 +1,144 @@
+@@[target("gdscript")]
+
+# Cookbook 72: Phases of Matter
+
+@@system Substance(melting_point: float, boiling_point: float, ionization_point: float) : RefCounted {
+    interface:
+        add_heat(joules: float)
+        remove_heat(joules: float)
+        temperature(): float
+        phase(): String
+
+    machine:
+        $Solid {
+            add_heat(joules: float) {
+                self.temp = self.temp + joules / self.heat_capacity
+                if self.temp >= self.mp:
+                    self.temp = self.mp
+                    self.latent_absorbed = 0.0
+                    -> $Melting
+            }
+            remove_heat(joules: float) {
+                self.temp = self.temp - joules / self.heat_capacity
+            }
+            temperature(): float { @@:(self.temp) }
+            phase(): String { @@:("solid") }
+        }
+
+        $Melting {
+            add_heat(joules: float) {
+                self.latent_absorbed = self.latent_absorbed + joules
+                if self.latent_absorbed >= self.latent_fusion:
+                    -> $Liquid
+            }
+            remove_heat(joules: float) {
+                self.latent_absorbed = self.latent_absorbed - joules
+                if self.latent_absorbed <= 0.0:
+                    -> $Solid
+            }
+            temperature(): float { @@:(self.mp) }
+            phase(): String { @@:("melting") }
+        }
+
+        $Liquid {
+            add_heat(joules: float) {
+                self.temp = self.temp + joules / self.heat_capacity
+                if self.temp >= self.bp:
+                    self.temp = self.bp
+                    self.latent_absorbed = 0.0
+                    -> $Boiling
+            }
+            remove_heat(joules: float) {
+                self.temp = self.temp - joules / self.heat_capacity
+                if self.temp <= self.mp:
+                    self.temp = self.mp
+                    self.latent_absorbed = self.latent_fusion
+                    -> $Melting
+            }
+            temperature(): float { @@:(self.temp) }
+            phase(): String { @@:("liquid") }
+        }
+
+        $Boiling {
+            add_heat(joules: float) {
+                self.latent_absorbed = self.latent_absorbed + joules
+                if self.latent_absorbed >= self.latent_vaporization:
+                    -> $Gas
+            }
+            remove_heat(joules: float) {
+                self.latent_absorbed = self.latent_absorbed - joules
+                if self.latent_absorbed <= 0.0:
+                    -> $Liquid
+            }
+            temperature(): float { @@:(self.bp) }
+            phase(): String { @@:("boiling") }
+        }
+
+        $Gas {
+            add_heat(joules: float) {
+                self.temp = self.temp + joules / self.heat_capacity
+                if self.temp >= self.ip:
+                    -> $Plasma
+            }
+            remove_heat(joules: float) {
+                self.temp = self.temp - joules / self.heat_capacity
+                if self.temp <= self.bp:
+                    self.temp = self.bp
+                    self.latent_absorbed = self.latent_vaporization
+                    -> $Boiling
+            }
+            temperature(): float { @@:(self.temp) }
+            phase(): String { @@:("gas") }
+        }
+
+        $Plasma {
+            remove_heat(joules: float) {
+                self.temp = self.temp - joules / self.heat_capacity
+                if self.temp <= self.ip:
+                    -> $Gas
+            }
+            temperature(): float { @@:(self.temp) }
+            phase(): String { @@:("plasma") }
+        }
+
+    domain:
+        mp: float = melting_point
+        bp: float = boiling_point
+        ip: float = ionization_point
+        temp: float = -50.0
+        heat_capacity: float = 4.18
+        latent_fusion: float = 334.0
+        latent_vaporization: float = 2260.0
+        latent_absorbed: float = 0.0
+}
+
+func check_str(label: String, actual: String, expected: String) -> void:
+    if actual != expected:
+        print("FAIL: %s expected '%s', got '%s'" % [label, expected, actual])
+        quit(1)
+
+func _init() -> void:
+    var water = @@Substance(0.0, 100.0, 10000.0)
+    check_str("initial phase", water.phase(), "solid")
+    water.add_heat(209.0)
+    check_str("after 209J", water.phase(), "melting")
+    water.add_heat(334.0)
+    check_str("after fusion", water.phase(), "liquid")
+    water.add_heat(418.0)
+    check_str("at boiling", water.phase(), "boiling")
+    water.add_heat(2260.0)
+    check_str("vaporised", water.phase(), "gas")
+    water.add_heat(41382.0)
+    check_str("ionised", water.phase(), "plasma")
+    water.remove_heat(1.0)
+    check_str("plasma cooled", water.phase(), "gas")
+    water.remove_heat(41400.0)
+    check_str("gas -> boiling", water.phase(), "boiling")
+    water.remove_heat(2260.0)
+    check_str("liquid again", water.phase(), "liquid")
+    water.remove_heat(418.0)
+    check_str("melting again", water.phase(), "melting")
+    water.remove_heat(334.0)
+    check_str("frozen", water.phase(), "solid")
+    print("PASS: phases_of_matter")
+    quit(0)

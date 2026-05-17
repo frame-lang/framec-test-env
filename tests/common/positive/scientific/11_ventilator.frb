@@ -1,0 +1,111 @@
+@@[target("ruby")]
+
+# Cookbook 82: Ventilator Breath Cycle
+
+@@system Ventilator {
+    interface:
+        power_on()
+        tick_ms(ms)
+        patient_effort_detected()
+        stop()
+        phase()
+        breath_count()
+
+    machine:
+        $Off {
+            power_on() { -> $Inspiration }
+            phase() { @@:("off") }
+            breath_count() { @@:(@breaths) }
+        }
+
+        $Ventilating {
+            stop() { -> $Off }
+            breath_count() { @@:(@breaths) }
+        }
+
+        $Inspiration => $Ventilating {
+            $>() {
+                @phase_ms = 0
+                @breaths = @breaths + 1
+            }
+            tick_ms(ms) {
+                @phase_ms = @phase_ms + ms
+                if @phase_ms >= 1000
+                    -> $Expiration
+                end
+            }
+            patient_effort_detected() { }
+            phase() { @@:("inspiration") }
+            => $^
+        }
+
+        $Expiration => $Ventilating {
+            $>() { @phase_ms = 0 }
+            tick_ms(ms) {
+                @phase_ms = @phase_ms + ms
+                if @phase_ms >= 1500
+                    -> $Pause
+                end
+            }
+            patient_effort_detected() { }
+            phase() { @@:("expiration") }
+            => $^
+        }
+
+        $Pause => $Ventilating {
+            $>() { @phase_ms = 0 }
+            tick_ms(ms) {
+                @phase_ms = @phase_ms + ms
+                if @phase_ms >= 500
+                    -> $Inspiration
+                end
+            }
+            patient_effort_detected() { -> $Inspiration }
+            phase() { @@:("pause") }
+            => $^
+        }
+
+    domain:
+        phase_ms = 0
+        breaths = 0
+}
+
+def check(label, actual, expected)
+    if actual != expected
+        puts "FAIL: #{label} expected '#{expected}', got '#{actual}'"
+        exit(1)
+    end
+end
+
+v = @@Ventilator()
+check("start off", v.phase, "off")
+v.power_on
+check("inspiration on power-on", v.phase, "inspiration")
+check("first breath counted", v.breath_count, 1)
+v.patient_effort_detected
+check("inspiration absorbs effort", v.phase, "inspiration")
+v.tick_ms(500)
+check("mid inspiration", v.phase, "inspiration")
+v.tick_ms(500)
+check("expiration", v.phase, "expiration")
+v.patient_effort_detected
+check("expiration absorbs effort", v.phase, "expiration")
+v.tick_ms(1500)
+check("pause", v.phase, "pause")
+v.patient_effort_detected
+check("pause triggers next breath", v.phase, "inspiration")
+check("breath 2 counted", v.breath_count, 2)
+v.tick_ms(1000)
+check("expiration 2", v.phase, "expiration")
+v.tick_ms(1500)
+check("pause 2", v.phase, "pause")
+v.tick_ms(500)
+check("inspiration 3 passive", v.phase, "inspiration")
+check("breath 3 counted", v.breath_count, 3)
+v.stop
+check("stopped", v.phase, "off")
+check("breath count persists across stop", v.breath_count, 3)
+v.tick_ms(10000)
+v.patient_effort_detected
+check("off absorbs ticks and effort", v.phase, "off")
+puts "PASS: ventilator"

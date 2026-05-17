@@ -1,0 +1,174 @@
+@@[target("kotlin")]
+
+// Cookbook 85: Sepsis Hour-1 Bundle
+
+@@system SepsisBundle {
+    interface:
+        recognize_sepsis()
+        lactate_drawn(value: Double)
+        cultures_drawn()
+        antibiotics_given()
+        fluids_complete()
+        reassess_map(map_mmhg: Int)
+        pressors_started()
+        tick_minute()
+        status(): String
+        bundle_complete(): Boolean = false
+        elapsed_min(): Int
+        pressors_indicated(): Boolean
+
+    machine:
+        $PreRecognition {
+            recognize_sepsis() {
+                this.elapsed = 0
+                this.lactate = 0.0
+                this.cultures = false
+                this.abx = false
+                this.fluids = false
+                this.reassessed = false
+                this.pressors_needed = false
+                this.pressors = false
+                -> $BundleActive
+            }
+            status(): String { @@:("pre-recognition") }
+            elapsed_min(): Int { @@:(this.elapsed) }
+            pressors_indicated(): Boolean { @@:(this.pressors_needed) }
+        }
+
+        $BundleActive {
+            lactate_drawn(value: Double) {
+                this.lactate = value
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            cultures_drawn() {
+                this.cultures = true
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            antibiotics_given() {
+                this.abx = true
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            fluids_complete() {
+                this.fluids = true
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            reassess_map(map_mmhg: Int) {
+                this.reassessed = true
+                this.pressors_needed = map_mmhg < 65
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            pressors_started() {
+                this.pressors = true
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            tick_minute() { this.elapsed = this.elapsed + 1 }
+            status(): String { @@:("active") }
+            elapsed_min(): Int { @@:(this.elapsed) }
+            pressors_indicated(): Boolean { @@:(this.pressors_needed) }
+        }
+
+        $OnTime {
+            bundle_complete(): Boolean { @@:(true) }
+            status(): String { @@:("on time") }
+            elapsed_min(): Int { @@:(this.elapsed) }
+            pressors_indicated(): Boolean { @@:(this.pressors_needed) }
+        }
+
+        $Late {
+            bundle_complete(): Boolean { @@:(true) }
+            status(): String { @@:("late") }
+            elapsed_min(): Int { @@:(this.elapsed) }
+            pressors_indicated(): Boolean { @@:(this.pressors_needed) }
+        }
+
+    actions:
+        is_complete(): Boolean {
+            val base = this.cultures && this.abx && this.fluids && this.lactate > 0.0 && this.reassessed
+            if (this.pressors_needed) {
+                return base && this.pressors
+            }
+            return base
+        }
+
+    domain:
+        elapsed: Int = 0
+        lactate: Double = 0.0
+        cultures: Boolean = false
+        abx: Boolean = false
+        fluids: Boolean = false
+        reassessed: Boolean = false
+        pressors_needed: Boolean = false
+        pressors: Boolean = false
+}
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) { println("FAIL: $label expected '$expected', got '$actual'"); kotlin.system.exitProcess(1) }
+}
+fun checkB(label: String, actual: Boolean, expected: Boolean) {
+    if (actual != expected) { println("FAIL: $label expected $expected, got $actual"); kotlin.system.exitProcess(1) }
+}
+
+fun main() {
+    val a = @@SepsisBundle()
+    check("pre-recognition", a.status() as String, "pre-recognition")
+    checkB("bundle_complete default false before recognize", a.bundle_complete() as Boolean, false)
+    a.lactate_drawn(3.4)
+    a.antibiotics_given()
+    check("pre-rec absorbs events", a.status() as String, "pre-recognition")
+    a.recognize_sepsis()
+    check("active", a.status() as String, "active")
+    a.lactate_drawn(3.4)
+    a.cultures_drawn()
+    var i = 0
+    while (i < 15) { a.tick_minute(); i = i + 1 }
+    a.antibiotics_given()
+    a.fluids_complete()
+    check("still active after fluids", a.status() as String, "active")
+    a.reassess_map(75)
+    check("on time", a.status() as String, "on time")
+    checkB("complete", a.bundle_complete() as Boolean, true)
+    checkB("no pressors indicated", a.pressors_indicated() as Boolean, false)
+    if ((a.elapsed_min() as Int) > 60) { println("FAIL: over 60"); kotlin.system.exitProcess(1) }
+    a.antibiotics_given()
+    a.tick_minute()
+    check("on time absorbs events", a.status() as String, "on time")
+
+    val b = @@SepsisBundle()
+    b.recognize_sepsis()
+    b.lactate_drawn(4.2)
+    b.cultures_drawn()
+    b.antibiotics_given()
+    b.fluids_complete()
+    i = 0
+    while (i < 70) { b.tick_minute(); i = i + 1 }
+    b.reassess_map(58)
+    check("active — pressors pending", b.status() as String, "active")
+    checkB("pressors flagged", b.pressors_indicated() as Boolean, true)
+    b.pressors_started()
+    check("late terminal", b.status() as String, "late")
+    checkB("complete (late)", b.bundle_complete() as Boolean, true)
+    if ((b.elapsed_min() as Int) <= 60) { println("FAIL: under 60"); kotlin.system.exitProcess(1) }
+
+    val c = @@SepsisBundle()
+    c.recognize_sepsis()
+    c.lactate_drawn(2.0)
+    c.cultures_drawn()
+    c.antibiotics_given()
+    c.fluids_complete()
+    c.reassess_map(80)
+    check("reassess completes w/o pressors", c.status() as String, "on time")
+
+    println("PASS: sepsis_bundle")
+}

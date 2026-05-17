@@ -1,0 +1,142 @@
+@@[target("swift")]
+
+// Cookbook 89: MFA with Lockout
+
+import Foundation
+
+@@system MfaAuth {
+    interface:
+        submit_username(u: String)
+        submit_password(p: String)
+        submit_second_factor(code: String)
+        cooldown_elapsed()
+        logout()
+        get_status(): String = ""
+        get_failures(): Int
+
+    machine:
+        $Idle {
+            submit_username(u: String) {
+                self.username = u
+                -> $AwaitingPassword
+            }
+            get_status(): String { @@:("idle") }
+            get_failures(): Int { @@:(self.failures) }
+        }
+
+        $AwaitingPassword {
+            submit_password(p: String) {
+                if self.username == "alice" && p == "hunter2" {
+                    -> $AwaitingSecondFactor
+                } else {
+                    self.failures = self.failures + 1
+                    if self.failures >= self.lockout_threshold {
+                        -> $Locked
+                    }
+                }
+            }
+            get_status(): String { @@:("awaiting_password") }
+            get_failures(): Int { @@:(self.failures) }
+        }
+
+        $AwaitingSecondFactor {
+            $.attempts: Int = 0
+
+            submit_second_factor(code: String) {
+                $.attempts = $.attempts + 1
+                if code == "123456" {
+                    self.failures = 0
+                    -> $Authenticated
+                } else if $.attempts >= 3 {
+                    self.failures = self.failures + 1
+                    if self.failures >= self.lockout_threshold {
+                        -> $Locked
+                    } else {
+                        -> $AwaitingPassword
+                    }
+                }
+            }
+            get_status(): String { @@:("awaiting_2fa") }
+            get_failures(): Int { @@:(self.failures) }
+        }
+
+        $Authenticated {
+            logout() { -> $Idle }
+            get_status(): String { @@:("authenticated") }
+            get_failures(): Int { @@:(self.failures) }
+        }
+
+        $Locked {
+            cooldown_elapsed() {
+                self.failures = self.lockout_threshold - 1
+                -> $Idle
+            }
+            get_status(): String { @@:("locked") }
+            get_failures(): Int { @@:(self.failures) }
+        }
+
+    domain:
+        username: String = ""
+        failures: Int = 0
+        lockout_threshold: Int = 5
+}
+
+func check(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected { print("FAIL: \(label) expected '\(expected)', got '\(actual)'"); exit(1) }
+}
+func checkI(_ label: String, _ actual: Int, _ expected: Int) {
+    if actual != expected { print("FAIL: \(label) expected \(expected), got \(actual)"); exit(1) }
+}
+
+let m = @@MfaAuth()
+check("idle", m.get_status() as! String, "idle")
+m.submit_second_factor(code: "123456")
+check("idle absorbs 2fa", m.get_status() as! String, "idle")
+m.submit_username(u: "alice")
+check("awaiting password", m.get_status() as! String, "awaiting_password")
+m.submit_second_factor(code: "123456")
+check("awaiting_password absorbs 2fa", m.get_status() as! String, "awaiting_password")
+m.submit_password(p: "hunter2")
+check("awaiting 2fa", m.get_status() as! String, "awaiting_2fa")
+checkI("no failures on correct password", m.get_failures() as! Int, 0)
+m.submit_second_factor(code: "123456")
+check("authenticated", m.get_status() as! String, "authenticated")
+checkI("failure counter reset on success", m.get_failures() as! Int, 0)
+m.logout()
+check("logged out", m.get_status() as! String, "idle")
+
+let m2 = @@MfaAuth()
+m2.submit_username(u: "alice")
+m2.submit_password(p: "wrong")
+checkI("1 failure", m2.get_failures() as! Int, 1)
+check("still awaiting password", m2.get_status() as! String, "awaiting_password")
+m2.submit_password(p: "wrong")
+m2.submit_password(p: "wrong")
+m2.submit_password(p: "wrong")
+checkI("4 failures", m2.get_failures() as! Int, 4)
+m2.submit_password(p: "wrong")
+check("locked", m2.get_status() as! String, "locked")
+checkI("5 failures", m2.get_failures() as! Int, 5)
+m2.submit_username(u: "alice")
+m2.submit_password(p: "hunter2")
+m2.submit_second_factor(code: "123456")
+check("locked absorbs all", m2.get_status() as! String, "locked")
+m2.cooldown_elapsed()
+check("back to idle after cooldown", m2.get_status() as! String, "idle")
+checkI("partial reset to threshold-1", m2.get_failures() as! Int, 4)
+
+let m3 = @@MfaAuth()
+m3.submit_username(u: "alice")
+m3.submit_password(p: "hunter2")
+check("2fa active", m3.get_status() as! String, "awaiting_2fa")
+m3.submit_second_factor(code: "bad1")
+check("2fa after 1 wrong still active", m3.get_status() as! String, "awaiting_2fa")
+m3.submit_second_factor(code: "bad2")
+m3.submit_second_factor(code: "bad3")
+check("2fa gave up", m3.get_status() as! String, "awaiting_password")
+checkI("one failure bumped", m3.get_failures() as! Int, 1)
+m3.submit_password(p: "hunter2")
+m3.submit_second_factor(code: "bad")
+check("new session, new attempts counter", m3.get_status() as! String, "awaiting_2fa")
+
+print("PASS: mfa_lockout")

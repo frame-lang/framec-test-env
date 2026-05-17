@@ -1,0 +1,183 @@
+@@[target("c")]
+
+// Cookbook 87: OAuth 2.0 Authorization Code + PKCE
+
+@@system OAuthPkceFlow {
+    interface:
+        start(client_id: const char*, redirect_uri: const char*, scope: const char*, nonce: const char*)
+        authorization_redirect(code: const char*, state: const char*)
+        exchange_response(access_token: const char*, refresh_token: const char*)
+        exchange_error(reason: const char*)
+        use_token(): const char* = "no_token"
+        refresh()
+        revoke()
+        timeout()
+        get_status(): const char* = "idle"
+        get_auth_code(): const char*
+        get_code_verifier(): const char*
+
+    machine:
+        $Idle {
+            start(client_id: const char*, redirect_uri: const char*, scope: const char*, nonce: const char*) {
+                self->client_id = client_id;
+                self->redirect_uri = redirect_uri;
+                self->scope = scope;
+                self->code_verifier = nonce;
+                self->code_challenge = nonce;
+                self->state_nonce = nonce;
+                -> $AwaitingRedirect
+            }
+            get_status(): const char* { @@:("idle") }
+            get_auth_code(): const char* { @@:(self->auth_code) }
+            get_code_verifier(): const char* { @@:(self->code_verifier) }
+        }
+
+        $AwaitingRedirect {
+            authorization_redirect(code: const char*, state: const char*) {
+                if strcmp(state, self->state_nonce) != 0 {
+                    -> $Failed
+                } else {
+                    self->auth_code = code;
+                    -> $ExchangingCode
+                }
+            }
+            timeout() { -> $Failed }
+            get_status(): const char* { @@:("awaiting_redirect") }
+            get_auth_code(): const char* { @@:(self->auth_code) }
+            get_code_verifier(): const char* { @@:(self->code_verifier) }
+        }
+
+        $ExchangingCode {
+            <$() {
+                self->auth_code = "";
+                self->code_verifier = "";
+            }
+            exchange_response(access_token: const char*, refresh_token: const char*) {
+                self->access_token = access_token;
+                self->refresh_token = refresh_token;
+                -> $Authorized
+            }
+            exchange_error(reason: const char*) { -> $Failed }
+            timeout() { -> $Failed }
+            get_status(): const char* { @@:("exchanging") }
+            get_auth_code(): const char* { @@:(self->auth_code) }
+            get_code_verifier(): const char* { @@:(self->code_verifier) }
+        }
+
+        $Authorized {
+            use_token(): const char* { @@:(self->access_token) }
+            refresh() { -> $Refreshing }
+            revoke() { -> $Revoked }
+            get_status(): const char* { @@:("authorized") }
+            get_auth_code(): const char* { @@:(self->auth_code) }
+            get_code_verifier(): const char* { @@:(self->code_verifier) }
+        }
+
+        $Refreshing {
+            exchange_response(access_token: const char*, refresh_token: const char*) {
+                self->access_token = access_token;
+                self->refresh_token = refresh_token;
+                -> $Authorized
+            }
+            exchange_error(reason: const char*) { -> $Failed }
+            timeout() { -> $Failed }
+            get_status(): const char* { @@:("refreshing") }
+            get_auth_code(): const char* { @@:(self->auth_code) }
+            get_code_verifier(): const char* { @@:(self->code_verifier) }
+        }
+
+        $Failed {
+            get_status(): const char* { @@:("failed") }
+            get_auth_code(): const char* { @@:(self->auth_code) }
+            get_code_verifier(): const char* { @@:(self->code_verifier) }
+        }
+
+        $Revoked {
+            get_status(): const char* { @@:("revoked") }
+            get_auth_code(): const char* { @@:(self->auth_code) }
+            get_code_verifier(): const char* { @@:(self->code_verifier) }
+        }
+
+    domain:
+        client_id: const char* = ""
+        redirect_uri: const char* = ""
+        scope: const char* = ""
+        code_verifier: const char* = ""
+        code_challenge: const char* = ""
+        state_nonce: const char* = ""
+        auth_code: const char* = ""
+        access_token: const char* = ""
+        refresh_token: const char* = ""
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void ck(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) { fprintf(stderr, "FAIL: %s expected '%s', got '%s'\n", label, expected, actual); exit(1); }
+}
+
+int main(void) {
+    OAuthPkceFlow f; OAuthPkceFlow_init(&f);
+    ck("idle", OAuthPkceFlow_get_status(&f), "idle");
+    ck("idle use_token default", OAuthPkceFlow_use_token(&f), "no_token");
+    OAuthPkceFlow_start(&f, "myclient", "https://app/cb", "read", "nonce123");
+    ck("awaiting redirect", OAuthPkceFlow_get_status(&f), "awaiting_redirect");
+    ck("PKCE verifier generated", OAuthPkceFlow_get_code_verifier(&f), "nonce123");
+    ck("use_token still denied", OAuthPkceFlow_use_token(&f), "no_token");
+    OAuthPkceFlow_authorization_redirect(&f, "authcode-XYZ", "nonce123");
+    ck("exchanging", OAuthPkceFlow_get_status(&f), "exchanging");
+    ck("auth code captured", OAuthPkceFlow_get_auth_code(&f), "authcode-XYZ");
+    OAuthPkceFlow_exchange_response(&f, "TOKEN-A", "REFRESH-B");
+    ck("authorized", OAuthPkceFlow_get_status(&f), "authorized");
+    ck("token usable", OAuthPkceFlow_use_token(&f), "TOKEN-A");
+    ck("auth_code zeroed", OAuthPkceFlow_get_auth_code(&f), "");
+    ck("code_verifier zeroed", OAuthPkceFlow_get_code_verifier(&f), "");
+    OAuthPkceFlow_authorization_redirect(&f, "authcode-XYZ", "nonce123");
+    ck("authorized absorbs replay", OAuthPkceFlow_get_status(&f), "authorized");
+    ck("token still usable", OAuthPkceFlow_use_token(&f), "TOKEN-A");
+    OAuthPkceFlow_refresh(&f);
+    ck("refreshing", OAuthPkceFlow_get_status(&f), "refreshing");
+    OAuthPkceFlow_exchange_response(&f, "TOKEN-A2", "REFRESH-B2");
+    ck("authorized post-refresh", OAuthPkceFlow_get_status(&f), "authorized");
+    ck("new token", OAuthPkceFlow_use_token(&f), "TOKEN-A2");
+    OAuthPkceFlow_revoke(&f);
+    ck("revoked", OAuthPkceFlow_get_status(&f), "revoked");
+    ck("revoked denies token", OAuthPkceFlow_use_token(&f), "no_token");
+
+    OAuthPkceFlow f2; OAuthPkceFlow_init(&f2);
+    OAuthPkceFlow_start(&f2, "myclient", "https://app/cb", "read", "nonce123");
+    OAuthPkceFlow_authorization_redirect(&f2, "attacker-code", "WRONG-NONCE");
+    ck("CSRF mismatch -> failed", OAuthPkceFlow_get_status(&f2), "failed");
+    ck("CSRF denies token", OAuthPkceFlow_use_token(&f2), "no_token");
+
+    OAuthPkceFlow f3; OAuthPkceFlow_init(&f3);
+    OAuthPkceFlow_start(&f3, "myclient", "https://app/cb", "read", "nonce123");
+    OAuthPkceFlow_timeout(&f3);
+    ck("timeout failed", OAuthPkceFlow_get_status(&f3), "failed");
+
+    OAuthPkceFlow f4; OAuthPkceFlow_init(&f4);
+    OAuthPkceFlow_start(&f4, "myclient", "https://app/cb", "read", "nonce123");
+    OAuthPkceFlow_authorization_redirect(&f4, "authcode", "nonce123");
+    OAuthPkceFlow_exchange_error(&f4, "invalid_grant");
+    ck("exchange error failed", OAuthPkceFlow_get_status(&f4), "failed");
+    ck("no token on exchange error", OAuthPkceFlow_use_token(&f4), "no_token");
+
+    OAuthPkceFlow f5; OAuthPkceFlow_init(&f5);
+    OAuthPkceFlow_start(&f5, "myclient", "https://app/cb", "read", "nonce123");
+    OAuthPkceFlow_authorization_redirect(&f5, "authcode", "nonce123");
+    OAuthPkceFlow_timeout(&f5);
+    ck("exchange timeout failed", OAuthPkceFlow_get_status(&f5), "failed");
+
+    OAuthPkceFlow f6; OAuthPkceFlow_init(&f6);
+    OAuthPkceFlow_start(&f6, "myclient", "https://app/cb", "read", "nonce123");
+    OAuthPkceFlow_authorization_redirect(&f6, "authcode", "nonce123");
+    OAuthPkceFlow_exchange_response(&f6, "TOKEN", "REFRESH");
+    OAuthPkceFlow_refresh(&f6);
+    OAuthPkceFlow_exchange_error(&f6, "invalid_refresh_token");
+    ck("refresh error failed", OAuthPkceFlow_get_status(&f6), "failed");
+
+    printf("PASS: oauth_pkce\n");
+    return 0;
+}

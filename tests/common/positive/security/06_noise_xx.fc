@@ -1,0 +1,112 @@
+@@[target("c")]
+
+// Cookbook 91: Noise Protocol XX Handshake (Initiator)
+
+@@system NoiseXxInitiator {
+    interface:
+        start(remote_endpoint: string)
+        msg2_received(valid: int)
+        msg3_ack()
+        send(plaintext: string): string = "not_ready"
+        recv(ciphertext: string): string = ""
+        timeout()
+        get_status(): string = "idle"
+
+    machine:
+        $Idle {
+            start(remote_endpoint: string) {
+                self->remote = remote_endpoint;
+                -> $AwaitingMsg2
+            }
+            get_status(): string { @@:("idle") }
+        }
+
+        $AwaitingMsg2 {
+            msg2_received(valid: int) {
+                if (valid == 1) { -> $AwaitingAck } else { -> $Aborted }
+            }
+            timeout() { -> $Aborted }
+            get_status(): string { @@:("awaiting_msg2") }
+        }
+
+        $AwaitingAck {
+            msg3_ack() { -> $Transport }
+            timeout() { -> $Aborted }
+            get_status(): string { @@:("awaiting_ack") }
+        }
+
+        $Transport {
+            send(plaintext: string): string { @@:("sent") }
+            recv(ciphertext: string): string { @@:("decrypted") }
+            get_status(): string { @@:("transport") }
+        }
+
+        $Aborted {
+            get_status(): string { @@:("aborted") }
+        }
+
+    domain:
+        remote: string = ""
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) { printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual); exit(1); }
+}
+
+int main(void) {
+    NoiseXxInitiator* n = @@NoiseXxInitiator();
+    check("idle", NoiseXxInitiator_get_status(n), "idle");
+    check("idle send default", NoiseXxInitiator_send(n, "hi"), "not_ready");
+    check("idle recv default", NoiseXxInitiator_recv(n, "ct"), "");
+    NoiseXxInitiator_msg2_received(n, 1);
+    check("idle absorbs msg2", NoiseXxInitiator_get_status(n), "idle");
+    NoiseXxInitiator_msg3_ack(n);
+    check("idle absorbs msg3_ack", NoiseXxInitiator_get_status(n), "idle");
+    NoiseXxInitiator_start(n, "peer");
+    check("awaiting msg2", NoiseXxInitiator_get_status(n), "awaiting_msg2");
+    check("awaiting_msg2 send default", NoiseXxInitiator_send(n, "hi"), "not_ready");
+    NoiseXxInitiator_msg3_ack(n);
+    check("awaiting_msg2 absorbs msg3_ack", NoiseXxInitiator_get_status(n), "awaiting_msg2");
+    NoiseXxInitiator_msg2_received(n, 1);
+    check("awaiting ack", NoiseXxInitiator_get_status(n), "awaiting_ack");
+    check("awaiting_ack send default", NoiseXxInitiator_send(n, "hi"), "not_ready");
+    NoiseXxInitiator_msg2_received(n, 1);
+    check("awaiting_ack absorbs msg2", NoiseXxInitiator_get_status(n), "awaiting_ack");
+    NoiseXxInitiator_msg3_ack(n);
+    check("transport", NoiseXxInitiator_get_status(n), "transport");
+    check("transport sends", NoiseXxInitiator_send(n, "hi"), "sent");
+    check("transport recvs", NoiseXxInitiator_recv(n, "ct"), "decrypted");
+
+    NoiseXxInitiator* n2 = @@NoiseXxInitiator();
+    NoiseXxInitiator_start(n2, "peer");
+    NoiseXxInitiator_msg2_received(n2, 0);
+    check("invalid msg2 -> aborted", NoiseXxInitiator_get_status(n2), "aborted");
+    check("aborted send default", NoiseXxInitiator_send(n2, "hi"), "not_ready");
+    check("aborted recv default", NoiseXxInitiator_recv(n2, "ct"), "");
+
+    NoiseXxInitiator* n3 = @@NoiseXxInitiator();
+    NoiseXxInitiator_start(n3, "peer");
+    NoiseXxInitiator_timeout(n3);
+    check("timeout at msg2 -> aborted", NoiseXxInitiator_get_status(n3), "aborted");
+
+    NoiseXxInitiator* n4 = @@NoiseXxInitiator();
+    NoiseXxInitiator_start(n4, "peer");
+    NoiseXxInitiator_msg2_received(n4, 1);
+    NoiseXxInitiator_timeout(n4);
+    check("timeout at ack -> aborted", NoiseXxInitiator_get_status(n4), "aborted");
+    NoiseXxInitiator_start(n4, "peer");
+    NoiseXxInitiator_msg2_received(n4, 1);
+    NoiseXxInitiator_msg3_ack(n4);
+    check("aborted absorbs all", NoiseXxInitiator_get_status(n4), "aborted");
+
+    printf("PASS: noise_xx\n");
+    NoiseXxInitiator_destroy(n);
+    NoiseXxInitiator_destroy(n2);
+    NoiseXxInitiator_destroy(n3);
+    NoiseXxInitiator_destroy(n4);
+    return 0;
+}

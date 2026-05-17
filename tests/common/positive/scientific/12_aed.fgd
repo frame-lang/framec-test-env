@@ -1,0 +1,134 @@
+@@[target("gdscript")]
+
+# Cookbook 83: AED / Defibrillator
+
+@@system AED : RefCounted {
+    interface:
+        power_on()
+        pads_attached()
+        rhythm_detected(rhythm: String)
+        tick_ms(ms: int)
+        press_shock()
+        confirm_clear()
+        status(): String
+        shock_count(): int
+        charge_pct(): int
+
+    machine:
+        $Off {
+            power_on() { -> $AwaitingPads }
+            status(): String { @@:("off") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $AwaitingPads {
+            pads_attached() { -> $Analyzing }
+            status(): String { @@:("attach pads") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $Analyzing {
+            rhythm_detected(rhythm: String) {
+                self.last_rhythm = rhythm
+                if rhythm == "VF" or rhythm == "VT":
+                    -> $Charging
+                else:
+                    -> $NotAdvised
+            }
+            status(): String { @@:("analyzing") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $Charging {
+            $>() { self.charge_pct_dom = 0 }
+            tick_ms(ms: int) {
+                self.charge_pct_dom = self.charge_pct_dom + ms
+                if self.charge_pct_dom >= 100:
+                    -> $AwaitingClear
+            }
+            status(): String { @@:("charging") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $AwaitingClear {
+            confirm_clear() { -> $ReadyToShock }
+            status(): String { @@:("awaiting clear") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $ReadyToShock {
+            press_shock() {
+                self.shocks = self.shocks + 1
+                -> $Analyzing
+            }
+            status(): String { @@:("ready to shock") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $NotAdvised {
+            status(): String { @@:("no shock advised") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+    domain:
+        last_rhythm: String = ""
+        charge_pct_dom: int = 0
+        shocks: int = 0
+}
+
+func check_str(label: String, actual: String, expected: String) -> void:
+    if actual != expected:
+        print("FAIL: %s expected '%s', got '%s'" % [label, expected, actual])
+        quit(1)
+func check_i(label: String, actual: int, expected: int) -> void:
+    if actual != expected:
+        print("FAIL: %s expected %d, got %d" % [label, expected, actual])
+        quit(1)
+
+func _init() -> void:
+    var a = @@AED()
+    check_str("start off", a.status(), "off")
+    a.press_shock()
+    check_i("off cannot shock", a.shock_count(), 0)
+    a.power_on()
+    check_str("awaiting pads", a.status(), "attach pads")
+    a.press_shock()
+    check_i("awaiting pads cannot shock", a.shock_count(), 0)
+    a.pads_attached()
+    check_str("analyzing", a.status(), "analyzing")
+    a.press_shock()
+    check_i("analyzing cannot shock", a.shock_count(), 0)
+    a.rhythm_detected("VF")
+    check_str("charging", a.status(), "charging")
+    a.press_shock()
+    check_i("charging cannot shock", a.shock_count(), 0)
+    a.tick_ms(50)
+    check_str("still charging", a.status(), "charging")
+    check_i("charge 50", a.charge_pct(), 50)
+    a.press_shock()
+    check_i("still cannot shock half-charged", a.shock_count(), 0)
+    a.tick_ms(50)
+    check_str("awaiting clear", a.status(), "awaiting clear")
+    a.press_shock()
+    check_i("awaiting clear cannot shock", a.shock_count(), 0)
+    a.confirm_clear()
+    check_str("ready", a.status(), "ready to shock")
+    a.press_shock()
+    check_i("shocked", a.shock_count(), 1)
+    check_str("back to analyzing", a.status(), "analyzing")
+    a.rhythm_detected("asystole")
+    check_str("no shock advised", a.status(), "no shock advised")
+    a.press_shock()
+    a.tick_ms(100)
+    a.confirm_clear()
+    check_str("not-advised absorbs everything", a.status(), "no shock advised")
+    check_i("still 1 shock total", a.shock_count(), 1)
+    print("PASS: aed")
+    quit(0)

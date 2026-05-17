@@ -1,0 +1,107 @@
+@@[target("gdscript")]
+
+# Cookbook 73: Water with Supercooling
+
+@@system Water : RefCounted {
+    interface:
+        cool(delta: float)
+        heat(delta: float)
+        nucleate()
+        shake()
+        temperature(): float
+        phase(): String
+
+    machine:
+        $Liquid {
+            cool(delta: float) {
+                self.temp = self.temp - delta
+                if self.temp < 0.0:
+                    -> $Supercooled
+            }
+            heat(delta: float) { self.temp = self.temp + delta }
+            temperature(): float { @@:(self.temp) }
+            phase(): String { @@:("liquid") }
+        }
+
+        $Supercooled {
+            cool(delta: float) {
+                self.temp = self.temp - delta
+                if self.temp <= -42.0:
+                    -> $Ice
+            }
+            heat(delta: float) {
+                self.temp = self.temp + delta
+                if self.temp >= 0.0:
+                    -> $Liquid
+            }
+            nucleate() { -> $Ice }
+            shake() { -> $Ice }
+            temperature(): float { @@:(self.temp) }
+            phase(): String { @@:("supercooled liquid") }
+        }
+
+        $Ice {
+            heat(delta: float) {
+                self.temp = self.temp + delta
+                if self.temp >= 0.0:
+                    -> $Liquid
+            }
+            cool(delta: float) { self.temp = self.temp - delta }
+            temperature(): float { @@:(self.temp) }
+            phase(): String { @@:("ice") }
+        }
+
+    domain:
+        temp: float = 25.0
+}
+
+func check_str(label: String, actual: String, expected: String) -> void:
+    if actual != expected:
+        print("FAIL: %s expected '%s', got '%s'" % [label, expected, actual])
+        quit(1)
+func check_f(label: String, actual: float, expected: float) -> void:
+    if abs(actual - expected) > 1e-9:
+        print("FAIL: %s expected %f, got %f" % [label, expected, actual])
+        quit(1)
+
+func _init() -> void:
+    var w = @@Water()
+    check_str("start", w.phase(), "liquid")
+    w.cool(30.0)
+    check_str("after big cool", w.phase(), "supercooled liquid")
+    w.shake()
+    check_str("shaken", w.phase(), "ice")
+
+    var w2 = @@Water()
+    w2.cool(30.0)
+    check_str("w2 supercooled", w2.phase(), "supercooled liquid")
+    check_f("same temp", w.temperature(), w2.temperature())
+    if w.phase() == w2.phase():
+        print("FAIL: phases should differ")
+        quit(1)
+
+    var w3 = @@Water()
+    w3.cool(30.0)
+    w3.nucleate()
+    check_str("nucleated", w3.phase(), "ice")
+
+    var w4 = @@Water()
+    w4.cool(30.0)
+    check_str("w4 supercooled", w4.phase(), "supercooled liquid")
+    w4.cool(40.0)
+    check_str("deep cool", w4.phase(), "ice")
+    w4.heat(50.0)
+    check_str("melted", w4.phase(), "liquid")
+
+    var w5 = @@Water()
+    w5.shake()
+    check_str("liquid shake ignored", w5.phase(), "liquid")
+    var w6 = @@Water()
+    w6.cool(30.0)
+    w6.cool(40.0)
+    check_str("w6 is ice", w6.phase(), "ice")
+    w6.shake()
+    check_str("ice shake ignored", w6.phase(), "ice")
+
+    print("PASS: water_supercooling")
+    quit(0)

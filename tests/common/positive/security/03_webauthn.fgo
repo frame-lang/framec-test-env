@@ -1,0 +1,170 @@
+@@[target("go")]
+
+// Cookbook 88: WebAuthn / FIDO2
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system WebAuthnCeremony {
+    interface:
+        begin_registration(user_id: string, rp_id: string)
+        registration_response(chal_ok: int, origin_ok: int, att_ok: int)
+        begin_authentication(user_id: string, rp_id: string, uv_required: int)
+        assertion_response(chal_ok: int, origin_ok: int, uv_ok: int, sig_ok: int, counter_ok: int)
+        timeout()
+        get_status(): string = "idle"
+        get_user(): string
+        get_rp(): string
+
+    machine:
+        $Idle {
+            begin_registration(user_id: string, rp_id: string) {
+                s.user_id = user_id
+                s.rp_id = rp_id
+                s.uv_required = 1
+                -> $AwaitingRegistration
+            }
+            begin_authentication(user_id: string, rp_id: string, uv_required: int) {
+                s.user_id = user_id
+                s.rp_id = rp_id
+                s.uv_required = uv_required
+                -> $AwaitingAssertion
+            }
+            get_status(): string { @@:("idle") }
+            get_user(): string { @@:(s.user_id) }
+            get_rp(): string { @@:(s.rp_id) }
+        }
+
+        $AwaitingRegistration {
+            registration_response(chal_ok: int, origin_ok: int, att_ok: int) {
+                if chal_ok == 0 { -> $Failed
+                } else if origin_ok == 0 { -> $Failed
+                } else if att_ok == 0 { -> $Failed
+                } else { -> $Registered }
+            }
+            timeout() { -> $Failed }
+            get_status(): string { @@:("awaiting_registration") }
+            get_user(): string { @@:(s.user_id) }
+            get_rp(): string { @@:(s.rp_id) }
+        }
+
+        $AwaitingAssertion {
+            assertion_response(chal_ok: int, origin_ok: int, uv_ok: int, sig_ok: int, counter_ok: int) {
+                if chal_ok == 0 { -> $Failed
+                } else if origin_ok == 0 { -> $Failed
+                } else if s.uv_required == 1 && uv_ok == 0 { -> $Failed
+                } else if sig_ok == 0 { -> $Failed
+                } else if counter_ok == 0 { -> $Failed
+                } else { -> $Authenticated }
+            }
+            timeout() { -> $Failed }
+            get_status(): string { @@:("awaiting_assertion") }
+            get_user(): string { @@:(s.user_id) }
+            get_rp(): string { @@:(s.rp_id) }
+        }
+
+        $Registered {
+            get_status(): string { @@:("registered") }
+            get_user(): string { @@:(s.user_id) }
+            get_rp(): string { @@:(s.rp_id) }
+        }
+
+        $Authenticated {
+            get_status(): string { @@:("authenticated") }
+            get_user(): string { @@:(s.user_id) }
+            get_rp(): string { @@:(s.rp_id) }
+        }
+
+        $Failed {
+            get_status(): string { @@:("failed") }
+            get_user(): string { @@:(s.user_id) }
+            get_rp(): string { @@:(s.rp_id) }
+        }
+
+    domain:
+        user_id: string = ""
+        rp_id: string = ""
+        uv_required: int = 0
+}
+
+func check(label, actual, expected string) {
+    if actual != expected { fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual); os.Exit(1) }
+}
+
+func main() {
+    w := @@WebAuthnCeremony()
+    check("idle", w.get_status().(string), "idle")
+    w.begin_registration("alice", "example.com")
+    check("awaiting registration", w.get_status().(string), "awaiting_registration")
+    check("user captured", w.get_user().(string), "alice")
+    check("rp captured", w.get_rp().(string), "example.com")
+    w.registration_response(1, 1, 1)
+    check("registered", w.get_status().(string), "registered")
+    w.registration_response(1, 1, 1)
+    check("registered absorbs replay", w.get_status().(string), "registered")
+
+    w2 := @@WebAuthnCeremony()
+    w2.begin_registration("bob", "example.com")
+    w2.registration_response(0, 1, 1)
+    check("reg chal mismatch", w2.get_status().(string), "failed")
+
+    w3 := @@WebAuthnCeremony()
+    w3.begin_registration("carol", "evil.com")
+    w3.registration_response(1, 0, 1)
+    check("reg origin mismatch", w3.get_status().(string), "failed")
+
+    w4 := @@WebAuthnCeremony()
+    w4.begin_registration("dave", "example.com")
+    w4.registration_response(1, 1, 0)
+    check("reg attestation failed", w4.get_status().(string), "failed")
+
+    w5 := @@WebAuthnCeremony()
+    w5.begin_registration("eve", "example.com")
+    w5.timeout()
+    check("reg timeout", w5.get_status().(string), "failed")
+
+    w6 := @@WebAuthnCeremony()
+    w6.begin_authentication("alice", "example.com", 1)
+    check("awaiting assertion", w6.get_status().(string), "awaiting_assertion")
+    w6.assertion_response(1, 1, 1, 1, 1)
+    check("authenticated", w6.get_status().(string), "authenticated")
+
+    w7 := @@WebAuthnCeremony()
+    w7.begin_authentication("alice", "example.com", 1)
+    w7.assertion_response(1, 1, 0, 1, 1)
+    check("uv gate", w7.get_status().(string), "failed")
+
+    w8 := @@WebAuthnCeremony()
+    w8.begin_authentication("alice", "example.com", 0)
+    w8.assertion_response(1, 1, 0, 1, 1)
+    check("uv not required", w8.get_status().(string), "authenticated")
+
+    w9 := @@WebAuthnCeremony()
+    w9.begin_authentication("alice", "example.com", 1)
+    w9.assertion_response(1, 0, 1, 1, 1)
+    check("origin confusion", w9.get_status().(string), "failed")
+
+    w10 := @@WebAuthnCeremony()
+    w10.begin_authentication("alice", "example.com", 1)
+    w10.assertion_response(1, 1, 1, 0, 1)
+    check("signature fail", w10.get_status().(string), "failed")
+
+    w11 := @@WebAuthnCeremony()
+    w11.begin_authentication("alice", "example.com", 1)
+    w11.assertion_response(1, 1, 1, 1, 0)
+    check("counter regression", w11.get_status().(string), "failed")
+
+    w12 := @@WebAuthnCeremony()
+    w12.begin_authentication("alice", "example.com", 1)
+    w12.assertion_response(0, 1, 1, 1, 1)
+    check("challenge replay", w12.get_status().(string), "failed")
+
+    w6.assertion_response(0, 0, 0, 0, 0)
+    check("authenticated absorbs replay", w6.get_status().(string), "authenticated")
+
+    fmt.Println("PASS: webauthn")
+}

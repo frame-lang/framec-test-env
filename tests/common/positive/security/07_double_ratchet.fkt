@@ -1,0 +1,111 @@
+@@[target("kotlin")]
+
+// Cookbook 92: Signal / Double Ratchet Session
+
+@@system DoubleRatchetSession {
+    interface:
+        initialize(shared_secret: String, remote_pub: String)
+        send_plaintext(m: String): String = ""
+        receive_ciphertext(header: String, ct: String, ratchet: Int, valid: Int): String = ""
+        close()
+        get_status(): String = "uninit"
+        get_sends(): Int
+        get_recvs(): Int
+        get_ratchets(): Int
+        get_zeroized(): Int
+
+    machine:
+        $Uninit {
+            initialize(shared_secret: String, remote_pub: String) {
+                this.root_key = shared_secret
+                this.remote_pub = remote_pub
+                -> $Active
+            }
+            get_status(): String { @@:("uninit") }
+            get_sends(): Int { @@:(this.sends) }
+            get_recvs(): Int { @@:(this.recvs) }
+            get_ratchets(): Int { @@:(this.ratchets) }
+            get_zeroized(): Int { @@:(this.zeroized) }
+        }
+
+        $Active {
+            send_plaintext(m: String): String {
+                this.sends = this.sends + 1
+                this.zeroized = this.zeroized + 1
+                @@:("ct-send")
+            }
+            receive_ciphertext(header: String, ct: String, ratchet: Int, valid: Int): String {
+                if (ratchet == 1) { this.ratchets = this.ratchets + 1 }
+                if (valid == 0) {
+                    @@:("decryption_failed")
+                } else {
+                    this.recvs = this.recvs + 1
+                    this.zeroized = this.zeroized + 1
+                    @@:("pt")
+                }
+            }
+            close() { -> $Closed }
+            get_status(): String { @@:("active") }
+            get_sends(): Int { @@:(this.sends) }
+            get_recvs(): Int { @@:(this.recvs) }
+            get_ratchets(): Int { @@:(this.ratchets) }
+            get_zeroized(): Int { @@:(this.zeroized) }
+        }
+
+        $Closed {
+            get_status(): String { @@:("closed") }
+            get_sends(): Int { @@:(this.sends) }
+            get_recvs(): Int { @@:(this.recvs) }
+            get_ratchets(): Int { @@:(this.ratchets) }
+            get_zeroized(): Int { @@:(this.zeroized) }
+        }
+
+    domain:
+        root_key: String = ""
+        remote_pub: String = ""
+        sends: Int = 0
+        recvs: Int = 0
+        ratchets: Int = 0
+        zeroized: Int = 0
+}
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) { println("FAIL: $label expected '$expected', got '$actual'"); kotlin.system.exitProcess(1) }
+}
+fun checkI(label: String, actual: Int, expected: Int) {
+    if (actual != expected) { println("FAIL: $label expected $expected, got $actual"); kotlin.system.exitProcess(1) }
+}
+
+fun main() {
+    val s = @@DoubleRatchetSession()
+    check("uninit", s.get_status() as String, "uninit")
+    check("uninit send default", s.send_plaintext("hi") as String, "")
+    check("uninit recv default", s.receive_ciphertext("h", "ct", 0, 1) as String, "")
+    s.initialize("root-secret", "remote-pub")
+    check("active", s.get_status() as String, "active")
+    check("sent", s.send_plaintext("m1") as String, "ct-send")
+    check("sent 2", s.send_plaintext("m2") as String, "ct-send")
+    checkI("2 sends", s.get_sends() as Int, 2)
+    checkI("zeroised == sends", s.get_zeroized() as Int, s.get_sends() as Int)
+    check("received", s.receive_ciphertext("h1", "c1", 0, 1) as String, "pt")
+    checkI("1 recv", s.get_recvs() as Int, 1)
+    checkI("0 ratchets", s.get_ratchets() as Int, 0)
+    check("received with ratchet", s.receive_ciphertext("h2", "c2", 1, 1) as String, "pt")
+    checkI("1 ratchet", s.get_ratchets() as Int, 1)
+    checkI("2 recvs", s.get_recvs() as Int, 2)
+    checkI("zeroise invariant", s.get_zeroized() as Int, (s.get_sends() as Int) + (s.get_recvs() as Int))
+    val beforeRecvs = s.get_recvs() as Int
+    val beforeZeroized = s.get_zeroized() as Int
+    check("bad decrypt", s.receive_ciphertext("bad", "bad", 0, 0) as String, "decryption_failed")
+    checkI("recvs unchanged", s.get_recvs() as Int, beforeRecvs)
+    checkI("zeroized unchanged", s.get_zeroized() as Int, beforeZeroized)
+    s.close()
+    check("closed", s.get_status() as String, "closed")
+    check("closed send default", s.send_plaintext("hi") as String, "")
+    check("closed recv default", s.receive_ciphertext("h", "ct", 0, 1) as String, "")
+    val finalSends = s.get_sends() as Int
+    val finalRecvs = s.get_recvs() as Int
+    checkI("sends frozen post-close", s.get_sends() as Int, finalSends)
+    checkI("recvs frozen post-close", s.get_recvs() as Int, finalRecvs)
+    println("PASS: double_ratchet")
+}

@@ -1,0 +1,103 @@
+@@[target("lua")]
+
+-- Cookbook 77: Neuron Action Potential
+
+@@system Neuron {
+    interface:
+        stimulate(input)
+        tick()
+        voltage()
+        phase()
+
+    machine:
+        $Resting {
+            stimulate(input) {
+                self.v = self.v + input
+                if self.v >= self.threshold then
+                    -> $Depolarizing
+                end
+            }
+            tick() { self.v = self.v + (self.v_rest - self.v) * 0.2 }
+            voltage() { @@:(self.v) }
+            phase() { @@:("resting") }
+        }
+
+        $Depolarizing {
+            $>() { self.v = self.v_peak }
+            tick() { -> $Repolarizing }
+            voltage() { @@:(self.v) }
+            phase() { @@:("spike") }
+        }
+
+        $Repolarizing {
+            tick() {
+                self.v = self.v_hyper
+                -> $Refractory
+            }
+            voltage() { @@:(self.v) }
+            phase() { @@:("repolarizing") }
+        }
+
+        $Refractory {
+            stimulate(input) { }
+            tick() {
+                self.ref_ticks = self.ref_ticks + 1
+                if self.ref_ticks >= 3 then
+                    self.ref_ticks = 0
+                    -> $Resting
+                end
+            }
+            voltage() { @@:(self.v) }
+            phase() { @@:("refractory") }
+        }
+
+    domain:
+        v = -70.0
+        v_rest = -70.0
+        v_peak = 40.0
+        v_hyper = -80.0
+        threshold = -55.0
+        ref_ticks = 0
+}
+
+local function check(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " expected '" .. tostring(expected) .. "', got '" .. tostring(actual) .. "'")
+        os.exit(1)
+    end
+end
+local function check_f(label, actual, expected)
+    if math.abs(actual - expected) > 1e-9 then
+        print("FAIL: " .. label .. " expected " .. tostring(expected) .. ", got " .. tostring(actual))
+        os.exit(1)
+    end
+end
+
+local n = @@Neuron()
+check("start resting", n:phase(), "resting")
+check_f("start voltage", n:voltage(), -70.0)
+n:stimulate(5.0)
+check("sub-threshold stays resting", n:phase(), "resting")
+check_f("sub-threshold voltage", n:voltage(), -65.0)
+n:stimulate(5.0)
+check("still resting", n:phase(), "resting")
+n:stimulate(6.0)
+check("spike", n:phase(), "spike")
+check_f("peak voltage", n:voltage(), 40.0)
+n:tick()
+check("repolarizing", n:phase(), "repolarizing")
+n:tick()
+check("refractory", n:phase(), "refractory")
+check_f("hyperpolarized", n:voltage(), -80.0)
+n:stimulate(100.0)
+check("refractory absorbs stim", n:phase(), "refractory")
+check_f("refractory voltage unchanged", n:voltage(), -80.0)
+n:tick()
+check("still refractory t+1", n:phase(), "refractory")
+n:tick()
+check("still refractory t+2", n:phase(), "refractory")
+n:tick()
+check("resting after t+3", n:phase(), "resting")
+n:stimulate(30.0)
+check("second spike", n:phase(), "spike")
+print("PASS: neuron_action")

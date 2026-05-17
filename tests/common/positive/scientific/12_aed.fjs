@@ -1,0 +1,132 @@
+@@[target("javascript")]
+
+// Cookbook 83: AED / Defibrillator
+
+@@system AED {
+    interface:
+        power_on()
+        pads_attached()
+        rhythm_detected(rhythm)
+        tick_ms(ms)
+        press_shock()
+        confirm_clear()
+        status()
+        shock_count()
+        charge_pct()
+
+    machine:
+        $Off {
+            power_on() { -> $AwaitingPads }
+            status() { @@:("off") }
+            shock_count() { @@:(this.shocks) }
+            charge_pct() { @@:(this.charge_pct_dom) }
+        }
+
+        $AwaitingPads {
+            pads_attached() { -> $Analyzing }
+            status() { @@:("attach pads") }
+            shock_count() { @@:(this.shocks) }
+            charge_pct() { @@:(this.charge_pct_dom) }
+        }
+
+        $Analyzing {
+            rhythm_detected(rhythm) {
+                this.last_rhythm = rhythm;
+                if (rhythm === "VF" || rhythm === "VT") {
+                    -> $Charging
+                } else {
+                    -> $NotAdvised
+                }
+            }
+            status() { @@:("analyzing") }
+            shock_count() { @@:(this.shocks) }
+            charge_pct() { @@:(this.charge_pct_dom) }
+        }
+
+        $Charging {
+            $>() { this.charge_pct_dom = 0; }
+            tick_ms(ms) {
+                this.charge_pct_dom = this.charge_pct_dom + ms;
+                if (this.charge_pct_dom >= 100) {
+                    -> $AwaitingClear
+                }
+            }
+            status() { @@:("charging") }
+            shock_count() { @@:(this.shocks) }
+            charge_pct() { @@:(this.charge_pct_dom) }
+        }
+
+        $AwaitingClear {
+            confirm_clear() { -> $ReadyToShock }
+            status() { @@:("awaiting clear") }
+            shock_count() { @@:(this.shocks) }
+            charge_pct() { @@:(this.charge_pct_dom) }
+        }
+
+        $ReadyToShock {
+            press_shock() {
+                this.shocks = this.shocks + 1;
+                -> $Analyzing
+            }
+            status() { @@:("ready to shock") }
+            shock_count() { @@:(this.shocks) }
+            charge_pct() { @@:(this.charge_pct_dom) }
+        }
+
+        $NotAdvised {
+            status() { @@:("no shock advised") }
+            shock_count() { @@:(this.shocks) }
+            charge_pct() { @@:(this.charge_pct_dom) }
+        }
+
+    domain:
+        last_rhythm = ""
+        charge_pct_dom = 0
+        shocks = 0
+}
+
+function check(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+        process.exit(1);
+    }
+}
+
+const a = @@AED();
+check("start off", a.status(), "off");
+a.press_shock();
+check("off cannot shock", a.shock_count(), 0);
+a.power_on();
+check("awaiting pads", a.status(), "attach pads");
+a.press_shock();
+check("awaiting pads cannot shock", a.shock_count(), 0);
+a.pads_attached();
+check("analyzing", a.status(), "analyzing");
+a.press_shock();
+check("analyzing cannot shock", a.shock_count(), 0);
+a.rhythm_detected("VF");
+check("charging", a.status(), "charging");
+a.press_shock();
+check("charging cannot shock", a.shock_count(), 0);
+a.tick_ms(50);
+check("still charging", a.status(), "charging");
+check("charge 50", a.charge_pct(), 50);
+a.press_shock();
+check("still cannot shock half-charged", a.shock_count(), 0);
+a.tick_ms(50);
+check("awaiting clear", a.status(), "awaiting clear");
+a.press_shock();
+check("awaiting clear cannot shock", a.shock_count(), 0);
+a.confirm_clear();
+check("ready", a.status(), "ready to shock");
+a.press_shock();
+check("shocked", a.shock_count(), 1);
+check("back to analyzing", a.status(), "analyzing");
+a.rhythm_detected("asystole");
+check("no shock advised", a.status(), "no shock advised");
+a.press_shock();
+a.tick_ms(100);
+a.confirm_clear();
+check("not-advised absorbs everything", a.status(), "no shock advised");
+check("still 1 shock total", a.shock_count(), 1);
+console.log("PASS: aed");

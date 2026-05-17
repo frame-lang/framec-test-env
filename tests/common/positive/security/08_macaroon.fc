@@ -1,0 +1,134 @@
+@@[target("c")]
+
+// Cookbook 93: Macaroon-Style Capability Token Verifier
+
+@@system MacaroonVerifier {
+    interface:
+        present(token: string, caveat_count: int)
+        caveat_verified(passed: int, caveat_index: int)
+        sig_verified(passed: int)
+        perform(action: string, resource: string, allowed: int): string = "denied"
+        get_status(): string = ""
+        get_caveat_index(): int
+
+    machine:
+        $Idle {
+            present(token: string, caveat_count: int) {
+                self->token = token;
+                self->caveats = caveat_count;
+                self->caveat_index = 0;
+                -> $CheckingSignature
+            }
+            get_status(): string { @@:("idle") }
+            get_caveat_index(): int { @@:(self->caveat_index) }
+        }
+
+        $CheckingSignature {
+            sig_verified(passed: int) {
+                if (passed == 1) { -> $CheckingCaveats } else { -> $Rejected }
+            }
+            get_status(): string { @@:("checking_sig") }
+            get_caveat_index(): int { @@:(self->caveat_index) }
+        }
+
+        $CheckingCaveats {
+            $>() {
+                if (self->caveat_index >= self->caveats) { -> $Authorized }
+            }
+            caveat_verified(passed: int, caveat_index: int) {
+                if (caveat_index != self->caveat_index) {
+                    -> $Rejected
+                } else if (passed == 0) {
+                    -> $Rejected
+                } else {
+                    self->caveat_index = self->caveat_index + 1;
+                    -> $CheckingCaveats
+                }
+            }
+            get_status(): string { @@:("checking_caveats") }
+            get_caveat_index(): int { @@:(self->caveat_index) }
+        }
+
+        $Authorized {
+            perform(action: string, resource: string, allowed: int): string {
+                if (allowed == 1) { @@:("allowed") } else { @@:("denied") }
+            }
+            get_status(): string { @@:("authorized") }
+            get_caveat_index(): int { @@:(self->caveat_index) }
+        }
+
+        $Rejected {
+            get_status(): string { @@:("rejected") }
+            get_caveat_index(): int { @@:(self->caveat_index) }
+        }
+
+    domain:
+        token: string = ""
+        caveats: int = 0
+        caveat_index: int = 0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) { printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual); exit(1); }
+}
+static void check_i(const char* label, int actual, int expected) {
+    if (actual != expected) { printf("FAIL: %s expected %d, got %d\n", label, expected, actual); exit(1); }
+}
+
+int main(void) {
+    MacaroonVerifier* v = @@MacaroonVerifier();
+    check("idle", MacaroonVerifier_get_status(v), "idle");
+    check("idle perform denied", MacaroonVerifier_perform(v, "read", "doc", 1), "denied");
+    MacaroonVerifier_present(v, "TOK", 3);
+    check("checking sig", MacaroonVerifier_get_status(v), "checking_sig");
+    check("sig-check perform denied", MacaroonVerifier_perform(v, "read", "doc", 1), "denied");
+    MacaroonVerifier_sig_verified(v, 1);
+    check("checking caveats", MacaroonVerifier_get_status(v), "checking_caveats");
+    check("caveat-check perform denied", MacaroonVerifier_perform(v, "read", "doc", 1), "denied");
+    MacaroonVerifier_caveat_verified(v, 1, 0);
+    check_i("caveat 0 done, index advanced", MacaroonVerifier_get_caveat_index(v), 1);
+    MacaroonVerifier_caveat_verified(v, 1, 1);
+    MacaroonVerifier_caveat_verified(v, 1, 2);
+    check("authorized", MacaroonVerifier_get_status(v), "authorized");
+    check("in-scope perform", MacaroonVerifier_perform(v, "read", "doc", 1), "allowed");
+    check("out-of-scope perform", MacaroonVerifier_perform(v, "write", "doc", 0), "denied");
+    MacaroonVerifier_caveat_verified(v, 1, 99);
+    check("authorized absorbs caveat", MacaroonVerifier_get_status(v), "authorized");
+
+    MacaroonVerifier* v2 = @@MacaroonVerifier();
+    MacaroonVerifier_present(v2, "TOK", 2);
+    MacaroonVerifier_sig_verified(v2, 0);
+    check("sig failed", MacaroonVerifier_get_status(v2), "rejected");
+    check("rejected denies perform", MacaroonVerifier_perform(v2, "read", "doc", 1), "denied");
+
+    MacaroonVerifier* v3 = @@MacaroonVerifier();
+    MacaroonVerifier_present(v3, "TOK", 3);
+    MacaroonVerifier_sig_verified(v3, 1);
+    MacaroonVerifier_caveat_verified(v3, 1, 0);
+    MacaroonVerifier_caveat_verified(v3, 0, 1);
+    check("caveat failed -> rejected", MacaroonVerifier_get_status(v3), "rejected");
+
+    MacaroonVerifier* v4 = @@MacaroonVerifier();
+    MacaroonVerifier_present(v4, "TOK", 3);
+    MacaroonVerifier_sig_verified(v4, 1);
+    MacaroonVerifier_caveat_verified(v4, 1, 0);
+    MacaroonVerifier_caveat_verified(v4, 1, 2);
+    check("out-of-order -> rejected", MacaroonVerifier_get_status(v4), "rejected");
+
+    MacaroonVerifier* v5 = @@MacaroonVerifier();
+    MacaroonVerifier_present(v5, "TOK", 0);
+    MacaroonVerifier_sig_verified(v5, 1);
+    check("no caveats -> authorized", MacaroonVerifier_get_status(v5), "authorized");
+
+    printf("PASS: macaroon\n");
+    MacaroonVerifier_destroy(v);
+    MacaroonVerifier_destroy(v2);
+    MacaroonVerifier_destroy(v3);
+    MacaroonVerifier_destroy(v4);
+    MacaroonVerifier_destroy(v5);
+    return 0;
+}

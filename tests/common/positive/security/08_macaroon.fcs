@@ -1,0 +1,128 @@
+@@[target("csharp")]
+
+// Cookbook 93: Macaroon-Style Capability Token Verifier
+
+using System;
+
+@@system MacaroonVerifier {
+    interface:
+        present(token: string, caveat_count: int)
+        caveat_verified(passed: int, caveat_index: int)
+        sig_verified(passed: int)
+        perform(action: string, resource: string, allowed: int): string = "denied"
+        get_status(): string = ""
+        get_caveat_index(): int
+
+    machine:
+        $Idle {
+            present(token: string, caveat_count: int) {
+                this.token = token;
+                this.caveats = caveat_count;
+                this.caveat_index = 0;
+                -> $CheckingSignature
+            }
+            get_status(): string { @@:("idle") }
+            get_caveat_index(): int { @@:(this.caveat_index) }
+        }
+
+        $CheckingSignature {
+            sig_verified(passed: int) {
+                if (passed == 1) { -> $CheckingCaveats } else { -> $Rejected }
+            }
+            get_status(): string { @@:("checking_sig") }
+            get_caveat_index(): int { @@:(this.caveat_index) }
+        }
+
+        $CheckingCaveats {
+            $>() {
+                if (this.caveat_index >= this.caveats) { -> $Authorized }
+            }
+            caveat_verified(passed: int, caveat_index: int) {
+                if (caveat_index != this.caveat_index) {
+                    -> $Rejected
+                } else if (passed == 0) {
+                    -> $Rejected
+                } else {
+                    this.caveat_index = this.caveat_index + 1;
+                    -> $CheckingCaveats
+                }
+            }
+            get_status(): string { @@:("checking_caveats") }
+            get_caveat_index(): int { @@:(this.caveat_index) }
+        }
+
+        $Authorized {
+            perform(action: string, resource: string, allowed: int): string {
+                if (allowed == 1) { @@:("allowed") } else { @@:("denied") }
+            }
+            get_status(): string { @@:("authorized") }
+            get_caveat_index(): int { @@:(this.caveat_index) }
+        }
+
+        $Rejected {
+            get_status(): string { @@:("rejected") }
+            get_caveat_index(): int { @@:(this.caveat_index) }
+        }
+
+    domain:
+        token: string = ""
+        caveats: int = 0
+        caveat_index: int = 0
+}
+
+public class Program {
+    static void Check(string label, string actual, string expected) {
+        if (actual != expected) { Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'"); Environment.Exit(1); }
+    }
+    static void CheckI(string label, int actual, int expected) {
+        if (actual != expected) { Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}"); Environment.Exit(1); }
+    }
+
+    public static void Main() {
+        var v = @@MacaroonVerifier();
+        Check("idle", (string)v.get_status(), "idle");
+        Check("idle perform denied", (string)v.perform("read", "doc", 1), "denied");
+        v.present("TOK", 3);
+        Check("checking sig", (string)v.get_status(), "checking_sig");
+        Check("sig-check perform denied", (string)v.perform("read", "doc", 1), "denied");
+        v.sig_verified(1);
+        Check("checking caveats", (string)v.get_status(), "checking_caveats");
+        Check("caveat-check perform denied", (string)v.perform("read", "doc", 1), "denied");
+        v.caveat_verified(1, 0);
+        CheckI("caveat 0 done, index advanced", (int)v.get_caveat_index(), 1);
+        v.caveat_verified(1, 1);
+        v.caveat_verified(1, 2);
+        Check("authorized", (string)v.get_status(), "authorized");
+        Check("in-scope perform", (string)v.perform("read", "doc", 1), "allowed");
+        Check("out-of-scope perform", (string)v.perform("write", "doc", 0), "denied");
+        v.caveat_verified(1, 99);
+        Check("authorized absorbs caveat", (string)v.get_status(), "authorized");
+
+        var v2 = @@MacaroonVerifier();
+        v2.present("TOK", 2);
+        v2.sig_verified(0);
+        Check("sig failed", (string)v2.get_status(), "rejected");
+        Check("rejected denies perform", (string)v2.perform("read", "doc", 1), "denied");
+
+        var v3 = @@MacaroonVerifier();
+        v3.present("TOK", 3);
+        v3.sig_verified(1);
+        v3.caveat_verified(1, 0);
+        v3.caveat_verified(0, 1);
+        Check("caveat failed -> rejected", (string)v3.get_status(), "rejected");
+
+        var v4 = @@MacaroonVerifier();
+        v4.present("TOK", 3);
+        v4.sig_verified(1);
+        v4.caveat_verified(1, 0);
+        v4.caveat_verified(1, 2);
+        Check("out-of-order -> rejected", (string)v4.get_status(), "rejected");
+
+        var v5 = @@MacaroonVerifier();
+        v5.present("TOK", 0);
+        v5.sig_verified(1);
+        Check("no caveats -> authorized", (string)v5.get_status(), "authorized");
+
+        Console.WriteLine("PASS: macaroon");
+    }
+}

@@ -1,0 +1,144 @@
+@@[target("erlang")]
+
+%% Cookbook 85: Sepsis Hour-1 Bundle
+
+@@system SepsisBundle {
+    interface:
+        recognize_sepsis()
+        lactate_drawn(value: float)
+        cultures_drawn()
+        antibiotics_given()
+        fluids_complete()
+        reassess_map(map_mmhg: int)
+        pressors_started()
+        tick_minute()
+        status(): string
+        bundle_complete(): bool = false
+        elapsed_min(): int
+        pressors_indicated(): bool
+
+    machine:
+        $PreRecognition {
+            recognize_sepsis() {
+                self.elapsed = 0,
+                self.lactate = 0.0,
+                self.cultures = false,
+                self.abx = false,
+                self.fluids = false,
+                self.reassessed = false,
+                self.pressors_needed = false,
+                self.pressors = false,
+                -> $BundleActive
+            }
+            status(): string { @@:("pre-recognition") }
+            elapsed_min(): int { @@:(self.elapsed) }
+            pressors_indicated(): bool { @@:(self.pressors_needed) }
+        }
+
+        $BundleActive {
+            lactate_drawn(value: float) {
+                self.lactate = Value,
+                case self.is_complete() of
+                    true ->
+                        case self.elapsed =< 60 of
+                            true -> -> $OnTime;
+                            false -> -> $Late
+                        end;
+                    false -> ok
+                end
+            }
+            cultures_drawn() {
+                self.cultures = true,
+                case self.is_complete() of
+                    true ->
+                        case self.elapsed =< 60 of
+                            true -> -> $OnTime;
+                            false -> -> $Late
+                        end;
+                    false -> ok
+                end
+            }
+            antibiotics_given() {
+                self.abx = true,
+                case self.is_complete() of
+                    true ->
+                        case self.elapsed =< 60 of
+                            true -> -> $OnTime;
+                            false -> -> $Late
+                        end;
+                    false -> ok
+                end
+            }
+            fluids_complete() {
+                self.fluids = true,
+                case self.is_complete() of
+                    true ->
+                        case self.elapsed =< 60 of
+                            true -> -> $OnTime;
+                            false -> -> $Late
+                        end;
+                    false -> ok
+                end
+            }
+            reassess_map(map_mmhg: int) {
+                self.reassessed = true,
+                self.pressors_needed = Map_mmhg < 65,
+                case self.is_complete() of
+                    true ->
+                        case self.elapsed =< 60 of
+                            true -> -> $OnTime;
+                            false -> -> $Late
+                        end;
+                    false -> ok
+                end
+            }
+            pressors_started() {
+                self.pressors = true,
+                case self.is_complete() of
+                    true ->
+                        case self.elapsed =< 60 of
+                            true -> -> $OnTime;
+                            false -> -> $Late
+                        end;
+                    false -> ok
+                end
+            }
+            tick_minute() { self.elapsed = self.elapsed + 1 }
+            status(): string { @@:("active") }
+            elapsed_min(): int { @@:(self.elapsed) }
+            pressors_indicated(): bool { @@:(self.pressors_needed) }
+        }
+
+        $OnTime {
+            bundle_complete(): bool { @@:(true) }
+            status(): string { @@:("on time") }
+            elapsed_min(): int { @@:(self.elapsed) }
+            pressors_indicated(): bool { @@:(self.pressors_needed) }
+        }
+
+        $Late {
+            bundle_complete(): bool { @@:(true) }
+            status(): string { @@:("late") }
+            elapsed_min(): int { @@:(self.elapsed) }
+            pressors_indicated(): bool { @@:(self.pressors_needed) }
+        }
+
+    actions:
+        is_complete(): bool {
+            Base = self.cultures andalso self.abx andalso self.fluids andalso (self.lactate > 0.0) andalso self.reassessed,
+            case self.pressors_needed of
+                true -> Base andalso self.pressors;
+                false -> Base
+            end
+        }
+
+    domain:
+        elapsed: int = 0
+        lactate: float = 0.0
+        cultures: bool = false
+        abx: bool = false
+        fluids: bool = false
+        reassessed: bool = false
+        pressors_needed: bool = false
+        pressors: bool = false
+}

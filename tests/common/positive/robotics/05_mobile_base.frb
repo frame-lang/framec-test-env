@@ -1,0 +1,238 @@
+@@[target("ruby")]
+
+# Cookbook 100: Mobile Base — Teleop/Autonomy + Safety Bumper
+
+@@system MobileBase {
+    interface:
+        set_teleop()
+        set_autonomous()
+        drive(linear, angular)
+        follow_waypoints(count)
+        waypoint_reached()
+        e_stop()
+        clear_e_stop()
+        bumper_hit(side)
+        cliff_detected()
+        clear_safety()
+        tick()
+        status()
+        get_x()
+        get_v()
+        get_wp_index()
+
+    machine:
+        $TeleopIdle => $Teleop {
+            drive(linear, angular) {
+                @v_linear = linear
+                @v_angular = angular
+                -> $TeleopDriving
+            }
+            set_autonomous() { -> $AutoIdle }
+            status() { @@:("teleop_idle") }
+            => $^
+        }
+
+        $Safety {
+            get_x() { @@:(@pos_x) }
+            get_v() { @@:(@v_linear) }
+            get_wp_index() { @@:(@wp_index) }
+        }
+
+        $Operational => $Safety {
+            e_stop() {
+                @v_linear = 0.0
+                @v_angular = 0.0
+                -> $EStopped
+            }
+            bumper_hit(side) {
+                @v_linear = 0.0
+                @v_angular = 0.0
+                @safety_reason = "bumper"
+                -> $ProtectiveStop
+            }
+            cliff_detected() {
+                @v_linear = 0.0
+                @v_angular = 0.0
+                @safety_reason = "cliff"
+                -> $ProtectiveStop
+            }
+            => $^
+        }
+
+        $EStopped {
+            clear_e_stop() { -> $TeleopIdle }
+            status() { @@:("e_stop") }
+            get_x() { @@:(@pos_x) }
+            get_v() { @@:(@v_linear) }
+            get_wp_index() { @@:(@wp_index) }
+        }
+
+        $ProtectiveStop {
+            clear_safety() {
+                @safety_reason = ""
+                -> $TeleopIdle
+            }
+            status() { @@:("protective_stop") }
+            get_x() { @@:(@pos_x) }
+            get_v() { @@:(@v_linear) }
+            get_wp_index() { @@:(@wp_index) }
+        }
+
+        $Teleop => $Operational {
+            follow_waypoints(count) { }
+            => $^
+        }
+
+        $TeleopDriving => $Teleop {
+            $>() {
+                if @v_linear > @teleop_speed_limit
+                    @v_linear = @teleop_speed_limit
+                end
+            }
+            drive(linear, angular) {
+                if linear == 0.0 && angular == 0.0
+                    @v_linear = 0.0
+                    @v_angular = 0.0
+                    -> $TeleopIdle
+                else
+                    @v_linear = linear
+                    @v_angular = angular
+                end
+            }
+            tick() {
+                @pos_x = @pos_x + @v_linear * 0.1
+            }
+            status() { @@:("teleop_driving") }
+            => $^
+        }
+
+        $Auto => $Operational {
+            drive(linear, angular) { }
+            set_teleop() { -> $TeleopIdle }
+            => $^
+        }
+
+        $AutoIdle => $Auto {
+            follow_waypoints(count) {
+                @wp_count = count
+                @wp_index = 0
+                -> $AutoDriving
+            }
+            status() { @@:("auto_idle") }
+            => $^
+        }
+
+        $AutoDriving => $Auto {
+            $>() {
+                if @wp_index >= @wp_count
+                    -> $AutoIdle
+                else
+                    @v_linear = @auto_speed_limit
+                end
+            }
+            tick() {
+                @pos_x = @pos_x + @v_linear * 0.1
+                if @pos_x >= (@wp_index + 1) * 5.0
+                    @@:self.waypoint_reached()
+                end
+            }
+            waypoint_reached() {
+                @wp_index = @wp_index + 1
+                -> $AutoDriving
+            }
+            status() { @@:("auto_driving") }
+            => $^
+        }
+
+    domain:
+        pos_x = 0.0
+        v_linear = 0.0
+        v_angular = 0.0
+        teleop_speed_limit = 0.5
+        auto_speed_limit = 1.0
+        wp_count = 0
+        wp_index = 0
+        safety_reason = ""
+}
+
+def check(label, actual, expected)
+    if actual != expected
+        puts "FAIL: #{label} expected '#{expected}', got '#{actual}'"
+        exit(1)
+    end
+end
+def check_d(label, actual, expected)
+    if (actual - expected).abs > 1e-9
+        puts "FAIL: #{label} expected #{expected}, got #{actual}"
+        exit(1)
+    end
+end
+
+b = @@MobileBase()
+check("teleop_idle", b.status, "teleop_idle")
+
+b.drive(0.3, 0.0)
+check("teleop_driving", b.status, "teleop_driving")
+check_d("velocity set", b.get_v, 0.3)
+
+b.tick
+b.tick
+check_d("position advanced", b.get_x, 0.06)
+
+b.drive(0.0, 0.0)
+check("stopped -> idle", b.status, "teleop_idle")
+
+b.drive(2.0, 0.0)
+check_d("speed limited on entry", b.get_v, 0.5)
+b.drive(0.0, 0.0)
+
+b.drive(0.3, 0.0)
+b.bumper_hit("front")
+check("bumper -> protective_stop", b.status, "protective_stop")
+check_d("velocity zeroed on bump", b.get_v, 0.0)
+
+pos_before = b.get_x
+b.tick
+check_d("protective absorbs tick", b.get_x, pos_before)
+
+b.clear_safety
+check("cleared to teleop_idle", b.status, "teleop_idle")
+
+b.drive(0.3, 0.0)
+b.cliff_detected
+check("cliff -> protective_stop", b.status, "protective_stop")
+b.clear_safety
+
+b.drive(0.3, 0.0)
+b.e_stop
+check("e_stop", b.status, "e_stop")
+b.clear_e_stop
+check("cleared e_stop to teleop_idle", b.status, "teleop_idle")
+
+b.set_autonomous
+check("auto_idle", b.status, "auto_idle")
+
+b.drive(0.3, 0.0)
+check("auto rejects drive", b.status, "auto_idle")
+
+b.follow_waypoints(3)
+check("auto_driving", b.status, "auto_driving")
+check("0 wp reached initially", b.get_wp_index, 0)
+
+i = 0
+while i < 250
+    b.tick
+    break if b.status == "auto_idle"
+    i = i + 1
+end
+check("auto complete -> auto_idle", b.status, "auto_idle")
+check("3 waypoints tracked", b.get_wp_index, 3)
+
+b.set_teleop
+check("back to teleop_idle", b.status, "teleop_idle")
+wp_before = b.get_wp_index
+b.follow_waypoints(5)
+check("teleop rejects follow", b.status, "teleop_idle")
+check("wp_index unchanged", b.get_wp_index, wp_before)
+
+puts "PASS: mobile_base"

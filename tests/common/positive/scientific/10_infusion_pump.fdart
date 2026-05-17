@@ -1,0 +1,132 @@
+@@[target("dart")]
+
+// Cookbook 81: Infusion Pump (safety-critical)
+
+import 'dart:io';
+
+@@system InfusionPump {
+    interface:
+        power_on()
+        set_rate(ml_per_hr: double)
+        prime()
+        start_infusion()
+        occlusion_detected()
+        acknowledge_alarm()
+        tick_minute()
+        volume_delivered(): double = 0.0
+        rate_mL_per_hr(): double
+        alarm_reason(): String
+        status(): String
+
+    machine:
+        $Off {
+            power_on() { -> $Idle }
+            status(): String { @@:("off") }
+            rate_mL_per_hr(): double { @@:(this.rate) }
+            volume_delivered(): double { @@:(this.volume) }
+            alarm_reason(): String { @@:("") }
+        }
+
+        $Operational {
+            occlusion_detected() { -> ("occlusion") $Alarm }
+        }
+
+        $Idle => $Operational {
+            set_rate(ml_per_hr: double) { this.rate = ml_per_hr; }
+            prime() {
+                if (this.rate > 0.0) {
+                    -> $Primed
+                }
+            }
+            status(): String { @@:("idle") }
+            rate_mL_per_hr(): double { @@:(this.rate) }
+            volume_delivered(): double { @@:(this.volume) }
+            alarm_reason(): String { @@:("") }
+            => $^
+        }
+
+        $Primed => $Operational {
+            start_infusion() { -> $Running }
+            status(): String { @@:("primed") }
+            rate_mL_per_hr(): double { @@:(this.rate) }
+            volume_delivered(): double { @@:(this.volume) }
+            alarm_reason(): String { @@:("") }
+            => $^
+        }
+
+        $Running => $Operational {
+            tick_minute() { this.volume = this.volume + this.rate / 60.0; }
+            status(): String { @@:("running") }
+            rate_mL_per_hr(): double { @@:(this.rate) }
+            volume_delivered(): double { @@:(this.volume) }
+            alarm_reason(): String { @@:("") }
+            => $^
+        }
+
+        $Alarm {
+            $.reason: String = "unknown"
+            $>(reason: String) { $.reason = reason; }
+            acknowledge_alarm() { -> $Idle }
+            status(): String { @@:("alarm") }
+            alarm_reason(): String { @@:($.reason) }
+            rate_mL_per_hr(): double { @@:(this.rate) }
+            volume_delivered(): double { @@:(this.volume) }
+        }
+
+    domain:
+        rate: double = 0.0
+        volume: double = 0.0
+}
+
+void check(String label, dynamic actual, dynamic expected) {
+    if (actual != expected) {
+        print("FAIL: $label expected '$expected', got '$actual'");
+        exit(1);
+    }
+}
+void checkF(String label, double actual, double expected) {
+    if ((actual - expected).abs() > 1e-9) {
+        print("FAIL: $label expected $expected, got $actual");
+        exit(1);
+    }
+}
+
+void main() {
+    var p = @@InfusionPump();
+    check("start off", p.status(), "off");
+    p.set_rate(100.0);
+    checkF("rate unchanged in Off", p.rate_mL_per_hr() as double, 0.0);
+    p.start_infusion();
+    check("still off", p.status(), "off");
+    p.power_on();
+    check("idle", p.status(), "idle");
+    p.set_rate(100.0);
+    checkF("rate set", p.rate_mL_per_hr() as double, 100.0);
+    p.start_infusion();
+    check("idle cannot start", p.status(), "idle");
+    checkF("no volume yet", p.volume_delivered() as double, 0.0);
+    p.prime();
+    check("primed", p.status(), "primed");
+    p.start_infusion();
+    check("running", p.status(), "running");
+    for (int i = 0; i < 10; i = i + 1) p.tick_minute();
+    check("running still", p.status(), "running");
+    double volAfter10 = p.volume_delivered() as double;
+    checkF("volume ≈ 10*100/60", volAfter10, 10.0 * 100.0 / 60.0);
+    p.occlusion_detected();
+    check("alarm on occlusion", p.status(), "alarm");
+    check("alarm reason via state var", p.alarm_reason(), "occlusion");
+    p.start_infusion();
+    p.prime();
+    p.tick_minute();
+    check("alarm still alarm", p.status(), "alarm");
+    checkF("volume locked in alarm", p.volume_delivered() as double, volAfter10);
+    p.acknowledge_alarm();
+    check("ack returns to idle", p.status(), "idle");
+    checkF("rate persisted across alarm", p.rate_mL_per_hr() as double, 100.0);
+    p.prime();
+    p.start_infusion();
+    p.tick_minute();
+    checkF("volume continues from prior", p.volume_delivered() as double, volAfter10 + 100.0 / 60.0);
+    print("PASS: infusion_pump");
+}

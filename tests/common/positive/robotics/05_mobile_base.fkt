@@ -1,0 +1,246 @@
+@@[target("kotlin")]
+
+// Cookbook 100: Mobile Base — Teleop/Autonomy + Safety Bumper
+
+@@system MobileBase {
+    interface:
+        set_teleop()
+        set_autonomous()
+        drive(linear: Double, angular: Double)
+        follow_waypoints(count: Int)
+        waypoint_reached()
+        e_stop()
+        clear_e_stop()
+        bumper_hit(side: String)
+        cliff_detected()
+        clear_safety()
+        tick()
+        status(): String
+        get_x(): Double
+        get_v(): Double
+        get_wp_index(): Int
+
+    machine:
+        $TeleopIdle => $Teleop {
+            drive(linear: Double, angular: Double) {
+                this.v_linear = linear
+                this.v_angular = angular
+                -> $TeleopDriving
+            }
+            set_autonomous() { -> $AutoIdle }
+            status(): String { @@:("teleop_idle") }
+            => $^
+        }
+
+        $Safety {
+            get_x(): Double { @@:(this.pos_x) }
+            get_v(): Double { @@:(this.v_linear) }
+            get_wp_index(): Int { @@:(this.wp_index) }
+        }
+
+        $Operational => $Safety {
+            e_stop() {
+                this.v_linear = 0.0
+                this.v_angular = 0.0
+                -> $EStopped
+            }
+            bumper_hit(side: String) {
+                this.v_linear = 0.0
+                this.v_angular = 0.0
+                this.safety_reason = "bumper"
+                -> $ProtectiveStop
+            }
+            cliff_detected() {
+                this.v_linear = 0.0
+                this.v_angular = 0.0
+                this.safety_reason = "cliff"
+                -> $ProtectiveStop
+            }
+            => $^
+        }
+
+        $EStopped {
+            clear_e_stop() { -> $TeleopIdle }
+            status(): String { @@:("e_stop") }
+            get_x(): Double { @@:(this.pos_x) }
+            get_v(): Double { @@:(this.v_linear) }
+            get_wp_index(): Int { @@:(this.wp_index) }
+        }
+
+        $ProtectiveStop {
+            clear_safety() {
+                this.safety_reason = ""
+                -> $TeleopIdle
+            }
+            status(): String { @@:("protective_stop") }
+            get_x(): Double { @@:(this.pos_x) }
+            get_v(): Double { @@:(this.v_linear) }
+            get_wp_index(): Int { @@:(this.wp_index) }
+        }
+
+        $Teleop => $Operational {
+            follow_waypoints(count: Int) { }
+            => $^
+        }
+
+        $TeleopDriving => $Teleop {
+            $>() {
+                if (this.v_linear > this.teleop_speed_limit) {
+                    this.v_linear = this.teleop_speed_limit
+                }
+            }
+            drive(linear: Double, angular: Double) {
+                if (linear == 0.0 && angular == 0.0) {
+                    this.v_linear = 0.0
+                    this.v_angular = 0.0
+                    -> $TeleopIdle
+                } else {
+                    this.v_linear = linear
+                    this.v_angular = angular
+                }
+            }
+            tick() {
+                this.pos_x = this.pos_x + this.v_linear * 0.1
+            }
+            status(): String { @@:("teleop_driving") }
+            => $^
+        }
+
+        $Auto => $Operational {
+            drive(linear: Double, angular: Double) { }
+            set_teleop() { -> $TeleopIdle }
+            => $^
+        }
+
+        $AutoIdle => $Auto {
+            follow_waypoints(count: Int) {
+                this.wp_count = count
+                this.wp_index = 0
+                -> $AutoDriving
+            }
+            status(): String { @@:("auto_idle") }
+            => $^
+        }
+
+        $AutoDriving => $Auto {
+            $>() {
+                if (this.wp_index >= this.wp_count) {
+                    -> $AutoIdle
+                } else {
+                    this.v_linear = this.auto_speed_limit
+                }
+            }
+            tick() {
+                this.pos_x = this.pos_x + this.v_linear * 0.1
+                if (this.pos_x >= (this.wp_index + 1) * 5.0) {
+                    @@:self.waypoint_reached()
+                }
+            }
+            waypoint_reached() {
+                this.wp_index = this.wp_index + 1
+                -> $AutoDriving
+            }
+            status(): String { @@:("auto_driving") }
+            => $^
+        }
+
+    domain:
+        pos_x: Double = 0.0
+        v_linear: Double = 0.0
+        v_angular: Double = 0.0
+        teleop_speed_limit: Double = 0.5
+        auto_speed_limit: Double = 1.0
+        wp_count: Int = 0
+        wp_index: Int = 0
+        safety_reason: String = ""
+}
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) {
+        println("FAIL: $label expected '$expected', got '$actual'")
+        kotlin.system.exitProcess(1)
+    }
+}
+fun checkD(label: String, actual: Double, expected: Double) {
+    if (kotlin.math.abs(actual - expected) > 1e-9) {
+        println("FAIL: $label expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+fun checkI(label: String, actual: Int, expected: Int) {
+    if (actual != expected) {
+        println("FAIL: $label expected $expected, got $actual")
+        kotlin.system.exitProcess(1)
+    }
+}
+
+fun main() {
+    val b = @@MobileBase()
+    check("teleop_idle", b.status() as String, "teleop_idle")
+
+    b.drive(0.3, 0.0)
+    check("teleop_driving", b.status() as String, "teleop_driving")
+    checkD("velocity set", b.get_v() as Double, 0.3)
+
+    b.tick()
+    b.tick()
+    checkD("position advanced", b.get_x() as Double, 0.06)
+
+    b.drive(0.0, 0.0)
+    check("stopped -> idle", b.status() as String, "teleop_idle")
+
+    b.drive(2.0, 0.0)
+    checkD("speed limited on entry", b.get_v() as Double, 0.5)
+    b.drive(0.0, 0.0)
+
+    b.drive(0.3, 0.0)
+    b.bumper_hit("front")
+    check("bumper -> protective_stop", b.status() as String, "protective_stop")
+    checkD("velocity zeroed on bump", b.get_v() as Double, 0.0)
+
+    val posBefore = b.get_x() as Double
+    b.tick()
+    checkD("protective absorbs tick", b.get_x() as Double, posBefore)
+
+    b.clear_safety()
+    check("cleared to teleop_idle", b.status() as String, "teleop_idle")
+
+    b.drive(0.3, 0.0)
+    b.cliff_detected()
+    check("cliff -> protective_stop", b.status() as String, "protective_stop")
+    b.clear_safety()
+
+    b.drive(0.3, 0.0)
+    b.e_stop()
+    check("e_stop", b.status() as String, "e_stop")
+    b.clear_e_stop()
+    check("cleared e_stop to teleop_idle", b.status() as String, "teleop_idle")
+
+    b.set_autonomous()
+    check("auto_idle", b.status() as String, "auto_idle")
+
+    b.drive(0.3, 0.0)
+    check("auto rejects drive", b.status() as String, "auto_idle")
+
+    b.follow_waypoints(3)
+    check("auto_driving", b.status() as String, "auto_driving")
+    checkI("0 wp reached initially", b.get_wp_index() as Int, 0)
+
+    var i = 0
+    while (i < 250) {
+        b.tick()
+        if ((b.status() as String) == "auto_idle") break
+        i = i + 1
+    }
+    check("auto complete -> auto_idle", b.status() as String, "auto_idle")
+    checkI("3 waypoints tracked", b.get_wp_index() as Int, 3)
+
+    b.set_teleop()
+    check("back to teleop_idle", b.status() as String, "teleop_idle")
+    val wpBefore = b.get_wp_index() as Int
+    b.follow_waypoints(5)
+    check("teleop rejects follow", b.status() as String, "teleop_idle")
+    checkI("wp_index unchanged", b.get_wp_index() as Int, wpBefore)
+
+    println("PASS: mobile_base")
+}

@@ -1,0 +1,105 @@
+@@[target("swift")]
+
+// Cookbook 77: Neuron Action Potential
+
+import Foundation
+
+@@system Neuron {
+    interface:
+        stimulate(input: Double)
+        tick()
+        voltage(): Double
+        phase(): String
+
+    machine:
+        $Resting {
+            stimulate(input: Double) {
+                self.v = self.v + input
+                if self.v >= self.threshold {
+                    -> $Depolarizing
+                }
+            }
+            tick() { self.v = self.v + (self.v_rest - self.v) * 0.2 }
+            voltage(): Double { @@:(self.v) }
+            phase(): String { @@:("resting") }
+        }
+
+        $Depolarizing {
+            $>() { self.v = self.v_peak }
+            tick() { -> $Repolarizing }
+            voltage(): Double { @@:(self.v) }
+            phase(): String { @@:("spike") }
+        }
+
+        $Repolarizing {
+            tick() {
+                self.v = self.v_hyper
+                -> $Refractory
+            }
+            voltage(): Double { @@:(self.v) }
+            phase(): String { @@:("repolarizing") }
+        }
+
+        $Refractory {
+            stimulate(input: Double) { }
+            tick() {
+                self.ref_ticks = self.ref_ticks + 1
+                if self.ref_ticks >= 3 {
+                    self.ref_ticks = 0
+                    -> $Resting
+                }
+            }
+            voltage(): Double { @@:(self.v) }
+            phase(): String { @@:("refractory") }
+        }
+
+    domain:
+        v: Double = -70.0
+        v_rest: Double = -70.0
+        v_peak: Double = 40.0
+        v_hyper: Double = -80.0
+        threshold: Double = -55.0
+        ref_ticks: Int = 0
+}
+
+func check(_ label: String, _ actual: String, _ expected: String) {
+    if actual != expected {
+        print("FAIL: \(label) expected '\(expected)', got '\(actual)'")
+        exit(1)
+    }
+}
+func checkF(_ label: String, _ actual: Double, _ expected: Double) {
+    if abs(actual - expected) > 1e-9 {
+        print("FAIL: \(label) expected \(expected), got \(actual)")
+        exit(1)
+    }
+}
+
+let n = @@Neuron()
+check("start resting", n.phase() as! String, "resting")
+checkF("start voltage", n.voltage() as! Double, -70.0)
+n.stimulate(input: 5.0)
+check("sub-threshold stays resting", n.phase() as! String, "resting")
+checkF("sub-threshold voltage", n.voltage() as! Double, -65.0)
+n.stimulate(input: 5.0)
+check("still resting", n.phase() as! String, "resting")
+n.stimulate(input: 6.0)
+check("spike", n.phase() as! String, "spike")
+checkF("peak voltage", n.voltage() as! Double, 40.0)
+n.tick()
+check("repolarizing", n.phase() as! String, "repolarizing")
+n.tick()
+check("refractory", n.phase() as! String, "refractory")
+checkF("hyperpolarized", n.voltage() as! Double, -80.0)
+n.stimulate(input: 100.0)
+check("refractory absorbs stim", n.phase() as! String, "refractory")
+checkF("refractory voltage unchanged", n.voltage() as! Double, -80.0)
+n.tick()
+check("still refractory t+1", n.phase() as! String, "refractory")
+n.tick()
+check("still refractory t+2", n.phase() as! String, "refractory")
+n.tick()
+check("resting after t+3", n.phase() as! String, "resting")
+n.stimulate(input: 30.0)
+check("second spike", n.phase() as! String, "spike")
+print("PASS: neuron_action")

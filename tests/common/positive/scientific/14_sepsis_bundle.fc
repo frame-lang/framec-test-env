@@ -1,0 +1,181 @@
+@@[target("c")]
+
+// Cookbook 85: Sepsis Hour-1 Bundle
+
+@@system SepsisBundle {
+    interface:
+        recognize_sepsis()
+        lactate_drawn(value: double)
+        cultures_drawn()
+        antibiotics_given()
+        fluids_complete()
+        reassess_map(map_mmhg: int)
+        pressors_started()
+        tick_minute()
+        status(): string
+        bundle_complete(): bool = false
+        elapsed_min(): int
+        pressors_indicated(): bool
+
+    machine:
+        $PreRecognition {
+            recognize_sepsis() {
+                self->elapsed = 0;
+                self->lactate = 0.0;
+                self->cultures = false;
+                self->abx = false;
+                self->fluids = false;
+                self->reassessed = false;
+                self->pressors_needed = false;
+                self->pressors = false;
+                -> $BundleActive
+            }
+            status(): string { @@:("pre-recognition") }
+            elapsed_min(): int { @@:(self->elapsed) }
+            pressors_indicated(): bool { @@:(self->pressors_needed) }
+        }
+
+        $BundleActive {
+            lactate_drawn(value: double) {
+                self->lactate = value;
+                if (self.is_complete()) {
+                    if (self->elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            cultures_drawn() {
+                self->cultures = true;
+                if (self.is_complete()) {
+                    if (self->elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            antibiotics_given() {
+                self->abx = true;
+                if (self.is_complete()) {
+                    if (self->elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            fluids_complete() {
+                self->fluids = true;
+                if (self.is_complete()) {
+                    if (self->elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            reassess_map(map_mmhg: int) {
+                self->reassessed = true;
+                self->pressors_needed = map_mmhg < 65;
+                if (self.is_complete()) {
+                    if (self->elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            pressors_started() {
+                self->pressors = true;
+                if (self.is_complete()) {
+                    if (self->elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            tick_minute() { self->elapsed = self->elapsed + 1; }
+            status(): string { @@:("active") }
+            elapsed_min(): int { @@:(self->elapsed) }
+            pressors_indicated(): bool { @@:(self->pressors_needed) }
+        }
+
+        $OnTime {
+            bundle_complete(): bool { @@:(true) }
+            status(): string { @@:("on time") }
+            elapsed_min(): int { @@:(self->elapsed) }
+            pressors_indicated(): bool { @@:(self->pressors_needed) }
+        }
+
+        $Late {
+            bundle_complete(): bool { @@:(true) }
+            status(): string { @@:("late") }
+            elapsed_min(): int { @@:(self->elapsed) }
+            pressors_indicated(): bool { @@:(self->pressors_needed) }
+        }
+
+    actions:
+        is_complete(): bool {
+            bool base = self->cultures && self->abx && self->fluids && self->lactate > 0.0 && self->reassessed;
+            if (self->pressors_needed) {
+                return base && self->pressors;
+            }
+            return base;
+        }
+
+    domain:
+        elapsed: int = 0
+        lactate: double = 0.0
+        cultures: bool = false
+        abx: bool = false
+        fluids: bool = false
+        reassessed: bool = false
+        pressors_needed: bool = false
+        pressors: bool = false
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) { printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual); exit(1); }
+}
+static void check_b(const char* label, bool actual, bool expected) {
+    if (actual != expected) { printf("FAIL: %s expected %d, got %d\n", label, expected, actual); exit(1); }
+}
+
+int main(void) {
+    SepsisBundle* a = @@SepsisBundle();
+    check_str("pre-recognition", SepsisBundle_status(a), "pre-recognition");
+    check_b("bundle_complete default false before recognize", SepsisBundle_bundle_complete(a), false);
+    SepsisBundle_lactate_drawn(a, 3.4);
+    SepsisBundle_antibiotics_given(a);
+    check_str("pre-rec absorbs events", SepsisBundle_status(a), "pre-recognition");
+    SepsisBundle_recognize_sepsis(a);
+    check_str("active", SepsisBundle_status(a), "active");
+    SepsisBundle_lactate_drawn(a, 3.4);
+    SepsisBundle_cultures_drawn(a);
+    for (int i = 0; i < 15; i = i + 1) SepsisBundle_tick_minute(a);
+    SepsisBundle_antibiotics_given(a);
+    SepsisBundle_fluids_complete(a);
+    check_str("still active after fluids", SepsisBundle_status(a), "active");
+    SepsisBundle_reassess_map(a, 75);
+    check_str("on time", SepsisBundle_status(a), "on time");
+    check_b("complete", SepsisBundle_bundle_complete(a), true);
+    check_b("no pressors indicated", SepsisBundle_pressors_indicated(a), false);
+    if (SepsisBundle_elapsed_min(a) > 60) { printf("FAIL: over 60\n"); exit(1); }
+    SepsisBundle_antibiotics_given(a);
+    SepsisBundle_tick_minute(a);
+    check_str("on time absorbs events", SepsisBundle_status(a), "on time");
+
+    SepsisBundle* b = @@SepsisBundle();
+    SepsisBundle_recognize_sepsis(b);
+    SepsisBundle_lactate_drawn(b, 4.2);
+    SepsisBundle_cultures_drawn(b);
+    SepsisBundle_antibiotics_given(b);
+    SepsisBundle_fluids_complete(b);
+    for (int i = 0; i < 70; i = i + 1) SepsisBundle_tick_minute(b);
+    SepsisBundle_reassess_map(b, 58);
+    check_str("active -- pressors pending", SepsisBundle_status(b), "active");
+    check_b("pressors flagged", SepsisBundle_pressors_indicated(b), true);
+    SepsisBundle_pressors_started(b);
+    check_str("late terminal", SepsisBundle_status(b), "late");
+    check_b("complete (late)", SepsisBundle_bundle_complete(b), true);
+    if (SepsisBundle_elapsed_min(b) <= 60) { printf("FAIL: under 60\n"); exit(1); }
+
+    SepsisBundle* c = @@SepsisBundle();
+    SepsisBundle_recognize_sepsis(c);
+    SepsisBundle_lactate_drawn(c, 2.0);
+    SepsisBundle_cultures_drawn(c);
+    SepsisBundle_antibiotics_given(c);
+    SepsisBundle_fluids_complete(c);
+    SepsisBundle_reassess_map(c, 80);
+    check_str("reassess completes w/o pressors", SepsisBundle_status(c), "on time");
+
+    printf("PASS: sepsis_bundle\n");
+    SepsisBundle_destroy(a);
+    SepsisBundle_destroy(b);
+    SepsisBundle_destroy(c);
+    return 0;
+}

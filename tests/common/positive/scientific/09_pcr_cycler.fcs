@@ -1,0 +1,145 @@
+@@[target("csharp")]
+
+// Cookbook 80: PCR Thermal Cycler
+
+using System;
+
+@@system PCRCycler(total_cycles: int) {
+    interface:
+        start()
+        tick_minute()
+        temperature(): double
+        current_cycle(): int
+        phase(): string
+
+    machine:
+        $Idle {
+            start() {
+                this.cycle = 0;
+                -> $Denature
+            }
+            temperature(): double { @@:(25.0) }
+            current_cycle(): int { @@:(this.cycle) }
+            phase(): string { @@:("idle") }
+        }
+
+        $Running {
+            current_cycle(): int { @@:(this.cycle) }
+        }
+
+        $Denature => $Running {
+            $>() {
+                this.cycle = this.cycle + 1;
+                this.phase_min = 0;
+            }
+            tick_minute() {
+                this.phase_min = this.phase_min + 1;
+                if (this.phase_min >= 1) {
+                    -> $Anneal
+                }
+            }
+            temperature(): double { @@:(95.0) }
+            phase(): string { @@:("denature") }
+            => $^
+        }
+
+        $Anneal => $Running {
+            $>() { this.phase_min = 0; }
+            tick_minute() {
+                this.phase_min = this.phase_min + 1;
+                if (this.phase_min >= 1) {
+                    -> $Extend
+                }
+            }
+            temperature(): double { @@:(55.0) }
+            phase(): string { @@:("anneal") }
+            => $^
+        }
+
+        $Extend => $Running {
+            $>() { this.phase_min = 0; }
+            tick_minute() {
+                this.phase_min = this.phase_min + 1;
+                if (this.phase_min >= 2) {
+                    if (this.cycle >= this.target) {
+                        -> $FinalHold
+                    } else {
+                        -> $Denature
+                    }
+                }
+            }
+            temperature(): double { @@:(72.0) }
+            phase(): string { @@:("extend") }
+            => $^
+        }
+
+        $FinalHold {
+            temperature(): double { @@:(4.0) }
+            current_cycle(): int { @@:(this.cycle) }
+            phase(): string { @@:("final hold") }
+        }
+
+    domain:
+        target: int = total_cycles
+        cycle: int = 0
+        phase_min: int = 0
+}
+
+public class Program {
+    static void Check(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+    static void CheckF(string label, double actual, double expected) {
+        if (Math.Abs(actual - expected) > 1e-9) {
+            Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}");
+            Environment.Exit(1);
+        }
+    }
+    static void CheckI(string label, int actual, int expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}");
+            Environment.Exit(1);
+        }
+    }
+
+    public static void Main() {
+        var p = @@PCRCycler(3);
+        Check("idle", (string)p.phase(), "idle");
+        CheckF("idle temperature", (double)p.temperature(), 25.0);
+        CheckI("idle cycle", (int)p.current_cycle(), 0);
+        p.tick_minute();
+        Check("idle absorbs tick", (string)p.phase(), "idle");
+        p.start();
+        Check("denature 1", (string)p.phase(), "denature");
+        CheckI("cycle 1", (int)p.current_cycle(), 1);
+        CheckF("95C", (double)p.temperature(), 95.0);
+        p.tick_minute();
+        Check("anneal 1", (string)p.phase(), "anneal");
+        CheckF("55C", (double)p.temperature(), 55.0);
+        p.tick_minute();
+        Check("extend 1", (string)p.phase(), "extend");
+        CheckF("72C", (double)p.temperature(), 72.0);
+        p.tick_minute();
+        Check("extend partway", (string)p.phase(), "extend");
+        p.tick_minute();
+        Check("denature 2", (string)p.phase(), "denature");
+        CheckI("cycle 2", (int)p.current_cycle(), 2);
+        p.tick_minute(); Check("anneal 2", (string)p.phase(), "anneal");
+        p.tick_minute(); Check("extend 2", (string)p.phase(), "extend");
+        p.tick_minute(); p.tick_minute();
+        Check("denature 3", (string)p.phase(), "denature");
+        CheckI("cycle 3", (int)p.current_cycle(), 3);
+        p.tick_minute(); p.tick_minute(); p.tick_minute();
+        p.tick_minute();
+        Check("final hold", (string)p.phase(), "final hold");
+        CheckF("4C", (double)p.temperature(), 4.0);
+        p.tick_minute();
+        Check("hold absorbs tick", (string)p.phase(), "final hold");
+        p.start();
+        Check("hold absorbs start", (string)p.phase(), "final hold");
+        Console.WriteLine("PASS: pcr_cycler");
+    }
+}

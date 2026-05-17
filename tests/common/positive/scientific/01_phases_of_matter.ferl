@@ -1,0 +1,137 @@
+@@[target("erlang")]
+
+%% Cookbook 72: Phases of Matter
+
+@@system Substance(melting_point: float, boiling_point: float, ionization_point: float) {
+    interface:
+        add_heat(joules: float)
+        remove_heat(joules: float)
+        temperature(): float
+        phase(): string
+
+    machine:
+        $Solid {
+            add_heat(joules: float) {
+                self.temp = self.temp + Joules / self.heat_capacity,
+                case self.temp >= self.mp of
+                    true ->
+                        self.temp = self.mp,
+                        self.latent_absorbed = 0.0,
+                        -> $Melting;
+                    false -> ok
+                end
+            }
+            remove_heat(joules: float) {
+                self.temp = self.temp - Joules / self.heat_capacity
+            }
+            temperature(): float { @@:(self.temp) }
+            phase(): string { @@:("solid") }
+        }
+
+        $Melting {
+            add_heat(joules: float) {
+                self.latent_absorbed = self.latent_absorbed + Joules,
+                case self.latent_absorbed >= self.latent_fusion of
+                    true -> -> $Liquid;
+                    false -> ok
+                end
+            }
+            remove_heat(joules: float) {
+                self.latent_absorbed = self.latent_absorbed - Joules,
+                case self.latent_absorbed =< 0.0 of
+                    true -> -> $Solid;
+                    false -> ok
+                end
+            }
+            temperature(): float { @@:(self.mp) }
+            phase(): string { @@:("melting") }
+        }
+
+        $Liquid {
+            add_heat(joules: float) {
+                self.temp = self.temp + Joules / self.heat_capacity,
+                case self.temp >= self.bp of
+                    true ->
+                        self.temp = self.bp,
+                        self.latent_absorbed = 0.0,
+                        -> $Boiling;
+                    false -> ok
+                end
+            }
+            remove_heat(joules: float) {
+                self.temp = self.temp - Joules / self.heat_capacity,
+                case self.temp =< self.mp of
+                    true ->
+                        self.temp = self.mp,
+                        self.latent_absorbed = self.latent_fusion,
+                        -> $Melting;
+                    false -> ok
+                end
+            }
+            temperature(): float { @@:(self.temp) }
+            phase(): string { @@:("liquid") }
+        }
+
+        $Boiling {
+            add_heat(joules: float) {
+                self.latent_absorbed = self.latent_absorbed + Joules,
+                case self.latent_absorbed >= self.latent_vaporization of
+                    true -> -> $Gas;
+                    false -> ok
+                end
+            }
+            remove_heat(joules: float) {
+                self.latent_absorbed = self.latent_absorbed - Joules,
+                case self.latent_absorbed =< 0.0 of
+                    true -> -> $Liquid;
+                    false -> ok
+                end
+            }
+            temperature(): float { @@:(self.bp) }
+            phase(): string { @@:("boiling") }
+        }
+
+        $Gas {
+            add_heat(joules: float) {
+                self.temp = self.temp + Joules / self.heat_capacity,
+                case self.temp >= self.ip of
+                    true -> -> $Plasma;
+                    false -> ok
+                end
+            }
+            remove_heat(joules: float) {
+                self.temp = self.temp - Joules / self.heat_capacity,
+                case self.temp =< self.bp of
+                    true ->
+                        self.temp = self.bp,
+                        self.latent_absorbed = self.latent_vaporization,
+                        -> $Boiling;
+                    false -> ok
+                end
+            }
+            temperature(): float { @@:(self.temp) }
+            phase(): string { @@:("gas") }
+        }
+
+        $Plasma {
+            remove_heat(joules: float) {
+                self.temp = self.temp - Joules / self.heat_capacity,
+                case self.temp =< self.ip of
+                    true -> -> $Gas;
+                    false -> ok
+                end
+            }
+            temperature(): float { @@:(self.temp) }
+            phase(): string { @@:("plasma") }
+        }
+
+    domain:
+        mp: float = melting_point
+        bp: float = boiling_point
+        ip: float = ionization_point
+        temp: float = -50.0
+        heat_capacity: float = 4.18
+        latent_fusion: float = 334.0
+        latent_vaporization: float = 2260.0
+        latent_absorbed: float = 0.0
+}

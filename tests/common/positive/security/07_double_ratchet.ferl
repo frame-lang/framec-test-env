@@ -1,0 +1,73 @@
+@@[target("erlang")]
+
+%% Cookbook 92: Signal / Double Ratchet Session
+
+@@system DoubleRatchetSession {
+    interface:
+        initialize(shared_secret: string, remote_pub: string)
+        send_plaintext(m: string): string = ""
+        receive_ciphertext(header: string, ct: string, ratchet: int, valid: int): string = ""
+        close()
+        get_status(): string = "uninit"
+        get_sends(): int
+        get_recvs(): int
+        get_ratchets(): int
+        get_zeroized(): int
+
+    machine:
+        $Uninit {
+            initialize(shared_secret: string, remote_pub: string) {
+                self.root_key = Shared_secret,
+                self.remote_pub = Remote_pub,
+                -> $Active
+            }
+            get_status(): string { @@:("uninit") }
+            get_sends(): int { @@:(self.sends) }
+            get_recvs(): int { @@:(self.recvs) }
+            get_ratchets(): int { @@:(self.ratchets) }
+            get_zeroized(): int { @@:(self.zeroized) }
+        }
+
+        $Active {
+            send_plaintext(m: string): string {
+                self.sends = self.sends + 1,
+                self.zeroized = self.zeroized + 1,
+                @@:("ct-send")
+            }
+            receive_ciphertext(header: string, ct: string, ratchet: int, valid: int): string {
+                case Ratchet == 1 of
+                    true -> self.ratchets = self.ratchets + 1;
+                    false -> ok
+                end,
+                case Valid == 0 of
+                    true -> @@:("decryption_failed");
+                    false ->
+                        self.recvs = self.recvs + 1,
+                        self.zeroized = self.zeroized + 1,
+                        @@:("pt")
+                end
+            }
+            close() { -> $Closed }
+            get_status(): string { @@:("active") }
+            get_sends(): int { @@:(self.sends) }
+            get_recvs(): int { @@:(self.recvs) }
+            get_ratchets(): int { @@:(self.ratchets) }
+            get_zeroized(): int { @@:(self.zeroized) }
+        }
+
+        $Closed {
+            get_status(): string { @@:("closed") }
+            get_sends(): int { @@:(self.sends) }
+            get_recvs(): int { @@:(self.recvs) }
+            get_ratchets(): int { @@:(self.ratchets) }
+            get_zeroized(): int { @@:(self.zeroized) }
+        }
+
+    domain:
+        root_key: string = ""
+        remote_pub: string = ""
+        sends: int = 0
+        recvs: int = 0
+        ratchets: int = 0
+        zeroized: int = 0
+}

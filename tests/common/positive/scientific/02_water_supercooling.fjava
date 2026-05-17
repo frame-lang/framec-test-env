@@ -1,0 +1,118 @@
+@@[target("java")]
+
+// Cookbook 73: Water with Supercooling
+
+@@system Water {
+    interface:
+        cool(delta: double)
+        heat(delta: double)
+        nucleate()
+        shake()
+        temperature(): double
+        phase(): String
+
+    machine:
+        $Liquid {
+            cool(delta: double) {
+                this.temp = this.temp - delta;
+                if (this.temp < 0.0) {
+                    -> $Supercooled
+                }
+            }
+            heat(delta: double) { this.temp = this.temp + delta; }
+            temperature(): double { @@:(this.temp) }
+            phase(): String { @@:("liquid") }
+        }
+
+        $Supercooled {
+            cool(delta: double) {
+                this.temp = this.temp - delta;
+                if (this.temp <= -42.0) {
+                    -> $Ice
+                }
+            }
+            heat(delta: double) {
+                this.temp = this.temp + delta;
+                if (this.temp >= 0.0) {
+                    -> $Liquid
+                }
+            }
+            nucleate() { -> $Ice }
+            shake() { -> $Ice }
+            temperature(): double { @@:(this.temp) }
+            phase(): String { @@:("supercooled liquid") }
+        }
+
+        $Ice {
+            heat(delta: double) {
+                this.temp = this.temp + delta;
+                if (this.temp >= 0.0) {
+                    -> $Liquid
+                }
+            }
+            cool(delta: double) { this.temp = this.temp - delta; }
+            temperature(): double { @@:(this.temp) }
+            phase(): String { @@:("ice") }
+        }
+
+    domain:
+        temp: double = 25.0
+}
+
+public class Water02Test {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+    static void checkF(String label, double actual, double expected) {
+        if (Math.abs(actual - expected) > 1e-9) {
+            System.out.println("FAIL: " + label + " expected " + expected + ", got " + actual);
+            System.exit(1);
+        }
+    }
+
+    public static void main(String[] args) {
+        Water w = @@Water();
+        check("start", (String) w.phase(), "liquid");
+        w.cool(30.0);
+        check("after big cool", (String) w.phase(), "supercooled liquid");
+        w.shake();
+        check("shaken", (String) w.phase(), "ice");
+
+        Water w2 = @@Water();
+        w2.cool(30.0);
+        check("w2 supercooled", (String) w2.phase(), "supercooled liquid");
+        checkF("same temp", (double) w.temperature(), (double) w2.temperature());
+        if (((String) w.phase()).equals((String) w2.phase())) {
+            System.out.println("FAIL: phases should differ");
+            System.exit(1);
+        }
+
+        Water w3 = @@Water();
+        w3.cool(30.0);
+        w3.nucleate();
+        check("nucleated", (String) w3.phase(), "ice");
+
+        Water w4 = @@Water();
+        w4.cool(30.0);
+        check("w4 supercooled", (String) w4.phase(), "supercooled liquid");
+        w4.cool(40.0);
+        check("deep cool", (String) w4.phase(), "ice");
+        w4.heat(50.0);
+        check("melted", (String) w4.phase(), "liquid");
+
+        Water w5 = @@Water();
+        w5.shake();
+        check("liquid shake ignored", (String) w5.phase(), "liquid");
+        Water w6 = @@Water();
+        w6.cool(30.0);
+        w6.cool(40.0);
+        check("w6 is ice", (String) w6.phase(), "ice");
+        w6.shake();
+        check("ice shake ignored", (String) w6.phase(), "ice");
+
+        System.out.println("PASS: water_supercooling");
+    }
+}

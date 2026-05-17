@@ -1,0 +1,143 @@
+@@[target("java")]
+
+// Cookbook 80: PCR Thermal Cycler
+
+@@system PCRCycler(total_cycles: int) {
+    interface:
+        start()
+        tick_minute()
+        temperature(): double
+        current_cycle(): int
+        phase(): String
+
+    machine:
+        $Idle {
+            start() {
+                this.cycle = 0;
+                -> $Denature
+            }
+            temperature(): double { @@:(25.0) }
+            current_cycle(): int { @@:(this.cycle) }
+            phase(): String { @@:("idle") }
+        }
+
+        $Running {
+            current_cycle(): int { @@:(this.cycle) }
+        }
+
+        $Denature => $Running {
+            $>() {
+                this.cycle = this.cycle + 1;
+                this.phase_min = 0;
+            }
+            tick_minute() {
+                this.phase_min = this.phase_min + 1;
+                if (this.phase_min >= 1) {
+                    -> $Anneal
+                }
+            }
+            temperature(): double { @@:(95.0) }
+            phase(): String { @@:("denature") }
+            => $^
+        }
+
+        $Anneal => $Running {
+            $>() { this.phase_min = 0; }
+            tick_minute() {
+                this.phase_min = this.phase_min + 1;
+                if (this.phase_min >= 1) {
+                    -> $Extend
+                }
+            }
+            temperature(): double { @@:(55.0) }
+            phase(): String { @@:("anneal") }
+            => $^
+        }
+
+        $Extend => $Running {
+            $>() { this.phase_min = 0; }
+            tick_minute() {
+                this.phase_min = this.phase_min + 1;
+                if (this.phase_min >= 2) {
+                    if (this.cycle >= this.target) {
+                        -> $FinalHold
+                    } else {
+                        -> $Denature
+                    }
+                }
+            }
+            temperature(): double { @@:(72.0) }
+            phase(): String { @@:("extend") }
+            => $^
+        }
+
+        $FinalHold {
+            temperature(): double { @@:(4.0) }
+            current_cycle(): int { @@:(this.cycle) }
+            phase(): String { @@:("final hold") }
+        }
+
+    domain:
+        target: int = total_cycles
+        cycle: int = 0
+        phase_min: int = 0
+}
+
+public class PCRCycler09Test {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+    static void checkF(String label, double actual, double expected) {
+        if (Math.abs(actual - expected) > 1e-9) {
+            System.out.println("FAIL: " + label + " expected " + expected + ", got " + actual);
+            System.exit(1);
+        }
+    }
+    static void checkI(String label, int actual, int expected) {
+        if (actual != expected) {
+            System.out.println("FAIL: " + label + " expected " + expected + ", got " + actual);
+            System.exit(1);
+        }
+    }
+
+    public static void main(String[] args) {
+        PCRCycler p = @@PCRCycler(3);
+        check("idle", (String) p.phase(), "idle");
+        checkF("idle temperature", (double) p.temperature(), 25.0);
+        checkI("idle cycle", (int) p.current_cycle(), 0);
+        p.tick_minute();
+        check("idle absorbs tick", (String) p.phase(), "idle");
+        p.start();
+        check("denature 1", (String) p.phase(), "denature");
+        checkI("cycle 1", (int) p.current_cycle(), 1);
+        checkF("95C", (double) p.temperature(), 95.0);
+        p.tick_minute();
+        check("anneal 1", (String) p.phase(), "anneal");
+        checkF("55C", (double) p.temperature(), 55.0);
+        p.tick_minute();
+        check("extend 1", (String) p.phase(), "extend");
+        checkF("72C", (double) p.temperature(), 72.0);
+        p.tick_minute();
+        check("extend partway", (String) p.phase(), "extend");
+        p.tick_minute();
+        check("denature 2", (String) p.phase(), "denature");
+        checkI("cycle 2", (int) p.current_cycle(), 2);
+        p.tick_minute(); check("anneal 2", (String) p.phase(), "anneal");
+        p.tick_minute(); check("extend 2", (String) p.phase(), "extend");
+        p.tick_minute(); p.tick_minute();
+        check("denature 3", (String) p.phase(), "denature");
+        checkI("cycle 3", (int) p.current_cycle(), 3);
+        p.tick_minute(); p.tick_minute(); p.tick_minute();
+        p.tick_minute();
+        check("final hold", (String) p.phase(), "final hold");
+        checkF("4C", (double) p.temperature(), 4.0);
+        p.tick_minute();
+        check("hold absorbs tick", (String) p.phase(), "final hold");
+        p.start();
+        check("hold absorbs start", (String) p.phase(), "final hold");
+        System.out.println("PASS: pcr_cycler");
+    }
+}

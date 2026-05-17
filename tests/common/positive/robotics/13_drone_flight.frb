@@ -1,0 +1,240 @@
+@@[target("ruby")]
+
+# Cookbook 108: Drone Flight Modes — Failsafe from Any Phase
+
+@@system DroneFlightMode {
+    interface:
+        arm(preflight_ok)
+        takeoff(altitude)
+        set_mission(waypoints_ok)
+        return_to_home()
+        land()
+        disarm()
+        takeoff_complete()
+        mission_complete()
+        home_reached()
+        touchdown()
+        battery_critical()
+        gps_lost()
+        rc_lost()
+        geofence_breach()
+        tick()
+        status()
+        altitude()
+        failsafe_reason()
+
+    machine:
+        $Disarmed {
+            arm(preflight_ok) {
+                if preflight_ok == 1
+                    -> $Armed
+                end
+            }
+            status() { @@:("disarmed") }
+            altitude() { @@:(@current_altitude) }
+            failsafe_reason() { @@:(@reason) }
+        }
+
+        $Armed {
+            takeoff(altitude) {
+                @target_altitude = altitude
+                -> $TakingOff
+            }
+            disarm() { -> $Disarmed }
+            status() { @@:("armed") }
+            altitude() { @@:(@current_altitude) }
+            failsafe_reason() { @@:(@reason) }
+        }
+
+        $Flying {
+            altitude() { @@:(@current_altitude) }
+            failsafe_reason() { @@:(@reason) }
+        }
+
+        $InFlight => $Flying {
+            battery_critical() {
+                @reason = "battery"
+                -> $EmergencyLand
+            }
+            rc_lost() {
+                @reason = "rc_lost"
+                -> $ReturningHome
+            }
+            gps_lost() {
+                @reason = "gps_lost"
+                -> $AltitudeHold
+            }
+            geofence_breach() {
+                @reason = "geofence"
+                -> $ReturningHome
+            }
+            => $^
+        }
+
+        $TakingOff => $InFlight {
+            $>() { @current_altitude = 0.0 }
+            tick() {
+                @current_altitude = @current_altitude + 1.0
+                if @current_altitude >= @target_altitude
+                    @@:self.takeoff_complete()
+                end
+            }
+            takeoff_complete() { -> $Hovering }
+            status() { @@:("taking_off") }
+            => $^
+        }
+
+        $Hovering => $InFlight {
+            set_mission(waypoints_ok) {
+                if waypoints_ok == 1
+                    -> $OnMission
+                end
+            }
+            land() { -> $Landing }
+            return_to_home() { -> $ReturningHome }
+            status() { @@:("hovering") }
+            => $^
+        }
+
+        $OnMission => $InFlight {
+            mission_complete() { -> $Hovering }
+            return_to_home() { -> $ReturningHome }
+            status() { @@:("on_mission") }
+            => $^
+        }
+
+        $ReturningHome => $InFlight {
+            home_reached() { -> $Landing }
+            status() { @@:("returning") }
+            => $^
+        }
+
+        $AltitudeHold => $InFlight {
+            status() { @@:("altitude_hold") }
+            => $^
+        }
+
+        $Landing {
+            touchdown() {
+                @current_altitude = 0.0
+                -> $Armed
+            }
+            status() { @@:("landing") }
+            altitude() { @@:(@current_altitude) }
+            failsafe_reason() { @@:(@reason) }
+        }
+
+        $EmergencyLand {
+            touchdown() {
+                @current_altitude = 0.0
+                -> $Armed
+            }
+            status() { @@:("emergency_land") }
+            altitude() { @@:(@current_altitude) }
+            failsafe_reason() { @@:(@reason) }
+        }
+
+    domain:
+        target_altitude = 0.0
+        current_altitude = 0.0
+        reason = ""
+}
+
+def check(label, actual, expected)
+    if actual != expected
+        puts "FAIL: #{label} expected '#{expected}', got '#{actual}'"
+        exit(1)
+    end
+end
+
+def check_alt(label, actual, expected)
+    if (actual - expected).abs > 1e-6
+        puts "FAIL: #{label} expected #{expected}, got #{actual}"
+        exit(1)
+    end
+end
+
+d = @@DroneFlightMode()
+check("disarmed", d.status, "disarmed")
+d.arm(0)
+check("preflight fail", d.status, "disarmed")
+d.arm(1)
+check("armed", d.status, "armed")
+d.takeoff(5.0)
+check("taking off", d.status, "taking_off")
+
+i = 0
+while i < 10
+    d.tick
+    break if d.status == "hovering"
+    i = i + 1
+end
+check("hovering", d.status, "hovering")
+check_alt("at altitude", d.altitude, 5.0)
+
+d.set_mission(1)
+check("on mission", d.status, "on_mission")
+d.mission_complete
+check("back to hovering", d.status, "hovering")
+
+d.land
+check("landing", d.status, "landing")
+d.touchdown
+check("back to armed", d.status, "armed")
+
+d2 = @@DroneFlightMode()
+d2.arm(1)
+d2.takeoff(100.0)
+d2.battery_critical
+check("battery -> emergency", d2.status, "emergency_land")
+check("battery reason", d2.failsafe_reason, "battery")
+
+d3 = @@DroneFlightMode()
+d3.arm(1)
+d3.takeoff(5.0)
+i = 0
+while i < 10
+    d3.tick
+    break if d3.status == "hovering"
+    i = i + 1
+end
+d3.rc_lost
+check("rc lost -> returning", d3.status, "returning")
+d3.home_reached
+check("home reached -> landing", d3.status, "landing")
+
+d4 = @@DroneFlightMode()
+d4.arm(1)
+d4.takeoff(5.0)
+i = 0
+while i < 10
+    d4.tick
+    break if d4.status == "hovering"
+    i = i + 1
+end
+d4.set_mission(1)
+d4.gps_lost
+check("gps lost -> altitude hold", d4.status, "altitude_hold")
+
+d5 = @@DroneFlightMode()
+d5.arm(1)
+d5.takeoff(5.0)
+i = 0
+while i < 10
+    d5.tick
+    break if d5.status == "hovering"
+    i = i + 1
+end
+d5.set_mission(1)
+d5.geofence_breach
+check("geofence -> returning", d5.status, "returning")
+check("geofence reason", d5.failsafe_reason, "geofence")
+
+d6 = @@DroneFlightMode()
+d6.battery_critical
+d6.rc_lost
+d6.gps_lost
+d6.geofence_breach
+check("disarmed ignores failsafes", d6.status, "disarmed")
+
+puts "PASS: drone_flight"

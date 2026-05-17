@@ -1,0 +1,180 @@
+@@[target("java")]
+
+// Cookbook 85: Sepsis Hour-1 Bundle
+
+@@system SepsisBundle {
+    interface:
+        recognize_sepsis()
+        lactate_drawn(value: double)
+        cultures_drawn()
+        antibiotics_given()
+        fluids_complete()
+        reassess_map(map_mmhg: int)
+        pressors_started()
+        tick_minute()
+        status(): String
+        bundle_complete(): boolean = false
+        elapsed_min(): int
+        pressors_indicated(): boolean
+
+    machine:
+        $PreRecognition {
+            recognize_sepsis() {
+                this.elapsed = 0;
+                this.lactate = 0.0;
+                this.cultures = false;
+                this.abx = false;
+                this.fluids = false;
+                this.reassessed = false;
+                this.pressors_needed = false;
+                this.pressors = false;
+                -> $BundleActive
+            }
+            status(): String { @@:("pre-recognition") }
+            elapsed_min(): int { @@:(this.elapsed) }
+            pressors_indicated(): boolean { @@:(this.pressors_needed) }
+        }
+
+        $BundleActive {
+            lactate_drawn(value: double) {
+                this.lactate = value;
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            cultures_drawn() {
+                this.cultures = true;
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            antibiotics_given() {
+                this.abx = true;
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            fluids_complete() {
+                this.fluids = true;
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            reassess_map(map_mmhg: int) {
+                this.reassessed = true;
+                this.pressors_needed = map_mmhg < 65;
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            pressors_started() {
+                this.pressors = true;
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            tick_minute() { this.elapsed = this.elapsed + 1; }
+            status(): String { @@:("active") }
+            elapsed_min(): int { @@:(this.elapsed) }
+            pressors_indicated(): boolean { @@:(this.pressors_needed) }
+        }
+
+        $OnTime {
+            bundle_complete(): boolean { @@:(true) }
+            status(): String { @@:("on time") }
+            elapsed_min(): int { @@:(this.elapsed) }
+            pressors_indicated(): boolean { @@:(this.pressors_needed) }
+        }
+
+        $Late {
+            bundle_complete(): boolean { @@:(true) }
+            status(): String { @@:("late") }
+            elapsed_min(): int { @@:(this.elapsed) }
+            pressors_indicated(): boolean { @@:(this.pressors_needed) }
+        }
+
+    actions:
+        is_complete(): boolean {
+            boolean base = this.cultures && this.abx && this.fluids && this.lactate > 0.0 && this.reassessed;
+            if (this.pressors_needed) {
+                return base && this.pressors;
+            }
+            return base;
+        }
+
+    domain:
+        elapsed: int = 0
+        lactate: double = 0.0
+        cultures: boolean = false
+        abx: boolean = false
+        fluids: boolean = false
+        reassessed: boolean = false
+        pressors_needed: boolean = false
+        pressors: boolean = false
+}
+
+public class SepsisBundle14Test {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+    static void checkB(String label, boolean actual, boolean expected) {
+        if (actual != expected) {
+            System.out.println("FAIL: " + label + " expected " + expected + ", got " + actual);
+            System.exit(1);
+        }
+    }
+
+    public static void main(String[] args) {
+        SepsisBundle a = @@SepsisBundle();
+        check("pre-recognition", (String) a.status(), "pre-recognition");
+        checkB("bundle_complete default false before recognize", (boolean) a.bundle_complete(), false);
+        a.lactate_drawn(3.4);
+        a.antibiotics_given();
+        check("pre-rec absorbs events", (String) a.status(), "pre-recognition");
+        a.recognize_sepsis();
+        check("active", (String) a.status(), "active");
+        a.lactate_drawn(3.4);
+        a.cultures_drawn();
+        for (int i = 0; i < 15; i = i + 1) a.tick_minute();
+        a.antibiotics_given();
+        a.fluids_complete();
+        check("still active after fluids", (String) a.status(), "active");
+        a.reassess_map(75);
+        check("on time", (String) a.status(), "on time");
+        checkB("complete", (boolean) a.bundle_complete(), true);
+        checkB("no pressors indicated", (boolean) a.pressors_indicated(), false);
+        if ((int) a.elapsed_min() > 60) { System.out.println("FAIL: over 60"); System.exit(1); }
+        a.antibiotics_given();
+        a.tick_minute();
+        check("on time absorbs events", (String) a.status(), "on time");
+
+        SepsisBundle b = @@SepsisBundle();
+        b.recognize_sepsis();
+        b.lactate_drawn(4.2);
+        b.cultures_drawn();
+        b.antibiotics_given();
+        b.fluids_complete();
+        for (int i = 0; i < 70; i = i + 1) b.tick_minute();
+        b.reassess_map(58);
+        check("active — pressors pending", (String) b.status(), "active");
+        checkB("pressors flagged", (boolean) b.pressors_indicated(), true);
+        b.pressors_started();
+        check("late terminal", (String) b.status(), "late");
+        checkB("complete (late)", (boolean) b.bundle_complete(), true);
+        if ((int) b.elapsed_min() <= 60) { System.out.println("FAIL: under 60"); System.exit(1); }
+
+        SepsisBundle c = @@SepsisBundle();
+        c.recognize_sepsis();
+        c.lactate_drawn(2.0);
+        c.cultures_drawn();
+        c.antibiotics_given();
+        c.fluids_complete();
+        c.reassess_map(80);
+        check("reassess completes w/o pressors", (String) c.status(), "on time");
+
+        System.out.println("PASS: sepsis_bundle");
+    }
+}
