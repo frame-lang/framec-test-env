@@ -1,0 +1,128 @@
+@@[target("javascript")]
+
+// Cookbook 81: Infusion Pump (safety-critical)
+
+@@system InfusionPump {
+    interface:
+        power_on()
+        set_rate(ml_per_hr)
+        prime()
+        start_infusion()
+        occlusion_detected()
+        acknowledge_alarm()
+        tick_minute()
+        volume_delivered() = 0.0
+        rate_mL_per_hr()
+        alarm_reason()
+        status()
+
+    machine:
+        $Off {
+            power_on() { -> $Idle }
+            status() { @@:("off") }
+            rate_mL_per_hr() { @@:(this.rate) }
+            volume_delivered() { @@:(this.volume) }
+            alarm_reason() { @@:("") }
+        }
+
+        $Operational {
+            occlusion_detected() { -> ("occlusion") $Alarm }
+        }
+
+        $Idle => $Operational {
+            set_rate(ml_per_hr) { this.rate = ml_per_hr; }
+            prime() {
+                if (this.rate > 0.0) {
+                    -> $Primed
+                }
+            }
+            status() { @@:("idle") }
+            rate_mL_per_hr() { @@:(this.rate) }
+            volume_delivered() { @@:(this.volume) }
+            alarm_reason() { @@:("") }
+            => $^
+        }
+
+        $Primed => $Operational {
+            start_infusion() { -> $Running }
+            status() { @@:("primed") }
+            rate_mL_per_hr() { @@:(this.rate) }
+            volume_delivered() { @@:(this.volume) }
+            alarm_reason() { @@:("") }
+            => $^
+        }
+
+        $Running => $Operational {
+            tick_minute() { this.volume = this.volume + this.rate / 60.0; }
+            status() { @@:("running") }
+            rate_mL_per_hr() { @@:(this.rate) }
+            volume_delivered() { @@:(this.volume) }
+            alarm_reason() { @@:("") }
+            => $^
+        }
+
+        $Alarm {
+            $.reason = "unknown"
+            $>(reason) { $.reason = reason; }
+            acknowledge_alarm() { -> $Idle }
+            status() { @@:("alarm") }
+            alarm_reason() { @@:($.reason) }
+            rate_mL_per_hr() { @@:(this.rate) }
+            volume_delivered() { @@:(this.volume) }
+        }
+
+    domain:
+        rate = 0.0
+        volume = 0.0
+}
+
+function check(label, actual, expected) {
+    if (actual !== expected) {
+        console.log("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+        process.exit(1);
+    }
+}
+function checkF(label, actual, expected) {
+    if (Math.abs(actual - expected) > 1e-9) {
+        console.log("FAIL: " + label + " expected " + expected + ", got " + actual);
+        process.exit(1);
+    }
+}
+
+const p = @@InfusionPump();
+check("start off", p.status(), "off");
+p.set_rate(100.0);
+checkF("rate unchanged in Off", p.rate_mL_per_hr(), 0.0);
+p.start_infusion();
+check("still off", p.status(), "off");
+p.power_on();
+check("idle", p.status(), "idle");
+p.set_rate(100.0);
+checkF("rate set", p.rate_mL_per_hr(), 100.0);
+p.start_infusion();
+check("idle cannot start", p.status(), "idle");
+checkF("no volume yet", p.volume_delivered(), 0.0);
+p.prime();
+check("primed", p.status(), "primed");
+p.start_infusion();
+check("running", p.status(), "running");
+for (let i = 0; i < 10; i = i + 1) p.tick_minute();
+check("running still", p.status(), "running");
+const volAfter10 = p.volume_delivered();
+checkF("volume ≈ 10*100/60", volAfter10, 10.0 * 100.0 / 60.0);
+p.occlusion_detected();
+check("alarm on occlusion", p.status(), "alarm");
+check("alarm reason via state var", p.alarm_reason(), "occlusion");
+p.start_infusion();
+p.prime();
+p.tick_minute();
+check("alarm still alarm", p.status(), "alarm");
+checkF("volume locked in alarm", p.volume_delivered(), volAfter10);
+p.acknowledge_alarm();
+check("ack returns to idle", p.status(), "idle");
+checkF("rate persisted across alarm", p.rate_mL_per_hr(), 100.0);
+p.prime();
+p.start_infusion();
+p.tick_minute();
+checkF("volume continues from prior", p.volume_delivered(), volAfter10 + 100.0 / 60.0);
+console.log("PASS: infusion_pump");
