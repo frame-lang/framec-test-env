@@ -1,0 +1,187 @@
+@@[target("gdscript")]
+
+# Cookbook 85: Sepsis Hour-1 Bundle
+
+@@system SepsisBundle : RefCounted {
+    interface:
+        recognize_sepsis()
+        lactate_drawn(value: float)
+        cultures_drawn()
+        antibiotics_given()
+        fluids_complete()
+        reassess_map(map_mmhg: int)
+        pressors_started()
+        tick_minute()
+        status(): String
+        bundle_complete(): bool = false
+        elapsed_min(): int
+        pressors_indicated(): bool
+
+    machine:
+        $PreRecognition {
+            recognize_sepsis() {
+                self.elapsed = 0
+                self.lactate = 0.0
+                self.cultures = false
+                self.abx = false
+                self.fluids = false
+                self.reassessed = false
+                self.pressors_needed = false
+                self.pressors = false
+                -> $BundleActive
+            }
+            status(): String { @@:("pre-recognition") }
+            elapsed_min(): int { @@:(self.elapsed) }
+            pressors_indicated(): bool { @@:(self.pressors_needed) }
+        }
+
+        $BundleActive {
+            lactate_drawn(value: float) {
+                self.lactate = value
+                if self.is_complete():
+                    if self.elapsed <= 60:
+                        -> $OnTime
+                    else:
+                        -> $Late
+            }
+            cultures_drawn() {
+                self.cultures = true
+                if self.is_complete():
+                    if self.elapsed <= 60:
+                        -> $OnTime
+                    else:
+                        -> $Late
+            }
+            antibiotics_given() {
+                self.abx = true
+                if self.is_complete():
+                    if self.elapsed <= 60:
+                        -> $OnTime
+                    else:
+                        -> $Late
+            }
+            fluids_complete() {
+                self.fluids = true
+                if self.is_complete():
+                    if self.elapsed <= 60:
+                        -> $OnTime
+                    else:
+                        -> $Late
+            }
+            reassess_map(map_mmhg: int) {
+                self.reassessed = true
+                self.pressors_needed = map_mmhg < 65
+                if self.is_complete():
+                    if self.elapsed <= 60:
+                        -> $OnTime
+                    else:
+                        -> $Late
+            }
+            pressors_started() {
+                self.pressors = true
+                if self.is_complete():
+                    if self.elapsed <= 60:
+                        -> $OnTime
+                    else:
+                        -> $Late
+            }
+            tick_minute() { self.elapsed = self.elapsed + 1 }
+            status(): String { @@:("active") }
+            elapsed_min(): int { @@:(self.elapsed) }
+            pressors_indicated(): bool { @@:(self.pressors_needed) }
+        }
+
+        $OnTime {
+            bundle_complete(): bool { @@:(true) }
+            status(): String { @@:("on time") }
+            elapsed_min(): int { @@:(self.elapsed) }
+            pressors_indicated(): bool { @@:(self.pressors_needed) }
+        }
+
+        $Late {
+            bundle_complete(): bool { @@:(true) }
+            status(): String { @@:("late") }
+            elapsed_min(): int { @@:(self.elapsed) }
+            pressors_indicated(): bool { @@:(self.pressors_needed) }
+        }
+
+    actions:
+        is_complete(): bool {
+            var base = self.cultures and self.abx and self.fluids and self.lactate > 0.0 and self.reassessed
+            if self.pressors_needed:
+                return base and self.pressors
+            return base
+        }
+
+    domain:
+        elapsed: int = 0
+        lactate: float = 0.0
+        cultures: bool = false
+        abx: bool = false
+        fluids: bool = false
+        reassessed: bool = false
+        pressors_needed: bool = false
+        pressors: bool = false
+}
+
+func check(label: String, actual, expected) -> void:
+    if actual != expected:
+        print("FAIL: %s expected '%s', got '%s'" % [label, str(expected), str(actual)])
+        quit(1)
+
+func _init() -> void:
+    var a = @@SepsisBundle()
+    check("pre-recognition", a.status(), "pre-recognition")
+    check("bundle_complete default false before recognize", a.bundle_complete(), false)
+    a.lactate_drawn(3.4)
+    a.antibiotics_given()
+    check("pre-rec absorbs events", a.status(), "pre-recognition")
+    a.recognize_sepsis()
+    check("active", a.status(), "active")
+    a.lactate_drawn(3.4)
+    a.cultures_drawn()
+    for i in range(15):
+        a.tick_minute()
+    a.antibiotics_given()
+    a.fluids_complete()
+    check("still active after fluids", a.status(), "active")
+    a.reassess_map(75)
+    check("on time", a.status(), "on time")
+    check("complete", a.bundle_complete(), true)
+    check("no pressors indicated", a.pressors_indicated(), false)
+    if a.elapsed_min() > 60:
+        print("FAIL: over 60")
+        quit(1)
+    a.antibiotics_given()
+    a.tick_minute()
+    check("on time absorbs events", a.status(), "on time")
+
+    var b = @@SepsisBundle()
+    b.recognize_sepsis()
+    b.lactate_drawn(4.2)
+    b.cultures_drawn()
+    b.antibiotics_given()
+    b.fluids_complete()
+    for i in range(70):
+        b.tick_minute()
+    b.reassess_map(58)
+    check("active — pressors pending", b.status(), "active")
+    check("pressors flagged", b.pressors_indicated(), true)
+    b.pressors_started()
+    check("late terminal", b.status(), "late")
+    check("complete (late)", b.bundle_complete(), true)
+    if b.elapsed_min() <= 60:
+        print("FAIL: under 60")
+        quit(1)
+
+    var c = @@SepsisBundle()
+    c.recognize_sepsis()
+    c.lactate_drawn(2.0)
+    c.cultures_drawn()
+    c.antibiotics_given()
+    c.fluids_complete()
+    c.reassess_map(80)
+    check("reassess completes w/o pressors", c.status(), "on time")
+
+    print("PASS: sepsis_bundle")
+    quit(0)

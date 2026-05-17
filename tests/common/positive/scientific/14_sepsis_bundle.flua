@@ -1,0 +1,194 @@
+@@[target("lua")]
+
+-- Cookbook 85: Sepsis Hour-1 Bundle
+
+@@system SepsisBundle {
+    interface:
+        recognize_sepsis()
+        lactate_drawn(value)
+        cultures_drawn()
+        antibiotics_given()
+        fluids_complete()
+        reassess_map(map_mmhg)
+        pressors_started()
+        tick_minute()
+        status()
+        bundle_complete() = false
+        elapsed_min()
+        pressors_indicated()
+
+    machine:
+        $PreRecognition {
+            recognize_sepsis() {
+                self.elapsed = 0
+                self.lactate = 0.0
+                self.cultures = false
+                self.abx = false
+                self.fluids = false
+                self.reassessed = false
+                self.pressors_needed = false
+                self.pressors = false
+                -> $BundleActive
+            }
+            status() { @@:("pre-recognition") }
+            elapsed_min() { @@:(self.elapsed) }
+            pressors_indicated() { @@:(self.pressors_needed) }
+        }
+
+        $BundleActive {
+            lactate_drawn(value) {
+                self.lactate = value
+                if self:is_complete() then
+                    if self.elapsed <= 60 then
+                        -> $OnTime
+                    else
+                        -> $Late
+                    end
+                end
+            }
+            cultures_drawn() {
+                self.cultures = true
+                if self:is_complete() then
+                    if self.elapsed <= 60 then
+                        -> $OnTime
+                    else
+                        -> $Late
+                    end
+                end
+            }
+            antibiotics_given() {
+                self.abx = true
+                if self:is_complete() then
+                    if self.elapsed <= 60 then
+                        -> $OnTime
+                    else
+                        -> $Late
+                    end
+                end
+            }
+            fluids_complete() {
+                self.fluids = true
+                if self:is_complete() then
+                    if self.elapsed <= 60 then
+                        -> $OnTime
+                    else
+                        -> $Late
+                    end
+                end
+            }
+            reassess_map(map_mmhg) {
+                self.reassessed = true
+                self.pressors_needed = map_mmhg < 65
+                if self:is_complete() then
+                    if self.elapsed <= 60 then
+                        -> $OnTime
+                    else
+                        -> $Late
+                    end
+                end
+            }
+            pressors_started() {
+                self.pressors = true
+                if self:is_complete() then
+                    if self.elapsed <= 60 then
+                        -> $OnTime
+                    else
+                        -> $Late
+                    end
+                end
+            }
+            tick_minute() { self.elapsed = self.elapsed + 1 }
+            status() { @@:("active") }
+            elapsed_min() { @@:(self.elapsed) }
+            pressors_indicated() { @@:(self.pressors_needed) }
+        }
+
+        $OnTime {
+            bundle_complete() { @@:(true) }
+            status() { @@:("on time") }
+            elapsed_min() { @@:(self.elapsed) }
+            pressors_indicated() { @@:(self.pressors_needed) }
+        }
+
+        $Late {
+            bundle_complete() { @@:(true) }
+            status() { @@:("late") }
+            elapsed_min() { @@:(self.elapsed) }
+            pressors_indicated() { @@:(self.pressors_needed) }
+        }
+
+    actions:
+        is_complete() {
+            local base = self.cultures and self.abx and self.fluids and self.lactate > 0.0 and self.reassessed
+            if self.pressors_needed then
+                return base and self.pressors
+            end
+            return base
+        }
+
+    domain:
+        elapsed = 0
+        lactate = 0.0
+        cultures = false
+        abx = false
+        fluids = false
+        reassessed = false
+        pressors_needed = false
+        pressors = false
+}
+
+local function check(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " expected '" .. tostring(expected) .. "', got '" .. tostring(actual) .. "'")
+        os.exit(1)
+    end
+end
+
+local a = @@SepsisBundle()
+check("pre-recognition", a:status(), "pre-recognition")
+check("bundle_complete default false before recognize", a:bundle_complete(), false)
+a:lactate_drawn(3.4)
+a:antibiotics_given()
+check("pre-rec absorbs events", a:status(), "pre-recognition")
+a:recognize_sepsis()
+check("active", a:status(), "active")
+a:lactate_drawn(3.4)
+a:cultures_drawn()
+for i = 1, 15 do a:tick_minute() end
+a:antibiotics_given()
+a:fluids_complete()
+check("still active after fluids", a:status(), "active")
+a:reassess_map(75)
+check("on time", a:status(), "on time")
+check("complete", a:bundle_complete(), true)
+check("no pressors indicated", a:pressors_indicated(), false)
+if a:elapsed_min() > 60 then print("FAIL: over 60"); os.exit(1) end
+a:antibiotics_given()
+a:tick_minute()
+check("on time absorbs events", a:status(), "on time")
+
+local b = @@SepsisBundle()
+b:recognize_sepsis()
+b:lactate_drawn(4.2)
+b:cultures_drawn()
+b:antibiotics_given()
+b:fluids_complete()
+for i = 1, 70 do b:tick_minute() end
+b:reassess_map(58)
+check("active — pressors pending", b:status(), "active")
+check("pressors flagged", b:pressors_indicated(), true)
+b:pressors_started()
+check("late terminal", b:status(), "late")
+check("complete (late)", b:bundle_complete(), true)
+if b:elapsed_min() <= 60 then print("FAIL: under 60"); os.exit(1) end
+
+local c = @@SepsisBundle()
+c:recognize_sepsis()
+c:lactate_drawn(2.0)
+c:cultures_drawn()
+c:antibiotics_given()
+c:fluids_complete()
+c:reassess_map(80)
+check("reassess completes w/o pressors", c:status(), "on time")
+
+print("PASS: sepsis_bundle")

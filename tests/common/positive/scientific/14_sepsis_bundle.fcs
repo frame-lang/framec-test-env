@@ -1,0 +1,176 @@
+@@[target("csharp")]
+
+// Cookbook 85: Sepsis Hour-1 Bundle
+
+using System;
+
+@@system SepsisBundle {
+    interface:
+        recognize_sepsis()
+        lactate_drawn(value: double)
+        cultures_drawn()
+        antibiotics_given()
+        fluids_complete()
+        reassess_map(map_mmhg: int)
+        pressors_started()
+        tick_minute()
+        status(): string
+        bundle_complete(): bool = false
+        elapsed_min(): int
+        pressors_indicated(): bool
+
+    machine:
+        $PreRecognition {
+            recognize_sepsis() {
+                this.elapsed = 0;
+                this.lactate = 0.0;
+                this.cultures = false;
+                this.abx = false;
+                this.fluids = false;
+                this.reassessed = false;
+                this.pressors_needed = false;
+                this.pressors = false;
+                -> $BundleActive
+            }
+            status(): string { @@:("pre-recognition") }
+            elapsed_min(): int { @@:(this.elapsed) }
+            pressors_indicated(): bool { @@:(this.pressors_needed) }
+        }
+
+        $BundleActive {
+            lactate_drawn(value: double) {
+                this.lactate = value;
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            cultures_drawn() {
+                this.cultures = true;
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            antibiotics_given() {
+                this.abx = true;
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            fluids_complete() {
+                this.fluids = true;
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            reassess_map(map_mmhg: int) {
+                this.reassessed = true;
+                this.pressors_needed = map_mmhg < 65;
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            pressors_started() {
+                this.pressors = true;
+                if (this.is_complete()) {
+                    if (this.elapsed <= 60) { -> $OnTime } else { -> $Late }
+                }
+            }
+            tick_minute() { this.elapsed = this.elapsed + 1; }
+            status(): string { @@:("active") }
+            elapsed_min(): int { @@:(this.elapsed) }
+            pressors_indicated(): bool { @@:(this.pressors_needed) }
+        }
+
+        $OnTime {
+            bundle_complete(): bool { @@:(true) }
+            status(): string { @@:("on time") }
+            elapsed_min(): int { @@:(this.elapsed) }
+            pressors_indicated(): bool { @@:(this.pressors_needed) }
+        }
+
+        $Late {
+            bundle_complete(): bool { @@:(true) }
+            status(): string { @@:("late") }
+            elapsed_min(): int { @@:(this.elapsed) }
+            pressors_indicated(): bool { @@:(this.pressors_needed) }
+        }
+
+    actions:
+        is_complete(): bool {
+            bool base = this.cultures && this.abx && this.fluids && this.lactate > 0.0 && this.reassessed;
+            if (this.pressors_needed) {
+                return base && this.pressors;
+            }
+            return base;
+        }
+
+    domain:
+        elapsed: int = 0
+        lactate: double = 0.0
+        cultures: bool = false
+        abx: bool = false
+        fluids: bool = false
+        reassessed: bool = false
+        pressors_needed: bool = false
+        pressors: bool = false
+}
+
+public class Program {
+    static void Check(string label, string actual, string expected) {
+        if (actual != expected) { Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'"); Environment.Exit(1); }
+    }
+    static void CheckB(string label, bool actual, bool expected) {
+        if (actual != expected) { Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}"); Environment.Exit(1); }
+    }
+
+    public static void Main() {
+        var a = @@SepsisBundle();
+        Check("pre-recognition", (string)a.status(), "pre-recognition");
+        CheckB("bundle_complete default false before recognize", (bool)a.bundle_complete(), false);
+        a.lactate_drawn(3.4);
+        a.antibiotics_given();
+        Check("pre-rec absorbs events", (string)a.status(), "pre-recognition");
+        a.recognize_sepsis();
+        Check("active", (string)a.status(), "active");
+        a.lactate_drawn(3.4);
+        a.cultures_drawn();
+        for (int i = 0; i < 15; i = i + 1) a.tick_minute();
+        a.antibiotics_given();
+        a.fluids_complete();
+        Check("still active after fluids", (string)a.status(), "active");
+        a.reassess_map(75);
+        Check("on time", (string)a.status(), "on time");
+        CheckB("complete", (bool)a.bundle_complete(), true);
+        CheckB("no pressors indicated", (bool)a.pressors_indicated(), false);
+        if ((int)a.elapsed_min() > 60) { Console.WriteLine("FAIL: over 60"); Environment.Exit(1); }
+        a.antibiotics_given();
+        a.tick_minute();
+        Check("on time absorbs events", (string)a.status(), "on time");
+
+        var b = @@SepsisBundle();
+        b.recognize_sepsis();
+        b.lactate_drawn(4.2);
+        b.cultures_drawn();
+        b.antibiotics_given();
+        b.fluids_complete();
+        for (int i = 0; i < 70; i = i + 1) b.tick_minute();
+        b.reassess_map(58);
+        Check("active — pressors pending", (string)b.status(), "active");
+        CheckB("pressors flagged", (bool)b.pressors_indicated(), true);
+        b.pressors_started();
+        Check("late terminal", (string)b.status(), "late");
+        CheckB("complete (late)", (bool)b.bundle_complete(), true);
+        if ((int)b.elapsed_min() <= 60) { Console.WriteLine("FAIL: under 60"); Environment.Exit(1); }
+
+        var c = @@SepsisBundle();
+        c.recognize_sepsis();
+        c.lactate_drawn(2.0);
+        c.cultures_drawn();
+        c.antibiotics_given();
+        c.fluids_complete();
+        c.reassess_map(80);
+        Check("reassess completes w/o pressors", (string)c.status(), "on time");
+
+        Console.WriteLine("PASS: sepsis_bundle");
+    }
+}
