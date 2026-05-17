@@ -1,0 +1,144 @@
+@@[target("csharp")]
+
+// Cookbook 83: AED / Defibrillator
+
+using System;
+
+@@system AED {
+    interface:
+        power_on()
+        pads_attached()
+        rhythm_detected(rhythm: string)
+        tick_ms(ms: int)
+        press_shock()
+        confirm_clear()
+        status(): string
+        shock_count(): int
+        charge_pct(): int
+
+    machine:
+        $Off {
+            power_on() { -> $AwaitingPads }
+            status(): string { @@:("off") }
+            shock_count(): int { @@:(this.shocks) }
+            charge_pct(): int { @@:(this.charge_pct_dom) }
+        }
+
+        $AwaitingPads {
+            pads_attached() { -> $Analyzing }
+            status(): string { @@:("attach pads") }
+            shock_count(): int { @@:(this.shocks) }
+            charge_pct(): int { @@:(this.charge_pct_dom) }
+        }
+
+        $Analyzing {
+            rhythm_detected(rhythm: string) {
+                this.last_rhythm = rhythm;
+                if (rhythm == "VF" || rhythm == "VT") {
+                    -> $Charging
+                } else {
+                    -> $NotAdvised
+                }
+            }
+            status(): string { @@:("analyzing") }
+            shock_count(): int { @@:(this.shocks) }
+            charge_pct(): int { @@:(this.charge_pct_dom) }
+        }
+
+        $Charging {
+            $>() { this.charge_pct_dom = 0; }
+            tick_ms(ms: int) {
+                this.charge_pct_dom = this.charge_pct_dom + ms;
+                if (this.charge_pct_dom >= 100) {
+                    -> $AwaitingClear
+                }
+            }
+            status(): string { @@:("charging") }
+            shock_count(): int { @@:(this.shocks) }
+            charge_pct(): int { @@:(this.charge_pct_dom) }
+        }
+
+        $AwaitingClear {
+            confirm_clear() { -> $ReadyToShock }
+            status(): string { @@:("awaiting clear") }
+            shock_count(): int { @@:(this.shocks) }
+            charge_pct(): int { @@:(this.charge_pct_dom) }
+        }
+
+        $ReadyToShock {
+            press_shock() {
+                this.shocks = this.shocks + 1;
+                -> $Analyzing
+            }
+            status(): string { @@:("ready to shock") }
+            shock_count(): int { @@:(this.shocks) }
+            charge_pct(): int { @@:(this.charge_pct_dom) }
+        }
+
+        $NotAdvised {
+            status(): string { @@:("no shock advised") }
+            shock_count(): int { @@:(this.shocks) }
+            charge_pct(): int { @@:(this.charge_pct_dom) }
+        }
+
+    domain:
+        last_rhythm: string = ""
+        charge_pct_dom: int = 0
+        shocks: int = 0
+}
+
+public class Program {
+    static void Check(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+    static void CheckI(string label, int actual, int expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}");
+            Environment.Exit(1);
+        }
+    }
+
+    public static void Main() {
+        var a = @@AED();
+        Check("start off", (string)a.status(), "off");
+        a.press_shock();
+        CheckI("off cannot shock", (int)a.shock_count(), 0);
+        a.power_on();
+        Check("awaiting pads", (string)a.status(), "attach pads");
+        a.press_shock();
+        CheckI("awaiting pads cannot shock", (int)a.shock_count(), 0);
+        a.pads_attached();
+        Check("analyzing", (string)a.status(), "analyzing");
+        a.press_shock();
+        CheckI("analyzing cannot shock", (int)a.shock_count(), 0);
+        a.rhythm_detected("VF");
+        Check("charging", (string)a.status(), "charging");
+        a.press_shock();
+        CheckI("charging cannot shock", (int)a.shock_count(), 0);
+        a.tick_ms(50);
+        Check("still charging", (string)a.status(), "charging");
+        CheckI("charge 50", (int)a.charge_pct(), 50);
+        a.press_shock();
+        CheckI("still cannot shock half-charged", (int)a.shock_count(), 0);
+        a.tick_ms(50);
+        Check("awaiting clear", (string)a.status(), "awaiting clear");
+        a.press_shock();
+        CheckI("awaiting clear cannot shock", (int)a.shock_count(), 0);
+        a.confirm_clear();
+        Check("ready", (string)a.status(), "ready to shock");
+        a.press_shock();
+        CheckI("shocked", (int)a.shock_count(), 1);
+        Check("back to analyzing", (string)a.status(), "analyzing");
+        a.rhythm_detected("asystole");
+        Check("no shock advised", (string)a.status(), "no shock advised");
+        a.press_shock();
+        a.tick_ms(100);
+        a.confirm_clear();
+        Check("not-advised absorbs everything", (string)a.status(), "no shock advised");
+        CheckI("still 1 shock total", (int)a.shock_count(), 1);
+        Console.WriteLine("PASS: aed");
+    }
+}

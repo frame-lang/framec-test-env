@@ -1,0 +1,140 @@
+@@[target("rust")]
+
+// Cookbook 83: AED / Defibrillator
+
+@@system AED {
+    interface:
+        power_on()
+        pads_attached()
+        rhythm_detected(rhythm: String)
+        tick_ms(ms: i32)
+        press_shock()
+        confirm_clear()
+        status(): String
+        shock_count(): i32
+        charge_pct(): i32
+
+    machine:
+        $Off {
+            power_on() { -> $AwaitingPads }
+            status(): String { @@:(String::from("off")) }
+            shock_count(): i32 { @@:(self.shocks) }
+            charge_pct(): i32 { @@:(self.charge_pct_dom) }
+        }
+
+        $AwaitingPads {
+            pads_attached() { -> $Analyzing }
+            status(): String { @@:(String::from("attach pads")) }
+            shock_count(): i32 { @@:(self.shocks) }
+            charge_pct(): i32 { @@:(self.charge_pct_dom) }
+        }
+
+        $Analyzing {
+            rhythm_detected(rhythm: String) {
+                self.last_rhythm = rhythm.clone();
+                if rhythm == "VF" || rhythm == "VT" {
+                    -> $Charging
+                } else {
+                    -> $NotAdvised
+                }
+            }
+            status(): String { @@:(String::from("analyzing")) }
+            shock_count(): i32 { @@:(self.shocks) }
+            charge_pct(): i32 { @@:(self.charge_pct_dom) }
+        }
+
+        $Charging {
+            $>() { self.charge_pct_dom = 0; }
+            tick_ms(ms: i32) {
+                self.charge_pct_dom = self.charge_pct_dom + ms;
+                if self.charge_pct_dom >= 100 {
+                    -> $AwaitingClear
+                }
+            }
+            status(): String { @@:(String::from("charging")) }
+            shock_count(): i32 { @@:(self.shocks) }
+            charge_pct(): i32 { @@:(self.charge_pct_dom) }
+        }
+
+        $AwaitingClear {
+            confirm_clear() { -> $ReadyToShock }
+            status(): String { @@:(String::from("awaiting clear")) }
+            shock_count(): i32 { @@:(self.shocks) }
+            charge_pct(): i32 { @@:(self.charge_pct_dom) }
+        }
+
+        $ReadyToShock {
+            press_shock() {
+                self.shocks = self.shocks + 1;
+                -> $Analyzing
+            }
+            status(): String { @@:(String::from("ready to shock")) }
+            shock_count(): i32 { @@:(self.shocks) }
+            charge_pct(): i32 { @@:(self.charge_pct_dom) }
+        }
+
+        $NotAdvised {
+            status(): String { @@:(String::from("no shock advised")) }
+            shock_count(): i32 { @@:(self.shocks) }
+            charge_pct(): i32 { @@:(self.charge_pct_dom) }
+        }
+
+    domain:
+        last_rhythm: String = String::new()
+        charge_pct_dom: i32 = 0
+        shocks: i32 = 0
+}
+
+fn check(label: &str, actual: String, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+fn check_i(label: &str, actual: i32, expected: i32) {
+    if actual != expected {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn main() {
+    let mut a = @@AED();
+    check("start off", a.status(), "off");
+    a.press_shock();
+    check_i("off cannot shock", a.shock_count(), 0);
+    a.power_on();
+    check("awaiting pads", a.status(), "attach pads");
+    a.press_shock();
+    check_i("awaiting pads cannot shock", a.shock_count(), 0);
+    a.pads_attached();
+    check("analyzing", a.status(), "analyzing");
+    a.press_shock();
+    check_i("analyzing cannot shock", a.shock_count(), 0);
+    a.rhythm_detected(String::from("VF"));
+    check("charging", a.status(), "charging");
+    a.press_shock();
+    check_i("charging cannot shock", a.shock_count(), 0);
+    a.tick_ms(50);
+    check("still charging", a.status(), "charging");
+    check_i("charge 50", a.charge_pct(), 50);
+    a.press_shock();
+    check_i("still cannot shock half-charged", a.shock_count(), 0);
+    a.tick_ms(50);
+    check("awaiting clear", a.status(), "awaiting clear");
+    a.press_shock();
+    check_i("awaiting clear cannot shock", a.shock_count(), 0);
+    a.confirm_clear();
+    check("ready", a.status(), "ready to shock");
+    a.press_shock();
+    check_i("shocked", a.shock_count(), 1);
+    check("back to analyzing", a.status(), "analyzing");
+    a.rhythm_detected(String::from("asystole"));
+    check("no shock advised", a.status(), "no shock advised");
+    a.press_shock();
+    a.tick_ms(100);
+    a.confirm_clear();
+    check("not-advised absorbs everything", a.status(), "no shock advised");
+    check_i("still 1 shock total", a.shock_count(), 1);
+    println!("PASS: aed");
+}

@@ -1,0 +1,146 @@
+@@[target("c")]
+
+// Cookbook 83: AED / Defibrillator
+
+@@system AED {
+    interface:
+        power_on()
+        pads_attached()
+        rhythm_detected(rhythm: string)
+        tick_ms(ms: int)
+        press_shock()
+        confirm_clear()
+        status(): string
+        shock_count(): int
+        charge_pct(): int
+
+    machine:
+        $Off {
+            power_on() { -> $AwaitingPads }
+            status(): string { @@:("off") }
+            shock_count(): int { @@:(self->shocks) }
+            charge_pct(): int { @@:(self->charge_pct_dom) }
+        }
+
+        $AwaitingPads {
+            pads_attached() { -> $Analyzing }
+            status(): string { @@:("attach pads") }
+            shock_count(): int { @@:(self->shocks) }
+            charge_pct(): int { @@:(self->charge_pct_dom) }
+        }
+
+        $Analyzing {
+            rhythm_detected(rhythm: string) {
+                self->last_rhythm = rhythm;
+                if (strcmp(rhythm, "VF") == 0 || strcmp(rhythm, "VT") == 0) {
+                    -> $Charging
+                } else {
+                    -> $NotAdvised
+                }
+            }
+            status(): string { @@:("analyzing") }
+            shock_count(): int { @@:(self->shocks) }
+            charge_pct(): int { @@:(self->charge_pct_dom) }
+        }
+
+        $Charging {
+            $>() { self->charge_pct_dom = 0; }
+            tick_ms(ms: int) {
+                self->charge_pct_dom = self->charge_pct_dom + ms;
+                if (self->charge_pct_dom >= 100) {
+                    -> $AwaitingClear
+                }
+            }
+            status(): string { @@:("charging") }
+            shock_count(): int { @@:(self->shocks) }
+            charge_pct(): int { @@:(self->charge_pct_dom) }
+        }
+
+        $AwaitingClear {
+            confirm_clear() { -> $ReadyToShock }
+            status(): string { @@:("awaiting clear") }
+            shock_count(): int { @@:(self->shocks) }
+            charge_pct(): int { @@:(self->charge_pct_dom) }
+        }
+
+        $ReadyToShock {
+            press_shock() {
+                self->shocks = self->shocks + 1;
+                -> $Analyzing
+            }
+            status(): string { @@:("ready to shock") }
+            shock_count(): int { @@:(self->shocks) }
+            charge_pct(): int { @@:(self->charge_pct_dom) }
+        }
+
+        $NotAdvised {
+            status(): string { @@:("no shock advised") }
+            shock_count(): int { @@:(self->shocks) }
+            charge_pct(): int { @@:(self->charge_pct_dom) }
+        }
+
+    domain:
+        last_rhythm: string = ""
+        charge_pct_dom: int = 0
+        shocks: int = 0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_i(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    AED* a = @@AED();
+    check_str("start off", AED_status(a), "off");
+    AED_press_shock(a);
+    check_i("off cannot shock", AED_shock_count(a), 0);
+    AED_power_on(a);
+    check_str("awaiting pads", AED_status(a), "attach pads");
+    AED_press_shock(a);
+    check_i("awaiting pads cannot shock", AED_shock_count(a), 0);
+    AED_pads_attached(a);
+    check_str("analyzing", AED_status(a), "analyzing");
+    AED_press_shock(a);
+    check_i("analyzing cannot shock", AED_shock_count(a), 0);
+    AED_rhythm_detected(a, "VF");
+    check_str("charging", AED_status(a), "charging");
+    AED_press_shock(a);
+    check_i("charging cannot shock", AED_shock_count(a), 0);
+    AED_tick_ms(a, 50);
+    check_str("still charging", AED_status(a), "charging");
+    check_i("charge 50", AED_charge_pct(a), 50);
+    AED_press_shock(a);
+    check_i("still cannot shock half-charged", AED_shock_count(a), 0);
+    AED_tick_ms(a, 50);
+    check_str("awaiting clear", AED_status(a), "awaiting clear");
+    AED_press_shock(a);
+    check_i("awaiting clear cannot shock", AED_shock_count(a), 0);
+    AED_confirm_clear(a);
+    check_str("ready", AED_status(a), "ready to shock");
+    AED_press_shock(a);
+    check_i("shocked", AED_shock_count(a), 1);
+    check_str("back to analyzing", AED_status(a), "analyzing");
+    AED_rhythm_detected(a, "asystole");
+    check_str("no shock advised", AED_status(a), "no shock advised");
+    AED_press_shock(a);
+    AED_tick_ms(a, 100);
+    AED_confirm_clear(a);
+    check_str("not-advised absorbs everything", AED_status(a), "no shock advised");
+    check_i("still 1 shock total", AED_shock_count(a), 1);
+    printf("PASS: aed\n");
+    AED_destroy(a);
+    return 0;
+}

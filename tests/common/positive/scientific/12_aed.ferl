@@ -1,0 +1,86 @@
+@@[target("erlang")]
+
+%% Cookbook 83: AED / Defibrillator
+
+@@system AED {
+    interface:
+        power_on()
+        pads_attached()
+        rhythm_detected(rhythm: string)
+        tick_ms(ms: int)
+        press_shock()
+        confirm_clear()
+        status(): string
+        shock_count(): int
+        charge_pct(): int
+
+    machine:
+        $Off {
+            power_on() { -> $AwaitingPads }
+            status(): string { @@:("off") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $AwaitingPads {
+            pads_attached() { -> $Analyzing }
+            status(): string { @@:("attach pads") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $Analyzing {
+            rhythm_detected(rhythm: string) {
+                self.last_rhythm = Rhythm,
+                case (Rhythm == "VF") orelse (Rhythm == "VT") of
+                    true -> -> $Charging;
+                    false -> -> $NotAdvised
+                end
+            }
+            status(): string { @@:("analyzing") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $Charging {
+            $>() { self.charge_pct_dom = 0 }
+            tick_ms(ms: int) {
+                self.charge_pct_dom = self.charge_pct_dom + Ms,
+                case self.charge_pct_dom >= 100 of
+                    true -> -> $AwaitingClear;
+                    false -> ok
+                end
+            }
+            status(): string { @@:("charging") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $AwaitingClear {
+            confirm_clear() { -> $ReadyToShock }
+            status(): string { @@:("awaiting clear") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $ReadyToShock {
+            press_shock() {
+                self.shocks = self.shocks + 1,
+                -> $Analyzing
+            }
+            status(): string { @@:("ready to shock") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+        $NotAdvised {
+            status(): string { @@:("no shock advised") }
+            shock_count(): int { @@:(self.shocks) }
+            charge_pct(): int { @@:(self.charge_pct_dom) }
+        }
+
+    domain:
+        last_rhythm: string = ""
+        charge_pct_dom: int = 0
+        shocks: int = 0
+}
