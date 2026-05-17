@@ -1,0 +1,176 @@
+@@[target("typescript")]
+
+// Cookbook 87: OAuth 2.0 Authorization Code + PKCE
+
+@@system OAuthPkceFlow {
+    interface:
+        start(client_id: string, redirect_uri: string, scope: string, nonce: string)
+        authorization_redirect(code: string, state: string)
+        exchange_response(access_token: string, refresh_token: string)
+        exchange_error(reason: string)
+        use_token(): string = "no_token"
+        refresh()
+        revoke()
+        timeout()
+        get_status(): string = "idle"
+        get_auth_code(): string
+        get_code_verifier(): string
+
+    machine:
+        $Idle {
+            start(client_id: string, redirect_uri: string, scope: string, nonce: string) {
+                this.client_id = client_id;
+                this.redirect_uri = redirect_uri;
+                this.scope = scope;
+                this.code_verifier = nonce;
+                this.code_challenge = nonce;
+                this.state_nonce = nonce;
+                -> $AwaitingRedirect
+            }
+            get_status(): string { @@:("idle") }
+            get_auth_code(): string { @@:(this.auth_code) }
+            get_code_verifier(): string { @@:(this.code_verifier) }
+        }
+
+        $AwaitingRedirect {
+            authorization_redirect(code: string, state: string) {
+                if (state !== this.state_nonce) {
+                    -> $Failed
+                } else {
+                    this.auth_code = code;
+                    -> $ExchangingCode
+                }
+            }
+            timeout() { -> $Failed }
+            get_status(): string { @@:("awaiting_redirect") }
+            get_auth_code(): string { @@:(this.auth_code) }
+            get_code_verifier(): string { @@:(this.code_verifier) }
+        }
+
+        $ExchangingCode {
+            <$() {
+                this.auth_code = "";
+                this.code_verifier = "";
+            }
+            exchange_response(access_token: string, refresh_token: string) {
+                this.access_token = access_token;
+                this.refresh_token = refresh_token;
+                -> $Authorized
+            }
+            exchange_error(reason: string) { -> $Failed }
+            timeout() { -> $Failed }
+            get_status(): string { @@:("exchanging") }
+            get_auth_code(): string { @@:(this.auth_code) }
+            get_code_verifier(): string { @@:(this.code_verifier) }
+        }
+
+        $Authorized {
+            use_token(): string { @@:(this.access_token) }
+            refresh() { -> $Refreshing }
+            revoke() { -> $Revoked }
+            get_status(): string { @@:("authorized") }
+            get_auth_code(): string { @@:(this.auth_code) }
+            get_code_verifier(): string { @@:(this.code_verifier) }
+        }
+
+        $Refreshing {
+            exchange_response(access_token: string, refresh_token: string) {
+                this.access_token = access_token;
+                this.refresh_token = refresh_token;
+                -> $Authorized
+            }
+            exchange_error(reason: string) { -> $Failed }
+            timeout() { -> $Failed }
+            get_status(): string { @@:("refreshing") }
+            get_auth_code(): string { @@:(this.auth_code) }
+            get_code_verifier(): string { @@:(this.code_verifier) }
+        }
+
+        $Failed {
+            get_status(): string { @@:("failed") }
+            get_auth_code(): string { @@:(this.auth_code) }
+            get_code_verifier(): string { @@:(this.code_verifier) }
+        }
+
+        $Revoked {
+            get_status(): string { @@:("revoked") }
+            get_auth_code(): string { @@:(this.auth_code) }
+            get_code_verifier(): string { @@:(this.code_verifier) }
+        }
+
+    domain:
+        client_id: string = ""
+        redirect_uri: string = ""
+        scope: string = ""
+        code_verifier: string = ""
+        code_challenge: string = ""
+        state_nonce: string = ""
+        auth_code: string = ""
+        access_token: string = ""
+        refresh_token: string = ""
+}
+
+function check(label: string, actual: any, expected: any): void {
+    if (actual !== expected) { console.log("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'"); process.exit(1); }
+}
+
+const f = @@OAuthPkceFlow();
+check("idle", f.get_status(), "idle");
+check("idle use_token default", f.use_token(), "no_token");
+f.start("myclient", "https://app/cb", "read", "nonce123");
+check("awaiting redirect", f.get_status(), "awaiting_redirect");
+check("PKCE verifier generated", f.get_code_verifier(), "nonce123");
+check("use_token still denied", f.use_token(), "no_token");
+f.authorization_redirect("authcode-XYZ", "nonce123");
+check("exchanging", f.get_status(), "exchanging");
+check("auth code captured", f.get_auth_code(), "authcode-XYZ");
+f.exchange_response("TOKEN-A", "REFRESH-B");
+check("authorized", f.get_status(), "authorized");
+check("token usable", f.use_token(), "TOKEN-A");
+check("auth_code zeroed", f.get_auth_code(), "");
+check("code_verifier zeroed", f.get_code_verifier(), "");
+f.authorization_redirect("authcode-XYZ", "nonce123");
+check("authorized absorbs replay", f.get_status(), "authorized");
+check("token still usable", f.use_token(), "TOKEN-A");
+f.refresh();
+check("refreshing", f.get_status(), "refreshing");
+f.exchange_response("TOKEN-A2", "REFRESH-B2");
+check("authorized post-refresh", f.get_status(), "authorized");
+check("new token", f.use_token(), "TOKEN-A2");
+f.revoke();
+check("revoked", f.get_status(), "revoked");
+check("revoked denies token", f.use_token(), "no_token");
+
+const f2 = @@OAuthPkceFlow();
+f2.start("myclient", "https://app/cb", "read", "nonce123");
+f2.authorization_redirect("attacker-code", "WRONG-NONCE");
+check("CSRF mismatch -> failed", f2.get_status(), "failed");
+check("CSRF denies token", f2.use_token(), "no_token");
+
+const f3 = @@OAuthPkceFlow();
+f3.start("myclient", "https://app/cb", "read", "nonce123");
+f3.timeout();
+check("timeout failed", f3.get_status(), "failed");
+
+const f4 = @@OAuthPkceFlow();
+f4.start("myclient", "https://app/cb", "read", "nonce123");
+f4.authorization_redirect("authcode", "nonce123");
+f4.exchange_error("invalid_grant");
+check("exchange error failed", f4.get_status(), "failed");
+check("no token on exchange error", f4.use_token(), "no_token");
+
+const f5 = @@OAuthPkceFlow();
+f5.start("myclient", "https://app/cb", "read", "nonce123");
+f5.authorization_redirect("authcode", "nonce123");
+f5.timeout();
+check("exchange timeout failed", f5.get_status(), "failed");
+
+const f6 = @@OAuthPkceFlow();
+f6.start("myclient", "https://app/cb", "read", "nonce123");
+f6.authorization_redirect("authcode", "nonce123");
+f6.exchange_response("TOKEN", "REFRESH");
+f6.refresh();
+f6.exchange_error("invalid_refresh_token");
+check("refresh error failed", f6.get_status(), "failed");
+
+console.log("PASS: oauth_pkce");

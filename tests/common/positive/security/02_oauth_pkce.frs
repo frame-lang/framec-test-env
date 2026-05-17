@@ -1,0 +1,185 @@
+@@[target("rust")]
+
+// Cookbook 87: OAuth 2.0 Authorization Code + PKCE
+
+@@system OAuthPkceFlow {
+    interface:
+        start(client_id: String, redirect_uri: String, scope: String, nonce: String)
+        authorization_redirect(code: String, state: String)
+        exchange_response(access_token: String, refresh_token: String)
+        exchange_error(reason: String)
+        use_token(): String = "no_token"
+        refresh()
+        revoke()
+        timeout()
+        get_status(): String = "idle"
+        get_auth_code(): String
+        get_code_verifier(): String
+
+    machine:
+        $Idle {
+            start(client_id: String, redirect_uri: String, scope: String, nonce: String) {
+                self.client_id = client_id;
+                self.redirect_uri = redirect_uri;
+                self.scope = scope;
+                self.code_verifier = nonce.clone();
+                self.code_challenge = nonce.clone();
+                self.state_nonce = nonce;
+                -> $AwaitingRedirect
+            }
+            get_status(): String { @@:(String::from("idle")) }
+            get_auth_code(): String { @@:(self.auth_code.clone()) }
+            get_code_verifier(): String { @@:(self.code_verifier.clone()) }
+        }
+
+        $AwaitingRedirect {
+            authorization_redirect(code: String, state: String) {
+                if state != self.state_nonce {
+                    -> $Failed
+                } else {
+                    self.auth_code = code;
+                    -> $ExchangingCode
+                }
+            }
+            timeout() { -> $Failed }
+            get_status(): String { @@:(String::from("awaiting_redirect")) }
+            get_auth_code(): String { @@:(self.auth_code.clone()) }
+            get_code_verifier(): String { @@:(self.code_verifier.clone()) }
+        }
+
+        $ExchangingCode {
+            <$() {
+                self.auth_code = String::new();
+                self.code_verifier = String::new();
+            }
+
+            exchange_response(access_token: String, refresh_token: String) {
+                self.access_token = access_token;
+                self.refresh_token = refresh_token;
+                -> $Authorized
+            }
+            exchange_error(reason: String) { -> $Failed }
+            timeout() { -> $Failed }
+            get_status(): String { @@:(String::from("exchanging")) }
+            get_auth_code(): String { @@:(self.auth_code.clone()) }
+            get_code_verifier(): String { @@:(self.code_verifier.clone()) }
+        }
+
+        $Authorized {
+            use_token(): String { @@:(self.access_token.clone()) }
+            refresh() { -> $Refreshing }
+            revoke() { -> $Revoked }
+            get_status(): String { @@:(String::from("authorized")) }
+            get_auth_code(): String { @@:(self.auth_code.clone()) }
+            get_code_verifier(): String { @@:(self.code_verifier.clone()) }
+        }
+
+        $Refreshing {
+            exchange_response(access_token: String, refresh_token: String) {
+                self.access_token = access_token;
+                self.refresh_token = refresh_token;
+                -> $Authorized
+            }
+            exchange_error(reason: String) { -> $Failed }
+            timeout() { -> $Failed }
+            get_status(): String { @@:(String::from("refreshing")) }
+            get_auth_code(): String { @@:(self.auth_code.clone()) }
+            get_code_verifier(): String { @@:(self.code_verifier.clone()) }
+        }
+
+        $Failed {
+            get_status(): String { @@:(String::from("failed")) }
+            get_auth_code(): String { @@:(self.auth_code.clone()) }
+            get_code_verifier(): String { @@:(self.code_verifier.clone()) }
+        }
+
+        $Revoked {
+            get_status(): String { @@:(String::from("revoked")) }
+            get_auth_code(): String { @@:(self.auth_code.clone()) }
+            get_code_verifier(): String { @@:(self.code_verifier.clone()) }
+        }
+
+    domain:
+        client_id: String = String::new()
+        redirect_uri: String = String::new()
+        scope: String = String::new()
+        code_verifier: String = String::new()
+        code_challenge: String = String::new()
+        state_nonce: String = String::new()
+        auth_code: String = String::new()
+        access_token: String = String::new()
+        refresh_token: String = String::new()
+}
+
+fn check(label: &str, actual: String, expected: &str) {
+    if actual != expected { println!("FAIL: {} expected '{}', got '{}'", label, expected, actual); std::process::exit(1); }
+}
+
+fn main() {
+    let mut f = @@OAuthPkceFlow();
+    check("idle", f.get_status(), "idle");
+    check("idle use_token default", f.use_token(), "no_token");
+
+    f.start(String::from("myclient"), String::from("https://app/cb"), String::from("read"), String::from("nonce123"));
+    check("awaiting redirect", f.get_status(), "awaiting_redirect");
+    check("PKCE verifier generated", f.get_code_verifier(), "nonce123");
+    check("use_token still denied", f.use_token(), "no_token");
+
+    f.authorization_redirect(String::from("authcode-XYZ"), String::from("nonce123"));
+    check("exchanging", f.get_status(), "exchanging");
+    check("auth code captured", f.get_auth_code(), "authcode-XYZ");
+
+    f.exchange_response(String::from("TOKEN-A"), String::from("REFRESH-B"));
+    check("authorized", f.get_status(), "authorized");
+    check("token usable", f.use_token(), "TOKEN-A");
+    check("auth_code zeroed", f.get_auth_code(), "");
+    check("code_verifier zeroed", f.get_code_verifier(), "");
+
+    f.authorization_redirect(String::from("authcode-XYZ"), String::from("nonce123"));
+    check("authorized absorbs replay", f.get_status(), "authorized");
+    check("token still usable", f.use_token(), "TOKEN-A");
+
+    f.refresh();
+    check("refreshing", f.get_status(), "refreshing");
+    f.exchange_response(String::from("TOKEN-A2"), String::from("REFRESH-B2"));
+    check("authorized post-refresh", f.get_status(), "authorized");
+    check("new token", f.use_token(), "TOKEN-A2");
+
+    f.revoke();
+    check("revoked", f.get_status(), "revoked");
+    check("revoked denies token", f.use_token(), "no_token");
+
+    let mut f2 = @@OAuthPkceFlow();
+    f2.start(String::from("myclient"), String::from("https://app/cb"), String::from("read"), String::from("nonce123"));
+    f2.authorization_redirect(String::from("attacker-code"), String::from("WRONG-NONCE"));
+    check("CSRF mismatch -> failed", f2.get_status(), "failed");
+    check("CSRF denies token", f2.use_token(), "no_token");
+
+    let mut f3 = @@OAuthPkceFlow();
+    f3.start(String::from("myclient"), String::from("https://app/cb"), String::from("read"), String::from("nonce123"));
+    f3.timeout();
+    check("timeout failed", f3.get_status(), "failed");
+
+    let mut f4 = @@OAuthPkceFlow();
+    f4.start(String::from("myclient"), String::from("https://app/cb"), String::from("read"), String::from("nonce123"));
+    f4.authorization_redirect(String::from("authcode"), String::from("nonce123"));
+    f4.exchange_error(String::from("invalid_grant"));
+    check("exchange error failed", f4.get_status(), "failed");
+    check("no token on exchange error", f4.use_token(), "no_token");
+
+    let mut f5 = @@OAuthPkceFlow();
+    f5.start(String::from("myclient"), String::from("https://app/cb"), String::from("read"), String::from("nonce123"));
+    f5.authorization_redirect(String::from("authcode"), String::from("nonce123"));
+    f5.timeout();
+    check("exchange timeout failed", f5.get_status(), "failed");
+
+    let mut f6 = @@OAuthPkceFlow();
+    f6.start(String::from("myclient"), String::from("https://app/cb"), String::from("read"), String::from("nonce123"));
+    f6.authorization_redirect(String::from("authcode"), String::from("nonce123"));
+    f6.exchange_response(String::from("TOKEN"), String::from("REFRESH"));
+    f6.refresh();
+    f6.exchange_error(String::from("invalid_refresh_token"));
+    check("refresh error failed", f6.get_status(), "failed");
+
+    println!("PASS: oauth_pkce");
+}

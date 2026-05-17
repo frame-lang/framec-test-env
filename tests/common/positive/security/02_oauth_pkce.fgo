@@ -1,0 +1,185 @@
+@@[target("go")]
+
+// Cookbook 87: OAuth 2.0 Authorization Code + PKCE
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system OAuthPkceFlow {
+    interface:
+        start(client_id: string, redirect_uri: string, scope: string, nonce: string)
+        authorization_redirect(code: string, state: string)
+        exchange_response(access_token: string, refresh_token: string)
+        exchange_error(reason: string)
+        use_token(): string = "no_token"
+        refresh()
+        revoke()
+        timeout()
+        get_status(): string = "idle"
+        get_auth_code(): string
+        get_code_verifier(): string
+
+    machine:
+        $Idle {
+            start(client_id: string, redirect_uri: string, scope: string, nonce: string) {
+                s.client_id = client_id
+                s.redirect_uri = redirect_uri
+                s.scope = scope
+                s.code_verifier = nonce
+                s.code_challenge = nonce
+                s.state_nonce = nonce
+                -> $AwaitingRedirect
+            }
+            get_status(): string { @@:("idle") }
+            get_auth_code(): string { @@:(s.auth_code) }
+            get_code_verifier(): string { @@:(s.code_verifier) }
+        }
+
+        $AwaitingRedirect {
+            authorization_redirect(code: string, state: string) {
+                if state != s.state_nonce {
+                    -> $Failed
+                } else {
+                    s.auth_code = code
+                    -> $ExchangingCode
+                }
+            }
+            timeout() { -> $Failed }
+            get_status(): string { @@:("awaiting_redirect") }
+            get_auth_code(): string { @@:(s.auth_code) }
+            get_code_verifier(): string { @@:(s.code_verifier) }
+        }
+
+        $ExchangingCode {
+            <$() {
+                s.auth_code = ""
+                s.code_verifier = ""
+            }
+            exchange_response(access_token: string, refresh_token: string) {
+                s.access_token = access_token
+                s.refresh_token = refresh_token
+                -> $Authorized
+            }
+            exchange_error(reason: string) { -> $Failed }
+            timeout() { -> $Failed }
+            get_status(): string { @@:("exchanging") }
+            get_auth_code(): string { @@:(s.auth_code) }
+            get_code_verifier(): string { @@:(s.code_verifier) }
+        }
+
+        $Authorized {
+            use_token(): string { @@:(s.access_token) }
+            refresh() { -> $Refreshing }
+            revoke() { -> $Revoked }
+            get_status(): string { @@:("authorized") }
+            get_auth_code(): string { @@:(s.auth_code) }
+            get_code_verifier(): string { @@:(s.code_verifier) }
+        }
+
+        $Refreshing {
+            exchange_response(access_token: string, refresh_token: string) {
+                s.access_token = access_token
+                s.refresh_token = refresh_token
+                -> $Authorized
+            }
+            exchange_error(reason: string) { -> $Failed }
+            timeout() { -> $Failed }
+            get_status(): string { @@:("refreshing") }
+            get_auth_code(): string { @@:(s.auth_code) }
+            get_code_verifier(): string { @@:(s.code_verifier) }
+        }
+
+        $Failed {
+            get_status(): string { @@:("failed") }
+            get_auth_code(): string { @@:(s.auth_code) }
+            get_code_verifier(): string { @@:(s.code_verifier) }
+        }
+
+        $Revoked {
+            get_status(): string { @@:("revoked") }
+            get_auth_code(): string { @@:(s.auth_code) }
+            get_code_verifier(): string { @@:(s.code_verifier) }
+        }
+
+    domain:
+        client_id: string = ""
+        redirect_uri: string = ""
+        scope: string = ""
+        code_verifier: string = ""
+        code_challenge: string = ""
+        state_nonce: string = ""
+        auth_code: string = ""
+        access_token: string = ""
+        refresh_token: string = ""
+}
+
+func check(label, actual, expected string) {
+    if actual != expected { fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual); os.Exit(1) }
+}
+
+func main() {
+    f := @@OAuthPkceFlow()
+    check("idle", f.get_status().(string), "idle")
+    check("idle use_token default", f.use_token().(string), "no_token")
+    f.start("myclient", "https://app/cb", "read", "nonce123")
+    check("awaiting redirect", f.get_status().(string), "awaiting_redirect")
+    check("PKCE verifier generated", f.get_code_verifier().(string), "nonce123")
+    check("use_token still denied", f.use_token().(string), "no_token")
+    f.authorization_redirect("authcode-XYZ", "nonce123")
+    check("exchanging", f.get_status().(string), "exchanging")
+    check("auth code captured", f.get_auth_code().(string), "authcode-XYZ")
+    f.exchange_response("TOKEN-A", "REFRESH-B")
+    check("authorized", f.get_status().(string), "authorized")
+    check("token usable", f.use_token().(string), "TOKEN-A")
+    check("auth_code zeroed", f.get_auth_code().(string), "")
+    check("code_verifier zeroed", f.get_code_verifier().(string), "")
+    f.authorization_redirect("authcode-XYZ", "nonce123")
+    check("authorized absorbs replay", f.get_status().(string), "authorized")
+    check("token still usable", f.use_token().(string), "TOKEN-A")
+    f.refresh()
+    check("refreshing", f.get_status().(string), "refreshing")
+    f.exchange_response("TOKEN-A2", "REFRESH-B2")
+    check("authorized post-refresh", f.get_status().(string), "authorized")
+    check("new token", f.use_token().(string), "TOKEN-A2")
+    f.revoke()
+    check("revoked", f.get_status().(string), "revoked")
+    check("revoked denies token", f.use_token().(string), "no_token")
+
+    f2 := @@OAuthPkceFlow()
+    f2.start("myclient", "https://app/cb", "read", "nonce123")
+    f2.authorization_redirect("attacker-code", "WRONG-NONCE")
+    check("CSRF mismatch -> failed", f2.get_status().(string), "failed")
+    check("CSRF denies token", f2.use_token().(string), "no_token")
+
+    f3 := @@OAuthPkceFlow()
+    f3.start("myclient", "https://app/cb", "read", "nonce123")
+    f3.timeout()
+    check("timeout failed", f3.get_status().(string), "failed")
+
+    f4 := @@OAuthPkceFlow()
+    f4.start("myclient", "https://app/cb", "read", "nonce123")
+    f4.authorization_redirect("authcode", "nonce123")
+    f4.exchange_error("invalid_grant")
+    check("exchange error failed", f4.get_status().(string), "failed")
+    check("no token on exchange error", f4.use_token().(string), "no_token")
+
+    f5 := @@OAuthPkceFlow()
+    f5.start("myclient", "https://app/cb", "read", "nonce123")
+    f5.authorization_redirect("authcode", "nonce123")
+    f5.timeout()
+    check("exchange timeout failed", f5.get_status().(string), "failed")
+
+    f6 := @@OAuthPkceFlow()
+    f6.start("myclient", "https://app/cb", "read", "nonce123")
+    f6.authorization_redirect("authcode", "nonce123")
+    f6.exchange_response("TOKEN", "REFRESH")
+    f6.refresh()
+    f6.exchange_error("invalid_refresh_token")
+    check("refresh error failed", f6.get_status().(string), "failed")
+
+    fmt.Println("PASS: oauth_pkce")
+}

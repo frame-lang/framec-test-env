@@ -1,0 +1,179 @@
+@@[target("lua")]
+
+-- Cookbook 87: OAuth 2.0 Authorization Code + PKCE
+
+@@system OAuthPkceFlow {
+    interface:
+        start(client_id, redirect_uri, scope, nonce)
+        authorization_redirect(code, state)
+        exchange_response(access_token, refresh_token)
+        exchange_error(reason)
+        use_token() = "no_token"
+        refresh()
+        revoke()
+        timeout()
+        get_status() = "idle"
+        get_auth_code()
+        get_code_verifier()
+
+    machine:
+        $Idle {
+            start(client_id, redirect_uri, scope, nonce) {
+                self.client_id = client_id
+                self.redirect_uri = redirect_uri
+                self.scope = scope
+                self.code_verifier = nonce
+                self.code_challenge = nonce
+                self.state_nonce = nonce
+                -> $AwaitingRedirect
+            }
+            get_status() { @@:("idle") }
+            get_auth_code() { @@:(self.auth_code) }
+            get_code_verifier() { @@:(self.code_verifier) }
+        }
+
+        $AwaitingRedirect {
+            authorization_redirect(code, state) {
+                if state ~= self.state_nonce then
+                    -> $Failed
+                else
+                    self.auth_code = code
+                    -> $ExchangingCode
+                end
+            }
+            timeout() { -> $Failed }
+            get_status() { @@:("awaiting_redirect") }
+            get_auth_code() { @@:(self.auth_code) }
+            get_code_verifier() { @@:(self.code_verifier) }
+        }
+
+        $ExchangingCode {
+            <$() {
+                self.auth_code = ""
+                self.code_verifier = ""
+            }
+            exchange_response(access_token, refresh_token) {
+                self.access_token = access_token
+                self.refresh_token = refresh_token
+                -> $Authorized
+            }
+            exchange_error(reason) { -> $Failed }
+            timeout() { -> $Failed }
+            get_status() { @@:("exchanging") }
+            get_auth_code() { @@:(self.auth_code) }
+            get_code_verifier() { @@:(self.code_verifier) }
+        }
+
+        $Authorized {
+            use_token() { @@:(self.access_token) }
+            refresh() { -> $Refreshing }
+            revoke() { -> $Revoked }
+            get_status() { @@:("authorized") }
+            get_auth_code() { @@:(self.auth_code) }
+            get_code_verifier() { @@:(self.code_verifier) }
+        }
+
+        $Refreshing {
+            exchange_response(access_token, refresh_token) {
+                self.access_token = access_token
+                self.refresh_token = refresh_token
+                -> $Authorized
+            }
+            exchange_error(reason) { -> $Failed }
+            timeout() { -> $Failed }
+            get_status() { @@:("refreshing") }
+            get_auth_code() { @@:(self.auth_code) }
+            get_code_verifier() { @@:(self.code_verifier) }
+        }
+
+        $Failed {
+            get_status() { @@:("failed") }
+            get_auth_code() { @@:(self.auth_code) }
+            get_code_verifier() { @@:(self.code_verifier) }
+        }
+
+        $Revoked {
+            get_status() { @@:("revoked") }
+            get_auth_code() { @@:(self.auth_code) }
+            get_code_verifier() { @@:(self.code_verifier) }
+        }
+
+    domain:
+        client_id = ""
+        redirect_uri = ""
+        scope = ""
+        code_verifier = ""
+        code_challenge = ""
+        state_nonce = ""
+        auth_code = ""
+        access_token = ""
+        refresh_token = ""
+}
+
+local function check(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " expected '" .. tostring(expected) .. "', got '" .. tostring(actual) .. "'")
+        os.exit(1)
+    end
+end
+
+local f = @@OAuthPkceFlow()
+check("idle", f:get_status(), "idle")
+check("idle use_token default", f:use_token(), "no_token")
+f:start("myclient", "https://app/cb", "read", "nonce123")
+check("awaiting redirect", f:get_status(), "awaiting_redirect")
+check("PKCE verifier generated", f:get_code_verifier(), "nonce123")
+check("use_token still denied", f:use_token(), "no_token")
+f:authorization_redirect("authcode-XYZ", "nonce123")
+check("exchanging", f:get_status(), "exchanging")
+check("auth code captured", f:get_auth_code(), "authcode-XYZ")
+f:exchange_response("TOKEN-A", "REFRESH-B")
+check("authorized", f:get_status(), "authorized")
+check("token usable", f:use_token(), "TOKEN-A")
+check("auth_code zeroed", f:get_auth_code(), "")
+check("code_verifier zeroed", f:get_code_verifier(), "")
+f:authorization_redirect("authcode-XYZ", "nonce123")
+check("authorized absorbs replay", f:get_status(), "authorized")
+check("token still usable", f:use_token(), "TOKEN-A")
+f:refresh()
+check("refreshing", f:get_status(), "refreshing")
+f:exchange_response("TOKEN-A2", "REFRESH-B2")
+check("authorized post-refresh", f:get_status(), "authorized")
+check("new token", f:use_token(), "TOKEN-A2")
+f:revoke()
+check("revoked", f:get_status(), "revoked")
+check("revoked denies token", f:use_token(), "no_token")
+
+local f2 = @@OAuthPkceFlow()
+f2:start("myclient", "https://app/cb", "read", "nonce123")
+f2:authorization_redirect("attacker-code", "WRONG-NONCE")
+check("CSRF mismatch -> failed", f2:get_status(), "failed")
+check("CSRF denies token", f2:use_token(), "no_token")
+
+local f3 = @@OAuthPkceFlow()
+f3:start("myclient", "https://app/cb", "read", "nonce123")
+f3:timeout()
+check("timeout failed", f3:get_status(), "failed")
+
+local f4 = @@OAuthPkceFlow()
+f4:start("myclient", "https://app/cb", "read", "nonce123")
+f4:authorization_redirect("authcode", "nonce123")
+f4:exchange_error("invalid_grant")
+check("exchange error failed", f4:get_status(), "failed")
+check("no token on exchange error", f4:use_token(), "no_token")
+
+local f5 = @@OAuthPkceFlow()
+f5:start("myclient", "https://app/cb", "read", "nonce123")
+f5:authorization_redirect("authcode", "nonce123")
+f5:timeout()
+check("exchange timeout failed", f5:get_status(), "failed")
+
+local f6 = @@OAuthPkceFlow()
+f6:start("myclient", "https://app/cb", "read", "nonce123")
+f6:authorization_redirect("authcode", "nonce123")
+f6:exchange_response("TOKEN", "REFRESH")
+f6:refresh()
+f6:exchange_error("invalid_refresh_token")
+check("refresh error failed", f6:get_status(), "failed")
+
+print("PASS: oauth_pkce")

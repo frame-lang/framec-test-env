@@ -1,0 +1,111 @@
+@@[target("erlang")]
+
+%% Cookbook 87: OAuth 2.0 Authorization Code + PKCE
+
+@@system OAuthPkceFlow {
+    interface:
+        start(ClientId, RedirectUri, Scope, Nonce)
+        authorization_redirect(Code, State)
+        exchange_response(AccessToken, RefreshToken)
+        exchange_error(Reason)
+        use_token() = "no_token"
+        refresh()
+        revoke()
+        timeout()
+        get_status() = "idle"
+        get_auth_code()
+        get_code_verifier()
+
+    machine:
+        $Idle {
+            start(ClientId, RedirectUri, Scope, Nonce) {
+                self.client_id = ClientId
+                self.redirect_uri = RedirectUri
+                self.scope = Scope
+                self.code_verifier = Nonce
+                self.code_challenge = Nonce
+                self.state_nonce = Nonce
+                -> $AwaitingRedirect
+            }
+            get_status() { @@:("idle") }
+            get_auth_code() { @@:(self.auth_code) }
+            get_code_verifier() { @@:(self.code_verifier) }
+        }
+
+        $AwaitingRedirect {
+            authorization_redirect(Code, State) {
+                if State =/= self.state_nonce
+                    -> $Failed
+                else
+                    self.auth_code = Code
+                    -> $ExchangingCode
+                end
+            }
+            timeout() { -> $Failed }
+            get_status() { @@:("awaiting_redirect") }
+            get_auth_code() { @@:(self.auth_code) }
+            get_code_verifier() { @@:(self.code_verifier) }
+        }
+
+        $ExchangingCode {
+            <$() {
+                self.auth_code = ""
+                self.code_verifier = ""
+            }
+            exchange_response(AccessToken, RefreshToken) {
+                self.access_token = AccessToken
+                self.refresh_token = RefreshToken
+                -> $Authorized
+            }
+            exchange_error(Reason) { -> $Failed }
+            timeout() { -> $Failed }
+            get_status() { @@:("exchanging") }
+            get_auth_code() { @@:(self.auth_code) }
+            get_code_verifier() { @@:(self.code_verifier) }
+        }
+
+        $Authorized {
+            use_token() { @@:(self.access_token) }
+            refresh() { -> $Refreshing }
+            revoke() { -> $Revoked }
+            get_status() { @@:("authorized") }
+            get_auth_code() { @@:(self.auth_code) }
+            get_code_verifier() { @@:(self.code_verifier) }
+        }
+
+        $Refreshing {
+            exchange_response(AccessToken, RefreshToken) {
+                self.access_token = AccessToken
+                self.refresh_token = RefreshToken
+                -> $Authorized
+            }
+            exchange_error(Reason) { -> $Failed }
+            timeout() { -> $Failed }
+            get_status() { @@:("refreshing") }
+            get_auth_code() { @@:(self.auth_code) }
+            get_code_verifier() { @@:(self.code_verifier) }
+        }
+
+        $Failed {
+            get_status() { @@:("failed") }
+            get_auth_code() { @@:(self.auth_code) }
+            get_code_verifier() { @@:(self.code_verifier) }
+        }
+
+        $Revoked {
+            get_status() { @@:("revoked") }
+            get_auth_code() { @@:(self.auth_code) }
+            get_code_verifier() { @@:(self.code_verifier) }
+        }
+
+    domain:
+        client_id = ""
+        redirect_uri = ""
+        scope = ""
+        code_verifier = ""
+        code_challenge = ""
+        state_nonce = ""
+        auth_code = ""
+        access_token = ""
+        refresh_token = ""
+}
