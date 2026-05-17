@@ -1,0 +1,108 @@
+@@[target("lua")]
+
+-- Cookbook 91: Noise Protocol XX Handshake (Initiator)
+
+@@system NoiseXxInitiator {
+    interface:
+        start(remote_endpoint)
+        msg2_received(valid)
+        msg3_ack()
+        send(plaintext) = "not_ready"
+        recv(ciphertext) = ""
+        timeout()
+        get_status() = "idle"
+
+    machine:
+        $Idle {
+            start(remote_endpoint) {
+                self.remote = remote_endpoint
+                -> $AwaitingMsg2
+            }
+            get_status() { @@:("idle") }
+        }
+
+        $AwaitingMsg2 {
+            msg2_received(valid) {
+                if valid == 1 then
+                    -> $AwaitingAck
+                else
+                    -> $Aborted
+                end
+            }
+            timeout() { -> $Aborted }
+            get_status() { @@:("awaiting_msg2") }
+        }
+
+        $AwaitingAck {
+            msg3_ack() { -> $Transport }
+            timeout() { -> $Aborted }
+            get_status() { @@:("awaiting_ack") }
+        }
+
+        $Transport {
+            send(plaintext) { @@:("sent") }
+            recv(ciphertext) { @@:("decrypted") }
+            get_status() { @@:("transport") }
+        }
+
+        $Aborted {
+            get_status() { @@:("aborted") }
+        }
+
+    domain:
+        remote = ""
+}
+
+local function check(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL: " .. label .. " expected '" .. tostring(expected) .. "', got '" .. tostring(actual) .. "'")
+        os.exit(1)
+    end
+end
+
+local n = @@NoiseXxInitiator()
+check("idle", n:get_status(), "idle")
+check("idle send default", n:send("hi"), "not_ready")
+check("idle recv default", n:recv("ct"), "")
+n:msg2_received(1)
+check("idle absorbs msg2", n:get_status(), "idle")
+n:msg3_ack()
+check("idle absorbs msg3_ack", n:get_status(), "idle")
+n:start("peer")
+check("awaiting msg2", n:get_status(), "awaiting_msg2")
+check("awaiting_msg2 send default", n:send("hi"), "not_ready")
+n:msg3_ack()
+check("awaiting_msg2 absorbs msg3_ack", n:get_status(), "awaiting_msg2")
+n:msg2_received(1)
+check("awaiting ack", n:get_status(), "awaiting_ack")
+check("awaiting_ack send default", n:send("hi"), "not_ready")
+n:msg2_received(1)
+check("awaiting_ack absorbs msg2", n:get_status(), "awaiting_ack")
+n:msg3_ack()
+check("transport", n:get_status(), "transport")
+check("transport sends", n:send("hi"), "sent")
+check("transport recvs", n:recv("ct"), "decrypted")
+
+local n2 = @@NoiseXxInitiator()
+n2:start("peer")
+n2:msg2_received(0)
+check("invalid msg2 -> aborted", n2:get_status(), "aborted")
+check("aborted send default", n2:send("hi"), "not_ready")
+check("aborted recv default", n2:recv("ct"), "")
+
+local n3 = @@NoiseXxInitiator()
+n3:start("peer")
+n3:timeout()
+check("timeout at msg2 -> aborted", n3:get_status(), "aborted")
+
+local n4 = @@NoiseXxInitiator()
+n4:start("peer")
+n4:msg2_received(1)
+n4:timeout()
+check("timeout at ack -> aborted", n4:get_status(), "aborted")
+n4:start("peer")
+n4:msg2_received(1)
+n4:msg3_ack()
+check("aborted absorbs all", n4:get_status(), "aborted")
+
+print("PASS: noise_xx")

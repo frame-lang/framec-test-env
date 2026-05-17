@@ -1,0 +1,108 @@
+@@[target("java")]
+
+// Cookbook 91: Noise Protocol XX Handshake (Initiator)
+
+@@system NoiseXxInitiator {
+    interface:
+        start(remote_endpoint: String)
+        msg2_received(valid: int)
+        msg3_ack()
+        send(plaintext: String): String = "not_ready"
+        recv(ciphertext: String): String = ""
+        timeout()
+        get_status(): String = "idle"
+
+    machine:
+        $Idle {
+            start(remote_endpoint: String) {
+                this.remote = remote_endpoint;
+                -> $AwaitingMsg2
+            }
+            get_status(): String { @@:("idle") }
+        }
+
+        $AwaitingMsg2 {
+            msg2_received(valid: int) {
+                if (valid == 1) { -> $AwaitingAck } else { -> $Aborted }
+            }
+            timeout() { -> $Aborted }
+            get_status(): String { @@:("awaiting_msg2") }
+        }
+
+        $AwaitingAck {
+            msg3_ack() { -> $Transport }
+            timeout() { -> $Aborted }
+            get_status(): String { @@:("awaiting_ack") }
+        }
+
+        $Transport {
+            send(plaintext: String): String { @@:("sent") }
+            recv(ciphertext: String): String { @@:("decrypted") }
+            get_status(): String { @@:("transport") }
+        }
+
+        $Aborted {
+            get_status(): String { @@:("aborted") }
+        }
+
+    domain:
+        remote: String = ""
+}
+
+public class NoiseXx06Test {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+
+    public static void main(String[] args) {
+        NoiseXxInitiator n = @@NoiseXxInitiator();
+        check("idle", (String) n.get_status(), "idle");
+        check("idle send default", (String) n.send("hi"), "not_ready");
+        check("idle recv default", (String) n.recv("ct"), "");
+        n.msg2_received(1);
+        check("idle absorbs msg2", (String) n.get_status(), "idle");
+        n.msg3_ack();
+        check("idle absorbs msg3_ack", (String) n.get_status(), "idle");
+        n.start("peer");
+        check("awaiting msg2", (String) n.get_status(), "awaiting_msg2");
+        check("awaiting_msg2 send default", (String) n.send("hi"), "not_ready");
+        n.msg3_ack();
+        check("awaiting_msg2 absorbs msg3_ack", (String) n.get_status(), "awaiting_msg2");
+        n.msg2_received(1);
+        check("awaiting ack", (String) n.get_status(), "awaiting_ack");
+        check("awaiting_ack send default", (String) n.send("hi"), "not_ready");
+        n.msg2_received(1);
+        check("awaiting_ack absorbs msg2", (String) n.get_status(), "awaiting_ack");
+        n.msg3_ack();
+        check("transport", (String) n.get_status(), "transport");
+        check("transport sends", (String) n.send("hi"), "sent");
+        check("transport recvs", (String) n.recv("ct"), "decrypted");
+
+        NoiseXxInitiator n2 = @@NoiseXxInitiator();
+        n2.start("peer");
+        n2.msg2_received(0);
+        check("invalid msg2 -> aborted", (String) n2.get_status(), "aborted");
+        check("aborted send default", (String) n2.send("hi"), "not_ready");
+        check("aborted recv default", (String) n2.recv("ct"), "");
+
+        NoiseXxInitiator n3 = @@NoiseXxInitiator();
+        n3.start("peer");
+        n3.timeout();
+        check("timeout at msg2 -> aborted", (String) n3.get_status(), "aborted");
+
+        NoiseXxInitiator n4 = @@NoiseXxInitiator();
+        n4.start("peer");
+        n4.msg2_received(1);
+        n4.timeout();
+        check("timeout at ack -> aborted", (String) n4.get_status(), "aborted");
+        n4.start("peer");
+        n4.msg2_received(1);
+        n4.msg3_ack();
+        check("aborted absorbs all", (String) n4.get_status(), "aborted");
+
+        System.out.println("PASS: noise_xx");
+    }
+}

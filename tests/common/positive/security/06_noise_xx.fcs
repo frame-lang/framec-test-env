@@ -1,0 +1,107 @@
+@@[target("csharp")]
+
+// Cookbook 91: Noise Protocol XX Handshake (Initiator)
+
+using System;
+
+@@system NoiseXxInitiator {
+    interface:
+        start(remote_endpoint: string)
+        msg2_received(valid: int)
+        msg3_ack()
+        send(plaintext: string): string = "not_ready"
+        recv(ciphertext: string): string = ""
+        timeout()
+        get_status(): string = "idle"
+
+    machine:
+        $Idle {
+            start(remote_endpoint: string) {
+                this.remote = remote_endpoint;
+                -> $AwaitingMsg2
+            }
+            get_status(): string { @@:("idle") }
+        }
+
+        $AwaitingMsg2 {
+            msg2_received(valid: int) {
+                if (valid == 1) { -> $AwaitingAck } else { -> $Aborted }
+            }
+            timeout() { -> $Aborted }
+            get_status(): string { @@:("awaiting_msg2") }
+        }
+
+        $AwaitingAck {
+            msg3_ack() { -> $Transport }
+            timeout() { -> $Aborted }
+            get_status(): string { @@:("awaiting_ack") }
+        }
+
+        $Transport {
+            send(plaintext: string): string { @@:("sent") }
+            recv(ciphertext: string): string { @@:("decrypted") }
+            get_status(): string { @@:("transport") }
+        }
+
+        $Aborted {
+            get_status(): string { @@:("aborted") }
+        }
+
+    domain:
+        remote: string = ""
+}
+
+public class Program {
+    static void Check(string label, string actual, string expected) {
+        if (actual != expected) { Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'"); Environment.Exit(1); }
+    }
+
+    public static void Main() {
+        var n = @@NoiseXxInitiator();
+        Check("idle", (string)n.get_status(), "idle");
+        Check("idle send default", (string)n.send("hi"), "not_ready");
+        Check("idle recv default", (string)n.recv("ct"), "");
+        n.msg2_received(1);
+        Check("idle absorbs msg2", (string)n.get_status(), "idle");
+        n.msg3_ack();
+        Check("idle absorbs msg3_ack", (string)n.get_status(), "idle");
+        n.start("peer");
+        Check("awaiting msg2", (string)n.get_status(), "awaiting_msg2");
+        Check("awaiting_msg2 send default", (string)n.send("hi"), "not_ready");
+        n.msg3_ack();
+        Check("awaiting_msg2 absorbs msg3_ack", (string)n.get_status(), "awaiting_msg2");
+        n.msg2_received(1);
+        Check("awaiting ack", (string)n.get_status(), "awaiting_ack");
+        Check("awaiting_ack send default", (string)n.send("hi"), "not_ready");
+        n.msg2_received(1);
+        Check("awaiting_ack absorbs msg2", (string)n.get_status(), "awaiting_ack");
+        n.msg3_ack();
+        Check("transport", (string)n.get_status(), "transport");
+        Check("transport sends", (string)n.send("hi"), "sent");
+        Check("transport recvs", (string)n.recv("ct"), "decrypted");
+
+        var n2 = @@NoiseXxInitiator();
+        n2.start("peer");
+        n2.msg2_received(0);
+        Check("invalid msg2 -> aborted", (string)n2.get_status(), "aborted");
+        Check("aborted send default", (string)n2.send("hi"), "not_ready");
+        Check("aborted recv default", (string)n2.recv("ct"), "");
+
+        var n3 = @@NoiseXxInitiator();
+        n3.start("peer");
+        n3.timeout();
+        Check("timeout at msg2 -> aborted", (string)n3.get_status(), "aborted");
+
+        var n4 = @@NoiseXxInitiator();
+        n4.start("peer");
+        n4.msg2_received(1);
+        n4.timeout();
+        Check("timeout at ack -> aborted", (string)n4.get_status(), "aborted");
+        n4.start("peer");
+        n4.msg2_received(1);
+        n4.msg3_ack();
+        Check("aborted absorbs all", (string)n4.get_status(), "aborted");
+
+        Console.WriteLine("PASS: noise_xx");
+    }
+}
