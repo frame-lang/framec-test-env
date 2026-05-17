@@ -1,0 +1,131 @@
+@@[target("go")]
+
+// Cookbook 93: Macaroon-Style Capability Token Verifier
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system MacaroonVerifier {
+    interface:
+        present(token: string, caveat_count: int)
+        caveat_verified(passed: int, caveat_index: int)
+        sig_verified(passed: int)
+        perform(action: string, resource: string, allowed: int): string = "denied"
+        get_status(): string = ""
+        get_caveat_index(): int
+
+    machine:
+        $Idle {
+            present(token: string, caveat_count: int) {
+                s.token = token
+                s.caveats = caveat_count
+                s.caveat_index = 0
+                -> $CheckingSignature
+            }
+            get_status(): string { @@:("idle") }
+            get_caveat_index(): int { @@:(s.caveat_index) }
+        }
+
+        $CheckingSignature {
+            sig_verified(passed: int) {
+                if passed == 1 { -> $CheckingCaveats } else { -> $Rejected }
+            }
+            get_status(): string { @@:("checking_sig") }
+            get_caveat_index(): int { @@:(s.caveat_index) }
+        }
+
+        $CheckingCaveats {
+            $>() {
+                if s.caveat_index >= s.caveats { -> $Authorized }
+            }
+            caveat_verified(passed: int, caveat_index: int) {
+                if caveat_index != s.caveat_index {
+                    -> $Rejected
+                } else if passed == 0 {
+                    -> $Rejected
+                } else {
+                    s.caveat_index = s.caveat_index + 1
+                    -> $CheckingCaveats
+                }
+            }
+            get_status(): string { @@:("checking_caveats") }
+            get_caveat_index(): int { @@:(s.caveat_index) }
+        }
+
+        $Authorized {
+            perform(action: string, resource: string, allowed: int): string {
+                if allowed == 1 { @@:("allowed") } else { @@:("denied") }
+            }
+            get_status(): string { @@:("authorized") }
+            get_caveat_index(): int { @@:(s.caveat_index) }
+        }
+
+        $Rejected {
+            get_status(): string { @@:("rejected") }
+            get_caveat_index(): int { @@:(s.caveat_index) }
+        }
+
+    domain:
+        token: string = ""
+        caveats: int = 0
+        caveat_index: int = 0
+}
+
+func check(label, actual, expected string) {
+    if actual != expected { fmt.Printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual); os.Exit(1) }
+}
+func checkI(label string, actual, expected int) {
+    if actual != expected { fmt.Printf("FAIL: %s expected %d, got %d\n", label, expected, actual); os.Exit(1) }
+}
+
+func main() {
+    v := @@MacaroonVerifier()
+    check("idle", v.get_status().(string), "idle")
+    check("idle perform denied", v.perform("read", "doc", 1).(string), "denied")
+    v.present("TOK", 3)
+    check("checking sig", v.get_status().(string), "checking_sig")
+    check("sig-check perform denied", v.perform("read", "doc", 1).(string), "denied")
+    v.sig_verified(1)
+    check("checking caveats", v.get_status().(string), "checking_caveats")
+    check("caveat-check perform denied", v.perform("read", "doc", 1).(string), "denied")
+    v.caveat_verified(1, 0)
+    checkI("caveat 0 done, index advanced", v.get_caveat_index().(int), 1)
+    v.caveat_verified(1, 1)
+    v.caveat_verified(1, 2)
+    check("authorized", v.get_status().(string), "authorized")
+    check("in-scope perform", v.perform("read", "doc", 1).(string), "allowed")
+    check("out-of-scope perform", v.perform("write", "doc", 0).(string), "denied")
+    v.caveat_verified(1, 99)
+    check("authorized absorbs caveat", v.get_status().(string), "authorized")
+
+    v2 := @@MacaroonVerifier()
+    v2.present("TOK", 2)
+    v2.sig_verified(0)
+    check("sig failed", v2.get_status().(string), "rejected")
+    check("rejected denies perform", v2.perform("read", "doc", 1).(string), "denied")
+
+    v3 := @@MacaroonVerifier()
+    v3.present("TOK", 3)
+    v3.sig_verified(1)
+    v3.caveat_verified(1, 0)
+    v3.caveat_verified(0, 1)
+    check("caveat failed -> rejected", v3.get_status().(string), "rejected")
+
+    v4 := @@MacaroonVerifier()
+    v4.present("TOK", 3)
+    v4.sig_verified(1)
+    v4.caveat_verified(1, 0)
+    v4.caveat_verified(1, 2)
+    check("out-of-order -> rejected", v4.get_status().(string), "rejected")
+
+    v5 := @@MacaroonVerifier()
+    v5.present("TOK", 0)
+    v5.sig_verified(1)
+    check("no caveats -> authorized", v5.get_status().(string), "authorized")
+
+    fmt.Println("PASS: macaroon")
+}
