@@ -1,0 +1,142 @@
+@@[target("kotlin")]
+
+// Cookbook 89: MFA with Lockout
+
+@@system MfaAuth {
+    interface:
+        submit_username(u: String)
+        submit_password(p: String)
+        submit_second_factor(code: String)
+        cooldown_elapsed()
+        logout()
+        get_status(): String = ""
+        get_failures(): Int
+
+    machine:
+        $Idle {
+            submit_username(u: String) {
+                this.username = u
+                -> $AwaitingPassword
+            }
+            get_status(): String { @@:("idle") }
+            get_failures(): Int { @@:(this.failures) }
+        }
+
+        $AwaitingPassword {
+            submit_password(p: String) {
+                if (this.username == "alice" && p == "hunter2") {
+                    -> $AwaitingSecondFactor
+                } else {
+                    this.failures = this.failures + 1
+                    if (this.failures >= this.lockout_threshold) {
+                        -> $Locked
+                    }
+                }
+            }
+            get_status(): String { @@:("awaiting_password") }
+            get_failures(): Int { @@:(this.failures) }
+        }
+
+        $AwaitingSecondFactor {
+            $.attempts: Int = 0
+
+            submit_second_factor(code: String) {
+                $.attempts = $.attempts + 1
+                if (code == "123456") {
+                    this.failures = 0
+                    -> $Authenticated
+                } else if ($.attempts >= 3) {
+                    this.failures = this.failures + 1
+                    if (this.failures >= this.lockout_threshold) {
+                        -> $Locked
+                    } else {
+                        -> $AwaitingPassword
+                    }
+                }
+            }
+            get_status(): String { @@:("awaiting_2fa") }
+            get_failures(): Int { @@:(this.failures) }
+        }
+
+        $Authenticated {
+            logout() { -> $Idle }
+            get_status(): String { @@:("authenticated") }
+            get_failures(): Int { @@:(this.failures) }
+        }
+
+        $Locked {
+            cooldown_elapsed() {
+                this.failures = this.lockout_threshold - 1
+                -> $Idle
+            }
+            get_status(): String { @@:("locked") }
+            get_failures(): Int { @@:(this.failures) }
+        }
+
+    domain:
+        username: String = ""
+        failures: Int = 0
+        lockout_threshold: Int = 5
+}
+
+fun check(label: String, actual: String, expected: String) {
+    if (actual != expected) { println("FAIL: $label expected '$expected', got '$actual'"); kotlin.system.exitProcess(1) }
+}
+fun checkI(label: String, actual: Int, expected: Int) {
+    if (actual != expected) { println("FAIL: $label expected $expected, got $actual"); kotlin.system.exitProcess(1) }
+}
+
+fun main() {
+    val m = @@MfaAuth()
+    check("idle", m.get_status() as String, "idle")
+    m.submit_second_factor("123456")
+    check("idle absorbs 2fa", m.get_status() as String, "idle")
+    m.submit_username("alice")
+    check("awaiting password", m.get_status() as String, "awaiting_password")
+    m.submit_second_factor("123456")
+    check("awaiting_password absorbs 2fa", m.get_status() as String, "awaiting_password")
+    m.submit_password("hunter2")
+    check("awaiting 2fa", m.get_status() as String, "awaiting_2fa")
+    checkI("no failures on correct password", m.get_failures() as Int, 0)
+    m.submit_second_factor("123456")
+    check("authenticated", m.get_status() as String, "authenticated")
+    checkI("failure counter reset on success", m.get_failures() as Int, 0)
+    m.logout()
+    check("logged out", m.get_status() as String, "idle")
+
+    val m2 = @@MfaAuth()
+    m2.submit_username("alice")
+    m2.submit_password("wrong")
+    checkI("1 failure", m2.get_failures() as Int, 1)
+    check("still awaiting password", m2.get_status() as String, "awaiting_password")
+    m2.submit_password("wrong")
+    m2.submit_password("wrong")
+    m2.submit_password("wrong")
+    checkI("4 failures", m2.get_failures() as Int, 4)
+    m2.submit_password("wrong")
+    check("locked", m2.get_status() as String, "locked")
+    checkI("5 failures", m2.get_failures() as Int, 5)
+    m2.submit_username("alice")
+    m2.submit_password("hunter2")
+    m2.submit_second_factor("123456")
+    check("locked absorbs all", m2.get_status() as String, "locked")
+    m2.cooldown_elapsed()
+    check("back to idle after cooldown", m2.get_status() as String, "idle")
+    checkI("partial reset to threshold-1", m2.get_failures() as Int, 4)
+
+    val m3 = @@MfaAuth()
+    m3.submit_username("alice")
+    m3.submit_password("hunter2")
+    check("2fa active", m3.get_status() as String, "awaiting_2fa")
+    m3.submit_second_factor("bad1")
+    check("2fa after 1 wrong still active", m3.get_status() as String, "awaiting_2fa")
+    m3.submit_second_factor("bad2")
+    m3.submit_second_factor("bad3")
+    check("2fa gave up", m3.get_status() as String, "awaiting_password")
+    checkI("one failure bumped", m3.get_failures() as Int, 1)
+    m3.submit_password("hunter2")
+    m3.submit_second_factor("bad")
+    check("new session, new attempts counter", m3.get_status() as String, "awaiting_2fa")
+
+    println("PASS: mfa_lockout")
+}

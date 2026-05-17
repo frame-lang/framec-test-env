@@ -1,0 +1,150 @@
+@@[target("c")]
+
+// Cookbook 89: MFA with Lockout
+
+@@system MfaAuth {
+    interface:
+        submit_username(u: string)
+        submit_password(p: string)
+        submit_second_factor(code: string)
+        cooldown_elapsed()
+        logout()
+        get_status(): string = ""
+        get_failures(): int
+
+    machine:
+        $Idle {
+            submit_username(u: string) {
+                self->username = u;
+                -> $AwaitingPassword
+            }
+            get_status(): string { @@:("idle") }
+            get_failures(): int { @@:(self->failures) }
+        }
+
+        $AwaitingPassword {
+            submit_password(p: string) {
+                if (strcmp(self->username, "alice") == 0 && strcmp(p, "hunter2") == 0) {
+                    -> $AwaitingSecondFactor
+                } else {
+                    self->failures = self->failures + 1;
+                    if (self->failures >= self->lockout_threshold) {
+                        -> $Locked
+                    }
+                }
+            }
+            get_status(): string { @@:("awaiting_password") }
+            get_failures(): int { @@:(self->failures) }
+        }
+
+        $AwaitingSecondFactor {
+            $.attempts: int = 0
+
+            submit_second_factor(code: string) {
+                $.attempts = $.attempts + 1;
+                if (strcmp(code, "123456") == 0) {
+                    self->failures = 0;
+                    -> $Authenticated
+                } else if ($.attempts >= 3) {
+                    self->failures = self->failures + 1;
+                    if (self->failures >= self->lockout_threshold) {
+                        -> $Locked
+                    } else {
+                        -> $AwaitingPassword
+                    }
+                }
+            }
+            get_status(): string { @@:("awaiting_2fa") }
+            get_failures(): int { @@:(self->failures) }
+        }
+
+        $Authenticated {
+            logout() { -> $Idle }
+            get_status(): string { @@:("authenticated") }
+            get_failures(): int { @@:(self->failures) }
+        }
+
+        $Locked {
+            cooldown_elapsed() {
+                self->failures = self->lockout_threshold - 1;
+                -> $Idle
+            }
+            get_status(): string { @@:("locked") }
+            get_failures(): int { @@:(self->failures) }
+        }
+
+    domain:
+        username: string = ""
+        failures: int = 0
+        lockout_threshold: int = 5
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) { printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual); exit(1); }
+}
+static void check_i(const char* label, int actual, int expected) {
+    if (actual != expected) { printf("FAIL: %s expected %d, got %d\n", label, expected, actual); exit(1); }
+}
+
+int main(void) {
+    MfaAuth* m = @@MfaAuth();
+    check("idle", MfaAuth_get_status(m), "idle");
+    MfaAuth_submit_second_factor(m, "123456");
+    check("idle absorbs 2fa", MfaAuth_get_status(m), "idle");
+    MfaAuth_submit_username(m, "alice");
+    check("awaiting password", MfaAuth_get_status(m), "awaiting_password");
+    MfaAuth_submit_second_factor(m, "123456");
+    check("awaiting_password absorbs 2fa", MfaAuth_get_status(m), "awaiting_password");
+    MfaAuth_submit_password(m, "hunter2");
+    check("awaiting 2fa", MfaAuth_get_status(m), "awaiting_2fa");
+    check_i("no failures on correct password", MfaAuth_get_failures(m), 0);
+    MfaAuth_submit_second_factor(m, "123456");
+    check("authenticated", MfaAuth_get_status(m), "authenticated");
+    check_i("failure counter reset on success", MfaAuth_get_failures(m), 0);
+    MfaAuth_logout(m);
+    check("logged out", MfaAuth_get_status(m), "idle");
+
+    MfaAuth* m2 = @@MfaAuth();
+    MfaAuth_submit_username(m2, "alice");
+    MfaAuth_submit_password(m2, "wrong");
+    check_i("1 failure", MfaAuth_get_failures(m2), 1);
+    check("still awaiting password", MfaAuth_get_status(m2), "awaiting_password");
+    MfaAuth_submit_password(m2, "wrong");
+    MfaAuth_submit_password(m2, "wrong");
+    MfaAuth_submit_password(m2, "wrong");
+    check_i("4 failures", MfaAuth_get_failures(m2), 4);
+    MfaAuth_submit_password(m2, "wrong");
+    check("locked", MfaAuth_get_status(m2), "locked");
+    check_i("5 failures", MfaAuth_get_failures(m2), 5);
+    MfaAuth_submit_username(m2, "alice");
+    MfaAuth_submit_password(m2, "hunter2");
+    MfaAuth_submit_second_factor(m2, "123456");
+    check("locked absorbs all", MfaAuth_get_status(m2), "locked");
+    MfaAuth_cooldown_elapsed(m2);
+    check("back to idle after cooldown", MfaAuth_get_status(m2), "idle");
+    check_i("partial reset to threshold-1", MfaAuth_get_failures(m2), 4);
+
+    MfaAuth* m3 = @@MfaAuth();
+    MfaAuth_submit_username(m3, "alice");
+    MfaAuth_submit_password(m3, "hunter2");
+    check("2fa active", MfaAuth_get_status(m3), "awaiting_2fa");
+    MfaAuth_submit_second_factor(m3, "bad1");
+    check("2fa after 1 wrong still active", MfaAuth_get_status(m3), "awaiting_2fa");
+    MfaAuth_submit_second_factor(m3, "bad2");
+    MfaAuth_submit_second_factor(m3, "bad3");
+    check("2fa gave up", MfaAuth_get_status(m3), "awaiting_password");
+    check_i("one failure bumped", MfaAuth_get_failures(m3), 1);
+    MfaAuth_submit_password(m3, "hunter2");
+    MfaAuth_submit_second_factor(m3, "bad");
+    check("new session, new attempts counter", MfaAuth_get_status(m3), "awaiting_2fa");
+
+    printf("PASS: mfa_lockout\n");
+    MfaAuth_destroy(m);
+    MfaAuth_destroy(m2);
+    MfaAuth_destroy(m3);
+    return 0;
+}

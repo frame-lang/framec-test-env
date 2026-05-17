@@ -1,0 +1,146 @@
+@@[target("csharp")]
+
+// Cookbook 89: MFA with Lockout
+
+using System;
+
+@@system MfaAuth {
+    interface:
+        submit_username(u: string)
+        submit_password(p: string)
+        submit_second_factor(code: string)
+        cooldown_elapsed()
+        logout()
+        get_status(): string = ""
+        get_failures(): int
+
+    machine:
+        $Idle {
+            submit_username(u: string) {
+                this.username = u;
+                -> $AwaitingPassword
+            }
+            get_status(): string { @@:("idle") }
+            get_failures(): int { @@:(this.failures) }
+        }
+
+        $AwaitingPassword {
+            submit_password(p: string) {
+                if (this.username == "alice" && p == "hunter2") {
+                    -> $AwaitingSecondFactor
+                } else {
+                    this.failures = this.failures + 1;
+                    if (this.failures >= this.lockout_threshold) {
+                        -> $Locked
+                    }
+                }
+            }
+            get_status(): string { @@:("awaiting_password") }
+            get_failures(): int { @@:(this.failures) }
+        }
+
+        $AwaitingSecondFactor {
+            $.attempts: int = 0
+
+            submit_second_factor(code: string) {
+                $.attempts = $.attempts + 1;
+                if (code == "123456") {
+                    this.failures = 0;
+                    -> $Authenticated
+                } else if ($.attempts >= 3) {
+                    this.failures = this.failures + 1;
+                    if (this.failures >= this.lockout_threshold) {
+                        -> $Locked
+                    } else {
+                        -> $AwaitingPassword
+                    }
+                }
+            }
+            get_status(): string { @@:("awaiting_2fa") }
+            get_failures(): int { @@:(this.failures) }
+        }
+
+        $Authenticated {
+            logout() { -> $Idle }
+            get_status(): string { @@:("authenticated") }
+            get_failures(): int { @@:(this.failures) }
+        }
+
+        $Locked {
+            cooldown_elapsed() {
+                this.failures = this.lockout_threshold - 1;
+                -> $Idle
+            }
+            get_status(): string { @@:("locked") }
+            get_failures(): int { @@:(this.failures) }
+        }
+
+    domain:
+        username: string = ""
+        failures: int = 0
+        lockout_threshold: int = 5
+}
+
+public class Program {
+    static void Check(string label, string actual, string expected) {
+        if (actual != expected) { Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'"); Environment.Exit(1); }
+    }
+    static void CheckI(string label, int actual, int expected) {
+        if (actual != expected) { Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}"); Environment.Exit(1); }
+    }
+
+    public static void Main() {
+        var m = @@MfaAuth();
+        Check("idle", (string)m.get_status(), "idle");
+        m.submit_second_factor("123456");
+        Check("idle absorbs 2fa", (string)m.get_status(), "idle");
+        m.submit_username("alice");
+        Check("awaiting password", (string)m.get_status(), "awaiting_password");
+        m.submit_second_factor("123456");
+        Check("awaiting_password absorbs 2fa", (string)m.get_status(), "awaiting_password");
+        m.submit_password("hunter2");
+        Check("awaiting 2fa", (string)m.get_status(), "awaiting_2fa");
+        CheckI("no failures on correct password", (int)m.get_failures(), 0);
+        m.submit_second_factor("123456");
+        Check("authenticated", (string)m.get_status(), "authenticated");
+        CheckI("failure counter reset on success", (int)m.get_failures(), 0);
+        m.logout();
+        Check("logged out", (string)m.get_status(), "idle");
+
+        var m2 = @@MfaAuth();
+        m2.submit_username("alice");
+        m2.submit_password("wrong");
+        CheckI("1 failure", (int)m2.get_failures(), 1);
+        Check("still awaiting password", (string)m2.get_status(), "awaiting_password");
+        m2.submit_password("wrong");
+        m2.submit_password("wrong");
+        m2.submit_password("wrong");
+        CheckI("4 failures", (int)m2.get_failures(), 4);
+        m2.submit_password("wrong");
+        Check("locked", (string)m2.get_status(), "locked");
+        CheckI("5 failures", (int)m2.get_failures(), 5);
+        m2.submit_username("alice");
+        m2.submit_password("hunter2");
+        m2.submit_second_factor("123456");
+        Check("locked absorbs all", (string)m2.get_status(), "locked");
+        m2.cooldown_elapsed();
+        Check("back to idle after cooldown", (string)m2.get_status(), "idle");
+        CheckI("partial reset to threshold-1", (int)m2.get_failures(), 4);
+
+        var m3 = @@MfaAuth();
+        m3.submit_username("alice");
+        m3.submit_password("hunter2");
+        Check("2fa active", (string)m3.get_status(), "awaiting_2fa");
+        m3.submit_second_factor("bad1");
+        Check("2fa after 1 wrong still active", (string)m3.get_status(), "awaiting_2fa");
+        m3.submit_second_factor("bad2");
+        m3.submit_second_factor("bad3");
+        Check("2fa gave up", (string)m3.get_status(), "awaiting_password");
+        CheckI("one failure bumped", (int)m3.get_failures(), 1);
+        m3.submit_password("hunter2");
+        m3.submit_second_factor("bad");
+        Check("new session, new attempts counter", (string)m3.get_status(), "awaiting_2fa");
+
+        Console.WriteLine("PASS: mfa_lockout");
+    }
+}
