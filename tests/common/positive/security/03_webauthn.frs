@@ -1,0 +1,175 @@
+@@[target("rust")]
+
+// Cookbook 88: WebAuthn / FIDO2
+
+@@system WebAuthnCeremony {
+    interface:
+        begin_registration(user_id: String, rp_id: String)
+        registration_response(chal_ok: i32, origin_ok: i32, att_ok: i32)
+        begin_authentication(user_id: String, rp_id: String, uv_required: i32)
+        assertion_response(chal_ok: i32, origin_ok: i32, uv_ok: i32, sig_ok: i32, counter_ok: i32)
+        timeout()
+        get_status(): String = "idle"
+        get_user(): String
+        get_rp(): String
+
+    machine:
+        $Idle {
+            begin_registration(user_id: String, rp_id: String) {
+                self.user_id = user_id;
+                self.rp_id = rp_id;
+                self.uv_required = 1;
+                -> $AwaitingRegistration
+            }
+            begin_authentication(user_id: String, rp_id: String, uv_required: i32) {
+                self.user_id = user_id;
+                self.rp_id = rp_id;
+                self.uv_required = uv_required;
+                -> $AwaitingAssertion
+            }
+            get_status(): String { @@:(String::from("idle")) }
+            get_user(): String { @@:(self.user_id.clone()) }
+            get_rp(): String { @@:(self.rp_id.clone()) }
+        }
+
+        $AwaitingRegistration {
+            registration_response(chal_ok: i32, origin_ok: i32, att_ok: i32) {
+                if chal_ok == 0 {
+                    -> $Failed
+                } else if origin_ok == 0 {
+                    -> $Failed
+                } else if att_ok == 0 {
+                    -> $Failed
+                } else {
+                    -> $Registered
+                }
+            }
+            timeout() { -> $Failed }
+            get_status(): String { @@:(String::from("awaiting_registration")) }
+            get_user(): String { @@:(self.user_id.clone()) }
+            get_rp(): String { @@:(self.rp_id.clone()) }
+        }
+
+        $AwaitingAssertion {
+            assertion_response(chal_ok: i32, origin_ok: i32, uv_ok: i32, sig_ok: i32, counter_ok: i32) {
+                if chal_ok == 0 {
+                    -> $Failed
+                } else if origin_ok == 0 {
+                    -> $Failed
+                } else if self.uv_required == 1 && uv_ok == 0 {
+                    -> $Failed
+                } else if sig_ok == 0 {
+                    -> $Failed
+                } else if counter_ok == 0 {
+                    -> $Failed
+                } else {
+                    -> $Authenticated
+                }
+            }
+            timeout() { -> $Failed }
+            get_status(): String { @@:(String::from("awaiting_assertion")) }
+            get_user(): String { @@:(self.user_id.clone()) }
+            get_rp(): String { @@:(self.rp_id.clone()) }
+        }
+
+        $Registered {
+            get_status(): String { @@:(String::from("registered")) }
+            get_user(): String { @@:(self.user_id.clone()) }
+            get_rp(): String { @@:(self.rp_id.clone()) }
+        }
+
+        $Authenticated {
+            get_status(): String { @@:(String::from("authenticated")) }
+            get_user(): String { @@:(self.user_id.clone()) }
+            get_rp(): String { @@:(self.rp_id.clone()) }
+        }
+
+        $Failed {
+            get_status(): String { @@:(String::from("failed")) }
+            get_user(): String { @@:(self.user_id.clone()) }
+            get_rp(): String { @@:(self.rp_id.clone()) }
+        }
+
+    domain:
+        user_id: String = String::new()
+        rp_id: String = String::new()
+        uv_required: i32 = 0
+}
+
+fn check(label: &str, actual: String, expected: &str) {
+    if actual != expected { println!("FAIL: {} expected '{}', got '{}'", label, expected, actual); std::process::exit(1); }
+}
+
+fn main() {
+    let mut w = @@WebAuthnCeremony();
+    check("idle", w.get_status(), "idle");
+    w.begin_registration(String::from("alice"), String::from("example.com"));
+    check("awaiting registration", w.get_status(), "awaiting_registration");
+    check("user captured", w.get_user(), "alice");
+    check("rp captured", w.get_rp(), "example.com");
+    w.registration_response(1, 1, 1);
+    check("registered", w.get_status(), "registered");
+    w.registration_response(1, 1, 1);
+    check("registered absorbs replay", w.get_status(), "registered");
+
+    let mut w2 = @@WebAuthnCeremony();
+    w2.begin_registration(String::from("bob"), String::from("example.com"));
+    w2.registration_response(0, 1, 1);
+    check("reg chal mismatch", w2.get_status(), "failed");
+
+    let mut w3 = @@WebAuthnCeremony();
+    w3.begin_registration(String::from("carol"), String::from("evil.com"));
+    w3.registration_response(1, 0, 1);
+    check("reg origin mismatch", w3.get_status(), "failed");
+
+    let mut w4 = @@WebAuthnCeremony();
+    w4.begin_registration(String::from("dave"), String::from("example.com"));
+    w4.registration_response(1, 1, 0);
+    check("reg attestation failed", w4.get_status(), "failed");
+
+    let mut w5 = @@WebAuthnCeremony();
+    w5.begin_registration(String::from("eve"), String::from("example.com"));
+    w5.timeout();
+    check("reg timeout", w5.get_status(), "failed");
+
+    let mut w6 = @@WebAuthnCeremony();
+    w6.begin_authentication(String::from("alice"), String::from("example.com"), 1);
+    check("awaiting assertion", w6.get_status(), "awaiting_assertion");
+    w6.assertion_response(1, 1, 1, 1, 1);
+    check("authenticated", w6.get_status(), "authenticated");
+
+    let mut w7 = @@WebAuthnCeremony();
+    w7.begin_authentication(String::from("alice"), String::from("example.com"), 1);
+    w7.assertion_response(1, 1, 0, 1, 1);
+    check("uv gate", w7.get_status(), "failed");
+
+    let mut w8 = @@WebAuthnCeremony();
+    w8.begin_authentication(String::from("alice"), String::from("example.com"), 0);
+    w8.assertion_response(1, 1, 0, 1, 1);
+    check("uv not required", w8.get_status(), "authenticated");
+
+    let mut w9 = @@WebAuthnCeremony();
+    w9.begin_authentication(String::from("alice"), String::from("example.com"), 1);
+    w9.assertion_response(1, 0, 1, 1, 1);
+    check("origin confusion", w9.get_status(), "failed");
+
+    let mut w10 = @@WebAuthnCeremony();
+    w10.begin_authentication(String::from("alice"), String::from("example.com"), 1);
+    w10.assertion_response(1, 1, 1, 0, 1);
+    check("signature fail", w10.get_status(), "failed");
+
+    let mut w11 = @@WebAuthnCeremony();
+    w11.begin_authentication(String::from("alice"), String::from("example.com"), 1);
+    w11.assertion_response(1, 1, 1, 1, 0);
+    check("counter regression", w11.get_status(), "failed");
+
+    let mut w12 = @@WebAuthnCeremony();
+    w12.begin_authentication(String::from("alice"), String::from("example.com"), 1);
+    w12.assertion_response(0, 1, 1, 1, 1);
+    check("challenge replay", w12.get_status(), "failed");
+
+    w6.assertion_response(0, 0, 0, 0, 0);
+    check("authenticated absorbs replay", w6.get_status(), "authenticated");
+
+    println!("PASS: webauthn");
+}
