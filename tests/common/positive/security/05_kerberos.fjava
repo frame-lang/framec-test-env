@@ -1,0 +1,185 @@
+@@[target("java")]
+
+// Cookbook 90: Kerberos Ticket Lifecycle (HSM)
+
+@@system KerberosClient {
+    interface:
+        authenticate(user: String, password: String)
+        preauth_accepted(tgt: String, session_key: String, expiry: int)
+        preauth_rejected(reason: String)
+        request_service(spn: String)
+        service_ticket_received(st: String, expiry: int)
+        service_ticket_rejected(reason: String)
+        tick(now: int)
+        logout()
+        get_status(): String = ""
+        get_tgt(): String
+        get_service_ticket(): String
+
+    machine:
+        $Idle {
+            authenticate(user: String, password: String) {
+                this.user = user;
+                -> $AwaitingTgt
+            }
+            get_status(): String { @@:("idle") }
+            get_tgt(): String { @@:((String) this.tgt) }
+            get_service_ticket(): String { @@:((String) this.service_ticket) }
+        }
+
+        $AwaitingTgt {
+            preauth_accepted(tgt: String, session_key: String, expiry: int) {
+                this.tgt = tgt;
+                this.session_key = session_key;
+                this.tgt_expiry = expiry;
+                -> $HasTgt
+            }
+            preauth_rejected(reason: String) { -> $Failed }
+            get_status(): String { @@:("awaiting_tgt") }
+            get_tgt(): String { @@:((String) this.tgt) }
+            get_service_ticket(): String { @@:((String) this.service_ticket) }
+        }
+
+        $HasValidTgt {
+            tick(now: int) {
+                if (now >= this.tgt_expiry) {
+                    this.tgt = "";
+                    this.session_key = "";
+                    this.tgt_expiry = 0;
+                    this.service_ticket = "";
+                    this.st_expiry = 0;
+                    -> $Idle
+                }
+            }
+            logout() {
+                this.tgt = "";
+                this.session_key = "";
+                this.tgt_expiry = 0;
+                this.service_ticket = "";
+                this.st_expiry = 0;
+                -> $Idle
+            }
+            get_tgt(): String { @@:((String) this.tgt) }
+            get_service_ticket(): String { @@:((String) this.service_ticket) }
+        }
+
+        $HasTgt => $HasValidTgt {
+            request_service(spn: String) { -> $AwaitingServiceTicket }
+            get_status(): String { @@:("has_tgt") }
+            => $^
+        }
+
+        $AwaitingServiceTicket => $HasValidTgt {
+            service_ticket_received(st: String, expiry: int) {
+                this.service_ticket = st;
+                this.st_expiry = expiry;
+                -> $HasServiceTicket
+            }
+            service_ticket_rejected(reason: String) { -> $HasTgt }
+            get_status(): String { @@:("awaiting_st") }
+            => $^
+        }
+
+        $HasServiceTicket => $HasValidTgt {
+            tick(now: int) {
+                if (now >= this.tgt_expiry) {
+                    this.tgt = "";
+                    this.session_key = "";
+                    this.tgt_expiry = 0;
+                    this.service_ticket = "";
+                    this.st_expiry = 0;
+                    -> $Idle
+                } else if (now >= this.st_expiry) {
+                    this.service_ticket = "";
+                    -> $HasTgt
+                }
+            }
+            request_service(spn: String) { -> $AwaitingServiceTicket }
+            get_status(): String { @@:("has_st") }
+            => $^
+        }
+
+        $Failed {
+            get_status(): String { @@:("failed") }
+            get_tgt(): String { @@:((String) this.tgt) }
+            get_service_ticket(): String { @@:((String) this.service_ticket) }
+        }
+
+    domain:
+        user: String = ""
+        tgt: String = ""
+        session_key: String = ""
+        tgt_expiry: int = 0
+        service_ticket: String = ""
+        st_expiry: int = 0
+}
+
+public class Kerberos05Test {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) { System.out.println("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'"); System.exit(1); }
+    }
+
+    public static void main(String[] args) {
+        KerberosClient k = @@KerberosClient();
+        check("idle", (String) k.get_status(), "idle");
+        k.request_service("HTTP/web");
+        check("idle absorbs request_service", (String) k.get_status(), "idle");
+        check("no service ticket in idle", (String) k.get_service_ticket(), "");
+        k.authenticate("alice", "pw");
+        check("awaiting tgt", (String) k.get_status(), "awaiting_tgt");
+        k.request_service("HTTP/web");
+        check("awaiting absorbs request_service", (String) k.get_status(), "awaiting_tgt");
+        k.preauth_accepted("TGT-abc", "K-123", 100);
+        check("has tgt", (String) k.get_status(), "has_tgt");
+        check("tgt stored", (String) k.get_tgt(), "TGT-abc");
+        k.tick(50);
+        check("still has tgt pre-expiry", (String) k.get_status(), "has_tgt");
+        k.request_service("HTTP/web");
+        check("awaiting st", (String) k.get_status(), "awaiting_st");
+        k.service_ticket_received("ST-xyz", 80);
+        check("has st", (String) k.get_status(), "has_st");
+        check("st stored", (String) k.get_service_ticket(), "ST-xyz");
+        k.tick(85);
+        check("ST expired -> has_tgt", (String) k.get_status(), "has_tgt");
+        check("st cleared", (String) k.get_service_ticket(), "");
+        check("tgt still there", (String) k.get_tgt(), "TGT-abc");
+        k.request_service("HTTP/web");
+        k.service_ticket_received("ST-2", 95);
+        check("has st 2", (String) k.get_status(), "has_st");
+        k.tick(100);
+        check("tgt expired -> idle", (String) k.get_status(), "idle");
+        check("tgt zeroed", (String) k.get_tgt(), "");
+        check("st zeroed", (String) k.get_service_ticket(), "");
+
+        KerberosClient k2 = @@KerberosClient();
+        k2.authenticate("alice", "pw");
+        k2.preauth_accepted("TGT-xx", "K-yy", 200);
+        k2.logout();
+        check("logout from has_tgt -> idle", (String) k2.get_status(), "idle");
+        check("logout cleared tgt", (String) k2.get_tgt(), "");
+
+        KerberosClient k3 = @@KerberosClient();
+        k3.authenticate("alice", "pw");
+        k3.preauth_accepted("TGT-1", "K-1", 500);
+        k3.request_service("spn");
+        k3.service_ticket_received("ST-1", 300);
+        k3.logout();
+        check("logout from has_st -> idle", (String) k3.get_status(), "idle");
+        check("logout cleared st", (String) k3.get_service_ticket(), "");
+
+        KerberosClient k4 = @@KerberosClient();
+        k4.authenticate("bob", "wrong");
+        k4.preauth_rejected("invalid_password");
+        check("preauth rejected", (String) k4.get_status(), "failed");
+
+        KerberosClient k5 = @@KerberosClient();
+        k5.authenticate("alice", "pw");
+        k5.preauth_accepted("TGT-q", "K-q", 500);
+        k5.request_service("deny_me");
+        k5.service_ticket_rejected("no_access");
+        check("st rejected -> has_tgt", (String) k5.get_status(), "has_tgt");
+        check("tgt retained", (String) k5.get_tgt(), "TGT-q");
+
+        System.out.println("PASS: kerberos");
+    }
+}

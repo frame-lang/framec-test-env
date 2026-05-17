@@ -1,0 +1,183 @@
+@@[target("rust")]
+
+// Cookbook 90: Kerberos Ticket Lifecycle (HSM)
+
+@@system KerberosClient {
+    interface:
+        authenticate(user: String, password: String)
+        preauth_accepted(tgt: String, session_key: String, expiry: i32)
+        preauth_rejected(reason: String)
+        request_service(spn: String)
+        service_ticket_received(st: String, expiry: i32)
+        service_ticket_rejected(reason: String)
+        tick(now: i32)
+        logout()
+        get_status(): String = ""
+        get_tgt(): String
+        get_service_ticket(): String
+
+    machine:
+        $Idle {
+            authenticate(user: String, password: String) {
+                self.user = user;
+                -> $AwaitingTgt
+            }
+            get_status(): String { @@:(String::from("idle")) }
+            get_tgt(): String { @@:(self.tgt.clone()) }
+            get_service_ticket(): String { @@:(self.service_ticket.clone()) }
+        }
+
+        $AwaitingTgt {
+            preauth_accepted(tgt: String, session_key: String, expiry: i32) {
+                self.tgt = tgt;
+                self.session_key = session_key;
+                self.tgt_expiry = expiry;
+                -> $HasTgt
+            }
+            preauth_rejected(reason: String) { -> $Failed }
+            get_status(): String { @@:(String::from("awaiting_tgt")) }
+            get_tgt(): String { @@:(self.tgt.clone()) }
+            get_service_ticket(): String { @@:(self.service_ticket.clone()) }
+        }
+
+        $HasValidTgt {
+            tick(now: i32) {
+                if now >= self.tgt_expiry {
+                    self.tgt = String::new();
+                    self.session_key = String::new();
+                    self.tgt_expiry = 0;
+                    self.service_ticket = String::new();
+                    self.st_expiry = 0;
+                    -> $Idle
+                }
+            }
+            logout() {
+                self.tgt = String::new();
+                self.session_key = String::new();
+                self.tgt_expiry = 0;
+                self.service_ticket = String::new();
+                self.st_expiry = 0;
+                -> $Idle
+            }
+            get_tgt(): String { @@:(self.tgt.clone()) }
+            get_service_ticket(): String { @@:(self.service_ticket.clone()) }
+        }
+
+        $HasTgt => $HasValidTgt {
+            request_service(spn: String) { -> $AwaitingServiceTicket }
+            get_status(): String { @@:(String::from("has_tgt")) }
+            => $^
+        }
+
+        $AwaitingServiceTicket => $HasValidTgt {
+            service_ticket_received(st: String, expiry: i32) {
+                self.service_ticket = st;
+                self.st_expiry = expiry;
+                -> $HasServiceTicket
+            }
+            service_ticket_rejected(reason: String) { -> $HasTgt }
+            get_status(): String { @@:(String::from("awaiting_st")) }
+            => $^
+        }
+
+        $HasServiceTicket => $HasValidTgt {
+            tick(now: i32) {
+                if now >= self.tgt_expiry {
+                    self.tgt = String::new();
+                    self.session_key = String::new();
+                    self.tgt_expiry = 0;
+                    self.service_ticket = String::new();
+                    self.st_expiry = 0;
+                    -> $Idle
+                } else if now >= self.st_expiry {
+                    self.service_ticket = String::new();
+                    -> $HasTgt
+                }
+            }
+            request_service(spn: String) { -> $AwaitingServiceTicket }
+            get_status(): String { @@:(String::from("has_st")) }
+            => $^
+        }
+
+        $Failed {
+            get_status(): String { @@:(String::from("failed")) }
+            get_tgt(): String { @@:(self.tgt.clone()) }
+            get_service_ticket(): String { @@:(self.service_ticket.clone()) }
+        }
+
+    domain:
+        user: String = String::new()
+        tgt: String = String::new()
+        session_key: String = String::new()
+        tgt_expiry: i32 = 0
+        service_ticket: String = String::new()
+        st_expiry: i32 = 0
+}
+
+fn check(label: &str, actual: String, expected: &str) {
+    if actual != expected { println!("FAIL: {} expected '{}', got '{}'", label, expected, actual); std::process::exit(1); }
+}
+
+fn main() {
+    let mut k = @@KerberosClient();
+    check("idle", k.get_status(), "idle");
+    k.request_service(String::from("HTTP/web"));
+    check("idle absorbs request_service", k.get_status(), "idle");
+    check("no service ticket in idle", k.get_service_ticket(), "");
+    k.authenticate(String::from("alice"), String::from("pw"));
+    check("awaiting tgt", k.get_status(), "awaiting_tgt");
+    k.request_service(String::from("HTTP/web"));
+    check("awaiting absorbs request_service", k.get_status(), "awaiting_tgt");
+    k.preauth_accepted(String::from("TGT-abc"), String::from("K-123"), 100);
+    check("has tgt", k.get_status(), "has_tgt");
+    check("tgt stored", k.get_tgt(), "TGT-abc");
+    k.tick(50);
+    check("still has tgt pre-expiry", k.get_status(), "has_tgt");
+    k.request_service(String::from("HTTP/web"));
+    check("awaiting st", k.get_status(), "awaiting_st");
+    k.service_ticket_received(String::from("ST-xyz"), 80);
+    check("has st", k.get_status(), "has_st");
+    check("st stored", k.get_service_ticket(), "ST-xyz");
+    k.tick(85);
+    check("ST expired -> has_tgt", k.get_status(), "has_tgt");
+    check("st cleared", k.get_service_ticket(), "");
+    check("tgt still there", k.get_tgt(), "TGT-abc");
+    k.request_service(String::from("HTTP/web"));
+    k.service_ticket_received(String::from("ST-2"), 95);
+    check("has st 2", k.get_status(), "has_st");
+    k.tick(100);
+    check("tgt expired -> idle", k.get_status(), "idle");
+    check("tgt zeroed", k.get_tgt(), "");
+    check("st zeroed", k.get_service_ticket(), "");
+
+    let mut k2 = @@KerberosClient();
+    k2.authenticate(String::from("alice"), String::from("pw"));
+    k2.preauth_accepted(String::from("TGT-xx"), String::from("K-yy"), 200);
+    k2.logout();
+    check("logout from has_tgt -> idle", k2.get_status(), "idle");
+    check("logout cleared tgt", k2.get_tgt(), "");
+
+    let mut k3 = @@KerberosClient();
+    k3.authenticate(String::from("alice"), String::from("pw"));
+    k3.preauth_accepted(String::from("TGT-1"), String::from("K-1"), 500);
+    k3.request_service(String::from("spn"));
+    k3.service_ticket_received(String::from("ST-1"), 300);
+    k3.logout();
+    check("logout from has_st -> idle", k3.get_status(), "idle");
+    check("logout cleared st", k3.get_service_ticket(), "");
+
+    let mut k4 = @@KerberosClient();
+    k4.authenticate(String::from("bob"), String::from("wrong"));
+    k4.preauth_rejected(String::from("invalid_password"));
+    check("preauth rejected", k4.get_status(), "failed");
+
+    let mut k5 = @@KerberosClient();
+    k5.authenticate(String::from("alice"), String::from("pw"));
+    k5.preauth_accepted(String::from("TGT-q"), String::from("K-q"), 500);
+    k5.request_service(String::from("deny_me"));
+    k5.service_ticket_rejected(String::from("no_access"));
+    check("st rejected -> has_tgt", k5.get_status(), "has_tgt");
+    check("tgt retained", k5.get_tgt(), "TGT-q");
+
+    println!("PASS: kerberos");
+}
