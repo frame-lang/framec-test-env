@@ -1,0 +1,105 @@
+@@[target("erlang")]
+
+%% Cookbook 86: TLS 1.3 Handshake (Client Side)
+
+@@system TlsClient {
+    interface:
+        connect(server_name)
+        server_hello_received(supported_versions_ext, downgrade_flag, cipher)
+        encrypted_extensions_received()
+        certificate_received(cert_valid)
+        cert_verify_received(sig_valid)
+        server_finished_received(mac_valid)
+        send_app_data(data) = "not_ready"
+        close()
+        timeout()
+        get_status() = "idle"
+
+    machine:
+        $Idle {
+            connect(server_name) {
+                self.server_name = Server_name
+                -> $WaitingServerHello
+            }
+            get_status() { @@:("idle") }
+        }
+
+        $WaitingServerHello {
+            server_hello_received(supported_versions_ext, downgrade_flag, cipher) {
+                if Supported_versions_ext =/= 772
+                    -> $Aborted
+                else
+                    if Downgrade_flag =/= 0
+                        -> $Aborted
+                    else
+                        if Cipher == "RC4"
+                            -> $Aborted
+                        else
+                            -> $WaitingEncryptedExtensions
+                        end
+                    end
+                end
+            }
+            timeout() { -> $Aborted }
+            get_status() { @@:("waiting server_hello") }
+        }
+
+        $WaitingEncryptedExtensions {
+            encrypted_extensions_received() { -> $WaitingCertificate }
+            timeout() { -> $Aborted }
+            get_status() { @@:("waiting ee") }
+        }
+
+        $WaitingCertificate {
+            certificate_received(cert_valid) {
+                if Cert_valid == 1
+                    -> $WaitingCertVerify
+                else
+                    -> $Aborted
+                end
+            }
+            timeout() { -> $Aborted }
+            get_status() { @@:("waiting cert") }
+        }
+
+        $WaitingCertVerify {
+            cert_verify_received(sig_valid) {
+                if Sig_valid == 1
+                    -> $WaitingServerFinished
+                else
+                    -> $Aborted
+                end
+            }
+            timeout() { -> $Aborted }
+            get_status() { @@:("waiting cert_verify") }
+        }
+
+        $WaitingServerFinished {
+            server_finished_received(mac_valid) {
+                if Mac_valid == 1
+                    -> $Established
+                else
+                    -> $Aborted
+                end
+            }
+            timeout() { -> $Aborted }
+            get_status() { @@:("waiting server_finished") }
+        }
+
+        $Established {
+            send_app_data(data) { @@:("sent") }
+            close() { -> $Closed }
+            get_status() { @@:("established") }
+        }
+
+        $Aborted {
+            get_status() { @@:("aborted") }
+        }
+
+        $Closed {
+            get_status() { @@:("closed") }
+        }
+
+    domain:
+        server_name = ""
+}

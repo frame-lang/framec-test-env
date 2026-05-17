@@ -1,0 +1,172 @@
+@@[target("c")]
+
+// Cookbook 86: TLS 1.3 Handshake (Client Side)
+
+@@system TlsClient {
+    interface:
+        connect(server_name: string)
+        server_hello_received(supported_versions_ext: int, downgrade_flag: int, cipher: string)
+        encrypted_extensions_received()
+        certificate_received(cert_valid: int)
+        cert_verify_received(sig_valid: int)
+        server_finished_received(mac_valid: int)
+        send_app_data(data: string): string = "not_ready"
+        close()
+        timeout()
+        get_status(): string = "idle"
+
+    machine:
+        $Idle {
+            connect(server_name: string) {
+                self->server_name = server_name;
+                -> $WaitingServerHello
+            }
+            get_status(): string { @@:("idle") }
+        }
+
+        $WaitingServerHello {
+            server_hello_received(supported_versions_ext: int, downgrade_flag: int, cipher: string) {
+                if (supported_versions_ext != 772) { -> $Aborted }
+                else if (downgrade_flag != 0) { -> $Aborted }
+                else if (strcmp(cipher, "RC4") == 0) { -> $Aborted }
+                else { -> $WaitingEncryptedExtensions }
+            }
+            timeout() { -> $Aborted }
+            get_status(): string { @@:("waiting server_hello") }
+        }
+
+        $WaitingEncryptedExtensions {
+            encrypted_extensions_received() { -> $WaitingCertificate }
+            timeout() { -> $Aborted }
+            get_status(): string { @@:("waiting ee") }
+        }
+
+        $WaitingCertificate {
+            certificate_received(cert_valid: int) {
+                if (cert_valid == 1) { -> $WaitingCertVerify } else { -> $Aborted }
+            }
+            timeout() { -> $Aborted }
+            get_status(): string { @@:("waiting cert") }
+        }
+
+        $WaitingCertVerify {
+            cert_verify_received(sig_valid: int) {
+                if (sig_valid == 1) { -> $WaitingServerFinished } else { -> $Aborted }
+            }
+            timeout() { -> $Aborted }
+            get_status(): string { @@:("waiting cert_verify") }
+        }
+
+        $WaitingServerFinished {
+            server_finished_received(mac_valid: int) {
+                if (mac_valid == 1) { -> $Established } else { -> $Aborted }
+            }
+            timeout() { -> $Aborted }
+            get_status(): string { @@:("waiting server_finished") }
+        }
+
+        $Established {
+            send_app_data(data: string): string { @@:("sent") }
+            close() { -> $Closed }
+            get_status(): string { @@:("established") }
+        }
+
+        $Aborted {
+            get_status(): string { @@:("aborted") }
+        }
+
+        $Closed {
+            get_status(): string { @@:("closed") }
+        }
+
+    domain:
+        server_name: string = ""
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) { fprintf(stderr, "FAIL: %s expected '%s', got '%s'\n", label, expected, actual); exit(1); }
+}
+
+int main(void) {
+    TlsClient c; TlsClient_init(&c);
+    check("start idle", TlsClient_get_status(&c), "idle");
+    check("idle app_data denied", TlsClient_send_app_data(&c, "hello"), "not_ready");
+    TlsClient_connect(&c, "example.com");
+    check("waiting SH", TlsClient_get_status(&c), "waiting server_hello");
+    check("waiting SH app_data denied", TlsClient_send_app_data(&c, "hello"), "not_ready");
+    TlsClient_server_hello_received(&c, 772, 0, "AES-GCM");
+    check("waiting EE", TlsClient_get_status(&c), "waiting ee");
+    check("waiting EE app_data denied", TlsClient_send_app_data(&c, "hello"), "not_ready");
+    TlsClient_encrypted_extensions_received(&c);
+    check("waiting cert", TlsClient_get_status(&c), "waiting cert");
+    TlsClient_certificate_received(&c, 1);
+    check("waiting cert_verify", TlsClient_get_status(&c), "waiting cert_verify");
+    TlsClient_cert_verify_received(&c, 1);
+    check("waiting finished", TlsClient_get_status(&c), "waiting server_finished");
+    check("still denied pre-finished", TlsClient_send_app_data(&c, "hello"), "not_ready");
+    TlsClient_server_finished_received(&c, 1);
+    check("established", TlsClient_get_status(&c), "established");
+    check("app_data allowed", TlsClient_send_app_data(&c, "hello"), "sent");
+    TlsClient_close(&c);
+    check("closed", TlsClient_get_status(&c), "closed");
+    check("closed denies app_data", TlsClient_send_app_data(&c, "hello"), "not_ready");
+
+    TlsClient c2; TlsClient_init(&c2);
+    TlsClient_connect(&c2, "example.com");
+    TlsClient_server_hello_received(&c2, 772, 1, "AES-GCM");
+    check("downgrade aborts", TlsClient_get_status(&c2), "aborted");
+    check("aborted denies app_data", TlsClient_send_app_data(&c2, "hello"), "not_ready");
+
+    TlsClient c3; TlsClient_init(&c3);
+    TlsClient_connect(&c3, "example.com");
+    TlsClient_server_hello_received(&c3, 771, 0, "AES-GCM");
+    check("version mismatch aborts", TlsClient_get_status(&c3), "aborted");
+
+    TlsClient c4; TlsClient_init(&c4);
+    TlsClient_connect(&c4, "example.com");
+    TlsClient_server_hello_received(&c4, 772, 0, "RC4");
+    check("weak cipher aborts", TlsClient_get_status(&c4), "aborted");
+
+    TlsClient c5; TlsClient_init(&c5);
+    TlsClient_connect(&c5, "example.com");
+    TlsClient_server_hello_received(&c5, 772, 0, "AES-GCM");
+    TlsClient_encrypted_extensions_received(&c5);
+    TlsClient_certificate_received(&c5, 0);
+    check("cert fail aborts", TlsClient_get_status(&c5), "aborted");
+
+    TlsClient c6; TlsClient_init(&c6);
+    TlsClient_connect(&c6, "example.com");
+    TlsClient_server_hello_received(&c6, 772, 0, "AES-GCM");
+    TlsClient_encrypted_extensions_received(&c6);
+    TlsClient_certificate_received(&c6, 1);
+    TlsClient_cert_verify_received(&c6, 0);
+    check("sig fail aborts", TlsClient_get_status(&c6), "aborted");
+
+    TlsClient c7; TlsClient_init(&c7);
+    TlsClient_connect(&c7, "example.com");
+    TlsClient_server_hello_received(&c7, 772, 0, "AES-GCM");
+    TlsClient_encrypted_extensions_received(&c7);
+    TlsClient_certificate_received(&c7, 1);
+    TlsClient_cert_verify_received(&c7, 1);
+    TlsClient_server_finished_received(&c7, 0);
+    check("mac fail aborts", TlsClient_get_status(&c7), "aborted");
+    check("failed mac denies app_data", TlsClient_send_app_data(&c7, "hello"), "not_ready");
+
+    TlsClient c8; TlsClient_init(&c8);
+    TlsClient_connect(&c8, "example.com");
+    TlsClient_timeout(&c8);
+    check("timeout from SH", TlsClient_get_status(&c8), "aborted");
+
+    TlsClient c9; TlsClient_init(&c9);
+    TlsClient_connect(&c9, "example.com");
+    TlsClient_server_hello_received(&c9, 772, 0, "AES-GCM");
+    TlsClient_timeout(&c9);
+    check("timeout from EE", TlsClient_get_status(&c9), "aborted");
+
+    printf("PASS: tls_client\n");
+    return 0;
+}
