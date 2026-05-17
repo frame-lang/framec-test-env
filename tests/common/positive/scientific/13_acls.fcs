@@ -1,0 +1,148 @@
+@@[target("csharp")]
+
+// Cookbook 84: ACLS Cardiac Arrest Algorithm
+
+using System;
+
+@@system ACLS {
+    interface:
+        start_code()
+        rhythm_check(rhythm: string)
+        cpr_cycle_complete()
+        give_epinephrine()
+        rosc_achieved()
+        pronounce()
+        phase(): string
+        shocks_given(): int
+        cpr_cycles_done(): int
+
+    machine:
+        $PreArrest {
+            start_code() {
+                this.shocks = 0;
+                this.cpr_cycles = 0;
+                -> $Analyzing
+            }
+            phase(): string { @@:("pre-arrest") }
+            shocks_given(): int { @@:(this.shocks) }
+            cpr_cycles_done(): int { @@:(this.cpr_cycles) }
+        }
+
+        $Coding {
+            rosc_achieved() { -> $ROSC }
+            pronounce() { -> $Terminated }
+            shocks_given(): int { @@:(this.shocks) }
+            cpr_cycles_done(): int { @@:(this.cpr_cycles) }
+        }
+
+        $Analyzing => $Coding {
+            rhythm_check(rhythm: string) {
+                this.last_rhythm = rhythm;
+                if (rhythm == "VF" || rhythm == "pulseless_VT") {
+                    this.shocks = this.shocks + 1;
+                    -> $CPR_Shockable
+                } else {
+                    -> $CPR_NonShockable
+                }
+            }
+            phase(): string { @@:("analyzing") }
+            => $^
+        }
+
+        $CPR_Shockable => $Coding {
+            give_epinephrine() { }
+            cpr_cycle_complete() {
+                this.cpr_cycles = this.cpr_cycles + 1;
+                -> $Analyzing
+            }
+            phase(): string { @@:("cpr shockable") }
+            => $^
+        }
+
+        $CPR_NonShockable => $Coding {
+            give_epinephrine() { }
+            cpr_cycle_complete() {
+                this.cpr_cycles = this.cpr_cycles + 1;
+                -> $Analyzing
+            }
+            phase(): string { @@:("cpr non-shockable") }
+            => $^
+        }
+
+        $ROSC {
+            phase(): string { @@:("rosc") }
+            shocks_given(): int { @@:(this.shocks) }
+            cpr_cycles_done(): int { @@:(this.cpr_cycles) }
+        }
+
+        $Terminated {
+            phase(): string { @@:("terminated") }
+            shocks_given(): int { @@:(this.shocks) }
+            cpr_cycles_done(): int { @@:(this.cpr_cycles) }
+        }
+
+    domain:
+        last_rhythm: string = ""
+        shocks: int = 0
+        cpr_cycles: int = 0
+}
+
+public class Program {
+    static void Check(string label, string actual, string expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected '{expected}', got '{actual}'");
+            Environment.Exit(1);
+        }
+    }
+    static void CheckI(string label, int actual, int expected) {
+        if (actual != expected) {
+            Console.WriteLine($"FAIL: {label} expected {expected}, got {actual}");
+            Environment.Exit(1);
+        }
+    }
+
+    public static void Main() {
+        var c = @@ACLS();
+        Check("pre-arrest", (string)c.phase(), "pre-arrest");
+        c.rhythm_check("VF");
+        c.cpr_cycle_complete();
+        c.rosc_achieved();
+        Check("pre-arrest absorbs", (string)c.phase(), "pre-arrest");
+        c.start_code();
+        Check("analyzing", (string)c.phase(), "analyzing");
+        c.rhythm_check("VF");
+        Check("cpr shockable", (string)c.phase(), "cpr shockable");
+        CheckI("1 shock", (int)c.shocks_given(), 1);
+        c.give_epinephrine();
+        Check("epi no-op", (string)c.phase(), "cpr shockable");
+        c.cpr_cycle_complete();
+        Check("back to analyzing", (string)c.phase(), "analyzing");
+        CheckI("1 cycle done", (int)c.cpr_cycles_done(), 1);
+        c.rhythm_check("asystole");
+        Check("non-shockable cpr", (string)c.phase(), "cpr non-shockable");
+        CheckI("still 1 shock", (int)c.shocks_given(), 1);
+        c.cpr_cycle_complete();
+        CheckI("2 cycles done", (int)c.cpr_cycles_done(), 2);
+        c.rhythm_check("pulseless_VT");
+        Check("shockable via VT", (string)c.phase(), "cpr shockable");
+        CheckI("2 shocks", (int)c.shocks_given(), 2);
+        c.rosc_achieved();
+        Check("rosc reached", (string)c.phase(), "rosc");
+        c.rhythm_check("VF");
+        c.cpr_cycle_complete();
+        c.rosc_achieved();
+        Check("rosc absorbs all", (string)c.phase(), "rosc");
+        CheckI("final shock count", (int)c.shocks_given(), 2);
+
+        var c2 = @@ACLS();
+        c2.start_code();
+        c2.rhythm_check("asystole");
+        c2.pronounce();
+        Check("pronounced", (string)c2.phase(), "terminated");
+        c2.rosc_achieved();
+        c2.rhythm_check("VF");
+        Check("terminated absorbs", (string)c2.phase(), "terminated");
+
+        Console.WriteLine("PASS: acls");
+    }
+}

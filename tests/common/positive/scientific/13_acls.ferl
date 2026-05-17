@@ -1,0 +1,86 @@
+@@[target("erlang")]
+
+%% Cookbook 84: ACLS Cardiac Arrest Algorithm
+
+@@system ACLS {
+    interface:
+        start_code()
+        rhythm_check(rhythm: string)
+        cpr_cycle_complete()
+        give_epinephrine()
+        rosc_achieved()
+        pronounce()
+        phase(): string
+        shocks_given(): int
+        cpr_cycles_done(): int
+
+    machine:
+        $PreArrest {
+            start_code() {
+                self.shocks = 0,
+                self.cpr_cycles = 0,
+                -> $Analyzing
+            }
+            phase(): string { @@:("pre-arrest") }
+            shocks_given(): int { @@:(self.shocks) }
+            cpr_cycles_done(): int { @@:(self.cpr_cycles) }
+        }
+
+        $Coding {
+            rosc_achieved() { -> $ROSC }
+            pronounce() { -> $Terminated }
+            shocks_given(): int { @@:(self.shocks) }
+            cpr_cycles_done(): int { @@:(self.cpr_cycles) }
+        }
+
+        $Analyzing => $Coding {
+            rhythm_check(rhythm: string) {
+                self.last_rhythm = Rhythm,
+                case (Rhythm == "VF") orelse (Rhythm == "pulseless_VT") of
+                    true ->
+                        self.shocks = self.shocks + 1,
+                        -> $CPR_Shockable;
+                    false -> -> $CPR_NonShockable
+                end
+            }
+            phase(): string { @@:("analyzing") }
+            => $^
+        }
+
+        $CPR_Shockable => $Coding {
+            give_epinephrine() { ok }
+            cpr_cycle_complete() {
+                self.cpr_cycles = self.cpr_cycles + 1,
+                -> $Analyzing
+            }
+            phase(): string { @@:("cpr shockable") }
+            => $^
+        }
+
+        $CPR_NonShockable => $Coding {
+            give_epinephrine() { ok }
+            cpr_cycle_complete() {
+                self.cpr_cycles = self.cpr_cycles + 1,
+                -> $Analyzing
+            }
+            phase(): string { @@:("cpr non-shockable") }
+            => $^
+        }
+
+        $ROSC {
+            phase(): string { @@:("rosc") }
+            shocks_given(): int { @@:(self.shocks) }
+            cpr_cycles_done(): int { @@:(self.cpr_cycles) }
+        }
+
+        $Terminated {
+            phase(): string { @@:("terminated") }
+            shocks_given(): int { @@:(self.shocks) }
+            cpr_cycles_done(): int { @@:(self.cpr_cycles) }
+        }
+
+    domain:
+        last_rhythm: string = ""
+        shocks: int = 0
+        cpr_cycles: int = 0
+}
