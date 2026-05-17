@@ -1,0 +1,101 @@
+@@[target("go")]
+
+// Cookbook 95: Secure Boot
+
+package main
+
+import (
+    "fmt"
+    "os"
+)
+
+@@system SecureBoot {
+    interface:
+        power_on()
+        verify_result(stage: int, passed: int)
+        measurement_extended(stage: int)
+        antirollback_check(passed: int)
+        get_stage(): int = -1
+
+    machine:
+        $Rom {
+            $>() { s.current_stage = 0 }
+            measurement_extended(stage: int) { if stage == 0 { s.current_stage = 0 } }
+            verify_result(stage: int, passed: int) {
+                if stage == 1 && passed != 0 { -> $VerifyingBootloader } else { -> $Halted }
+            }
+            get_stage(): int { @@:(0) }
+        }
+        $VerifyingBootloader {
+            measurement_extended(stage: int) { if stage == 1 { -> $AntirollbackBootloader } }
+            get_stage(): int { @@:(1) }
+        }
+        $AntirollbackBootloader {
+            antirollback_check(passed: int) { if passed != 0 { -> $BootloaderRunning } else { -> $Halted } }
+            get_stage(): int { @@:(1) }
+        }
+        $BootloaderRunning {
+            verify_result(stage: int, passed: int) { if stage == 2 && passed != 0 { -> $VerifyingKernel } else { -> $Recovery } }
+            get_stage(): int { @@:(2) }
+        }
+        $VerifyingKernel {
+            measurement_extended(stage: int) { if stage == 2 { -> $AntirollbackKernel } }
+            get_stage(): int { @@:(2) }
+        }
+        $AntirollbackKernel {
+            antirollback_check(passed: int) { if passed != 0 { -> $KernelRunning } else { -> $Recovery } }
+            get_stage(): int { @@:(2) }
+        }
+        $KernelRunning {
+            verify_result(stage: int, passed: int) { if stage == 3 && passed != 0 { -> $VerifyingInit } else { -> $Recovery } }
+            get_stage(): int { @@:(3) }
+        }
+        $VerifyingInit {
+            measurement_extended(stage: int) { if stage == 3 { -> $Booted } }
+            get_stage(): int { @@:(3) }
+        }
+        $Booted { get_stage(): int { @@:(4) } }
+        $Recovery { get_stage(): int { @@:(-2) } }
+        $Halted { get_stage(): int { @@:(-1) } }
+
+    domain:
+        current_stage: int = 0
+}
+
+func check(label string, actual, expected int) {
+    if actual != expected { fmt.Printf("FAIL: %s expected %d, got %d\n", label, expected, actual); os.Exit(1) }
+}
+
+func main() {
+    b := @@SecureBoot()
+    check("rom stage", b.get_stage().(int), 0)
+    b.measurement_extended(0); b.verify_result(1, 1); check("verifying bootloader", b.get_stage().(int), 1)
+    b.measurement_extended(1); check("antirollback bootloader", b.get_stage().(int), 1)
+    b.antirollback_check(1); check("bootloader running", b.get_stage().(int), 2)
+    b.verify_result(2, 1); b.measurement_extended(2); b.antirollback_check(1); check("kernel running", b.get_stage().(int), 3)
+    b.verify_result(3, 1); b.measurement_extended(3); check("booted", b.get_stage().(int), 4)
+
+    b2 := @@SecureBoot(); b2.measurement_extended(0); b2.verify_result(1, 0)
+    check("bootloader sig bad -> halted", b2.get_stage().(int), -1)
+    b2.verify_result(2, 1); check("halted absorbs", b2.get_stage().(int), -1)
+
+    b3 := @@SecureBoot(); b3.measurement_extended(0); b3.verify_result(1, 1); b3.measurement_extended(1); b3.antirollback_check(0)
+    check("bootloader rollback -> halted", b3.get_stage().(int), -1)
+
+    b4 := @@SecureBoot(); b4.measurement_extended(0); b4.verify_result(1, 1); b4.measurement_extended(1); b4.antirollback_check(1); b4.verify_result(2, 0)
+    check("kernel sig bad -> recovery", b4.get_stage().(int), -2)
+
+    b5 := @@SecureBoot(); b5.measurement_extended(0); b5.verify_result(1, 1); b5.measurement_extended(1); b5.antirollback_check(1); b5.verify_result(2, 1); b5.measurement_extended(2); b5.antirollback_check(0)
+    check("kernel rollback -> recovery", b5.get_stage().(int), -2)
+
+    b6 := @@SecureBoot(); b6.measurement_extended(0); b6.verify_result(1, 1); b6.measurement_extended(1); b6.antirollback_check(1); b6.verify_result(2, 1); b6.measurement_extended(2); b6.antirollback_check(1); b6.verify_result(3, 0)
+    check("init sig bad -> recovery", b6.get_stage().(int), -2)
+
+    b7 := @@SecureBoot(); b7.antirollback_check(1)
+    check("antirollback in ROM absorbed", b7.get_stage().(int), 0)
+    b7.measurement_extended(5); check("wrong-stage measurement absorbed", b7.get_stage().(int), 0)
+
+    b8 := @@SecureBoot(); b8.verify_result(3, 1); check("bogus verify at ROM halts", b8.get_stage().(int), -1)
+
+    fmt.Println("PASS: secure_boot")
+}

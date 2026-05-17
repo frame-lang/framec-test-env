@@ -1,0 +1,105 @@
+@@[target("c")]
+
+// Cookbook 95: Secure Boot
+
+@@system SecureBoot {
+    interface:
+        power_on()
+        verify_result(stage: int, passed: int)
+        measurement_extended(stage: int)
+        antirollback_check(passed: int)
+        get_stage(): int = -1
+
+    machine:
+        $Rom {
+            $>() { self->current_stage = 0; }
+            measurement_extended(stage: int) { if (stage == 0) { self->current_stage = 0; } }
+            verify_result(stage: int, passed: int) {
+                if (stage == 1 && passed != 0) { -> $VerifyingBootloader } else { -> $Halted }
+            }
+            get_stage(): int { @@:(0) }
+        }
+        $VerifyingBootloader {
+            measurement_extended(stage: int) { if (stage == 1) { -> $AntirollbackBootloader } }
+            get_stage(): int { @@:(1) }
+        }
+        $AntirollbackBootloader {
+            antirollback_check(passed: int) { if (passed != 0) { -> $BootloaderRunning } else { -> $Halted } }
+            get_stage(): int { @@:(1) }
+        }
+        $BootloaderRunning {
+            verify_result(stage: int, passed: int) { if (stage == 2 && passed != 0) { -> $VerifyingKernel } else { -> $Recovery } }
+            get_stage(): int { @@:(2) }
+        }
+        $VerifyingKernel {
+            measurement_extended(stage: int) { if (stage == 2) { -> $AntirollbackKernel } }
+            get_stage(): int { @@:(2) }
+        }
+        $AntirollbackKernel {
+            antirollback_check(passed: int) { if (passed != 0) { -> $KernelRunning } else { -> $Recovery } }
+            get_stage(): int { @@:(2) }
+        }
+        $KernelRunning {
+            verify_result(stage: int, passed: int) { if (stage == 3 && passed != 0) { -> $VerifyingInit } else { -> $Recovery } }
+            get_stage(): int { @@:(3) }
+        }
+        $VerifyingInit {
+            measurement_extended(stage: int) { if (stage == 3) { -> $Booted } }
+            get_stage(): int { @@:(3) }
+        }
+        $Booted { get_stage(): int { @@:(4) } }
+        $Recovery { get_stage(): int { @@:(-2) } }
+        $Halted { get_stage(): int { @@:(-1) } }
+
+    domain:
+        current_stage: int = 0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+
+static void check(const char* label, int actual, int expected) {
+    if (actual != expected) { fprintf(stderr, "FAIL: %s expected %d, got %d\n", label, expected, actual); exit(1); }
+}
+
+int main(void) {
+    SecureBoot b; SecureBoot_init(&b);
+    check("rom stage", SecureBoot_get_stage(&b), 0);
+    SecureBoot_measurement_extended(&b, 0); SecureBoot_verify_result(&b, 1, 1); check("verifying bootloader", SecureBoot_get_stage(&b), 1);
+    SecureBoot_measurement_extended(&b, 1); check("antirollback bootloader", SecureBoot_get_stage(&b), 1);
+    SecureBoot_antirollback_check(&b, 1); check("bootloader running", SecureBoot_get_stage(&b), 2);
+    SecureBoot_verify_result(&b, 2, 1); SecureBoot_measurement_extended(&b, 2); SecureBoot_antirollback_check(&b, 1); check("kernel running", SecureBoot_get_stage(&b), 3);
+    SecureBoot_verify_result(&b, 3, 1); SecureBoot_measurement_extended(&b, 3); check("booted", SecureBoot_get_stage(&b), 4);
+
+    SecureBoot b2; SecureBoot_init(&b2);
+    SecureBoot_measurement_extended(&b2, 0); SecureBoot_verify_result(&b2, 1, 0);
+    check("bootloader sig bad -> halted", SecureBoot_get_stage(&b2), -1);
+    SecureBoot_verify_result(&b2, 2, 1); check("halted absorbs", SecureBoot_get_stage(&b2), -1);
+
+    SecureBoot b3; SecureBoot_init(&b3);
+    SecureBoot_measurement_extended(&b3, 0); SecureBoot_verify_result(&b3, 1, 1); SecureBoot_measurement_extended(&b3, 1); SecureBoot_antirollback_check(&b3, 0);
+    check("bootloader rollback -> halted", SecureBoot_get_stage(&b3), -1);
+
+    SecureBoot b4; SecureBoot_init(&b4);
+    SecureBoot_measurement_extended(&b4, 0); SecureBoot_verify_result(&b4, 1, 1); SecureBoot_measurement_extended(&b4, 1); SecureBoot_antirollback_check(&b4, 1); SecureBoot_verify_result(&b4, 2, 0);
+    check("kernel sig bad -> recovery", SecureBoot_get_stage(&b4), -2);
+
+    SecureBoot b5; SecureBoot_init(&b5);
+    SecureBoot_measurement_extended(&b5, 0); SecureBoot_verify_result(&b5, 1, 1); SecureBoot_measurement_extended(&b5, 1); SecureBoot_antirollback_check(&b5, 1); SecureBoot_verify_result(&b5, 2, 1); SecureBoot_measurement_extended(&b5, 2); SecureBoot_antirollback_check(&b5, 0);
+    check("kernel rollback -> recovery", SecureBoot_get_stage(&b5), -2);
+
+    SecureBoot b6; SecureBoot_init(&b6);
+    SecureBoot_measurement_extended(&b6, 0); SecureBoot_verify_result(&b6, 1, 1); SecureBoot_measurement_extended(&b6, 1); SecureBoot_antirollback_check(&b6, 1); SecureBoot_verify_result(&b6, 2, 1); SecureBoot_measurement_extended(&b6, 2); SecureBoot_antirollback_check(&b6, 1); SecureBoot_verify_result(&b6, 3, 0);
+    check("init sig bad -> recovery", SecureBoot_get_stage(&b6), -2);
+
+    SecureBoot b7; SecureBoot_init(&b7);
+    SecureBoot_antirollback_check(&b7, 1);
+    check("antirollback in ROM absorbed", SecureBoot_get_stage(&b7), 0);
+    SecureBoot_measurement_extended(&b7, 5); check("wrong-stage measurement absorbed", SecureBoot_get_stage(&b7), 0);
+
+    SecureBoot b8; SecureBoot_init(&b8);
+    SecureBoot_verify_result(&b8, 3, 1); check("bogus verify at ROM halts", SecureBoot_get_stage(&b8), -1);
+
+    printf("PASS: secure_boot\n");
+    return 0;
+}
