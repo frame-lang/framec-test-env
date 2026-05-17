@@ -68,6 +68,66 @@ def run(batches: list[SkipBatch]) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Shared skip-reason text — same wording reused across many stems with
+# the same skip rationale.
+# ---------------------------------------------------------------------------
+
+_C_ONLY_BODY = (
+    "C-codegen-specific regression net. The bug or behavior it "
+    "guards against was specific to the C backend's pointer-based "
+    "dispatch, native-function passthrough, or lifecycle-stack "
+    "handling. Other backends didn't share the same code path.\n\n"
+    "See `docs/partial-coverage-audit.md`."
+)
+
+_RUST_ONLY_BODY = (
+    "Rust-codegen-specific regression net. The bug or behavior it "
+    "guards against was specific to Rust's borrow-checker, typed-"
+    "domain handling, or factory-call path. Other backends didn't "
+    "share the same code path.\n\n"
+    "See `docs/partial-coverage-audit.md`."
+)
+
+_SEGMENTER_UNIFORM_BODY = (
+    "The segmenter's tokenization / brace-handling / comment-"
+    "tracking logic is target-uniform within each comment-syntax "
+    "family. The matrix corpus has fixtures in the `//` C-family "
+    "(c, cpp, dart, js, swift, ts — 6 fixtures), the `#` family "
+    "(gd, py, rb, lua — 4), and the `%` family (erl — 1). Adding "
+    "this backend's fixture would duplicate coverage that already "
+    "exists in its comment-syntax family.\n\n"
+    "See `docs/partial-coverage-audit.md`."
+)
+
+
+def c_only(stem_path: str) -> SkipBatch:
+    return SkipBatch(
+        stem_path=stem_path,
+        real_exts=["fc"],
+        title="Intentional skip — C-only regression net",
+        body=_C_ONLY_BODY,
+    )
+
+
+def rust_only(stem_path: str) -> SkipBatch:
+    return SkipBatch(
+        stem_path=stem_path,
+        real_exts=["frs"],
+        title="Intentional skip — Rust-only regression net",
+        body=_RUST_ONLY_BODY,
+    )
+
+
+def segmenter_skip(stem_path: str, real: list[str]) -> SkipBatch:
+    return SkipBatch(
+        stem_path=stem_path,
+        real_exts=real,
+        title="Intentional skip — segmenter coverage target-uniform",
+        body=_SEGMENTER_UNIFORM_BODY,
+    )
+
+
+# ---------------------------------------------------------------------------
 # Batches — one entry per single-target fixture in framework dirs (not
 # cookbook dirs scientific/security/robotics/parser_specialists, which
 # belong to the cookbook port agent).
@@ -149,6 +209,85 @@ BATCHES: list[SkipBatch] = [
             "prolog. C is the only target where the issue surfaces; "
             "other backends handle nested helper functions via their "
             "native scoping rules without Frame-side intervention.\n\n"
+            "See `docs/partial-coverage-audit.md`."
+        ),
+    ),
+
+    # === core/ — C-only regression nets ===
+    c_only("core/forward_multi_native"),
+    c_only("core/forward_then_native_exec"),
+    c_only("core/terminal_last_stack_ops"),
+    c_only("core/transition_basic"),
+    c_only("core/transition_state_args_exec"),
+    c_only("core/transition_state_id_exec"),
+
+    # === systems/ — C-only regression nets ===
+    c_only("systems/if_forward_exec"),
+    c_only("systems/interface_with_param"),
+    c_only("systems/simple_interface"),
+    c_only("systems/system_return_header_defaults"),
+    c_only("systems/transition_basic_exec"),
+
+    # === systems/ — Rust-only regression net ===
+    rust_only("systems/handler_outside_state"),
+
+    # === validator/ — C-only regression nets ===
+    c_only("validator/terminal_last_forward"),
+    c_only("validator/terminal_last_transition"),
+
+    # === segmenter/ — target-uniform within comment-syntax family ===
+    segmenter_skip(
+        "segmenter/frame_tokens_in_comments",
+        ["fc", "fcpp", "fdart", "ferl", "fgd", "fjs", "flua",
+         "fpy", "frb", "frs", "fswift", "fts"],
+    ),
+    segmenter_skip(
+        "segmenter/heavy_native_prolog",
+        ["fc", "fcpp", "fdart", "ferl", "fgd", "fjs", "flua",
+         "fpy", "frb", "frs", "fswift", "fts"],
+    ),
+    segmenter_skip(
+        "segmenter/nested_braces",
+        ["fc", "fcpp", "fdart", "ferl", "fgd", "fjs", "flua",
+         "fpy", "frb", "frs", "fswift", "fts"],
+    ),
+
+    # === interfaces/ — dynamic-only return-type inference ===
+    SkipBatch(
+        stem_path="interfaces/return_no_type_annotation",
+        real_exts=["fgd", "fjs", "flua", "fphp", "fpy", "frb"],
+        title="Intentional skip — dynamic-typed targets only",
+        body=(
+            "Tests Frame's allowance of return without a type "
+            "annotation on the interface method. Only meaningful on "
+            "dynamically typed targets (Python, JS, Ruby, Lua, PHP, "
+            "GDScript) where return types are inferred at runtime. "
+            "Typed targets (Java, Kotlin, Swift, C#, C, C++, Go, "
+            "Rust, Dart, TS) require explicit return-type "
+            "annotations as part of their host-language grammar — a "
+            "Frame fixture missing the annotation cannot transpile.\n\n"
+            "See `docs/partial-coverage-audit.md`."
+        ),
+    ),
+
+    # === primary/81 — async-native targets only ===
+    SkipBatch(
+        stem_path="primary/81_persist_async_basic",
+        real_exts=["fcpp", "fcs", "fgd", "fgo", "fjava", "fjs",
+                   "fkt", "fpy", "frs", "fswift", "fts"],
+        title="Intentional skip — async-native targets only",
+        body=(
+            "Persist × async cross-product fixture. Limited to "
+            "backends with native async/await primitives that "
+            "Frame's async codegen targets: C++ (coroutines), C# "
+            "(async/await), GDScript (await), Go (goroutines + "
+            "channels), Java (CompletableFuture), JS/TS "
+            "(async/await), Kotlin (coroutines), Python "
+            "(asyncio), Rust (async fn), Swift (async/await).\n\n"
+            "C, Dart, Erlang, Lua, PHP, Ruby do not have a "
+            "consistent native-async target shape that Frame "
+            "currently emits to (per the per-language capability "
+            "matrix); no port for them.\n\n"
             "See `docs/partial-coverage-audit.md`."
         ),
     ),
