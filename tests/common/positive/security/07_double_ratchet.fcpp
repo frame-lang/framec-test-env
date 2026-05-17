@@ -1,0 +1,115 @@
+@@[target("cpp")]
+
+// Cookbook 92: Signal / Double Ratchet Session
+
+@@system DoubleRatchetSession {
+    interface:
+        initialize(shared_secret: string, remote_pub: string)
+        send_plaintext(m: string): string = ""
+        receive_ciphertext(header: string, ct: string, ratchet: int, valid: int): string = ""
+        close()
+        get_status(): string = "uninit"
+        get_sends(): int
+        get_recvs(): int
+        get_ratchets(): int
+        get_zeroized(): int
+
+    machine:
+        $Uninit {
+            initialize(shared_secret: string, remote_pub: string) {
+                this->root_key = shared_secret;
+                this->remote_pub = remote_pub;
+                -> $Active
+            }
+            get_status(): string { @@:("uninit") }
+            get_sends(): int { @@:(this->sends) }
+            get_recvs(): int { @@:(this->recvs) }
+            get_ratchets(): int { @@:(this->ratchets) }
+            get_zeroized(): int { @@:(this->zeroized) }
+        }
+
+        $Active {
+            send_plaintext(m: string): string {
+                this->sends = this->sends + 1;
+                this->zeroized = this->zeroized + 1;
+                @@:("ct-send")
+            }
+            receive_ciphertext(header: string, ct: string, ratchet: int, valid: int): string {
+                if (ratchet == 1) { this->ratchets = this->ratchets + 1; }
+                if (valid == 0) {
+                    @@:("decryption_failed")
+                } else {
+                    this->recvs = this->recvs + 1;
+                    this->zeroized = this->zeroized + 1;
+                    @@:("pt")
+                }
+            }
+            close() { -> $Closed }
+            get_status(): string { @@:("active") }
+            get_sends(): int { @@:(this->sends) }
+            get_recvs(): int { @@:(this->recvs) }
+            get_ratchets(): int { @@:(this->ratchets) }
+            get_zeroized(): int { @@:(this->zeroized) }
+        }
+
+        $Closed {
+            get_status(): string { @@:("closed") }
+            get_sends(): int { @@:(this->sends) }
+            get_recvs(): int { @@:(this->recvs) }
+            get_ratchets(): int { @@:(this->ratchets) }
+            get_zeroized(): int { @@:(this->zeroized) }
+        }
+
+    domain:
+        root_key: string = ""
+        remote_pub: string = ""
+        sends: int = 0
+        recvs: int = 0
+        ratchets: int = 0
+        zeroized: int = 0
+}
+
+#include <iostream>
+#include <cstdlib>
+
+static void check(const std::string& label, const std::string& actual, const std::string& expected) {
+    if (actual != expected) { std::cout << "FAIL: " << label << " expected '" << expected << "', got '" << actual << "'\n"; std::exit(1); }
+}
+static void check_i(const std::string& label, int actual, int expected) {
+    if (actual != expected) { std::cout << "FAIL: " << label << " expected " << expected << ", got " << actual << "\n"; std::exit(1); }
+}
+
+int main() {
+    auto s = @@DoubleRatchetSession();
+    check("uninit", s.get_status(), "uninit");
+    check("uninit send default", s.send_plaintext("hi"), "");
+    check("uninit recv default", s.receive_ciphertext("h", "ct", 0, 1), "");
+    s.initialize("root-secret", "remote-pub");
+    check("active", s.get_status(), "active");
+    check("sent", s.send_plaintext("m1"), "ct-send");
+    check("sent 2", s.send_plaintext("m2"), "ct-send");
+    check_i("2 sends", s.get_sends(), 2);
+    check_i("zeroised == sends", s.get_zeroized(), s.get_sends());
+    check("received", s.receive_ciphertext("h1", "c1", 0, 1), "pt");
+    check_i("1 recv", s.get_recvs(), 1);
+    check_i("0 ratchets", s.get_ratchets(), 0);
+    check("received with ratchet", s.receive_ciphertext("h2", "c2", 1, 1), "pt");
+    check_i("1 ratchet", s.get_ratchets(), 1);
+    check_i("2 recvs", s.get_recvs(), 2);
+    check_i("zeroise invariant", s.get_zeroized(), s.get_sends() + s.get_recvs());
+    int before_recvs = s.get_recvs();
+    int before_zeroized = s.get_zeroized();
+    check("bad decrypt", s.receive_ciphertext("bad", "bad", 0, 0), "decryption_failed");
+    check_i("recvs unchanged", s.get_recvs(), before_recvs);
+    check_i("zeroized unchanged", s.get_zeroized(), before_zeroized);
+    s.close();
+    check("closed", s.get_status(), "closed");
+    check("closed send default", s.send_plaintext("hi"), "");
+    check("closed recv default", s.receive_ciphertext("h", "ct", 0, 1), "");
+    int final_sends = s.get_sends();
+    int final_recvs = s.get_recvs();
+    check_i("sends frozen post-close", s.get_sends(), final_sends);
+    check_i("recvs frozen post-close", s.get_recvs(), final_recvs);
+    std::cout << "PASS: double_ratchet\n";
+    return 0;
+}
