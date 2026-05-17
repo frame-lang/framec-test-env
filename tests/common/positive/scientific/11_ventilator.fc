@@ -1,0 +1,125 @@
+@@[target("c")]
+
+// Cookbook 82: Ventilator Breath Cycle
+
+@@system Ventilator {
+    interface:
+        power_on()
+        tick_ms(ms: int)
+        patient_effort_detected()
+        stop()
+        phase(): string
+        breath_count(): int
+
+    machine:
+        $Off {
+            power_on() { -> $Inspiration }
+            phase(): string { @@:("off") }
+            breath_count(): int { @@:(self->breaths) }
+        }
+
+        $Ventilating {
+            stop() { -> $Off }
+            breath_count(): int { @@:(self->breaths) }
+        }
+
+        $Inspiration => $Ventilating {
+            $>() {
+                self->phase_ms = 0;
+                self->breaths = self->breaths + 1;
+            }
+            tick_ms(ms: int) {
+                self->phase_ms = self->phase_ms + ms;
+                if (self->phase_ms >= 1000) {
+                    -> $Expiration
+                }
+            }
+            patient_effort_detected() { }
+            phase(): string { @@:("inspiration") }
+            => $^
+        }
+
+        $Expiration => $Ventilating {
+            $>() { self->phase_ms = 0; }
+            tick_ms(ms: int) {
+                self->phase_ms = self->phase_ms + ms;
+                if (self->phase_ms >= 1500) {
+                    -> $Pause
+                }
+            }
+            patient_effort_detected() { }
+            phase(): string { @@:("expiration") }
+            => $^
+        }
+
+        $Pause => $Ventilating {
+            $>() { self->phase_ms = 0; }
+            tick_ms(ms: int) {
+                self->phase_ms = self->phase_ms + ms;
+                if (self->phase_ms >= 500) {
+                    -> $Inspiration
+                }
+            }
+            patient_effort_detected() { -> $Inspiration }
+            phase(): string { @@:("pause") }
+            => $^
+        }
+
+    domain:
+        phase_ms: int = 0
+        breaths: int = 0
+}
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+static void check_str(const char* label, const char* actual, const char* expected) {
+    if (strcmp(actual, expected) != 0) {
+        printf("FAIL: %s expected '%s', got '%s'\n", label, expected, actual);
+        exit(1);
+    }
+}
+static void check_i(const char* label, int actual, int expected) {
+    if (actual != expected) {
+        printf("FAIL: %s expected %d, got %d\n", label, expected, actual);
+        exit(1);
+    }
+}
+
+int main(void) {
+    Ventilator* v = @@Ventilator();
+    check_str("start off", Ventilator_phase(v), "off");
+    Ventilator_power_on(v);
+    check_str("inspiration on power-on", Ventilator_phase(v), "inspiration");
+    check_i("first breath counted", Ventilator_breath_count(v), 1);
+    Ventilator_patient_effort_detected(v);
+    check_str("inspiration absorbs effort", Ventilator_phase(v), "inspiration");
+    Ventilator_tick_ms(v, 500);
+    check_str("mid inspiration", Ventilator_phase(v), "inspiration");
+    Ventilator_tick_ms(v, 500);
+    check_str("expiration", Ventilator_phase(v), "expiration");
+    Ventilator_patient_effort_detected(v);
+    check_str("expiration absorbs effort", Ventilator_phase(v), "expiration");
+    Ventilator_tick_ms(v, 1500);
+    check_str("pause", Ventilator_phase(v), "pause");
+    Ventilator_patient_effort_detected(v);
+    check_str("pause triggers next breath", Ventilator_phase(v), "inspiration");
+    check_i("breath 2 counted", Ventilator_breath_count(v), 2);
+    Ventilator_tick_ms(v, 1000);
+    check_str("expiration 2", Ventilator_phase(v), "expiration");
+    Ventilator_tick_ms(v, 1500);
+    check_str("pause 2", Ventilator_phase(v), "pause");
+    Ventilator_tick_ms(v, 500);
+    check_str("inspiration 3 passive", Ventilator_phase(v), "inspiration");
+    check_i("breath 3 counted", Ventilator_breath_count(v), 3);
+    Ventilator_stop(v);
+    check_str("stopped", Ventilator_phase(v), "off");
+    check_i("breath count persists across stop", Ventilator_breath_count(v), 3);
+    Ventilator_tick_ms(v, 10000);
+    Ventilator_patient_effort_detected(v);
+    check_str("off absorbs ticks and effort", Ventilator_phase(v), "off");
+    printf("PASS: ventilator\n");
+    Ventilator_destroy(v);
+    return 0;
+}

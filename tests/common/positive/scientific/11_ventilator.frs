@@ -1,0 +1,129 @@
+@@[target("rust")]
+
+// Cookbook 82: Ventilator Breath Cycle
+
+@@system Ventilator {
+    interface:
+        power_on()
+        tick_ms(ms: i32)
+        patient_effort_detected()
+        stop()
+        phase(): String
+        breath_count(): i32
+
+    machine:
+        $Off {
+            power_on() { -> $Inspiration }
+            phase(): String { @@:(String::from("off")) }
+            breath_count(): i32 { @@:(self.breaths) }
+        }
+
+        $Ventilating {
+            stop() { -> $Off }
+            breath_count(): i32 { @@:(self.breaths) }
+        }
+
+        $Inspiration => $Ventilating {
+            $>() {
+                self.phase_ms = 0;
+                self.breaths = self.breaths + 1;
+            }
+            tick_ms(ms: i32) {
+                self.phase_ms = self.phase_ms + ms;
+                if self.phase_ms >= 1000 {
+                    -> $Expiration
+                }
+            }
+            patient_effort_detected() { }
+            phase(): String { @@:(String::from("inspiration")) }
+            => $^
+        }
+
+        $Expiration => $Ventilating {
+            $>() { self.phase_ms = 0; }
+            tick_ms(ms: i32) {
+                self.phase_ms = self.phase_ms + ms;
+                if self.phase_ms >= 1500 {
+                    -> $Pause
+                }
+            }
+            patient_effort_detected() { }
+            phase(): String { @@:(String::from("expiration")) }
+            => $^
+        }
+
+        $Pause => $Ventilating {
+            $>() { self.phase_ms = 0; }
+            tick_ms(ms: i32) {
+                self.phase_ms = self.phase_ms + ms;
+                if self.phase_ms >= 500 {
+                    -> $Inspiration
+                }
+            }
+            patient_effort_detected() { -> $Inspiration }
+            phase(): String { @@:(String::from("pause")) }
+            => $^
+        }
+
+    domain:
+        phase_ms: i32 = 0
+        breaths: i32 = 0
+}
+
+fn check(label: &str, actual: String, expected: &str) {
+    if actual != expected {
+        println!("FAIL: {} expected '{}', got '{}'", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+fn check_i(label: &str, actual: i32, expected: i32) {
+    if actual != expected {
+        println!("FAIL: {} expected {}, got {}", label, expected, actual);
+        std::process::exit(1);
+    }
+}
+
+fn main() {
+    let mut v = @@Ventilator();
+    check("start off", v.phase(), "off");
+
+    v.power_on();
+    check("inspiration on power-on", v.phase(), "inspiration");
+    check_i("first breath counted", v.breath_count(), 1);
+
+    v.patient_effort_detected();
+    check("inspiration absorbs effort", v.phase(), "inspiration");
+
+    v.tick_ms(500);
+    check("mid inspiration", v.phase(), "inspiration");
+    v.tick_ms(500);
+    check("expiration", v.phase(), "expiration");
+
+    v.patient_effort_detected();
+    check("expiration absorbs effort", v.phase(), "expiration");
+
+    v.tick_ms(1500);
+    check("pause", v.phase(), "pause");
+
+    v.patient_effort_detected();
+    check("pause triggers next breath", v.phase(), "inspiration");
+    check_i("breath 2 counted", v.breath_count(), 2);
+
+    v.tick_ms(1000);
+    check("expiration 2", v.phase(), "expiration");
+    v.tick_ms(1500);
+    check("pause 2", v.phase(), "pause");
+    v.tick_ms(500);
+    check("inspiration 3 passive", v.phase(), "inspiration");
+    check_i("breath 3 counted", v.breath_count(), 3);
+
+    v.stop();
+    check("stopped", v.phase(), "off");
+    check_i("breath count persists across stop", v.breath_count(), 3);
+
+    v.tick_ms(10000);
+    v.patient_effort_detected();
+    check("off absorbs ticks and effort", v.phase(), "off");
+
+    println!("PASS: ventilator");
+}

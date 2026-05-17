@@ -1,0 +1,115 @@
+@@[target("dart")]
+
+// Cookbook 82: Ventilator Breath Cycle
+
+import 'dart:io';
+
+@@system Ventilator {
+    interface:
+        power_on()
+        tick_ms(ms: int)
+        patient_effort_detected()
+        stop()
+        phase(): String
+        breath_count(): int
+
+    machine:
+        $Off {
+            power_on() { -> $Inspiration }
+            phase(): String { @@:("off") }
+            breath_count(): int { @@:(this.breaths) }
+        }
+
+        $Ventilating {
+            stop() { -> $Off }
+            breath_count(): int { @@:(this.breaths) }
+        }
+
+        $Inspiration => $Ventilating {
+            $>() {
+                this.phase_ms = 0;
+                this.breaths = this.breaths + 1;
+            }
+            tick_ms(ms: int) {
+                this.phase_ms = this.phase_ms + ms;
+                if (this.phase_ms >= 1000) {
+                    -> $Expiration
+                }
+            }
+            patient_effort_detected() { }
+            phase(): String { @@:("inspiration") }
+            => $^
+        }
+
+        $Expiration => $Ventilating {
+            $>() { this.phase_ms = 0; }
+            tick_ms(ms: int) {
+                this.phase_ms = this.phase_ms + ms;
+                if (this.phase_ms >= 1500) {
+                    -> $Pause
+                }
+            }
+            patient_effort_detected() { }
+            phase(): String { @@:("expiration") }
+            => $^
+        }
+
+        $Pause => $Ventilating {
+            $>() { this.phase_ms = 0; }
+            tick_ms(ms: int) {
+                this.phase_ms = this.phase_ms + ms;
+                if (this.phase_ms >= 500) {
+                    -> $Inspiration
+                }
+            }
+            patient_effort_detected() { -> $Inspiration }
+            phase(): String { @@:("pause") }
+            => $^
+        }
+
+    domain:
+        phase_ms: int = 0
+        breaths: int = 0
+}
+
+void check(String label, dynamic actual, dynamic expected) {
+    if (actual != expected) {
+        print("FAIL: $label expected '$expected', got '$actual'");
+        exit(1);
+    }
+}
+
+void main() {
+    var v = @@Ventilator();
+    check("start off", v.phase(), "off");
+    v.power_on();
+    check("inspiration on power-on", v.phase(), "inspiration");
+    check("first breath counted", v.breath_count(), 1);
+    v.patient_effort_detected();
+    check("inspiration absorbs effort", v.phase(), "inspiration");
+    v.tick_ms(500);
+    check("mid inspiration", v.phase(), "inspiration");
+    v.tick_ms(500);
+    check("expiration", v.phase(), "expiration");
+    v.patient_effort_detected();
+    check("expiration absorbs effort", v.phase(), "expiration");
+    v.tick_ms(1500);
+    check("pause", v.phase(), "pause");
+    v.patient_effort_detected();
+    check("pause triggers next breath", v.phase(), "inspiration");
+    check("breath 2 counted", v.breath_count(), 2);
+    v.tick_ms(1000);
+    check("expiration 2", v.phase(), "expiration");
+    v.tick_ms(1500);
+    check("pause 2", v.phase(), "pause");
+    v.tick_ms(500);
+    check("inspiration 3 passive", v.phase(), "inspiration");
+    check("breath 3 counted", v.breath_count(), 3);
+    v.stop();
+    check("stopped", v.phase(), "off");
+    check("breath count persists across stop", v.breath_count(), 3);
+    v.tick_ms(10000);
+    v.patient_effort_detected();
+    check("off absorbs ticks and effort", v.phase(), "off");
+    print("PASS: ventilator");
+}

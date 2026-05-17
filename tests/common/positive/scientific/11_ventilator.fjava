@@ -1,0 +1,121 @@
+@@[target("java")]
+
+// Cookbook 82: Ventilator Breath Cycle
+
+@@system Ventilator {
+    interface:
+        power_on()
+        tick_ms(ms: int)
+        patient_effort_detected()
+        stop()
+        phase(): String
+        breath_count(): int
+
+    machine:
+        $Off {
+            power_on() { -> $Inspiration }
+            phase(): String { @@:("off") }
+            breath_count(): int { @@:(this.breaths) }
+        }
+
+        $Ventilating {
+            stop() { -> $Off }
+            breath_count(): int { @@:(this.breaths) }
+        }
+
+        $Inspiration => $Ventilating {
+            $>() {
+                this.phase_ms = 0;
+                this.breaths = this.breaths + 1;
+            }
+            tick_ms(ms: int) {
+                this.phase_ms = this.phase_ms + ms;
+                if (this.phase_ms >= 1000) {
+                    -> $Expiration
+                }
+            }
+            patient_effort_detected() { }
+            phase(): String { @@:("inspiration") }
+            => $^
+        }
+
+        $Expiration => $Ventilating {
+            $>() { this.phase_ms = 0; }
+            tick_ms(ms: int) {
+                this.phase_ms = this.phase_ms + ms;
+                if (this.phase_ms >= 1500) {
+                    -> $Pause
+                }
+            }
+            patient_effort_detected() { }
+            phase(): String { @@:("expiration") }
+            => $^
+        }
+
+        $Pause => $Ventilating {
+            $>() { this.phase_ms = 0; }
+            tick_ms(ms: int) {
+                this.phase_ms = this.phase_ms + ms;
+                if (this.phase_ms >= 500) {
+                    -> $Inspiration
+                }
+            }
+            patient_effort_detected() { -> $Inspiration }
+            phase(): String { @@:("pause") }
+            => $^
+        }
+
+    domain:
+        phase_ms: int = 0
+        breaths: int = 0
+}
+
+public class Ventilator11Test {
+    static void check(String label, String actual, String expected) {
+        if (!actual.equals(expected)) {
+            System.out.println("FAIL: " + label + " expected '" + expected + "', got '" + actual + "'");
+            System.exit(1);
+        }
+    }
+    static void checkI(String label, int actual, int expected) {
+        if (actual != expected) {
+            System.out.println("FAIL: " + label + " expected " + expected + ", got " + actual);
+            System.exit(1);
+        }
+    }
+
+    public static void main(String[] args) {
+        Ventilator v = @@Ventilator();
+        check("start off", (String) v.phase(), "off");
+        v.power_on();
+        check("inspiration on power-on", (String) v.phase(), "inspiration");
+        checkI("first breath counted", (int) v.breath_count(), 1);
+        v.patient_effort_detected();
+        check("inspiration absorbs effort", (String) v.phase(), "inspiration");
+        v.tick_ms(500);
+        check("mid inspiration", (String) v.phase(), "inspiration");
+        v.tick_ms(500);
+        check("expiration", (String) v.phase(), "expiration");
+        v.patient_effort_detected();
+        check("expiration absorbs effort", (String) v.phase(), "expiration");
+        v.tick_ms(1500);
+        check("pause", (String) v.phase(), "pause");
+        v.patient_effort_detected();
+        check("pause triggers next breath", (String) v.phase(), "inspiration");
+        checkI("breath 2 counted", (int) v.breath_count(), 2);
+        v.tick_ms(1000);
+        check("expiration 2", (String) v.phase(), "expiration");
+        v.tick_ms(1500);
+        check("pause 2", (String) v.phase(), "pause");
+        v.tick_ms(500);
+        check("inspiration 3 passive", (String) v.phase(), "inspiration");
+        checkI("breath 3 counted", (int) v.breath_count(), 3);
+        v.stop();
+        check("stopped", (String) v.phase(), "off");
+        checkI("breath count persists across stop", (int) v.breath_count(), 3);
+        v.tick_ms(10000);
+        v.patient_effort_detected();
+        check("off absorbs ticks and effort", (String) v.phase(), "off");
+        System.out.println("PASS: ventilator");
+    }
+}
