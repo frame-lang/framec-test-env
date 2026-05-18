@@ -1834,7 +1834,12 @@ def js_persist(meta: dict) -> str:
     has_bool = set_b is not None
 
     lines = [""]
-    lines.append(f"const inst = new {sys_name}();")
+    # RFC-0015: @@SysName() compiles to per-target factory. Generator
+    # emits snake_case save/load names (`save_state`, `restore_state`)
+    # per the `@@[save(save_state)]` declaration in
+    # `gen_persist_pure.py`; the JS Lang config's camelCase
+    # `save_method`/`restore_call` fields are legacy and unused here.
+    lines.append(f"const inst = @@{sys_name}();")
     for _ in range(advances_pre):
         lines.append("inst.advance();")
         lines.append('console.log("TRACE: advance");')
@@ -1847,9 +1852,11 @@ def js_persist(meta: dict) -> str:
         lines.append(f"inst.set_b({'true' if set_b else 'false'});")
         lines.append(f'console.log("TRACE: set_b {"true" if set_b else "false"}");')
     lines.append('console.log("TRACE: status " + inst.status());')
-    lines.append("const blob = inst.saveState();")
+    lines.append("const blob = inst.save_state();")
     lines.append('console.log("TRACE: save ok");')
-    lines.append(f"const rest = {sys_name}.restoreState(blob);")
+    # RFC-0015: factory + instance method
+    lines.append(f"const rest = @@{sys_name}();")
+    lines.append("rest.restore_state(blob);")
     lines.append('console.log("TRACE: restore ok");')
     lines.append('console.log("TRACE: post_status " + rest.status());')
     lines.append('console.log("TRACE: post_x " + rest.get_x());')
@@ -1899,7 +1906,11 @@ def go_persist(meta: dict) -> str:
     has_bool = set_b is not None
 
     lines = ["", "func main() {"]
-    lines.append(f"    inst := New{sys_name}()")
+    # RFC-0015: @@SysName() compiles to per-target factory (Go: emits
+    # `NewPersist0000()` or `CreatePersist0000()` via Frame factory).
+    # Method names follow Go's "capitalize first char" rule, e.g.
+    # `save_state` → `Save_state`, `set_x` → `Set_x`.
+    lines.append(f"    inst := @@{sys_name}()")
     for _ in range(advances_pre):
         lines.append("    inst.Advance()")
         lines.append('    fmt.Println("TRACE: advance")')
@@ -1912,9 +1923,11 @@ def go_persist(meta: dict) -> str:
         lines.append(f"    inst.Set_b({'true' if set_b else 'false'})")
         lines.append(f'    fmt.Println("TRACE: set_b {"true" if set_b else "false"}")')
     lines.append('    fmt.Printf("TRACE: status %s\\n", inst.Status())')
-    lines.append("    blob := inst.SaveState()")
+    lines.append("    blob := inst.Save_state()")
     lines.append('    fmt.Println("TRACE: save ok")')
-    lines.append(f"    rest := Restore{sys_name}(blob)")
+    # RFC-0015: factory + instance method (was package-level RestoreXxx)
+    lines.append(f"    rest := @@{sys_name}()")
+    lines.append("    rest.Restore_state(blob)")
     lines.append('    fmt.Println("TRACE: restore ok")')
     lines.append('    fmt.Printf("TRACE: post_status %s\\n", rest.Status())')
     lines.append('    fmt.Printf("TRACE: post_x %d\\n", rest.Get_x())')
@@ -2107,7 +2120,8 @@ def dart_persist(meta: dict) -> str:
     has_bool = set_b is not None
 
     lines = ["", "void main() {"]
-    lines.append(f"    var inst = {sys_name}();")
+    # RFC-0015: @@SysName() compiles to per-target factory.
+    lines.append(f"    var inst = @@{sys_name}();")
     for _ in range(advances_pre):
         lines.append("    inst.advance();")
         lines.append('    print("TRACE: advance");')
@@ -2122,9 +2136,11 @@ def dart_persist(meta: dict) -> str:
     # Dart interpolates `$foo` — escape literal `$` unused here; method
     # calls go in `${expr}`.
     lines.append('    print("TRACE: status ${inst.status()}");')
-    lines.append("    var blob = inst.saveState();")
+    lines.append("    var blob = inst.save_state();")
     lines.append('    print("TRACE: save ok");')
-    lines.append(f"    var rest = {sys_name}.restoreState(blob);")
+    # RFC-0015: factory + instance method
+    lines.append(f"    var rest = @@{sys_name}();")
+    lines.append("    rest.restore_state(blob);")
     lines.append('    print("TRACE: restore ok");')
     lines.append('    print("TRACE: post_status ${rest.status()}");')
     lines.append('    print("TRACE: post_x ${rest.get_x()}");')
@@ -2148,7 +2164,9 @@ def swift_persist(meta: dict) -> str:
     has_bool = set_b is not None
 
     lines = [""]
-    lines.append(f"let inst = {sys_name}()")
+    # RFC-0015: @@SysName() compiles to per-target factory.
+    # `var` not `let` because restore_state mutates the instance.
+    lines.append(f"var inst = @@{sys_name}()")
     for _ in range(advances_pre):
         lines.append("inst.advance()")
         lines.append('print("TRACE: advance")')
@@ -2162,9 +2180,11 @@ def swift_persist(meta: dict) -> str:
         lines.append(f'print("TRACE: set_b {"true" if set_b else "false"}")')
     # Swift interpolation: \(expr)
     lines.append(r'print("TRACE: status \(inst.status())")')
-    lines.append("let blob = inst.saveState()")
+    lines.append("let blob = inst.save_state()")
     lines.append('print("TRACE: save ok")')
-    lines.append(f"let rest = {sys_name}.restoreState(blob)")
+    # RFC-0015: factory + instance method
+    lines.append(f"var rest = @@{sys_name}()")
+    lines.append("rest.restore_state(blob)")
     lines.append('print("TRACE: restore ok")')
     lines.append(r'print("TRACE: post_status \(rest.status())")')
     lines.append(r'print("TRACE: post_x \(rest.get_x())")')
@@ -2360,7 +2380,8 @@ def csharp_persist(meta: dict) -> str:
 
     lines = ["", "public class CanaryMain {"]
     lines.append("    public static void Main() {")
-    lines.append(f"        var inst = new {sys_name}();")
+    # RFC-0015: @@SysName() compiles to per-target factory.
+    lines.append(f"        var inst = @@{sys_name}();")
     for _ in range(advances_pre):
         lines.append("        inst.advance();")
         lines.append('        System.Console.WriteLine("TRACE: advance");')
@@ -2373,9 +2394,11 @@ def csharp_persist(meta: dict) -> str:
         lines.append(f"        inst.set_b({'true' if set_b else 'false'});")
         lines.append(f'        System.Console.WriteLine("TRACE: set_b {"true" if set_b else "false"}");')
     lines.append('        System.Console.WriteLine("TRACE: status " + inst.status());')
-    lines.append("        var blob = inst.SaveState();")
+    lines.append("        var blob = inst.save_state();")
     lines.append('        System.Console.WriteLine("TRACE: save ok");')
-    lines.append(f"        var rest = {sys_name}.RestoreState(blob);")
+    # RFC-0015: factory + instance method
+    lines.append(f"        var rest = @@{sys_name}();")
+    lines.append("        rest.restore_state(blob);")
     lines.append('        System.Console.WriteLine("TRACE: restore ok");')
     lines.append('        System.Console.WriteLine("TRACE: post_status " + rest.status());')
     lines.append('        System.Console.WriteLine("TRACE: post_x " + rest.get_x());')
@@ -2645,7 +2668,12 @@ def _erlang_persist_escript(meta: dict) -> str:
     lines.append('    io:format("TRACE: status ~s~n", [Status]),')
     lines.append(f"    Blob = {module}:save_state(Pid),")
     lines.append('    io:format("TRACE: save ok~n"),')
-    lines.append(f"    {{ok, Pid2}} = {module}:load_state(Blob),")
+    # Erlang is gen_statem Pid-based: `restore_state/1` is a
+    # module-level function that deserialises the blob, spawns a
+    # fresh gen_statem with `start_link`, and replaces its state.
+    # Returns `{ok, Pid}` directly. Renamed from `load_state` per
+    # `@@[load(restore_state)]` in the generator (RFC-0030 Track A.1).
+    lines.append(f"    {{ok, Pid2}} = {module}:restore_state(Blob),")
     lines.append('    io:format("TRACE: restore ok~n"),')
     lines.append(f"    PostStatus = {module}:status(Pid2),")
     lines.append('    io:format("TRACE: post_status ~s~n", [PostStatus]),')
@@ -3881,7 +3909,9 @@ LANGS = {
         render_canary=php_canary,
         renderers={'persist': php_persist, 'selfcall': php_selfcall, 'hsm': php_hsm, 'operations': php_operations, 'nested': php_nested, 'multisys': php_multisys},
         rewrite_trace=_php_trace,
-        prolog="<?php\n",
+        # No prolog — framec's PHP backend emits `<?php` itself (framec
+        # commit `12befc3`); double-emitting causes parse error at the
+        # second `<?php`.
         notes="JSON string blob. static restore_state. New() fires constructor.",
     ),
     "dart": Lang(
