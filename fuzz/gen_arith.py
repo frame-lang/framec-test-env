@@ -186,7 +186,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
 
     if lang == "python_3":
         lines.append(spec.fail_exit_def)
-        lines.append(f"_inst = {sys_name}()")
+        lines.append(f"_inst = @@{sys_name}()")
         for c in seq_calls:
             lines.append(f"_inst.{c}()")
         lines.append(f"_ret = _inst.{verify}()")
@@ -195,7 +195,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
         lines.append(spec.println_pass.replace("nested-frame", "arith"))
     elif lang == "javascript":
         lines.append(spec.fail_exit_def)
-        lines.append(f"const _inst = new {sys_name}();")
+        lines.append(f"const _inst = @@{sys_name}();")
         for c in seq_calls:
             lines.append(f"_inst.{c}();")
         lines.append(f"const _ret = _inst.{verify}();")
@@ -203,7 +203,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
         lines.append(spec.println_pass.replace("nested-frame", "arith"))
     elif lang == "typescript":
         lines.append(spec.fail_exit_def)
-        lines.append(f"const _inst = new {sys_name}();")
+        lines.append(f"const _inst = @@{sys_name}();")
         for c in seq_calls:
             lines.append(f"_inst.{c}();")
         lines.append(f"const _ret: number = _inst.{verify}();")
@@ -211,7 +211,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
         lines.append(spec.println_pass.replace("nested-frame", "arith"))
     elif lang == "ruby":
         lines.append(spec.fail_exit_def)
-        lines.append(f"_inst = {sys_name}.new")
+        lines.append(f"_inst = @@{sys_name}()")
         for c in seq_calls:
             lines.append(f"_inst.{c}")
         lines.append(f"_ret = _inst.{verify}")
@@ -219,7 +219,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
         lines.append(spec.println_pass.replace("nested-frame", "arith"))
     elif lang == "lua":
         lines.append(spec.fail_exit_def)
-        lines.append(f"local _inst = {sys_name}.new()")
+        lines.append(f"local _inst = @@{sys_name}()")
         for c in seq_calls:
             lines.append(f"_inst:{c}()")
         lines.append(f"local _ret = _inst:{verify}()")
@@ -227,7 +227,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
         lines.append(spec.println_pass.replace("nested-frame", "arith"))
     elif lang == "php":
         lines.append(spec.fail_exit_def)
-        lines.append(f"$_inst = new {sys_name}();")
+        lines.append(f"$_inst = @@{sys_name}();")
         for c in seq_calls:
             lines.append(f"$_inst->{c}();")
         lines.append(f"$_ret = $_inst->{verify}();")
@@ -236,7 +236,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
     elif lang == "dart":
         lines.append(spec.fail_exit_def)
         lines.append("void main() {")
-        lines.append(f"    final _inst = {sys_name}();")
+        lines.append(f"    final _inst = @@{sys_name}();")
         for c in seq_calls:
             lines.append(f"    _inst.{c}();")
         lines.append(f"    final _ret = _inst.{verify}();")
@@ -246,7 +246,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
     elif lang == "rust":
         lines.append(spec.fail_exit_def)
         lines.append("fn main() {")
-        lines.append(f"    let mut _inst = {sys_name}::new();")
+        lines.append(f"    let mut _inst = @@{sys_name}();")
         for c in seq_calls:
             lines.append(f"    _inst.{c}();")
         lines.append(f"    let _ret = _inst.{verify}();")
@@ -261,7 +261,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
         lines.insert(6, "")
         lines.append(spec.fail_exit_def)
         lines.append("func main() {")
-        lines.append(f"    sm := New{sys_name}()")
+        lines.append(f"    sm := @@{sys_name}()")
         for c in seq_calls:
             method_pasc = c[:1].upper() + c[1:]
             lines.append(f"    sm.{method_pasc}()")
@@ -272,7 +272,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
         lines.append("}")
     elif lang == "swift":
         lines.append(spec.fail_exit_def)
-        lines.append(f"let _inst = {sys_name}()")
+        lines.append(f"var _inst = @@{sys_name}()")
         for c in seq_calls:
             lines.append(f"_inst.{c}()")
         lines.append(f"let _ret = _inst.{verify}()")
@@ -281,7 +281,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
     elif lang == "java":
         lines.append("class Driver {")
         lines.append("    public static void main(String[] args) {")
-        lines.append(f"        var _inst = new {sys_name}();")
+        lines.append(f"        var _inst = @@{sys_name}();")
         for c in seq_calls:
             lines.append(f"        _inst.{c}();")
         lines.append(f"        int _ret = (int) _inst.{verify}();")
@@ -298,7 +298,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
         lines.insert(3, "")
         lines.append(spec.fail_exit_def)
         lines.append("fun main() {")
-        lines.append(f"    val _inst = {sys_name}()")
+        lines.append(f"    val _inst = @@{sys_name}()")
         for c in seq_calls:
             lines.append(f"    _inst.{c}()")
         lines.append(f"    val _ret = _inst.{verify}() as Int")
@@ -309,7 +309,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
         lines.append(f"namespace nf_{cid} {{")
         lines.append("    public class Driver {")
         lines.append("        public static void Main() {")
-        lines.append(f"            var _inst = new {sys_name}();")
+        lines.append(f"            var _inst = @@{sys_name}();")
         for c in seq_calls:
             lines.append(f"            _inst.{c}();")
         lines.append(f"            int _ret = (int) _inst.{verify}();")
@@ -324,7 +324,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
         lines.append("#include <stdio.h>")
         lines.append("#include <stdlib.h>")
         lines.append("int main(void) {")
-        lines.append(f"    {sys_name}* _inst = {sys_name}_new();")
+        lines.append(f"    {sys_name}* _inst = @@{sys_name}();")
         for c in seq_calls:
             lines.append(f"    {sys_name}_{c}(_inst);")
         lines.append(f"    int _ret = (int)(intptr_t){sys_name}_{verify}(_inst);")
@@ -354,7 +354,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
         lines.insert(3, "")
         lines.append(spec.fail_exit_def)
         lines.append("func _init():")
-        lines.append(f"    var _inst = {sys_name}.new()")
+        lines.append(f"    var _inst = @@{sys_name}()")
         for c in seq_calls:
             lines.append(f"    _inst.{c}()")
         lines.append(f"    var _ret = _inst.{verify}()")
