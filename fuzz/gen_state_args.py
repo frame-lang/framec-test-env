@@ -587,7 +587,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
     elif lang == "cpp":
         lines.append("#include <iostream>")
         lines.append("int main() {")
-        lines.append(f"    {sys_name} _inst;")
+        lines.append(f"    auto _inst = @@{sys_name}();")
         lines.append(f"    _inst.{m_drive}();")
         if is_p8:
             lines.append(f"    int _ret = std::any_cast<int>(_inst.{m_drive2}());")

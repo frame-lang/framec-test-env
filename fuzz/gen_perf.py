@@ -578,7 +578,7 @@ def gen_case(lang, cid, equiv, expected, pattern, tier_name, n, is_smoke):
         lines.append("#include <iostream>")
         lines.append("#include <chrono>")
         lines.append("int main() {")
-        lines.append(f"    {sys_name} _inst;")
+        lines.append(f"    auto _inst = @@{sys_name}();")
         lines.append(f"    int _n = {n};")
         lines.append("    auto _start = std::chrono::high_resolution_clock::now();")
         if is_p3:

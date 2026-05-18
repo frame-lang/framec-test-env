@@ -914,7 +914,7 @@ def gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke):
     elif lang == "cpp":
         lines.append("#include <iostream>")
         lines.append("int main() {")
-        lines.append(f"    {sys_name} _inst;")
+        lines.append(f"    auto _inst = @@{sys_name}();")
         for c in seq_calls:
             lines.append(f"    _inst.{c}();")
         lines.append(f"    int _ret = std::any_cast<int>(_inst.{verify}());")

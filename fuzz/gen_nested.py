@@ -755,7 +755,7 @@ def gen_case(lang, pattern):
         lines.append("// Inline test driver.")
         lines.append("#include <iostream>")
         lines.append("int main() {")
-        lines.append(f"    {sys_name} _inst;")
+        lines.append(f"    auto _inst = @@{sys_name}();")
         lines.append(f"    _inst.drive({drive_arg_str});")
         lines.append(f"    int _n = std::any_cast<int>(_inst.get_n());")
         lines.append(f"    if (_n != {expected_n}) {{")

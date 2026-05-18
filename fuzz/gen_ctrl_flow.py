@@ -886,7 +886,7 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
     elif lang == "cpp":
         lines.append("#include <iostream>")
         lines.append("int main() {")
-        lines.append(f"    {sys_name} _inst;")
+        lines.append(f"    auto _inst = @@{sys_name}();")
         if body.drive_returns:
             lines.append(f"    int _ret = std::any_cast<int>(_inst.{m_drive}());")
         else:

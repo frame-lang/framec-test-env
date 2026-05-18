@@ -480,7 +480,7 @@ def gen_case(lang, case_id_str, smoke_tag, expected, frame_expr,
     elif lang == "cpp":
         lines.append("#include <iostream>")
         lines.append("int main() {")
-        lines.append(f"    {sys_name} _inst;")
+        lines.append(f"    auto _inst = @@{sys_name}();")
         if lhs.drive_returns:
             lines.append(f"    int _ret = std::any_cast<int>(_inst.{m_drive}({drive_arg_str}));")
         else:

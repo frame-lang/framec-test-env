@@ -381,7 +381,7 @@ def gen_case(lang, cid, equiv, expected, pattern, lit, is_smoke):
         lines.append("#include <iostream>")
         lines.append("#include <string>")
         lines.append("int main() {")
-        lines.append(f"    {sys_name} _inst;")
+        lines.append(f"    auto _inst = @@{sys_name}();")
         for c in seq_calls:
             lines.append(f"    _inst.{c}();")
         if is_int:

@@ -313,7 +313,7 @@ def gen_case(lang, cid, equiv, expected, shape, vt, is_smoke):
     elif lang == "cpp":
         lines.append("#include <iostream>")
         lines.append("int main() {")
-        lines.append(f"    {sys_name} _inst;")
+        lines.append(f"    auto _inst = @@{sys_name}();")
         lines.append(f"    int _ret = std::any_cast<int>(_inst.{m_drive}({drive_arg_str}));")
         lines.append(f"    if (_ret != {expected}) {{")
         lines.append(f"        std::cerr << \"FAIL: expected ret={expected}, got \" << _ret << std::endl;")
