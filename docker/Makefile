@@ -128,6 +128,24 @@ $(foreach lang,$(LANGS),$(eval $(call LANG_TEST_RULE,$(lang))))
 # if you want a different cap.
 MATRIX_JOBS ?= 4
 
+# ERLANG_TEST_JOBS deviates from MATRIX_JOBS — Erlang is the matrix's
+# long pole (134s at MATRIX_JOBS=4 on a 12-core macOS host; the next
+# slowest container is Kotlin at ~110s and C at ~107s, neither of
+# which has a tuning knob). Most of Erlang's wall happens AFTER the
+# fast langs (lua/ruby/js/php at ~15-20s and python/typescript at
+# ~30s) have exited and freed cores, so bumping its parallelism
+# costs little contention. Measured 2026-05-17:
+#
+#   ERLANG_TEST_JOBS=4   → erlang 134s, wall 134s
+#   ERLANG_TEST_JOBS=6   → erlang 126s, wall 126s
+#   ERLANG_TEST_JOBS=8   → erlang 117s, wall 117s  ← saturates here
+#   ERLANG_TEST_JOBS=12  → erlang 117s, wall 117s  (no further win)
+#
+# 8 is the floor; past that BEAM startup ordering and erlc serialization
+# stop scaling. Override on the make line if your host has a different
+# core count or contention profile.
+ERLANG_TEST_JOBS ?= 8
+
 coverage-check:
 	@# Report-only coverage check: every fixture stem under
 	@# tests/common/positive/<cat>/ must have either a real
@@ -171,7 +189,7 @@ test: $(STAMP_DIR)/framec-native build
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
 	 CPP_COMPILE_JOBS=$(MATRIX_JOBS) \
 	 DART_COMPILE_JOBS=$(MATRIX_JOBS) \
-	 ERLANG_TEST_JOBS=$(MATRIX_JOBS) \
+	 ERLANG_TEST_JOBS=$(ERLANG_TEST_JOBS) \
 	 GO_COMPILE_JOBS=$(MATRIX_JOBS) \
 	 RUST_EXEC_JOBS=$(MATRIX_JOBS) \
 	 SWIFT_COMPILE_JOBS=$(MATRIX_JOBS) \
