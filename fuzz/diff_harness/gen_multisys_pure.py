@@ -147,6 +147,10 @@ def gen_outer_system(case_id: int, params: dict) -> tuple[str, str, int]:
     run_lines, bump_count = gen_run_body(pattern, n)
 
     lines = []
+    # RFC-0021: multi-system modules must mark which system callers
+    # instantiate first via `@@[main]`. The driver is the entry
+    # point — Counter is the embedded inner instance.
+    lines.append("@@[main]")
     lines.append(f"@@system {sys_name} {{")
     lines.append("    interface:")
     lines.append("        run()")
