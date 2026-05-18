@@ -270,8 +270,14 @@ def gen_case(lang, cid, equiv, expected, s1, s2, lit, is_smoke):
         m_get_n if s2.verify_method == "get_n" else m_get_scache
     )
 
+    # drive must declare a return type if ANY statement writes to
+    # `@@:return` — s1.writes_ret (e.g. `ret_w` S1) or s2.drive_returns
+    # (the `dom_to_ret`/`sv_to_ret`/etc. S2 family). Without this,
+    # framec's Rust target rejects the case at E606 (`@@:return = X`
+    # in a void method has no enum variant to write into).
+    drive_writes_ret = s1.writes_ret or s2.drive_returns
     drive_sig = (
-        f"{m_drive}(x: int): int" if s2.drive_returns
+        f"{m_drive}(x: int): int" if drive_writes_ret
         else f"{m_drive}(x: int)"
     )
 
