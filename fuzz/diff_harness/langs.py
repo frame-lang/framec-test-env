@@ -187,7 +187,12 @@ def py_persist(meta: dict) -> str:
     lines.append('    print(f"TRACE: status {inst.status()}")')
     lines.append("    blob = inst.save_state()")
     lines.append('    print("TRACE: save ok")')
-    lines.append(f"    rest = {sys_name}.restore_state(blob)")
+    # RFC-0015 hard-cut: restore_state is now an instance method on
+    # a freshly-constructed system, not a classmethod that returns a
+    # new instance. `@@SystemName()` compiles to the per-target
+    # factory (here: `SystemName._create()` for Python).
+    lines.append(f"    rest = @@{sys_name}()")
+    lines.append("    rest.restore_state(blob)")
     lines.append('    print("TRACE: restore ok")')
     lines.append('    print(f"TRACE: post_status {rest.status()}")')
     lines.append('    print(f"TRACE: post_x {rest.get_x()}")')
@@ -1950,7 +1955,9 @@ def ruby_persist(meta: dict) -> str:
     lines.append('puts "TRACE: status #{inst.status}"')
     lines.append("blob = inst.save_state")
     lines.append('puts "TRACE: save ok"')
-    lines.append(f"rest = {sys_name}.restore_state(blob)")
+    # RFC-0015: factory + instance method
+    lines.append(f"rest = @@{sys_name}()")
+    lines.append("rest.restore_state(blob)")
     lines.append('puts "TRACE: restore ok"')
     lines.append('puts "TRACE: post_status #{rest.status}"')
     lines.append('puts "TRACE: post_x #{rest.get_x}"')
@@ -2073,7 +2080,9 @@ def php_persist(meta: dict) -> str:
     lines.append('echo "TRACE: status " . $inst->status() . PHP_EOL;')
     lines.append("$blob = $inst->save_state();")
     lines.append('echo "TRACE: save ok" . PHP_EOL;')
-    lines.append(f"$rest = {sys_name}::restore_state($blob);")
+    # RFC-0015: factory + instance method
+    lines.append(f"$rest = @@{sys_name}();")
+    lines.append("$rest->restore_state($blob);")
     lines.append('echo "TRACE: restore ok" . PHP_EOL;')
     lines.append('echo "TRACE: post_status " . $rest->status() . PHP_EOL;')
     lines.append('echo "TRACE: post_x " . $rest->get_x() . PHP_EOL;')
@@ -2200,7 +2209,9 @@ def java_persist(meta: dict) -> str:
     lines.append('        System.out.println("TRACE: status " + inst.status());')
     lines.append("        String blob = inst.save_state();")
     lines.append('        System.out.println("TRACE: save ok");')
-    lines.append(f"        {sys_name} rest = {sys_name}.restore_state(blob);")
+    # RFC-0015: factory + instance method
+    lines.append(f"        {sys_name} rest = @@{sys_name}();")
+    lines.append("        rest.restore_state(blob);")
     lines.append('        System.out.println("TRACE: restore ok");')
     lines.append('        System.out.println("TRACE: post_status " + rest.status());')
     lines.append('        System.out.println("TRACE: post_x " + rest.get_x());')
@@ -2313,7 +2324,10 @@ def c_persist(meta: dict) -> str:
     lines.append(f'    printf("TRACE: status %s\\n", {sys_name}_status(inst));')
     lines.append(f"    char* blob = {sys_name}_save_state(inst);")
     lines.append('    printf("TRACE: save ok\\n");')
-    lines.append(f"    {sys_name}* rest = {sys_name}_restore_state(blob);")
+    # RFC-0015: factory + instance method. C uses function form
+    # `Sys_restore_state(s, blob)` instead of a method.
+    lines.append(f"    {sys_name}* rest = @@{sys_name}();")
+    lines.append(f"    {sys_name}_restore_state(rest, blob);")
     lines.append('    printf("TRACE: restore ok\\n");')
     lines.append(f'    printf("TRACE: post_status %s\\n", {sys_name}_status(rest));')
     lines.append(f'    printf("TRACE: post_x %d\\n", {sys_name}_get_x(rest));')
@@ -2408,7 +2422,9 @@ def kotlin_persist(meta: dict) -> str:
     # framec's Kotlin codegen now emits `restore_state` inside the
     # `companion object { }` block so it's callable statically,
     # matching every other backend's persist API.
-    lines.append(f"    val rest = {sys_name}.restore_state(blob)")
+    # RFC-0015: factory + instance method
+    lines.append(f"    val rest = @@{sys_name}()")
+    lines.append("    rest.restore_state(blob)")
     lines.append('    println("TRACE: restore ok")')
     lines.append('    println("TRACE: post_status ${rest.status()}")')
     lines.append('    println("TRACE: post_x ${rest.get_x()}")')
@@ -2451,7 +2467,9 @@ def rust_persist(meta: dict) -> str:
     lines.append('    println!("TRACE: status {}", inst.status());')
     lines.append("    let blob = inst.save_state();")
     lines.append('    println!("TRACE: save ok");')
-    lines.append(f"    let mut rest = {sys_name}::restore_state(&blob);")
+    # RFC-0015: factory + instance method
+    lines.append(f"    let mut rest = @@{sys_name}();")
+    lines.append("    rest.restore_state(blob.clone());")
     lines.append('    println!("TRACE: restore ok");')
     lines.append('    println!("TRACE: post_status {}", rest.status());')
     lines.append('    println!("TRACE: post_x {}", rest.get_x());')
@@ -2492,7 +2510,9 @@ def lua_persist(meta: dict) -> str:
     lines.append('print("TRACE: status " .. inst:status())')
     lines.append("local blob = inst:save_state()")
     lines.append('print("TRACE: save ok")')
-    lines.append(f"local rest = {sys_name}.restore_state(blob)")
+    # RFC-0015: factory + instance method (Lua `:` for method call)
+    lines.append(f"local rest = @@{sys_name}()")
+    lines.append("rest:restore_state(blob)")
     lines.append('print("TRACE: restore ok")')
     lines.append('print("TRACE: post_status " .. rest:status())')
     # Lua's cjson decodes `x` as a float on round-trip, so `1000`
@@ -2538,7 +2558,9 @@ def gdscript_persist(meta: dict) -> str:
     lines.append('    print("TRACE: status " + str(inst.status()))')
     lines.append("    var blob = inst.save_state()")
     lines.append('    print("TRACE: save ok")')
-    lines.append(f"    var rest = {sys_name}.restore_state(blob)")
+    # RFC-0015: factory + instance method
+    lines.append(f"    var rest = @@{sys_name}()")
+    lines.append("    rest.restore_state(blob)")
     lines.append('    print("TRACE: restore ok")')
     lines.append('    print("TRACE: post_status " + str(rest.status()))')
     lines.append('    print("TRACE: post_x " + str(rest.get_x()))')
@@ -2750,7 +2772,9 @@ def cpp_persist(meta: dict) -> str:
     )
     lines.append("    std::string blob = inst.save_state();")
     lines.append('    std::cout << "TRACE: save ok" << std::endl;')
-    lines.append(f"    {sys_name} rest = {sys_name}::restore_state(blob);")
+    # RFC-0015: factory + instance method
+    lines.append(f"    {sys_name} rest = @@{sys_name}();")
+    lines.append("    rest.restore_state(blob);")
     lines.append('    std::cout << "TRACE: restore ok" << std::endl;')
     lines.append(
         '    std::cout << "TRACE: post_status " << std::any_cast<std::string>(rest.status()) << std::endl;'
