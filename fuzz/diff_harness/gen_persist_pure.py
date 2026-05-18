@@ -116,7 +116,15 @@ def gen_case_frame(case_id: int, params: dict) -> tuple[str, str]:
     parts = []
     parts.append("@@target python_3")
     parts.append("")
-    parts.append("@@persist")
+    # RFC-0015 hard-cut: persist is now module-level attribute form.
+    # `@@[persist(<type>)]` declares the serialized blob's type;
+    # `@@[save(name)]` / `@@[load(name)]` name the framework-emitted
+    # methods. The persist-blob type is target-specific — the runner
+    # rewrites the `str` placeholder per-backend (see langs.py
+    # rewrite_trace / per-backend renderer).
+    parts.append("@@[persist(str)]")
+    parts.append("@@[save(save_state)]")
+    parts.append("@@[load(restore_state)]")
     parts.append(f"@@system {sys_name} {{")
     parts.append(gen_machine_block(params["n_states"], params["hsm_depth"], has_str, has_bool))
     parts.append("")
