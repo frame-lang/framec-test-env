@@ -494,8 +494,7 @@ def gen_case(lang, pattern):
     # PHP requires the `<?php` opener at the very top of the source —
     # without it the generated file is treated as literal HTML. The
     # other backends pass through the prolog cleanly.
-    if lang == "php":
-        lines.append("<?php")
+    # PHP prolog: framec emits `<?php` itself (commit 12befc3)
     lines.append("")
     lines.append(f"@@system {sys_name} {{")
     lines.append("    interface:")

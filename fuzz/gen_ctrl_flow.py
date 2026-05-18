@@ -669,8 +669,7 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
 
     lines = []
     lines.append(f'@@[target("{spec.target}")]')
-    if lang == "php":
-        lines.append("<?php")
+    # PHP prolog: framec emits `<?php` itself (commit 12befc3)
     lines.append("")
     lines.append(f"@@system {sys_name} {{")
     lines.append("    interface:")

@@ -240,8 +240,9 @@ def gen_case(lang, case_id_str, smoke_tag, expected, frame_expr,
 
     lines = []
     lines.append(f'@@[target("{spec.target}")]')
-    if lang == "php":
-        lines.append("<?php")
+    # No `<?php` here — framec's PHP backend emits the opening tag
+    # itself (framec commit 12befc3); double-emit causes parse error
+    # on PHP at line 2/3 with `unexpected token "<"`.
     lines.append("")
     if lang == "erlang":
         lines.append(f"%% FUZZ_EXPECTED_N: {expected}")

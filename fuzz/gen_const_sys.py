@@ -154,8 +154,7 @@ def gen_case(lang, cid, equiv, expected, pattern, lit, is_smoke):
 
     lines = []
     lines.append(f'@@[target("{spec.target}")]')
-    if lang == "php":
-        lines.append("<?php")
+    # PHP prolog: framec emits `<?php` itself (commit 12befc3)
     lines.append("")
     if lang == "erlang":
         lines.append(f"%% FUZZ_EXPECTED_VAL: {expected}")
