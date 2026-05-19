@@ -288,6 +288,8 @@ CSPROJ
             verify_method=$(grep '^%% FUZZ_VERIFY_METHOD:' "$case_file" | awk '{print $3}')
             local drive_returns
             drive_returns=$(grep '^%% FUZZ_DRIVE_RETURNS:' "$case_file" | awk '{print $3}')
+            local verify_kind
+            verify_kind=$(grep '^%% FUZZ_VERIFY_KIND:' "$case_file" | awk '{print $3}')
             local mod
             mod=$(grep -m1 '^-module(' "$gen" | sed 's/-module(\(.*\))\./\1/')
             if [ -z "$mod" ]; then
@@ -324,6 +326,16 @@ CSPROJ
             pre_drive=$(grep '^%% FUZZ_PRE_DRIVE:' "$case_file" | awk '{print $3}')
             local pre_drive_seq
             pre_drive_seq=$(grep '^%% FUZZ_PRE_DRIVE_SEQ:' "$case_file" | awk '{print $3}')
+            # const_sys P1/P2 cases have no `drive()` method — only
+            # the verify method. Detect via "no drive-related
+            # metadata at all" and call verify_method directly.
+            # P3 has pre_drive_seq=drive so it falls into the
+            # pre_drive_seq branch correctly.
+            local has_drive_phase=""
+            if [ -n "$pre_drive" ] || [ -n "$pre_drive_seq" ] \
+               || [ -n "$drive_arg" ] || [ -n "$drive_returns" ]; then
+                has_drive_phase=yes
+            fi
             local body
             if [ -n "$pre_drive_seq" ]; then
                 # Phase 19 multi-call sequence: a comma-separated
@@ -341,11 +353,25 @@ CSPROJ
                 # reads the persisted state arg.
                 body="    _ = ${mod}:${pre_drive}(Pid),
     Ret = ${mod}:${verify_method}(Pid),"
+            elif [ -z "$has_drive_phase" ] && [ -n "$verify_method" ]; then
+                # const_sys P1/P2: no drive method exists; the
+                # verify method IS the call.
+                body="    Ret = ${mod}:${verify_method}(Pid),"
             elif [ "${drive_returns:-yes}" = "yes" ]; then
                 body="    Ret = ${drive_call},"
             else
                 body="    _ = ${drive_call},
     Ret = ${mod}:${verify_method:-get_n}(Pid),"
+            fi
+            # Erlang literal for Expected: int → bare, string →
+            # quoted. Without quoting, "S0" reads as an unbound
+            # atom-variable and the case errors out before the
+            # match.
+            local expected_lit
+            if [ "$verify_kind" = "string" ]; then
+                expected_lit="\"${expected_n}\""
+            else
+                expected_lit="${expected_n}"
             fi
             cat > "$escript" <<ESCRIPT
 #!/usr/bin/env escript
@@ -353,7 +379,7 @@ main(_) ->
     code:add_patha("$out"),
     {ok, Pid} = ${mod}:start_link(),
 ${body}
-    Expected = ${expected_n},
+    Expected = ${expected_lit},
     case Ret of
         Expected -> io:format("PASS: const-sys~n");
         Other ->
