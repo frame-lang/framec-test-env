@@ -136,7 +136,7 @@ run_one() {
             ;;
         rust)
             local bin="$out/bin"
-            if ! rustc -o "$bin" "$gen" 2>"$errlog"; then
+            if ! rustc --edition 2021 -o "$bin" "$gen" 2>"$errlog"; then
                 local e
                 e=$(head -3 "$errlog" | tr '\n' '|' | head -c 220)
                 printf "%s\t%s\tcompile\tFAIL\t%s\n" "$lang" "$case_id" "$e" >> "$summary"
