@@ -726,7 +726,7 @@ class Helpers {{
 
 class {main_cls} {{
     public static void main(String[] args) {{
-        {sys_name} s = new {sys_name}();
+        {sys_name} s = {sys_name}.__create();   // factory fires the start $> (Java init() is a no-op; RFC-0017)
         System.out.println("TRACE: CALL fetch");
         String r = s.fetch("k").join();
         System.out.println("TRACE: RET " + r);

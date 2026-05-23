@@ -90,7 +90,10 @@ for lang in $LANGS; do
     ext=$(lang_to_ext "$lang")
     [ -z "$ext" ] && continue
     cases=$(ls "$CASES_DIR/$lang"/case_*.$ext 2>/dev/null | sort)
-    total=$(echo "$cases" | grep -c . || echo 0)
+    # `grep -c .` already prints 0 on no match (and exits 1); the old
+    # `|| echo 0` appended a SECOND 0 → total="0\n0" → "integer expression
+    # expected". Drop it; use printf so an empty `$cases` yields no input.
+    total=$(printf '%s' "$cases" | grep -c .)
     [ "$total" -eq 0 ] && { echo "$lang: no cases"; continue; }
     echo "=== $lang ($total cases) ==="
     for case_file in $cases; do

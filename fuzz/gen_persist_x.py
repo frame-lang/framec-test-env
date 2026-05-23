@@ -112,15 +112,10 @@ def gen_p1_python(case_id, sys_name, value):
     """
     return f"""@@[target("python_3")]
 
-@@[persist]
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
 @@system {sys_name} {{
-    operations:
-        @@[save]
-        save_state(): str {{}}
-
-        @@[load]
-        restore_state(data: str) {{}}
-
     interface:
         kick(v: int)
         get_slot(): int
@@ -181,15 +176,10 @@ def gen_p2_python(case_id, sys_name, value):
     """
     return f"""@@[target("python_3")]
 
-@@[persist]
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
 @@system {sys_name} {{
-    operations:
-        @@[save]
-        save_state(): str {{}}
-
-        @@[load]
-        restore_state(data: str) {{}}
-
     interface:
         kick(v: int)
         get_tag(): int
@@ -253,15 +243,10 @@ def gen_p3_python(case_id, sys_name, value):
     """
     return f"""@@[target("python_3")]
 
-@@[persist]
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
 @@system {sys_name} {{
-    operations:
-        @@[save]
-        save_state(): str {{}}
-
-        @@[load]
-        restore_state(data: str) {{}}
-
     interface:
         drive(p: int)
         get_x(): int
@@ -326,15 +311,10 @@ def gen_p4_python(case_id, sys_name, value):
     """
     return f"""@@[target("python_3")]
 
-@@[persist]
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
 @@system {sys_name} {{
-    operations:
-        @@[save]
-        save_state(): str {{}}
-
-        @@[load]
-        restore_state(data: str) {{}}
-
     interface:
         push_modal(v: int)
         pop_modal()
@@ -406,15 +386,10 @@ def gen_p5_python(case_id, sys_name, value):
     """
     return f"""@@[target("python_3")]
 
-@@[persist]
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
 @@system {sys_name} {{
-    operations:
-        @@[save]
-        save_state(): str {{}}
-
-        @@[load]
-        restore_state(data: str) {{}}
-
     interface:
         seed(v: int)
         bump()
@@ -490,15 +465,10 @@ VALUES = [0, 1, 42, 100, -7]
 
 P1_FRAME = """@@target {target}
 
-@@[persist]
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
 @@system {sys} {{
-    operations:
-        @@[save]
-        save_state(): str {{}}
-
-        @@[load]
-        restore_state(data: str) {{}}
-
     interface:
         kick(v: int)
         get_slot(): int
@@ -529,15 +499,10 @@ P1_FRAME = """@@target {target}
 
 P2_FRAME = """@@target {target}
 
-@@[persist]
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
 @@system {sys} {{
-    operations:
-        @@[save]
-        save_state(): str {{}}
-
-        @@[load]
-        restore_state(data: str) {{}}
-
     interface:
         kick(v: int)
         get_tag(): int
@@ -571,15 +536,10 @@ P2_FRAME = """@@target {target}
 
 P3_FRAME = """@@target {target}
 
-@@[persist]
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
 @@system {sys} {{
-    operations:
-        @@[save]
-        save_state(): str {{}}
-
-        @@[load]
-        restore_state(data: str) {{}}
-
     interface:
         drive(p: int)
         get_x(): int
@@ -613,15 +573,10 @@ P3_FRAME = """@@target {target}
 
 P4_FRAME = """@@target {target}
 
-@@[persist]
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
 @@system {sys} {{
-    operations:
-        @@[save]
-        save_state(): str {{}}
-
-        @@[load]
-        restore_state(data: str) {{}}
-
     interface:
         push_modal(v: int)
         pop_modal()
@@ -662,15 +617,10 @@ P4_FRAME = """@@target {target}
 
 P5_FRAME = """@@target {target}
 
-@@[persist]
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
 @@system {sys} {{
-    operations:
-        @@[save]
-        save_state(): str {{}}
-
-        @@[load]
-        restore_state(data: str) {{}}
-
     interface:
         seed(v: int)
         bump()
