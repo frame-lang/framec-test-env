@@ -4,26 +4,26 @@
 
 @@system ZeroTrustSession {
     interface:
-        authenticate(user_id: string, device_id: string, channel_id: string, mfa_factor: string)
+        authenticate(user_id: char*, device_id: char*, channel_id: char*, mfa_factor: char*)
         auth_result(passed: int, risk_score: int)
-        request_resource(resource: string, channel_id: string, policy_ok: int): string = "denied"
+        request_resource(resource: char*, channel_id: char*, policy_ok: int): char* = "denied"
         posture_update(score: int)
         risk_signal_update(score: int)
         channel_binding_mismatch()
         session_heartbeat()
         logout()
-        get_status(): string = ""
+        get_status(): char* = ""
         get_risk(): int
 
     machine:
         $Anonymous {
-            authenticate(user_id: string, device_id: string, channel_id: string, mfa_factor: string) {
+            authenticate(user_id: char*, device_id: char*, channel_id: char*, mfa_factor: char*) {
                 self->user_id = user_id;
                 self->device_id = device_id;
                 self->bound_channel = channel_id;
                 -> $Authenticating
             }
-            get_status(): string { @@:("anonymous") }
+            get_status(): char* { @@:("anonymous") }
             get_risk(): int { @@:(self->current_risk) }
         }
 
@@ -33,15 +33,15 @@
                 else if (risk_score > self->high_risk_threshold) { -> $StepUpRequired }
                 else { self->current_risk = risk_score; -> $FullAccess }
             }
-            get_status(): string { @@:("authenticating") }
+            get_status(): char* { @@:("authenticating") }
             get_risk(): int { @@:(self->current_risk) }
         }
 
         $StepUpRequired {
-            authenticate(user_id: string, device_id: string, channel_id: string, mfa_factor: string) { -> $Authenticating }
-            request_resource(resource: string, channel_id: string, policy_ok: int): string { @@:("denied_stepup") }
+            authenticate(user_id: char*, device_id: char*, channel_id: char*, mfa_factor: char*) { -> $Authenticating }
+            request_resource(resource: char*, channel_id: char*, policy_ok: int): char* { @@:("denied_stepup") }
             logout() { -> $Anonymous }
-            get_status(): string { @@:("step_up_required") }
+            get_status(): char* { @@:("step_up_required") }
             get_risk(): int { @@:(self->current_risk) }
         }
 
@@ -53,7 +53,7 @@
         }
 
         $FullAccess => $LiveSession {
-            request_resource(resource: string, channel_id: string, policy_ok: int): string {
+            request_resource(resource: char*, channel_id: char*, policy_ok: int): char* {
                 if (strcmp(channel_id, self->bound_channel) != 0) {
                     @@:("denied_channel")
                     -> $Terminated
@@ -71,12 +71,12 @@
                 if (score > self->block_threshold) { -> $Terminated }
                 else if (score > self->high_risk_threshold) { -> $Degraded }
             }
-            get_status(): string { @@:("full_access") }
+            get_status(): char* { @@:("full_access") }
             => $^
         }
 
         $Degraded => $LiveSession {
-            request_resource(resource: string, channel_id: string, policy_ok: int): string {
+            request_resource(resource: char*, channel_id: char*, policy_ok: int): char* {
                 if (strcmp(channel_id, self->bound_channel) != 0) {
                     @@:("denied_channel")
                     -> $Terminated
@@ -93,19 +93,19 @@
             posture_update(score: int) {
                 if (score >= self->min_posture) { -> $FullAccess }
             }
-            get_status(): string { @@:("degraded") }
+            get_status(): char* { @@:("degraded") }
             => $^
         }
 
         $Terminated {
-            get_status(): string { @@:("terminated") }
+            get_status(): char* { @@:("terminated") }
             get_risk(): int { @@:(self->current_risk) }
         }
 
     domain:
-        user_id: string = ""
-        device_id: string = ""
-        bound_channel: string = ""
+        user_id: char* = ""
+        device_id: char* = ""
+        bound_channel: char* = ""
         current_risk: int = 0
         high_risk_threshold: int = 70
         block_threshold: int = 90

@@ -10,27 +10,27 @@
 @@[load(restore_state)]
 @@system DeadLetterProcessor {
     interface:
-        accept(msg_id: str, payload: str): str
-        process_tick(): str
+        accept(msg_id: char*, payload: char*): char*
+        process_tick(): char*
         reset()
 
     machine:
         $Idle {
-            accept(msg_id: str, payload: str): str {
+            accept(msg_id: char*, payload: char*): char* {
                 self->msg_id = msg_id;
                 self->payload = payload;
                 self->attempts = 0;
                 @@:("accepted")
                 -> $Processing
             }
-            process_tick(): str { @@:("idle") }
+            process_tick(): char* { @@:("idle") }
         }
 
         $Processing {
             $>() {
                 self->attempts = self->attempts + 1;
             }
-            process_tick(): str {
+            process_tick(): char* {
                 if (DeadLetterProcessor_try_process(self, self->payload)) {
                     @@:("ok")
                     -> "success" $Done
@@ -47,7 +47,7 @@
         }
 
         $Done {
-            process_tick(): str { @@:("done") }
+            process_tick(): char* { @@:("done") }
             reset() { -> $Idle }
         }
 
@@ -55,21 +55,21 @@
             $>() {
                 DeadLetterProcessor_to_dlq(self, self->msg_id, self->payload);
             }
-            process_tick(): str { @@:("dead_lettered") }
+            process_tick(): char* { @@:("dead_lettered") }
             reset() { -> $Idle }
         }
 
     actions:
-        try_process(payload: str): int {
+        try_process(payload: char*): int {
             return 0;
         }
-        to_dlq(msg_id: str, payload: str) {
+        to_dlq(msg_id: char*, payload: char*) {
             printf("DLQ <- %s: %s\n", msg_id, payload);
         }
 
     domain:
-        msg_id: str = ""
-        payload: str = ""
+        msg_id: char* = ""
+        payload: char* = ""
         attempts: int = 0
         max_attempts: int = 3
 }

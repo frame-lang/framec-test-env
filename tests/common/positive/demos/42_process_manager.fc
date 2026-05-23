@@ -6,58 +6,58 @@
 
 @@system OrderSaga {
     interface:
-        start(order_id: str)
+        start(order_id: char*)
         reserved()
-        reserve_failed(reason: str)
-        charged(tx_id: str)
-        charge_failed(reason: str)
-        shipped(tracking: str)
-        ship_failed(reason: str)
-        status(): str
+        reserve_failed(reason: char*)
+        charged(tx_id: char*)
+        charge_failed(reason: char*)
+        shipped(tracking: char*)
+        ship_failed(reason: char*)
+        status(): char*
 
     machine:
         $New {
-            start(order_id: str) {
+            start(order_id: char*) {
                 self->order_id = order_id;
                 -> $Reserving
             }
-            status(): str { @@:("new") }
+            status(): char* { @@:("new") }
         }
 
         $Reserving {
             $>() { OrderSaga_call_reserve(self, self->order_id); }
             reserved() { -> $Charging }
-            reserve_failed(reason: str) {
+            reserve_failed(reason: char*) {
                 self->failure = reason;
                 -> "abort" $Failed
             }
-            status(): str { @@:("reserving") }
+            status(): char* { @@:("reserving") }
         }
 
         $Charging {
             $>() { OrderSaga_call_charge(self, self->order_id); }
-            charged(tx_id: str) {
+            charged(tx_id: char*) {
                 self->tx_id = tx_id;
                 -> $Shipping
             }
-            charge_failed(reason: str) {
+            charge_failed(reason: char*) {
                 self->failure = reason;
                 -> "compensate" $CompensatingReservation
             }
-            status(): str { @@:("charging") }
+            status(): char* { @@:("charging") }
         }
 
         $Shipping {
             $>() { OrderSaga_call_ship(self, self->order_id); }
-            shipped(tracking: str) {
+            shipped(tracking: char*) {
                 self->tracking = tracking;
                 -> $Completed
             }
-            ship_failed(reason: str) {
+            ship_failed(reason: char*) {
                 self->failure = reason;
                 -> "compensate" $CompensatingCharge
             }
-            status(): str { @@:("shipping") }
+            status(): char* { @@:("shipping") }
         }
 
         $CompensatingCharge {
@@ -65,7 +65,7 @@
                 OrderSaga_call_refund(self, self->tx_id);
                 -> "refunded" $CompensatingReservation
             }
-            status(): str { @@:("compensating_charge") }
+            status(): char* { @@:("compensating_charge") }
         }
 
         $CompensatingReservation {
@@ -73,15 +73,15 @@
                 OrderSaga_call_release(self, self->order_id);
                 -> "released" $Failed
             }
-            status(): str { @@:("compensating_reservation") }
+            status(): char* { @@:("compensating_reservation") }
         }
 
         $Completed {
-            status(): str { @@:("completed") }
+            status(): char* { @@:("completed") }
         }
 
         $Failed {
-            status(): str {
+            status(): char* {
                 static char buf[64];
                 snprintf(buf, sizeof(buf), "failed: %s", self->failure);
                 @@:(buf)
@@ -89,17 +89,17 @@
         }
 
     actions:
-        call_reserve(oid: str) { printf("reserve %s\n", oid); }
-        call_charge(oid: str)  { printf("charge %s\n", oid); }
-        call_ship(oid: str)    { printf("ship %s\n", oid); }
-        call_refund(tx: str)   { printf("refund %s\n", tx); }
-        call_release(oid: str) { printf("release reservation for %s\n", oid); }
+        call_reserve(oid: char*) { printf("reserve %s\n", oid); }
+        call_charge(oid: char*)  { printf("charge %s\n", oid); }
+        call_ship(oid: char*)    { printf("ship %s\n", oid); }
+        call_refund(tx: char*)   { printf("refund %s\n", tx); }
+        call_release(oid: char*) { printf("release reservation for %s\n", oid); }
 
     domain:
-        order_id: str = ""
-        tx_id: str = ""
-        tracking: str = ""
-        failure: str = ""
+        order_id: char* = ""
+        tx_id: char* = ""
+        tracking: char* = ""
+        failure: char* = ""
 }
 
 int main() {

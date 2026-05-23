@@ -4,26 +4,26 @@
 
 @@system ZeroTrustSession {
     interface:
-        authenticate(user_id: string, device_id: string, channel_id: string, mfa_factor: string)
+        authenticate(user_id: std::string, device_id: std::string, channel_id: std::string, mfa_factor: std::string)
         auth_result(passed: int, risk_score: int)
-        request_resource(resource: string, channel_id: string, policy_ok: int): string = "denied"
+        request_resource(resource: std::string, channel_id: std::string, policy_ok: int): std::string = "denied"
         posture_update(score: int)
         risk_signal_update(score: int)
         channel_binding_mismatch()
         session_heartbeat()
         logout()
-        get_status(): string = ""
+        get_status(): std::string = ""
         get_risk(): int
 
     machine:
         $Anonymous {
-            authenticate(user_id: string, device_id: string, channel_id: string, mfa_factor: string) {
+            authenticate(user_id: std::string, device_id: std::string, channel_id: std::string, mfa_factor: std::string) {
                 this->user_id = user_id;
                 this->device_id = device_id;
                 this->bound_channel = channel_id;
                 -> $Authenticating
             }
-            get_status(): string { @@:("anonymous") }
+            get_status(): std::string { @@:("anonymous") }
             get_risk(): int { @@:(this->current_risk) }
         }
 
@@ -33,15 +33,15 @@
                 else if (risk_score > this->high_risk_threshold) { -> $StepUpRequired }
                 else { this->current_risk = risk_score; -> $FullAccess }
             }
-            get_status(): string { @@:("authenticating") }
+            get_status(): std::string { @@:("authenticating") }
             get_risk(): int { @@:(this->current_risk) }
         }
 
         $StepUpRequired {
-            authenticate(user_id: string, device_id: string, channel_id: string, mfa_factor: string) { -> $Authenticating }
-            request_resource(resource: string, channel_id: string, policy_ok: int): string { @@:("denied_stepup") }
+            authenticate(user_id: std::string, device_id: std::string, channel_id: std::string, mfa_factor: std::string) { -> $Authenticating }
+            request_resource(resource: std::string, channel_id: std::string, policy_ok: int): std::string { @@:("denied_stepup") }
             logout() { -> $Anonymous }
-            get_status(): string { @@:("step_up_required") }
+            get_status(): std::string { @@:("step_up_required") }
             get_risk(): int { @@:(this->current_risk) }
         }
 
@@ -53,7 +53,7 @@
         }
 
         $FullAccess => $LiveSession {
-            request_resource(resource: string, channel_id: string, policy_ok: int): string {
+            request_resource(resource: std::string, channel_id: std::string, policy_ok: int): std::string {
                 if (channel_id != this->bound_channel) {
                     @@:("denied_channel")
                     -> $Terminated
@@ -71,12 +71,12 @@
                 if (score > this->block_threshold) { -> $Terminated }
                 else if (score > this->high_risk_threshold) { -> $Degraded }
             }
-            get_status(): string { @@:("full_access") }
+            get_status(): std::string { @@:("full_access") }
             => $^
         }
 
         $Degraded => $LiveSession {
-            request_resource(resource: string, channel_id: string, policy_ok: int): string {
+            request_resource(resource: std::string, channel_id: std::string, policy_ok: int): std::string {
                 if (channel_id != this->bound_channel) {
                     @@:("denied_channel")
                     -> $Terminated
@@ -93,12 +93,12 @@
             posture_update(score: int) {
                 if (score >= this->min_posture) { -> $FullAccess }
             }
-            get_status(): string { @@:("degraded") }
+            get_status(): std::string { @@:("degraded") }
             => $^
         }
 
         $Terminated {
-            get_status(): string { @@:("terminated") }
+            get_status(): std::string { @@:("terminated") }
             get_risk(): int { @@:(this->current_risk) }
         }
 

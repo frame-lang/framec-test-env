@@ -8,16 +8,16 @@
 
 @@system TlsServerHandshake {
     interface:
-        client_hello(version: str, cipher: str)
-        client_key_exchange(key_data: str)
+        client_hello(version: char*, cipher: char*)
+        client_key_exchange(key_data: char*)
         client_change_cipher_spec()
-        client_finished(verify: str)
-        alert(level: str, desc: str)
-        status(): str
+        client_finished(verify: char*)
+        alert(level: char*, desc: char*)
+        status(): char*
 
     machine:
         $Idle {
-            client_hello(version: str, cipher: str) {
+            client_hello(version: char*, cipher: char*) {
                 self->client_version = version;
                 if (strcmp(cipher, "TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256") == 0) {
                     self->selected_cipher = cipher;
@@ -32,7 +32,7 @@
                     }
                 }
             }
-            status(): str { @@:("idle") }
+            status(): char* { @@:("idle") }
         }
 
         $ServerHello => $Handshaking {
@@ -42,17 +42,17 @@
                 TlsServerHandshake_send_server_hello_done(self);
                 -> $AwaitClientKeyExchange
             }
-            status(): str { @@:("server hello") }
+            status(): char* { @@:("server hello") }
             => $^
         }
 
         $AwaitClientKeyExchange => $Handshaking {
-            client_key_exchange(key_data: str) {
+            client_key_exchange(key_data: char*) {
                 self->premaster = key_data;
                 TlsServerHandshake_derive_keys(self);
                 -> $AwaitChangeCipherSpec
             }
-            status(): str { @@:("await key exchange") }
+            status(): char* { @@:("await key exchange") }
             => $^
         }
 
@@ -61,12 +61,12 @@
                 self->client_encrypted = 1;
                 -> $AwaitClientFinished
             }
-            status(): str { @@:("await change cipher spec") }
+            status(): char* { @@:("await change cipher spec") }
             => $^
         }
 
         $AwaitClientFinished => $Handshaking {
-            client_finished(verify: str) {
+            client_finished(verify: char*) {
                 if (strcmp(verify, "valid") == 0) {
                     TlsServerHandshake_send_change_cipher_spec(self);
                     TlsServerHandshake_send_finished(self);
@@ -76,12 +76,12 @@
                     -> $Closed
                 }
             }
-            status(): str { @@:("await client finished") }
+            status(): char* { @@:("await client finished") }
             => $^
         }
 
         $Handshaking {
-            alert(level: str, desc: str) {
+            alert(level: char*, desc: char*) {
                 if (strcmp(level, "fatal") == 0) {
                     -> $Closed
                 }
@@ -89,16 +89,16 @@
         }
 
         $Established {
-            alert(level: str, desc: str) {
+            alert(level: char*, desc: char*) {
                 if (strcmp(level, "fatal") == 0) {
                     -> $Closed
                 }
             }
-            status(): str { @@:("established") }
+            status(): char* { @@:("established") }
         }
 
         $Closed {
-            status(): str { @@:("closed") }
+            status(): char* { @@:("closed") }
         }
 
     actions:
@@ -111,9 +111,9 @@
         send_alert() {}
 
     domain:
-        client_version: str = ""
-        selected_cipher: str = ""
-        premaster: str = ""
+        client_version: char* = ""
+        selected_cipher: char* = ""
+        premaster: char* = ""
         client_encrypted: bool = 0
 }
 
