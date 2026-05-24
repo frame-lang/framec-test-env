@@ -35,7 +35,93 @@ Usage:
     ./run_nested.sh
 """
 import argparse
+import re
 from pathlib import Path
+
+
+# ─── Portable-alias → native-type rendering (shared by all generators) ─
+#
+# framec is pure passthrough — it copies a type name verbatim into the
+# target and never translates `int`→`i64` etc. (the per-backend alias
+# tables were exterminated; see framec docs § "Frame has no type
+# system"). So the author of a program targeting a statically-typed
+# language must write that language's native type names.
+#
+# The fuzz generators author one Frame program per (case, language) and
+# stamp the target into a leading `@@[target("…")]` directive. For the 8
+# statically-typed targets the generator — as the program's author —
+# must emit native type names. `native_types(src)` does that as a final
+# pass over the assembled source: it reads the target from the directive
+# and rewrites the portable vocabulary to that target's native spelling,
+# in type-annotation position only (after a `:`), so framec only ever
+# sees valid native types on a static target.
+#
+# Dynamic targets (python_3, javascript, typescript, ruby, lua, php,
+# dart, gdscript) are absent from the table and pass through unchanged
+# (they ignore type names, or `int`/`str` are already native in Python).
+# `void`/`None`/`list`/`dict` are NOT mapped — they are structural forms
+# still handled inside framec (Kotlin `Unit`, Go empty return, C
+# `FrameVec*`/`FrameDict*`, …). This mirrors EXACTLY the matrix-corpus
+# migration (`tests/migrate_aliases_to_native.py`) and the now-removed
+# framec per-backend match arms.
+_NATIVE_PRIM = {
+    "rust":    {"int": "i64", "float": "f64", "str": "String",
+                "string": "String", "Any": "String"},
+    "c":       {"number": "int", "Any": "int", "float": "double",
+                "str": "char*", "string": "char*", "String": "char*",
+                "boolean": "bool"},
+    "cpp_17":  {"i32": "int", "i64": "int", "number": "int",
+                "float": "double", "f64": "double", "f32": "double",
+                "str": "std::string", "string": "std::string",
+                "String": "std::string", "boolean": "bool", "Any": "std::any"},
+    "csharp":  {"i32": "int", "i64": "int", "number": "int",
+                "float": "double", "f64": "double", "f32": "double",
+                "str": "string", "string": "string", "String": "string",
+                "boolean": "bool", "Any": "object"},
+    "java":    {"i32": "int", "i64": "int", "number": "int",
+                "float": "double", "f64": "double", "f32": "double",
+                "str": "String", "string": "String", "bool": "boolean",
+                "Any": "Object"},
+    "go":      {"i32": "int", "i64": "int", "number": "int",
+                "float": "float64", "f64": "float64", "f32": "float64",
+                "str": "string", "string": "string", "String": "string",
+                "boolean": "bool", "Any": "any", "Object": "any", "object": "any"},
+    "kotlin":  {"int": "Int", "i32": "Int", "i64": "Int", "number": "Int",
+                "float": "Double", "f64": "Double", "f32": "Double",
+                "double": "Double", "str": "String", "string": "String",
+                "bool": "Boolean", "boolean": "Boolean",
+                "Any": "Any?", "Object": "Any?", "object": "Any?"},
+    "swift":   {"int": "Int", "i32": "Int", "i64": "Int", "number": "Int",
+                "float": "Double", "f64": "Double", "f32": "Double",
+                "double": "Double", "str": "String", "string": "String",
+                "bool": "Bool", "boolean": "Bool", "Boolean": "Bool",
+                "Object": "Any", "object": "Any"},
+}
+# cpp appears as both cpp_17 (gen_nested specs) and cpp_23 (run_fuzz).
+_NATIVE_PRIM["cpp_23"] = _NATIVE_PRIM["cpp_17"]
+
+_TARGET_RE = re.compile(r'@@\[target\("([^"]+)"\)\]|@@target\s+(\S+)')
+
+
+def native_types(src: str) -> str:
+    """Final pass over an assembled Frame source: rewrite portable-alias
+    type names to the source's target-native spelling, in type-annotation
+    position only. No-op for dynamic targets. `(?<!:)` guards against
+    matching the `:string` inside a native `std::string`."""
+    m = _TARGET_RE.search(src)
+    if not m:
+        return src
+    target = m.group(1) or m.group(2)
+    mapping = _NATIVE_PRIM.get(target)
+    if not mapping:
+        return src
+    for alias, native in mapping.items():
+        if alias == native:
+            continue
+        src = re.sub(r"(?<!:)(:\s*)" + re.escape(alias) + r"\b",
+                     lambda mm: mm.group(1) + native, src)
+    return src
+
 
 # Each pattern declares an expected final-trace value the driver
 # asserts after invoking the system. The trace is a single int that
@@ -815,7 +901,7 @@ def main():
         for pat in PATTERNS:
             src, _expected = gen_case(lang, pat)
             path = out / f"{pat}.{spec.ext}"
-            path.write_text(src)
+            path.write_text(native_types(src))
             count += 1
     print(f"generated {count} cases across {len(args.langs)} langs × "
           f"{len(PATTERNS)} patterns into {out}")

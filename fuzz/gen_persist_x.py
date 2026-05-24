@@ -33,6 +33,7 @@ Usage:
 import argparse
 import itertools
 from pathlib import Path
+from gen_nested import native_types
 
 # --- Per-language config -------------------------------------------------
 
@@ -757,7 +758,7 @@ def main():
     for cid, (pat, _, v) in enumerate(cases):
         content = gen_case(args.lang, pat, cid, v)
         out_path = lang_dir / f"case_{cid:04d}_{pat}.{spec.ext}"
-        out_path.write_text(content)
+        out_path.write_text(native_types(content))
     print(f"Generated {len(cases)} Phase 24 cases for {spec.target}")
 
 

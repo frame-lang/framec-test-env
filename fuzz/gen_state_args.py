@@ -28,7 +28,7 @@ Usage:
 import argparse
 from pathlib import Path
 
-from gen_nested import LANGS, method_name
+from gen_nested import LANGS, method_name, native_types
 
 
 COMPUTE_RETURN = 9
@@ -650,7 +650,7 @@ def main():
         for cid, equiv, expected, pattern, vt, is_smoke in enumerate_cases():
             src = gen_case(lang, cid, equiv, expected, pattern, vt, is_smoke)
             path = out / f"{cid}.{spec.ext}"
-            path.write_text(src)
+            path.write_text(native_types(src))
             index_rows.append(
                 f"{lang}\t{cid}\t{equiv}\t{'yes' if is_smoke else 'no'}\t{expected}"
             )

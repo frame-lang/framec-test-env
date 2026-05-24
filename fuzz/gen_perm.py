@@ -34,7 +34,7 @@ from pathlib import Path
 # Reuse Phase 9's LangSpec / method_name / op_call so per-language
 # emission stays in one place. The per-pattern body in Phase 9 differs
 # per pattern; here it differs per (recv1, op, recv2) triple.
-from gen_nested import LANGS, method_name, op_call
+from gen_nested import LANGS, method_name, op_call, native_types
 
 
 # Domain + state-var seeds used by every case. These values get
@@ -614,7 +614,7 @@ def main():
             src = gen_case(lang, cid, smoke_tag, expected, expr,
                            None, is_smoke, lhs)
             path = out / f"{cid}.{spec.ext}"
-            path.write_text(src)
+            path.write_text(native_types(src))
             index_rows.append(
                 f"{lang}\t{cid}\t{smoke_tag}\t{'yes' if is_smoke else 'no'}\t{expected}"
             )

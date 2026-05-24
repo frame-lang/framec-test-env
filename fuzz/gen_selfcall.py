@@ -37,6 +37,7 @@ import argparse
 import itertools
 import random
 from pathlib import Path
+from gen_nested import native_types
 
 STATE_COUNTS = [2, 3, 5]
 HSM_DEPTHS = [0, 1, 2]
@@ -280,7 +281,7 @@ def main():
                 post_call_stmts=post_k, post_structure=post_structure,
             )
             (lang_dir / f"case_{cid:04d}.{spec.ext}").write_text(
-                gen_case(lang_key, cid, params))
+                native_types(gen_case(lang_key, cid, params)))
         print(f"Generated {len(axes)} selfcall cases for {spec.target}")
 
 

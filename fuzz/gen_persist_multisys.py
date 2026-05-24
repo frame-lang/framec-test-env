@@ -26,6 +26,7 @@ Usage:
 """
 import argparse
 from pathlib import Path
+from gen_nested import native_types
 
 
 # Per-backend template config.
@@ -717,7 +718,7 @@ def write_cases(out_dir: Path, langs, max_per_pattern):
                 case_id = f"{i:03d}"
                 text = gen(lang, case_id)
                 out = out_dir / f"{lang}_{tag_prefix}_{case_id}.{ext}"
-                out.write_text(text)
+                out.write_text(native_types(text))
                 written += 1
     return written
 

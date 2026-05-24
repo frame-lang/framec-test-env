@@ -32,6 +32,27 @@ cd tests/
 
 Requires each language's toolchain installed locally.
 
+## Test layers (RFC-0031)
+
+The release-gating discipline is defined in framec
+[**RFC-0031**](../framec/docs/rfcs/rfc-0031.md) (operational guide:
+[`releasing.md`](../framec/docs/contributing/releasing.md)) as a
+**four-layer** model. This repo provides the **matrix** and **fuzz**
+halves that Layers 1 and 4 exercise:
+
+| Layer | What | Cadence | Command (this repo) |
+|---|---|---|---|
+| **1 — RC bar** | full matrix + full fuzz on the release commit | manual, pre-tag | `cd docker && make test` · `cd fuzz && ./run_all.sh --tier=full` |
+| **2 — CI** | matrix + smoke/core fuzz | automated, per-push | GitHub Actions |
+| **3 — Monitoring** | crates.io / release-artifact health | manual | n/a here |
+| **4 — Drift detection** | full matrix + **full fuzz (35k+ cases)** + stale-roadmap audit | automated, nightly | `cd docker && make test` · `cd fuzz && ./run_all.sh --tier=full` |
+
+**Fuzz tiers** (`fuzz/run_all.sh`): `--tier=smoke` (~2 min, per-lang
+sanity) · `--tier=core` · `--tier=full` (~50 min, all 35k+ cases). The
+fuzz tier catches **edition / no_std / runtime regressions the smoke
+tier and the 17-lang matrix miss** — run it (at least `smoke`, ideally
+`full`) for any broad codegen change, not just the matrix.
+
 ## Supported Languages
 
 | Language | Extension | Target Name | Status |

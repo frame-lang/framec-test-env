@@ -38,7 +38,7 @@ Usage:
 import argparse
 from pathlib import Path
 
-from gen_nested import LANGS, method_name
+from gen_nested import LANGS, method_name, native_types
 
 
 # Domain seeds. f starts at 5 so dom_eq_K with K=5 fires the if-true
@@ -951,7 +951,7 @@ def main():
                 construct=construct, inner_cond=inner_cond,
             )
             path = out / f"{cid}.{spec.ext}"
-            path.write_text(src)
+            path.write_text(native_types(src))
             index_rows.append(
                 f"{lang}\t{cid}\t{equiv}\t{'yes' if is_smoke else 'no'}\t{expected}"
             )

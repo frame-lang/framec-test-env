@@ -23,7 +23,7 @@ Usage:
 """
 from pathlib import Path
 
-from gen_nested import LANGS, method_name
+from gen_nested import LANGS, method_name, native_types
 
 
 # Per-language native-line-comment leader. Used in handler bodies
@@ -411,7 +411,7 @@ def main():
             spec = LANGS[lang]
             ext = spec.ext
             text = gen_case(lang, cid, equiv, expected, pattern, lit, is_smoke)
-            (out_dir / f"{cid}.{ext}").write_text(text)
+            (out_dir / f"{cid}.{ext}").write_text(native_types(text))
             cases_per_lang[lang] += 1
             if is_smoke:
                 smoke_per_lang[lang] += 1

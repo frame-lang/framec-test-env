@@ -23,6 +23,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import threading
@@ -37,6 +38,83 @@ FRAMEC = os.environ.get(
     "FRAMEC",
     str(Path(__file__).resolve().parents[3] / "framepiler" / "target" / "release" / "framec"),
 )
+
+
+# ─── Portable-alias → native-type rendering ──────────────────────────
+#
+# framec is pure passthrough: it copies a type name verbatim into the
+# target and never translates `int`→`i64` etc. (the per-backend alias
+# tables were exterminated — see framec docs § "Frame has no type
+# system"). So the *author* of a program targeting a statically-typed
+# language must write that language's native type names.
+#
+# The pure-Frame fuzz corpus is authored once, portably (`int`/`str`/…),
+# then rendered to all 17 backends by `build_source`. For the 8
+# statically-typed backends that means this harness — the author of
+# these generated programs — must emit native type names per target,
+# exactly as a human would. We do it here, at the single render
+# chokepoint, in type-annotation position only (after a `:`), so framec
+# only ever sees valid native types on a static target.
+#
+# Dynamic backends (python_3, javascript, typescript, ruby, lua, php,
+# dart, gdscript) are absent from the table: they ignore type names
+# (or, for Python, `int`/`str` are already native), so the portable
+# spelling passes through fine. `void`/`None`/`list`/`dict` are NOT
+# mapped here — they are structural forms still handled inside framec
+# (Kotlin `Unit`, Go empty return, C `FrameVec*`/`FrameDict*`, …).
+#
+# This table mirrors EXACTLY the migration applied to the matrix corpus
+# (`tests/migrate_aliases_to_native.py`) and the now-removed framec
+# per-backend match arms.
+PRIM_TYPES: dict[str, dict[str, str]] = {
+    "rust":    {"int": "i64", "float": "f64", "str": "String",
+                "string": "String", "Any": "String"},
+    "c":       {"number": "int", "Any": "int", "float": "double",
+                "str": "char*", "string": "char*", "String": "char*",
+                "boolean": "bool"},
+    "cpp_23":  {"i32": "int", "i64": "int", "number": "int",
+                "float": "double", "f64": "double", "f32": "double",
+                "str": "std::string", "string": "std::string",
+                "String": "std::string", "boolean": "bool", "Any": "std::any"},
+    "csharp":  {"i32": "int", "i64": "int", "number": "int",
+                "float": "double", "f64": "double", "f32": "double",
+                "str": "string", "string": "string", "String": "string",
+                "boolean": "bool", "Any": "object"},
+    "java":    {"i32": "int", "i64": "int", "number": "int",
+                "float": "double", "f64": "double", "f32": "double",
+                "str": "String", "string": "String", "bool": "boolean",
+                "Any": "Object"},
+    "go":      {"i32": "int", "i64": "int", "number": "int",
+                "float": "float64", "f64": "float64", "f32": "float64",
+                "str": "string", "string": "string", "String": "string",
+                "boolean": "bool", "Any": "any", "Object": "any", "object": "any"},
+    "kotlin":  {"int": "Int", "i32": "Int", "i64": "Int", "number": "Int",
+                "float": "Double", "f64": "Double", "f32": "Double",
+                "double": "Double", "str": "String", "string": "String",
+                "bool": "Boolean", "boolean": "Boolean",
+                "Any": "Any?", "Object": "Any?", "object": "Any?"},
+    "swift":   {"int": "Int", "i32": "Int", "i64": "Int", "number": "Int",
+                "float": "Double", "f64": "Double", "f32": "Double",
+                "double": "Double", "str": "String", "string": "String",
+                "bool": "Bool", "boolean": "Bool", "Boolean": "Bool",
+                "Object": "Any", "object": "Any"},
+}
+
+
+def _rewrite_native_types(body: str, lang_name: str) -> str:
+    """Rewrite portable-alias type names to `lang_name`'s native spelling,
+    in type-annotation position only (after a `:`). No-op for dynamic
+    backends. `(?<!:)` guards against matching the `:string` inside a
+    native `std::string` (the second colon of `::`)."""
+    mapping = PRIM_TYPES.get(lang_name)
+    if not mapping:
+        return body
+    for alias, native in mapping.items():
+        if alias == native:
+            continue
+        body = re.sub(r"(?<!:)(:\s*)" + re.escape(alias) + r"\b",
+                      lambda m: m.group(1) + native, body)
+    return body
 
 
 @dataclass
@@ -85,6 +163,9 @@ def build_source(lang: Lang, system_block: str, meta: dict) -> str:
             rewritten.append(line)
     body = "".join(rewritten)
     body = lang.rewrite_trace(body)
+    # framec is passthrough: author native type names per target so a
+    # static backend never receives a portable alias (`int`/`str`/…).
+    body = _rewrite_native_types(body, lang.name)
     # Default kind is "persist" for back-compat with legacy meta files
     # that predate the harness_kind field.
     kind = meta.get("harness_kind", "persist")
