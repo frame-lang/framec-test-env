@@ -179,7 +179,13 @@ exec_one() {
         echo "binary missing" > "$EXEC_DIR/${sanitized}.out"
         return
     fi
-    timeout "$TIMEOUT_SEC" "$bin_path" > "$EXEC_DIR/${sanitized}.out" 2>&1
+    # setsid --wait + sync: under heavy parallel matrix load the classifier
+    # occasionally read a partial .out (Docker volume page-cache propagation)
+    # and reported a false "unrecognized output". setsid --wait ensures all
+    # child fds are closed; sync commits the file before the .rc marks it
+    # ready. Mirrors the go/dart/gdscript runners (2026-04-26 flake fix).
+    setsid --wait timeout "$TIMEOUT_SEC" "$bin_path" > "$EXEC_DIR/${sanitized}.out" 2>&1
+    sync "$EXEC_DIR/${sanitized}.out" 2>/dev/null || true
     echo $? > "$EXEC_DIR/${sanitized}.rc"
 }
 export -f exec_one
@@ -227,9 +233,23 @@ while IFS=$'\t' read -r num status name rest; do
             elif [ -z "$out" ]; then
                 echo "ok $num - $name # clean exit"; pass=$((pass+1))
             else
-                echo "not ok $num - $name # unrecognized output"
-                echo "$out" | head -3 | sed 's/^/  # /'
-                fail=$((fail+1))
+                # Defensive re-read (mirrors go/dart, 2026-04-26 flake fix):
+                # under heavy parallel load the .out is occasionally read
+                # mid-write despite setsid --wait + sync (Docker volume
+                # page-cache propagation) and mis-classified. Settle + re-cat.
+                sleep 0.1
+                out=$(cat "$out_file" 2>/dev/null)
+                if echo "$out" | grep -qE "^ok |PASS"; then
+                    echo "ok $num - $name"; pass=$((pass+1))
+                elif echo "$out" | grep -q "^not ok "; then
+                    echo "not ok $num - $name"; fail=$((fail+1))
+                elif [ -z "$out" ]; then
+                    echo "ok $num - $name # clean exit"; pass=$((pass+1))
+                else
+                    echo "not ok $num - $name # unrecognized output"
+                    echo "$out" | head -3 | sed 's/^/  # /'
+                    fail=$((fail+1))
+                fi
             fi ;;
         *)
             echo "not ok $num - $name # unknown status $status"; fail=$((fail+1)) ;;

@@ -59,12 +59,24 @@ framec_cached() {
         # Corrupted cache entry; fall through.
         rm -f "$cache_path"
     fi
-    if framec compile -l "$target" -o "$out_dir" "$src_file" >/dev/null 2>"$err_file"; then
-        mkdir -p "$(dirname "$cache_path")"
-        ( cd "$out_dir" && tar -cf "${cache_path}.tmp" . 2>/dev/null ) \
-            && mv "${cache_path}.tmp" "$cache_path" \
-            || rm -f "${cache_path}.tmp"
-        return 0
+    if ! framec compile -l "$target" -o "$out_dir" "$src_file" >/dev/null 2>"$err_file"; then
+        # Under heavy parallel matrix load (xargs -P × 17 containers + multi-GB
+        # cache I/O), framec is occasionally OOM-killed / resource-starved — it
+        # exits non-zero with EMPTY stderr even though the source is valid (this
+        # is how the C backend's transition_state_args_exec flaked: framec
+        # transpiles it cleanly in isolation, 8/8). A real transpile error
+        # always writes a diagnostic to stderr, so retry once after a brief
+        # settle ONLY when stderr is empty — real errors still fail fast (keeps
+        # negative tests honest).
+        if [ -s "$err_file" ]; then
+            return 1
+        fi
+        sleep 0.5
+        framec compile -l "$target" -o "$out_dir" "$src_file" >/dev/null 2>"$err_file" || return 1
     fi
-    return 1
+    mkdir -p "$(dirname "$cache_path")"
+    ( cd "$out_dir" && tar -cf "${cache_path}.tmp" . 2>/dev/null ) \
+        && mv "${cache_path}.tmp" "$cache_path" \
+        || rm -f "${cache_path}.tmp"
+    return 0
 }
