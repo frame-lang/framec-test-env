@@ -581,6 +581,36 @@ def _build_p14_three_push_alternating_pop(spec, lang, base, bump):
     ]
 
 
+def _build_p15_inline_push(spec, lang, base, bump):
+    """P15: same semantics as P2 (state-var restored on pop) but the
+    push and transition are written INLINE on one line: `push$ -> $S1`.
+    Every other pattern writes them on separate lines, which parses as a
+    bare push$ + a normal transition and sidesteps the push-with-
+    transition codegen entirely. The inline form is a single
+    StackPush{transition_target=Some} segment. FRAMEC_BUGS #42: that path
+    emitted a call to a non-existent transition method on
+    python/gdscript/ts/js. Verify $S0's $.x reads back BASE after the
+    round trip (pushed compartment restored, $S1's write discarded)."""
+    m_drive = method_name(lang, "drive")
+    m_back = method_name(lang, "go_back")
+    m_get_x = method_name(lang, "get_x")
+    return [
+        f"        $S0 {{",
+        f"            $.x: int = {base}",
+        f"            {m_drive}() {{",
+        f"                push$ -> $S1",
+        f"            }}",
+        f"            {m_get_x}(): int {{ @@:($.x) }}",
+        f"        }}",
+        f"        $S1 {{",
+        f"            $.x: int = {bump}",
+        f"            {m_back}() {{",
+        f"                -> pop$",
+        f"            }}",
+        f"        }}",
+    ]
+
+
 PATTERNS = [
     Pattern("p1_dom_persists",
             _build_p1_dom_persists,
@@ -650,6 +680,12 @@ PATTERNS = [
             lambda base, bump: base + 3 * bump,  # bump at each of 3 depths
             ["drive", "bump_f", "to_s2", "bump_f", "to_s3", "bump_f",
              "pop3", "pop2", "pop1"]),
+    # FRAMEC_BUGS #42: inline `push$ -> $S1` (single segment) vs the
+    # separate-line form every other pattern uses.
+    Pattern("p15_inline_push",
+            _build_p15_inline_push,
+            lambda base, bump: base,
+            ["drive", "go_back"]),
 ]
 
 
