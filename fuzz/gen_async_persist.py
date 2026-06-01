@@ -53,6 +53,7 @@ async def fetch_remote(key: str) -> str:
     return f"value-for-{{key}}"
 
 
+@@[async]
 @@[persist(str)]
 @@[save(save_state)]
 @@[load(restore_state)]
