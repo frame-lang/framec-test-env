@@ -29,23 +29,31 @@
         value : Int = 0
 }
 
+// RFC-0043 D2: PersistAsync's gated interface methods (configure, get)
+// are `async throws`. saveState/restoreState are persist methods that
+// bypass the gate and stay sync — no `try` needed there.
 let __sem = DispatchSemaphore(value: 0)
 Task {
-    let s1 = @@PersistAsync()
-    await s1.initAsync()
-    await s1.configure(5)
-    var v = await s1.get()
-    if v != 10 { print("FAIL pre: expected 10, got \(v)"); exit(1) }
-    let snap = s1.saveState()
-    let s2 = @@PersistAsync()
+    do {
+        let s1 = @@PersistAsync()
+        await s1.initAsync()
+        try await s1.configure(5)
+        var v = try await s1.get()
+        if v != 10 { print("FAIL pre: expected 10, got \(v)"); exit(1) }
+        let snap = s1.saveState()
+        let s2 = @@PersistAsync()
 
-    s2.restoreState(snap)
-    v = await s2.get()
-    if v != 10 { print("FAIL post: expected 10, got \(v)"); exit(1) }
-    await s2.configure(3)
-    v = await s2.get()
-    if v != 16 { print("FAIL post-2nd: expected 16, got \(v)"); exit(1) }
-    print("PASS: 81_persist_async_basic")
+        s2.restoreState(snap)
+        v = try await s2.get()
+        if v != 10 { print("FAIL post: expected 10, got \(v)"); exit(1) }
+        try await s2.configure(3)
+        v = try await s2.get()
+        if v != 16 { print("FAIL post-2nd: expected 16, got \(v)"); exit(1) }
+        print("PASS: 81_persist_async_basic")
+    } catch {
+        print("FAIL: unexpected error: \(error)")
+        exit(1)
+    }
     __sem.signal()
 }
 __sem.wait()
