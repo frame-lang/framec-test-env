@@ -73,7 +73,19 @@ case $lang in
     typescript) target="typescript"; out_dir="$TS_OUT"; out_ext="ts" ;;
     rust) target="rust"; out_dir="$RUST_OUT"; out_ext="rs" ;;
     c) target="c"; out_dir="$C_OUT"; out_ext="c" ;;
-    cpp) target="cpp_17"; out_dir="$CPP_OUT"; out_ext="cpp" ;;
+    cpp)
+        # RFC-0043 D4: async fixtures declare @@[target("cpp_23")] in the
+        # Frame source and require coroutine support (g++ needs -std=c++23).
+        # Legacy sync C++ fixtures stay on cpp_17. Detect the pragma in the
+        # first 20 lines of the source.
+        if head -20 "$test_file" 2>/dev/null | grep -qE '@@\[target\("cpp_23"\)\]'; then
+            target="cpp_23"
+        else
+            target="cpp_17"
+        fi
+        out_dir="$CPP_OUT"
+        out_ext="cpp"
+        ;;
     java) target="java"; out_dir="$JAVA_OUT"; out_ext="java" ;;
     csharp) target="csharp"; out_dir="$CSHARP_OUT"; out_ext="cs" ;;
     go) target="go"; out_dir="$GO_OUT"; out_ext="go" ;;
@@ -174,7 +186,16 @@ case $lang in
         elif [ -d "/usr/local/include/nlohmann" ]; then
             cpp_json_flags="-I/usr/local/include"
         fi
-        if g++ -std=c++17 $cpp_json_flags -o "$cpp_bin" "$out_file" 2>&1; then
+        # RFC-0043 D4: pick the C++ standard from $target (set above).
+        # cpp_23 fixtures use coroutines and require -std=c++23. Legacy
+        # cpp_17 fixtures keep -std=c++17 for backwards-compatibility
+        # (some idioms used by old fixtures don't compile under c++23
+        # without warnings-as-errors changes).
+        case "$target" in
+            cpp_23) cpp_std="c++23" ;;
+            *)      cpp_std="c++17" ;;
+        esac
+        if g++ "-std=$cpp_std" $cpp_json_flags -o "$cpp_bin" "$out_file" 2>&1; then
             run_output=$("$cpp_bin" 2>&1) || run_status=$?
         else
             run_status=1
