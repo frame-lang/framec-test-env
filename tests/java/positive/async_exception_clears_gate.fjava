@@ -6,16 +6,15 @@
 // try/finally MUST clear busy/in_flight → next interface call succeeds
 // (no E703 from a stuck gate).
 //
-// Java's contract is structurally different from other layered
-// backends: the machine is synchronous (per `make_java_interface_async`),
-// the casing wraps the machine's sync call in a try/finally that
-// returns the resulting CompletableFuture. If the handler throws,
-// the casing's try/finally still clears the gate, then the throw
-// propagates SYNCHRONOUSLY out of the casing (not via a failed future).
-// The caller wraps the call in try/catch (not .exceptionally).
+// Java contract (post Fix #3 / D-JAVA-1):
+//   The casing returns CompletableFuture<T>. A handler throw becomes
+//   a *failed future* — `CompletableFuture.failedFuture(e)`. The
+//   caller observes this via `.get()` throwing ExecutionException
+//   whose `getCause()` is the handler's RuntimeException.
 //
-// D-JAVA-1 from the deep-dive: this divergence is real and is what the
-// fixture verifies. Future RFC may reconcile (failed-future contract).
+// Aligns Java with every other layered backend's recoverable contract.
+
+import java.util.concurrent.ExecutionException;
 
 @@[async]
 @@system Crashable {
@@ -39,21 +38,27 @@ class Main {
         Crashable s = @@Crashable();
         s.init().get();
 
-        // First call: handler throws. Gate MUST clear in casing's finally.
-        // Per D-JAVA-1, the throw propagates synchronously from the casing
-        // call (not via the future's exceptional state).
-        RuntimeException caught = null;
+        // First call: handler throws. Casing wraps it in
+        // CompletableFuture.failedFuture(e). The gate clears via the
+        // casing's whenComplete/finally — must be clear by the time
+        // the future settles.
+        Throwable caught = null;
         try {
-            s.boom();
-        } catch (RuntimeException e) {
-            caught = e;
+            s.boom().get();
+        } catch (ExecutionException e) {
+            caught = e.getCause();
         }
-        if (caught == null) throw new RuntimeException("expected boom() to throw");
+        if (caught == null) throw new RuntimeException("expected failed future");
+        if (!(caught instanceof RuntimeException)) {
+            throw new RuntimeException("expected RuntimeException cause, got "
+                + caught.getClass().getName());
+        }
         if (!"handler crash".equals(caught.getMessage())) {
             throw new RuntimeException("unexpected message: " + caught.getMessage());
         }
 
-        // Second call: gate must be clear. If stuck, this throws E703.
+        // Second call: gate must be clear. If stuck, this completes
+        // exceptionally with IllegalStateException("E703: ...").
         String result = s.peek().get();
         if (!"ok".equals(result)) {
             throw new RuntimeException("expected 'ok', got '" + result + "'");

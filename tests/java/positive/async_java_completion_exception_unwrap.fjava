@@ -1,0 +1,92 @@
+@@[target("java")]
+
+// Java-unique — async_java_completion_exception_unwrap
+//
+// RFC-0043 (Java) post Fix #3: the casing returns
+// `CompletableFuture.failedFuture(handlerEx)` directly. Unlike
+// exceptions thrown INSIDE a `.thenApply()` lambda (which Java wraps
+// in CompletionException), a future completed-exceptionally at
+// SOURCE delivers the exception verbatim through `.handle()` and
+// `.exceptionally()`.
+//
+// What this fixture pins (subtle Java contract):
+//   1. .handle((v, ex) -> ...) receives the RAW RuntimeException
+//      (no CompletionException wrap, because the failure originated
+//      at the future's source via failedFuture()).
+//   2. .exceptionally(e -> ...) receives the same RAW exception.
+//   3. .get() throws ExecutionException with cause = handler exception.
+//   4. .join() throws CompletionException with cause = handler exception
+//      (join always wraps).
+//
+// This asymmetry is a notorious Java foot-gun. Pinning it prevents
+// silent contract drift.
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.atomic.AtomicReference;
+
+@@[async]
+@@system Sys {
+    interface:
+        async crash(): String
+
+    machine:
+        $S {
+            crash(): String { throw new RuntimeException("boom"); }
+        }
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        Sys s = @@Sys(); s.init().get();
+
+        // 1. .handle() — exception delivered RAW (failedFuture path).
+        AtomicReference<Throwable> handleSeen = new AtomicReference<>();
+        s.crash().handle((v, ex) -> {
+            handleSeen.set(ex);
+            return null;
+        }).get();
+        if (handleSeen.get() == null) throw new RuntimeException("handle saw null");
+        if (!(handleSeen.get() instanceof RuntimeException)) {
+            throw new RuntimeException(".handle() saw " + handleSeen.get().getClass().getName());
+        }
+        if (!"boom".equals(handleSeen.get().getMessage())) {
+            throw new RuntimeException("handle msg: " + handleSeen.get().getMessage());
+        }
+
+        // 2. .exceptionally() — same RAW exception.
+        AtomicReference<Throwable> excSeen = new AtomicReference<>();
+        s.crash().exceptionally(e -> {
+            excSeen.set(e);
+            return null;
+        }).get();
+        if (!(excSeen.get() instanceof RuntimeException) || !"boom".equals(excSeen.get().getMessage())) {
+            throw new RuntimeException(".exceptionally() saw " + excSeen.get());
+        }
+
+        // 3. .get() — ExecutionException with cause = handler exception.
+        Throwable getCause = null;
+        try {
+            s.crash().get();
+        } catch (ExecutionException e) {
+            getCause = e.getCause();
+        }
+        if (!(getCause instanceof RuntimeException) || !"boom".equals(getCause.getMessage())) {
+            throw new RuntimeException(".get() cause: " + getCause);
+        }
+
+        // 4. .join() — throws CompletionException wrapping the handler exception.
+        Throwable joinCause = null;
+        try {
+            s.crash().join();
+        } catch (CompletionException e) {
+            joinCause = e.getCause();
+        }
+        if (!(joinCause instanceof RuntimeException) || !"boom".equals(joinCause.getMessage())) {
+            throw new RuntimeException(".join() cause: " + joinCause);
+        }
+
+        System.out.println("PASS: async_java_completion_exception_unwrap");
+    }
+}

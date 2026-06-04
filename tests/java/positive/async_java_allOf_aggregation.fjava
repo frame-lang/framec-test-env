@@ -1,0 +1,52 @@
+@@[target("java")]
+
+// Java-unique — async_java_allOf_aggregation
+//
+// RFC-0043 (Java): CompletableFuture.allOf() is the canonical
+// fan-out / join idiom. Useful for "fire N independent calls on
+// distinct system instances, then collect results."
+//
+// What this pins:
+//   1. Three independent Sys instances (separate gates) dispatched in parallel.
+//   2. allOf().join() collects all three futures.
+//   3. Each result is retrievable from the original future via .get()
+//      after allOf settles.
+//   4. After the aggregate settles, each instance's gate is clear.
+
+import java.util.concurrent.CompletableFuture;
+
+@@[async]
+@@system Sys {
+    interface:
+        async produce(label: String): String
+
+    machine:
+        $S {
+            produce(label: String): String { @@:("result:" + label) }
+        }
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        Sys a = @@Sys(); a.init().get();
+        Sys b = @@Sys(); b.init().get();
+        Sys c = @@Sys(); c.init().get();
+
+        CompletableFuture<String> fa = a.produce("A");
+        CompletableFuture<String> fb = b.produce("B");
+        CompletableFuture<String> fc = c.produce("C");
+
+        CompletableFuture.allOf(fa, fb, fc).get();
+
+        if (!"result:A".equals(fa.get())) throw new RuntimeException("A: " + fa.get());
+        if (!"result:B".equals(fb.get())) throw new RuntimeException("B: " + fb.get());
+        if (!"result:C".equals(fc.get())) throw new RuntimeException("C: " + fc.get());
+
+        // Verify each gate is clear post-aggregate.
+        if (!"result:A2".equals(a.produce("A2").get())) throw new RuntimeException("A gate stuck");
+        if (!"result:B2".equals(b.produce("B2").get())) throw new RuntimeException("B gate stuck");
+        if (!"result:C2".equals(c.produce("C2").get())) throw new RuntimeException("C gate stuck");
+
+        System.out.println("PASS: async_java_allOf_aggregation");
+    }
+}

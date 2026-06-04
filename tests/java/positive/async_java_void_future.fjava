@@ -1,0 +1,47 @@
+@@[target("java")]
+
+// Java-unique — async_java_void_future
+//
+// RFC-0043 (Java): an async interface method declared with no return
+// type becomes `CompletableFuture<Void>`. The caller must `.get()` to
+// observe completion (and to surface any failed-future exception).
+//
+// This fixture pins:
+//   1. Casing emits CompletableFuture<Void> for async no-return.
+//   2. `.get()` returns null on success.
+//   3. Gate cleared in finally; subsequent call succeeds.
+
+import java.util.concurrent.CompletableFuture;
+
+@@[async]
+@@system Sys {
+    interface:
+        async fire()
+        async peek(): String
+
+    machine:
+        $S {
+            fire() {
+                // do nothing — no return value
+            }
+            peek(): String { @@:("post-fire") }
+        }
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        Sys s = @@Sys();
+        s.init().get();
+
+        CompletableFuture<Void> f = s.fire();
+        Void v = f.get();
+        if (v != null) throw new RuntimeException("CompletableFuture<Void>.get() returned non-null: " + v);
+
+        String result = s.peek().get();
+        if (!"post-fire".equals(result)) {
+            throw new RuntimeException("expected 'post-fire', got '" + result + "'");
+        }
+
+        System.out.println("PASS: async_java_void_future");
+    }
+}
