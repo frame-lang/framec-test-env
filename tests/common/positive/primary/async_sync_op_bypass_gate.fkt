@@ -1,0 +1,50 @@
+@@[target("kotlin")]
+
+// C4 — async_sync_op_bypass_gate
+
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
+
+@@[async]
+@@system Holder {
+    operations:
+        get_count: Int {
+            @@:(this.count)
+        }
+
+    interface:
+        async slow_work(): String
+
+    machine:
+        $S {
+            slow_work(): String {
+                this.count = this.count + 1
+                delay(50)
+                @@:("done")
+            }
+        }
+
+    domain:
+        count: Int = 0
+}
+
+fun main() = runBlocking {
+    val s = @@Holder()
+    s.init()
+
+    check(s.get_count() == 0)
+
+    val d = async { s.slow_work() }
+    yield()
+
+    // Sync op while suspend in flight — bypasses gate.
+    val n = s.get_count()
+    check(n == 1) { "during: $n" }
+
+    val r = d.await()
+    check(r == "done")
+
+    println("PASS: async_sync_op_bypass_gate")
+}

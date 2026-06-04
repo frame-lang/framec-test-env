@@ -1,0 +1,50 @@
+@@[target("javascript")]
+
+// C4 — async_sync_op_bypass_gate
+//
+// Operations bypass the gate. A sync op called while async dispatch
+// is in flight on the SAME instance must succeed (no E703).
+
+@@[async]
+@@system Holder {
+    operations:
+        get_count: int {
+            @@:(this.count)
+        }
+
+    interface:
+        async slow_work(): str
+
+    machine:
+        $S {
+            slow_work(): str {
+                this.count = this.count + 1;
+                await new Promise(resolve => setTimeout(resolve, 50));
+                @@:("done")
+            }
+        }
+
+    domain:
+        count: int = 0
+}
+
+async function main() {
+    const s = @@Holder();
+    await s.init();
+
+    if (s.get_count() !== 0) throw new Error(`initial: ${s.get_count()}`);
+
+    const p = s.slow_work();
+    await new Promise(resolve => setImmediate(resolve));
+
+    const n = s.get_count();
+    if (n !== 1) throw new Error(`during dispatch: expected 1, got ${n}`);
+
+    const r = await p;
+    if (r !== "done") throw new Error(`expected 'done', got ${r}`);
+    if (s.get_count() !== 1) throw new Error(`final: ${s.get_count()}`);
+
+    console.log("PASS: async_sync_op_bypass_gate");
+}
+
+main();

@@ -1,0 +1,64 @@
+@@[target("rust")]
+
+// C4 — async_sync_op_bypass_gate (Rust specialization)
+//
+// RFC-0043 (Rust): operations bypass the gate — the casing emits a
+// SYNC delegate (no .await) for sync ops, with no busy check. The
+// op's return type is plain `T`, not `Result<T, FrameE703Error>`.
+//
+// True "call op while dispatch in flight" testing requires Rc<RefCell>
+// sharing (the borrow checker prevents two &mut on the same instance
+// otherwise). Per RFC D1's single-driver contract, that scenario is
+// out of scope. The principled Rust test verifies (a) the op is
+// emitted as sync — no await, no Result wrapper, and (b) the op
+// reads/writes domain fields directly.
+
+@@[async]
+@@system Holder {
+    operations:
+        get_count: i32 {
+            @@:(self.count)
+        }
+
+    interface:
+        async slow_work(): String
+
+    machine:
+        $S {
+            slow_work(): String {
+                self.count = self.count + 1;
+                @@:(String::from("done"))
+                return;
+            }
+        }
+
+    domain:
+        count: i32 = 0
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut s = @@Holder();
+    s.init().await;
+
+    // Op is sync — no .await, no `?`. Domain field starts at 0.
+    let n0: i32 = s.get_count();
+    assert_eq!(n0, 0, "initial");
+
+    // Async dispatch increments count.
+    let r = s.slow_work().await?;
+    assert_eq!(r, "done");
+
+    // Op reads the updated count.
+    let n1: i32 = s.get_count();
+    assert_eq!(n1, 1, "after dispatch");
+
+    // Multiple ops in a row — no gate.
+    let n2: i32 = s.get_count();
+    let n3: i32 = s.get_count();
+    assert_eq!(n2, 1);
+    assert_eq!(n3, 1);
+
+    println!("PASS: async_sync_op_bypass_gate");
+    Ok(())
+}

@@ -1,0 +1,65 @@
+@@[target("python_3")]
+
+# C4 — async_sync_op_bypass_gate
+#
+# RFC-0043: operations (declared in `operations:`) bypass the gate.
+# A sync operation called WHILE an async dispatch is in flight on the
+# SAME instance must succeed, not raise E703.
+#
+# Single-thread async runtimes (asyncio): we can drive the race by
+# kicking off the async call as a task, yielding to give it the gate,
+# then calling the sync op. The op must succeed; the async dispatch
+# resumes and completes.
+
+import asyncio
+
+@@[async]
+@@system Holder {
+    operations:
+        get_count: int {
+            @@:(self.count)
+        }
+
+    interface:
+        async slow_work(): str
+
+    machine:
+        $S {
+            slow_work(): str {
+                self.count = self.count + 1
+                await asyncio.sleep(0.05)
+                @@:("done")
+            }
+        }
+
+    domain:
+        count: int = 0
+}
+
+async def main():
+    s = @@Holder()
+    await s.init()
+
+    # Op works before any async call.
+    assert s.get_count() == 0, f"initial: {s.get_count()}"
+
+    # Kick off async dispatch — busy=True until it completes.
+    task = asyncio.create_task(s.slow_work())
+    # Yield once so the task gets to enter the casing and set busy.
+    await asyncio.sleep(0)
+
+    # Op called while async dispatch is suspended — MUST bypass the
+    # gate and succeed. If the op were gated, this would raise E703.
+    # The count was incremented by slow_work's handler entry path.
+    n = s.get_count()
+    assert n == 1, f"during dispatch: expected 1, got {n}"
+
+    # Now await — async dispatch completes.
+    result = await task
+    assert result == "done"
+    assert s.get_count() == 1, f"after dispatch: {s.get_count()}"
+
+    print("PASS: async_sync_op_bypass_gate")
+
+if __name__ == '__main__':
+    asyncio.run(main())
