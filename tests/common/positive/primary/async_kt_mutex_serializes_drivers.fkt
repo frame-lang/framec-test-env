@@ -1,0 +1,64 @@
+@@[target("kotlin")]
+
+// Kotlin-unique — async_kt_mutex_serializes_drivers
+//
+// RFC-0043's gate is single-driver (D1). Concurrent access from
+// multiple OS threads is undefined; the caller is responsible for
+// serialization.
+//
+// This fixture documents the canonical Kotlin mitigation pattern:
+// wrap calls in `kotlinx.coroutines.sync.Mutex` so that two
+// dispatcher-threaded coroutines compete safely.
+//
+// What this pins:
+//   1. Dispatchers.Default with multiple threads.
+//   2. Two coroutines call s.work() concurrently.
+//   3. WITHOUT the user-provided mutex, this would race the
+//      non-atomic gate (TOCTOU). WITH the mutex, both calls
+//      serialize and both succeed.
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
+
+@@[async]
+@@system Sys {
+    interface:
+        async work(): String
+
+    machine:
+        $S {
+            work(): String {
+                delay(20)
+                @@:("done")
+            }
+        }
+}
+
+fun main() = runBlocking {
+    val s = @@Sys()
+    s.init()
+
+    val gate = Mutex()
+    val results = mutableListOf<String>()
+
+    val d1 = async(Dispatchers.Default) {
+        gate.withLock { s.work() }
+    }
+    val d2 = async(Dispatchers.Default) {
+        gate.withLock { s.work() }
+    }
+
+    results.add(d1.await())
+    results.add(d2.await())
+
+    check(results.all { it == "done" }) {
+        "expected all 'done', got $results"
+    }
+
+    println("PASS: async_kt_mutex_serializes_drivers")
+}

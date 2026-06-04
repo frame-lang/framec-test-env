@@ -1,0 +1,88 @@
+@@[target("kotlin")]
+
+// Kotlin-unique — async_kt_cancellation_clears_gate
+//
+// RFC-0043 (Kotlin) — central cancellation test.
+//
+// Kotlin's CancellationException is structured concurrency's normal
+// mechanism for cooperative cancellation. It propagates through
+// suspending functions like any other exception, BUT it must NOT be
+// rethrown without rethrow (since the parent coroutine catches it as
+// the signal "this child cancelled").
+//
+// What this pins:
+//   1. withTimeout fires CancellationException into the casing's await
+//      on machine.work() → casing's try/finally MUST clear gate.
+//   2. Caller observes TimeoutCancellationException (subtype of
+//      CancellationException). No stuck-gate IllegalStateException.
+//   3. Subsequent call on the same instance succeeds — gate is clear.
+//   4. Job.cancel() on a sibling coroutine doing slow_work() also
+//      clears the gate via the same finally.
+
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withTimeout
+import kotlinx.coroutines.yield
+
+@@[async]
+@@system Slow {
+    interface:
+        async work(): String
+
+    machine:
+        $S {
+            work(): String {
+                // 1-second delay — well past the 50ms timeout below.
+                delay(1000)
+                @@:("done")
+            }
+        }
+}
+
+fun main() = runBlocking {
+    val s = @@Slow()
+    s.init()
+
+    // ─── Scenario A: withTimeout fires cancellation into casing's await ───
+    var timedOut = false
+    try {
+        withTimeout(50) {
+            s.work()
+        }
+    } catch (e: TimeoutCancellationException) {
+        timedOut = true
+    }
+    check(timedOut) { "expected withTimeout to fire" }
+
+    // Gate must be clear after cancellation — this would throw
+    // IllegalStateException("E703: ...") if finally didn't run.
+    val result = s.work()
+    check(result == "done") { "expected 'done' after timeout cleanup, got $result" }
+
+    // ─── Scenario B: explicit Job.cancel() while work is suspended ───
+    val s2 = @@Slow()
+    s2.init()
+
+    val job = launch {
+        try {
+            s2.work()
+        } catch (e: CancellationException) {
+            // expected — cancellation propagates through
+        }
+    }
+    // Let the launched coroutine reach the await suspension.
+    yield()
+    delay(10)
+    job.cancel()
+    job.join()
+
+    // Gate must be clear after explicit cancel — same finally invariant.
+    val result2 = s2.work()
+    check(result2 == "done") { "expected 'done' after cancel cleanup, got $result2" }
+
+    println("PASS: async_kt_cancellation_clears_gate")
+}
