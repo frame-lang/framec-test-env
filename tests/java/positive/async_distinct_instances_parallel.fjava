@@ -1,0 +1,34 @@
+@@[target("java")]
+
+// C3 — async_distinct_instances_parallel
+//
+// Per-instance gate: two distinct casing instances each have their
+// own busy/in_flight fields. Concurrent calls on different instances
+// don't cross-contaminate.
+
+@@[async]
+@@system WorkerSys {
+    interface:
+        async work(label: String): String
+
+    machine:
+        $S {
+            work(label: String): String { @@:(label) }
+        }
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        WorkerSys sa = @@WorkerSys();
+        WorkerSys sb = @@WorkerSys();
+        sa.init().get();
+        sb.init().get();
+
+        String ra = sa.work("from_a").get();
+        String rb = sb.work("from_b").get();
+        if (!"from_a".equals(ra)) throw new RuntimeException("sa: " + ra);
+        if (!"from_b".equals(rb)) throw new RuntimeException("sb: " + rb);
+
+        System.out.println("PASS: async_distinct_instances_parallel");
+    }
+}

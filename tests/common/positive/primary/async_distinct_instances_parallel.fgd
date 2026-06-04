@@ -1,0 +1,39 @@
+@@[target("gdscript")]
+
+# C3 — async_distinct_instances_parallel
+#
+# Per-instance gate. Sequential calls on two distinct instances, then
+# verify the gate is independent (each instance's busy field is its
+# own).
+
+extends SceneTree
+
+@@[async]
+@@system WorkerSys {
+    interface:
+        async work(label: String): String
+
+    machine:
+        $S {
+            work(label: String): String { @@:(label) }
+        }
+}
+
+func _init():
+    var sa = @@WorkerSys()
+    var sb = @@WorkerSys()
+    await sa.init()
+    await sb.init()
+
+    var ra = await sa.work("from_a")
+    var rb = await sb.work("from_b")
+    assert(ra == "from_a", "sa: " + str(ra))
+    assert(rb == "from_b", "sb: " + str(rb))
+
+    # Interleave: sa busy doesn't affect sb.
+    var ra2 = await sa.work("a2")
+    var rb2 = await sb.work("b2")
+    assert(ra2 == "a2" and rb2 == "b2", "interleave failed: " + str(ra2) + "/" + str(rb2))
+
+    print("PASS: async_distinct_instances_parallel")
+    quit()

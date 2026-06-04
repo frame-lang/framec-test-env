@@ -1,0 +1,36 @@
+@@[target("kotlin")]
+
+// C3 — async_distinct_instances_parallel
+
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+
+@@[async]
+@@system WorkerSys {
+    interface:
+        async work(label: String): String
+
+    machine:
+        $S {
+            work(label: String): String {
+                delay(50)
+                @@:(label)
+            }
+        }
+}
+
+fun main() = runBlocking {
+    val sa = @@WorkerSys()
+    val sb = @@WorkerSys()
+    sa.init()
+    sb.init()
+
+    val da = async { sa.work("from_a") }
+    val db = async { sb.work("from_b") }
+    val results = awaitAll(da, db)
+    check(results.toSet() == setOf("from_a", "from_b")) { "unexpected: $results" }
+
+    println("PASS: async_distinct_instances_parallel")
+}
