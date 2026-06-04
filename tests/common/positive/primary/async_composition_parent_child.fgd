@@ -1,0 +1,49 @@
+@@[target("gdscript")]
+
+# C6 — async_composition_parent_child
+
+extends SceneTree
+
+@@[async]
+@@system Child {
+    interface:
+        async work(): String
+
+    machine:
+        $S {
+            work(): String { @@:("from_child") }
+        }
+}
+
+@@[async]
+@@[main]
+@@system Parent {
+    interface:
+        async chain(): String
+        async direct(): String
+
+    machine:
+        $S {
+            chain(): String {
+                var r = await self.child.work()
+                @@:("parent_saw:" + r)
+            }
+            direct(): String { @@:("parent_direct") }
+        }
+
+    domain:
+        child: Child = @@Child()
+}
+
+func _init():
+    var p = @@Parent()
+    await p.init()
+
+    var r1 = await p.direct()
+    assert(r1 == "parent_direct", "direct: " + str(r1))
+
+    var r2 = await p.chain()
+    assert(r2 == "parent_saw:from_child", "chain: " + str(r2))
+
+    print("PASS: async_composition_parent_child")
+    quit()

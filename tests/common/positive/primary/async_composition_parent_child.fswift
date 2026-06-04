@@ -1,0 +1,56 @@
+@@[target("swift")]
+
+// C6 — async_composition_parent_child
+
+import Foundation
+
+@@[async]
+@@system Child {
+    interface:
+        async work(): String
+
+    machine:
+        $S {
+            work(): String { @@:("from_child") }
+        }
+}
+
+@@[async]
+@@[main]
+@@system Parent {
+    interface:
+        async chain(): String
+        async direct(): String
+
+    machine:
+        $S {
+            chain(): String {
+                let r = (try? await self.child.work()) ?? "FAIL_CHILD"
+                @@:("parent_saw:" + r)
+            }
+            direct(): String { @@:("parent_direct") }
+        }
+
+    domain:
+        child: Child = @@Child()
+}
+
+let __sem = DispatchSemaphore(value: 0)
+Task {
+    do {
+        let p = @@Parent()
+        await p.initAsync()
+
+        let r1 = try await p.direct()
+        guard r1 == "parent_direct" else { fatalError("direct: \(r1)") }
+
+        let r2 = try await p.chain()
+        guard r2 == "parent_saw:from_child" else { fatalError("chain: \(r2)") }
+
+        print("PASS: async_composition_parent_child")
+    } catch {
+        fatalError("unexpected: \(error)")
+    }
+    __sem.signal()
+}
+__sem.wait()

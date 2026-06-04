@@ -1,0 +1,52 @@
+@@[target("java")]
+
+// C6 — async_composition_parent_child
+
+@@[async]
+@@system private Child {
+    interface:
+        async work(): String
+
+    machine:
+        $S {
+            work(): String { @@:("from_child") }
+        }
+}
+
+@@[async]
+@@[main]
+@@system Parent {
+    interface:
+        async chain(): String
+        async direct(): String
+
+    machine:
+        $S {
+            chain(): String {
+                String r = this.child.work().join();
+                @@:("parent_saw:" + r)
+            }
+            direct(): String { @@:("parent_direct") }
+        }
+
+    domain:
+        child: Child = @@Child()
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        Parent p = @@Parent();
+        p.init().get();
+
+        String r1 = p.direct().get();
+        if (!"parent_direct".equals(r1)) throw new RuntimeException("direct: " + r1);
+
+        String r2 = p.chain().get();
+        if (!"parent_saw:from_child".equals(r2)) throw new RuntimeException("chain: " + r2);
+
+        String r3 = p.chain().get();
+        if (!"parent_saw:from_child".equals(r3)) throw new RuntimeException("second: " + r3);
+
+        System.out.println("PASS: async_composition_parent_child");
+    }
+}
