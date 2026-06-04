@@ -1,0 +1,46 @@
+@@[target("java")]
+
+// C5 — async_persist_roundtrip_gate_clears
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[async]
+@@system Counter {
+    interface:
+        async bump(): Integer
+
+    machine:
+        $S {
+            bump(): Integer {
+                this.value = this.value + 1;
+                @@:(this.value)
+            }
+        }
+
+    domain:
+        value: int = 0
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        Counter s1 = @@Counter();
+        s1.init().get();
+
+        Integer v1 = s1.bump().get();
+        if (v1 != 1) throw new RuntimeException("s1: " + v1);
+
+        String snap = s1.save_state();
+
+        Counter s2 = @@Counter();
+        s2.restore_state(snap);
+
+        Integer v2 = s2.bump().get();
+        if (v2 != 2) throw new RuntimeException("s2 after restore: " + v2);
+
+        Integer v3 = s2.bump().get();
+        if (v3 != 3) throw new RuntimeException("s2 second: " + v3);
+
+        System.out.println("PASS: async_persist_roundtrip_gate_clears");
+    }
+}

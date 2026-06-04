@@ -1,0 +1,53 @@
+@@[target("rust")]
+
+// C5 — async_persist_roundtrip_gate_clears
+//
+// RFC-0043 (Rust): the casing's `busy: bool` + `in_flight:
+// Option<&'static str>` fields are transient state on the casing
+// struct. Save serializes only the machine's compartment + domain;
+// restore creates a fresh casing whose gate is initially clear.
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[async]
+@@system Counter {
+    interface:
+        async bump(): i32
+
+    machine:
+        $S {
+            bump(): i32 {
+                tokio::task::yield_now().await;
+                self.value = self.value + 1;
+                @@:(self.value)
+                return;
+            }
+        }
+
+    domain:
+        value: i32 = 0
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut s1 = @@Counter();
+    s1.init().await;
+
+    let v1 = s1.bump().await?;
+    assert_eq!(v1, 1, "s1.bump");
+
+    let snap: String = s1.save_state();
+
+    let mut s2 = @@Counter();
+    s2.restore_state(snap);
+
+    let v2 = s2.bump().await?;
+    assert_eq!(v2, 2, "s2.bump after restore");
+
+    let v3 = s2.bump().await?;
+    assert_eq!(v3, 3, "s2.bump second");
+
+    println!("PASS: async_persist_roundtrip_gate_clears");
+    Ok(())
+}

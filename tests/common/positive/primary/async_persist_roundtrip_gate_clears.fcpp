@@ -1,0 +1,48 @@
+@@[target("cpp_23")]
+
+#include <nlohmann/json.hpp>
+
+// C5 — async_persist_roundtrip_gate_clears
+
+#include <iostream>
+
+@@[persist(std::string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[async]
+@@system Counter {
+    interface:
+        async bump(): int
+
+    machine:
+        $S {
+            bump(): int {
+                this->value = this->value + 1;
+                @@:(this->value)
+            }
+        }
+
+    domain:
+        value: int = 0
+}
+
+int main() {
+    auto s1 = @@Counter();
+    s1.init().get();
+
+    int v1 = s1.bump().get();
+    if (v1 != 1) { std::cout << "FAIL s1: " << v1 << std::endl; return 1; }
+
+    auto snap = s1.save_state();
+    auto s2 = @@Counter();
+    s2.restore_state(snap);
+
+    int v2 = s2.bump().get();
+    if (v2 != 2) { std::cout << "FAIL s2: " << v2 << std::endl; return 1; }
+
+    int v3 = s2.bump().get();
+    if (v3 != 3) { std::cout << "FAIL s2 second: " << v3 << std::endl; return 1; }
+
+    std::cout << "PASS: async_persist_roundtrip_gate_clears" << std::endl;
+    return 0;
+}

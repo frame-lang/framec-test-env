@@ -1,0 +1,50 @@
+@@[target("typescript")]
+
+// C5 — async_persist_roundtrip_gate_clears
+//
+// Save state → restore on a fresh instance → next async call succeeds
+// (gate is fresh, not stuck from anywhere stale).
+
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[async]
+@@system Counter {
+    interface:
+        async bump(): int
+
+    machine:
+        $S {
+            bump(): int {
+                await Promise.resolve();
+                this.value = this.value + 1;
+                @@:(this.value)
+            }
+        }
+
+    domain:
+        value: int = 0
+}
+
+async function main(): Promise<void> {
+    const s1 = @@Counter();
+    await s1.init();
+
+    const v1 = await s1.bump();
+    if (v1 !== 1) throw new Error(`s1.bump: ${v1}`);
+
+    const snap = s1.save_state();
+
+    const s2 = @@Counter();
+    s2.restore_state(snap);
+
+    const v2 = await s2.bump();
+    if (v2 !== 2) throw new Error(`s2.bump: ${v2}`);
+
+    const v3 = await s2.bump();
+    if (v3 !== 3) throw new Error(`s2.bump second: ${v3}`);
+
+    console.log("PASS: async_persist_roundtrip_gate_clears");
+}
+
+main();
