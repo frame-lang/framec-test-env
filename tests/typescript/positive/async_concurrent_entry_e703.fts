@@ -1,0 +1,51 @@
+@@[target("typescript")]
+
+// C2 — async_concurrent_entry_e703
+//
+// RFC-0043: Promise.all on a single casing — one wins the gate, the
+// other rejects with Error("E703: ..."). After both settle, a fresh
+// call succeeds (gate clears).
+
+@@[async]
+@@system Slow {
+    interface:
+        async slow_work(): str
+
+    machine:
+        $S {
+            slow_work(): str {
+                await new Promise<void>(resolve => setTimeout(resolve, 50));
+                @@:("done")
+            }
+        }
+}
+
+async function main(): Promise<void> {
+    const s = @@Slow();
+    await s.init();
+
+    // Promise.all kicks off both promises immediately. One wins the gate,
+    // the other rejects synchronously from the casing wrapper (the
+    // `throw new Error(...)` runs BEFORE the first co_await). To collect
+    // both outcomes without Promise.all short-circuiting, use
+    // Promise.allSettled.
+    const settled = await Promise.allSettled([s.slow_work(), s.slow_work()]);
+    const fulfilled = settled.filter(r => r.status === "fulfilled");
+    const rejected = settled.filter(r => r.status === "rejected");
+
+    if (fulfilled.length !== 1) throw new Error(`expected 1 fulfilled, got ${fulfilled.length}`);
+    if ((fulfilled[0] as PromiseFulfilledResult<string>).value !== "done") {
+        throw new Error(`unexpected fulfilled value`);
+    }
+    if (rejected.length !== 1) throw new Error(`expected 1 rejected, got ${rejected.length}`);
+    const errMsg = String((rejected[0] as PromiseRejectedResult).reason);
+    if (!errMsg.includes("E703")) throw new Error(`expected E703 in error: ${errMsg}`);
+
+    // After both settled, gate must be clear.
+    const result = await s.slow_work();
+    if (result !== "done") throw new Error(`expected 'done' after clear, got ${result}`);
+
+    console.log("PASS: async_concurrent_entry_e703");
+}
+
+main();

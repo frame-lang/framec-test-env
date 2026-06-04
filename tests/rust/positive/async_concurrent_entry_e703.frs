@@ -1,0 +1,64 @@
+@@[target("rust")]
+
+// C2 — async_concurrent_entry_e703 (Rust specialization)
+//
+// RFC-0043 (Rust): in Rust, single-driver entry is enforced at
+// COMPILE TIME by the borrow checker. The casing's interface methods
+// take `&mut self`, so the following does NOT compile:
+//
+//     let s = &mut sys;
+//     tokio::join!(s.slow_work(), s.slow_work());  // ERROR: two &mut
+//
+// The runtime gate (`busy` + `Err(FrameE703Error)`) is a fallback for
+// users who deliberately escape the borrow checker via
+// `Rc<RefCell<_>>` or similar interior-mutability primitives. Holding
+// a `RefCell::borrow_mut()` across `.await` PANICS with "RefCell
+// already borrowed" — so even the escape hatch doesn't easily exercise
+// the runtime gate.
+//
+// As a result, Rust's C2 reduces to verifying the gate cycles cleanly
+// across sequential calls. The "concurrent two-caller E703" case other
+// backends test is structurally not idiomatic-testable on Rust. The
+// compile-time guarantee IS the test — and it's a stronger one.
+
+use std::time::Duration;
+
+@@[async]
+@@system Slow {
+    interface:
+        async slow_work(): String
+
+    machine:
+        $S {
+            slow_work(): String {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+                @@:(String::from("done"))
+                return;
+            }
+        }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut s = @@Slow();
+    s.init().await;
+
+    // Three sequential calls. Gate must clear between each via
+    // _GateGuard::drop. If any call sees a stuck gate, it returns
+    // Err(FrameE703Error) and `?` propagates.
+    let r1 = s.slow_work().await?;
+    assert_eq!(r1, "done");
+    let r2 = s.slow_work().await?;
+    assert_eq!(r2, "done");
+    let r3 = s.slow_work().await?;
+    assert_eq!(r3, "done");
+
+    // Documentation of the compile-time guarantee: the line below
+    // would not compile (commented out so the test does compile).
+    //
+    //     tokio::join!(s.slow_work(), s.slow_work());
+    //     // error[E0499]: cannot borrow `s` as mutable more than once
+
+    println!("PASS: async_concurrent_entry_e703");
+    Ok(())
+}

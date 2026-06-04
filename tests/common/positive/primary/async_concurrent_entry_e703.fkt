@@ -1,0 +1,67 @@
+@@[target("kotlin")]
+
+// C2 — async_concurrent_entry_e703
+//
+// RFC-0043 (Kotlin): two coroutines launch concurrent slow_work() on
+// the same casing — one wins the gate, the other throws
+// IllegalStateException("E703: ..."). After both settle, a fresh call
+// succeeds.
+//
+// Kotlin coroutines on `runBlocking { }` use the same thread by
+// default; `async` + `await` cooperatively switches between them at
+// suspend points (the casing's await on machine.slow_work).
+
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+
+@@[async]
+@@system Slow {
+    interface:
+        async slow_work(): String
+
+    machine:
+        $S {
+            slow_work(): String {
+                delay(50)
+                @@:("done")
+            }
+        }
+}
+
+fun main() = runBlocking {
+    val s = @@Slow()
+    s.init()
+
+    // Kotlin's `async { }` propagates exceptions to the parent
+    // CoroutineScope IMMEDIATELY, cancelling siblings. To collect
+    // both outcomes without losing one to scope-cancellation, wrap
+    // each body in `runCatching { }` so the async returns Result<T>
+    // rather than throwing into the parent.
+    val d1 = async { runCatching { s.slow_work() } }
+    val d2 = async { runCatching { s.slow_work() } }
+    val r1 = d1.await()
+    val r2 = d2.await()
+
+    var successes = 0
+    var errors = 0
+    for (r in listOf(r1, r2)) {
+        r.fold(
+            onSuccess = { v -> if (v == "done") successes++ },
+            onFailure = { e ->
+                if (e is IllegalStateException && e.message?.contains("E703") == true) {
+                    errors++
+                }
+            }
+        )
+    }
+
+    check(successes == 1) { "expected 1 success, got $successes" }
+    check(errors == 1) { "expected 1 E703, got $errors" }
+
+    // After both settled, gate must be clear.
+    val result = s.slow_work()
+    check(result == "done") { "expected 'done' after clear, got $result" }
+
+    println("PASS: async_concurrent_entry_e703")
+}

@@ -1,0 +1,47 @@
+@@[target("java")]
+
+// C2 — async_concurrent_entry_e703 (Java specialization)
+//
+// RFC-0043 (Java): Java's machine is SYNCHRONOUS (the casing wraps the
+// sync kernel call in CompletableFuture.completedFuture). A handler
+// body that completes quickly won't keep the gate busy long enough for
+// a second caller to hit E703 from the SAME thread.
+//
+// Java's casing gate is non-volatile (RFC D1 documented single-driver
+// contract). For cooperative-concurrency testing on a single thread,
+// we instead verify gate CYCLING across sequential calls: the casing's
+// try/finally MUST clear busy/in_flight after every call so the next
+// call doesn't see a stuck gate.
+//
+// True multi-thread testing on Java is out of scope per RFC D1
+// (documented as caller's responsibility to serialize).
+
+import java.util.concurrent.ExecutionException;
+
+@@[async]
+@@system Slow {
+    interface:
+        async slow_work(): String
+
+    machine:
+        $S {
+            slow_work(): String { @@:("done") }
+        }
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        Slow s = @@Slow();
+        s.init().get();
+
+        // Three sequential calls — gate must clear between each.
+        String r1 = s.slow_work().get();
+        if (!"done".equals(r1)) throw new RuntimeException("call 1: expected 'done', got " + r1);
+        String r2 = s.slow_work().get();
+        if (!"done".equals(r2)) throw new RuntimeException("call 2: expected 'done', got " + r2);
+        String r3 = s.slow_work().get();
+        if (!"done".equals(r3)) throw new RuntimeException("call 3: expected 'done', got " + r3);
+
+        System.out.println("PASS: async_concurrent_entry_e703");
+    }
+}

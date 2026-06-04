@@ -1,0 +1,56 @@
+@@[target("csharp")]
+
+// C2 — async_concurrent_entry_e703
+//
+// RFC-0043 (C#): Task.WhenAll on a single casing — one wins the gate,
+// the other throws InvalidOperationException("E703: ..."). After both
+// settle, a fresh call succeeds.
+//
+// C# has real threading (Task scheduler). Per RFC D1, the gate is
+// documented single-driver; this test exercises cooperative
+// concurrency on the same thread (Task.WhenAll on async tasks).
+
+using System;
+using System.Threading.Tasks;
+
+@@[async]
+@@system Slow {
+    interface:
+        async slow_work(): string
+
+    machine:
+        $S {
+            slow_work(): string {
+                await Task.Delay(50);
+                @@:("done")
+            }
+        }
+}
+
+class Program {
+    public static async Task Main(string[] args) {
+        var s = @@Slow();
+        await s.init();
+
+        // Task.WhenAll throws AggregateException if any task fails.
+        // To collect both outcomes individually, await each task separately.
+        var t1 = s.slow_work();
+        var t2 = s.slow_work();
+        try { await Task.WhenAll(t1, t2); } catch { }
+
+        int successes = 0, errors = 0;
+        try { var r = await t1; if (r == "done") successes++; }
+        catch (InvalidOperationException e) when (e.Message.Contains("E703")) { errors++; }
+        try { var r = await t2; if (r == "done") successes++; }
+        catch (InvalidOperationException e) when (e.Message.Contains("E703")) { errors++; }
+
+        if (successes != 1) throw new Exception($"expected 1 success, got {successes}");
+        if (errors != 1) throw new Exception($"expected 1 E703 error, got {errors}");
+
+        // After both settled, gate must be clear.
+        var result = await s.slow_work();
+        if (result != "done") throw new Exception($"expected 'done' after clear, got '{result}'");
+
+        Console.WriteLine("PASS: async_concurrent_entry_e703");
+    }
+}
