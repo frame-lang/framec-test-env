@@ -4,6 +4,16 @@ import asyncio
 
 @@[async]
 @@system AsyncWorker {
+    operations:
+        # RFC-0043: domain fields live on the private machine, NOT on
+        # the casing. External callers can't reach `w.log` directly.
+        # `has_log_entry` is a sync operation (bypasses the gate)
+        # that lets the test driver assert observable lifecycle
+        # behavior — the entry/exit handlers appended to the log.
+        has_log_entry(needle: str): bool {
+            @@:(needle in self.log)
+        }
+
     interface:
         async start()
         async process(data: str): str
@@ -50,7 +60,7 @@ async def main():
     # Note: when ANY interface method is async, ALL interface methods become async
     status = await w.get_status()
     assert status == "idle", f"Expected idle, got {status}"
-    assert "idle:ready" in w.log, f"Expected idle:ready in log, got {w.log}"
+    assert w.has_log_entry("idle:ready"), "Expected idle:ready in log"
 
     await w.start()
     status = await w.get_status()
@@ -62,7 +72,7 @@ async def main():
     await w.stop()
     status = await w.get_status()
     assert status == "idle"
-    assert "working:exited" in w.log
+    assert w.has_log_entry("working:exited"), "Expected working:exited in log"
 
     print("PASS: async_http_client")
 
