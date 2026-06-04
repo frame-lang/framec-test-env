@@ -1,0 +1,59 @@
+@@[target("swift")]
+
+// C1 — async_exception_clears_gate (Swift specialization)
+//
+// RFC-0043 (Swift, post-D2): casing's `defer { busy = false; in_flight = nil }`
+// MUST run on EVERY scope exit — normal return, throw, after await.
+//
+// Swift's machine handler signature is `async -> T` (NOT `async throws`),
+// so a user-level handler body can't recoverably throw a Swift Error.
+// The only handler-side "exception" path is `fatalError`, which
+// terminates the program and cannot be caught. As a result, Swift's
+// C1 reduces to the gate-cycling case: verify `defer` clears the gate
+// between successive interface calls, so call #2 doesn't see E703 from
+// a stuck busy flag.
+//
+// (E703 ITSELF is tested in C2 — concurrent entry returns an Err that
+// the caller catches, and the next call succeeds.)
+//
+// The Swift handler-throws path is documented as a known limitation;
+// a future RFC may extend handler bodies to `throws`.
+
+import Foundation
+
+@@[async]
+@@system Worker {
+    interface:
+        async peek(): String
+
+    machine:
+        $S {
+            peek(): String { @@:("ok") }
+        }
+}
+
+let __sem = DispatchSemaphore(value: 0)
+Task {
+    do {
+        let s = @@Worker()
+        await s.initAsync()
+
+        // First call — defer MUST clear the gate after this returns.
+        let r1 = try await s.peek()
+        guard r1 == "ok" else { fatalError("call #1 expected 'ok', got \(r1)") }
+
+        // Second call — if defer skipped on call #1, this throws E703.
+        let r2 = try await s.peek()
+        guard r2 == "ok" else { fatalError("call #2 expected 'ok', got \(r2)") }
+
+        // Third call for good measure.
+        let r3 = try await s.peek()
+        guard r3 == "ok" else { fatalError("call #3 expected 'ok', got \(r3)") }
+
+        print("PASS: async_exception_clears_gate")
+    } catch {
+        fatalError("unexpected error: \(error)")
+    }
+    __sem.signal()
+}
+__sem.wait()

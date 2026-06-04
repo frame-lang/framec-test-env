@@ -1,0 +1,47 @@
+@@[target("kotlin")]
+
+// C1 — async_exception_clears_gate
+//
+// RFC-0043 (Kotlin): handler throws during await → casing's
+// try/finally MUST clear busy/in_flight → next interface call
+// succeeds (no IllegalStateException for E703 from a stuck gate).
+
+import kotlinx.coroutines.runBlocking
+
+@@[async]
+@@system Crashable {
+    interface:
+        async boom(): String
+        async peek(): String
+
+    machine:
+        $S {
+            boom(): String {
+                throw RuntimeException("handler crash")
+            }
+            peek(): String {
+                @@:("ok")
+            }
+        }
+}
+
+fun main() = runBlocking {
+    val s = @@Crashable()
+    s.init()
+
+    // First call: handler throws. Casing's try/finally MUST clear gate.
+    var caught: RuntimeException? = null
+    try {
+        s.boom()
+    } catch (e: RuntimeException) {
+        caught = e
+    }
+    check(caught != null) { "expected boom() to throw" }
+    check(caught.message == "handler crash") { "unexpected message: ${caught.message}" }
+
+    // Second call: gate must be clear. Stuck gate would throw IllegalStateException.
+    val result = s.peek()
+    check(result == "ok") { "expected 'ok', got $result" }
+
+    println("PASS: async_exception_clears_gate")
+}

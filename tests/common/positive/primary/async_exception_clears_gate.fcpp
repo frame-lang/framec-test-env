@@ -1,0 +1,58 @@
+@@[target("cpp_23")]
+
+// C1 — async_exception_clears_gate
+//
+// RFC-0043 (C++): handler throws during co_await → casing's
+// try { ... } catch (...) { ...; throw; } MUST clear busy/in_flight
+// → next interface call succeeds (no std::runtime_error for E703
+// from a stuck gate).
+
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+@@[async]
+@@system Crashable {
+    interface:
+        async boom(): std::string
+        async peek(): std::string
+
+    machine:
+        $S {
+            boom(): std::string {
+                throw std::runtime_error("handler crash");
+            }
+            peek(): std::string {
+                @@:(std::string("ok"))
+            }
+        }
+}
+
+int main() {
+    auto s = @@Crashable();
+    s.init().get();
+
+    // First call: handler throws. Casing's catch(...)+rethrow MUST clear gate.
+    bool caught = false;
+    try {
+        s.boom().get();
+    } catch (const std::runtime_error& e) {
+        if (std::string(e.what()) == "handler crash") {
+            caught = true;
+        }
+    }
+    if (!caught) {
+        std::cout << "FAIL: expected boom() to throw 'handler crash'" << std::endl;
+        return 1;
+    }
+
+    // Second call: gate must be clear. Stuck gate would throw E703.
+    auto result = s.peek().get();
+    if (result != "ok") {
+        std::cout << "FAIL: expected 'ok', got '" << result << "'" << std::endl;
+        return 1;
+    }
+
+    std::cout << "PASS: async_exception_clears_gate" << std::endl;
+    return 0;
+}

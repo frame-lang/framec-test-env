@@ -1,0 +1,64 @@
+@@[target("java")]
+
+// C1 — async_exception_clears_gate
+//
+// RFC-0043 (Java): handler throws during machine call → casing's
+// try/finally MUST clear busy/in_flight → next interface call succeeds
+// (no E703 from a stuck gate).
+//
+// Java's contract is structurally different from other layered
+// backends: the machine is synchronous (per `make_java_interface_async`),
+// the casing wraps the machine's sync call in a try/finally that
+// returns the resulting CompletableFuture. If the handler throws,
+// the casing's try/finally still clears the gate, then the throw
+// propagates SYNCHRONOUSLY out of the casing (not via a failed future).
+// The caller wraps the call in try/catch (not .exceptionally).
+//
+// D-JAVA-1 from the deep-dive: this divergence is real and is what the
+// fixture verifies. Future RFC may reconcile (failed-future contract).
+
+@@[async]
+@@system Crashable {
+    interface:
+        async boom(): String
+        async peek(): String
+
+    machine:
+        $S {
+            boom(): String {
+                throw new RuntimeException("handler crash");
+            }
+            peek(): String {
+                @@:("ok")
+            }
+        }
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        Crashable s = @@Crashable();
+        s.init().get();
+
+        // First call: handler throws. Gate MUST clear in casing's finally.
+        // Per D-JAVA-1, the throw propagates synchronously from the casing
+        // call (not via the future's exceptional state).
+        RuntimeException caught = null;
+        try {
+            s.boom();
+        } catch (RuntimeException e) {
+            caught = e;
+        }
+        if (caught == null) throw new RuntimeException("expected boom() to throw");
+        if (!"handler crash".equals(caught.getMessage())) {
+            throw new RuntimeException("unexpected message: " + caught.getMessage());
+        }
+
+        // Second call: gate must be clear. If stuck, this throws E703.
+        String result = s.peek().get();
+        if (!"ok".equals(result)) {
+            throw new RuntimeException("expected 'ok', got '" + result + "'");
+        }
+
+        System.out.println("PASS: async_exception_clears_gate");
+    }
+}
