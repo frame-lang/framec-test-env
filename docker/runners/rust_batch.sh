@@ -178,8 +178,15 @@ exec_one() {
         echo "binary missing" > "$EXEC_DIR/${sanitized}.out"
         return
     fi
-    timeout "$TIMEOUT_SEC" "$bin_path" > "$EXEC_DIR/${sanitized}.out" 2>&1
+    # setsid --wait guarantees all child fds are closed, and sync flushes
+    # the .out file, before the verdict pass reads it. Without this, heavy
+    # parallel matrix load can leave a not-yet-flushed file that the reader
+    # misreads as "unrecognized output" — a false failure (e.g. the
+    # intermittent 18_smtp_conversation flake). Mirrors the go/gdscript
+    # runner hardening.
+    setsid --wait timeout "$TIMEOUT_SEC" "$bin_path" > "$EXEC_DIR/${sanitized}.out" 2>&1
     echo $? > "$EXEC_DIR/${sanitized}.rc"
+    sync "$EXEC_DIR/${sanitized}.out" 2>/dev/null || true
 }
 export -f exec_one
 
@@ -222,9 +229,23 @@ while IFS=$'\t' read -r num status name rest; do
             elif [ -z "$out" ]; then
                 echo "ok $num - $name # clean exit"; pass=$((pass+1))
             else
-                echo "not ok $num - $name # unrecognized output"
-                echo "$out" | head -3 | sed 's/^/  # /'
-                fail=$((fail+1))
+                # Defensive re-read: even with setsid --wait + sync, under
+                # heavy parallel load the first cat can race a not-yet-visible
+                # Docker volume page-cache write. Re-read once after a short
+                # settle before pronouncing the output unrecognized.
+                sleep 0.1
+                out=$(cat "$out_file" 2>/dev/null)
+                if echo "$out" | grep -q "^not ok "; then
+                    echo "not ok $num - $name"; fail=$((fail+1))
+                elif echo "$out" | grep -qE "^ok |PASS"; then
+                    echo "ok $num - $name"; pass=$((pass+1))
+                elif [ -z "$out" ]; then
+                    echo "ok $num - $name # clean exit"; pass=$((pass+1))
+                else
+                    echo "not ok $num - $name # unrecognized output"
+                    echo "$out" | head -3 | sed 's/^/  # /'
+                    fail=$((fail+1))
+                fi
             fi ;;
         *)
             echo "not ok $num - $name # unknown status $status"; fail=$((fail+1)) ;;

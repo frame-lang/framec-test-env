@@ -1,0 +1,73 @@
+@@[target("python_3")]
+
+# Python-unique — async_py_context_stack_leak (D-PY-1 regression test)
+#
+# RFC-0043 (Python): the machine layer maintains a `_context_stack`
+# that mirrors the dispatch nest. The pattern in emit code is:
+#
+#     self._context_stack.append(__ctx)
+#     await self.__kernel(__e)
+#     return self._context_stack.pop()._return
+#
+# **Defect (D-PY-1, surfaced by Kotlin agent + verified):** the
+# .append/.pop pair is NOT in a try/finally. If `__kernel` raises
+# (handler throw, internal error), the .pop() never runs and the
+# stack accumulates a stale entry per failed call.
+#
+# This fixture pins the invariant: after a handler exception, the
+# context_stack length returns to baseline. If it doesn't, the test
+# fails — surfacing the defect.
+#
+# Until D-PY-1 is fixed, this fixture is expected to fail and acts
+# as a TODO marker. After the fix lands (wrap append/await/pop in
+# try/finally in emit), this passes and protects against regression.
+
+import asyncio
+
+@@[async]
+@@system Sys {
+    interface:
+        async crash()
+        async peek(): str
+
+    machine:
+        $S {
+            crash() {
+                raise RuntimeError("handler crash")
+            }
+            peek(): str { @@:("ok") }
+        }
+}
+
+async def main():
+    s = @@Sys()
+    await s.init()
+
+    # Baseline: machine has 0 stack entries after init's own pop.
+    baseline = len(s._context_stack)
+    if baseline != 0:
+        raise RuntimeError(f"unexpected baseline stack depth: {baseline}")
+
+    # Call crash() — handler raises. The casing's gate clears via
+    # finally. But the MACHINE's context_stack does NOT, per D-PY-1.
+    try:
+        await s.crash()
+    except RuntimeError as e:
+        if str(e) != "handler crash":
+            raise RuntimeError(f"unexpected: {e}")
+
+    after_crash = len(s._context_stack)
+    if after_crash != 0:
+        raise RuntimeError(
+            f"D-PY-1: machine._context_stack leaked — expected 0, got {after_crash}"
+        )
+
+    # Subsequent call: if a stale entry exists, this would write
+    # the return value to the wrong context.
+    result = await s.peek()
+    if result != "ok":
+        raise RuntimeError(f"peek returned wrong value: {result}")
+
+    print("PASS: async_py_context_stack_leak")
+
+asyncio.run(main())
