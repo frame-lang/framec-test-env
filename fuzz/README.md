@@ -564,15 +564,15 @@ not framec.
 ## Phase 20: Const + @@:system access fuzz (wave 1)
 
 `gen_const_sys.py` + `run_const_sys.sh` — `const` domain fields and
-`@@:system.state` reads. Two Frame features that hadn't been fuzzed.
+`@@:system.state.name` reads. Two Frame features that hadn't been fuzzed.
 
 Patterns (3):
 - `p1_const_field` — `const k: int = LIT` initialized to a literal,
   read back via `get_const(): int`.
-- `p2_sys_state_initial` — `@@:system.state` read immediately after
+- `p2_sys_state_initial` — `@@:system.state.name` read immediately after
   construction returns `"S0"`.
 - `p3_sys_state_after_xfer` — drive transitions to $S1; reading
-  `@@:system.state` returns `"S1"`. Verifies the runtime updates
+  `@@:system.state.name` returns `"S1"`. Verifies the runtime updates
   the state name across transitions.
 
 Total: 3 × 10 = 30 cases per lang × 16 langs = 480.

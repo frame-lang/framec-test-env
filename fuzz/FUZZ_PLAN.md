@@ -948,10 +948,10 @@ green on full tier**, 48 on smoke. Zero framec defects.
 - P1 const_field: `const k: int = LIT` declared in domain block.
   Read via `get_const(): int { @@:(self.k) }`. Verifies const-
   field initialization + readback round-trips.
-- P2 sys_state_initial: read `@@:system.state` immediately after
+- P2 sys_state_initial: read `@@:system.state.name` immediately after
   construction. Should return `"S0"` (initial state name).
 - P3 sys_state_after_xfer: drive transitions to `$S1`; read
-  `@@:system.state` from $S1's handler. Should return `"S1"` —
+  `@@:system.state.name` from $S1's handler. Should return `"S1"` —
   verifies the runtime updates the state name correctly across
   transitions.
 
@@ -963,7 +963,7 @@ question.
 
 **Wave 2 candidates:** const used in expressions (e.g., as a
 transition arg: `-> $S(self.const_k)`), const fields with
-non-literal initializers (system params), `@@:system.state`
+non-literal initializers (system params), `@@:system.state.name`
 inside `if`/`while` conditions, system params × state init.
 
 ---
@@ -1405,7 +1405,7 @@ Each wave-N candidate noted in its phase's section:
   **2380/2380 full-tier clean**. Zero defects surfaced.
 - **Phase 20 wave 2:** const used as transition arg
   (`-> $S(self.const_k)`), const initialised from a system param,
-  `@@:system.state` inside `if` conditions, Erlang state-name
+  `@@:system.state.name` inside `if` conditions, Erlang state-name
   atom normalisation (currently skipped).
 
 ### Low-yield: Phases 18, 22, 23 (deliberately skipped)

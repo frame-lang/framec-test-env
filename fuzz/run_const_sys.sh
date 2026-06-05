@@ -36,7 +36,7 @@ done
 
 # Phase 20 wave 1: Erlang represents state names as atoms (`s0`,
 # lowercase) while other backends emit strings (`S0`, PascalCase).
-# `@@:system.state`-comparison patterns (P2, P3) would need per-
+# `@@:system.state.name`-comparison patterns (P2, P3) would need per-
 # backend expected normalization to handle the atom-vs-string split,
 # which is a wave-2 design question. Wave 1 ships 16 backends.
 LANGS=${EXPLICIT_LANGS:-"python_3 javascript typescript ruby lua php dart rust go swift java kotlin csharp c cpp gdscript"}
