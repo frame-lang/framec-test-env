@@ -1,0 +1,53 @@
+@@[target("typescript")]
+
+// TypeScript-unique — async_ts_unhandled_rejection_isolation
+//
+// RFC-0043 (TS): fire-and-forget casing calls that throw must
+// produce an unhandled-rejection in the global handler but MUST
+// NOT leave the system's gate stuck.
+
+@@[async]
+@@system Sys {
+    interface:
+        async crash(): str
+        async peek(): str
+
+    machine:
+        $S {
+            crash(): str { throw new Error("crashed"); }
+            peek(): str { @@:("ok") }
+        }
+}
+
+async function main(): Promise<void> {
+    let s = @@Sys();
+    await s.init();
+
+    // Capture unhandled rejection.
+    let unhandled: Error | null = null;
+    const handler = (reason: any) => {
+        if (reason instanceof Error) unhandled = reason;
+    };
+    process.on("unhandledRejection", handler);
+
+    // Fire-and-forget — explicitly attach a void handler so the
+    // rejection becomes "handled" but we record it.
+    s.crash().then(() => {}, (e) => { unhandled = e as Error; });
+
+    // Let microtask queue drain.
+    await new Promise(r => setTimeout(r, 10));
+
+    process.off("unhandledRejection", handler);
+
+    if (unhandled === null || (unhandled as Error).message !== "crashed") {
+        throw new Error(`expected 'crashed', got: ${(unhandled as Error | null)?.message ?? "null"}`);
+    }
+
+    // Gate must be clear.
+    const r = await s.peek();
+    if (r !== "ok") throw new Error(`gate stuck: ${r}`);
+
+    console.log("PASS: async_ts_unhandled_rejection_isolation");
+}
+
+main();

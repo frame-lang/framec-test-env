@@ -1,0 +1,73 @@
+@@[target("typescript")]
+
+// TypeScript-unique — async_ts_promise_race_abandons_loser
+//
+// RFC-0043 (TS): Promise.race resolves with the first settled
+// promise and ABANDONS the others. The losing promise keeps running
+// to completion but its result is ignored.
+//
+// What this pins:
+//   1. Two casing calls race. The faster one wins.
+//   2. The loser keeps executing — gate semantics still apply: the
+//      first caller takes the gate, the second sees E703 (since both
+//      are issued before either resolves).
+//   3. The losing promise's resolution (post-race) still settles the
+//      gate cleanup properly (no abandoned in-flight state).
+//   4. A follow-up call after race + losing-promise both settle
+//      sees a clean gate.
+
+@@[async]
+@@system Sys {
+    interface:
+        async fast(): str
+        async slow(): str
+
+    machine:
+        $S {
+            fast(): str { @@:("fast-done") }
+            slow(): str { @@:("slow-done") }
+        }
+}
+
+function delay(ms: number): Promise<void> {
+    return new Promise(r => setTimeout(r, ms));
+}
+
+async function main(): Promise<void> {
+    let s = @@Sys();
+    await s.init();
+
+    // Issue fast() then slow() — both go through the casing
+    // synchronously up to their await. fast() wins the gate;
+    // slow() throws E703 immediately.
+    let slowError: Error | null = null;
+    const fastP = s.fast();
+    const slowP = s.slow().catch((e: Error) => {
+        slowError = e;
+        return "loser-saw-e703";
+    });
+
+    const winner = await Promise.race([fastP, slowP]);
+    // The first to settle is slow() (because it errored synchronously
+    // via the gate). So winner is "loser-saw-e703".
+    if (winner !== "loser-saw-e703" && winner !== "fast-done") {
+        throw new Error(`unexpected winner: ${winner}`);
+    }
+
+    // Drain both — the abandoned loser must still settle cleanly.
+    const fastResult = await fastP;
+    const slowResult = await slowP;
+    if (fastResult !== "fast-done") throw new Error(`fastP: ${fastResult}`);
+    if (slowResult !== "loser-saw-e703") throw new Error(`slowP: ${slowResult}`);
+    if (slowError === null || !slowError!.message?.includes("E703")) {
+        throw new Error(`slow expected E703, got: ${slowError}`);
+    }
+
+    // Follow-up — gate clear.
+    const r = await s.fast();
+    if (r !== "fast-done") throw new Error(`post-race: ${r}`);
+
+    console.log("PASS: async_ts_promise_race_abandons_loser");
+}
+
+main();

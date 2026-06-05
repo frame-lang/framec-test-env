@@ -1,0 +1,54 @@
+@@[target("typescript")]
+
+// TypeScript-unique — async_ts_for_await_throw_inside
+//
+// RFC-0043 (TS): a handler body may consume an async iterator via
+// `for await (...)`. If the iterator throws OR a throw escapes the
+// loop body, the casing's finally must still clear the gate.
+
+@@[async]
+@@system Sys {
+    interface:
+        async consume(): str
+        async peek(): str
+
+    machine:
+        $S {
+            consume(): str {
+                async function* gen() {
+                    yield "a";
+                    yield "b";
+                    throw new Error("iter-failed");
+                }
+                let acc = "";
+                for await (const v of gen()) {
+                    acc += v;
+                }
+                @@:(acc)
+            }
+            peek(): str { @@:("ok") }
+        }
+}
+
+async function main(): Promise<void> {
+    let s = @@Sys();
+    await s.init();
+
+    let consumeErr: Error | null = null;
+    try {
+        await s.consume();
+    } catch (e) {
+        consumeErr = e as Error;
+    }
+    if (consumeErr === null || consumeErr.message !== "iter-failed") {
+        throw new Error(`expected iter-failed, got: ${consumeErr?.message}`);
+    }
+
+    // Gate must be clear — async iterator throw still ran finally.
+    const r = await s.peek();
+    if (r !== "ok") throw new Error(`gate stuck: ${r}`);
+
+    console.log("PASS: async_ts_for_await_throw_inside");
+}
+
+main();
