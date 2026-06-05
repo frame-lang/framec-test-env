@@ -1,0 +1,49 @@
+@@[target("javascript")]
+
+// JavaScript-unique — async_js_promise_allsettled
+//
+// RFC-0043 (JS): Promise.allSettled never rejects; returns
+// `{status, value|reason}` for each promise. Used for "best-effort
+// fan-out" pattern.
+
+@@[async]
+@@system Sys {
+    interface:
+        async work(crash)
+
+    machine:
+        $S {
+            work(crash) {
+                if (crash) {
+                    throw new Error("crash");
+                }
+                @@:("ok")
+            }
+        }
+}
+
+async function main() {
+    let a = @@Sys(); await a.init();
+    let b = @@Sys(); await b.init();
+    let c = @@Sys(); await c.init();
+
+    const results = await Promise.allSettled([
+        a.work(false),
+        b.work(true),
+        c.work(false),
+    ]);
+
+    if (results.length !== 3) throw new Error(`length: ${results.length}`);
+    if (results[0].status !== "fulfilled") throw new Error(`a: ${results[0].status}`);
+    if (results[1].status !== "rejected") throw new Error(`b: ${results[1].status}`);
+    if (results[2].status !== "fulfilled") throw new Error(`c: ${results[2].status}`);
+
+    // Each gate independent — all clear.
+    const ra = await a.work(false);
+    const rb = await b.work(false);
+    const rc = await c.work(false);
+
+    console.log("PASS: async_js_promise_allsettled");
+}
+
+main();

@@ -1,0 +1,66 @@
+@@[target("javascript")]
+
+// JavaScript-unique — async_js_three_deep_composition
+//
+// RFC-0043 (JS): A→B→C composition chain. Parent holds child, child
+// holds grandchild. Parent's handler calls child's interface, which
+// calls grandchild's. All three gates are independent.
+
+@@[async]
+@@system Grandchild {
+    interface:
+        async leaf()
+
+    machine:
+        $S {
+            leaf() { /* no-op */ }
+        }
+}
+
+@@[async]
+@@system Child {
+    interface:
+        async mid()
+
+    machine:
+        $S {
+            mid() {
+                await this.gc.leaf();
+            }
+        }
+
+    domain:
+        gc: Grandchild = @@Grandchild()
+}
+
+@@[async]
+@@[main]
+@@system Parent {
+    interface:
+        async top()
+
+    machine:
+        $S {
+            top() {
+                await this.ch.mid();
+            }
+        }
+
+    domain:
+        ch: Child = @@Child()
+}
+
+async function main() {
+    const p = @@Parent();
+    await p.init();
+
+    // Chain: top() → mid() → leaf(). All three settle in order.
+    await p.top();
+
+    // Run again — all three gates clear.
+    await p.top();
+
+    console.log("PASS: async_js_three_deep_composition");
+}
+
+main();
