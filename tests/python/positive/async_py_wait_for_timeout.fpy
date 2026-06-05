@@ -1,0 +1,44 @@
+@@[target("python_3")]
+
+# Python-unique — async_py_wait_for_timeout
+#
+# RFC-0043 (Python): asyncio.wait_for fires CancelledError into the
+# casing's await on machine.work(). The casing's finally MUST run
+# (gate cleared) before the TimeoutError propagates out.
+
+import asyncio
+
+@@[async]
+@@system Slow {
+    interface:
+        async slow(): str
+        async fast(): str
+
+    machine:
+        $S {
+            slow(): str {
+                await asyncio.sleep(1)
+                @@:("done")
+            }
+            fast(): str { @@:("ok") }
+        }
+}
+
+async def main():
+    s = @@Slow()
+    await s.init()
+
+    try:
+        await asyncio.wait_for(s.slow(), timeout=0.05)
+        assert False, "expected TimeoutError"
+    except asyncio.TimeoutError:
+        pass  # expected
+
+    # Gate must be clear — if stuck, this raises E703.
+    result = await s.fast()
+    assert result == "ok", f"gate stuck: {result!r}"
+
+    print("PASS: async_py_wait_for_timeout")
+
+if __name__ == '__main__':
+    asyncio.run(main())

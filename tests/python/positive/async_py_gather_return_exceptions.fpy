@@ -1,0 +1,54 @@
+@@[target("python_3")]
+
+# Python-unique — async_py_gather_return_exceptions
+#
+# RFC-0043 (Python): asyncio.gather(*coros, return_exceptions=True)
+# collects all results AND exceptions in a list — no short-circuit
+# on first failure (unlike default gather behavior).
+#
+# Useful for "best-effort fan-out". Pins that all gates are clean
+# afterward and per-instance results are properly carried.
+
+import asyncio
+
+@@[async]
+@@system Sys {
+    interface:
+        async work(crash: bool): str
+
+    machine:
+        $S {
+            work(crash: bool): str {
+                if crash:
+                    raise ValueError("crashed")
+                @@:("ok")
+            }
+        }
+}
+
+async def main():
+    a = @@Sys(); await a.init()
+    b = @@Sys(); await b.init()
+    c = @@Sys(); await c.init()
+
+    results = await asyncio.gather(
+        a.work(False),
+        b.work(True),
+        c.work(False),
+        return_exceptions=True,
+    )
+
+    assert results[0] == "ok", f"a: {results[0]!r}"
+    assert isinstance(results[1], ValueError), f"b: {results[1]!r}"
+    assert str(results[1]) == "crashed", f"b msg: {results[1]!r}"
+    assert results[2] == "ok", f"c: {results[2]!r}"
+
+    # Follow-up on each — all gates clear.
+    assert await a.work(False) == "ok"
+    assert await b.work(False) == "ok"
+    assert await c.work(False) == "ok"
+
+    print("PASS: async_py_gather_return_exceptions")
+
+if __name__ == '__main__':
+    asyncio.run(main())

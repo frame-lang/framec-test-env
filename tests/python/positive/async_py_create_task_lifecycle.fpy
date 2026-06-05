@@ -1,0 +1,55 @@
+@@[target("python_3")]
+
+# Python-unique — async_py_create_task_lifecycle
+#
+# RFC-0043 (Python): casing calls can be wrapped in asyncio.create_task
+# for fire-and-forget. Pins that:
+#   1. The task runs to completion independently.
+#   2. Cancelling the task before completion clears the gate.
+
+import asyncio
+
+@@[async]
+@@system Sys {
+    interface:
+        async work(): str
+        async peek(): str
+
+    machine:
+        $S {
+            work(): str {
+                await asyncio.sleep(0.05)
+                @@:("done")
+            }
+            peek(): str { @@:("ok") }
+        }
+}
+
+async def main():
+    s = @@Sys()
+    await s.init()
+
+    # Case 1: task runs to completion.
+    t1 = asyncio.create_task(s.work())
+    await asyncio.sleep(0)  # let task start
+    r1 = await t1
+    assert r1 == "done", f"t1: {r1!r}"
+    assert await s.peek() == "ok"
+
+    # Case 2: cancel task mid-flight.
+    t2 = asyncio.create_task(s.work())
+    await asyncio.sleep(0)  # let task acquire gate
+    t2.cancel()
+    try:
+        await t2
+        assert False, "expected CancelledError"
+    except asyncio.CancelledError:
+        pass
+
+    # Gate must be clear after cancel.
+    assert await s.peek() == "ok"
+
+    print("PASS: async_py_create_task_lifecycle")
+
+if __name__ == '__main__':
+    asyncio.run(main())
