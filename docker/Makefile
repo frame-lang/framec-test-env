@@ -166,19 +166,12 @@ test: $(STAMP_DIR)/framec-native build
 	@timeout 5 docker info >/dev/null 2>&1 || { \
 		echo "ERROR: Docker daemon unresponsive (timeout 5s on 'docker info')"; \
 		exit 2; }
-	@# framec_cache size warning — `framec_cached.sh` has LRU eviction
-	@# (keeps FRAMEC_CACHE_KEEP=3 most-recent framec hashes per lang),
-	@# but if eviction was disabled or hadn't been in place historically
-	@# the cache can carry 100+ GB. Warn at 5 GB/lang so the user can
-	@# `make clean-cache` before another run packs more in.
-	@for d in $(TEST_ENV_ROOT)/output/*/.framec_cache; do \
-		[ -d "$$d" ] || continue; \
-		kb=$$(du -sk "$$d" 2>/dev/null | cut -f1); \
-		mb=$$((kb / 1024)); \
-		if [ "$$mb" -gt 5000 ]; then \
-			echo "  WARNING: $$d is $${mb} MB — run 'make clean-cache' to reclaim"; \
-		fi; \
-	done
+	@# framec_cache now lives in the in-VM `framec_cache` named volume
+	@# (off VirtioFS — see docker-compose.yml), so its size can no longer
+	@# stall `--force-recreate` the way the old /output/.framec_cache
+	@# VirtioFS bind did (a multi-GB bind deadlocked recreate for hours).
+	@# LRU eviction (FRAMEC_CACHE_KEEP=3) bounds it; `make clean-cache`
+	@# reclaims it on demand.
 	@# --force-recreate: collect-results.sh greps `^not ok` lines from
 	@# the container's full log history. Persistent containers from
 	@# prior runs accumulate logs (one suite invocation per run); a
@@ -232,6 +225,11 @@ clean-cache:
 	@# first transpile (~30 s overhead for the whole run). See
 	@# docs/docker.md "framec transpile cache" for why this exists.
 	@echo "=== Cleaning framec transpile caches ==="
+	@# Current location: the in-VM `framec_cache` named volume.
+	@docker volume rm docker_framec_cache >/dev/null 2>&1 \
+		&& echo "  rm  docker_framec_cache (named volume)" \
+		|| echo "  --  docker_framec_cache (absent or in use)"
+	@# Legacy location: per-language VirtioFS host binds (pre-named-volume).
 	@for d in $(TEST_ENV_ROOT)/output/*/.framec_cache; do \
 		[ -d "$$d" ] || continue; \
 		kb=$$(du -sk "$$d" 2>/dev/null | cut -f1); \
