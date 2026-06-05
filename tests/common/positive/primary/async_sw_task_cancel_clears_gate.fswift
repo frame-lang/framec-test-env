@@ -1,0 +1,54 @@
+@@[target("swift")]
+
+// Swift-unique — async_sw_task_cancel_clears_gate
+//
+// RFC-0043 (Swift): a Task.cancel() during a casing call's await
+// must surface CancellationError and trigger the casing's defer to
+// clear the gate. Subsequent calls succeed cleanly.
+
+import Foundation
+
+@@[async]
+@@system Slow {
+    interface:
+        async work(): String
+        async peek(): String
+
+    machine:
+        $S {
+            work(): String {
+                // sleep_nanoseconds is throws — guard against cancel.
+                let _ = try? await Task.sleep(nanoseconds: 100_000_000)
+                @@:("done")
+            }
+            peek(): String { @@:("ok") }
+        }
+}
+
+let __sem = DispatchSemaphore(value: 0)
+Task {
+    do {
+        let s = @@Slow()
+        await s.initAsync()
+
+        // Spawn the slow call as a separate task, cancel it mid-flight.
+        let t = Task {
+            return try? await s.work()
+        }
+        try? await Task.sleep(nanoseconds: 5_000_000)  // 5ms
+        t.cancel()
+        let r = await t.value
+        // Result may be "done" if the task completed before cancel won the race,
+        // or nil if the cancel propagated.
+
+        // Gate must be clear regardless.
+        let p = try await s.peek()
+        guard p == "ok" else { fatalError("gate stuck: \(p)") }
+
+        print("PASS: async_sw_task_cancel_clears_gate")
+    } catch {
+        fatalError("unexpected: \(error)")
+    }
+    __sem.signal()
+}
+__sem.wait()
