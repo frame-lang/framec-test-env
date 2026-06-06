@@ -1,0 +1,51 @@
+@@[target("cpp_23")]
+
+// C++-unique — async_cpp_string_return_lifetime
+//
+// RFC-0043 (C++): a casing call returning std::string must produce
+// a value with proper lifetime — no dangling-reference, no
+// temporaries-bound-to-references. The std::any_cast<std::string>
+// path in interface_gen.rs needs std::move'd value semantics.
+
+#include <iostream>
+#include <stdexcept>
+#include <string>
+#include <vector>
+
+@@[async]
+@@system Sys {
+    interface:
+        async produce(label: std::string): std::string
+
+    machine:
+        $S {
+            produce(label: std::string): std::string {
+                @@:(std::string("result:") + label)
+            }
+        }
+}
+
+int main() {
+    auto s = @@Sys();
+    s.init().get();
+
+    // Collect results into a vector — exercises move semantics.
+    std::vector<std::string> results;
+    for (int i = 0; i < 5; i++) {
+        auto r = s.produce(std::string("item") + std::to_string(i)).get();
+        results.push_back(std::move(r));
+    }
+
+    // All strings should be intact (no dangling).
+    for (int i = 0; i < 5; i++) {
+        std::string expected = std::string("result:item") + std::to_string(i);
+        if (results[i] != expected) {
+            std::cout << "FAIL: results[" << i << "] = " << results[i]
+                      << " expected " << expected << std::endl;
+            return 1;
+        }
+    }
+
+    std::cout << "PASS: async_cpp_string_return_lifetime" << std::endl;
+    return 0;
+}
