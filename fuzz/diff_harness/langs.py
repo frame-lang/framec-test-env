@@ -705,11 +705,12 @@ class {main_cls} {{
 
 def java_async(meta: dict) -> str:
     """Java counterpart of `py_async`. Java has no `async`/`await`
-    keywords; framec lowers `async fetch(): String` to a method
-    returning `CompletableFuture<String>` and leaves sync interface
-    methods (`status(): str`) as plain returns. The driver `.join()`s
-    each async call (unchecked-exception variant of `.get()`) and
-    treats `status()` as a sync return.
+    keywords; on an `@@[async]` system framec's casing presents a
+    uniform `CompletableFuture<T>` boundary for EVERY interface method —
+    the async `fetch()` and the sync `status()` alike (the sync one is
+    wrapped via `CompletableFuture.completedFuture(...)`, RFC-0043). So
+    the driver `.join()`s every interface call (unchecked-exception
+    variant of `.get()`), `status()` included.
 
     Java's runner naming convention: the file is `<sys_name>.java`
     and the main class is `<sys_name>Main` (the runner runs
@@ -733,7 +734,7 @@ class {main_cls} {{
         System.out.println("TRACE: CALL fetch");
         String r = s.fetch("k").join();
         System.out.println("TRACE: RET " + r);
-        System.out.println("TRACE: status " + s.status());
+        System.out.println("TRACE: status " + s.status().join());
     }}
 }}
 """
