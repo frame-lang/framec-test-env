@@ -1,0 +1,51 @@
+@@[target("csharp")]
+
+// C4 — async_sync_op_bypass_gate
+
+using System;
+using System.Threading.Tasks;
+
+@@[async]
+@@system Holder {
+    operations:
+        get_count: int {
+            @@:(this.count)
+        }
+
+    interface:
+        async slow_work(): string
+
+    machine:
+        $S {
+            slow_work(): string {
+                this.count = this.count + 1;
+                await Task.Delay(50);
+                @@:("done")
+            }
+        }
+
+    domain:
+        count: int = 0
+}
+
+class Program {
+    public static async Task Main(string[] args) {
+        var s = @@Holder();
+        await s.init();
+
+        if (s.get_count() != 0) throw new Exception("initial");
+
+        // Fire async; yield so it gets the gate.
+        var p = s.slow_work();
+        await Task.Yield();
+
+        // Sync op while async in flight — no E703.
+        int n = s.get_count();
+        if (n != 1) throw new Exception($"during: {n}");
+
+        var r = await p;
+        if (r != "done") throw new Exception($"final: {r}");
+
+        Console.WriteLine("PASS: async_sync_op_bypass_gate");
+    }
+}

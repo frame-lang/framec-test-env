@@ -1,0 +1,54 @@
+@@[target("rust")]
+
+// Rust-unique — async_rs_timeout_drops_gate
+//
+// RFC-0043 (Rust, post-D5): tokio::time::timeout DROPS the inner
+// future on elapse. _GateGuard's Drop runs as part of the future's
+// destructor, clearing the gate. A follow-up call succeeds.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+@@[async]
+@@system Slow {
+    interface:
+        async work(): String
+        async peek(): String
+
+    machine:
+        $S {
+            work(): String {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                @@:(String::from("done"))
+                return;
+            }
+            peek(): String {
+                @@:(String::from("ok"))
+                return;
+            }
+        }
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    let local = tokio::task::LocalSet::new();
+    local.run_until(async {
+        let s = Rc::new(RefCell::new(@@Slow()));
+        s.borrow_mut().init().await;
+
+        // Wrap work() in a 10ms timeout — guaranteed to elapse before
+        // the 100ms sleep completes. Future is dropped; gate clears.
+        let s_clone = Rc::clone(&s);
+        let elapsed = tokio::time::timeout(
+            std::time::Duration::from_millis(10),
+            async move { s_clone.borrow_mut().work().await }
+        ).await;
+        assert!(elapsed.is_err(), "expected timeout to elapse");
+
+        // Gate must be clear — if stuck, this returns Err(FrameE703Error).
+        let v = s.borrow_mut().peek().await.expect("peek should not E703");
+        assert_eq!(v, "ok", "expected 'ok', got {}", v);
+
+        println!("PASS: async_rs_timeout_drops_gate");
+    }).await;
+}

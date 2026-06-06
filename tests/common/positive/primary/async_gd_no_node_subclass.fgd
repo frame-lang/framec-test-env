@@ -1,0 +1,40 @@
+@@[target("gdscript")]
+
+# GDScript-unique — async_gd_no_node_subclass
+#
+# RFC-0043 (GDScript): the generated system class is a plain GDScript
+# class — NOT a Node/Resource/SceneTree subclass. Pins that no
+# lifecycle pollution (no _ready, _process, _enter_tree) is injected,
+# and that the system runs cleanly outside any node hierarchy.
+
+extends SceneTree
+
+@@[async]
+@@system Sys {
+    interface:
+        async work(): String
+
+    machine:
+        $S {
+            work(): String { @@:("done") }
+        }
+}
+
+func _init():
+    var s = @@Sys()
+    await s.init()
+
+    # Sanity: not a Node — has_method("_ready") should be FALSE for
+    # the user's actual frame methods to behave normally.
+    # Frame system instances are RefCounted, not Node.
+    var r = await s.work()
+    assert(r == "done", "expected 'done', got: " + str(r))
+
+    # No Node lifecycle methods.
+    assert(not s.has_method("_ready"), "should not have _ready")
+    assert(not s.has_method("_process"), "should not have _process")
+    assert(not s.has_method("_enter_tree"), "should not have _enter_tree")
+    assert(not s.has_method("_exit_tree"), "should not have _exit_tree")
+
+    print("PASS: async_gd_no_node_subclass")
+    quit()

@@ -2,7 +2,15 @@
 
 use tokio;
 
+@@[async]
 @@system AsyncWorker {
+    operations:
+        // RFC-0043: domain fields live on the private machine, not the
+        // casing. External callers can't reach `w.log` directly.
+        has_log_entry(needle: String): bool {
+            @@:(self.log.contains(&needle))
+        }
+
     interface:
         async start()
         async process(data: String): String
@@ -42,22 +50,23 @@ use tokio;
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut w = @@AsyncWorker();
     w.init().await;
 
-    assert_eq!(w.get_status().await, "idle");
-    assert!(w.log.contains(&"idle:ready".to_string()));
+    assert_eq!(w.get_status().await?, "idle");
+    assert!(w.has_log_entry("idle:ready".to_string()));
 
-    w.start().await;
-    assert_eq!(w.get_status().await, "working");
+    w.start().await?;
+    assert_eq!(w.get_status().await?, "working");
 
-    let result = w.process("hello".to_string()).await;
+    let result = w.process("hello".to_string()).await?;
     assert_eq!(result, "processed:hello");
 
-    w.stop().await;
-    assert_eq!(w.get_status().await, "idle");
-    assert!(w.log.contains(&"working:exited".to_string()));
+    w.stop().await?;
+    assert_eq!(w.get_status().await?, "idle");
+    assert!(w.has_log_entry("working:exited".to_string()));
 
     println!("PASS: async_http_client");
+    Ok(())
 }

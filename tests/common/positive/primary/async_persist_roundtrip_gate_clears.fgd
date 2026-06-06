@@ -1,0 +1,45 @@
+@@[target("gdscript")]
+
+# C5 — async_persist_roundtrip_gate_clears
+
+extends SceneTree
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[async]
+@@system Counter {
+    interface:
+        async bump(): int
+
+    machine:
+        $S {
+            bump(): int {
+                self.value = self.value + 1
+                @@:(self.value)
+            }
+        }
+
+    domain:
+        value: int = 0
+}
+
+func _init():
+    var s1 = @@Counter()
+    await s1.init()
+
+    var v1 = await s1.bump()
+    assert(v1 == 1, "s1: " + str(v1))
+
+    var snap = s1.save_state()
+    var s2 = @@Counter()
+    s2.restore_state(snap)
+
+    var v2 = await s2.bump()
+    assert(v2 == 2, "s2: " + str(v2))
+
+    var v3 = await s2.bump()
+    assert(v3 == 3, "s2 second: " + str(v3))
+
+    print("PASS: async_persist_roundtrip_gate_clears")
+    quit()

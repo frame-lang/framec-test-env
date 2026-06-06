@@ -1,0 +1,72 @@
+@@[target("cpp_23")]
+
+// C++-unique — async_cpp_throw_after_partial_await
+//
+// RFC-0043 (C++): handler co_awaits multiple steps; throws partway
+// through. The casing's catch(...) MUST clear the gate at the
+// outer boundary even though the throw originated inside a nested
+// co_await chain.
+
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+@@[async]
+@@system Helper {
+    interface:
+        async step(): std::string
+
+    machine:
+        $S {
+            step(): std::string { @@:(std::string("step-ok")) }
+        }
+}
+
+@@[async]
+@@[main]
+@@system Main {
+    interface:
+        async do_work()
+        async peek(): std::string
+
+    machine:
+        $S {
+            do_work() {
+                auto r1 = co_await this->helper->step();
+                if (r1 != "step-ok") throw std::runtime_error("helper failed");
+                throw std::runtime_error("intentional after step");
+            }
+            peek(): std::string { @@:(std::string("ok")) }
+        }
+
+    domain:
+        helper: Helper = @@Helper()
+}
+
+int main() {
+    auto m = @@Main();
+    m.init().get();
+
+    bool caught = false;
+    try {
+        m.do_work().get();
+    } catch (const std::runtime_error& e) {
+        if (std::string(e.what()) == "intentional after step") {
+            caught = true;
+        }
+    }
+    if (!caught) {
+        std::cout << "FAIL: expected intentional throw" << std::endl;
+        return 1;
+    }
+
+    // Gate cleared — peek succeeds.
+    auto p = m.peek().get();
+    if (p != "ok") {
+        std::cout << "FAIL: gate stuck: " << p << std::endl;
+        return 1;
+    }
+
+    std::cout << "PASS: async_cpp_throw_after_partial_await" << std::endl;
+    return 0;
+}

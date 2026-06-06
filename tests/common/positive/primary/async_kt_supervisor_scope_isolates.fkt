@@ -1,0 +1,78 @@
+@@[target("kotlin")]
+
+// Kotlin-unique — async_kt_supervisor_scope_isolates
+//
+// RFC-0043 (Kotlin): under `supervisorScope`, a child coroutine
+// failure does NOT cancel its siblings. This pins that:
+//   1. Two casing calls run concurrently under supervisorScope.
+//   2. The losing one's IllegalStateException("E703") does NOT
+//      cancel the winner.
+//   3. After both settle, the gate is clear and a follow-up succeeds.
+//
+// Contrast: under plain coroutineScope, a child exception cancels
+// siblings — which is why C2 uses runCatching to wrap each child.
+// supervisorScope is the production pattern for "isolate failures
+// between independent units of work."
+
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.supervisorScope
+
+@@[async]
+@@system Slow {
+    interface:
+        async work(): String
+
+    machine:
+        $S {
+            work(): String {
+                delay(40)
+                @@:("done")
+            }
+        }
+}
+
+fun main() = runBlocking {
+    val s = @@Slow()
+    s.init()
+
+    var winnerResult: String? = null
+    var loserError: Throwable? = null
+
+    supervisorScope {
+        val d1 = async { s.work() }
+        // Yield to let d1 acquire the gate.
+        delay(5)
+        val d2 = async { s.work() }
+
+        // Under supervisorScope, awaiting a failed child does NOT
+        // cancel the supervisor (or other children). Each await
+        // re-throws its own child's exception locally.
+        try {
+            winnerResult = d1.await()
+        } catch (e: Throwable) {
+            check(false) { "winner shouldn't have failed: $e" }
+        }
+        try {
+            d2.await()
+            check(false) { "loser should have thrown" }
+        } catch (e: Throwable) {
+            loserError = e
+        }
+    }
+
+    check(winnerResult == "done") { "expected winner='done', got $winnerResult" }
+    check(loserError is IllegalStateException) {
+        "expected IllegalStateException, got ${loserError?.javaClass?.name}"
+    }
+    check(loserError?.message?.contains("E703") == true) {
+        "expected E703 in message, got ${loserError?.message}"
+    }
+
+    // Gate is clear after both settled.
+    val result = s.work()
+    check(result == "done") { "expected 'done' after supervisor scope exit, got $result" }
+
+    println("PASS: async_kt_supervisor_scope_isolates")
+}

@@ -3,6 +3,7 @@
 // Test 1: Basic async dispatch chain for Rust
 // Validates: async fn, .await, return value propagation
 
+@@[async]
 @@system AsyncBasic {
     interface:
         async fetch(key: String): String
@@ -24,15 +25,19 @@
 }
 
 #[tokio::main]
-async fn main() {
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut s = @@AsyncBasic();
     s.init().await;
 
-    let result = s.fetch(String::from("test")).await;
+    // RFC-0043 D5: gated interface methods return Result<T, FrameE703Error>.
+    // Single-driver scripts use `?` to propagate any E703 — which can't
+    // actually fire here since each call is sequential.
+    let result = s.fetch(String::from("test")).await?;
     assert_eq!(result, "value_for_test", "fetch returned wrong value");
 
-    let state = s.get_state().await;
+    let state = s.get_state().await?;
     assert_eq!(state, "Ready", "state should be Ready");
 
     println!("PASS: Rust async basic — dispatch chain and return values work");
+    Ok(())
 }

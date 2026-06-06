@@ -1,0 +1,43 @@
+@@[target("dart")]
+
+// Dart-unique — async_dt_zone_value_propagation
+//
+// RFC-0043 (Dart): Zone values propagate across await boundaries.
+// A handler reading a Zone.current value during its dispatch should
+// see the value set by the caller's runZoned wrap.
+
+import 'dart:async';
+
+@@[async]
+@@system Sys {
+    interface:
+        async read_zone(): String
+
+    machine:
+        $S {
+            read_zone(): String {
+                final v = Zone.current[#trace_id];
+                @@:(v != null ? v.toString() : "no-zone")
+            }
+        }
+}
+
+Future<void> main() async {
+    final s = @@Sys();
+    await s.init();
+
+    // Wrap a casing call in a Zone with values.
+    final result = await runZoned(() async {
+        return await s.read_zone();
+    }, zoneValues: {#trace_id: "trace-123"});
+
+    if (result != "trace-123") {
+        throw Exception("expected trace-123, got: $result");
+    }
+
+    // Outside the zone — no zone value.
+    final outside = await s.read_zone();
+    if (outside != "no-zone") throw Exception("expected no-zone, got: $outside");
+
+    print("PASS: async_dt_zone_value_propagation");
+}

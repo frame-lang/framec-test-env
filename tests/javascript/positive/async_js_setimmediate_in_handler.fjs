@@ -1,0 +1,35 @@
+@@[target("javascript")]
+
+// JavaScript-unique — async_js_setimmediate_in_handler
+//
+// RFC-0043 (JS): a handler body can use setImmediate / setTimeout
+// inside an await. The gate must remain held across the timer
+// suspension and clear when the handler resumes.
+
+@@[async]
+@@system Sys {
+    interface:
+        async timed_work()
+
+    machine:
+        $S {
+            timed_work() {
+                await new Promise(r => setImmediate(r));
+                await new Promise(r => setTimeout(r, 5));
+            }
+        }
+}
+
+async function main() {
+    const s = @@Sys();
+    await s.init();
+
+    await s.timed_work();
+
+    // Follow-up works — gate cleared after async timer settle.
+    await s.timed_work();
+
+    console.log("PASS: async_js_setimmediate_in_handler");
+}
+
+main();

@@ -1,0 +1,69 @@
+@@[target("swift")]
+
+// C2 — async_concurrent_entry_e703
+//
+// RFC-0043 (Swift, post-D2): casing wrappers are `async throws -> T`.
+// Two concurrent task-group children both call slow_work() on the
+// same casing; one wins the gate, the other throws
+// FrameE703Error.busy(...). After the group settles, a fresh call
+// succeeds (gate clears via defer).
+
+import Foundation
+
+@@[async]
+@@system Slow {
+    interface:
+        async slow_work(): String
+
+    machine:
+        $S {
+            slow_work(): String {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                @@:("done")
+            }
+        }
+}
+
+let __sem = DispatchSemaphore(value: 0)
+Task {
+    let s = @@Slow()
+    await s.initAsync()
+
+    // Use a TaskGroup so siblings don't cancel each other on throw.
+    // Each child wraps its call in do/catch so a throw doesn't escape.
+    var successes = 0
+    var errors = 0
+    await withTaskGroup(of: Result<String, Error>.self) { group in
+        group.addTask {
+            do { return .success(try await s.slow_work()) }
+            catch { return .failure(error) }
+        }
+        group.addTask {
+            do { return .success(try await s.slow_work()) }
+            catch { return .failure(error) }
+        }
+        for await result in group {
+            switch result {
+            case .success(let v):
+                if v == "done" { successes += 1 }
+            case .failure(let e):
+                if case Slow.FrameE703Error.busy = e { errors += 1 }
+            }
+        }
+    }
+
+    guard successes == 1 else { fatalError("expected 1 success, got \(successes)") }
+    guard errors == 1 else { fatalError("expected 1 E703, got \(errors)") }
+
+    // After both settled, gate must be clear.
+    do {
+        let result = try await s.slow_work()
+        guard result == "done" else { fatalError("expected 'done' after clear, got \(result)") }
+    } catch {
+        fatalError("unexpected error after clear: \(error)")
+    }
+
+    print("PASS: async_concurrent_entry_e703")
+    __sem.signal()
+}
+__sem.wait()

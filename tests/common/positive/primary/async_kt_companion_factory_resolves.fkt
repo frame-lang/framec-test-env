@@ -1,0 +1,50 @@
+@@[target("kotlin")]
+
+// Kotlin-unique — async_kt_companion_factory_resolves
+//
+// RFC-0043 Phase 6.5 regression test.
+//
+// In Kotlin, `@@Sys()` resolves to the casing class's companion-object
+// factory `Sys.__create()` (not to the machine class). If the
+// emission regresses to `SysMachine.__create()` or the
+// `@@Sys.factory` lookup resolves wrongly, the `.work()` call below
+// would either fail to type-check or return the wrong system surface.
+//
+// What this pins:
+//   1. `@@Sys()` returns the casing wrapper (suspend interface).
+//   2. `s.work()` is a suspend function (must be inside coroutine).
+//   3. The gate behavior is present (E703 path exists, not tested
+//      explicitly here).
+
+import kotlinx.coroutines.runBlocking
+
+@@[async]
+@@system Sys {
+    interface:
+        async work(): String
+
+    machine:
+        $S {
+            work(): String { @@:("ok") }
+        }
+}
+
+fun main() = runBlocking {
+    val s: Sys = @@Sys()
+    s.init()
+
+    // If this compiles + runs, the casing factory resolution is correct.
+    // (A direct machine.work() would not require suspend; the gate
+    // would be bypassed.)
+    val result: String = s.work()
+    check(result == "ok") { "expected 'ok', got $result" }
+
+    // Verify the type of `s` is the casing, not the machine. This
+    // assertion would fail at compile time, not runtime, if regressed.
+    val className = s::class.java.simpleName
+    check(className == "Sys") {
+        "expected casing class name 'Sys', got '$className' (regression: factory returned wrong class)"
+    }
+
+    println("PASS: async_kt_companion_factory_resolves")
+}

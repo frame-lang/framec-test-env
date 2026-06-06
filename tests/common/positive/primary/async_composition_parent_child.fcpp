@@ -1,0 +1,50 @@
+@@[target("cpp_23")]
+
+// C6 — async_composition_parent_child
+
+#include <iostream>
+
+@@[async]
+@@system Child {
+    interface:
+        async work(): std::string
+
+    machine:
+        $S {
+            work(): std::string { @@:(std::string("from_child")) }
+        }
+}
+
+@@[async]
+@@[main]
+@@system Parent {
+    interface:
+        async chain(): std::string
+        async direct(): std::string
+
+    machine:
+        $S {
+            chain(): std::string {
+                std::string r = co_await this->child->work();
+                @@:("parent_saw:" + r)
+            }
+            direct(): std::string { @@:(std::string("parent_direct")) }
+        }
+
+    domain:
+        child: Child = @@Child()
+}
+
+int main() {
+    auto p = @@Parent();
+    p.init().get();
+
+    auto r1 = p.direct().get();
+    if (r1 != "parent_direct") { std::cout << "FAIL direct: " << r1 << std::endl; return 1; }
+
+    auto r2 = p.chain().get();
+    if (r2 != "parent_saw:from_child") { std::cout << "FAIL chain: " << r2 << std::endl; return 1; }
+
+    std::cout << "PASS: async_composition_parent_child" << std::endl;
+    return 0;
+}

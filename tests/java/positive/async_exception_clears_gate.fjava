@@ -1,0 +1,69 @@
+@@[target("java")]
+
+// C1 — async_exception_clears_gate
+//
+// RFC-0043 (Java): handler throws during machine call → casing's
+// try/finally MUST clear busy/in_flight → next interface call succeeds
+// (no E703 from a stuck gate).
+//
+// Java contract (post Fix #3 / D-JAVA-1):
+//   The casing returns CompletableFuture<T>. A handler throw becomes
+//   a *failed future* — `CompletableFuture.failedFuture(e)`. The
+//   caller observes this via `.get()` throwing ExecutionException
+//   whose `getCause()` is the handler's RuntimeException.
+//
+// Aligns Java with every other layered backend's recoverable contract.
+
+import java.util.concurrent.ExecutionException;
+
+@@[async]
+@@system Crashable {
+    interface:
+        async boom(): String
+        async peek(): String
+
+    machine:
+        $S {
+            boom(): String {
+                throw new RuntimeException("handler crash");
+            }
+            peek(): String {
+                @@:("ok")
+            }
+        }
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        Crashable s = @@Crashable();
+        s.init().get();
+
+        // First call: handler throws. Casing wraps it in
+        // CompletableFuture.failedFuture(e). The gate clears via the
+        // casing's whenComplete/finally — must be clear by the time
+        // the future settles.
+        Throwable caught = null;
+        try {
+            s.boom().get();
+        } catch (ExecutionException e) {
+            caught = e.getCause();
+        }
+        if (caught == null) throw new RuntimeException("expected failed future");
+        if (!(caught instanceof RuntimeException)) {
+            throw new RuntimeException("expected RuntimeException cause, got "
+                + caught.getClass().getName());
+        }
+        if (!"handler crash".equals(caught.getMessage())) {
+            throw new RuntimeException("unexpected message: " + caught.getMessage());
+        }
+
+        // Second call: gate must be clear. If stuck, this completes
+        // exceptionally with IllegalStateException("E703: ...").
+        String result = s.peek().get();
+        if (!"ok".equals(result)) {
+            throw new RuntimeException("expected 'ok', got '" + result + "'");
+        }
+
+        System.out.println("PASS: async_exception_clears_gate");
+    }
+}

@@ -1,0 +1,49 @@
+@@[target("gdscript")]
+
+# C1 — async_exception_clears_gate (GDScript specialization)
+#
+# RFC-0043 (GDScript, post-D3): GDScript has no try/finally.
+# The casing's gate uses early-return-with-push_error on E703
+# and manual cleanup (busy = false; in_flight = null) AFTER the await.
+# Manual cleanup means: if the await raises a hard error (push_error or
+# script crash), the gate is NOT cleared. This is a documented
+# limitation in RFC-0043 §GDScript known limitations.
+#
+# Since GDScript handler bodies can't recoverably throw (the only
+# error path is hard runtime errors that abort the script), this C1
+# fixture reduces to the gate-cycling case: verify the manual cleanup
+# clears the gate between successive interface calls. Same shape as
+# Swift's C1 specialization.
+
+extends SceneTree
+
+@@[async]
+@@system Worker {
+    interface:
+        async peek(): String
+
+    machine:
+        $S {
+            peek(): String { @@:("ok") }
+        }
+}
+
+func _init():
+    var s = @@Worker()
+    await s.init()
+
+    # First call — manual cleanup MUST clear the gate after this returns.
+    var r1 = await s.peek()
+    assert(r1 == "ok", "call #1 expected 'ok', got " + str(r1))
+
+    # Second call — if cleanup skipped, this returns "" (typed-zero
+    # from the early-return-push_error path), not "ok".
+    var r2 = await s.peek()
+    assert(r2 == "ok", "call #2 expected 'ok', got " + str(r2))
+
+    # Third call for good measure.
+    var r3 = await s.peek()
+    assert(r3 == "ok", "call #3 expected 'ok', got " + str(r3))
+
+    print("PASS: async_exception_clears_gate")
+    quit()

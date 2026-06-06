@@ -1,0 +1,53 @@
+@@[target("swift")]
+
+// C5 — async_persist_roundtrip_gate_clears
+
+import Foundation
+
+@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@[async]
+@@system Counter {
+    interface:
+        async bump(): Int
+
+    machine:
+        $S {
+            bump(): Int {
+                self.value = self.value + 1
+                @@:(self.value)
+            }
+        }
+
+    domain:
+        value: Int = 0
+}
+
+let __sem = DispatchSemaphore(value: 0)
+Task {
+    do {
+        let s1 = @@Counter()
+        await s1.initAsync()
+
+        let v1 = try await s1.bump()
+        guard v1 == 1 else { fatalError("s1: \(v1)") }
+
+        let snap = s1.saveState()
+
+        let s2 = @@Counter()
+        s2.restoreState(snap)
+
+        let v2 = try await s2.bump()
+        guard v2 == 2 else { fatalError("s2: \(v2)") }
+
+        let v3 = try await s2.bump()
+        guard v3 == 3 else { fatalError("s2 second: \(v3)") }
+
+        print("PASS: async_persist_roundtrip_gate_clears")
+    } catch {
+        fatalError("unexpected: \(error)")
+    }
+    __sem.signal()
+}
+__sem.wait()

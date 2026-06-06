@@ -1,0 +1,65 @@
+@@[target("kotlin")]
+
+// Kotlin-unique — async_kt_e703_message_format
+//
+// RFC-0043: E703 message must include both the conflicting method
+// name and the in_flight method name to help the user diagnose.
+//
+// Template (per casing.rs Kotlin branch):
+//   "E703: system busy: cannot enter '<method>' while '<in_flight>' is in flight"
+//
+// This fixture pins the EXACT format. A drift in the message format
+// breaks any user code that scrapes the message (admittedly fragile,
+// but we publish this as part of the contract).
+
+import kotlinx.coroutines.async
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.runBlocking
+
+@@[async]
+@@system Sys {
+    interface:
+        async first(): String
+        async second(): String
+
+    machine:
+        $S {
+            first(): String {
+                delay(50)
+                @@:("first-done")
+            }
+            second(): String {
+                @@:("second-done")
+            }
+        }
+}
+
+fun main() = runBlocking {
+    val s = @@Sys()
+    s.init()
+
+    // Start first(), then try second() before first settles.
+    val d1 = async { runCatching { s.first() } }
+    // Give d1 time to acquire the gate.
+    delay(5)
+    val d2 = async { runCatching { s.second() } }
+
+    val r1 = d1.await()
+    val r2 = d2.await()
+
+    check(r1.isSuccess && r1.getOrNull() == "first-done") {
+        "expected first() to win, got $r1"
+    }
+
+    val ex = r2.exceptionOrNull()
+    check(ex is IllegalStateException) {
+        "expected IllegalStateException, got ${ex?.javaClass?.name}"
+    }
+    val msg = ex.message ?: ""
+    val expected = "E703: system busy: cannot enter 'second' while 'first' is in flight"
+    check(msg == expected) {
+        "E703 message format drift:\n  expected: $expected\n  actual:   $msg"
+    }
+
+    println("PASS: async_kt_e703_message_format")
+}

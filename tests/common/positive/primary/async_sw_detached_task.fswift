@@ -1,0 +1,45 @@
+@@[target("swift")]
+
+// Swift-unique — async_sw_detached_task
+//
+// RFC-0043 (Swift): Task.detached spawns a task with no priority/
+// metadata inheritance from the spawning context. Casing calls
+// inside detached tasks still go through the gate cleanly.
+
+import Foundation
+
+@@[async]
+@@system Sys {
+    interface:
+        async work(): String
+
+    machine:
+        $S {
+            work(): String { @@:("done") }
+        }
+}
+
+let __sem = DispatchSemaphore(value: 0)
+Task {
+    do {
+        let s = @@Sys()
+        await s.initAsync()
+
+        // Spawn a detached task; await its result.
+        let detached = Task.detached {
+            return try await s.work()
+        }
+        let r1 = try await detached.value
+        guard r1 == "done" else { fatalError("detached: \(r1)") }
+
+        // Issue follow-up — gate clear.
+        let r2 = try await s.work()
+        guard r2 == "done" else { fatalError("post: \(r2)") }
+
+        print("PASS: async_sw_detached_task")
+    } catch {
+        fatalError("unexpected: \(error)")
+    }
+    __sem.signal()
+}
+__sem.wait()

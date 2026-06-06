@@ -1,0 +1,47 @@
+@@[target("kotlin")]
+
+// C5 — async_persist_roundtrip_gate_clears
+
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[async]
+@@system Counter {
+    interface:
+        async bump(): Int
+
+    machine:
+        $S {
+            bump(): Int {
+                yield()
+                this.value = this.value + 1
+                @@:(this.value)
+            }
+        }
+
+    domain:
+        value: Int = 0
+}
+
+fun main() = runBlocking {
+    val s1 = @@Counter()
+    s1.init()
+
+    val v1 = s1.bump()
+    check(v1 == 1) { "s1: $v1" }
+
+    val snap = s1.save_state()
+    val s2 = @@Counter()
+    s2.restore_state(snap)
+
+    val v2 = s2.bump()
+    check(v2 == 2) { "s2: $v2" }
+
+    val v3 = s2.bump()
+    check(v3 == 3) { "s2 second: $v3" }
+
+    println("PASS: async_persist_roundtrip_gate_clears")
+}

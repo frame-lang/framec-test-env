@@ -1,0 +1,49 @@
+@@[target("java")]
+
+// C4 — async_sync_op_bypass_gate
+//
+// Operations bypass the gate AND are emitted as sync methods on the
+// Java casing (no CompletableFuture wrap). Sync ops can be called
+// before, during, or after async dispatch without triggering E703.
+
+@@[async]
+@@system Holder {
+    operations:
+        get_count: int {
+            @@:(this.count)
+        }
+
+    interface:
+        async slow_work(): String
+
+    machine:
+        $S {
+            slow_work(): String {
+                this.count = this.count + 1;
+                @@:("done")
+            }
+        }
+
+    domain:
+        count: int = 0
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        Holder s = @@Holder();
+        s.init().get();
+
+        if (s.get_count() != 0) throw new RuntimeException("initial: " + s.get_count());
+
+        String r = s.slow_work().get();
+        if (!"done".equals(r)) throw new RuntimeException("dispatch: " + r);
+        if (s.get_count() != 1) throw new RuntimeException("after dispatch: " + s.get_count());
+
+        // Ops are sync — no .get() needed, no E703.
+        int n2 = s.get_count();
+        int n3 = s.get_count();
+        if (n2 != 1 || n3 != 1) throw new RuntimeException("sequential ops");
+
+        System.out.println("PASS: async_sync_op_bypass_gate");
+    }
+}

@@ -1,0 +1,54 @@
+@@[target("rust")]
+
+// Rust-unique — async_rs_select_cancellation
+//
+// RFC-0043 (Rust, post-D5): tokio::select! polls multiple futures
+// and drops the others when one completes. If the work() future
+// is dropped mid-await, _GateGuard::drop() runs and the gate clears.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+@@[async]
+@@system Slow {
+    interface:
+        async work(): String
+        async peek(): String
+
+    machine:
+        $S {
+            work(): String {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                @@:(String::from("done"))
+                return;
+            }
+            peek(): String {
+                @@:(String::from("ok"))
+                return;
+            }
+        }
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    let local = tokio::task::LocalSet::new();
+    local.run_until(async {
+        let s = Rc::new(RefCell::new(@@Slow()));
+        s.borrow_mut().init().await;
+
+        let s_clone = Rc::clone(&s);
+        let result = tokio::select! {
+            r = async { s_clone.borrow_mut().work().await } => Some(r),
+            _ = tokio::time::sleep(std::time::Duration::from_millis(10)) => None,
+        };
+
+        // The sleep should win (10ms < 100ms), so result is None.
+        assert!(result.is_none(), "expected sleep to win, got: {:?}", result.is_some());
+
+        // Gate must be clear despite work() being dropped mid-await.
+        let v = s.borrow_mut().peek().await.expect("peek should not E703");
+        assert_eq!(v, "ok", "expected 'ok', got {}", v);
+
+        println!("PASS: async_rs_select_cancellation");
+    }).await;
+}

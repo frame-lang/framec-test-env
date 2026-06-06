@@ -1,0 +1,38 @@
+@@[target("dart")]
+
+// Dart-unique — async_dt_future_then_chain
+//
+// RFC-0043 (Dart): Future.then() chains. Each call takes/clears the
+// gate; subsequent .then() callbacks see the gate clear.
+
+@@[async]
+@@system Sys {
+    interface:
+        async first(): String
+        async second(): String
+        async third(): String
+
+    machine:
+        $S {
+            first(): String { @@:("a") }
+            second(): String { @@:("ab") }
+            third(): String { @@:("abc") }
+        }
+}
+
+Future<void> main() async {
+    final s = @@Sys();
+    await s.init();
+
+    // Chain via .then() — each link goes through gate.
+    final result = await s.first()
+        .then((v) => s.second())
+        .then((v) => s.third());
+
+    if (result != "abc") throw Exception("chain: $result");
+
+    // Gate clear post-chain.
+    if (await s.first() != "a") throw Exception("post-chain stuck");
+
+    print("PASS: async_dt_future_then_chain");
+}

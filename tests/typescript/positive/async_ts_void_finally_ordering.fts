@@ -1,0 +1,42 @@
+@@[target("typescript")]
+
+// TypeScript-unique — async_ts_void_finally_ordering
+//
+// RFC-0043 (TS): async fn with no return type (Promise<void>) —
+// casing must clear gate before resolving the promise. A caller
+// awaiting the void promise then immediately issuing a follow-up
+// must observe a clear gate.
+
+@@[async]
+@@system Sys {
+    interface:
+        async fire()
+        async peek(): str
+
+    machine:
+        $S {
+            fire() { /* no-op */ }
+            peek(): str { @@:("ok") }
+        }
+}
+
+async function main(): Promise<void> {
+    let s = @@Sys();
+    await s.init();
+
+    await s.fire();
+    // Immediate follow-up — gate must be clear.
+    const r = await s.peek();
+    if (r !== "ok") throw new Error(`gate stuck after void fire(): ${r}`);
+
+    // Multiple back-to-back fires — must all succeed.
+    for (let i = 0; i < 5; i++) {
+        await s.fire();
+    }
+    const r2 = await s.peek();
+    if (r2 !== "ok") throw new Error(`gate stuck after loop: ${r2}`);
+
+    console.log("PASS: async_ts_void_finally_ordering");
+}
+
+main();

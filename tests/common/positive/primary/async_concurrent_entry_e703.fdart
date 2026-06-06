@@ -1,0 +1,51 @@
+@@[target("dart")]
+
+// C2 — async_concurrent_entry_e703
+//
+// RFC-0043 (Dart): Future.wait on a single casing — one wins the gate,
+// the other throws StateError("E703: ..."). After both settle, a fresh
+// call succeeds.
+
+@@[async]
+@@system Slow {
+    interface:
+        async slow_work(): String
+
+    machine:
+        $S {
+            slow_work(): String {
+                await Future.delayed(Duration(milliseconds: 50));
+                @@:("done")
+            }
+        }
+}
+
+Future<void> main() async {
+    final s = @@Slow();
+    await s.init();
+
+    // Wrap each Future with .then(onError:) at creation time so the
+    // rejected one is handled synchronously — Dart's unhandled-
+    // rejection detection fires on Futures that go unhandled across
+    // microtask boundaries, even momentarily.
+    final futures = [
+        s.slow_work().then<Object>((v) => v, onError: (e) => e),
+        s.slow_work().then<Object>((v) => v, onError: (e) => e),
+    ];
+    final results = await Future.wait(futures);
+
+    int successes = 0, errors = 0;
+    for (final r in results) {
+        if (r == "done") successes++;
+        else if (r is StateError && r.message.contains("E703")) errors++;
+    }
+
+    if (successes != 1) throw Exception("expected 1 success, got $successes (results: $results)");
+    if (errors != 1) throw Exception("expected 1 E703, got $errors (results: $results)");
+
+    // After both settled, gate must be clear.
+    final result = await s.slow_work();
+    if (result != "done") throw Exception("expected 'done' after clear, got '$result'");
+
+    print("PASS: async_concurrent_entry_e703");
+}

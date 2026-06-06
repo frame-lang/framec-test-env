@@ -1,0 +1,68 @@
+@@[target("kotlin")]
+
+// Kotlin-unique — async_kt_noncancellable_finally
+//
+// RFC-0043 (Kotlin): question — does the casing's finally block
+// need `withContext(NonCancellable)` to guarantee the gate clears
+// even when the coroutine is cancelled DURING the finally?
+//
+// Kotlin's rule: a coroutine becomes "cancelled" the moment its Job
+// is cancelled. A suspending call inside a cancelled coroutine's
+// finally re-throws CancellationException unless wrapped in
+// withContext(NonCancellable).
+//
+// The casing's finally is:
+//     this.busy = false
+//     this.in_flight = null
+// — NEITHER is a suspending call. They're plain assignments. So the
+// finally completes synchronously even on cancel. No NonCancellable
+// wrap is needed.
+//
+// This fixture pins that invariant by cancelling mid-await and
+// verifying the gate is clear afterward (which is only possible if
+// the finally ran). If the finally were ever changed to include a
+// suspending call without NonCancellable, this test would fail.
+
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.yield
+
+@@[async]
+@@system Sys {
+    interface:
+        async slow(): String
+
+    machine:
+        $S {
+            slow(): String {
+                delay(1000)
+                @@:("done")
+            }
+        }
+}
+
+fun main() = runBlocking {
+    val s = @@Sys()
+    s.init()
+
+    val job = launch {
+        try {
+            s.slow()
+        } catch (e: CancellationException) {
+            // expected
+        }
+    }
+    yield()
+    delay(10)
+    job.cancel()
+    job.join()
+
+    // If the finally ran (plain assignments, no NonCancellable needed),
+    // the next call succeeds. If it didn't, this throws E703.
+    val r = s.slow()
+    check(r == "done") { "gate stuck after cancel: $r" }
+
+    println("PASS: async_kt_noncancellable_finally")
+}

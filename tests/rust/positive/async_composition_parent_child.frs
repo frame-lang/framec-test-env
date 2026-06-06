@@ -1,0 +1,65 @@
+@@[target("rust")]
+
+// C6 — async_composition_parent_child
+//
+// RFC-0043 (Rust): an async parent owns an async child as a domain
+// field. Parent's handler awaits child's gated interface method,
+// which returns Result<T, FrameE703Error> (post-D5). The `?` operator
+// inside the handler body propagates any child-side E703 to the
+// parent's return.
+
+@@[async]
+@@system Child {
+    interface:
+        async work(): String
+
+    machine:
+        $S {
+            work(): String {
+                @@:(String::from("from_child"))
+                return;
+            }
+        }
+}
+
+@@[async]
+@@[main]
+@@system Parent {
+    interface:
+        async chain(): String
+        async direct(): String
+
+    machine:
+        $S {
+            chain(): String {
+                let r = self.child.work().await.unwrap();
+                @@:(format!("parent_saw:{}", r))
+                return;
+            }
+            direct(): String {
+                @@:(String::from("parent_direct"))
+                return;
+            }
+        }
+
+    domain:
+        child: Child = @@Child()
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut p = @@Parent();
+    p.init().await;
+
+    let r1 = p.direct().await?;
+    assert_eq!(r1, "parent_direct");
+
+    let r2 = p.chain().await?;
+    assert_eq!(r2, "parent_saw:from_child");
+
+    let r3 = p.chain().await?;
+    assert_eq!(r3, "parent_saw:from_child");
+
+    println!("PASS: async_composition_parent_child");
+    Ok(())
+}

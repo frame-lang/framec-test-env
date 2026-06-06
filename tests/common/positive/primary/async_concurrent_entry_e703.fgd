@@ -1,0 +1,49 @@
+@@[target("gdscript")]
+
+# C2 — async_concurrent_entry_e703 (GDScript specialization)
+#
+# RFC-0043 (GDScript): cooperative concurrency in GDScript is
+# signal-based and doesn't compose cleanly into the Promise.all /
+# Future.wait pattern other backends use. Two coroutines awaiting
+# from the same SceneTree don't reliably interleave at a granularity
+# that exercises the gate.
+#
+# As a result, GDScript's C2 reduces to gate-cycling: verify the
+# casing's manual cleanup (busy = false; in_flight = null) clears the
+# gate between sequential calls so the next call doesn't get the
+# typed-zero E703 path.
+#
+# A purpose-built concurrent-E703 fixture for GDScript would need to
+# drive both calls via Timer nodes or via process_frame yielding —
+# both worth doing as a GDScript-unique fixture in the per-language
+# tier (P1). For C2's cross-backend pattern, this gate-cycling shape
+# matches Swift's specialization.
+
+extends SceneTree
+
+@@[async]
+@@system Slow {
+    interface:
+        async slow_work(): String
+
+    machine:
+        $S {
+            slow_work(): String { @@:("done") }
+        }
+}
+
+func _init():
+    var s = @@Slow()
+    await s.init()
+
+    # Three sequential calls. Each must clear the gate before the next
+    # so we never see "" (the E703 typed-zero return).
+    var r1 = await s.slow_work()
+    assert(r1 == "done", "call 1 expected 'done', got " + str(r1))
+    var r2 = await s.slow_work()
+    assert(r2 == "done", "call 2 expected 'done', got " + str(r2))
+    var r3 = await s.slow_work()
+    assert(r3 == "done", "call 3 expected 'done', got " + str(r3))
+
+    print("PASS: async_concurrent_entry_e703")
+    quit()

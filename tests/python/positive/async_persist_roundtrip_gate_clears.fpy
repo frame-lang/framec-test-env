@@ -1,0 +1,65 @@
+@@[target("python_3")]
+
+# C5 — async_persist_roundtrip_gate_clears
+#
+# RFC-0043: the casing's gate (busy/in_flight) is TRANSIENT — it lives
+# on the casing struct, not on the machine's persisted state. Save
+# captures machine state only; restore creates a fresh casing whose
+# gate is initially clear.
+#
+# This fixture: do an async call (which sets and clears the gate),
+# save state, instantiate a fresh casing, restore, then verify a
+# subsequent async call on the restored instance succeeds — i.e. the
+# gate isn't stuck busy=True from somewhere stale.
+
+import asyncio
+
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[async]
+@@system Counter {
+    interface:
+        async bump(): int
+
+    machine:
+        $S {
+            bump(): int {
+                await asyncio.sleep(0)
+                self.value = self.value + 1
+                @@:(self.value)
+            }
+        }
+
+    domain:
+        value: int = 0
+}
+
+async def main():
+    s1 = @@Counter()
+    await s1.init()
+
+    # Drive the gate through one full cycle on s1.
+    v1 = await s1.bump()
+    assert v1 == 1, f"s1.bump: {v1}"
+
+    # Save state.
+    snap = s1._saveState() if hasattr(s1, '_saveState') else s1.save_state()
+
+    # Fresh instance, restored from snapshot.
+    s2 = @@Counter()
+    s2.restore_state(snap)
+
+    # If the gate were corrupted (or accidentally serialized), this
+    # would raise RuntimeError("E703: ..."). It must succeed.
+    v2 = await s2.bump()
+    assert v2 == 2, f"s2.bump after restore: {v2}"
+
+    # And again.
+    v3 = await s2.bump()
+    assert v3 == 3, f"s2.bump second: {v3}"
+
+    print("PASS: async_persist_roundtrip_gate_clears")
+
+if __name__ == '__main__':
+    asyncio.run(main())

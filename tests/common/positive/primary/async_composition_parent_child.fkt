@@ -1,0 +1,49 @@
+@@[target("kotlin")]
+
+// C6 — async_composition_parent_child
+
+import kotlinx.coroutines.runBlocking
+
+@@[async]
+@@system Child {
+    interface:
+        async work(): String
+
+    machine:
+        $S {
+            work(): String { @@:("from_child") }
+        }
+}
+
+@@[async]
+@@[main]
+@@system Parent {
+    interface:
+        async chain(): String
+        async direct(): String
+
+    machine:
+        $S {
+            chain(): String {
+                val r = this.child.work()
+                @@:("parent_saw:" + r)
+            }
+            direct(): String { @@:("parent_direct") }
+        }
+
+    domain:
+        child: Child = @@Child()
+}
+
+fun main() = runBlocking {
+    val p = @@Parent()
+    p.init()
+
+    val r1 = p.direct()
+    check(r1 == "parent_direct") { "direct: $r1" }
+
+    val r2 = p.chain()
+    check(r2 == "parent_saw:from_child") { "chain: $r2" }
+
+    println("PASS: async_composition_parent_child")
+}

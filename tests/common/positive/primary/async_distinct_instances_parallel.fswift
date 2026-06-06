@@ -1,0 +1,42 @@
+@@[target("swift")]
+
+// C3 — async_distinct_instances_parallel
+
+import Foundation
+
+@@[async]
+@@system WorkerSys {
+    interface:
+        async work(label: String): String
+
+    machine:
+        $S {
+            work(label: String): String {
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                @@:(label)
+            }
+        }
+}
+
+let __sem = DispatchSemaphore(value: 0)
+Task {
+    do {
+        let sa = @@WorkerSys()
+        let sb = @@WorkerSys()
+        await sa.initAsync()
+        await sb.initAsync()
+
+        async let ra = sa.work("from_a")
+        async let rb = sb.work("from_b")
+        let (ra1, rb1) = try await (ra, rb)
+        guard Set([ra1, rb1]) == Set(["from_a", "from_b"]) else {
+            fatalError("unexpected: \(ra1), \(rb1)")
+        }
+
+        print("PASS: async_distinct_instances_parallel")
+    } catch {
+        fatalError("unexpected error: \(error)")
+    }
+    __sem.signal()
+}
+__sem.wait()

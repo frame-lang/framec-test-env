@@ -1,0 +1,38 @@
+@@[target("javascript")]
+
+// C3 — async_distinct_instances_parallel
+//
+// Per-instance gate: concurrent calls on different instances should
+// both succeed without E703.
+
+@@[async]
+@@system WorkerSys {
+    interface:
+        async work(label: str): str
+
+    machine:
+        $S {
+            work(label: str): str {
+                await new Promise(resolve => setTimeout(resolve, 50));
+                @@:(label)
+            }
+        }
+}
+
+async function main() {
+    const sa = @@WorkerSys();
+    const sb = @@WorkerSys();
+    await sa.init();
+    await sb.init();
+
+    const results = await Promise.all([sa.work("from_a"), sb.work("from_b")]);
+    if (results.length !== 2) throw new Error(`expected 2 results, got ${results.length}`);
+    const set = new Set(results);
+    if (!set.has("from_a") || !set.has("from_b")) {
+        throw new Error(`unexpected results: ${JSON.stringify(results)}`);
+    }
+
+    console.log("PASS: async_distinct_instances_parallel");
+}
+
+main();

@@ -1,0 +1,63 @@
+@@[target("python_3")]
+
+# C2 — async_concurrent_entry_e703
+#
+# RFC-0043: a second external interface call entered while the first
+# is mid-await MUST raise RuntimeError("E703: ...") rather than corrupt
+# state. The first caller proceeds normally; the second sees the gate.
+# After the first call completes, the gate clears and a fresh call
+# succeeds.
+#
+# Python: drive cooperative concurrent entry via asyncio.gather.
+# Single event loop, single thread — but two coroutines awaiting on
+# the same casing simultaneously. One wins the gate, the other is
+# rejected.
+
+import asyncio
+
+@@[async]
+@@system Slow {
+    interface:
+        async slow_work(): str
+
+    machine:
+        $S {
+            slow_work(): str {
+                # I/O suspension — yields to the event loop long enough
+                # for the second caller to enter and hit the gate.
+                await asyncio.sleep(0.05)
+                @@:("done")
+            }
+        }
+}
+
+async def main():
+    s = @@Slow()
+    await s.init()
+
+    # asyncio.gather schedules both calls; one wins the gate, the
+    # other's casing wrapper checks busy=True and raises RuntimeError.
+    # return_exceptions=True lets us collect both outcomes without
+    # the gather call itself raising.
+    results = await asyncio.gather(
+        s.slow_work(),
+        s.slow_work(),
+        return_exceptions=True,
+    )
+
+    # Exactly one Ok, exactly one E703.
+    successes = [r for r in results if isinstance(r, str)]
+    errors = [r for r in results if isinstance(r, RuntimeError)]
+    assert len(successes) == 1, f"expected 1 success, got {len(successes)}: {results!r}"
+    assert successes[0] == "done", f"unexpected success: {successes[0]!r}"
+    assert len(errors) == 1, f"expected 1 RuntimeError, got {len(errors)}: {results!r}"
+    assert "E703" in str(errors[0]), f"expected E703 message: {errors[0]!r}"
+
+    # After both calls completed, gate must be clear — next call succeeds.
+    result = await s.slow_work()
+    assert result == "done", f"expected 'done' after gate clears, got {result!r}"
+
+    print("PASS: async_concurrent_entry_e703")
+
+if __name__ == '__main__':
+    asyncio.run(main())

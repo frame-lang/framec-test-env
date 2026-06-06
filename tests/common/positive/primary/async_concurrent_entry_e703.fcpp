@@ -1,0 +1,49 @@
+@@[target("cpp_23")]
+
+// C2 — async_concurrent_entry_e703 (C++ specialization)
+//
+// RFC-0043 (C++): the casing's `bool busy` is non-atomic (RFC D1
+// documented single-driver contract). True multi-thread testing of
+// E703 is out of scope per RFC.
+//
+// On a single thread, C++23 coroutines (FrameTask) run synchronously
+// from creation up to the first co_await — a fresh coroutine never
+// preempts an in-flight one. Without true multi-threading, the
+// concurrent-entry-E703 case isn't reachable, so this fixture
+// degrades to gate-cycling (sequential calls). The casing's
+// try { ... } catch (...) { ...; throw; } MUST clear busy/in_flight
+// between calls so the next .get() doesn't see std::runtime_error
+// for E703.
+
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+@@[async]
+@@system Slow {
+    interface:
+        async slow_work(): std::string
+
+    machine:
+        $S {
+            slow_work(): std::string {
+                @@:(std::string("done"))
+            }
+        }
+}
+
+int main() {
+    auto s = @@Slow();
+    s.init().get();
+
+    // Three sequential calls — gate must cycle cleanly.
+    auto r1 = s.slow_work().get();
+    if (r1 != "done") { std::cout << "FAIL call 1: " << r1 << std::endl; return 1; }
+    auto r2 = s.slow_work().get();
+    if (r2 != "done") { std::cout << "FAIL call 2: " << r2 << std::endl; return 1; }
+    auto r3 = s.slow_work().get();
+    if (r3 != "done") { std::cout << "FAIL call 3: " << r3 << std::endl; return 1; }
+
+    std::cout << "PASS: async_concurrent_entry_e703" << std::endl;
+    return 0;
+}

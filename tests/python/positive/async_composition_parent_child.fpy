@@ -1,0 +1,72 @@
+@@[target("python_3")]
+
+# C6 — async_composition_parent_child
+#
+# RFC-0043: an async parent system holds an async child system as a
+# domain field. Parent's handler awaits the child's async method.
+# Both gates engage INDEPENDENTLY: parent gate set while parent
+# dispatches, child gate set while child dispatches (nested inside),
+# both clear cleanly on the way out.
+#
+# Verifies cross-system gate isolation — the gate scope is per-instance.
+
+import asyncio
+
+@@[async]
+@@system Child {
+    interface:
+        async work(): str
+
+    machine:
+        $S {
+            work(): str {
+                await asyncio.sleep(0)
+                @@:("from_child")
+            }
+        }
+}
+
+@@[async]
+@@[main]
+@@system Parent {
+    interface:
+        async chain(): str
+        async direct(): str
+
+    machine:
+        $S {
+            chain(): str {
+                # Parent's handler calls child's async method. Both
+                # gates engage independently.
+                r = await self.child.work()
+                @@:(f"parent_saw:{r}")
+            }
+            direct(): str {
+                @@:("parent_direct")
+            }
+        }
+
+    domain:
+        child: Child = @@Child()
+}
+
+async def main():
+    p = @@Parent()
+    await p.init()
+
+    # Parent's direct method (no child dispatch) — sanity check.
+    r1 = await p.direct()
+    assert r1 == "parent_direct", f"direct: {r1}"
+
+    # Parent's chain method invokes child. Both gates clear afterwards.
+    r2 = await p.chain()
+    assert r2 == "parent_saw:from_child", f"chain: {r2}"
+
+    # Second call must succeed (both gates were cleared).
+    r3 = await p.chain()
+    assert r3 == "parent_saw:from_child", f"second chain: {r3}"
+
+    print("PASS: async_composition_parent_child")
+
+if __name__ == '__main__':
+    asyncio.run(main())

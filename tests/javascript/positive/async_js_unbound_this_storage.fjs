@@ -1,0 +1,58 @@
+@@[target("javascript")]
+
+// JavaScript-unique — async_js_unbound_this_storage
+//
+// RFC-0043 (JS): a notorious foot-gun. Detaching a casing method
+// from its instance loses `this` binding:
+//
+//     const fn = s.fetch;
+//     await fn(...)              // <-- TypeError: cannot read 'busy' of undefined
+//
+// The fix: callers must always invoke methods THROUGH the instance
+// or explicitly bind. This fixture demonstrates the failure path
+// (caught) and the canonical recovery: `.bind(s)` or `s.fetch(...)`.
+
+@@[async]
+@@system Sys {
+    interface:
+        async fetch()
+
+    machine:
+        $S {
+            fetch() { /* no-op */ }
+        }
+}
+
+async function main() {
+    let s = @@Sys();
+    await s.init();
+
+    // 1. Direct call — works.
+    await s.fetch();
+
+    // 2. Detached call — throws TypeError.
+    let detachErr = null;
+    const fn = s.fetch;
+    try {
+        await fn();
+    } catch (e) {
+        detachErr = e;
+    }
+    if (detachErr === null) {
+        throw new Error("expected detached call to throw");
+    }
+    if (!(detachErr instanceof TypeError)) {
+        throw new Error(`expected TypeError, got: ${detachErr.constructor.name}`);
+    }
+
+    // 3. Re-bound — works.
+    const bound = s.fetch.bind(s);
+    await bound();
+
+    // 4. Gate is clear despite the detached call failing.
+    await s.fetch();
+
+    console.log("PASS: async_js_unbound_this_storage");
+}
+
+main();

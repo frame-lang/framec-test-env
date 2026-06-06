@@ -1,0 +1,72 @@
+@@[target("cpp_23")]
+
+// C++-unique — async_cpp_nested_throw_propagation
+//
+// RFC-0043 (C++): nested co_await chain — Parent's handler co_awaits
+// Child's call which throws. The exception must propagate cleanly
+// up through both coroutine frames, clearing both gates.
+
+#include <iostream>
+#include <stdexcept>
+#include <string>
+
+@@[async]
+@@system Child {
+    interface:
+        async crash()
+
+    machine:
+        $S {
+            crash() {
+                throw std::runtime_error("child boom");
+            }
+        }
+}
+
+@@[async]
+@@[main]
+@@system Parent {
+    interface:
+        async call_child()
+        async peek(): std::string
+
+    machine:
+        $S {
+            call_child() {
+                co_await this->child->crash();
+            }
+            peek(): std::string { @@:(std::string("ok")) }
+        }
+
+    domain:
+        child: Child = @@Child()
+}
+
+int main() {
+    auto p = @@Parent();
+    p.init().get();
+
+    bool caught = false;
+    try {
+        p.call_child().get();
+    } catch (const std::runtime_error& e) {
+        if (std::string(e.what()) == "child boom") {
+            caught = true;
+        }
+    }
+    if (!caught) {
+        std::cout << "FAIL: expected child boom" << std::endl;
+        return 1;
+    }
+
+    // Both gates cleared — follow-up on parent succeeds, child
+    // is independently usable.
+    auto r1 = p.peek().get();
+    if (r1 != "ok") {
+        std::cout << "FAIL: parent gate stuck: " << r1 << std::endl;
+        return 1;
+    }
+
+    std::cout << "PASS: async_cpp_nested_throw_propagation" << std::endl;
+    return 0;
+}

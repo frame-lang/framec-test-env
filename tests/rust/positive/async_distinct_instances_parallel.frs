@@ -1,0 +1,46 @@
+@@[target("rust")]
+
+// C3 — async_distinct_instances_parallel
+//
+// RFC-0043 (Rust): the gate is PER-INSTANCE. Two distinct casing
+// instances each own their own (busy, in_flight) fields, so
+// tokio::join! across two different `&mut Worker`s compiles cleanly
+// (each &mut targets a distinct instance) and both calls succeed
+// without seeing E703.
+
+use std::time::Duration;
+
+@@[async]
+@@system WorkerSys {
+    interface:
+        async work(label: String): String
+
+    machine:
+        $S {
+            work(label: String): String {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                @@:(label)
+                return;
+            }
+        }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut sa = @@WorkerSys();
+    let mut sb = @@WorkerSys();
+    sa.init().await;
+    sb.init().await;
+
+    // tokio::join! takes one expression per future. Each is a distinct
+    // &mut borrow on a different binding (sa vs sb), so the borrow
+    // checker is satisfied.
+    let (ra, rb) = tokio::join!(sa.work("from_a".to_string()), sb.work("from_b".to_string()));
+    let ra = ra?;
+    let rb = rb?;
+    assert_eq!(ra, "from_a");
+    assert_eq!(rb, "from_b");
+
+    println!("PASS: async_distinct_instances_parallel");
+    Ok(())
+}

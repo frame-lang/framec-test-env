@@ -1,0 +1,40 @@
+@@[target("swift")]
+
+// Swift-unique — async_sw_async_let_parallel
+//
+// RFC-0043 (Swift): async let binds run concurrently. Two separate
+// system instances dispatched via async let run in parallel.
+
+import Foundation
+
+@@[async]
+@@system Sys {
+    interface:
+        async work(label: String): String
+
+    machine:
+        $S {
+            work(label: String): String { @@:("done:" + label) }
+        }
+}
+
+let __sem = DispatchSemaphore(value: 0)
+Task {
+    do {
+        let a = @@Sys(); await a.initAsync()
+        let b = @@Sys(); await b.initAsync()
+
+        async let ra = a.work("A")
+        async let rb = b.work("B")
+        let (sa, sb) = try await (ra, rb)
+
+        guard sa == "done:A" else { fatalError("a: \(sa)") }
+        guard sb == "done:B" else { fatalError("b: \(sb)") }
+
+        print("PASS: async_sw_async_let_parallel")
+    } catch {
+        fatalError("unexpected: \(error)")
+    }
+    __sem.signal()
+}
+__sem.wait()

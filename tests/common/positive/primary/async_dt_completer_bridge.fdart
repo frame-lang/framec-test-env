@@ -1,0 +1,40 @@
+@@[target("dart")]
+
+// Dart-unique — async_dt_completer_bridge
+//
+// RFC-0043 (Dart): the Completer pattern bridges between
+// callback-based APIs and futures. A casing call inside a
+// completer-based wait should still go through the gate properly.
+
+import 'dart:async';
+
+@@[async]
+@@system Sys {
+    interface:
+        async work(): String
+        async peek(): String
+
+    machine:
+        $S {
+            work(): String { @@:("done") }
+            peek(): String { @@:("ok") }
+        }
+}
+
+Future<void> main() async {
+    final s = @@Sys();
+    await s.init();
+
+    // Bridge: a Completer is fulfilled by a casing call's completion.
+    final completer = Completer<String>();
+
+    s.work().then((v) => completer.complete(v));
+
+    final result = await completer.future;
+    if (result != "done") throw Exception("completer: $result");
+
+    // Gate clear.
+    if (await s.peek() != "ok") throw Exception("gate stuck");
+
+    print("PASS: async_dt_completer_bridge");
+}

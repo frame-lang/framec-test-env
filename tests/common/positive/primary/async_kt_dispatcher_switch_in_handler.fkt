@@ -1,0 +1,52 @@
+@@[target("kotlin")]
+
+// Kotlin-unique — async_kt_dispatcher_switch_in_handler
+//
+// RFC-0043 (Kotlin): a handler body can `withContext(Dispatchers.IO)`
+// to suspend on a blocking call. The casing's await must survive the
+// dispatcher swap. The thread that resumes the casing may differ from
+// the thread that suspended it; the finally MUST still execute
+// against the original instance.
+//
+// What this pins:
+//   1. Handler body switches to Dispatchers.IO mid-handler.
+//   2. Casing's await spans the switch.
+//   3. Gate clears in finally regardless of resumed thread.
+//   4. Subsequent call on same instance succeeds.
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
+
+@@[async]
+@@system Sys {
+    interface:
+        async io_call(): String
+
+    machine:
+        $S {
+            io_call(): String {
+                // Simulated blocking I/O on the IO dispatcher.
+                val result = withContext(Dispatchers.IO) {
+                    Thread.sleep(10)
+                    "io-result"
+                }
+                @@:(result)
+            }
+        }
+}
+
+fun main() = runBlocking {
+    val s = @@Sys()
+    s.init()
+
+    val r1 = s.io_call()
+    check(r1 == "io-result") { "expected 'io-result', got $r1" }
+
+    // Second call — gate must have cleared even though the suspend
+    // resumed on a different thread.
+    val r2 = s.io_call()
+    check(r2 == "io-result") { "expected 'io-result' on second call, got $r2" }
+
+    println("PASS: async_kt_dispatcher_switch_in_handler")
+}

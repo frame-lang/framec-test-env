@@ -1,0 +1,44 @@
+@@[target("dart")]
+
+// C4 — async_sync_op_bypass_gate
+
+@@[async]
+@@system Holder {
+    operations:
+        get_count: int {
+            @@:(this.count)
+        }
+
+    interface:
+        async slow_work(): String
+
+    machine:
+        $S {
+            slow_work(): String {
+                this.count = this.count + 1;
+                await Future.delayed(Duration(milliseconds: 50));
+                @@:("done")
+            }
+        }
+
+    domain:
+        count: int = 0
+}
+
+Future<void> main() async {
+    final s = @@Holder();
+    await s.init();
+
+    if (s.get_count() != 0) throw Exception("initial");
+
+    final p = s.slow_work();
+    await Future.delayed(Duration.zero);  // yield once
+
+    final n = s.get_count();
+    if (n != 1) throw Exception("during: $n");
+
+    final r = await p;
+    if (r != "done") throw Exception("final: $r");
+
+    print("PASS: async_sync_op_bypass_gate");
+}

@@ -1,0 +1,57 @@
+@@[target("swift")]
+
+// C4 — async_sync_op_bypass_gate
+//
+// Operations bypass the gate. Sync ops on Swift's casing are emitted
+// without `async throws` — call directly.
+
+import Foundation
+
+@@[async]
+@@system Holder {
+    operations:
+        get_count: Int {
+            @@:(self.count)
+        }
+
+    interface:
+        async slow_work(): String
+
+    machine:
+        $S {
+            slow_work(): String {
+                self.count = self.count + 1
+                try? await Task.sleep(nanoseconds: 50_000_000)
+                @@:("done")
+            }
+        }
+
+    domain:
+        count: Int = 0
+}
+
+let __sem = DispatchSemaphore(value: 0)
+Task {
+    do {
+        let s = @@Holder()
+        await s.initAsync()
+
+        guard s.get_count() == 0 else { fatalError("initial: \(s.get_count())") }
+
+        // Fire async; sync op while it's in flight.
+        async let p = s.slow_work()
+        await Task.yield()
+
+        let n = s.get_count()
+        guard n == 1 else { fatalError("during: \(n)") }
+
+        let r = try await p
+        guard r == "done" else { fatalError("final: \(r)") }
+
+        print("PASS: async_sync_op_bypass_gate")
+    } catch {
+        fatalError("unexpected: \(error)")
+    }
+    __sem.signal()
+}
+__sem.wait()

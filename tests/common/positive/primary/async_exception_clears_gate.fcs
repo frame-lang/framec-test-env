@@ -1,0 +1,52 @@
+@@[target("csharp")]
+
+// C1 — async_exception_clears_gate
+//
+// RFC-0043 (C#): handler throws during await → casing's try/finally
+// MUST clear busy/in_flight → next interface call succeeds (no
+// InvalidOperationException for E703 from a stuck gate).
+
+using System;
+using System.Threading.Tasks;
+
+@@[async]
+@@system Crashable {
+    interface:
+        async boom(): string
+        async peek(): string
+
+    machine:
+        $S {
+            boom(): string {
+                throw new Exception("handler crash");
+            }
+            peek(): string {
+                @@:("ok")
+            }
+        }
+}
+
+class Program {
+    public static async Task Main(string[] args) {
+        var s = @@Crashable();
+        await s.init();
+
+        // First call: handler throws. Casing's try/finally MUST clear gate.
+        Exception caught = null;
+        try {
+            await s.boom();
+        } catch (Exception e) {
+            caught = e;
+        }
+        if (caught == null) throw new Exception("expected boom() to throw");
+        if (caught.Message != "handler crash") {
+            throw new Exception("unexpected message: " + caught.Message);
+        }
+
+        // Second call: gate must be clear. Stuck gate would throw InvalidOperationException.
+        string result = await s.peek();
+        if (result != "ok") throw new Exception("expected 'ok', got '" + result + "'");
+
+        Console.WriteLine("PASS: async_exception_clears_gate");
+    }
+}

@@ -1,7 +1,13 @@
 @@[target("swift")]
 
 
+@@[async]
 @@system AsyncWorker {
+    operations:
+        has_log_entry(needle: String): Bool {
+            @@:(self.log.contains(needle))
+        }
+
     interface:
         async start()
         async process(data: String): String
@@ -32,28 +38,37 @@
 
 // Swift top-level async: wrap in a Task and semaphore to keep the program
 // alive until all awaits resolve, without requiring a @main-decorated type.
+//
+// RFC-0043 D2: AsyncWorker's gated interface methods are `async throws`.
+// They throw `AsyncWorker.FrameE703Error.busy(...)` on concurrent entry;
+// this single-driver script never triggers it, so every call uses `try`
+// without a do/catch wrapper. A real production caller would catch.
 let __sem = DispatchSemaphore(value: 0)
 Task {
-    let w = @@AsyncWorker()
-    await w.initAsync()
+    do {
+        let w = @@AsyncWorker()
+        await w.initAsync()
 
-    var status = await w.get_status()
-    guard status == "idle" else { fatalError("Expected idle, got \(status)") }
-    guard w.log.contains("idle:ready") else { fatalError("Expected idle:ready in log") }
+        var status = try await w.get_status()
+        guard status == "idle" else { fatalError("Expected idle, got \(status)") }
+        guard w.has_log_entry("idle:ready") else { fatalError("Expected idle:ready in log") }
 
-    await w.start()
-    status = await w.get_status()
-    guard status == "working" else { fatalError("Expected working, got \(status)") }
+        try await w.start()
+        status = try await w.get_status()
+        guard status == "working" else { fatalError("Expected working, got \(status)") }
 
-    let result = await w.process("hello")
-    guard result == "processed:hello" else { fatalError("Expected processed:hello, got \(result)") }
+        let result = try await w.process("hello")
+        guard result == "processed:hello" else { fatalError("Expected processed:hello, got \(result)") }
 
-    await w.stop()
-    status = await w.get_status()
-    guard status == "idle" else { fatalError("Expected idle, got \(status)") }
-    guard w.log.contains("working:exited") else { fatalError("Expected working:exited in log") }
+        try await w.stop()
+        status = try await w.get_status()
+        guard status == "idle" else { fatalError("Expected idle, got \(status)") }
+        guard w.has_log_entry("working:exited") else { fatalError("Expected working:exited in log") }
 
-    print("PASS: async_http_client")
+        print("PASS: async_http_client")
+    } catch {
+        fatalError("Unexpected error: \(error)")
+    }
     __sem.signal()
 }
 __sem.wait()

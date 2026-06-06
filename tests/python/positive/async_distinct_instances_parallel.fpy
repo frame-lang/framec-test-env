@@ -1,0 +1,51 @@
+@@[target("python_3")]
+
+# C3 — async_distinct_instances_parallel
+#
+# RFC-0043: the gate (busy/in_flight) is PER-INSTANCE. Two distinct
+# system instances each have their own gate; concurrent calls on
+# different instances run in parallel without seeing E703.
+#
+# Failure mode if the gate were a class-attribute or static field:
+#   sys_a.fetch() takes the (shared) gate; sys_b.fetch() sees busy=True
+#   and raises E703 even though it's a different instance.
+
+import asyncio
+
+@@[async]
+@@system WorkerSys {
+    interface:
+        async work(label: str): str
+
+    machine:
+        $S {
+            work(label: str): str {
+                await asyncio.sleep(0.05)
+                @@:(label)
+            }
+        }
+}
+
+async def main():
+    sa = @@WorkerSys()
+    sb = @@WorkerSys()
+    await sa.init()
+    await sb.init()
+
+    # Concurrent calls on DIFFERENT instances. Each has its own gate;
+    # both should succeed without E703.
+    results = await asyncio.gather(
+        sa.work("from_a"),
+        sb.work("from_b"),
+        return_exceptions=True,
+    )
+
+    # Both must be successful results — no E703.
+    errors = [r for r in results if isinstance(r, Exception)]
+    assert len(errors) == 0, f"expected no errors, got {errors!r}"
+    assert set(results) == {"from_a", "from_b"}, f"unexpected results: {results!r}"
+
+    print("PASS: async_distinct_instances_parallel")
+
+if __name__ == '__main__':
+    asyncio.run(main())

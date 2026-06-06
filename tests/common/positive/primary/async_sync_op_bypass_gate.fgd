@@ -1,0 +1,48 @@
+@@[target("gdscript")]
+
+# C4 — async_sync_op_bypass_gate
+#
+# Sequential pattern: ops are sync and bypass the gate. Verify count
+# updates from async dispatch are visible to subsequent op calls.
+
+extends SceneTree
+
+@@[async]
+@@system Holder {
+    operations:
+        get_count: int {
+            @@:(self.count)
+        }
+
+    interface:
+        async slow_work(): String
+
+    machine:
+        $S {
+            slow_work(): String {
+                self.count = self.count + 1
+                @@:("done")
+            }
+        }
+
+    domain:
+        count: int = 0
+}
+
+func _init():
+    var s = @@Holder()
+    await s.init()
+
+    assert(s.get_count() == 0, "initial: " + str(s.get_count()))
+
+    var r = await s.slow_work()
+    assert(r == "done", "dispatch: " + str(r))
+    assert(s.get_count() == 1, "after: " + str(s.get_count()))
+
+    # Ops back-to-back — no gate.
+    var n2 = s.get_count()
+    var n3 = s.get_count()
+    assert(n2 == 1 and n3 == 1, "sequential ops: " + str(n2) + "/" + str(n3))
+
+    print("PASS: async_sync_op_bypass_gate")
+    quit()

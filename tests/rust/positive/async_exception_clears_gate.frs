@@ -1,0 +1,64 @@
+@@[target("rust")]
+
+// C1 — async_exception_clears_gate
+//
+// RFC-0043 (Rust, post-D5): handler panics during .await → casing's
+// _GateGuard::drop() MUST run on unwind → next interface call succeeds.
+//
+// Two distinct error classes after D5:
+//   - Gate violation (E703) returns `Err(FrameE703Error)` — recoverable
+//     via `?` or match. Same shape as every other layered backend.
+//   - Handler-side panic still propagates as a panic. _GateGuard's
+//     Drop runs on unwind so the gate clears, but the panic itself
+//     reaches the caller via the runtime's panic-handling.
+//
+// This fixture exercises the panic case (handler crash inside .await).
+// Verifies the gate clears via Drop, then a subsequent call succeeds.
+// Uses LocalSet + spawn_local because the machine state uses Rc<>
+// (per the framec Rust emission contract) and isn't Send.
+
+use std::cell::RefCell;
+use std::rc::Rc;
+
+@@[async]
+@@system Crashable {
+    interface:
+        async boom(): String
+        async peek(): String
+
+    machine:
+        $S {
+            boom(): String {
+                panic!("handler crash");
+            }
+            peek(): String {
+                @@:(String::from("ok"))
+                return;
+            }
+        }
+}
+
+#[tokio::main(flavor = "current_thread")]
+async fn main() {
+    let local = tokio::task::LocalSet::new();
+    local.run_until(async {
+        let s = Rc::new(RefCell::new(@@Crashable()));
+        s.borrow_mut().init().await;
+
+        // First call: handler panics. _GateGuard::drop on unwind
+        // MUST clear busy/in_flight.
+        let s_clone = Rc::clone(&s);
+        let h = tokio::task::spawn_local(async move {
+            s_clone.borrow_mut().boom().await
+        });
+        let result = h.await;
+        assert!(result.is_err(), "expected JoinError from panic");
+
+        // Second call: must return Ok("ok"), NOT Err(FrameE703Error).
+        // Stuck gate would surface as Err here.
+        let v = s.borrow_mut().peek().await.expect("peek should not E703");
+        assert_eq!(v, "ok", "expected 'ok', got {}", v);
+
+        println!("PASS: async_exception_clears_gate");
+    }).await;
+}

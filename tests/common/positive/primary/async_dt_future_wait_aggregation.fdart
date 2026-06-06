@@ -1,0 +1,63 @@
+@@[target("dart")]
+
+// Dart-unique — async_dt_future_wait_aggregation
+//
+// RFC-0043 (Dart): Future.wait collects N futures into a single
+// Future<List<T>>. If any fails, the aggregate rejects with the
+// first failure. Use eagerError: false to let all settle first.
+
+@@[async]
+@@system Sys {
+    interface:
+        async work(crash: bool): String
+
+    machine:
+        $S {
+            work(crash: bool): String {
+                if (crash) {
+                    throw Exception("crashed");
+                }
+                @@:("ok")
+            }
+        }
+}
+
+Future<void> main() async {
+    final a = @@Sys(); await a.init();
+    final b = @@Sys(); await b.init();
+    final c = @@Sys(); await c.init();
+
+    // First case: all succeed.
+    final ok = await Future.wait([
+        a.work(false),
+        b.work(false),
+        c.work(false),
+    ]);
+    if (ok.length != 3 || ok.any((x) => x != "ok")) {
+        throw Exception("expected 3 'ok', got $ok");
+    }
+
+    // Second case: one fails — Future.wait short-circuits with eagerError: true.
+    // With eagerError: false, all settle but result still rejects.
+    bool sawError = false;
+    try {
+        await Future.wait([
+            a.work(false),
+            b.work(true),
+            c.work(false),
+        ], eagerError: false);
+    } catch (e) {
+        sawError = true;
+        if (!e.toString().contains("crashed")) {
+            throw Exception("expected 'crashed' in error: $e");
+        }
+    }
+    if (!sawError) throw Exception("expected Future.wait to reject");
+
+    // Per-instance gates clear.
+    if (await a.work(false) != "ok") throw Exception("a gate stuck");
+    if (await b.work(false) != "ok") throw Exception("b gate stuck");
+    if (await c.work(false) != "ok") throw Exception("c gate stuck");
+
+    print("PASS: async_dt_future_wait_aggregation");
+}

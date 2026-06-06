@@ -1,0 +1,57 @@
+@@[target("rust")]
+
+// Rust-unique — async_rs_e703_recovery
+//
+// RFC-0043 (Rust, post-D5): E703 is a recoverable Result variant.
+// Rust's borrow checker prevents concurrent dispatch on the same
+// instance at compile time, but the runtime gate IS still present
+// as a defense-in-depth check.
+//
+// This fixture verifies the public API: every casing method returns
+// Result<T, FrameE703Error>. The error variant is matchable, the
+// success variant `?`-chains. Sequential calls always succeed.
+
+use std::time::Duration;
+
+@@[async]
+@@system Sys {
+    interface:
+        async work(): String
+
+    machine:
+        $S {
+            work(): String {
+                tokio::time::sleep(Duration::from_millis(5)).await;
+                @@:(String::from("done"))
+                return;
+            }
+        }
+}
+
+#[tokio::main]
+async fn main() {
+    let mut s = @@Sys();
+    s.init().await;
+
+    // ? chains on success via inner async block.
+    let result: Result<(), Box<dyn std::error::Error>> = (async {
+        let r1: String = s.work().await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        assert_eq!(r1, "done");
+
+        // Match on Result.
+        let r2 = match s.work().await {
+            Ok(v) => v,
+            Err(e) => return Err(Box::new(e) as Box<dyn std::error::Error>),
+        };
+        assert_eq!(r2, "done");
+
+        // Many calls in tight succession — gate cycles cleanly.
+        for _ in 0..10 {
+            let _ = s.work().await.map_err(|e| Box::new(e) as Box<dyn std::error::Error>)?;
+        }
+        Ok(())
+    }).await;
+
+    result.expect("all calls should succeed");
+    println!("PASS: async_rs_e703_recovery");
+}

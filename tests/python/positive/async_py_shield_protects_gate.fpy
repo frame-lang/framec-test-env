@@ -1,0 +1,54 @@
+@@[target("python_3")]
+
+# Python-unique — async_py_shield_protects_gate
+#
+# RFC-0043 (Python): asyncio.shield() prevents cancellation of the
+# inner coroutine. If the OUTER waiter cancels (e.g. timeout), the
+# inner casing call keeps running to completion — gate stays held
+# until the inner call settles, then clears.
+#
+# Pins that cancellation of an awaiter doesn't strand the gate.
+
+import asyncio
+
+@@[async]
+@@system Sys {
+    interface:
+        async work(): str
+        async peek(): str
+
+    machine:
+        $S {
+            work(): str {
+                await asyncio.sleep(0.05)
+                @@:("done")
+            }
+            peek(): str { @@:("ok") }
+        }
+}
+
+async def main():
+    s = @@Sys()
+    await s.init()
+
+    inner = asyncio.create_task(s.work())
+
+    # Shield the inner task. Cancel the outer waiter — inner survives.
+    try:
+        await asyncio.wait_for(asyncio.shield(inner), timeout=0.01)
+        assert False, "expected TimeoutError"
+    except asyncio.TimeoutError:
+        pass
+
+    # Inner task survived the outer cancel. Let it finish.
+    result = await inner
+    assert result == "done", f"inner: {result!r}"
+
+    # Gate clear — peek succeeds.
+    p = await s.peek()
+    assert p == "ok", f"gate stuck: {p!r}"
+
+    print("PASS: async_py_shield_protects_gate")
+
+if __name__ == '__main__':
+    asyncio.run(main())

@@ -1,0 +1,49 @@
+@@[target("csharp")]
+
+// C#-unique — async_cs_task_whenany_winner
+//
+// RFC-0043 (C#): Task.WhenAny returns the first task that completes.
+// The losers keep running. After both settle, all gates are clean.
+
+using System;
+using System.Threading.Tasks;
+
+@@[async]
+@@system Sys {
+    interface:
+        async work(label: string): string
+
+    machine:
+        $S {
+            work(label: string): string {
+                @@:("done:" + label)
+            }
+        }
+}
+
+class Program {
+    public static async Task Main(string[] args) {
+        var a = @@Sys(); await a.init();
+        var b = @@Sys(); await b.init();
+
+        var t1 = a.work("A");
+        var t2 = b.work("B");
+        var winner = await Task.WhenAny(t1, t2);
+
+        // Both should be complete (they're trivial); winner is the first
+        // observed.
+        string wval = await winner;
+        if (wval != "done:A" && wval != "done:B") {
+            throw new Exception("unexpected winner: " + wval);
+        }
+
+        // Drain the loser.
+        var loser = winner == t1 ? t2 : t1;
+        var lval = await loser;
+        if (lval != "done:A" && lval != "done:B") {
+            throw new Exception("unexpected loser: " + lval);
+        }
+
+        Console.WriteLine("PASS: async_cs_task_whenany_winner");
+    }
+}

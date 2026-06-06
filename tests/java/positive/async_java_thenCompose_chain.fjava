@@ -1,0 +1,52 @@
+@@[target("java")]
+
+// Java-unique — async_java_thenCompose_chain
+//
+// RFC-0043 (Java): the canonical "chain async calls" idiom in Java
+// is CompletableFuture.thenCompose(). Each casing call returns
+// CompletableFuture<T>; .thenCompose() chains them without nested
+// futures. This pins the gate-clear semantics under the chain:
+// each link of the chain takes the gate, clears it, then the next
+// link takes it.
+
+import java.util.concurrent.CompletableFuture;
+
+@@[async]
+@@system Sys {
+    interface:
+        async first(): String
+        async second(in: String): String
+        async third(in: String): String
+
+    machine:
+        $S {
+            first(): String { @@:("a") }
+            second(in: String): String { @@:(in + "b") }
+            third(in: String): String { @@:(in + "c") }
+        }
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        Sys s = @@Sys();
+        s.init().get();
+
+        // Chain three casing calls. Each takes/releases the gate.
+        CompletableFuture<String> chain = s.first()
+            .thenCompose(v -> s.second(v))
+            .thenCompose(v -> s.third(v));
+
+        String result = chain.get();
+        if (!"abc".equals(result)) {
+            throw new RuntimeException("expected 'abc', got '" + result + "'");
+        }
+
+        // After chain settles, gate is clear; a fresh call works.
+        String again = s.first().get();
+        if (!"a".equals(again)) {
+            throw new RuntimeException("post-chain call failed: " + again);
+        }
+
+        System.out.println("PASS: async_java_thenCompose_chain");
+    }
+}

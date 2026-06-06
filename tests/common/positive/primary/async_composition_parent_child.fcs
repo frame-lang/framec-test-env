@@ -1,0 +1,55 @@
+@@[target("csharp")]
+
+// C6 — async_composition_parent_child
+
+using System;
+using System.Threading.Tasks;
+
+@@[async]
+@@system Child {
+    interface:
+        async work(): string
+
+    machine:
+        $S {
+            work(): string {
+                await Task.Yield();
+                @@:("from_child")
+            }
+        }
+}
+
+@@[async]
+@@[main]
+@@system Parent {
+    interface:
+        async chain(): string
+        async direct(): string
+
+    machine:
+        $S {
+            chain(): string {
+                string r = await this.child.work();
+                @@:("parent_saw:" + r)
+            }
+            direct(): string { @@:("parent_direct") }
+        }
+
+    domain:
+        child: Child = @@Child()
+}
+
+class Program {
+    public static async Task Main(string[] args) {
+        var p = @@Parent();
+        await p.init();
+
+        var r1 = await p.direct();
+        if (r1 != "parent_direct") throw new Exception("direct: " + r1);
+
+        var r2 = await p.chain();
+        if (r2 != "parent_saw:from_child") throw new Exception("chain: " + r2);
+
+        Console.WriteLine("PASS: async_composition_parent_child");
+    }
+}

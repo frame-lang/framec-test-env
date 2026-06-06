@@ -1,0 +1,40 @@
+@@[target("typescript")]
+
+// TypeScript-unique — async_ts_dynamic_import_in_handler
+//
+// RFC-0043 (TS): a handler body can `await import("...")` for
+// lazy module loading. The casing's gate must remain claimed across
+// the import's await and clear on resume.
+
+@@[async]
+@@system Sys {
+    interface:
+        async load_and_use(): str
+        async peek(): str
+
+    machine:
+        $S {
+            load_and_use(): str {
+                // Dynamic-import 'node:util' for a deterministic check.
+                const util = await import("node:util");
+                const formatted = util.format("hello-%s", "world");
+                @@:(formatted)
+            }
+            peek(): str { @@:("ok") }
+        }
+}
+
+async function main(): Promise<void> {
+    let s = @@Sys();
+    await s.init();
+
+    const r1 = await s.load_and_use();
+    if (r1 !== "hello-world") throw new Error(`expected hello-world, got: ${r1}`);
+
+    const r2 = await s.peek();
+    if (r2 !== "ok") throw new Error(`gate stuck after dynamic import: ${r2}`);
+
+    console.log("PASS: async_ts_dynamic_import_in_handler");
+}
+
+main();

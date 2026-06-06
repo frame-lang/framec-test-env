@@ -1,0 +1,54 @@
+@@[target("javascript")]
+
+// C6 — async_composition_parent_child
+
+@@[async]
+@@system Child {
+    interface:
+        async work(): str
+
+    machine:
+        $S {
+            work(): str {
+                await Promise.resolve();
+                @@:("from_child")
+            }
+        }
+}
+
+@@[async]
+@@[main]
+@@system Parent {
+    interface:
+        async chain(): str
+        async direct(): str
+
+    machine:
+        $S {
+            chain(): str {
+                const r = await this.child.work();
+                @@:(`parent_saw:${r}`)
+            }
+            direct(): str {
+                @@:("parent_direct")
+            }
+        }
+
+    domain:
+        child: Child = @@Child()
+}
+
+async function main() {
+    const p = @@Parent();
+    await p.init();
+
+    const r1 = await p.direct();
+    if (r1 !== "parent_direct") throw new Error(`direct: ${r1}`);
+
+    const r2 = await p.chain();
+    if (r2 !== "parent_saw:from_child") throw new Error(`chain: ${r2}`);
+
+    console.log("PASS: async_composition_parent_child");
+}
+
+main();

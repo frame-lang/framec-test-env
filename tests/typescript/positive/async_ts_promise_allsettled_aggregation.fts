@@ -1,0 +1,68 @@
+@@[target("typescript")]
+
+// TypeScript-unique — async_ts_promise_allsettled_aggregation
+//
+// RFC-0043 (TS): Promise.allSettled() over multiple instances
+// collects ALL results (success or failure) — never short-circuits
+// on first error like Promise.all().
+//
+// What this pins:
+//   1. Three separate instances dispatch concurrently.
+//   2. Two succeed; one throws.
+//   3. allSettled() returns 3 PromiseSettledResult entries.
+//   4. Each instance's gate is independently cleared post-settle.
+
+@@[async]
+@@system Sys {
+    interface:
+        async maybe_crash(should_crash: bool): str
+
+    machine:
+        $S {
+            maybe_crash(should_crash: bool): str {
+                if (should_crash) {
+                    throw new Error("crashed");
+                }
+                @@:("ok")
+            }
+        }
+}
+
+async function main(): Promise<void> {
+    let a = @@Sys(); await a.init();
+    let b = @@Sys(); await b.init();
+    let c = @@Sys(); await c.init();
+
+    const results = await Promise.allSettled([
+        a.maybe_crash(false),
+        b.maybe_crash(true),
+        c.maybe_crash(false),
+    ]);
+
+    if (results.length !== 3) throw new Error(`length: ${results.length}`);
+    if (results[0].status !== "fulfilled") throw new Error(`results[0]: ${results[0].status}`);
+    if (results[1].status !== "rejected") throw new Error(`results[1]: ${results[1].status}`);
+    if (results[2].status !== "fulfilled") throw new Error(`results[2]: ${results[2].status}`);
+
+    if ((results[0] as PromiseFulfilledResult<string>).value !== "ok") {
+        throw new Error(`a.value: ${(results[0] as PromiseFulfilledResult<string>).value}`);
+    }
+    if (!((results[1] as PromiseRejectedResult).reason instanceof Error)) {
+        throw new Error(`b.reason: ${(results[1] as PromiseRejectedResult).reason}`);
+    }
+    if ((results[2] as PromiseFulfilledResult<string>).value !== "ok") {
+        throw new Error(`c.value: ${(results[2] as PromiseFulfilledResult<string>).value}`);
+    }
+
+    // All gates clear — follow-up on each succeeds.
+    const ra = await a.maybe_crash(false);
+    const rb = await b.maybe_crash(false);
+    const rc = await c.maybe_crash(false);
+    if (ra !== "ok" || rb !== "ok" || rc !== "ok") {
+        throw new Error(`follow-up: ${ra} ${rb} ${rc}`);
+    }
+
+    console.log("PASS: async_ts_promise_allsettled_aggregation");
+}
+
+main();

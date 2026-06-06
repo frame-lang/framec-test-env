@@ -1,0 +1,62 @@
+@@[target("swift")]
+
+// Swift-unique — async_sw_task_group_concurrent_entry
+//
+// RFC-0043 (Swift, post-D2): TaskGroup runs N tasks concurrently.
+// When the same instance is hit by multiple group tasks, the first
+// wins the gate; others throw E703 via FrameE703Error.
+
+import Foundation
+
+@@[async]
+@@system Slow {
+    interface:
+        async work(): String
+
+    machine:
+        $S {
+            work(): String {
+                let _ = try? await Task.sleep(nanoseconds: 50_000_000)
+                @@:("done")
+            }
+        }
+}
+
+let __sem = DispatchSemaphore(value: 0)
+Task {
+    do {
+        let s = @@Slow()
+        await s.initAsync()
+
+        var successes = 0
+        var errors = 0
+
+        await withTaskGroup(of: String?.self) { group in
+            for _ in 0..<3 {
+                group.addTask {
+                    return try? await s.work()
+                }
+            }
+            for await result in group {
+                if result == "done" {
+                    successes += 1
+                } else {
+                    errors += 1
+                }
+            }
+        }
+
+        guard successes == 1 else { fatalError("expected 1 success, got \(successes)") }
+        guard errors == 2 else { fatalError("expected 2 E703, got \(errors)") }
+
+        // Gate clear post-group.
+        let r = try await s.work()
+        guard r == "done" else { fatalError("post-group: \(r)") }
+
+        print("PASS: async_sw_task_group_concurrent_entry")
+    } catch {
+        fatalError("unexpected: \(error)")
+    }
+    __sem.signal()
+}
+__sem.wait()

@@ -1,0 +1,57 @@
+@@[target("python_3")]
+
+# C1 — async_exception_clears_gate
+#
+# RFC-0043: when a handler raises an exception during the await, the
+# casing's try/finally MUST clear the busy/in_flight gate before the
+# exception propagates to the caller. A subsequent interface call MUST
+# succeed cleanly — no E703 from a stale gate.
+#
+# Failure mode if the gate doesn't clear:
+#   await sys.boom()  # raises ValueError
+#   await sys.peek()  # would see RuntimeError("E703: system busy ...")
+#                    # because busy is stuck True
+#
+# This fixture exercises the exception path on every layered backend
+# (one fixture file per language; same Frame contract, language-native
+# driver).
+
+import asyncio
+
+@@[async]
+@@system Crashable {
+    interface:
+        async boom(): str
+        async peek(): str
+
+    machine:
+        $S {
+            boom(): str {
+                raise ValueError("handler crash")
+            }
+            peek(): str {
+                @@:("ok")
+            }
+        }
+}
+
+async def main():
+    s = @@Crashable()
+    await s.init()
+
+    # First call: handler raises. Gate MUST clear in the casing's finally.
+    try:
+        await s.boom()
+        assert False, "expected ValueError from boom()"
+    except ValueError as e:
+        assert str(e) == "handler crash", f"unexpected msg: {e!r}"
+
+    # Second call: must NOT see E703. If the gate is stuck busy,
+    # this raises RuntimeError mentioning E703.
+    result = await s.peek()
+    assert result == "ok", f"expected 'ok' got {result!r}"
+
+    print("PASS: async_exception_clears_gate")
+
+if __name__ == '__main__':
+    asyncio.run(main())

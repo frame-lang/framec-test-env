@@ -1,0 +1,60 @@
+@@[target("gdscript")]
+
+# GDScript-unique — async_gd_typed_zero_return (D3 verification)
+#
+# RFC-0043 (GDScript, D3): when concurrent entry hits E703, the
+# casing pushes the error message via push_error and returns the
+# typed-zero for the declared return type. This pins:
+#   - String → ""
+#   - int    → 0
+#   - bool   → false
+
+extends SceneTree
+
+@@[async]
+@@system Sys {
+    interface:
+        async return_int(): int
+        async return_string(): String
+        async return_bool(): bool
+        async return_float(): float
+
+    machine:
+        $S {
+            return_int(): int { @@:(42) }
+            return_string(): String { @@:("real") }
+            return_bool(): bool { @@:(true) }
+            return_float(): float { @@:(3.14) }
+        }
+}
+
+func _init():
+    var s = @@Sys()
+    await s.init()
+
+    # Manually trigger E703: set busy=true then call. Casing's early-return
+    # should fire and return typed-zero.
+    s.busy = true
+    s.in_flight = "blocker"
+
+    var rs = await s.return_string()
+    assert(rs == "", "expected '' for String typed-zero, got: " + str(rs))
+
+    var ri = await s.return_int()
+    assert(ri == 0, "expected 0 for int typed-zero, got: " + str(ri))
+
+    var rb = await s.return_bool()
+    assert(rb == false, "expected false for bool typed-zero, got: " + str(rb))
+
+    var rf = await s.return_float()
+    assert(rf == 0.0, "expected 0.0 for float typed-zero, got: " + str(rf))
+
+    # Clear gate manually; verify happy path still works.
+    s.busy = false
+    s.in_flight = null
+
+    var real_s = await s.return_string()
+    assert(real_s == "real", "expected 'real', got: " + str(real_s))
+
+    print("PASS: async_gd_typed_zero_return")
+    quit()

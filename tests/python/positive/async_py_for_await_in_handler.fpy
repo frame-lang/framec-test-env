@@ -1,0 +1,47 @@
+@@[target("python_3")]
+
+# Python-unique — async_py_for_await_in_handler
+#
+# RFC-0043 (Python): a handler body can consume an async generator
+# via `async for`. The gate is held across all yields; cleared when
+# the loop exits (normally or via raise).
+
+import asyncio
+
+@@[async]
+@@system Sys {
+    interface:
+        async consume(): str
+        async peek(): str
+
+    machine:
+        $S {
+            consume(): str {
+                async def gen():
+                    yield "a"
+                    await asyncio.sleep(0)
+                    yield "b"
+                    await asyncio.sleep(0)
+                    yield "c"
+                acc = ""
+                async for v in gen():
+                    acc += v
+                @@:(acc)
+            }
+            peek(): str { @@:("ok") }
+        }
+}
+
+async def main():
+    s = @@Sys()
+    await s.init()
+
+    result = await s.consume()
+    assert result == "abc", f"expected 'abc', got {result!r}"
+
+    assert await s.peek() == "ok"
+
+    print("PASS: async_py_for_await_in_handler")
+
+if __name__ == '__main__':
+    asyncio.run(main())

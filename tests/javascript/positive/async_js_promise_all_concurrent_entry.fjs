@@ -1,0 +1,46 @@
+@@[target("javascript")]
+
+// JavaScript-unique — async_js_promise_all_concurrent_entry
+//
+// RFC-0043 (JS): Promise.all over an array including a busy-conflict
+// rejects with the FIRST rejection. Use .catch() per element to keep
+// all results.
+
+@@[async]
+@@system Sys {
+    interface:
+        async work()
+        async fast()
+
+    machine:
+        $S {
+            work() { /* "slow" — actually trivial, but the gate is held */ }
+            fast() { /* trivial */ }
+        }
+}
+
+async function main() {
+    const s = @@Sys();
+    await s.init();
+
+    // Issue both calls — work() takes gate first; fast() throws E703.
+    const wp = s.work();
+    const fp = s.fast().catch(e => ({ err: e }));
+
+    const results = await Promise.all([wp, fp]);
+
+    // results[0] is work() result (undefined for void), results[1] is { err }
+    if (results[1] === undefined || !results[1].err) {
+        throw new Error(`expected E703 in results[1], got: ${JSON.stringify(results[1])}`);
+    }
+    if (!results[1].err.message.includes("E703")) {
+        throw new Error(`expected E703, got: ${results[1].err.message}`);
+    }
+
+    // Gate now clear — follow-up succeeds.
+    await s.fast();
+
+    console.log("PASS: async_js_promise_all_concurrent_entry");
+}
+
+main();
