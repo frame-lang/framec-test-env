@@ -470,11 +470,14 @@ async fn op(key: &str) -> String {{
 fn main() {{
     futures::executor::block_on(async {{
         let mut s = {sys_name}::new();
-        s.init().await;
+        // RFC-0043 (D5): the async casing's interface methods return
+        // Result<T, FrameE703Error> (the single-driver gate); a single
+        // sequential call never trips it, so unwrap the Ok value.
+        let _ = s.init().await;
         println!("TRACE: CALL fetch");
-        let r = s.fetch(String::from("k")).await;
+        let r = s.fetch(String::from("k")).await.unwrap();
         println!("TRACE: RET {{}}", r);
-        println!("TRACE: status {{}}", s.status().await);
+        println!("TRACE: status {{}}", s.status().await.unwrap());
     }});
 }}
 """
