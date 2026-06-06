@@ -12,8 +12,21 @@ x-framec-volume: &framec
   ${FRAMEC_BIN:?Set FRAMEC_BIN to the path of a Linux framec binary}:/usr/local/bin/framec:ro
 x-tests-volume: &tests
   ../tests:/tests:ro
+# framec transpile cache — a NAMED volume (lives in the Docker VM's own
+# ext4, NOT a VirtioFS host bind). It used to default to /output/.framec_cache,
+# which put a multi-GB, unevicted cache on the VirtioFS-shared host bind; when
+# `docker compose up --force-recreate` recreated that mount across all 17
+# services at once, VirtioFS mount setup deadlocked (uninterruptible D-state
+# processes, hours-long hangs). A named volume never touches VirtioFS, so cache
+# size can't stall recreate. Cache keys already namespace by (framec-hash,
+# target, source-sha), so all 17 containers share this one volume safely.
+x-framec-cache-volume: &fcache
+  framec_cache:/framec_cache
 x-env: &env
   COMPILE_ONLY: ${COMPILE_ONLY:-false}
+  # Point framec_cached.sh at the in-VM named volume (see &fcache above)
+  # instead of its /output/.framec_cache default on the VirtioFS bind.
+  FRAMEC_CACHE_DIR: /framec_cache
   # Per-container parallelism cap. Empty default means each runner
   # uses its own nproc-based default (correct for solo runs). The
   # matrix `make test` target sets these to a smaller value to
@@ -29,22 +42,22 @@ services:
   python:
     build: { context: ., dockerfile: base/python/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/python:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/python:/output"]
 
   typescript:
     build: { context: ., dockerfile: base/typescript/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/typescript:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/typescript:/output"]
 
   javascript:
     build: { context: ., dockerfile: base/javascript/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/javascript:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/javascript:/output"]
 
   rust:
     build: { context: ., dockerfile: base/rust/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/rust:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/rust:/output"]
 
   c:
     build: { context: ., dockerfile: base/c/Dockerfile }
@@ -53,67 +66,67 @@ services:
     # warm runs reuse object-file cache (the c/cpp base images put a
     # ccache shim in /usr/local/bin/{gcc,g++} pointing at /ccache as
     # CCACHE_DIR — see docker/base/c/Dockerfile).
-    volumes: [*framec, *tests, "../output/c:/output", "ccache_c:/ccache"]
+    volumes: [*framec, *tests, *fcache, "../output/c:/output", "ccache_c:/ccache"]
 
   cpp:
     build: { context: ., dockerfile: base/cpp/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/cpp:/output", "ccache_cpp:/ccache"]
+    volumes: [*framec, *tests, *fcache, "../output/cpp:/output", "ccache_cpp:/ccache"]
 
   csharp:
     build: { context: ., dockerfile: base/csharp/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/csharp:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/csharp:/output"]
 
   java:
     build: { context: ., dockerfile: base/java/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/java:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/java:/output"]
 
   go:
     build: { context: ., dockerfile: base/go/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/go:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/go:/output"]
 
   php:
     build: { context: ., dockerfile: base/php/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/php:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/php:/output"]
 
   kotlin:
     build: { context: ., dockerfile: base/kotlin/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/kotlin:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/kotlin:/output"]
 
   swift:
     build: { context: ., dockerfile: base/swift/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/swift:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/swift:/output"]
 
   ruby:
     build: { context: ., dockerfile: base/ruby/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/ruby:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/ruby:/output"]
 
   erlang:
     build: { context: ., dockerfile: base/erlang/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/erlang:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/erlang:/output"]
 
   lua:
     build: { context: ., dockerfile: base/lua/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/lua:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/lua:/output"]
 
   dart:
     build: { context: ., dockerfile: base/dart/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/dart:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/dart:/output"]
 
   gdscript:
     build: { context: ., dockerfile: base/gdscript/Dockerfile }
     environment: *env
-    volumes: [*framec, *tests, "../output/gdscript:/output"]
+    volumes: [*framec, *tests, *fcache, "../output/gdscript:/output"]
 
 # Named volumes for ccache. Persisted in the user's docker volume
 # store so warm runs reuse object-file cache. `docker compose down -v`
@@ -121,3 +134,6 @@ services:
 volumes:
   ccache_c:
   ccache_cpp:
+  # Shared framec transpile cache (see &fcache). In-VM ext4, not VirtioFS.
+  # `make clean-cache` / `docker volume rm docker_framec_cache` reclaims it.
+  framec_cache:
