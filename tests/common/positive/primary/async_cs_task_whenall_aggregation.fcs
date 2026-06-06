@@ -1,0 +1,64 @@
+@@[target("csharp")]
+
+// C#-unique — async_cs_task_whenall_aggregation
+//
+// RFC-0043 (C#): Task.WhenAll over N independent instances. Each
+// gate independent. If any task fails, WhenAll's Task fails with
+// AggregateException; .Result throws the first inner exception.
+
+using System;
+using System.Threading.Tasks;
+
+@@[async]
+@@system Sys {
+    interface:
+        async work(crash: bool): string
+
+    machine:
+        $S {
+            work(crash: bool): string {
+                if (crash) {
+                    throw new Exception("crashed");
+                }
+                @@:("ok")
+            }
+        }
+}
+
+class Program {
+    public static async Task Main(string[] args) {
+        var a = @@Sys(); await a.init();
+        var b = @@Sys(); await b.init();
+        var c = @@Sys(); await c.init();
+
+        // All success.
+        var t1 = a.work(false);
+        var t2 = b.work(false);
+        var t3 = c.work(false);
+        await Task.WhenAll(t1, t2, t3);
+        if (t1.Result != "ok" || t2.Result != "ok" || t3.Result != "ok") {
+            throw new Exception("expected 3 ok");
+        }
+
+        // One fails — WhenAll throws.
+        bool sawError = false;
+        try {
+            await Task.WhenAll(
+                a.work(false),
+                b.work(true),
+                c.work(false)
+            );
+        } catch (Exception e) {
+            sawError = true;
+            if (e.Message != "crashed") throw new Exception("expected crashed: " + e.Message);
+        }
+        if (!sawError) throw new Exception("expected WhenAll to throw");
+
+        // Gates clear.
+        if (await a.work(false) != "ok") throw new Exception("a stuck");
+        if (await b.work(false) != "ok") throw new Exception("b stuck");
+        if (await c.work(false) != "ok") throw new Exception("c stuck");
+
+        Console.WriteLine("PASS: async_cs_task_whenall_aggregation");
+    }
+}

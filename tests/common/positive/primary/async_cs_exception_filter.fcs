@@ -1,0 +1,63 @@
+@@[target("csharp")]
+
+// C#-unique — async_cs_exception_filter
+//
+// RFC-0043 (C#): C# supports exception filters via `catch (E e) when (...)`.
+// A handler exception caught via a filter must still trigger the
+// casing's finally for gate cleanup.
+
+using System;
+using System.Threading.Tasks;
+
+@@[async]
+@@system Sys {
+    interface:
+        async maybe_crash(code: int): string
+        async peek(): string
+
+    machine:
+        $S {
+            maybe_crash(code: int): string {
+                if (code == 1) throw new InvalidOperationException("type-1");
+                if (code == 2) throw new ArgumentException("type-2");
+                @@:("ok")
+            }
+            peek(): string { @@:("clean") }
+        }
+}
+
+class Program {
+    public static async Task Main(string[] args) {
+        var s = @@Sys(); await s.init();
+
+        // Catch only InvalidOperationException with filter.
+        bool caught = false;
+        try {
+            await s.maybe_crash(1);
+        } catch (InvalidOperationException e) when (e.Message.Contains("type-1")) {
+            caught = true;
+        }
+        if (!caught) throw new Exception("filter didn't catch");
+
+        // Gate clear after filtered catch.
+        if (await s.peek() != "clean") throw new Exception("gate stuck after filter");
+
+        // Now mismatched filter — catch falls through to outer.
+        bool fellThrough = false;
+        try {
+            try {
+                await s.maybe_crash(2);
+            } catch (InvalidOperationException) when (false) {
+                throw new Exception("should not match");
+            }
+        } catch (ArgumentException) {
+            fellThrough = true;
+        }
+        if (!fellThrough) throw new Exception("expected ArgumentException to escape filter");
+
+        // Gate still clear.
+        if (await s.peek() != "clean") throw new Exception("gate stuck after fallthrough");
+
+        Console.WriteLine("PASS: async_cs_exception_filter");
+    }
+}
