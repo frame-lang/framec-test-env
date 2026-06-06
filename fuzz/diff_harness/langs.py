@@ -3945,6 +3945,10 @@ LANGS = {
         # file") for multi-system files. Per FUZZ_PLAN.md Phase 7
         # Java is excluded alongside Erlang for the same reason.
         renderers={'persist': java_persist, 'selfcall': java_selfcall, 'hsm': java_hsm, 'operations': java_operations, 'nested': java_nested, 'async': java_async},
+        # Java multi-system is a design exclusion (E407: one public class per
+        # file), so there is intentionally no 'multisys' renderer. Skip those
+        # cases as unsupported rather than crashing on the missing renderer.
+        case_supported=lambda m: m.get("harness_kind") != "multisys",
         rewrite_trace=_java_trace,
         docker_image="docker-java",
         notes=(
