@@ -1,0 +1,32 @@
+@@[target("python_3")]
+
+# D-PY-1 variation (sync): a synchronous handler that raises must still
+# pop the context stack. Without the try/finally fix, the pop is skipped.
+
+@@system SyncCrash {
+    interface:
+        crash()
+        peek(): str
+    machine:
+        $S {
+            crash() { raise RuntimeError("boom") }
+            peek(): str { @@:("ok") }
+        }
+}
+
+def main():
+    s = @@SyncCrash()
+    if len(s._context_stack) != 0:
+        raise RuntimeError(f"unexpected baseline: {len(s._context_stack)}")
+    try:
+        s.crash()
+    except RuntimeError as e:
+        if str(e) != "boom":
+            raise RuntimeError(f"unexpected: {e}")
+    if len(s._context_stack) != 0:
+        raise RuntimeError(f"sync leak: expected 0, got {len(s._context_stack)}")
+    if s.peek() != "ok":
+        raise RuntimeError("peek returned wrong value")
+    print("PASS: sync_context_stack_leak")
+
+main()

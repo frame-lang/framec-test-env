@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Phase 20 — `const` domain fields + `@@:system.state` access fuzz (Wave 1).
+Phase 20 — `const` domain fields + `@@:system.state.name` access fuzz (Wave 1).
 
 Two Frame features tested:
   1. `const k: int = LIT` in the domain block — immutable field
      initialized to a literal. Read via getter; verify the value
      matches the declaration.
-  2. `@@:system.state` — reads the current state name as a string.
+  2. `@@:system.state.name` — reads the current state name as a string.
      Tested AFTER a transition to verify the runtime updates the
      state name correctly.
 
@@ -27,7 +27,7 @@ from pathlib import Path
 from gen_nested import LANGS, method_name, native_types
 
 
-# State-name string returned by @@:system.state. Per-language
+# State-name string returned by @@:system.state.name. Per-language
 # casing may differ — framec emits the exact state name without
 # the leading $. State `$S0` → "S0" verbatim across all backends.
 EXPECTED_STATE_NAME = "S0"
@@ -61,19 +61,19 @@ def _build_p1_const_field(spec, lang, lit):
 
 
 def _build_p2_system_state_initial(spec, lang, lit):
-    """P2: read @@:system.state right after construction.
+    """P2: read @@:system.state.name right after construction.
     Should return "S0" (initial state name, no $ prefix)."""
     m_get = method_name(lang, "get_state")
     return [
         f"        $S0 {{",
-        f"            {m_get}(): str {{ @@:(@@:system.state) }}",
+        f"            {m_get}(): str {{ @@:(@@:system.state.name) }}",
         f"        }}",
     ], f"        f: int = {lit}"
 
 
 def _build_p3_system_state_after_transition(spec, lang, lit):
     """P3: drive() transitions to $S1; get_state() reads
-    @@:system.state. Verify the runtime updates the state name to
+    @@:system.state.name. Verify the runtime updates the state name to
     "S1" after the transition."""
     m_drive = method_name(lang, "drive")
     m_get = method_name(lang, "get_state")
@@ -84,7 +84,7 @@ def _build_p3_system_state_after_transition(spec, lang, lit):
         f"            }}",
         f"        }}",
         f"        $S1 {{",
-        f"            {m_get}(): str {{ @@:(@@:system.state) }}",
+        f"            {m_get}(): str {{ @@:(@@:system.state.name) }}",
         f"        }}",
     ], f"        f: int = {lit}"
 
