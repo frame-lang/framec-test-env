@@ -125,6 +125,10 @@ def gen_system(case_id: int, params: dict) -> tuple[str, str]:
     lines = []
     lines.append("@@target python_3")
     lines.append("")
+    # RFC-0043: a system with async members must carry the `@@[async]`
+    # system-header attribute, else E720 (hard cut). Emit it immediately
+    # before `@@system`.
+    lines.append("@@[async]")
     lines.append(f"@@system {sys_name} {{")
     lines.append("    interface:")
     lines.append("        async fetch(key: str): str")
