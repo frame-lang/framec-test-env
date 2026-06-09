@@ -108,7 +108,7 @@ LANGS = {
     ),
     "fgd": LangSpec(
         target="gdscript",  ext="fgd",
-        int_type="int",     str_type="str",     bool_type="bool",
+        int_type="int",     str_type="String",  bool_type="bool",
         int_default="0",    str_default='""',   bool_default="false",
         str_lit=lambda s: f'"{s}"',             self_x="self.x",
         stmt_end="",        stmt_sep="",

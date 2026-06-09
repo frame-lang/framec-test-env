@@ -35,9 +35,12 @@ ROOT = os.path.join(os.path.dirname(os.path.abspath(__file__)), "common")
 # arms — only the spellings that table translated, so we don't touch types
 # already native to that language (e.g. Rust `i32`/`f64` are left alone; only
 # Rust's actual aliases `int`/`str`/`float`/`number`/`Any` are rewritten).
-# Only the 8 backends that HAD a table are migrated — Dart/GDScript/TS/Ruby/
-# Lua/PHP/JS/Erlang/Python were always pass-through, so any alias usage there
-# predates and is unaffected by this change. `void`/`None`/`list`/`dict` are
+# The statically-typed backends are migrated to native spellings. Dart and
+# GDScript are included: they are typed enough that `str`/`list`/`dict`/`float`
+# are not real type names (Dart uses `String`/`double`; GDScript uses
+# `String`/`Array`/`Dictionary`), and framec no longer aliases them. The truly
+# dynamic backends (Python/JS/TS/Ruby/Lua/PHP/Erlang) ignore type annotations,
+# so any alias usage there is harmless and left untouched. `void`/`None` are
 # structural (kept in the mappers) and intentionally not rewritten.
 SUBS = {
     # rust: int→i64, float→f64, str|string|String→String, Any→String (i32/i64/f32/f64/bool native)
@@ -70,8 +73,14 @@ SUBS = {
     "fswift": {"int": "Int", "i32": "Int", "i64": "Int", "number": "Int", "float": "Double",
                "f64": "Double", "f32": "Double", "double": "Double", "str": "String", "string": "String",
                "bool": "Bool", "boolean": "Bool", "Boolean": "Bool", "Object": "Any", "object": "Any"},
-    # Always-passthrough backends (no table existed) — leave untouched:
-    "fpy": {}, "fjs": {}, "fts": {}, "frb": {}, "flua": {}, "fphp": {}, "fdart": {}, "fgd": {}, "ferl": {},
+    # dart: str|string→String, float|number→double, list→List, map→Map (int/bool native)
+    "fdart":  {"str": "String", "string": "String", "float": "double",
+               "number": "double", "list": "List", "map": "Map"},
+    # gdscript: str|string→String, list→Array, dict|map→Dictionary (int/float/bool native)
+    "fgd":    {"str": "String", "string": "String", "list": "Array",
+               "dict": "Dictionary", "map": "Dictionary"},
+    # Truly dynamic backends — annotations are ignored, leave untouched:
+    "fpy": {}, "fjs": {}, "fts": {}, "frb": {}, "flua": {}, "fphp": {}, "ferl": {},
 }
 
 # Only rewrite an alias when it appears in a TYPE POSITION — directly after a
