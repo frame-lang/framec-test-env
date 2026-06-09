@@ -56,10 +56,13 @@ from pathlib import Path
 # in type-annotation position only (after a `:`), so framec only ever
 # sees valid native types on a static target.
 #
-# Dynamic targets (python_3, javascript, typescript, ruby, lua, php,
-# dart, gdscript) are absent from the table and pass through unchanged
-# (they ignore type names, or `int`/`str` are already native in Python).
-# `void`/`None`/`list`/`dict` are NOT mapped — they are structural forms
+# Truly dynamic targets (python_3, javascript, typescript, ruby, lua,
+# php) are absent from the table and pass through unchanged (they ignore
+# type names, or `int`/`str` are already native there). Dart and GDScript
+# ARE statically typed enough that `str`/`list`/`dict`/`float` are not
+# real type names — they get native spellings (`String`/`Array`/
+# `Dictionary`/`double`) just like the other typed backends.
+# `void`/`None` are NOT mapped — they are structural forms
 # still handled inside framec (Kotlin `Unit`, Go empty return, C
 # `FrameVec*`/`FrameDict*`, …). This mirrors EXACTLY the matrix-corpus
 # migration (`tests/migrate_aliases_to_native.py`) and the now-removed
@@ -96,6 +99,12 @@ _NATIVE_PRIM = {
                 "double": "Double", "str": "String", "string": "String",
                 "bool": "Bool", "boolean": "Bool", "Boolean": "Bool",
                 "Object": "Any", "object": "Any"},
+    # dart: int/bool native; str→String, float/number→double, list/map→typed collections
+    "dart":    {"str": "String", "string": "String", "float": "double",
+                "number": "double", "list": "List", "map": "Map"},
+    # gdscript: int/float/bool native; str→String, list→Array, dict/map→Dictionary
+    "gdscript": {"str": "String", "string": "String", "list": "Array",
+                 "dict": "Dictionary", "map": "Dictionary"},
 }
 # cpp appears as both cpp_17 (gen_nested specs) and cpp_23 (run_fuzz).
 _NATIVE_PRIM["cpp_23"] = _NATIVE_PRIM["cpp_17"]
