@@ -207,11 +207,22 @@ while IFS=$'\t' read -r num status name rest; do
                 # Defensive re-read: under heavy parallel matrix load
                 # the .out file occasionally reads mid-write despite
                 # setsid --wait + sync (Docker volume page-cache
-                # propagation). Re-cat after a brief settle and check
-                # again — if recognizable, treat as PASS. Same pattern
-                # as go/dart/gdscript/c batch scripts.
-                sleep 0.1
-                out=$(cat "$out_file" 2>/dev/null)
+                # propagation). The single 0.1s retry proved too short
+                # under sustained load — Swift ASYNC fixtures (buffered
+                # `print` racing exit in the async runtime) kept flaking
+                # one test per run, a different async fixture each time
+                # (issue #11). Retry with a bounded back-off loop
+                # (5 × 0.2s, worst case 1s per genuinely-failing case)
+                # before declaring the output unrecognized.
+                retries=0
+                while [ "$retries" -lt 5 ]; do
+                    sleep 0.2
+                    out=$(cat "$out_file" 2>/dev/null)
+                    if echo "$out" | grep -qE "^ok |PASS|^not ok "; then
+                        break
+                    fi
+                    retries=$((retries+1))
+                done
                 if echo "$out" | grep -qE "^ok |PASS"; then
                     echo "ok $num - $name"; pass=$((pass+1))
                 elif echo "$out" | grep -q "^not ok "; then
