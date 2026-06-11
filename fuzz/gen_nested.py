@@ -142,6 +142,7 @@ PATTERNS = [
     "p9_return_plus_transition",
     "p11_statevar_lhs",
     "p14_dom_selfcall_arithmetic",
+    "p15_float_statevar",
 ]
 # Phase 10 retirement: p1, p2, p3, p4, p5, p6, p13 retired because
 # Phase 10's gen_perm.py emits a strict superset of their expression
@@ -155,6 +156,17 @@ PATTERNS = [
 #           self-calls fire ONE transition guard at end-of-statement";
 #           p14 verifies it on all 17 langs at runtime, complementing
 #           Phase 10's transpile-only structural fuzz.
+#   p15   — float-typed STATE VARS (issue #8 / framec#59): the corpus's
+#           state-var type vocabulary was int-only, so the float
+#           whole-number-initializer trap (`$.f: float = 1.0` emitting
+#           an integer literal into a float slot) was never generated.
+#           Declares the trap literals (0.0, 1.0 whole-number, 0.4
+#           non-whole control) and does float-only read/write through
+#           the compartment; #59's failure modes (typed-target compile
+#           error / cast crash) are asserted by the existing
+#           transpile→compile→run gates, with p11's int observable
+#           (n == 9) carried unchanged for the trace diff. The `float`
+#           spelling is rewritten per target by `native_types` below.
 #
 # p12 (selfcall in if condition) intentionally omitted — Frame's
 # `if cond { ... }` syntax requires per-language native control-flow
@@ -507,6 +519,25 @@ def gen_case(lang, pattern):
             f"                @@:self.{m_absorb_scache}()",
         ]
         expected_n = 9
+    elif pattern == "p15_float_statevar":
+        # Float-typed state vars (issue #8 / framec#59). The state
+        # declares the trap literals — `0.0`, the whole-number `1.0`,
+        # and a non-whole `0.4` control — and the handler does a
+        # float-only read-modify-write through the compartment
+        # (`$.fone = $.fone + $.fzero`). framec#59's failure modes are
+        # COMPILE error (Rust: integer literal in a float slot) and
+        # cast crash (C++/C#: any-cast of an int where double is
+        # stored) — both asserted by the harness's existing
+        # transpile→compile→run gates without a float value assert
+        # (float formatting differs per target; keep traces int-only).
+        # The int observable rides p11's flow unchanged.
+        # Expected: n == 9.
+        body = [
+            f"                $.fone = $.fone + $.fzero{spec.stmt_end}",
+            f"                $.scache = @@:self.{m_compute}(){spec.stmt_end}",
+            f"                @@:self.{m_absorb_scache}()",
+        ]
+        expected_n = 9
     elif pattern == "p12_selfcall_in_if":
         # Selfcall result captured to a local intermediate, then
         # checked in an if condition. compute() → 9 → captured →
@@ -613,6 +644,15 @@ def gen_case(lang, pattern):
     # there's no value in carrying dead state.
     if pattern == "p11_statevar_lhs":
         lines.append("            $.scache: int = 0")
+    elif pattern == "p15_float_statevar":
+        # framec#59 trap literals: 0.0, the whole-number 1.0 (the case
+        # that emitted an integer literal into a float slot), and a
+        # non-whole 0.4 control. `float` is rewritten to the target's
+        # native spelling by `native_types`.
+        lines.append("            $.scache: int = 0")
+        lines.append("            $.fzero: float = 0.0")
+        lines.append("            $.fone: float = 1.0")
+        lines.append("            $.ffrac: float = 0.4")
     lines.append(f"            {drive_decl} {{")
     lines.append("\n".join(body))
     lines.append("            }")
@@ -629,7 +669,7 @@ def gen_case(lang, pattern):
     # doesn't reference the un-declared state-var (which would
     # break Dart's typed-lowering even when the call site never
     # fires).
-    if pattern == "p11_statevar_lhs":
+    if pattern in ("p11_statevar_lhs", "p15_float_statevar"):
         lines.append(f"            {m_absorb_scache}() {{ {self_n} = {self_n} + $.scache{spec.stmt_end} }}")
     else:
         lines.append(f"            {m_absorb_scache}() {{ }}")
