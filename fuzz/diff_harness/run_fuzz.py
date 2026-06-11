@@ -49,19 +49,21 @@ FRAMEC = os.environ.get(
 # language must write that language's native type names.
 #
 # The pure-Frame fuzz corpus is authored once, portably (`int`/`str`/…),
-# then rendered to all 17 backends by `build_source`. For the 8
+# then rendered to all 17 backends by `build_source`. For the 10
 # statically-typed backends that means this harness — the author of
 # these generated programs — must emit native type names per target,
 # exactly as a human would. We do it here, at the single render
 # chokepoint, in type-annotation position only (after a `:`), so framec
 # only ever sees valid native types on a static target.
 #
-# Dynamic backends (python_3, javascript, typescript, ruby, lua, php,
-# dart, gdscript) are absent from the table: they ignore type names
-# (or, for Python, `int`/`str` are already native), so the portable
-# spelling passes through fine. `void`/`None`/`list`/`dict` are NOT
-# mapped here — they are structural forms still handled inside framec
-# (Kotlin `Unit`, Go empty return, C `FrameVec*`/`FrameDict*`, …).
+# Truly dynamic backends (python_3, javascript, typescript, ruby, lua,
+# php) are absent from the table: they ignore type names (or, for
+# Python, `int`/`str` are already native), so the portable spelling
+# passes through fine. Dart and GDScript ARE statically typed enough
+# that `str` is not a real type name — they get native spellings
+# (`String`), same as gen_nested.py's `_NATIVE_PRIM`. `void`/`None` are
+# NOT mapped here — they are structural forms still handled inside
+# framec (Kotlin `Unit`, Go empty return, C `FrameVec*`/`FrameDict*`, …).
 #
 # This table mirrors EXACTLY the migration applied to the matrix corpus
 # (`tests/migrate_aliases_to_native.py`) and the now-removed framec
@@ -98,6 +100,15 @@ PRIM_TYPES: dict[str, dict[str, str]] = {
                 "double": "Double", "str": "String", "string": "String",
                 "bool": "Bool", "boolean": "Bool", "Boolean": "Bool",
                 "Object": "Any", "object": "Any"},
+    # dart: int/bool native; str→String, float/number→double (matches
+    # gen_nested.py's _NATIVE_PRIM — exposed when the v4.5.0 type-table
+    # extermination made framec pass `str` through verbatim).
+    "dart":    {"str": "String", "string": "String", "float": "double",
+                "number": "double", "list": "List", "map": "Map"},
+    # gdscript: int/float/bool native; str→String, list→Array,
+    # dict/map→Dictionary (matches gen_nested.py's _NATIVE_PRIM).
+    "gdscript": {"str": "String", "string": "String", "list": "Array",
+                 "dict": "Dictionary", "map": "Dictionary"},
 }
 
 
