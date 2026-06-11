@@ -586,7 +586,12 @@ def swift_async(meta: dict) -> str:
     blocks via `DispatchSemaphore` so the script doesn't exit before
     awaits resolve. Swift's `init` is reserved for constructors;
     framec renames the API-parity helper to `initAsync` for Swift —
-    see test_env demos/19_async_http_client.fswift."""
+    see test_env demos/19_async_http_client.fswift.
+
+    Interface calls use `try await`: since RFC-0043 D2 the gated async
+    interface is `async throws` (the E703 concurrent-entry gate; same
+    calling pattern as the demo). `initAsync` does not throw. This
+    single-driver script never triggers E703, so the `try` never fires."""
     sys_name = meta["sys_name"]
     return f"""
 
@@ -601,9 +606,9 @@ Task {{
     let s = {sys_name}()
     await s.initAsync()
     print("TRACE: CALL fetch")
-    let r = await s.fetch("k")
+    let r = try await s.fetch("k")
     print("TRACE: RET " + r)
-    print("TRACE: status " + (await s.status()))
+    print("TRACE: status " + (try await s.status()))
     __sem.signal()
 }}
 __sem.wait()
