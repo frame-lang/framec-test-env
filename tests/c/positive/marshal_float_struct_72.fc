@@ -1,0 +1,73 @@
+@@[target("c")]
+
+// Regression for framec #72 — C void*-slot marshalling.
+//
+// The return WRITE packed float|double via pack_double but the interface
+// wrapper READ unpacked only double, so a float return emitted an
+// uncompilable (float)void* cast; struct-by-value params/returns fell into
+// (void*)(intptr_t) casts that don't compile at all. Marshalling is now
+// category-driven from one source of truth (c_marshal.rs): floats bit-pun
+// symmetrically, structs box (params: stack box in the wrapper; returns:
+// heap box freed once by the wrapper read).
+//
+// Exercises: float return, float param, struct param, struct return.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+typedef struct { float x; float y; } Vector2;
+
+@@[main]
+@@system Field {
+    interface:
+        set_court(size: Vector2)
+        set_margin(m: float)
+        court(): Vector2
+        radius(): float
+    machine:
+        $A {
+            set_court(size: Vector2) {
+                @@:self.w = size.x;
+                @@:self.h = size.y;
+            }
+            set_margin(m: float) {
+                @@:self.margin = m;
+            }
+            court(): Vector2 {
+                Vector2 v;
+                v.x = @@:self.w;
+                v.y = @@:self.h;
+                @@:(v)
+            }
+            radius(): float { @@:(@@:self.w / 2.0f + @@:self.margin) }
+        }
+    domain:
+        w: float = 0.0f
+        h: float = 0.0f
+        margin: float = 0.0f
+}
+
+int main() {
+    Field* f = @@Field();
+
+    Vector2 court_size = { 800.0f, 450.0f };
+    Field_set_court(f, court_size);
+    Field_set_margin(f, 2.5f);
+
+    Vector2 got = Field_court(f);
+    if (got.x != 800.0f || got.y != 450.0f) {
+        printf("not ok - struct round-trip: %f %f\n", (double)got.x, (double)got.y);
+        return 1;
+    }
+
+    double r = Field_radius(f);
+    if (r != 402.5) {
+        printf("not ok - float return: %f\n", r);
+        return 1;
+    }
+
+    printf("PASS: marshal_float_struct_72\n");
+    Field_destroy(f);
+    return 0;
+}
