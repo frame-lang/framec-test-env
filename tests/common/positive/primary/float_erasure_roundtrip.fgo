@@ -1,0 +1,37 @@
+@@[target("go")]
+
+package main
+
+import "fmt"
+import "os"
+
+// Runtime regression for framec#77 — float32 values through the interface{}
+// erasure layer. Bare literals store float64; the declared-type .(float32)
+// assertion panics at runtime while compiling cleanly.
+
+@@[main]
+@@system Roundtrip {
+    interface:
+        bump()
+        peek(): float32
+        radius(): float32
+    machine:
+        $S {
+            $.cool: float32 = 0.0
+
+            bump() { $.cool = $.cool + 1.5 }
+            peek(): float32 { @@:($.cool) }
+            radius(): float32 { @@:(32.0) }
+        }
+}
+
+func main() {
+    p := @@Roundtrip()
+    p.Bump()
+    p.Bump()
+    got := p.Peek()
+    if got != 3.0 { fmt.Println("FAIL peek:", got); os.Exit(1) }
+    rad := p.Radius()
+    if rad != 32.0 { fmt.Println("FAIL radius:", rad); os.Exit(1) }
+    fmt.Println("PASS: float_erasure_roundtrip")
+}
