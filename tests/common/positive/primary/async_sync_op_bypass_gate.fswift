@@ -6,9 +6,18 @@
 // without `async throws` — call directly.
 
 import Foundation
-// Line-buffer stdout: async drivers' buffered `print` can race exit
-// and lose the final PASS line under a redirected stdout (test-env #11).
 setvbuf(stdout, nil, _IOLBF, 0)
+
+// Deterministic handshake (was a flaky race, mis-filed as test-env #11): the
+// driver must observe `count` AFTER `slow_work` has incremented it and while
+// it is suspended at the sleep. `Task.yield()` alone does NOT guarantee the
+// child task reached its increment, so `get_count()` intermittently read 0
+// ("Fatal error: during: 0"), and framec's Swift `defer` cleanup change
+// perturbed timing enough to lose that race ~1-in-60. `slow_work` now signals
+// `__started` right after the increment; the driver polls it non-blocking with
+// `Task.yield()` (no cooperative-thread blocking, no continuation-set race) so
+// the "during" read is ordered after the increment, every time.
+let __started = DispatchSemaphore(value: 0)
 
 @@[async]
 @@system Holder {
@@ -24,6 +33,7 @@ setvbuf(stdout, nil, _IOLBF, 0)
         $S {
             slow_work(): String {
                 self.count = self.count + 1
+                __started.signal()
                 try? await Task.sleep(nanoseconds: 50_000_000)
                 @@:("done")
             }
@@ -41,9 +51,10 @@ Task {
 
         guard s.get_count() == 0 else { fatalError("initial: \(s.get_count())") }
 
-        // Fire async; sync op while it's in flight.
+        // Fire async; wait until slow_work has incremented (and is now
+        // suspended at the sleep), then read the gate-bypassing sync op.
         async let p = s.slow_work()
-        await Task.yield()
+        while __started.wait(timeout: .now()) == .timedOut { await Task.yield() }
 
         let n = s.get_count()
         guard n == 1 else { fatalError("during: \(n)") }
