@@ -13,6 +13,13 @@ native epilog that instantiates the generated recognizer and asserts the
 fields, printing `PASS: NN_name`. Run via the harness: `FRAMEC=<framec>
 ./run_tests.sh --category fsm` (or the hermetic docker matrix).
 
+**Status: all 18 fixtures pass on all 17 languages** (real-toolchain
+compile+run). The matrix already earned its keep: it surfaced a C# RE2-parity
+bug — edge `\b`/`\B` on the `bytes` alphabet was unenforced (the C# unit test
+had only exercised the `char`/Pike path), so `/\bcat\b/` wrongly accepted
+`"cats"`. Fixed in framec (C# backend now emits the `iswordat` word-boundary
+guard like the other backends).
+
 ## Fixtures
 
 | #   | Fixture | Feature exercised |
