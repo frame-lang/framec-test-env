@@ -1,0 +1,12 @@
+#!/usr/bin/env escript
+%%! -*- erlang -*-
+%% RFC-0042 @@fsm matrix sidecar: drive `recognize/1` and assert the
+%% same behavior the Rust fixture's `main` asserts. The generic
+%% export-walking smoke driver cannot call `recognize/1` (it would
+%% pass a placeholder that crashes `list_to_tuple/1`), so this fixture
+%% ships an explicit driver. A failed match aborts with a non-zero exit.
+main(_) ->
+    R0 = m:recognize("ab"),
+    false = maps:get(accepted, R0),
+    io:format("PASS: 106_interior_anchor~n"),
+    halt(0).
