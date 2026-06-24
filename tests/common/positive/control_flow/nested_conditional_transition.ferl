@@ -1,0 +1,32 @@
+%% #119 regression: a handler whose control flow nests a transition inside one
+%% branch and falls through (no transition, mutating state) in another. The
+%% nested fall-through leaf must yield a valid gen_statem reply tuple with the
+%% threaded Data, or gen_statem crashes with bad_return_from_state_function.
+@@[target("erlang")]
+@@system Auth {
+    interface:
+        verify(p: string)
+        failures(): int
+    machine:
+        $Idle {
+            verify(p: string) {
+                if p == "ok" {
+                    -> $Active
+                } else {
+                    self.fails = self.fails + 1
+                    if self.fails >= 3 {
+                        -> $Locked
+                    }
+                }
+            }
+            failures(): int { @@:(@@:self.fails) }
+        }
+        $Active {
+            failures(): int { @@:(@@:self.fails) }
+        }
+        $Locked {
+            failures(): int { @@:(@@:self.fails) }
+        }
+    domain:
+        fails: int = 0
+}
