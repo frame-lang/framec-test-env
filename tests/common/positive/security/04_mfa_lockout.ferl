@@ -1,0 +1,81 @@
+@@[target("erlang")]
+
+%% Cookbook 89: MFA with Lockout. Exercises nested if/else-if with mixed
+%% state mutation and transitions (the #119 lowering path).
+
+@@system MfaAuth {
+    interface:
+        submit_username(u: str)
+        submit_password(p: str)
+        submit_second_factor(code: str)
+        cooldown_elapsed()
+        logout()
+        get_status(): str
+        get_failures(): int
+
+    machine:
+        $Idle {
+            submit_username(u: str) {
+                self.username = u
+                -> $AwaitingPassword
+            }
+            get_status(): str { @@:("idle") }
+            get_failures(): int { @@:(self.failures) }
+        }
+
+        $AwaitingPassword {
+            submit_password(p: str) {
+                if self.username == "alice" andalso p == "hunter2" {
+                    -> $AwaitingSecondFactor
+                } else {
+                    self.failures = self.failures + 1
+                    if self.failures >= self.lockout_threshold {
+                        -> $Locked
+                    }
+                }
+            }
+            get_status(): str { @@:("awaiting_password") }
+            get_failures(): int { @@:(self.failures) }
+        }
+
+        $AwaitingSecondFactor {
+            $.attempts: int = 0
+
+            submit_second_factor(code: str) {
+                $.attempts = $.attempts + 1
+                if code == "123456" {
+                    self.failures = 0
+                    -> $Authenticated
+                } else if $.attempts >= 3 {
+                    self.failures = self.failures + 1
+                    if self.failures >= self.lockout_threshold {
+                        -> $Locked
+                    } else {
+                        -> $AwaitingPassword
+                    }
+                }
+            }
+            get_status(): str { @@:("awaiting_2fa") }
+            get_failures(): int { @@:(self.failures) }
+        }
+
+        $Authenticated {
+            logout() { -> $Idle }
+            get_status(): str { @@:("authenticated") }
+            get_failures(): int { @@:(self.failures) }
+        }
+
+        $Locked {
+            cooldown_elapsed() {
+                self.failures = self.lockout_threshold - 1
+                -> $Idle
+            }
+            get_status(): str { @@:("locked") }
+            get_failures(): int { @@:(self.failures) }
+        }
+
+    domain:
+        username: str = ""
+        failures: int = 0
+        lockout_threshold: int = 5
+}
