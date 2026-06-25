@@ -1,0 +1,568 @@
+@@[target("rust")]
+@@[persist(String)]
+
+// ============================================================================
+// MAXIMAL FRAME COVERAGE FIXTURE — rust (core: HSM, stack, all 7 statements,
+// transitions, references, const, actions, operations, multi-system, probe).
+// Persist + async layered in after the core is green. TAP via fn ck.
+// ============================================================================
+
+// [attr: main]
+@@[main]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Job {
+
+    // [section: operations]
+    operations:
+        // [op: typed params + return, native return]
+        clamp(v: i32, hi: i32): i32 {
+            if v > hi {
+                return hi;
+            }
+            return v;
+        }
+
+    // [section: interface]
+    interface:
+        start(id: String)
+        submit(task: String)
+        tick()
+        pause()
+        resume()
+        finish()
+        spin(n: i32): i32
+        status(): String
+        counter(): i32
+        depth(): i32
+        trace_of(): String
+        set_cache(v: i32)
+        get_cache(): i32
+        // [f64/bool coverage + const read + internal clamp call]
+        set_verbose(v: bool)
+        is_verbose(): bool
+        set_ratio(r: f64)
+        get_ratio(): f64
+        capacity(): i32
+        clamp_in(v: i32, hi: i32): i32
+        get_clamped(): i32
+
+    // [section: machine]
+    machine:
+
+        // [state: initial]
+        $Begin {
+            // [handler: enter, no args]
+            $>() {
+                self.trace.push_str("Begin>;");
+            }
+            start(id: String) {
+                self.job_id = id;
+                self.note(String::from("N;"));
+                -> ("seed") $Idle
+            }
+            status(): String { @@:(String::from("begin")) }
+            trace_of(): String { @@:(self.trace.clone()) }
+            counter(): i32 { @@:(self.attempts) }
+            // [f64/bool setters/getters — exercised + persist round-tripped]
+            set_verbose(v: bool) { self.verbose = v; }
+            set_ratio(r: f64) { self.ratio = r; }
+            get_ratio(): f64 { @@:(self.ratio) }
+            // [bool read in a guard]
+            is_verbose(): bool {
+                if self.verbose {
+                    @@:(true)
+                } else {
+                    @@:(false)
+                }
+            }
+            // [const read]
+            capacity(): i32 { @@:(self.MAX) }
+        }
+
+        // [state: HSM parent]
+        $Working {
+            status(): String { @@:(String::from("working")) }
+            counter(): i32 { @@:(self.attempts) }
+            depth(): i32 { @@:(self.stack_depth) }
+            trace_of(): String { @@:(self.trace.clone()) }
+        }
+
+        // [state: HSM child => parent]
+        $Idle => $Working {
+            // [state var w/ type + init]
+            $.i: i32 = 0
+
+            // [handler: enter w/ param]
+            $>(seed: String) {
+                self.trace.push_str(&format!("Idle>({});", seed));
+            }
+            // [handler: exit]
+            <$() {
+                self.trace.push_str("Idle<;");
+            }
+            submit(task: String) {
+                // [native control: terminal conditional]
+                if task == "" {
+                    -> $Rejected
+                } else {
+                    self.attempts = self.attempts + 1;
+                    -> $Active(task)
+                }
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            status(): String { => $^ }
+            depth(): i32 { => $^ }
+            spin(n: i32): i32 {
+                // [native control: while loop over state var]
+                while $.i < n {
+                    $.i = $.i + 1;
+                }
+                @@:($.i)
+            }
+        }
+
+        // [state: typed state parameter (receives state args)]
+        $Active(task: String) {
+            $>() {
+                self.trace.push_str(&format!("Active>({});", task));
+            }
+            <$(why: String) {
+                self.trace.push_str(&format!("Active<({});", why));
+            }
+            tick() {
+                // [native control: NON-TERMINAL conditional — mutate, fall through]
+                if self.attempts < self.max_attempts {
+                    self.attempts = self.attempts + 1;
+                }
+                self.trace.push_str(&format!("tick{};", self.attempts));
+            }
+            finish() {
+                ("done") -> ("finished") $Done
+            }
+            status(): String { @@:(String::from("active")) }
+            counter(): i32 { @@:(self.attempts) }
+            trace_of(): String { @@:(self.trace.clone()) }
+            set_cache(v: i32) { self.cache = v; }
+            get_cache(): i32 { @@:(self.cache) }
+            // [internal operation call: clamp() invoked as self.clamp(...) inside a handler]
+            clamp_in(v: i32, hi: i32) {
+                self.clamped = self.clamp(v, hi);
+            }
+            get_clamped(): i32 { @@:(self.clamped) }
+            // [f64/bool getters available in $Active for persist-restore reads]
+            is_verbose(): bool {
+                if self.verbose {
+                    @@:(true)
+                } else {
+                    @@:(false)
+                }
+            }
+            get_ratio(): f64 { @@:(self.ratio) }
+        }
+
+        // [state: modal (pushed)]
+        $Paused {
+            $>() {
+                self.stack_depth = self.stack_depth + 1;
+            }
+            <$() {
+                self.stack_depth = self.stack_depth - 1;
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            resume() {
+                -> pop$
+            }
+            status(): String { @@:(String::from("paused")) }
+            depth(): i32 { @@:(self.stack_depth) }
+        }
+
+        $Rejected {
+            status(): String { @@:(String::from("rejected")) }
+            counter(): i32 { @@:(self.attempts) }
+            trace_of(): String { @@:(self.trace.clone()) }
+        }
+
+        // [state: final]
+        $Done {
+            $>(why: String) {
+                self.trace.push_str(&format!("Done>({});", why));
+            }
+            status(): String { @@:(String::from("done")) }
+            counter(): i32 { @@:(self.attempts) }
+            depth(): i32 { @@:(self.stack_depth) }
+            trace_of(): String { @@:(self.trace.clone()) }
+        }
+
+    // [section: actions]
+    actions:
+        note(s: String) {
+            self.trace.push_str(&s);
+        }
+
+    // [section: domain]
+    domain:
+        // [decl: const field]
+        const MAX: i32 = 99
+        // [decl: typed domain vars + init]
+        job_id: String = String::from("")
+        attempts: i32 = 0
+        max_attempts: i32 = 3
+        stack_depth: i32 = 0
+        trace: String = String::from("")
+        // [decl: f64 + bool domain fields — exercised in guards/getters + persist round-trip]
+        verbose: bool = false
+        ratio: f64 = 1.5
+        clamped: i32 = 0
+        // [decl: no_persist field — excluded from save/load, resets on restore]
+        @@[no_persist]
+        cache: i32 = -1
+}
+
+// ============================================================================
+// MULTI-SYSTEM COMPOSITION — Controller holds + delegates to Sensor
+// ============================================================================
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Sensor {
+    interface:
+        bump()
+        read(): i32
+    machine:
+        $S {
+            bump() {
+                self.val = self.val + 1;
+            }
+            read(): i32 { @@:(self.val) }
+        }
+    domain:
+        val: i32 = 0
+}
+
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Controller {
+    interface:
+        tick()
+        total(): i32
+        count(): i32
+    machine:
+        $C {
+            tick() {
+                self.seen = self.seen + 1;
+                self.sensor.bump();
+            }
+            total(): i32 { @@:(self.sensor.read()) }
+            count(): i32 { @@:(self.seen) }
+        }
+    domain:
+        // [composition: hold a sub-system as a domain field]
+        sensor: Sensor = @@Sensor()
+        seen: i32 = 0
+}
+
+// ============================================================================
+// CONSTRUCT PROBE — @@:event, @@:params, @@:data, @@:return(e),
+// @@:system.state.name, labeled transition, reentrant @@:self, const, action
+// ============================================================================
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Probe {
+    interface:
+        echo(x: String): String
+        fire()
+        relay()
+        ping()
+        here(): String
+        evt(): String
+        cap(): i32
+        log(): String
+        classify(n: i32): String
+        // [@@:data call-scope isolation across a reentrant @@:self call]
+        outer_data(): String
+        inner_data(): String
+
+    machine:
+        $A {
+            echo(x: String): String {
+                @@:data.tmp = @@:params.x
+                @@:(format!("echo:{}", @@:data.tmp))
+            }
+            classify(n: i32): String {
+                if n < 0 {
+                    @@:(String::from("neg"))
+                } else {
+                    if n == 0 {
+                        @@:(String::from("zero"))
+                    } else {
+                        @@:(String::from("pos"))
+                    }
+                }
+            }
+            fire() {
+                self.last = @@:event
+                -> "fired" $B
+            }
+            relay() {
+                -> => $B
+            }
+            ping() {
+                self.helper(String::from("ping;"));
+                @@:self.fire()
+            }
+            here(): String { @@:(@@:system.state.name) }
+            evt(): String { @@:return(self.last.clone()) }
+            cap(): i32 { @@:(self.LIMIT) }
+            log(): String { @@:(self.trace.clone()) }
+            // [@@:data scope isolation: set "outer", reentrantly call inner_data()
+            //  which sets its OWN @@:data.k="inner", then prove ours is untouched]
+            outer_data(): String {
+                @@:data.k = String::from("outer")
+                @@:self.inner_data()
+                @@:(format!("{}", @@:data.k))
+            }
+            inner_data(): String {
+                @@:data.k = String::from("inner")
+                @@:(format!("{}", @@:data.k))
+            }
+        }
+
+        $B {
+            relay() {
+                self.trace.push_str("B.relay;");
+            }
+            here(): String { @@:(String::from("B")) }
+            evt(): String { @@:return(self.last.clone()) }
+            log(): String { @@:(self.trace.clone()) }
+        }
+
+    actions:
+        helper(s: String) {
+            self.trace.push_str(&s);
+        }
+
+    domain:
+        const LIMIT: i32 = 50
+        trace: String = String::from("")
+        last: String = String::from("")
+}
+
+// ============================================================================
+// ASYNC SYSTEM — @@[async] Pump: async interface methods (await point inside
+// the handler) + a SYNC operation bypass (operations stay synchronous even in
+// an async system). Driven with futures::executor::block_on. Also persistable:
+// save/restore of an async (casing + machine) system is round-tripped below.
+//
+// E703 NOTE (single-driver contract): the async dispatch returns
+// Result<_, FrameE703Error> to reject a SECOND concurrent driver. In Rust the
+// borrow checker forbids two concurrent `&mut self` async calls, so the
+// single-driver contract is COMPILE-enforced: the runtime gate exists and is
+// compile-verified (the Result type is present and matched with .expect()), but
+// it is unreachable in safe single-threaded code. It cannot be behaviorally
+// exercised without a multi-threaded runtime, so we intentionally do NOT add
+// tokio just to hit it — an accepted, documented limitation, not a coverage gap.
+// ============================================================================
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[async]
+@@system Pump {
+    operations:
+        // [op: SYNC bypass — operations are not async even in an @@[async] system]
+        peek(): i32 {
+            return self.level;
+        }
+    interface:
+        // [async interface methods]
+        async push(): i32
+        async drain(): i32
+    machine:
+        $P {
+            push(): i32 {
+                // [async control: executor-agnostic await point]
+                std::future::ready(()).await;
+                self.level = self.level + 1;
+                @@:(self.level)
+                return;
+            }
+            drain(): i32 {
+                std::future::ready(()).await;
+                self.level = 0;
+                @@:(self.level)
+                return;
+            }
+        }
+    domain:
+        level: i32 = 0
+}
+
+// ============================================================================
+// DRIVER — TAP via ck(); fresh machine per scenario.
+// ============================================================================
+fn ck(n: &mut i32, cond: bool, desc: &str) {
+    *n += 1;
+    println!("{} {} - {}", if cond { "ok" } else { "not ok" }, *n, desc);
+}
+
+fn main() {
+    let mut n = 0;
+    println!("TAP version 14");
+
+    let mut j0 = @@Job();
+    ck(&mut n, j0.clamp(150, 99) == 99, "operation clamp(150,99)=99");
+    ck(&mut n, j0.clamp(5, 99) == 5, "operation clamp(5,99)=5");
+
+    let mut a = @@Job();
+    a.start(String::from("J1"));
+    ck(&mut n, a.status() == "working", "Idle forwards status via => $^ to parent");
+    a.submit(String::from(""));
+    ck(&mut n, a.status() == "rejected", "submit('') terminal conditional -> $Rejected");
+    ck(&mut n, a.trace_of().contains("N;"), "action note() invoked from start()");
+
+    let mut b = @@Job();
+    b.start(String::from("J2"));
+    b.submit(String::from("payload"));
+    ck(&mut n, b.status() == "active", "submit(task) state-args -> $Active(task)");
+    b.tick();
+    b.tick();
+    b.tick();
+    b.tick();
+    ck(&mut n, b.counter() == 3, "non-terminal conditional clamps attempts at max=3");
+    ck(&mut n, b.trace_of().contains("tick3"), "trailing read of mutated field ran after the if");
+
+    b.finish();
+    ck(&mut n, b.status() == "done", "finish() exit-args -> $Done");
+    ck(&mut n, b.trace_of().contains("Active<(done)"), "exit handler received exit arg 'done'");
+    ck(&mut n, b.trace_of().contains("Done>(finished)"), "enter handler received enter arg (exit+enter form)");
+
+    let mut c = @@Job();
+    c.start(String::from("J3"));
+    c.pause();
+    ck(&mut n, c.status() == "paused" && c.depth() == 1, "push$ -> $Paused; depth=1");
+    c.resume();
+    ck(&mut n, c.status() == "working" && c.depth() == 0, "-> pop$ ran <$ (depth->0) + depth() via => $^");
+
+    let mut cn = @@Job();
+    cn.start(String::from("J3b"));
+    cn.pause();
+    cn.pause();
+    ck(&mut n, cn.status() == "paused", "nested push$ twice -> still $Paused");
+    cn.resume();
+    cn.resume();
+    ck(&mut n, cn.status() == "working", "two -> pop$ restore through the stack to $Idle");
+
+    let mut d = @@Job();
+    d.start(String::from("J4"));
+    ck(&mut n, d.spin(5) == 5, "while loop over state var $.i -> 5");
+
+    // multi-system isolation
+    let mut c1 = @@Controller();
+    c1.tick();
+    c1.tick();
+    let mut c2 = @@Controller();
+    c2.tick();
+    c2.tick();
+    c2.tick();
+    ck(&mut n, c1.total() == 2 && c2.total() == 3, "multi-system: two Controllers, independent Sensors");
+    ck(&mut n, c1.count() == 2 && c2.count() == 3, "multi-system: each Controller's own domain isolated");
+
+    // construct probe
+    let mut pr = @@Probe();
+    ck(&mut n, pr.echo(String::from("hi")) == "echo:hi", "@@:params.x + @@:data set/read");
+    ck(&mut n, pr.here() == "A" && pr.cap() == 50, "@@:system.state.name + const read");
+    ck(&mut n, pr.classify(-1) == "neg" && pr.classify(0) == "zero" && pr.classify(50) == "pos",
+        "nested conditional (3 branches)");
+    pr.fire();
+    ck(&mut n, pr.here() == "B" && pr.evt() == "fire", "@@:event recorded + labeled transition -> $B");
+    let mut pr2 = @@Probe();
+    pr2.relay();
+    ck(&mut n, pr2.here() == "B" && pr2.log().contains("B.relay;"), "forward transition -> => $B re-dispatched relay");
+    let mut pr3 = @@Probe();
+    pr3.ping();
+    ck(&mut n, pr3.log().contains("ping;") && pr3.here() == "B", "action invocation + reentrant @@:self.fire()");
+
+    // persist round-trip: drive to $Active, mutate domain + cache, save, restore into fresh machine
+    let mut p1 = @@Job();
+    p1.start(String::from("PJ"));
+    p1.submit(String::from("payload"));   // -> $Active(task)
+    p1.tick();                            // attempts -> 1
+    p1.set_cache(777);                    // no_persist field
+    let snap = p1.save_state();
+    ck(&mut n, p1.get_cache() == 777, "persist: no_persist field holds value before save");
+
+    let mut p2 = @@Job();
+    p2.restore_state(snap);
+    ck(&mut n, p2.status() == "active", "persist: restored machine is back in $Active");
+    ck(&mut n, p2.counter() == 2, "persist: domain field 'attempts' round-tripped (=2)");
+    ck(&mut n, p2.get_cache() == -1, "persist: @@[no_persist] 'cache' reset to default (-1), not 777");
+
+    // async system: drive async interface methods via a minimal executor (block_on)
+    let mut pump = @@Pump();
+    futures::executor::block_on(pump.init());
+    let r1 = futures::executor::block_on(pump.push()).expect("push not busy");
+    let r2 = futures::executor::block_on(pump.push()).expect("push not busy");
+    ck(&mut n, r1 == 1 && r2 == 2, "async: two awaited push() calls increment level 1,2");
+    ck(&mut n, pump.peek() == 2, "async: SYNC op peek() bypasses async, reads level=2");
+    let r3 = futures::executor::block_on(pump.drain()).expect("drain not busy");
+    ck(&mut n, r3 == 0 && pump.peek() == 0, "async: awaited drain() resets level to 0");
+
+    // ----- const read via interface method -----
+    let mut cap = @@Job();
+    ck(&mut n, cap.capacity() == 99, "const MAX read via capacity() interface method = 99");
+
+    // ----- bool read in a guard -----
+    let mut bv = @@Job();
+    ck(&mut n, bv.is_verbose() == false, "bool field default false read in guard");
+    bv.set_verbose(true);
+    ck(&mut n, bv.is_verbose() == true, "bool field set true, read back true in guard");
+
+    // ----- f64 getter -----
+    let mut fr = @@Job();
+    ck(&mut n, fr.get_ratio() == 1.5, "f64 field default 1.5 via getter");
+    fr.set_ratio(2.75);
+    ck(&mut n, fr.get_ratio() == 2.75, "f64 field set 2.75, read back");
+
+    // ----- f64 + bool persist round-trip (serde_json f64 path is historically fragile) -----
+    let mut fp1 = @@Job();
+    fp1.set_verbose(true);
+    fp1.set_ratio(3.0625);                       // exact in f64; survives JSON
+    fp1.start(String::from("FP"));
+    fp1.submit(String::from("payload"));         // -> $Active (where getters are reachable)
+    let fsnap = fp1.save_state();
+    let mut fp2 = @@Job();
+    fp2.restore_state(fsnap);
+    ck(&mut n, fp2.status() == "active", "f64/bool persist: restored machine back in $Active");
+    ck(&mut n, fp2.is_verbose() == true, "f64/bool persist: bool field survived save/restore");
+    ck(&mut n, fp2.get_ratio() == 3.0625, "f64/bool persist: f64 field survived serde_json round-trip");
+
+    // ----- clamp() called internally as self.clamp(...) inside a handler -----
+    let mut ci = @@Job();
+    ci.start(String::from("CI"));
+    ci.submit(String::from("payload"));          // -> $Active
+    ci.clamp_in(250, 99);
+    ck(&mut n, ci.get_clamped() == 99, "operation clamp() called internally (self.clamp) inside handler = 99");
+    ci.clamp_in(7, 99);
+    ck(&mut n, ci.get_clamped() == 7, "internal self.clamp(7,99) = 7");
+
+    // ----- @@:data call-scope isolation across a reentrant @@:self call -----
+    let mut od = @@Probe();
+    ck(&mut n, od.outer_data() == "outer",
+        "@@:data scope isolated: reentrant @@:self.inner_data() did not clobber outer's @@:data.k");
+
+    // ----- async persist round-trip: save Pump at level 2, restore into fresh Pump -----
+    let mut ap1 = @@Pump();
+    futures::executor::block_on(ap1.init());
+    futures::executor::block_on(ap1.push()).expect("push not busy");
+    futures::executor::block_on(ap1.push()).expect("push not busy"); // level -> 2
+    let asnap = ap1.save_state();
+    let mut ap2 = @@Pump();
+    ap2.restore_state(asnap);
+    ck(&mut n, ap2.peek() == 2, "async persist: restored Pump retains level=2 (sync op peek())");
+
+    println!("1..{}", n);
+}
