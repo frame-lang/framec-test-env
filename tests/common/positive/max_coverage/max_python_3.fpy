@@ -1,0 +1,553 @@
+@@[target("python_3")]
+
+import asyncio
+
+# ============================================================================
+# MAXIMAL FRAME COVERAGE FIXTURE — python_3
+# One runnable, self-asserting file exercising every Frame construct this
+# backend supports. Construct tags are standalone [tag] lines above each
+# construct (never trailing `{`, Python is indent-sensitive). TAP output.
+# ============================================================================
+
+# [attr: main] [attr: persist] [attr: save op] [attr: load op] [attr: factory rename]
+@@[main]
+@@[persist(JSON)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[create(make)]
+@@system Job {
+
+    # [section: operations]
+    operations:
+        # [op: typed params + return, native return passthrough]
+        clamp(v: int, hi: int): int {
+            if v > hi:
+                return hi
+            return v
+        }
+
+    # [section: interface]
+    interface:
+        start(id: str)
+        submit(task: str)
+        tick()
+        pause()
+        resume()
+        finish()
+        spin(n: int): int
+        status(): str
+        counter(): int
+        depth(): int
+        trace_of(): str
+        scratch_of(): int
+
+    # [section: machine]
+    machine:
+
+        # [state: initial]
+        $Begin {
+            # [handler: enter, no args]
+            $>() {
+                self.trace = self.trace + "Begin>;"
+            }
+            start(id: str) {
+                self.job_id = id
+                self.note("N;")
+                -> ("seed") $Idle
+            }
+            status(): str {
+                @@:("begin")
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+        }
+
+        # [state: HSM parent]
+        $Working {
+            status(): str {
+                @@:("working")
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+            depth(): int {
+                @@:(self.stack_depth)
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+        }
+
+        # [state: HSM child => parent]
+        $Idle => $Working {
+            # [handler: enter w/ param]
+            $>(seed: str) {
+                self.trace = self.trace + "Idle>(" + seed + ");"
+            }
+            # [handler: exit]
+            <$() {
+                self.trace = self.trace + "Idle<;"
+            }
+            submit(task: str) {
+                if task == "":
+                    -> $Rejected
+                else:
+                    self.attempts = self.attempts + 1
+                    -> $Active(task)
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            status(): str {
+                => $^
+            }
+            depth(): int {
+                => $^
+            }
+            spin(n: int): int {
+                $.i = 0
+                while $.i < n:
+                    $.i = $.i + 1
+                @@:($.i)
+            }
+        }
+
+        # [state: state w/ a typed state parameter (receives state args)]
+        $Active(task: str) {
+            $>() {
+                self.trace = self.trace + "Active>(" + task + ");"
+            }
+            <$(why: str) {
+                self.trace = self.trace + "Active<(" + why + ");"
+            }
+            tick() {
+                self.scratch = self.scratch + 1
+                if self.attempts < self.max_attempts:
+                    self.attempts = self.attempts + 1
+                self.trace = self.trace + "tick" + str(self.attempts) + ";"
+            }
+            finish() {
+                ("done") -> ("finished") $Done
+            }
+            status(): str {
+                @@:("active")
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+            scratch_of(): int {
+                @@:(self.scratch)
+            }
+        }
+
+        # [state: modal (pushed)]
+        $Paused {
+            $>() {
+                self.stack_depth = self.stack_depth + 1
+            }
+            <$() {
+                self.stack_depth = self.stack_depth - 1
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            resume() {
+                -> pop$
+            }
+            status(): str {
+                @@:("paused")
+            }
+            depth(): int {
+                @@:(self.stack_depth)
+            }
+        }
+
+        $Rejected {
+            status(): str {
+                @@:("rejected")
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+        }
+
+        # [state: final]
+        $Done {
+            $>(why: str) {
+                self.trace = self.trace + "Done>(" + why + ");"
+            }
+            status(): str {
+                @@:("done")
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+            depth(): int {
+                @@:(self.stack_depth)
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+        }
+
+    # [section: actions]
+    actions:
+        note(s: str) {
+            self.trace = self.trace + s
+        }
+
+    # [section: domain]
+    domain:
+        # [decl: const field]
+        const MAX: int = 99
+        # [decl: typed domain vars + init]
+        job_id: str = ""
+        attempts: int = 0
+        max_attempts: int = 3
+        stack_depth: int = 0
+        trace: str = ""
+        # [attr: @@[no_persist] — field excluded from the serialized blob]
+        @@[no_persist] scratch: int = 0
+}
+
+# ============================================================================
+# ASYNC SYSTEM — [attr: @@[async]] async interface + await + sync-op bypass
+# ============================================================================
+@@[async]
+@@[persist(JSON)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Pump {
+
+    # [op: sync operation — bypasses the async gate]
+    operations:
+        level(): int {
+            @@:(self.ticks)
+        }
+
+    interface:
+        async fill()                    # [async interface method]
+        async drain()
+
+    machine:
+
+        $Empty {
+            fill() {
+                await asyncio.sleep(0)  # [native await inside handler]
+                self.ticks = self.ticks + 1
+                -> $Full
+            }
+        }
+
+        $Full {
+            drain() {
+                await asyncio.sleep(0)
+                -> $Empty
+            }
+        }
+
+    domain:
+        ticks: int = 0
+}
+
+# ============================================================================
+# MULTI-SYSTEM COMPOSITION — [Controller holds + delegates to Sensor]
+# ============================================================================
+@@[persist(JSON)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Sensor {
+    interface:
+        bump()
+        read(): int
+    machine:
+        $S {
+            bump() {
+                self.val = self.val + 1
+            }
+            read(): int {
+                @@:(self.val)
+            }
+        }
+    domain:
+        val: int = 0
+}
+
+@@[persist(JSON)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Controller {
+    interface:
+        tick()
+        total(): int
+        count(): int
+    machine:
+        $C {
+            # [composition: hold a sub-system instance in a state var]
+            $.sensor = None
+            $>() {
+                $.sensor = @@Sensor()
+            }
+            tick() {
+                self.seen = self.seen + 1
+                $.sensor.bump()
+            }
+            total(): int {
+                @@:($.sensor.read())
+            }
+            count(): int {
+                @@:(self.seen)
+            }
+        }
+    domain:
+        seen: int = 0
+}
+
+# ============================================================================
+# CONSTRUCT PROBE — the remaining reference/transition constructs:
+# @@:event, @@:params.x, @@:data.x (set+read), @@:return(e), @@:system.state.name,
+# labeled transition, forward transition (-> => $S), reentrant @@:self.m(),
+# const read, action invocation.
+# ============================================================================
+@@[persist(JSON)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Probe {
+
+    interface:
+        echo(x: str): str
+        fire()
+        relay()
+        ping()
+        here(): str
+        evt(): str
+        cap(): int
+        log(): str
+        classify(n: int): str
+        guard(): int
+        outer_data(): str
+        inner_data()
+
+    machine:
+
+        $A {
+            echo(x: str): str {
+                @@:data.tmp = @@:params.x
+                @@:("echo:" + @@:data.tmp)
+            }
+            outer_data(): str {
+                @@:data.k = "outer"
+                @@:self.inner_data()              # reentrant: inner gets its OWN @@:data scope
+                @@:(@@:data.k)                    # must still read "outer" (call-scope isolation)
+            }
+            inner_data() {
+                @@:data.k = "inner"
+            }
+            classify(n: int): str {
+                if n < 0:
+                    @@:("neg")
+                elif n == 0:
+                    @@:("zero")
+                else:
+                    if n > 100:
+                        @@:("big")
+                    else:
+                        @@:("pos")
+            }
+            guard(): int {
+                @@:return(self.LIMIT)
+                self.helper("LEAK;")
+            }
+            fire() {
+                self.last = @@:event
+                -> "fired" $B                     # [transition: labeled]
+            }
+            relay() {
+                -> => $B                          # [transition: forward (re-dispatch event)]
+            }
+            ping() {
+                self.helper("ping;")              # [action invocation: self.<action>()]
+                @@:self.fire()                    # [ref: reentrant self-call]
+            }
+            here(): str {
+                @@:(@@:system.state.name)
+            }
+            evt(): str {
+                @@:return(self.last)
+            }
+            cap(): int {
+                @@:(self.LIMIT)                   # [decl: const read]
+            }
+            log(): str {
+                @@:(self.trace)
+            }
+        }
+
+        $B {
+            relay() {
+                self.trace = self.trace + "B.relay;"   # handles the re-dispatched event
+            }
+            here(): str {
+                @@:("B")
+            }
+            evt(): str {
+                @@:return(self.last)
+            }
+            log(): str {
+                @@:(self.trace)
+            }
+        }
+
+    # [section: actions]
+    actions:
+        helper(s: str) {
+            self.trace = self.trace + s
+        }
+
+    domain:
+        # [decl: const field, read via self.LIMIT]
+        const LIMIT: int = 50
+        trace: str = ""
+        last: str = ""
+}
+
+# ============================================================================
+# DRIVER — TAP, fresh machine per scenario, asserts every path.
+# ============================================================================
+_N = 0
+def _ck(cond, desc):
+    global _N
+    _N += 1
+    print(("ok " if cond else "not ok ") + str(_N) + " - " + desc)
+
+async def _async_tests():
+    p = @@Pump()
+    await p.init()
+    await p.fill()
+    _ck(p.level() == 1, "async fill(): awaited + mutated + transitioned to $Full")
+    await p.drain()
+    await p.fill()
+    _ck(p.level() == 2, "async drain() really transitioned $Full->$Empty (fill accepted again -> 2)")
+    q = @@Pump()
+    await q.init()
+    results = await asyncio.gather(q.fill(), q.fill(), return_exceptions=True)
+    _ck(any(isinstance(r, Exception) for r in results),
+        "concurrent fill() trips the async busy-gate (E703)")
+
+if __name__ == '__main__':
+    print("TAP version 14")
+
+    # operations (instance form)
+    j0 = Job.make()
+    _ck(j0.clamp(150, 99) == 99, "operation clamp(150,99)=99")
+    _ck(j0.clamp(5, 99) == 5, "operation clamp(5,99)=5")
+
+    a = @@Job()
+    a.start("J1")
+    _ck(a.status() == "working", "Idle forwards status via => $^ to parent")
+    a.submit("")
+    _ck(a.status() == "rejected", "submit('') terminal conditional -> $Rejected")
+    _ck("N;" in a.trace_of(), "action note() invoked from start()")
+
+    b = @@Job()
+    b.start("J2")
+    b.submit("payload")
+    _ck(b.status() == "active", "submit(task) state-args -> $Active(task)")
+    b.tick()
+    b.tick()
+    b.tick()
+    b.tick()
+    _ck(b.counter() == 3, "non-terminal conditional clamps attempts at max_attempts=3")
+    _ck("tick3" in b.trace_of(), "trailing read of mutated field ran after the if")
+
+    b.finish()
+    _ck(b.status() == "done", "finish() exit-args -> $Done")
+    _ck("Active<(done)" in b.trace_of(), "exit handler received exit arg 'done'")
+    _ck("Done>(finished)" in b.trace_of(), "enter handler received enter arg (exit+enter form)")
+
+    # single-level modal: push$/pop$ with depth() asserted — exercises $Paused.$>
+    # (+1), $Paused.<$ (-1), and the SECOND => $^ path ($Idle.depth() -> $Working)
+    c = @@Job()
+    c.start("J3")
+    c.pause()
+    _ck(c.status() == "paused" and c.depth() == 1, "push$ -> $Paused; $Paused.$> set depth=1")
+    c.resume()
+    _ck(c.status() == "working" and c.depth() == 0,
+        "-> pop$ ran $Paused.<$ (depth->0) and depth() forwards via => $^ to $Working")
+
+    # nested modal stack — two push$, two -> pop$ prove a real stack (not a slot)
+    cn = @@Job()
+    cn.start("J3b")
+    cn.pause()
+    cn.pause()
+    _ck(cn.status() == "paused", "nested push$ twice -> still $Paused")
+    cn.resume()
+    cn.resume()
+    _ck(cn.status() == "working", "two -> pop$ restore through the stack to $Idle")
+
+    d = @@Job()
+    d.start("J4")
+    _ck(d.spin(5) == 5, "while loop over state var $.i -> 5")
+
+    # persist — FULL deep equality incl. state-arg survival across restore
+    e = @@Job()
+    e.start("J5")
+    e.submit("z")
+    e.tick()
+    snap = e.save_state()
+    e2 = @@Job()
+    e2.restore_state(snap)
+    _ck(e2.trace_of() == e.trace_of() and "Active>(z)" in e2.trace_of(),
+        "persist restores FULL trace incl. state-arg 'z' (deep equality)")
+    _ck(e2.counter() == e.counter() and e2.status() == "active",
+        "persist restores domain + current state")
+    _ck(e.scratch_of() == 1 and e2.scratch_of() == 0,
+        "@@[no_persist] field excluded from blob (restore resets it to default 0)")
+
+    # async (asyncio.run)
+    asyncio.run(_async_tests())
+
+    # multi-system composition + ISOLATION (two independent Controllers)
+    c1 = @@Controller()
+    c1.tick()
+    c1.tick()
+    c2 = @@Controller()
+    c2.tick()
+    c2.tick()
+    c2.tick()
+    _ck(c1.total() == 2 and c2.total() == 3, "multi-system: two Controllers hold INDEPENDENT Sensors")
+    _ck(c1.count() == 2 and c2.count() == 3, "multi-system: each Controller's own domain isolated")
+
+    # construct probe
+    pr = @@Probe()
+    _ck(pr.echo("hi") == "echo:hi", "@@:params.x + @@:data set/read")
+    _ck(pr.here() == "A" and pr.cap() == 50, "@@:system.state.name + const read")
+    _ck(pr.classify(-1) == "neg" and pr.classify(0) == "zero" and pr.classify(50) == "pos" and pr.classify(200) == "big",
+        "elif ladder + nested conditional (4 branches)")
+    _ck(pr.guard() == 50 and "LEAK;" not in pr.log(),
+        "@@:return(e) short-circuits trailing code (vs @@:(e))")
+    pr.fire()
+    _ck(pr.here() == "B" and pr.evt() == "fire", "@@:event recorded + labeled transition -> $B")
+    pr2 = @@Probe()
+    pr2.relay()
+    _ck(pr2.here() == "B" and "B.relay;" in pr2.log(), "forward transition -> => $B re-dispatched relay")
+    pr3 = @@Probe()
+    pr3.ping()
+    _ck("ping;" in pr3.log() and pr3.here() == "B", "action invocation + reentrant @@:self.fire()")
+    pr5 = @@Probe()
+    _ck(pr5.outer_data() == "outer",
+        "@@:data call-scope isolated across reentrant @@:self call")
+
+    print("1.." + str(_N))
