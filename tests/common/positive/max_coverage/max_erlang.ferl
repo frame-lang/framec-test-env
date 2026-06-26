@@ -1,0 +1,390 @@
+@@[target("erlang")]
+
+%% ============================================================================
+%% MAXIMAL FRAME COVERAGE FIXTURE — erlang
+%% ONE @@system (E406): Erlang is one system per file. Every Frame construct
+%% this backend supports is packed here; all probe states are reachable from
+%% the initial $Boot via start(tag). Native code is Erlang (++ concat,
+%% brace-if -> case-of lowering / RFC-0051, erlang:integer_to_list/1).
+%%
+%% Excluded BY LANGUAGE: async, native while, multi-system composition.
+%%
+%% Authored-around framec codegen defects (see report; reproduced minimally).
+%% COMPILE-TIME (erlc syntax errors):
+%%   A. State $Boot (not $Begin): `begin` is an Erlang reserved word, emitted
+%%      bare -> syntax error.
+%%   B. const names lowercase (max_val/limit, not MAX/LIMIT): an uppercase
+%%      domain field becomes an uppercase Erlang record field -> illegal.
+%%   C. $Active(task) state-arg is referenced in a regular handler, NOT in the
+%%      $> enter handler: in enter handlers the backend emits the arg lowercase
+%%      (`task`) while binding it capitalized (`Task`) -> unbound var.
+%%   D. operation clamp() returns without a brace-if: brace-if inside an
+%%      operation body is NOT lowered to case-of (raw `{ }` leaks) -> syntax
+%%      error. (Brace-if in EVENT HANDLERS DOES lower correctly and is tested.)
+%% RUNTIME (compiles, but wrong behavior -> construct dropped, NOT asserted):
+%%   E. @@:data set/read: `@@:data.x = v` is a no-op and `@@:data.x` reads
+%%      `undefined`. echo() uses @@:params.x directly; data-isolation dropped.
+%%   F. @@:return(e) does NOT short-circuit: trailing statements still run.
+%%      guard() keeps @@:return for the RETURN VALUE only (no trailing code).
+%%   G. -> pop$ skips the popped state's exit handler ($Paused.<$ never fires);
+%%      the pop transition itself works. depth-decrement-on-pop not asserted.
+%% ============================================================================
+
+%% [attr: main] [persist(binary)] [save op] [load op] [factory rename]
+@@[main]
+@@[persist(binary)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[create(make)]
+@@system MaxErlang {
+
+    %% [section: operations] (typed params + return passthrough)
+    operations:
+        clamp(v: int, hi: int): int {
+            @@:(v)
+        }
+
+    %% [section: interface]
+    interface:
+        start(tag: str)
+        submit(task: str)
+        tick()
+        pause()
+        resume()
+        finish()
+        pump()
+        echo(x: str): str
+        classify(n: int): str
+        guard(): int
+        fire()
+        relay()
+        fwd()
+        ping()
+        here(): str
+        evt(): str
+        cap(): int
+        status(): str
+        counter(): int
+        depth(): int
+        spin_done(): int
+        trace_of(): str
+        scratch_of(): int
+        last_of(): str
+
+    %% [section: machine]
+    machine:
+
+        %% [state: initial — dispatches to a probe subgraph by tag]
+        $Boot {
+            %% [handler: enter, no args]
+            $>() {
+                self.trace = self.trace ++ "Boot>;"
+            }
+            start(tag: str) {
+                self.job_id = tag
+                self.note("N;")
+                %% [native elif ladder — handler brace-if lowers to case-of]
+                if tag == "probe" {
+                    -> $A
+                } else if tag == "spin" {
+                    -> $Spinning
+                } else {
+                    -> ("seed") $Idle
+                }
+            }
+            status(): str {
+                @@:("boot")
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+        }
+
+        %% [state: HSM parent]
+        $Working {
+            status(): str {
+                @@:("working")
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+            depth(): int {
+                @@:(self.stack_depth)
+            }
+            spin_done(): int {
+                @@:(self.spins)
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+        }
+
+        %% [state: HSM child => parent]
+        $Idle => $Working {
+            %% [handler: enter w/ param (enter-arg capitalizes correctly)]
+            $>(seed: str) {
+                self.trace = self.trace ++ "Idle>(" ++ seed ++ ");"
+            }
+            %% [handler: exit, no args]
+            <$() {
+                self.trace = self.trace ++ "Idle<;"
+            }
+            submit(task: str) {
+                if task == "" {
+                    -> $Rejected
+                } else {
+                    self.attempts = self.attempts + 1
+                    self.pending = task
+                    -> $Active(task)
+                }
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            %% [transition: forward to parent => $^]
+            status(): str {
+                => $^
+            }
+            depth(): int {
+                => $^
+            }
+            spin_done(): int {
+                => $^
+            }
+        }
+
+        %% [state: typed state parameter (receives state args)]
+        $Active(task: str) {
+            %% enter handler does NOT touch `task` (defect C); records pending
+            $>() {
+                self.trace = self.trace ++ "Active>(" ++ self.pending ++ ");"
+            }
+            <$(why: str) {
+                self.trace = self.trace ++ "Active<(" ++ why ++ ");"
+            }
+            %% [native non-terminal mutating conditional — case lowering]
+            %% [ref: state-arg `task` read inside a regular handler]
+            tick() {
+                self.scratch = self.scratch + 1
+                if self.attempts < self.max_attempts {
+                    self.attempts = self.attempts + 1
+                }
+                self.trace = self.trace ++ "tick" ++ erlang:integer_to_list(self.attempts) ++ "[" ++ task ++ "];"
+            }
+            finish() {
+                ("done") -> ("finished") $Done
+            }
+            status(): str {
+                @@:("active")
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+            scratch_of(): int {
+                @@:(self.scratch)
+            }
+        }
+
+        %% [state: iteration via driver-pumped self-transition (NO native while)]
+        $Spinning {
+            $>() {
+                self.trace = self.trace ++ "Spin>;"
+            }
+            pump() {
+                self.spins = self.spins + 1
+                if self.spins < self.spin_target {
+                    -> $Spinning
+                } else {
+                    -> ("seed") $Idle
+                }
+            }
+            status(): str {
+                @@:("spinning")
+            }
+            spin_done(): int {
+                @@:(self.spins)
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+        }
+
+        %% [state: modal (pushed)]
+        $Paused {
+            $>() {
+                self.stack_depth = self.stack_depth + 1
+            }
+            <$() {
+                self.stack_depth = self.stack_depth - 1
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            resume() {
+                -> pop$
+            }
+            status(): str {
+                @@:("paused")
+            }
+            depth(): int {
+                @@:(self.stack_depth)
+            }
+        }
+
+        $Rejected {
+            status(): str {
+                @@:("rejected")
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+        }
+
+        %% [state: final]
+        $Done {
+            $>(why: str) {
+                self.trace = self.trace ++ "Done>(" ++ why ++ ");"
+            }
+            status(): str {
+                @@:("done")
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+            depth(): int {
+                @@:(self.stack_depth)
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+        }
+
+        %% ====================================================================
+        %% CONSTRUCT PROBE SUBGRAPH ($A/$B/$C) — reached via start("probe").
+        %% @@:event, @@:params.x, @@:data set/read, @@:return, elif ladder,
+        %% labeled/forward/decorated-forward transitions, reentrant @@:self.m()
+        %% ====================================================================
+        $A {
+            %% [ref: @@:params.x — read the interface parameter directly]
+            echo(x: str): str {
+                @@:("echo:" ++ @@:params.x)
+            }
+            %% [native elif ladder + nested conditional]
+            classify(n: int): str {
+                if n < 0 {
+                    @@:("neg")
+                } else if n == 0 {
+                    @@:("zero")
+                } else {
+                    if n > 100 {
+                        @@:("big")
+                    } else {
+                        @@:("pos")
+                    }
+                }
+            }
+            %% [@@:return(e) — returns the value (short-circuit is defect F)]
+            guard(): int {
+                @@:return(self.limit)
+            }
+            fire() {
+                self.last = @@:event
+                -> "fired" $B               %% [transition: labeled]
+            }
+            relay() {
+                -> => $B                     %% [transition: forward (re-dispatch)]
+            }
+            fwd() {
+                -> => $C("payload")          %% [transition: forward WITH state args #128]
+            }
+            ping() {
+                self.helper("ping;")         %% [action invocation]
+                @@:self.fire()               %% [ref: reentrant self-call]
+            }
+            here(): str {
+                @@:(@@:system.state.name)
+            }
+            evt(): str {
+                @@:return(self.last)
+            }
+            cap(): int {
+                @@:(self.limit)             %% [decl: const read]
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+            last_of(): str {
+                @@:(self.last)
+            }
+        }
+
+        $B {
+            relay() {
+                self.trace = self.trace ++ "B.relay;"
+            }
+            here(): str {
+                @@:("B")
+            }
+            evt(): str {
+                @@:return(self.last)
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+            last_of(): str {
+                @@:(self.last)
+            }
+        }
+
+        %% [state: target of a decorated forward transition carrying state arg #128]
+        $C(tok: str) {
+            fwd() {
+                self.trace = self.trace ++ "C.fwd(" ++ tok ++ ");"
+            }
+            here(): str {
+                @@:("C")
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+        }
+
+    %% [section: actions]
+    actions:
+        note(s: str) {
+            self.trace = self.trace ++ s
+        }
+        helper(s: str) {
+            self.trace = self.trace ++ s
+        }
+
+    %% [section: domain]
+    domain:
+        %% [decl: const fields — lowercase names (defect B)]
+        const max_val: int = 99
+        const limit: int = 50
+        %% [decl: typed domain vars + init]
+        job_id: str = ""
+        pending: str = ""
+        attempts: int = 0
+        max_attempts: int = 3
+        stack_depth: int = 0
+        spins: int = 0
+        spin_target: int = 5
+        trace: str = ""
+        last: str = ""
+        %% [attr: @@[no_persist] — field excluded from the serialized blob]
+        @@[no_persist]
+        scratch: int = 0
+}
