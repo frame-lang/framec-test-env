@@ -339,6 +339,7 @@ import asyncio
         guard(): int
         outer_data(): str
         inner_data()
+        fwd()
 
     machine:
 
@@ -377,6 +378,9 @@ import asyncio
             relay() {
                 -> => $B                          # [transition: forward (re-dispatch event)]
             }
+            fwd() {
+                -> => $C("payload")               # [transition: forward WITH state args (#128)]
+            }
             ping() {
                 self.helper("ping;")              # [action invocation: self.<action>()]
                 @@:self.fire()                    # [ref: reentrant self-call]
@@ -404,6 +408,19 @@ import asyncio
             }
             evt(): str {
                 @@:return(self.last)
+            }
+            log(): str {
+                @@:(self.trace)
+            }
+        }
+
+        # [state: target of a forward transition carrying a state arg (#128 fixed)]
+        $C(tok: str) {
+            fwd() {
+                self.trace = self.trace + "C.fwd(" + tok + ");"
+            }
+            here(): str {
+                @@:("C")
             }
             log(): str {
                 @@:(self.trace)
@@ -546,6 +563,10 @@ if __name__ == '__main__':
     pr3 = @@Probe()
     pr3.ping()
     _ck("ping;" in pr3.log() and pr3.here() == "B", "action invocation + reentrant @@:self.fire()")
+    pr4 = @@Probe()
+    pr4.fwd()
+    _ck(pr4.here() == "C" and "C.fwd(payload)" in pr4.log(),
+        "forward transition WITH state args -> => $C(arg) [#128 fixed]")
     pr5 = @@Probe()
     _ck(pr5.outer_data() == "outer",
         "@@:data call-scope isolated across reentrant @@:self call")

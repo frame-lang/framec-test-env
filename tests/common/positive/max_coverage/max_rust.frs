@@ -1,5 +1,5 @@
 @@[target("rust")]
-@@[persist(String)]
+@@[*persist(String)]
 
 // ============================================================================
 // MAXIMAL FRAME COVERAGE FIXTURE — rust (core: HSM, stack, all 7 statements,
@@ -287,6 +287,7 @@
         // [@@:data call-scope isolation across a reentrant @@:self call]
         outer_data(): String
         inner_data(): String
+        fwd()
 
     machine:
         $A {
@@ -312,6 +313,9 @@
             relay() {
                 -> => $B
             }
+            fwd() {
+                -> => $C("payload")
+            }
             ping() {
                 self.helper(String::from("ping;"));
                 @@:self.fire()
@@ -325,11 +329,11 @@
             outer_data(): String {
                 @@:data.k = String::from("outer")
                 @@:self.inner_data()
-                @@:(format!("{}", @@:data.k))
+                @@:(@@:data.k)
             }
             inner_data(): String {
                 @@:data.k = String::from("inner")
-                @@:(format!("{}", @@:data.k))
+                @@:(@@:data.k)
             }
         }
 
@@ -339,6 +343,15 @@
             }
             here(): String { @@:(String::from("B")) }
             evt(): String { @@:return(self.last.clone()) }
+            log(): String { @@:(self.trace.clone()) }
+        }
+
+        // [state: target of a forward transition carrying a state arg (#128 fixed)]
+        $C(tok: String) {
+            fwd() {
+                self.trace.push_str(&format!("C.fwd({});", tok));
+            }
+            here(): String { @@:(String::from("C")) }
             log(): String { @@:(self.trace.clone()) }
         }
 
@@ -485,6 +498,10 @@ fn main() {
     let mut pr3 = @@Probe();
     pr3.ping();
     ck(&mut n, pr3.log().contains("ping;") && pr3.here() == "B", "action invocation + reentrant @@:self.fire()");
+    let mut pr4 = @@Probe();
+    pr4.fwd();
+    ck(&mut n, pr4.here() == "C" && pr4.log().contains("C.fwd(payload)"),
+        "forward transition WITH state args -> => $C(arg) [#128 fixed]");
 
     // persist round-trip: drive to $Active, mutate domain + cache, save, restore into fresh machine
     let mut p1 = @@Job();
