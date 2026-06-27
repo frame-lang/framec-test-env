@@ -22,7 +22,10 @@ contains(Hay, Needle) ->
     string:find(Hay, Needle) =/= nomatch.
 
 main(_) ->
-    code:add_patha(filename:dirname(escript:script_name())),
+    %% NB: no escript:script_name() here — the matrix erlang runner batches
+    %% tests by wrapping this driver as a module fn (test_tNNN_*:run/0), where
+    %% escript:script_name() badmatches []. The compiled module is already on
+    %% the path in both standalone-escript and batched-module contexts.
     code:add_patha("."),
     put(?N, 0),
     io:format("TAP version 14~n"),
