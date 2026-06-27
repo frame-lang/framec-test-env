@@ -9,25 +9,15 @@
 %%
 %% Excluded BY LANGUAGE: async, native while, multi-system composition.
 %%
-%% Authored-around framec codegen defects (see report; reproduced minimally).
-%% COMPILE-TIME (erlc syntax errors):
-%%   A. State $Boot (not $Begin): `begin` is an Erlang reserved word, emitted
-%%      bare -> syntax error.
-%%   B. const names lowercase (max_val/limit, not MAX/LIMIT): an uppercase
-%%      domain field becomes an uppercase Erlang record field -> illegal.
-%%   C. $Active(task) state-arg is referenced in a regular handler, NOT in the
-%%      $> enter handler: in enter handlers the backend emits the arg lowercase
-%%      (`task`) while binding it capitalized (`Task`) -> unbound var.
-%%   D. operation clamp() returns without a brace-if: brace-if inside an
-%%      operation body is NOT lowered to case-of (raw `{ }` leaks) -> syntax
-%%      error. (Brace-if in EVENT HANDLERS DOES lower correctly and is tested.)
-%% RUNTIME (compiles, but wrong behavior -> construct dropped, NOT asserted):
-%%   E. @@:data set/read: `@@:data.x = v` is a no-op and `@@:data.x` reads
-%%      `undefined`. echo() uses @@:params.x directly; data-isolation dropped.
-%%   F. @@:return(e) does NOT short-circuit: trailing statements still run.
-%%      guard() keeps @@:return for the RETURN VALUE only (no trailing code).
-%%   G. -> pop$ skips the popped state's exit handler ($Paused.<$ never fires);
-%%      the pop transition itself works. depth-decrement-on-pop not asserted.
+%% All 7 Erlang backend defects this fixture originally surfaced (#132 A-G) are
+%% now FIXED and EXERCISED here (no longer authored-around):
+%%   A. reserved-word state name ($End -> quoted 'end' atom).
+%%   B. uppercase const name (const LIMIT -> lowercase Erlang record field).
+%%   C. $Active(task) state-arg read INSIDE the $> enter handler.
+%%   D. brace-if inside an operation body (clamp) lowered to case-of.
+%%   E. @@:data.k set + read (call-scoped data) in echo().
+%%   F. @@:return(e) short-circuits: trailing self.note("LEAK;") must NOT run.
+%%   G. -> pop$ fires the popped state's <$ exit handler ($Paused.<$ -> depth--).
 %% ============================================================================
 
 %% [attr: main] [persist(binary)] [save op] [load op] [factory rename]
@@ -41,7 +31,12 @@
     %% [section: operations] (typed params + return passthrough)
     operations:
         clamp(v: int, hi: int): int {
-            @@:(v)
+            %% [D: brace-if inside an operation body — lowered to case-of]
+            if v > hi {
+                @@:(hi)
+            } else {
+                @@:(v)
+            }
         }
 
     %% [section: interface]
@@ -159,9 +154,9 @@
 
         %% [state: typed state parameter (receives state args)]
         $Active(task: str) {
-            %% enter handler does NOT touch `task` (defect C); records pending
+            %% [C: state-arg `task` read INSIDE the $> enter handler]
             $>() {
-                self.trace = self.trace ++ "Active>(" ++ self.pending ++ ");"
+                self.trace = self.trace ++ "Active>(" ++ task ++ ");"
             }
             <$(why: str) {
                 self.trace = self.trace ++ "Active<(" ++ why ++ ");"
@@ -176,7 +171,7 @@
                 self.trace = self.trace ++ "tick" ++ erlang:integer_to_list(self.attempts) ++ "[" ++ task ++ "];"
             }
             finish() {
-                ("done") -> ("finished") $Done
+                ("done") -> ("finished") $End
             }
             status(): str {
                 @@:("active")
@@ -251,8 +246,8 @@
             }
         }
 
-        %% [state: final]
-        $Done {
+        %% [state: final — A: reserved-word state name -> quoted 'end' atom]
+        $End {
             $>(why: str) {
                 self.trace = self.trace ++ "Done>(" ++ why ++ ");"
             }
@@ -276,9 +271,10 @@
         %% labeled/forward/decorated-forward transitions, reentrant @@:self.m()
         %% ====================================================================
         $A {
-            %% [ref: @@:params.x — read the interface parameter directly]
+            %% [E: @@:data.k set then read (call-scoped); + @@:params.x]
             echo(x: str): str {
-                @@:("echo:" ++ @@:params.x)
+                @@:data.k = @@:params.x
+                @@:("echo:" ++ @@:data.k)
             }
             %% [native elif ladder + nested conditional]
             classify(n: int): str {
@@ -294,9 +290,10 @@
                     }
                 }
             }
-            %% [@@:return(e) — returns the value (short-circuit is defect F)]
+            %% [F: @@:return(e) short-circuits — the trailing note() must NOT run]
             guard(): int {
-                @@:return(self.limit)
+                @@:return(self.LIMIT)
+                self.note("LEAK;")
             }
             fire() {
                 self.last = @@:event
@@ -319,7 +316,7 @@
                 @@:return(self.last)
             }
             cap(): int {
-                @@:(self.limit)             %% [decl: const read]
+                @@:(self.LIMIT)             %% [B: uppercase const read]
             }
             trace_of(): str {
                 @@:(self.trace)
@@ -371,9 +368,9 @@
 
     %% [section: domain]
     domain:
-        %% [decl: const fields — lowercase names (defect B)]
+        %% [B: uppercase const name -> lowercase Erlang record field]
         const max_val: int = 99
-        const limit: int = 50
+        const LIMIT: int = 50
         %% [decl: typed domain vars + init]
         job_id: str = ""
         pending: str = ""

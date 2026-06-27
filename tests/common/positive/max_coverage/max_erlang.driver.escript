@@ -29,7 +29,8 @@ main(_) ->
 
     %% ---- operations (instance form; bare-return passthrough) ----
     J0 = max_erlang:make(),
-    ck(max_erlang:clamp(J0, 5, 99) =:= 5, "operation clamp(5,99) returns v"),
+    ck(max_erlang:clamp(J0, 5, 99) =:= 5, "operation clamp(5,99) else-branch returns v [D]"),
+    ck(max_erlang:clamp(J0, 150, 99) =:= 99, "operation clamp(150,99) if-branch returns hi [D]"),
 
     %% ---- HSM => $^ forward to parent ----
     A = max_erlang:make(),
@@ -68,10 +69,10 @@ main(_) ->
     ck(max_erlang:status(C) =:= "paused" andalso max_erlang:depth(C) =:= 1,
        "push$ -> $Paused; $Paused.$> set depth=1"),
     max_erlang:resume(C),
-    %% NOTE: -> pop$ does NOT fire $Paused.<$ in Erlang (defect G), so depth
-    %% stays 1; we assert only the (correct) pop transition + => $^ forward.
     ck(max_erlang:status(C) =:= "working",
        "-> pop$ restores to $Idle; depth() forwards via => $^ to $Working"),
+    ck(max_erlang:depth(C) =:= 0,
+       "-> pop$ fires $Paused.<$ exit handler; stack_depth back to 0 [G]"),
 
     %% ---- nested modal stack (two push$, two pop$) ----
     CN = max_erlang:make(),
@@ -82,6 +83,7 @@ main(_) ->
     max_erlang:resume(CN),
     max_erlang:resume(CN),
     ck(max_erlang:status(CN) =:= "working", "two -> pop$ restore through the stack to $Idle"),
+    ck(max_erlang:depth(CN) =:= 0, "both pops fired $Paused.<$; stack_depth back to 0 [G]"),
 
     %% ---- iteration via driver-pumped self-transition (NO native while) ----
     D = max_erlang:make(),
@@ -111,13 +113,15 @@ main(_) ->
     PR = max_erlang:make(),
     max_erlang:start(PR, "probe"),
     ck(max_erlang:here(PR) =:= "A", "@@:system.state.name reports $A"),
-    ck(max_erlang:echo(PR, "hi") =:= "echo:hi", "@@:params.x read in handler"),
-    ck(max_erlang:cap(PR) =:= 50, "const read self.limit = 50"),
+    ck(max_erlang:echo(PR, "hi") =:= "echo:hi", "@@:data.k set+read (call-scoped) + @@:params.x [E]"),
+    ck(max_erlang:cap(PR) =:= 50, "uppercase const read self.LIMIT = 50 [B]"),
     ck(max_erlang:classify(PR, -1) =:= "neg", "elif ladder: n<0 -> neg"),
     ck(max_erlang:classify(PR, 0) =:= "zero", "elif ladder: n==0 -> zero"),
     ck(max_erlang:classify(PR, 50) =:= "pos", "elif ladder: nested else -> pos"),
     ck(max_erlang:classify(PR, 200) =:= "big", "elif ladder: nested if -> big"),
     ck(max_erlang:guard(PR) =:= 50, "@@:return(e) returns the value"),
+    ck(not contains(max_erlang:trace_of(PR), "LEAK"),
+       "@@:return(e) short-circuits: trailing note(LEAK) did not run [F]"),
 
     %% @@:event + labeled transition -> $B  (@@:event is an ATOM in Erlang)
     PRf = max_erlang:make(),
