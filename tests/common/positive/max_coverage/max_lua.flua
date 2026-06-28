@@ -17,24 +17,24 @@
 --     language-natural skip for Lua (runtime-capability-matrix.md: async row
 --     marks Lua 🚫). No `@@[async]` system in this fixture.
 --
--- Lua-backend codegen bugs this fixture surfaced — now FIXED and exercised:
+-- CALL-SYNTAX NOTES (Oceans Model — the codegen translates Frame references
+-- but NOT native call syntax; #134/#136 confirmed works-as-designed):
 --
---   1. BARE ACTION CALL (#134, FIXED) — `self.note(...)` now lowers to a colon
---      call `self:note(...)` matching the colon-def. `start()` uses the bare
---      form to exercise it (earlier it needed the `@@:self.note(...)` form).
+--   * ACTIONS are invoked two ways, both used here:
+--       - portable Frame form `@@:self.<action>()` (lowers to the target's
+--         native call — `self:note()` on Lua), and
+--       - native syntax (the user writes the target spelling directly).
+--     Bare `self.note()` (Lua dot) is just the native form mis-spelled — the
+--     codegen does NOT rewrite it; write `self:note()` or `@@:self.note()`.
 --
---   2. NESTED `if` INSIDE AN `else` BLOCK (#135, FIXED) — `if c {} else { if d
---      {} else {} }` now lowers correctly (no stray-brace leak). `classify()`
---      nests directly in the `else` block, 3 levels deep, to exercise it.
+--   * CROSS-SYSTEM child calls are native: the codegen lowers the `$.sensor`
+--     reference and `@@Sensor()` construction, but the CALL is user-authored —
+--     write `self.sensor:bump()` (Lua colon) / `$.sensor:bump()`. This fixture
+--     holds the Sensor in `domain:` and calls `self.sensor:bump()`.
 --
--- Still OPEN (avoided here, tracked):
---   3. CROSS-SYSTEM `$.sensor.bump()` (#136) — the `$.field` receiver resolves
---      to `state_vars["sensor"]` but an embedded system is stored at
---      `self.sensor` → nil receiver (cross-backend; Python reference too). The
---      WORKING form (used here for multi-system) instantiates the sub-system
---      natively in `domain:` (`sensor = Sensor._create()`) and calls it with an
---      explicit colon (`self.sensor:bump()`). Multi-system is fully exercised;
---      only the `$.x.m()` sugar is avoided.
+--   * NESTED `if` directly inside an `else` block (#135, a REAL fix — brace
+--     control flow IS Frame-translated on Lua): `classify()` nests in the
+--     `else` block, 3 levels deep, to exercise the fixed brace-lowering.
 -- ============================================================================
 
 -- [attr: main] [attr: persist] [attr: save op] [attr: load op] [attr: factory rename]
@@ -81,7 +81,7 @@
             }
             start(id: str) {
                 self.job_id = id
-                self.note("N;")              -- bare action call (#134 fixed: lowers to self:note)
+                self:note("N;")              -- native action call (Lua colon, passthrough)
                 -> ("seed") $Idle
             }
             status(): str {
