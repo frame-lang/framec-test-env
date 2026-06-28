@@ -1,0 +1,621 @@
+@@[target("lua")]
+
+-- ============================================================================
+-- MAXIMAL FRAME COVERAGE FIXTURE — lua
+-- One runnable, self-asserting file exercising every Frame construct the Lua
+-- backend supports. Construct tags are standalone [tag] comments above each
+-- construct. The native driver (epilog, below the systems) runs at chunk top
+-- level and prints TAP; framec emits `return { ... }` AFTER the driver
+-- (issue #120 module shape), so the driver is reachable.
+--
+-- Native code is Lua: `..` concat, `tostring`/`("%d"):format`, 1-based tables,
+-- `nil`, `~=`, `and`/`or`/`not`, `string.find(h, n, 1, true)` for "contains",
+-- numeric `for` / `while` loops, method calls with `:`.
+--
+-- Excluded BY LANGUAGE:
+--   * async — the Lua matrix has no async runtime; async is a documented
+--     language-natural skip for Lua (runtime-capability-matrix.md: async row
+--     marks Lua 🚫). No `@@[async]` system in this fixture.
+--
+-- Lua-backend codegen bugs this fixture surfaced — now FIXED and exercised:
+--
+--   1. BARE ACTION CALL (#134, FIXED) — `self.note(...)` now lowers to a colon
+--      call `self:note(...)` matching the colon-def. `start()` uses the bare
+--      form to exercise it (earlier it needed the `@@:self.note(...)` form).
+--
+--   2. NESTED `if` INSIDE AN `else` BLOCK (#135, FIXED) — `if c {} else { if d
+--      {} else {} }` now lowers correctly (no stray-brace leak). `classify()`
+--      nests directly in the `else` block, 3 levels deep, to exercise it.
+--
+-- Still OPEN (avoided here, tracked):
+--   3. CROSS-SYSTEM `$.sensor.bump()` (#136) — the `$.field` receiver resolves
+--      to `state_vars["sensor"]` but an embedded system is stored at
+--      `self.sensor` → nil receiver (cross-backend; Python reference too). The
+--      WORKING form (used here for multi-system) instantiates the sub-system
+--      natively in `domain:` (`sensor = Sensor._create()`) and calls it with an
+--      explicit colon (`self.sensor:bump()`). Multi-system is fully exercised;
+--      only the `$.x.m()` sugar is avoided.
+-- ============================================================================
+
+-- [attr: main] [attr: persist] [attr: save op] [attr: load op] [attr: factory rename]
+@@[main]
+@@[persist(JSON)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[create(make)]
+@@system Job {
+
+    -- [section: operations]
+    operations:
+        -- [op: typed params + return, native return passthrough, brace-if in op body]
+        clamp(v: int, hi: int): int {
+            if v > hi {
+                @@:(hi)
+            }
+            @@:(v)
+        }
+
+    -- [section: interface]
+    interface:
+        start(id: str)
+        submit(task: str)
+        tick()
+        pause()
+        resume()
+        finish()
+        spin(n: int): int
+        status(): str
+        counter(): int
+        depth(): int
+        trace_of(): str
+        scratch_of(): int
+
+    -- [section: machine]
+    machine:
+
+        -- [state: initial]
+        $Begin {
+            -- [handler: enter, no args]
+            $>() {
+                self.trace = self.trace .. "Begin>;"
+            }
+            start(id: str) {
+                self.job_id = id
+                self.note("N;")              -- bare action call (#134 fixed: lowers to self:note)
+                -> ("seed") $Idle
+            }
+            status(): str {
+                @@:("begin")
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+        }
+
+        -- [state: HSM parent]
+        $Working {
+            status(): str {
+                @@:("working")
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+            depth(): int {
+                @@:(self.stack_depth)
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+        }
+
+        -- [state: HSM child => parent]
+        $Idle => $Working {
+            -- [handler: enter w/ param]
+            $>(seed: str) {
+                self.trace = self.trace .. "Idle>(" .. seed .. ");"
+            }
+            -- [handler: exit]
+            <$() {
+                self.trace = self.trace .. "Idle<;"
+            }
+            submit(task: str) {
+                -- [native non-terminal mutating conditional + terminal branch]
+                if task == "" {
+                    -> $Rejected
+                } else {
+                    self.attempts = self.attempts + 1
+                    -> $Active(task)
+                }
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            -- [transition: forward to parent => $^]
+            status(): str {
+                => $^
+            }
+            depth(): int {
+                => $^
+            }
+            spin(n: int): int {
+                -- [native while loop over a state var $.i]
+                $.i = 0
+                while $.i < n {
+                    $.i = $.i + 1
+                }
+                @@:($.i)
+            }
+        }
+
+        -- [state: typed state parameter (receives state args)]
+        $Active(task: str) {
+            -- [handler: enter reads the state arg `task`]
+            $>() {
+                self.trace = self.trace .. "Active>(" .. task .. ");"
+            }
+            -- [handler: exit w/ arg]
+            <$(why: str) {
+                self.trace = self.trace .. "Active<(" .. why .. ");"
+            }
+            tick() {
+                self.scratch = self.scratch + 1
+                if self.attempts < self.max_attempts {
+                    self.attempts = self.attempts + 1
+                }
+                self.trace = self.trace .. "tick" .. tostring(self.attempts) .. ";"
+            }
+            -- [transition: decorated w/ exit arg + enter arg]
+            finish() {
+                ("done") -> ("finished") $Done
+            }
+            status(): str {
+                @@:("active")
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+            scratch_of(): int {
+                @@:(self.scratch)
+            }
+        }
+
+        -- [state: modal (pushed)]
+        $Paused {
+            $>() {
+                self.stack_depth = self.stack_depth + 1
+            }
+            <$() {
+                self.stack_depth = self.stack_depth - 1
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            resume() {
+                -> pop$
+            }
+            status(): str {
+                @@:("paused")
+            }
+            depth(): int {
+                @@:(self.stack_depth)
+            }
+        }
+
+        $Rejected {
+            status(): str {
+                @@:("rejected")
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+        }
+
+        -- [state: final]
+        $Done {
+            $>(why: str) {
+                self.trace = self.trace .. "Done>(" .. why .. ");"
+            }
+            status(): str {
+                @@:("done")
+            }
+            counter(): int {
+                @@:(self.attempts)
+            }
+            depth(): int {
+                @@:(self.stack_depth)
+            }
+            trace_of(): str {
+                @@:(self.trace)
+            }
+        }
+
+    -- [section: actions]
+    actions:
+        note(s: str) {
+            self.trace = self.trace .. s
+        }
+
+    -- [section: domain]
+    domain:
+        -- [decl: const field]
+        const MAX: int = 99
+        -- [decl: typed domain vars + init]
+        job_id: str = ""
+        attempts: int = 0
+        max_attempts: int = 3
+        stack_depth: int = 0
+        trace: str = ""
+        -- [attr: @@[no_persist] — field excluded from the serialized blob]
+        @@[no_persist] scratch: int = 0
+}
+
+-- ============================================================================
+-- MULTI-SYSTEM COMPOSITION — Controller holds + delegates to Sensor.
+-- Idiomatic Lua: sub-system instantiated natively in domain (Sensor._create())
+-- and called with an explicit colon (self.sensor:bump()). See header note.
+-- ============================================================================
+@@[persist(JSON)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Sensor {
+    interface:
+        bump()
+        read(): int
+    machine:
+        $S {
+            bump() {
+                self.val = self.val + 1
+            }
+            read(): int {
+                @@:(self.val)
+            }
+        }
+    domain:
+        val: int = 0
+}
+
+@@[persist(JSON)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Controller {
+    interface:
+        tick()
+        total(): int
+        count(): int
+    machine:
+        $C {
+            tick() {
+                self.seen = self.seen + 1
+                -- [composition: delegate to held sub-system w/ explicit colon]
+                self.sensor:bump()
+            }
+            total(): int {
+                @@:(self.sensor:read())
+            }
+            count(): int {
+                @@:(self.seen)
+            }
+        }
+    domain:
+        -- [composition: hold an independent sub-system instance per Controller]
+        sensor = Sensor._create()
+        seen: int = 0
+}
+
+-- ============================================================================
+-- CONSTRUCT PROBE — remaining reference/transition constructs:
+-- @@:event, @@:params.x, @@:data.x (set+read, call-scope isolation),
+-- @@:return(e) short-circuit, @@:system.state.name, labeled transition,
+-- forward transition (-> => $S), decorated forward w/ state args (-> => $S(arg)),
+-- reentrant @@:self.m(), const read, action invocation, elif ladder.
+-- ============================================================================
+@@[persist(JSON)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Probe {
+
+    interface:
+        echo(x: str): str
+        fire()
+        relay()
+        ping()
+        here(): str
+        evt(): str
+        cap(): int
+        log(): str
+        classify(n: int): str
+        guard(): int
+        setres(): int
+        outer_data(): str
+        inner_data()
+        fwd()
+        to_d()
+
+    machine:
+
+        $A {
+            echo(x: str): str {
+                -- [ref: @@:data set from @@:params, then read]
+                @@:data.tmp = @@:params.x
+                @@:("echo:" .. @@:data.tmp)
+            }
+            outer_data(): str {
+                @@:data.k = "outer"
+                -- reentrant: inner gets its OWN @@:data scope
+                @@:self.inner_data()
+                -- must still read "outer" (call-scope isolation)
+                @@:(@@:data.k)
+            }
+            inner_data() {
+                @@:data.k = "inner"
+            }
+            -- [nested `if` directly inside the `else` block (#135 fixed) —
+            --  3 levels deep, exercising the brace-lowering that used to leak]
+            classify(n: int): str {
+                if n < 0 {
+                    @@:("neg")
+                } else {
+                    if n == 0 {
+                        @@:("zero")
+                    } else {
+                        if n > 100 {
+                            @@:("big")
+                        } else {
+                            @@:("pos")
+                        }
+                    }
+                }
+            }
+            -- [@@:return(e) SHORT-CIRCUIT — trailing helper() must NOT run]
+            guard(): int {
+                @@:return(self.LIMIT)
+                @@:self.helper("LEAK;")
+            }
+            -- [@@:(e) is a SETTER, NOT short-circuiting — trailing code DOES run]
+            setres(): int {
+                @@:(7)
+                @@:self.helper("RAN;")
+            }
+            fire() {
+                self.last = @@:event
+                -> "fired" $B
+            }
+            relay() {
+                -> => $B
+            }
+            fwd() {
+                -> => $C("payload")
+            }
+            to_d() {
+                -> $D
+            }
+            ping() {
+                -- [action invocation via @@:self — the blessed self-ref form;
+                --  bare `self.helper(...)` mis-lowers to a `.` call on Lua
+                --  (codegen bug, see header). @@:self gives the needed colon.]
+                @@:self.helper("ping;")
+                @@:self.fire()
+            }
+            here(): str {
+                @@:(@@:system.state.name)
+            }
+            evt(): str {
+                @@:return(self.last)
+            }
+            cap(): int {
+                @@:(self.LIMIT)
+            }
+            log(): str {
+                @@:(self.trace)
+            }
+        }
+
+        $B {
+            relay() {
+                self.trace = self.trace .. "B.relay;"
+            }
+            here(): str {
+                @@:("B")
+            }
+            evt(): str {
+                @@:return(self.last)
+            }
+            log(): str {
+                @@:(self.trace)
+            }
+        }
+
+        -- [state: target of a forward transition carrying a state arg (#128)]
+        $C(tok: str) {
+            fwd() {
+                self.trace = self.trace .. "C.fwd(" .. tok .. ");"
+            }
+            here(): str {
+                @@:("C")
+            }
+            log(): str {
+                @@:(self.trace)
+            }
+        }
+
+        -- [state: source of an EXIT-DECORATED forward carrying a state arg]
+        $D {
+            -- [handler: exit w/ arg, fired by the decorated forward below]
+            <$(why: str) {
+                self.trace = self.trace .. "D<(" .. why .. ");"
+            }
+            -- [transition: decorated forward `(exit) -> => $S(arg)` (#128)]
+            fwd() {
+                ("gone") -> => $C("payload")
+            }
+            here(): str {
+                @@:("D")
+            }
+            log(): str {
+                @@:(self.trace)
+            }
+        }
+
+    -- [section: actions]
+    actions:
+        helper(s: str) {
+            self.trace = self.trace .. s
+        }
+
+    domain:
+        -- [decl: const field, read via self.LIMIT]
+        const LIMIT: int = 50
+        trace: str = ""
+        last: str = ""
+}
+
+-- ============================================================================
+-- DRIVER — TAP, fresh machine per scenario, asserts every path.
+-- ============================================================================
+local _n = 0
+local function _ck(cond, desc)
+    _n = _n + 1
+    print((cond and "ok " or "not ok ") .. ("%d - %s"):format(_n, desc))
+end
+
+local function contains(hay, needle)
+    return string.find(hay, needle, 1, true) ~= nil
+end
+
+print("TAP version 14")
+
+-- operations (instance form; brace-if inside op body)
+local j0 = Job.make()
+_ck(j0:clamp(150, 99) == 99, "operation clamp(150,99)=99 (brace-if in op body)")
+_ck(j0:clamp(5, 99) == 5, "operation clamp(5,99)=5")
+
+-- HSM forward via => $^
+local a = @@Job()
+a:start("J1")
+_ck(a:status() == "working", "Idle forwards status via => $^ to parent $Working")
+a:submit("")
+_ck(a:status() == "rejected", "submit('') terminal conditional -> $Rejected")
+_ck(contains(a:trace_of(), "N;"), "action note() invoked from start()")
+
+-- state args + non-terminal conditional + exit/enter args
+local b = @@Job()
+b:start("J2")
+b:submit("payload")
+_ck(b:status() == "active", "submit(task) state-args -> $Active(task)")
+b:tick()
+b:tick()
+b:tick()
+b:tick()
+_ck(b:counter() == 3, "non-terminal conditional clamps attempts at max_attempts=3")
+_ck(contains(b:trace_of(), "tick3"), "trailing read of mutated field ran after the if")
+b:finish()
+_ck(b:status() == "done", "finish() exit+enter args -> $Done")
+_ck(contains(b:trace_of(), "Active<(done)"), "exit handler received exit arg 'done'")
+_ck(contains(b:trace_of(), "Done>(finished)"), "enter handler received enter arg 'finished'")
+_ck(contains(b:trace_of(), "Active>(payload)"), "enter handler read state arg 'payload'")
+
+-- single-level modal: push$/pop$ with depth() asserted
+local c = @@Job()
+c:start("J3")
+c:pause()
+_ck(c:status() == "paused" and c:depth() == 1, "push$ -> $Paused; $Paused.$> set depth=1")
+c:resume()
+_ck(c:status() == "working" and c:depth() == 0,
+    "-> pop$ ran $Paused.<$ (depth->0) and depth() forwards via => $^ to $Working")
+
+-- nested modal stack — two push$, two -> pop$ prove a real stack (not a slot)
+local cn = @@Job()
+cn:start("J3b")
+cn:pause()
+cn:pause()
+_ck(cn:status() == "paused", "nested push$ twice -> still $Paused")
+cn:resume()
+cn:resume()
+_ck(cn:status() == "working", "two -> pop$ restore through the stack to $Idle")
+
+-- native while loop over a state var
+local d = @@Job()
+d:start("J4")
+_ck(d:spin(5) == 5, "native while loop over state var $.i -> 5")
+
+-- persist — full round-trip incl. state-arg survival + @@[no_persist]
+local e = @@Job()
+e:start("J5")
+e:submit("z")
+e:tick()
+local snap = e:save_state()
+local e2 = @@Job()
+e2:restore_state(snap)
+_ck(e2:trace_of() == e:trace_of() and contains(e2:trace_of(), "Active>(z)"),
+    "persist restores FULL trace incl. state-arg 'z' (deep equality)")
+_ck(e2:counter() == e:counter() and e2:status() == "active",
+    "persist restores domain + current state")
+_ck(e:scratch_of() == 1 and e2:scratch_of() == 0,
+    "@@[no_persist] field excluded from blob (restore resets it to default 0)")
+
+-- multi-system composition + ISOLATION (two independent Controllers)
+local m1 = @@Controller()
+m1:tick()
+m1:tick()
+local m2 = @@Controller()
+m2:tick()
+m2:tick()
+m2:tick()
+_ck(m1:total() == 2 and m2:total() == 3, "multi-system: two Controllers hold INDEPENDENT Sensors")
+_ck(m1:count() == 2 and m2:count() == 3, "multi-system: each Controller's own domain isolated")
+
+-- construct probe
+local pr = @@Probe()
+_ck(pr:echo("hi") == "echo:hi", "@@:params.x + @@:data set/read")
+_ck(pr:here() == "A" and pr:cap() == 50, "@@:system.state.name + const read")
+_ck(pr:classify(-1) == "neg" and pr:classify(0) == "zero"
+    and pr:classify(50) == "pos" and pr:classify(200) == "big",
+    "elif ladder + nested conditional (4 branches)")
+_ck(pr:guard() == 50 and not contains(pr:log(), "LEAK;"),
+    "@@:return(e) short-circuits: trailing action did NOT run")
+local prs = @@Probe()
+_ck(prs:setres() == 7 and contains(prs:log(), "RAN;"),
+    "@@:(e) is a setter (NOT short-circuiting): trailing action DID run")
+pr:fire()
+_ck(pr:here() == "B" and pr:evt() == "fire", "@@:event recorded + labeled transition -> $B")
+
+local pr2 = @@Probe()
+pr2:relay()
+_ck(pr2:here() == "B" and contains(pr2:log(), "B.relay;"), "forward transition -> => $B re-dispatched relay")
+
+local pr3 = @@Probe()
+pr3:ping()
+_ck(contains(pr3:log(), "ping;") and pr3:here() == "B", "action invocation + reentrant @@:self.fire()")
+
+local pr4 = @@Probe()
+pr4:fwd()
+_ck(pr4:here() == "C" and contains(pr4:log(), "C.fwd(payload)"),
+    "forward transition WITH state args -> => $C(arg) [#128]")
+
+local pr5 = @@Probe()
+_ck(pr5:outer_data() == "outer",
+    "@@:data call-scope isolated across reentrant @@:self call")
+
+-- EXIT-DECORATED forward carrying a state arg: A -> $D, then $D.fwd does
+-- ("gone") -> => $C("payload") — fires $D.<$(why) AND lands in $C w/ arg.
+local pr6 = @@Probe()
+pr6:to_d()
+_ck(pr6:here() == "D", "transition A -> $D")
+pr6:fwd()
+_ck(pr6:here() == "C"
+    and contains(pr6:log(), "D<(gone)")
+    and contains(pr6:log(), "C.fwd(payload)"),
+    "exit-decorated forward (exit) -> => $C(arg): exit handler + state arg [#128]")
+
+print("1.." .. _n)
