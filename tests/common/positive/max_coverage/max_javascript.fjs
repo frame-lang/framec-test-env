@@ -1,0 +1,592 @@
+@@[target("javascript")]
+
+// ============================================================================
+// MAXIMAL FRAME COVERAGE FIXTURE — javascript
+// One runnable, self-asserting file exercising every Frame construct this
+// backend supports. Construct tags are `//` comment lines above each construct.
+// TAP output, driven by real `node`.
+// JS persist = JSON serialized to a string; async = Promise-based with the
+// single-driver E703 busy-gate.
+// ============================================================================
+
+// [attr: main] [attr: persist] [attr: save op] [attr: load op] [attr: factory rename]
+@@[main]
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[create(make)]
+@@system Job {
+
+    // [section: operations]
+    operations:
+        // [op: typed params + return, native return passthrough, conditional in op body]
+        clamp(v: number, hi: number): number {
+            if (v > hi) {
+                return hi;
+            }
+            return v;
+        }
+
+    // [section: interface]
+    interface:
+        start(id: string)
+        submit(task: string)
+        tick()
+        pause()
+        resume()
+        finish()
+        spin(n: number): number
+        status(): string
+        counter(): number
+        depth(): number
+        trace_of(): string
+        scratch_of(): number
+
+    // [section: machine]
+    machine:
+
+        // [state: initial]
+        $Begin {
+            // [handler: enter, no args]
+            $>() {
+                this.trace = this.trace + "Begin>;";
+            }
+            start(id: string) {
+                this.job_id = id;
+                this.note("N;");
+                -> ("seed") $Idle
+            }
+            status(): string {
+                @@:("begin")
+            }
+            trace_of(): string {
+                @@:(this.trace)
+            }
+            counter(): number {
+                @@:(this.attempts)
+            }
+        }
+
+        // [state: HSM parent]
+        $Working {
+            status(): string {
+                @@:("working")
+            }
+            counter(): number {
+                @@:(this.attempts)
+            }
+            depth(): number {
+                @@:(this.stack_depth)
+            }
+            trace_of(): string {
+                @@:(this.trace)
+            }
+        }
+
+        // [state: HSM child => parent]
+        $Idle => $Working {
+            // [handler: enter w/ param]
+            $>(seed: string) {
+                this.trace = this.trace + "Idle>(" + seed + ");";
+            }
+            // [handler: exit]
+            <$() {
+                this.trace = this.trace + "Idle<;";
+            }
+            submit(task: string) {
+                if (task === "") {
+                    -> $Rejected
+                } else {
+                    this.attempts = this.attempts + 1;
+                    -> $Active(task)
+                }
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            status(): string {
+                => $^
+            }
+            depth(): number {
+                => $^
+            }
+            spin(n: number): number {
+                $.i = 0;
+                while ($.i < n) {
+                    $.i = $.i + 1;
+                }
+                @@:($.i)
+            }
+        }
+
+        // [state: state w/ a typed state parameter (receives state args)]
+        $Active(task: string) {
+            $>() {
+                this.trace = this.trace + "Active>(" + task + ");";
+            }
+            <$(why: string) {
+                this.trace = this.trace + "Active<(" + why + ");";
+            }
+            tick() {
+                this.scratch = this.scratch + 1;
+                if (this.attempts < this.max_attempts) {
+                    this.attempts = this.attempts + 1;
+                }
+                this.trace = this.trace + "tick" + this.attempts + ";";
+            }
+            finish() {
+                ("done") -> ("finished") $Done
+            }
+            status(): string {
+                @@:("active")
+            }
+            counter(): number {
+                @@:(this.attempts)
+            }
+            trace_of(): string {
+                @@:(this.trace)
+            }
+            scratch_of(): number {
+                @@:(this.scratch)
+            }
+        }
+
+        // [state: modal (pushed)]
+        $Paused {
+            $>() {
+                this.stack_depth = this.stack_depth + 1;
+            }
+            <$() {
+                this.stack_depth = this.stack_depth - 1;
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            resume() {
+                -> pop$
+            }
+            status(): string {
+                @@:("paused")
+            }
+            depth(): number {
+                @@:(this.stack_depth)
+            }
+        }
+
+        $Rejected {
+            status(): string {
+                @@:("rejected")
+            }
+            counter(): number {
+                @@:(this.attempts)
+            }
+            trace_of(): string {
+                @@:(this.trace)
+            }
+        }
+
+        // [state: final]
+        $Done {
+            $>(why: string) {
+                this.trace = this.trace + "Done>(" + why + ");";
+            }
+            status(): string {
+                @@:("done")
+            }
+            counter(): number {
+                @@:(this.attempts)
+            }
+            depth(): number {
+                @@:(this.stack_depth)
+            }
+            trace_of(): string {
+                @@:(this.trace)
+            }
+        }
+
+    // [section: actions]
+    actions:
+        note(s: string) {
+            this.trace = this.trace + s;
+        }
+
+    // [section: domain]
+    domain:
+        // [decl: const field]
+        const MAX: number = 99
+        // [decl: typed domain vars + init]
+        job_id: string = ""
+        attempts: number = 0
+        max_attempts: number = 3
+        stack_depth: number = 0
+        trace: string = ""
+        // [attr: @@[no_persist] — field excluded from the serialized blob]
+        @@[no_persist]
+        scratch: number = 0
+}
+
+// ============================================================================
+// ASYNC SYSTEM — [attr: @@[async]] async interface + await + sync-op bypass
+// ============================================================================
+@@[async]
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Pump {
+
+    // [op: sync operation — bypasses the async gate]
+    operations:
+        level(): number {
+            @@:(this.ticks)
+        }
+
+    interface:
+        async fill()                    // [async interface method]
+        async drain()
+
+    machine:
+
+        $Empty {
+            fill() {
+                await delay()           // [native await inside handler]
+                this.ticks = this.ticks + 1;
+                -> $Full
+            }
+        }
+
+        $Full {
+            drain() {
+                await delay()
+                -> $Empty
+            }
+        }
+
+    domain:
+        ticks: number = 0
+}
+
+// ============================================================================
+// MULTI-SYSTEM COMPOSITION — [Controller holds + delegates to Sensor]
+// ============================================================================
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Sensor {
+    interface:
+        bump()
+        read(): number
+    machine:
+        $S {
+            bump() {
+                this.val = this.val + 1;
+            }
+            read(): number {
+                @@:(this.val)
+            }
+        }
+    domain:
+        val: number = 0
+}
+
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Controller {
+    interface:
+        tick()
+        total(): number
+        count(): number
+    machine:
+        $C {
+            // [composition: hold a sub-system instance in a state var]
+            $.sensor = null;
+            $>() {
+                $.sensor = @@Sensor();
+            }
+            tick() {
+                this.seen = this.seen + 1;
+                $.sensor.bump();
+            }
+            total(): number {
+                @@:($.sensor.read())
+            }
+            count(): number {
+                @@:(this.seen)
+            }
+        }
+    domain:
+        seen: number = 0
+}
+
+// ============================================================================
+// CONSTRUCT PROBE — the remaining reference/transition constructs:
+// @@:event, @@:params.x, @@:data.x (set+read), @@:return(e), @@:system.state.name,
+// labeled transition, forward transition (-> => $S), reentrant @@:self.m(),
+// const read, action invocation.
+// ============================================================================
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Probe {
+
+    interface:
+        echo(x: string): string
+        fire()
+        relay()
+        ping()
+        here(): string
+        evt(): string
+        cap(): number
+        log(): string
+        classify(n: number): string
+        guard(): number
+        outer_data(): string
+        inner_data()
+        fwd()
+
+    machine:
+
+        $A {
+            echo(x: string): string {
+                @@:data.tmp = @@:params.x
+                @@:("echo:" + @@:data.tmp)
+            }
+            outer_data(): string {
+                @@:data.k = "outer"
+                @@:self.inner_data()              // reentrant: inner gets its OWN @@:data scope
+                @@:(@@:data.k)                    // must still read "outer" (call-scope isolation)
+            }
+            inner_data() {
+                @@:data.k = "inner"
+            }
+            classify(n: number): string {
+                if (n < 0) {
+                    @@:("neg")
+                } else if (n === 0) {
+                    @@:("zero")
+                } else {
+                    if (n > 100) {
+                        @@:("big")
+                    } else {
+                        @@:("pos")
+                    }
+                }
+            }
+            guard(): number {
+                @@:return(this.LIMIT)
+                this.helper("LEAK;");
+            }
+            fire() {
+                this.last = @@:event
+                -> "fired" $B                     // [transition: labeled]
+            }
+            relay() {
+                -> => $B                          // [transition: forward (re-dispatch event)]
+            }
+            fwd() {
+                -> => $C("payload")               // [transition: forward WITH state args (#128)]
+            }
+            ping() {
+                this.helper("ping;");             // [action invocation: this.<action>()]
+                @@:self.fire()                    // [ref: reentrant self-call]
+            }
+            here(): string {
+                @@:(@@:system.state.name)
+            }
+            evt(): string {
+                @@:return(this.last)
+            }
+            cap(): number {
+                @@:(this.LIMIT)                   // [decl: const read]
+            }
+            log(): string {
+                @@:(this.trace)
+            }
+        }
+
+        $B {
+            relay() {
+                this.trace = this.trace + "B.relay;";  // handles the re-dispatched event
+            }
+            here(): string {
+                @@:("B")
+            }
+            evt(): string {
+                @@:return(this.last)
+            }
+            log(): string {
+                @@:(this.trace)
+            }
+        }
+
+        // [state: target of a forward transition carrying a state arg (#128 fixed)]
+        $C(tok: string) {
+            fwd() {
+                this.trace = this.trace + "C.fwd(" + tok + ");";
+            }
+            here(): string {
+                @@:("C")
+            }
+            log(): string {
+                @@:(this.trace)
+            }
+        }
+
+    // [section: actions]
+    actions:
+        helper(s: string) {
+            this.trace = this.trace + s;
+        }
+
+    domain:
+        // [decl: const field, read via this.LIMIT]
+        const LIMIT: number = 50
+        trace: string = ""
+        last: string = ""
+}
+
+// ============================================================================
+// DRIVER — TAP, fresh machine per scenario, asserts every path.
+// ============================================================================
+function delay() { return Promise.resolve(); }
+
+let _n = 0;
+function _ck(cond, desc) {
+    _n++;
+    console.log((cond ? "ok " : "not ok ") + _n + " - " + desc);
+}
+
+async function _async_tests() {
+    const p = @@Pump();
+    await p.init();
+    await p.fill();
+    _ck(p.level() === 1, "async fill(): awaited + mutated + transitioned to $Full");
+    await p.drain();
+    await p.fill();
+    _ck(p.level() === 2, "async drain() really transitioned $Full->$Empty (fill accepted again -> 2)");
+
+    const q = @@Pump();
+    await q.init();
+    const results = await Promise.allSettled([q.fill(), q.fill()]);
+    const tripped = results.some(r => r.status === "rejected" && String(r.reason).includes("E703"));
+    _ck(tripped, "concurrent fill() trips the async busy-gate (E703)");
+}
+
+async function main() {
+    console.log("TAP version 14");
+
+    // operations (instance form)
+    const j0 = Job.make();
+    _ck(j0.clamp(150, 99) === 99, "operation clamp(150,99)=99 (conditional in op body)");
+    _ck(j0.clamp(5, 99) === 5, "operation clamp(5,99)=5");
+
+    const a = @@Job();
+    a.start("J1");
+    _ck(a.status() === "working", "Idle forwards status via => $^ to parent");
+    a.submit("");
+    _ck(a.status() === "rejected", "submit('') terminal conditional -> $Rejected");
+    _ck(a.trace_of().includes("N;"), "action note() invoked from start()");
+
+    const b = @@Job();
+    b.start("J2");
+    b.submit("payload");
+    _ck(b.status() === "active", "submit(task) state-args -> $Active(task)");
+    b.tick();
+    b.tick();
+    b.tick();
+    b.tick();
+    _ck(b.counter() === 3, "non-terminal conditional clamps attempts at max_attempts=3");
+    _ck(b.trace_of().includes("tick3"), "trailing read of mutated field ran after the if");
+
+    b.finish();
+    _ck(b.status() === "done", "finish() exit-args -> $Done");
+    _ck(b.trace_of().includes("Active<(done)"), "exit handler received exit arg 'done'");
+    _ck(b.trace_of().includes("Done>(finished)"), "enter handler received enter arg (exit+enter form)");
+
+    // single-level modal: push$/pop$ with depth() asserted — exercises $Paused.$>
+    // (+1), $Paused.<$ (-1), and the SECOND => $^ path ($Idle.depth() -> $Working)
+    const c = @@Job();
+    c.start("J3");
+    c.pause();
+    _ck(c.status() === "paused" && c.depth() === 1, "push$ -> $Paused; $Paused.$> set depth=1");
+    c.resume();
+    _ck(c.status() === "working" && c.depth() === 0,
+        "-> pop$ ran $Paused.<$ (depth->0) and depth() forwards via => $^ to $Working");
+
+    // nested modal stack — two push$, two -> pop$ prove a real stack (not a slot)
+    const cn = @@Job();
+    cn.start("J3b");
+    cn.pause();
+    cn.pause();
+    _ck(cn.status() === "paused", "nested push$ twice -> still $Paused");
+    cn.resume();
+    cn.resume();
+    _ck(cn.status() === "working", "two -> pop$ restore through the stack to $Idle");
+
+    const d = @@Job();
+    d.start("J4");
+    _ck(d.spin(5) === 5, "while loop over state var $.i -> 5");
+
+    // persist — FULL deep equality incl. state-arg survival across restore
+    const e = @@Job();
+    e.start("J5");
+    e.submit("z");
+    e.tick();
+    const snap = e.save_state();
+    const e2 = @@Job();
+    e2.restore_state(snap);
+    _ck(e2.trace_of() === e.trace_of() && e2.trace_of().includes("Active>(z)"),
+        "persist restores FULL trace incl. state-arg 'z' (deep equality)");
+    _ck(e2.counter() === e.counter() && e2.status() === "active",
+        "persist restores domain + current state");
+    _ck(e.scratch_of() === 1 && e2.scratch_of() === 0,
+        "@@[no_persist] field excluded from blob (restore resets it to default 0)");
+
+    // async
+    await _async_tests();
+
+    // multi-system composition + ISOLATION (two independent Controllers)
+    const c1 = @@Controller();
+    c1.tick();
+    c1.tick();
+    const c2 = @@Controller();
+    c2.tick();
+    c2.tick();
+    c2.tick();
+    _ck(c1.total() === 2 && c2.total() === 3, "multi-system: two Controllers hold INDEPENDENT Sensors");
+    _ck(c1.count() === 2 && c2.count() === 3, "multi-system: each Controller's own domain isolated");
+
+    // construct probe
+    const pr = @@Probe();
+    _ck(pr.echo("hi") === "echo:hi", "@@:params.x + @@:data set/read");
+    _ck(pr.here() === "A" && pr.cap() === 50, "@@:system.state.name + const read");
+    _ck(pr.classify(-1) === "neg" && pr.classify(0) === "zero" && pr.classify(50) === "pos" && pr.classify(200) === "big",
+        "elif ladder + nested conditional (4 branches)");
+    _ck(pr.guard() === 50 && !pr.log().includes("LEAK;"),
+        "@@:return(e) short-circuits trailing code (vs @@:(e))");
+    pr.fire();
+    _ck(pr.here() === "B" && pr.evt() === "fire", "@@:event recorded + labeled transition -> $B");
+
+    const pr2 = @@Probe();
+    pr2.relay();
+    _ck(pr2.here() === "B" && pr2.log().includes("B.relay;"), "forward transition -> => $B re-dispatched relay");
+
+    const pr3 = @@Probe();
+    pr3.ping();
+    _ck(pr3.log().includes("ping;") && pr3.here() === "B", "action invocation + reentrant @@:self.fire()");
+
+    const pr4 = @@Probe();
+    pr4.fwd();
+    _ck(pr4.here() === "C" && pr4.log().includes("C.fwd(payload)"),
+        "forward transition WITH state args -> => $C(arg) [#128 fixed]");
+
+    const pr5 = @@Probe();
+    _ck(pr5.outer_data() === "outer",
+        "@@:data call-scope isolated across reentrant @@:self call");
+
+    console.log("1.." + _n);
+}
+
+main();
