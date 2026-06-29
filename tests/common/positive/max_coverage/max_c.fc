@@ -1,0 +1,589 @@
+@@[target("c")]
+
+// ============================================================================
+// MAXIMAL FRAME COVERAGE FIXTURE — c
+// One runnable, self-asserting file exercising every Frame construct the C
+// backend supports. Construct tags are standalone [tag] comment lines above
+// each construct. TAP output, asserted by RUNNING under gcc/clang + libcjson.
+//
+// C idioms (vs the Python reference):
+//   * No self/method syntax — own actions/ops/interface called with the
+//     portable @@:self.<name>(args) (lowers to <System>_<name>(self, args));
+//     domain reads use native self-><field>; child systems are native calls.
+//   * Native C statements end with `;`; Frame statements (-> $S, push$, @@:(e),
+//     @@:return(e), => $^) do NOT.
+//   * @@:event / state-args lower to `const char*` — fields that receive them
+//     are declared `const char*` to stay warning-clean (discards-qualifiers).
+//   * @@:params.x / @@:data.x are `void*` — cast: (int)(intptr_t)x for ints,
+//     (char*)x for strings; store ints as (void*)(intptr_t)v.
+//   * Conditionals are native C `if/else if/else` (Frame has no if/elif here);
+//     a while loop over a state var is native C `while (...)`.
+//   * Persist = JSON via libcjson (@@[persist(char*)] + save/load ops).
+//   * Async is NOT supported on C (framec warns + ignores) — EXCLUDED below.
+// ============================================================================
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+// ----------------------------------------------------------------------------
+// TAP driver (inline, C convention).
+// ----------------------------------------------------------------------------
+static int _n = 0;
+static void _ck(int cond, const char* desc) {
+    _n++;
+    printf((cond ? "ok %d - %s\n" : "not ok %d - %s\n"), _n, desc);
+}
+static int _has(const char* hay, const char* needle) {
+    return hay != NULL && strstr(hay, needle) != NULL;
+}
+
+// ============================================================================
+// [attr: persist JSON] [attr: save op] [attr: load op] [attr: factory rename]
+// Job — the workhorse: HSM, modal stack, transitions, enter/exit args, typed
+// state-args, operations, actions, const, persist round-trip, @@[no_persist],
+// float enter-arg (RFC-0048 _Generic), while-loop over a state var.
+// ============================================================================
+@@[main]
+@@[persist(char*)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[create(make)]
+@@system Job {
+
+    // [section: operations]
+    operations:
+        // [op: typed params + return, with a conditional in the op body]
+        clamp(v: int, hi: int): int {
+            if (v > hi) {
+                return hi;
+            }
+            @@:(v)
+        }
+        // [op: returns char*, used in expression position from handlers]
+        // Append to the heap-grown trace buffer; returns the (possibly
+        // realloc'd) pointer. Native C body — passes through framec unchanged.
+        trace_buf_append(s: char*): char* {
+            size_t old = (self->trace == NULL) ? 0 : strlen(self->trace);
+            size_t add = strlen(s);
+            char* grown = (char*)realloc((void*)self->trace, old + add + 1);
+            memcpy(grown + old, s, add + 1);
+            @@:(grown)
+        }
+
+    // [section: interface]
+    interface:
+        start(id: char*)
+        submit(task: char*)
+        tick()
+        pause()
+        resume()
+        finish()
+        spin(n: int): int
+        setrate(r: double)
+        boost(r: double)
+        rate(): double
+        status(): char*
+        counter(): int
+        depth(): int
+        trace_of(): char*
+        scratch_of(): int
+
+    // [section: machine]
+    machine:
+
+        // [state: initial]
+        $Begin {
+            // [handler: enter, no args]
+            $>() {
+                self->trace = @@:self.trace_buf_append("Begin>;");
+            }
+            start(id: char*) {
+                self->job_id = id;
+                @@:self.note("N;");                 // [action invocation via @@:self]
+                -> ("seed") $Idle                   // [transition: labeled-less w/ enter arg]
+            }
+            status(): char* { @@:("begin") }
+            trace_of(): char* { @@:(self->trace) }
+            counter(): int { @@:(self->attempts) }
+            rate(): double { @@:(self->throughput) }
+        }
+
+        // [state: HSM parent]
+        $Working {
+            status(): char* { @@:("working") }
+            counter(): int { @@:(self->attempts) }
+            depth(): int { @@:(self->stack_depth) }
+            trace_of(): char* { @@:(self->trace) }
+        }
+
+        // [state: HSM child => parent]
+        $Idle => $Working {
+            // [handler: enter w/ typed param]
+            $>(seed: char*) {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "Idle>(%s);", seed);
+                self->trace = @@:self.trace_buf_append(buf);
+            }
+            // [handler: exit]
+            <$() {
+                self->trace = @@:self.trace_buf_append("Idle<;");
+            }
+            submit(task: char*) {
+                if (strcmp(task, "") == 0) {
+                    -> $Rejected                    // [transition: plain, conditional branch]
+                } else {
+                    self->attempts = self->attempts + 1;
+                    -> $Active(task)                // [transition: w/ typed state arg]
+                }
+            }
+            pause() {
+                push$                               // [stmt: push modal]
+                -> $Paused
+            }
+            // [handler: forward to parent via => $^]
+            status(): char* { => $^ }
+            depth(): int { => $^ }
+            // [op-like handler: while loop over a state var]
+            spin(n: int): int {
+                $.i = 0
+                while ($.i < n) {
+                    $.i = $.i + 1;
+                }
+                @@:($.i)
+            }
+        }
+
+        // [state: receives a typed state arg]
+        $Active(task: char*) {
+            $>() {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "Active>(%s);", task);
+                self->trace = @@:self.trace_buf_append(buf);
+            }
+            // [handler: exit w/ arg]
+            <$(why: char*) {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "Active<(%s);", why);
+                self->trace = @@:self.trace_buf_append(buf);
+            }
+            tick() {
+                self->scratch = self->scratch + 1;
+                // [conditional: non-terminal if clamps a field]
+                if (self->attempts < self->max_attempts) {
+                    self->attempts = self->attempts + 1;
+                }
+                char buf[32];
+                snprintf(buf, sizeof(buf), "tick%d;", self->attempts);
+                self->trace = @@:self.trace_buf_append(buf);
+            }
+            setrate(r: double) {
+                self->throughput = r;
+            }
+            // [transition: DOUBLE enter-arg — heap-boxed pack_double marshalling]
+            boost(r: double) {
+                -> (r) $Boosted
+            }
+            finish() {
+                ("done") -> ("finished") $Done      // [transition: exit-arg + enter-arg]
+            }
+            status(): char* { @@:("active") }
+            counter(): int { @@:(self->attempts) }
+            trace_of(): char* { @@:(self->trace) }
+            scratch_of(): int { @@:(self->scratch) }
+            rate(): double { @@:(self->throughput) }
+        }
+
+        // [state: child of $Working; enter handler receives a DOUBLE enter-arg
+        // marshalled via the C-specific _Generic ARG_PUSH path (RFC-0048)]
+        $Boosted => $Working {
+            $>(x: double) {
+                self->throughput = x;
+            }
+            status(): char* { @@:("boosted") }
+            rate(): double { @@:(self->throughput) }
+            counter(): int { => $^ }
+            trace_of(): char* { @@:(self->trace) }
+        }
+
+        // [state: modal (pushed); nested push$ proves a real stack]
+        $Paused {
+            $>() {
+                self->stack_depth = self->stack_depth + 1;
+            }
+            <$() {
+                self->stack_depth = self->stack_depth - 1;
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            resume() {
+                -> pop$                             // [stmt: pop modal]
+            }
+            status(): char* { @@:("paused") }
+            depth(): int { @@:(self->stack_depth) }
+        }
+
+        $Rejected {
+            status(): char* { @@:("rejected") }
+            counter(): int { @@:(self->attempts) }
+            trace_of(): char* { @@:(self->trace) }
+        }
+
+        // [state: final, enter w/ arg]
+        $Done {
+            $>(why: char*) {
+                char buf[64];
+                snprintf(buf, sizeof(buf), "Done>(%s);", why);
+                self->trace = @@:self.trace_buf_append(buf);
+            }
+            status(): char* { @@:("done") }
+            counter(): int { @@:(self->attempts) }
+            depth(): int { @@:(self->stack_depth) }
+            trace_of(): char* { @@:(self->trace) }
+        }
+
+    // [section: actions]
+    actions:
+        note(s: char*) {
+            self->trace = @@:self.trace_buf_append(s);
+        }
+
+    // [section: domain]
+    domain:
+        // [decl: const field — persisted (#139: const+persist clean on C)]
+        const MAX: int = 99
+        // [decl: typed domain vars + init]
+        job_id: const char* = ""
+        attempts: int = 0
+        max_attempts: int = 3
+        stack_depth: int = 0
+        throughput: double = 0.0
+        // trace grows on the heap (strdup/realloc); init to a heap copy so the
+        // first realloc is well-defined. (The C backend treats char* domain
+        // fields as borrowed and does not free them in Job_destroy, so the
+        // grown buffer leaks at teardown — bounded + small, not egregious.)
+        trace: char* = strdup("")
+        // [attr: @@[no_persist] — excluded from the serialized blob]
+        @@[no_persist]
+        scratch: int = 0
+}
+
+// ============================================================================
+// MULTI-SYSTEM COMPOSITION — Controller holds + delegates to a Sensor, with
+// two independent Controller instances proving per-instance isolation.
+// Composition idiom (C): a typed domain var initialized with @@Sensor(),
+// called natively (Sensor_bump / Sensor_read).
+// ============================================================================
+@@[persist(char*)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Sensor {
+    interface:
+        bump()
+        read(): int
+    machine:
+        $S {
+            bump() { self->val = self->val + 1; }
+            read(): int { @@:(self->val) }
+        }
+    domain:
+        val: int = 0
+}
+
+@@system Controller {
+    interface:
+        tick()
+        total(): int
+        count(): int
+    machine:
+        $C {
+            tick() {
+                self->seen = self->seen + 1;
+                Sensor_bump(self->sensor);          // [composition: native child call]
+            }
+            total(): int { @@:(Sensor_read(self->sensor)) }
+            count(): int { @@:(self->seen) }
+        }
+    domain:
+        // [composition: hold a sub-system instance in a domain var]
+        sensor: Sensor* = @@Sensor()
+        seen: int = 0
+}
+
+// ============================================================================
+// CONSTRUCT PROBE — the remaining reference/transition constructs:
+// @@:event, @@:params.x, @@:data.x (set+read, call-scope isolation),
+// @@:return(e) short-circuit, @@:system.state.name, forward (-> => $S),
+// forward WITH state args (-> => $C(arg)), reentrant @@:self.m(), const read,
+// action invocation, elif-ladder + nested conditional (native C if/else-if).
+// ============================================================================
+@@system Probe {
+
+    interface:
+        echo(x: char*): char*
+        fire()
+        relay()
+        ping()
+        here(): char*
+        evt(): char*
+        cap(): int
+        log(): char*
+        classify(n: int): char*
+        guard(): int
+        outer_data(): char*
+        inner_data()
+        fwd()
+
+    machine:
+
+        $A {
+            echo(x: char*): char* {
+                @@:data.tmp = (void*)@@:params.x;   // [ref: @@:params.x + @@:data set]
+                @@:((char*)@@:data.tmp)             // [ref: @@:data read]
+            }
+            outer_data(): char* {
+                @@:data.k = (void*)"outer";
+                @@:self.inner_data();               // reentrant: inner gets its OWN @@:data scope
+                @@:((char*)@@:data.k)               // must still read "outer" (call-scope isolation)
+            }
+            inner_data() {
+                @@:data.k = (void*)"inner";
+            }
+            classify(n: int): char* {
+                // [conditional: elif ladder + nested conditional (4 branches)]
+                if (n < 0) {
+                    @@:("neg")
+                } else if (n == 0) {
+                    @@:("zero")
+                } else {
+                    if (n > 100) {
+                        @@:("big")
+                    } else {
+                        @@:("pos")
+                    }
+                }
+            }
+            guard(): int {
+                @@:return(self->LIMIT)              // [ref: @@:return short-circuits]
+                self->trace = "LEAK;";              // must NOT execute
+            }
+            fire() {
+                self->last = @@:event;              // [ref: @@:event]
+                -> $B                               // [transition: plain]
+            }
+            relay() {
+                -> => $B                            // [transition: forward (re-dispatch event)]
+            }
+            fwd() {
+                -> => $C("payload")                 // [transition: forward WITH state args]
+            }
+            ping() {
+                @@:self.helper("ping;");            // [action invocation via @@:self]
+                @@:self.fire();                     // [ref: reentrant self-call -> transitions to $B]
+            }
+            here(): char* { @@:(@@:system.state.name) }   // [ref: @@:system.state.name]
+            evt(): char* { @@:return(self->last) }
+            cap(): int { @@:(self->LIMIT) }         // [decl: const read]
+            log(): char* { @@:(self->trace) }
+        }
+
+        $B {
+            relay() {
+                self->trace = "B.relay;";           // handles the re-dispatched event
+            }
+            here(): char* { @@:("B") }
+            evt(): char* { @@:return(self->last) }
+            log(): char* { @@:(self->trace) }
+        }
+
+        // [state: target of a forward transition carrying a state arg]
+        $C(tok: char*) {
+            fwd() {
+                static char buf[64];
+                snprintf(buf, sizeof(buf), "C.fwd(%s);", tok);
+                self->trace = buf;
+            }
+            here(): char* { @@:("C") }
+            log(): char* { @@:(self->trace) }
+        }
+
+    // [section: actions]
+    actions:
+        helper(s: char*) {
+            self->trace = s;
+        }
+
+    domain:
+        // [decl: const field, read via self->LIMIT]
+        const LIMIT: int = 50
+        trace: const char* = ""
+        last: const char* = ""
+}
+
+// ============================================================================
+// DRIVER — TAP, fresh machine per scenario, asserts every path.
+// ============================================================================
+int main(void) {
+    printf("TAP version 14\n");
+
+    // --- operations (instance form via factory rename) ---
+    Job* j0 = Job_make();
+    _ck(Job_clamp(j0, 150, 99) == 99, "operation clamp(150,99)=99 (conditional in op body)");
+    _ck(Job_clamp(j0, 5, 99) == 5, "operation clamp(5,99)=5");
+    Job_destroy(j0);
+
+    // --- HSM forward via => $^ ---
+    Job* a = @@Job();
+    Job_start(a, "J1");
+    _ck(strcmp(Job_status(a), "working") == 0, "Idle forwards status via => $^ to parent");
+    Job_submit(a, "");
+    _ck(strcmp(Job_status(a), "rejected") == 0, "submit('') conditional branch -> $Rejected");
+    _ck(_has(Job_trace_of(a), "N;"), "action note() invoked from start() via @@:self");
+    Job_destroy(a);
+
+    // --- state-args + enter/exit args + non-terminal conditional clamp ---
+    Job* b = @@Job();
+    Job_start(b, "J2");
+    Job_submit(b, "payload");
+    _ck(strcmp(Job_status(b), "active") == 0, "submit(task) state-arg -> $Active(task)");
+    Job_tick(b);
+    Job_tick(b);
+    Job_tick(b);
+    Job_tick(b);
+    _ck(Job_counter(b) == 3, "non-terminal conditional clamps attempts at max_attempts=3");
+    _ck(_has(Job_trace_of(b), "tick3;"), "trailing field read ran after the if");
+    Job_finish(b);
+    _ck(strcmp(Job_status(b), "done") == 0, "finish() exit+enter args -> $Done");
+    _ck(_has(Job_trace_of(b), "Active<(done);"), "exit handler received exit arg 'done'");
+    _ck(_has(Job_trace_of(b), "Done>(finished);"), "enter handler received enter arg 'finished'");
+    _ck(_has(Job_trace_of(b), "Active>(payload);"), "enter handler received state arg 'payload'");
+    Job_destroy(b);
+
+    // --- single-level modal: push$/pop$ with depth() asserted ---
+    Job* c = @@Job();
+    Job_start(c, "J3");
+    Job_pause(c);
+    _ck(strcmp(Job_status(c), "paused") == 0 && Job_depth(c) == 1,
+        "push$ -> $Paused; $Paused.$> set depth=1");
+    Job_resume(c);
+    _ck(strcmp(Job_status(c), "working") == 0 && Job_depth(c) == 0,
+        "-> pop$ ran $Paused.<$ (depth->0); depth() forwards via => $^ to $Working");
+    Job_destroy(c);
+
+    // --- nested modal stack — two push$, two pop$ prove a real stack ---
+    Job* cn = @@Job();
+    Job_start(cn, "J3b");
+    Job_pause(cn);
+    Job_pause(cn);
+    _ck(strcmp(Job_status(cn), "paused") == 0, "nested push$ twice -> still $Paused");
+    Job_resume(cn);
+    Job_resume(cn);
+    _ck(strcmp(Job_status(cn), "working") == 0, "two -> pop$ restore through the stack to $Idle");
+    Job_destroy(cn);
+
+    // --- while loop over a state var ---
+    Job* d = @@Job();
+    Job_start(d, "J4");
+    _ck(Job_spin(d, 5) == 5, "while loop over state var $.i -> 5");
+    Job_destroy(d);
+
+    // --- double interface param: heap-boxed double marshalling (RFC-0046) ---
+    Job* fr = @@Job();
+    Job_start(fr, "JF");
+    Job_submit(fr, "p");
+    Job_setrate(fr, 2.5);
+    _ck(Job_rate(fr) == 2.5, "double interface param round-trips (heap-boxed marshalling)");
+
+    // --- DOUBLE transition enter-arg: heap-boxed pack_double marshalling
+    // (RFC-0046; the _Generic ARG_PUSH fallback macro is emitted but the
+    // statically-typed double path here resolves to pack_double directly) ---
+    Job* fb = @@Job();
+    Job_start(fb, "JB");
+    Job_submit(fb, "q");
+    Job_boost(fb, 7.25);
+    _ck(strcmp(Job_status(fb), "boosted") == 0 && Job_rate(fb) == 7.25,
+        "transition double enter-arg -> $Boosted (heap-boxed pack_double)");
+    _ck(Job_counter(fb) == 1, "$Boosted forwards counter() via => $^ to $Working");
+    Job_destroy(fb);
+
+    // --- persist — FULL round-trip incl. state-arg + const + double + no_persist ---
+    Job_tick(fr);
+    char* snap = Job_save_state(fr);
+    _ck(_has(snap, "\"throughput\":2.5") && _has(snap, "\"MAX\":99") && _has(snap, "\"scratch\"") == 0,
+        "save blob carries double + const, EXCLUDES @@[no_persist] field");
+    Job* fr2 = @@Job();
+    Job_restore_state(fr2, snap);
+    free(snap);
+    _ck(strcmp(Job_trace_of(fr2), Job_trace_of(fr)) == 0 && _has(Job_trace_of(fr2), "Active>(p);"),
+        "persist restores FULL trace incl. state arg 'p' (deep equality)");
+    _ck(Job_counter(fr2) == Job_counter(fr) && strcmp(Job_status(fr2), "active") == 0,
+        "persist restores domain + current state");
+    _ck(Job_rate(fr2) == 2.5, "persist round-trips the double field (2.5)");
+    _ck(Job_scratch_of(fr) == 1 && Job_scratch_of(fr2) == 0,
+        "@@[no_persist] field excluded from blob (restore resets to default 0)");
+    Job_destroy(fr);
+    Job_destroy(fr2);
+
+    // --- multi-system composition + ISOLATION (two independent Controllers) ---
+    Controller* k1 = @@Controller();
+    Controller_tick(k1);
+    Controller_tick(k1);
+    Controller* k2 = @@Controller();
+    Controller_tick(k2);
+    Controller_tick(k2);
+    Controller_tick(k2);
+    _ck(Controller_total(k1) == 2 && Controller_total(k2) == 3,
+        "multi-system: two Controllers hold INDEPENDENT Sensors");
+    _ck(Controller_count(k1) == 2 && Controller_count(k2) == 3,
+        "multi-system: each Controller's own domain isolated");
+    Controller_destroy(k1);
+    Controller_destroy(k2);
+
+    // --- construct probe ---
+    Probe* pr = @@Probe();
+    _ck(strcmp(Probe_echo(pr, "hi"), "hi") == 0, "@@:params.x + @@:data set/read");
+    _ck(strcmp(Probe_here(pr), "A") == 0 && Probe_cap(pr) == 50,
+        "@@:system.state.name + const read");
+    _ck(strcmp(Probe_classify(pr, -1), "neg") == 0 && strcmp(Probe_classify(pr, 0), "zero") == 0
+        && strcmp(Probe_classify(pr, 50), "pos") == 0 && strcmp(Probe_classify(pr, 200), "big") == 0,
+        "elif ladder + nested conditional (4 branches)");
+    _ck(Probe_guard(pr) == 50 && _has(Probe_log(pr), "LEAK;") == 0,
+        "@@:return(e) short-circuits trailing code (vs @@:(e))");
+    Probe_destroy(pr);
+
+    Probe* prf = @@Probe();
+    Probe_fire(prf);
+    _ck(strcmp(Probe_here(prf), "B") == 0 && strcmp(Probe_evt(prf), "fire") == 0,
+        "@@:event recorded + plain transition -> $B");
+    Probe_destroy(prf);
+
+    Probe* pr2 = @@Probe();
+    Probe_relay(pr2);
+    _ck(strcmp(Probe_here(pr2), "B") == 0 && _has(Probe_log(pr2), "B.relay;"),
+        "forward transition -> => $B re-dispatched relay");
+    Probe_destroy(pr2);
+
+    Probe* pr3 = @@Probe();
+    Probe_ping(pr3);
+    _ck(_has(Probe_log(pr3), "ping;") && strcmp(Probe_here(pr3), "B") == 0,
+        "action invocation + reentrant @@:self.fire()");
+    Probe_destroy(pr3);
+
+    Probe* pr4 = @@Probe();
+    Probe_fwd(pr4);
+    _ck(strcmp(Probe_here(pr4), "C") == 0 && _has(Probe_log(pr4), "C.fwd(payload);"),
+        "forward transition WITH state args -> => $C(arg)");
+    Probe_destroy(pr4);
+
+    Probe* pr5 = @@Probe();
+    _ck(strcmp(Probe_outer_data(pr5), "outer") == 0,
+        "@@:data call-scope isolated across reentrant @@:self call");
+    Probe_destroy(pr5);
+
+    printf("1..%d\n", _n);
+    return 0;
+}
