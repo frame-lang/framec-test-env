@@ -1,0 +1,647 @@
+@@[target("dart")]
+
+// ============================================================================
+// MAXIMAL FRAME COVERAGE FIXTURE — dart
+// One runnable, self-asserting file exercising every Frame construct the Dart
+// backend supports. TAP output via ck(). main() is async (Future<void>) so the
+// @@[async] Pump can be driven with real await + the E703 busy-gate tripped.
+//
+// Dart idioms: own actions/operations/interface methods use the portable
+// `@@:self.name(args)` (-> this.name(args)); child-system calls are native
+// Dart the user authors (`this.sensor.bump()`). Persist uses dart:convert
+// (jsonEncode/jsonDecode). Native control flow is Dart `if/else if/else`,
+// `while`, native `return`.
+// ============================================================================
+
+import 'dart:async';
+import 'dart:convert';
+
+// ============================================================================
+// CORE SYSTEM — HSM, modal stack, all 7 statements, transitions, references,
+// const, actions, operations, persist round-trip, typed fields (int/bool/
+// double/String), internal operation call.
+// ============================================================================
+@@[main]
+@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@[create(make)]
+@@system Job {
+
+    // [section: operations]
+    operations:
+        // [op: typed params + return, native return passthrough + conditional in op body]
+        clamp(v: int, hi: int): int {
+            if (v > hi) {
+                return hi;
+            }
+            return v;
+        }
+
+    // [section: interface]
+    interface:
+        start(id: String)
+        submit(task: String)
+        tick()
+        pause()
+        resume()
+        finish()
+        spin(n: int): int
+        status(): String
+        counter(): int
+        depth(): int
+        traceOf(): String
+        scratchOf(): int
+        // [bool/double coverage + const read + internal op call]
+        setVerbose(v: bool)
+        isVerbose(): bool
+        setRatio(r: double)
+        getRatio(): double
+        capacity(): int
+        clampIn(v: int, hi: int)
+        getClamped(): int
+
+    // [section: machine]
+    machine:
+
+        // [state: initial]
+        $Begin {
+            // [handler: enter, no args]
+            $>() {
+                this.trace = this.trace + "Begin>;";
+            }
+            start(id: String) {
+                this.job_id = id;
+                @@:self.note("N;");                  // [action invocation via @@:self]
+                -> ("seed") $Idle
+            }
+            status(): String { @@:("begin") }
+            traceOf(): String { @@:(this.trace) }
+            counter(): int { @@:(this.attempts) }
+            // [bool setter/getter — exercised + persist round-tripped]
+            setVerbose(v: bool) { this.verbose = v; }
+            // [bool read in a guard]
+            isVerbose(): bool {
+                if (this.verbose) {
+                    @@:(true)
+                } else {
+                    @@:(false)
+                }
+            }
+            setRatio(r: double) { this.ratio = r; }
+            getRatio(): double { @@:(this.ratio) }
+            // [const read via interface method]
+            capacity(): int { @@:(this.MAX) }
+        }
+
+        // [state: HSM parent]
+        $Working {
+            status(): String { @@:("working") }
+            counter(): int { @@:(this.attempts) }
+            depth(): int { @@:(this.stack_depth) }
+            traceOf(): String { @@:(this.trace) }
+        }
+
+        // [state: HSM child => parent]
+        $Idle => $Working {
+            // [state var w/ type + init]
+            $.i: int = 0
+
+            // [handler: enter w/ param]
+            $>(seed: String) {
+                this.trace = this.trace + "Idle>(" + seed + ");";
+            }
+            // [handler: exit]
+            <$() {
+                this.trace = this.trace + "Idle<;";
+            }
+            submit(task: String) {
+                // [native control: terminal conditional w/ transitions]
+                if (task == "") {
+                    -> $Rejected
+                } else {
+                    this.attempts = this.attempts + 1;
+                    -> $Active(task)
+                }
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            // [transition forwarding via => $^ to HSM parent]
+            status(): String { => $^ }
+            depth(): int { => $^ }
+            spin(n: int): int {
+                // [native control: while loop over state var $.i]
+                while ($.i < n) {
+                    $.i = $.i + 1;
+                }
+                @@:($.i)
+            }
+        }
+
+        // [state: typed state parameter (receives state args)]
+        $Active(task: String) {
+            $>() {
+                this.trace = this.trace + "Active>(" + task + ");";
+            }
+            <$(why: String) {
+                this.trace = this.trace + "Active<(" + why + ");";
+            }
+            tick() {
+                this.scratch = this.scratch + 1;
+                // [native control: NON-TERMINAL conditional — mutate, fall through]
+                if (this.attempts < this.max_attempts) {
+                    this.attempts = this.attempts + 1;
+                }
+                this.trace = this.trace + "tick" + this.attempts.toString() + ";";
+            }
+            finish() {
+                ("done") -> ("finished") $Done       // [exit-args + enter-args transition]
+            }
+            status(): String { @@:("active") }
+            counter(): int { @@:(this.attempts) }
+            traceOf(): String { @@:(this.trace) }
+            scratchOf(): int { @@:(this.scratch) }
+            // [internal operation call: clamp() invoked as @@:self.clamp(...) inside a handler]
+            clampIn(v: int, hi: int) {
+                this.clamped = @@:self.clamp(v, hi);
+            }
+            getClamped(): int { @@:(this.clamped) }
+            // [bool/double getters + const read reachable in $Active for persist-restore reads]
+            isVerbose(): bool {
+                if (this.verbose) {
+                    @@:(true)
+                } else {
+                    @@:(false)
+                }
+            }
+            getRatio(): double { @@:(this.ratio) }
+            capacity(): int { @@:(this.MAX) }
+        }
+
+        // [state: modal (pushed)]
+        $Paused {
+            $>() {
+                this.stack_depth = this.stack_depth + 1;
+            }
+            <$() {
+                this.stack_depth = this.stack_depth - 1;
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            resume() {
+                -> pop$
+            }
+            status(): String { @@:("paused") }
+            depth(): int { @@:(this.stack_depth) }
+        }
+
+        $Rejected {
+            status(): String { @@:("rejected") }
+            counter(): int { @@:(this.attempts) }
+            traceOf(): String { @@:(this.trace) }
+        }
+
+        // [state: final]
+        $Done {
+            $>(why: String) {
+                this.trace = this.trace + "Done>(" + why + ");";
+            }
+            status(): String { @@:("done") }
+            counter(): int { @@:(this.attempts) }
+            depth(): int { @@:(this.stack_depth) }
+            traceOf(): String { @@:(this.trace) }
+        }
+
+    // [section: actions]
+    actions:
+        note(s: String) {
+            this.trace = this.trace + s;
+        }
+
+    // [section: domain]
+    domain:
+        // [decl: const field — read AND persisted (#139: not emitted final/const)]
+        const MAX: int = 99
+        // [decl: typed domain vars + init]
+        job_id: String = ""
+        attempts: int = 0
+        max_attempts: int = 3
+        stack_depth: int = 0
+        trace: String = ""
+        // [decl: bool + double domain fields — guards/getters + persist round-trip]
+        verbose: bool = false
+        ratio: double = 1.5
+        clamped: int = 0
+        // [attr: @@[no_persist] — excluded from the serialized blob, resets on restore]
+        @@[no_persist]
+        scratch: int = 0
+}
+
+// ============================================================================
+// MULTI-SYSTEM COMPOSITION — Controller holds + delegates to Sensor.
+// framec lowers the sensor field + @@Sensor() construction; the call
+// (this.sensor.bump()) is user-authored native Dart.
+// ============================================================================
+@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@system Sensor {
+    interface:
+        bump()
+        read(): int
+    machine:
+        $S {
+            bump() {
+                this.val = this.val + 1;
+            }
+            read(): int { @@:(this.val) }
+        }
+    domain:
+        val: int = 0
+}
+
+@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@system Controller {
+    interface:
+        tick()
+        total(): int
+        count(): int
+    machine:
+        $C {
+            tick() {
+                this.seen = this.seen + 1;
+                this.sensor.bump();                  // native call into child system
+            }
+            total(): int { @@:(this.sensor.read()) }
+            count(): int { @@:(this.seen) }
+        }
+    domain:
+        // [composition: hold a sub-system instance as a typed domain field]
+        sensor: Sensor = @@Sensor()
+        seen: int = 0
+}
+
+// ============================================================================
+// CONSTRUCT PROBE — the remaining reference/transition constructs:
+// @@:event, @@:params.x, @@:data.x (set+read, call-scope isolation),
+// @@:return(e) short-circuit, @@:system.state.name, labeled transition,
+// forward transition (-> => $S), forward WITH state args (#128), reentrant
+// @@:self, const read, action invocation, else-if ladder + nested conditional.
+// ============================================================================
+@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@system Probe {
+
+    interface:
+        echo(x: String): String
+        fire()
+        relay()
+        ping()
+        here(): String
+        evt(): String
+        cap(): int
+        log(): String
+        classify(n: int): String
+        guard(): int
+        outerData(): String
+        innerData()
+        fwd()
+
+    machine:
+
+        $A {
+            echo(x: String): String {
+                @@:data.tmp = @@:params.x
+                @@:("echo:" + @@:data.tmp)
+            }
+            // [@@:data call-scope isolation across a reentrant @@:self call]
+            outerData(): String {
+                @@:data.k = "outer"
+                @@:self.innerData()                  // inner gets its OWN @@:data scope
+                @@:(@@:data.k)                       // must still read "outer"
+            }
+            innerData() {
+                @@:data.k = "inner"
+            }
+            // [else-if ladder + nested conditional — 4 branches]
+            classify(n: int): String {
+                if (n < 0) {
+                    @@:("neg")
+                } else if (n == 0) {
+                    @@:("zero")
+                } else {
+                    if (n > 100) {
+                        @@:("big")
+                    } else {
+                        @@:("pos")
+                    }
+                }
+            }
+            // [@@:return(e) short-circuits trailing code (vs @@:(e))]
+            guard(): int {
+                @@:return(this.LIMIT)
+                @@:self.helper("LEAK;");
+            }
+            fire() {
+                this.last = @@:event
+                -> "fired" $B                        // [transition: labeled]
+            }
+            relay() {
+                -> => $B                             // [transition: forward (re-dispatch)]
+            }
+            fwd() {
+                -> => $C("payload")                  // [transition: forward WITH state args (#128)]
+            }
+            ping() {
+                @@:self.helper("ping;");             // [action invocation via @@:self]
+                @@:self.fire()                       // [ref: reentrant self-call]
+            }
+            here(): String { @@:(@@:system.state.name) }
+            evt(): String { @@:return(this.last) }
+            cap(): int { @@:(this.LIMIT) }           // [decl: const read]
+            log(): String { @@:(this.trace) }
+        }
+
+        $B {
+            relay() {
+                this.trace = this.trace + "B.relay;";  // handles re-dispatched event
+            }
+            here(): String { @@:("B") }
+            evt(): String { @@:return(this.last) }
+            log(): String { @@:(this.trace) }
+        }
+
+        // [state: target of a forward transition carrying a state arg (#128 fixed)]
+        $C(tok: String) {
+            fwd() {
+                this.trace = this.trace + "C.fwd(" + tok + ");";
+            }
+            here(): String { @@:("C") }
+            log(): String { @@:(this.trace) }
+        }
+
+    // [section: actions]
+    actions:
+        helper(s: String) {
+            this.trace = this.trace + s;
+        }
+
+    domain:
+        const LIMIT: int = 50
+        trace: String = ""
+        last: String = ""
+}
+
+// ============================================================================
+// ASYNC SYSTEM — @@[async] Pump: async interface methods (await point inside
+// the handler) + a SYNC operation bypass + the E703 single-driver gate.
+// Dart is async-layered: interface methods return Future<T>, init() is async.
+// The busy-gate is a synchronous re-entrancy check: a second driver on the
+// same casing while one is in-flight throws StateError("E703: ...").
+// ============================================================================
+@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@[async]
+@@system Pump {
+    operations:
+        // [op: SYNC bypass — operations are not async even in an @@[async] system]
+        peek(): int {
+            return this.level;
+        }
+    interface:
+        async push(): int
+        async drain(): int
+        async slow(): int
+    machine:
+        $P {
+            push(): int {
+                await Future.delayed(Duration.zero);  // [native await point inside handler]
+                this.level = this.level + 1;
+                @@:(this.level)
+            }
+            drain(): int {
+                await Future.delayed(Duration.zero);
+                this.level = 0;
+                @@:(this.level)
+            }
+            // [slow await — used to trip the concurrent E703 gate]
+            slow(): int {
+                await Future.delayed(Duration(milliseconds: 50));
+                this.level = this.level + 1;
+                @@:(this.level)
+            }
+        }
+    domain:
+        level: int = 0
+}
+
+// ============================================================================
+// DRIVER — TAP, fresh machine per scenario, asserts every path.
+// ============================================================================
+int _n = 0;
+void ck(bool cond, String desc) {
+    _n++;
+    print((cond ? "ok " : "not ok ") + _n.toString() + " - " + desc);
+}
+
+Future<void> main() async {
+    print("TAP version 14");
+
+    // ----- operations (instance form, factory-renamed make) -----
+    final j0 = Job.make();
+    ck(j0.clamp(150, 99) == 99, "operation clamp(150,99)=99 (conditional in op body)");
+    ck(j0.clamp(5, 99) == 5, "operation clamp(5,99)=5 (native return passthrough)");
+
+    // ----- HSM forward via => $^ + terminal conditional + action -----
+    final a = @@Job();
+    a.start("J1");
+    ck(a.status() == "working", "Idle forwards status via => \$^ to parent \$Working");
+    a.submit("");
+    ck(a.status() == "rejected", "submit('') terminal conditional -> \$Rejected");
+    ck(a.traceOf().contains("N;"), "action note() invoked from start() via @@:self");
+
+    // ----- state-args + non-terminal conditional + trailing read -----
+    final b = @@Job();
+    b.start("J2");
+    b.submit("payload");
+    ck(b.status() == "active", "submit(task) state-args -> \$Active(task)");
+    b.tick();
+    b.tick();
+    b.tick();
+    b.tick();
+    ck(b.counter() == 3, "non-terminal conditional clamps attempts at max_attempts=3");
+    ck(b.traceOf().contains("tick3"), "trailing read of mutated field ran after the if");
+
+    // ----- exit-args + enter-args transition -----
+    b.finish();
+    ck(b.status() == "done", "finish() exit+enter-args -> \$Done");
+    ck(b.traceOf().contains("Active<(done)"), "exit handler received exit arg 'done'");
+    ck(b.traceOf().contains("Done>(finished)"), "enter handler received enter arg 'finished'");
+
+    // ----- single-level modal: push\$ / -> pop\$ + second => \$^ path -----
+    final c = @@Job();
+    c.start("J3");
+    c.pause();
+    ck(c.status() == "paused" && c.depth() == 1, "push\$ -> \$Paused; \$Paused.\$> set depth=1");
+    c.resume();
+    ck(c.status() == "working" && c.depth() == 0,
+        "-> pop\$ ran \$Paused.<\$ (depth->0) and depth() forwards via => \$^ to \$Working");
+
+    // ----- nested modal stack — two push\$, two -> pop\$ prove a real stack -----
+    final cn = @@Job();
+    cn.start("J3b");
+    cn.pause();
+    cn.pause();
+    ck(cn.status() == "paused", "nested push\$ twice -> still \$Paused");
+    cn.resume();
+    cn.resume();
+    ck(cn.status() == "working", "two -> pop\$ restore through the stack to \$Idle");
+
+    // ----- while loop over a state var -----
+    final d = @@Job();
+    d.start("J4");
+    ck(d.spin(5) == 5, "while loop over state var \$.i -> 5");
+
+    // ----- const read via interface method -----
+    final cap = @@Job();
+    ck(cap.capacity() == 99, "const MAX read via capacity() interface method = 99");
+
+    // ----- bool read in a guard -----
+    final bv = @@Job();
+    ck(bv.isVerbose() == false, "bool field default false read in guard");
+    bv.setVerbose(true);
+    ck(bv.isVerbose() == true, "bool field set true, read back true in guard");
+
+    // ----- double getter -----
+    final fr = @@Job();
+    ck(fr.getRatio() == 1.5, "double field default 1.5 via getter");
+    fr.setRatio(2.75);
+    ck(fr.getRatio() == 2.75, "double field set 2.75, read back");
+
+    // ----- internal operation call: clamp() called as @@:self.clamp(...) inside a handler -----
+    final ci = @@Job();
+    ci.start("CI");
+    ci.submit("payload");                            // -> $Active
+    ci.clampIn(250, 99);
+    ck(ci.getClamped() == 99, "operation clamp() called internally (@@:self.clamp) = 99");
+    ci.clampIn(7, 99);
+    ck(ci.getClamped() == 7, "internal @@:self.clamp(7,99) = 7");
+
+    // ----- persist — deep round-trip incl. state-arg survival + const + no_persist -----
+    final e = @@Job();
+    e.setVerbose(true);                              // set in $Begin (setters live there)
+    e.setRatio(3.0625);                              // exact in double; survives JSON
+    e.start("J5");
+    e.submit("z");                                   // -> $Active(z)
+    e.tick();                                        // attempts -> 1, scratch -> 1
+    final snap = e.saveState();
+    ck(e.scratchOf() == 1, "persist: @@[no_persist] scratch holds 1 before save");
+
+    final e2 = @@Job();
+    e2.restoreState(snap);
+    ck(e2.traceOf() == e.traceOf() && e2.traceOf().contains("Active>(z)"),
+        "persist restores FULL trace incl. state-arg 'z' (deep equality)");
+    ck(e2.counter() == e.counter() && e2.status() == "active",
+        "persist restores domain + current state (\$Active)");
+    ck(e2.isVerbose() == true && e2.getRatio() == 3.0625,
+        "persist round-trips bool + double fields through JSON");
+    ck(e2.capacity() == 99,
+        "persist: const MAX survives save/restore + compiles (#139: not final)");
+    ck(e.scratchOf() == 1 && e2.scratchOf() == 0,
+        "@@[no_persist] scratch excluded from blob (restore resets to default 0)");
+
+    // ----- multi-system composition + ISOLATION (two independent Controllers) -----
+    final k1 = @@Controller();
+    k1.tick();
+    k1.tick();
+    final k2 = @@Controller();
+    k2.tick();
+    k2.tick();
+    k2.tick();
+    ck(k1.total() == 2 && k2.total() == 3, "multi-system: two Controllers hold INDEPENDENT Sensors");
+    ck(k1.count() == 2 && k2.count() == 3, "multi-system: each Controller's own domain isolated");
+
+    // ----- construct probe -----
+    final pr = @@Probe();
+    ck(pr.echo("hi") == "echo:hi", "@@:params.x + @@:data set/read");
+    ck(pr.here() == "A" && pr.cap() == 50, "@@:system.state.name + const read");
+    ck(pr.classify(-1) == "neg" && pr.classify(0) == "zero" && pr.classify(50) == "pos" && pr.classify(200) == "big",
+        "else-if ladder + nested conditional (4 branches)");
+    ck(pr.guard() == 50 && !pr.log().contains("LEAK;"),
+        "@@:return(e) short-circuits trailing code (vs @@:(e))");
+    pr.fire();
+    ck(pr.here() == "B" && pr.evt() == "fire", "@@:event recorded + labeled transition -> \$B");
+
+    final pr2 = @@Probe();
+    pr2.relay();
+    ck(pr2.here() == "B" && pr2.log().contains("B.relay;"), "forward transition -> => \$B re-dispatched relay");
+
+    final pr3 = @@Probe();
+    pr3.ping();
+    ck(pr3.log().contains("ping;") && pr3.here() == "B", "action invocation + reentrant @@:self.fire()");
+
+    final pr4 = @@Probe();
+    pr4.fwd();
+    ck(pr4.here() == "C" && pr4.log().contains("C.fwd(payload)"),
+        "forward transition WITH state args -> => \$C(arg) [#128 fixed]");
+
+    final pr5 = @@Probe();
+    ck(pr5.outerData() == "outer",
+        "@@:data call-scope isolated across reentrant @@:self call");
+
+    // ----- ASYNC: driven with real await -----
+    final pump = @@Pump();
+    await pump.init();
+    final r1 = await pump.push();
+    final r2 = await pump.push();
+    ck(r1 == 1 && r2 == 2, "async: two awaited push() calls increment level 1,2");
+    ck(pump.peek() == 2, "async: SYNC op peek() bypasses async gate, reads level=2");
+    final r3 = await pump.drain();
+    ck(r3 == 0 && pump.peek() == 0, "async: awaited drain() resets level to 0");
+
+    // ----- ASYNC E703 GATE: two concurrent slow() drivers on one casing -----
+    // The first slow() sets busy=true and awaits the 50ms delay. The second,
+    // launched before the first settles, hits the busy-gate. Because slow() is
+    // an `async` method, that gate-throw surfaces as a REJECTED Future (not a
+    // synchronous throw), so we capture both futures and await each, counting
+    // the winner vs the E703 rejection.
+    final g = @@Pump();
+    await g.init();
+    int successes = 0;
+    int e703 = 0;
+    final t1 = g.slow();           // starts, sets busy=true, awaits the 50ms delay
+    // Attach error handlers to BOTH futures synchronously (before any await
+    // suspends) so the immediate E703 rejection on t2 is never seen as an
+    // unhandled async error by the Dart zone.
+    final f1 = t1.then((v) { if (v >= 1) successes++; })
+                 .catchError((e) { if (e is StateError && e.message.contains("E703")) e703++; });
+    final t2 = g.slow();           // re-entry while in-flight -> Future rejects with E703
+    final f2 = t2.then((v) { if (v >= 1) successes++; })
+                 .catchError((e) { if (e is StateError && e.message.contains("E703")) e703++; });
+    await f1;
+    await f2;
+    ck(successes == 1 && e703 == 1, "async: concurrent slow() trips the E703 busy-gate (1 win, 1 E703)");
+    // gate clears after the in-flight driver settles
+    final r4 = await g.slow();
+    ck(r4 >= 1, "async: E703 gate clears after the driver settles (fresh slow() succeeds)");
+
+    // ----- async persist round-trip -----
+    final ap1 = @@Pump();
+    await ap1.init();
+    await ap1.push();
+    await ap1.push();                                // level -> 2
+    final asnap = ap1.saveState();
+    final ap2 = @@Pump();
+    ap2.restoreState(asnap);
+    ck(ap2.peek() == 2, "async persist: restored Pump retains level=2 (sync op peek())");
+
+    print("1.." + _n.toString());
+}
