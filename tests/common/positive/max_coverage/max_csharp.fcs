@@ -1,0 +1,641 @@
+@@[target("csharp")]
+
+// ============================================================================
+// MAXIMAL FRAME COVERAGE FIXTURE — csharp
+// One runnable, self-asserting file exercising every Frame construct the C#
+// backend supports. TAP output via Ck(). The matrix runner wraps this file in
+// `namespace frametest.<id> { ... }` and reflectively invokes Program.Main().
+//
+// Main() is SYNCHRONOUS on purpose: the dispatcher invokes Main by reflection
+// and does NOT await a returned Task, so async work is driven internally via
+// `.GetAwaiter().GetResult()`.
+//
+// C# idioms: own actions/operations/interface methods use the portable
+// `@@:self.Name(args)` (-> this.Name(args)); child-system calls are native C#
+// the user authors (`this.sensor.Bump()`). Interface methods emit PascalCase.
+// ============================================================================
+
+using System;
+using System.Threading.Tasks;
+
+// ============================================================================
+// CORE SYSTEM — HSM, modal stack, all 7 statements, transitions, references,
+// const, actions, operations, persist round-trip, typed fields (int/bool/
+// double/string), internal operation call.
+// ============================================================================
+@@[main]
+@@[persist(string)]
+@@[save(SaveState)]
+@@[load(RestoreState)]
+@@[create(Make)]
+@@system Job {
+
+    // [section: operations]
+    operations:
+        // [op: typed params + return, native return passthrough + conditional in op body]
+        Clamp(v: int, hi: int): int {
+            if (v > hi) {
+                return hi;
+            }
+            return v;
+        }
+
+    // [section: interface]
+    interface:
+        Start(id: string)
+        Submit(task: string)
+        Tick()
+        Pause()
+        Resume()
+        Finish()
+        Spin(n: int): int
+        Status(): string
+        Counter(): int
+        Depth(): int
+        TraceOf(): string
+        ScratchOf(): int
+        // [bool/double coverage + const read + internal op call]
+        SetVerbose(v: bool)
+        IsVerbose(): bool
+        SetRatio(r: double)
+        GetRatio(): double
+        Capacity(): int
+        ClampIn(v: int, hi: int)
+        GetClamped(): int
+
+    // [section: machine]
+    machine:
+
+        // [state: initial]
+        $Begin {
+            // [handler: enter, no args]
+            $>() {
+                this.trace = this.trace + "Begin>;";
+            }
+            Start(id: string) {
+                this.job_id = id;
+                @@:self.Note("N;");                 // [action invocation via @@:self]
+                -> ("seed") $Idle
+            }
+            Status(): string { @@:("begin") }
+            TraceOf(): string { @@:(this.trace) }
+            Counter(): int { @@:(this.attempts) }
+            // [bool setter/getter — exercised + persist round-tripped]
+            SetVerbose(v: bool) { this.verbose = v; }
+            // [bool read in a guard]
+            IsVerbose(): bool {
+                if (this.verbose) {
+                    @@:(true)
+                } else {
+                    @@:(false)
+                }
+            }
+            SetRatio(r: double) { this.ratio = r; }
+            GetRatio(): double { @@:(this.ratio) }
+            // [const read via interface method]
+            Capacity(): int { @@:(this.MAX) }
+        }
+
+        // [state: HSM parent]
+        $Working {
+            Status(): string { @@:("working") }
+            Counter(): int { @@:(this.attempts) }
+            Depth(): int { @@:(this.stack_depth) }
+            TraceOf(): string { @@:(this.trace) }
+        }
+
+        // [state: HSM child => parent]
+        $Idle => $Working {
+            // [state var w/ type + init]
+            $.i: int = 0
+
+            // [handler: enter w/ param]
+            $>(seed: string) {
+                this.trace = this.trace + "Idle>(" + seed + ");";
+            }
+            // [handler: exit]
+            <$() {
+                this.trace = this.trace + "Idle<;";
+            }
+            Submit(task: string) {
+                // [native control: terminal conditional w/ transitions]
+                if (task == "") {
+                    -> $Rejected
+                } else {
+                    this.attempts = this.attempts + 1;
+                    -> $Active(task)
+                }
+            }
+            Pause() {
+                push$
+                -> $Paused
+            }
+            // [transition forwarding via => $^ to HSM parent]
+            Status(): string { => $^ }
+            Depth(): int { => $^ }
+            Spin(n: int): int {
+                // [native control: while loop over state var $.i]
+                while ($.i < n) {
+                    $.i = $.i + 1;
+                }
+                @@:($.i)
+            }
+        }
+
+        // [state: typed state parameter (receives state args)]
+        $Active(task: string) {
+            $>() {
+                this.trace = this.trace + "Active>(" + task + ");";
+            }
+            <$(why: string) {
+                this.trace = this.trace + "Active<(" + why + ");";
+            }
+            Tick() {
+                this.scratch = this.scratch + 1;
+                // [native control: NON-TERMINAL conditional — mutate, fall through]
+                if (this.attempts < this.max_attempts) {
+                    this.attempts = this.attempts + 1;
+                }
+                this.trace = this.trace + "tick" + this.attempts.ToString() + ";";
+            }
+            Finish() {
+                ("done") -> ("finished") $Done       // [exit-args + enter-args transition]
+            }
+            Status(): string { @@:("active") }
+            Counter(): int { @@:(this.attempts) }
+            TraceOf(): string { @@:(this.trace) }
+            ScratchOf(): int { @@:(this.scratch) }
+            // [internal operation call: Clamp() invoked as @@:self.Clamp(...) inside a handler]
+            ClampIn(v: int, hi: int) {
+                this.clamped = @@:self.Clamp(v, hi);
+            }
+            GetClamped(): int { @@:(this.clamped) }
+            // [bool/double getters + const read reachable in $Active for persist-restore reads]
+            IsVerbose(): bool {
+                if (this.verbose) {
+                    @@:(true)
+                } else {
+                    @@:(false)
+                }
+            }
+            GetRatio(): double { @@:(this.ratio) }
+            Capacity(): int { @@:(this.MAX) }
+        }
+
+        // [state: modal (pushed)]
+        $Paused {
+            $>() {
+                this.stack_depth = this.stack_depth + 1;
+            }
+            <$() {
+                this.stack_depth = this.stack_depth - 1;
+            }
+            Pause() {
+                push$
+                -> $Paused
+            }
+            Resume() {
+                -> pop$
+            }
+            Status(): string { @@:("paused") }
+            Depth(): int { @@:(this.stack_depth) }
+        }
+
+        $Rejected {
+            Status(): string { @@:("rejected") }
+            Counter(): int { @@:(this.attempts) }
+            TraceOf(): string { @@:(this.trace) }
+        }
+
+        // [state: final]
+        $Done {
+            $>(why: string) {
+                this.trace = this.trace + "Done>(" + why + ");";
+            }
+            Status(): string { @@:("done") }
+            Counter(): int { @@:(this.attempts) }
+            Depth(): int { @@:(this.stack_depth) }
+            TraceOf(): string { @@:(this.trace) }
+        }
+
+    // [section: actions]
+    actions:
+        Note(s: string) {
+            this.trace = this.trace + s;
+        }
+
+    // [section: domain]
+    domain:
+        // [decl: const field — read AND persisted (#139: not emitted readonly)]
+        const MAX: int = 99
+        // [decl: typed domain vars + init]
+        job_id: string = ""
+        attempts: int = 0
+        max_attempts: int = 3
+        stack_depth: int = 0
+        trace: string = ""
+        // [decl: bool + double domain fields — guards/getters + persist round-trip]
+        verbose: bool = false
+        ratio: double = 1.5
+        clamped: int = 0
+        // [attr: @@[no_persist] — excluded from the serialized blob, resets on restore]
+        @@[no_persist]
+        scratch: int = 0
+}
+
+// ============================================================================
+// MULTI-SYSTEM COMPOSITION — Controller holds + delegates to Sensor.
+// framec lowers the $.sensor reference + @@Sensor() construction; the call
+// (this.sensor.Bump()) is user-authored native C#.
+// ============================================================================
+@@[persist(string)]
+@@[save(SaveState)]
+@@[load(RestoreState)]
+@@system Sensor {
+    interface:
+        Bump()
+        Read(): int
+    machine:
+        $S {
+            Bump() {
+                this.val = this.val + 1;
+            }
+            Read(): int { @@:(this.val) }
+        }
+    domain:
+        val: int = 0
+}
+
+@@[persist(string)]
+@@[save(SaveState)]
+@@[load(RestoreState)]
+@@system Controller {
+    interface:
+        Tick()
+        Total(): int
+        Count(): int
+    machine:
+        $C {
+            Tick() {
+                this.seen = this.seen + 1;
+                this.sensor.Bump();                  // native call into child system
+            }
+            Total(): int { @@:(this.sensor.Read()) }
+            Count(): int { @@:(this.seen) }
+        }
+    domain:
+        // [composition: hold a sub-system instance as a typed domain field]
+        sensor: Sensor = @@Sensor()
+        seen: int = 0
+}
+
+// ============================================================================
+// CONSTRUCT PROBE — the remaining reference/transition constructs:
+// @@:event, @@:params.x, @@:data.x (set+read, call-scope isolation),
+// @@:return(e) short-circuit, @@:system.state.name, labeled transition,
+// forward transition (-> => $S), forward WITH state args (#128), reentrant
+// @@:self, const read, action invocation, elif ladder + nested conditional.
+// ============================================================================
+@@[persist(string)]
+@@[save(SaveState)]
+@@[load(RestoreState)]
+@@system Probe {
+
+    interface:
+        Echo(x: string): string
+        Fire()
+        Relay()
+        Ping()
+        Here(): string
+        Evt(): string
+        Cap(): int
+        Log(): string
+        Classify(n: int): string
+        Guard(): int
+        OuterData(): string
+        InnerData()
+        Fwd()
+
+    machine:
+
+        $A {
+            Echo(x: string): string {
+                @@:data.tmp = @@:params.x
+                @@:("echo:" + @@:data.tmp)
+            }
+            // [@@:data call-scope isolation across a reentrant @@:self call]
+            OuterData(): string {
+                @@:data.k = "outer"
+                @@:self.InnerData()                  // inner gets its OWN @@:data scope
+                @@:(@@:data.k)                       // must still read "outer"
+            }
+            InnerData() {
+                @@:data.k = "inner"
+            }
+            // [elif ladder + nested conditional — 4 branches]
+            Classify(n: int): string {
+                if (n < 0) {
+                    @@:("neg")
+                } else if (n == 0) {
+                    @@:("zero")
+                } else {
+                    if (n > 100) {
+                        @@:("big")
+                    } else {
+                        @@:("pos")
+                    }
+                }
+            }
+            // [@@:return(e) short-circuits trailing code (vs @@:(e))]
+            Guard(): int {
+                @@:return(this.LIMIT)
+                @@:self.Helper("LEAK;");
+            }
+            Fire() {
+                this.last = @@:event
+                -> "fired" $B                        // [transition: labeled]
+            }
+            Relay() {
+                -> => $B                             // [transition: forward (re-dispatch)]
+            }
+            Fwd() {
+                -> => $C("payload")                  // [transition: forward WITH state args (#128)]
+            }
+            Ping() {
+                @@:self.Helper("ping;");             // [action invocation via @@:self]
+                @@:self.Fire()                       // [ref: reentrant self-call]
+            }
+            Here(): string { @@:(@@:system.state.name) }
+            Evt(): string { @@:return(this.last) }
+            Cap(): int { @@:(this.LIMIT) }           // [decl: const read]
+            Log(): string { @@:(this.trace) }
+        }
+
+        $B {
+            Relay() {
+                this.trace = this.trace + "B.relay;";  // handles re-dispatched event
+            }
+            Here(): string { @@:("B") }
+            Evt(): string { @@:return(this.last) }
+            Log(): string { @@:(this.trace) }
+        }
+
+        // [state: target of a forward transition carrying a state arg (#128 fixed)]
+        $C(tok: string) {
+            Fwd() {
+                this.trace = this.trace + "C.fwd(" + tok + ");";
+            }
+            Here(): string { @@:("C") }
+            Log(): string { @@:(this.trace) }
+        }
+
+    // [section: actions]
+    actions:
+        Helper(s: string) {
+            this.trace = this.trace + s;
+        }
+
+    domain:
+        const LIMIT: int = 50
+        trace: string = ""
+        last: string = ""
+}
+
+// ============================================================================
+// ASYNC SYSTEM — @@[async] Pump: async interface methods (await point inside
+// the handler) + a SYNC operation bypass + the E703 single-driver gate.
+// C# has real Task scheduling, so the gate is behaviorally exercised:
+// two concurrent drivers on the same casing — one wins, the other throws
+// InvalidOperationException("E703: ...").
+// ============================================================================
+@@[persist(string)]
+@@[save(SaveState)]
+@@[load(RestoreState)]
+@@[async]
+@@system Pump {
+    operations:
+        // [op: SYNC bypass — operations are not async even in an @@[async] system]
+        Peek(): int {
+            return this.level;
+        }
+    interface:
+        async Push(): int
+        async Drain(): int
+        async Slow(): int
+    machine:
+        $P {
+            Push(): int {
+                await Task.Yield();                  // [native await point inside handler]
+                this.level = this.level + 1;
+                @@:(this.level)
+            }
+            Drain(): int {
+                await Task.Yield();
+                this.level = 0;
+                @@:(this.level)
+            }
+            // [slow await — used to trip the concurrent E703 gate]
+            Slow(): int {
+                await Task.Delay(60);
+                this.level = this.level + 1;
+                @@:(this.level)
+            }
+        }
+    domain:
+        level: int = 0
+}
+
+// ============================================================================
+// DRIVER — TAP, fresh machine per scenario, asserts every path.
+// ============================================================================
+class Program {
+    static int _n = 0;
+    static void Ck(bool cond, string desc) {
+        _n++;
+        Console.WriteLine((cond ? "ok " : "not ok ") + _n + " - " + desc);
+    }
+
+    static void Main() {
+        Console.WriteLine("TAP version 14");
+
+        // ----- operations (instance form, factory-renamed Make) -----
+        Job j0 = Job.Make();
+        Ck(j0.Clamp(150, 99) == 99, "operation Clamp(150,99)=99 (conditional in op body)");
+        Ck(j0.Clamp(5, 99) == 5, "operation Clamp(5,99)=5 (native return passthrough)");
+
+        // ----- HSM forward via => $^ + terminal conditional + action -----
+        Job a = @@Job();
+        a.Start("J1");
+        Ck(a.Status() == "working", "Idle forwards Status via => $^ to parent $Working");
+        a.Submit("");
+        Ck(a.Status() == "rejected", "Submit('') terminal conditional -> $Rejected");
+        Ck(a.TraceOf().Contains("N;"), "action Note() invoked from Start() via @@:self");
+
+        // ----- state-args + non-terminal conditional + trailing read -----
+        Job b = @@Job();
+        b.Start("J2");
+        b.Submit("payload");
+        Ck(b.Status() == "active", "Submit(task) state-args -> $Active(task)");
+        b.Tick();
+        b.Tick();
+        b.Tick();
+        b.Tick();
+        Ck(b.Counter() == 3, "non-terminal conditional clamps attempts at max_attempts=3");
+        Ck(b.TraceOf().Contains("tick3"), "trailing read of mutated field ran after the if");
+
+        // ----- exit-args + enter-args transition -----
+        b.Finish();
+        Ck(b.Status() == "done", "Finish() exit+enter-args -> $Done");
+        Ck(b.TraceOf().Contains("Active<(done)"), "exit handler received exit arg 'done'");
+        Ck(b.TraceOf().Contains("Done>(finished)"), "enter handler received enter arg 'finished'");
+
+        // ----- single-level modal: push$ / -> pop$ + second => $^ path -----
+        Job c = @@Job();
+        c.Start("J3");
+        c.Pause();
+        Ck(c.Status() == "paused" && c.Depth() == 1, "push$ -> $Paused; $Paused.$> set depth=1");
+        c.Resume();
+        Ck(c.Status() == "working" && c.Depth() == 0,
+            "-> pop$ ran $Paused.<$ (depth->0) and Depth() forwards via => $^ to $Working");
+
+        // ----- nested modal stack — two push$, two -> pop$ prove a real stack -----
+        Job cn = @@Job();
+        cn.Start("J3b");
+        cn.Pause();
+        cn.Pause();
+        Ck(cn.Status() == "paused", "nested push$ twice -> still $Paused");
+        cn.Resume();
+        cn.Resume();
+        Ck(cn.Status() == "working", "two -> pop$ restore through the stack to $Idle");
+
+        // ----- while loop over a state var -----
+        Job d = @@Job();
+        d.Start("J4");
+        Ck(d.Spin(5) == 5, "while loop over state var $.i -> 5");
+
+        // ----- const read via interface method -----
+        Job cap = @@Job();
+        Ck(cap.Capacity() == 99, "const MAX read via Capacity() interface method = 99");
+
+        // ----- bool read in a guard -----
+        Job bv = @@Job();
+        Ck(bv.IsVerbose() == false, "bool field default false read in guard");
+        bv.SetVerbose(true);
+        Ck(bv.IsVerbose() == true, "bool field set true, read back true in guard");
+
+        // ----- double getter -----
+        Job fr = @@Job();
+        Ck(fr.GetRatio() == 1.5, "double field default 1.5 via getter");
+        fr.SetRatio(2.75);
+        Ck(fr.GetRatio() == 2.75, "double field set 2.75, read back");
+
+        // ----- internal operation call: Clamp() called as @@:self.Clamp(...) inside a handler -----
+        Job ci = @@Job();
+        ci.Start("CI");
+        ci.Submit("payload");                        // -> $Active
+        ci.ClampIn(250, 99);
+        Ck(ci.GetClamped() == 99, "operation Clamp() called internally (@@:self.Clamp) = 99");
+        ci.ClampIn(7, 99);
+        Ck(ci.GetClamped() == 7, "internal @@:self.Clamp(7,99) = 7");
+
+        // ----- persist — deep round-trip incl. state-arg survival + const + no_persist -----
+        Job e = @@Job();
+        e.SetVerbose(true);                          // set in $Begin (setters live there)
+        e.SetRatio(3.0625);                          // exact in double; survives JSON
+        e.Start("J5");
+        e.Submit("z");                               // -> $Active(z)
+        e.Tick();                                    // attempts -> 1, scratch -> 1
+        string snap = e.SaveState();
+        Ck(e.ScratchOf() == 1, "persist: @@[no_persist] scratch holds 1 before save");
+
+        Job e2 = @@Job();
+        e2.RestoreState(snap);
+        Ck(e2.TraceOf() == e.TraceOf() && e2.TraceOf().Contains("Active>(z)"),
+            "persist restores FULL trace incl. state-arg 'z' (deep equality)");
+        Ck(e2.Counter() == e.Counter() && e2.Status() == "active",
+            "persist restores domain + current state ($Active)");
+        Ck(e2.IsVerbose() == true && e2.GetRatio() == 3.0625,
+            "persist round-trips bool + double fields through JSON");
+        Ck(e2.Capacity() == 99,
+            "persist: const MAX survives save/restore + compiles (#139: not readonly)");
+        Ck(e.ScratchOf() == 1 && e2.ScratchOf() == 0,
+            "@@[no_persist] scratch excluded from blob (restore resets to default 0)");
+
+        // ----- multi-system composition + ISOLATION (two independent Controllers) -----
+        Controller k1 = @@Controller();
+        k1.Tick();
+        k1.Tick();
+        Controller k2 = @@Controller();
+        k2.Tick();
+        k2.Tick();
+        k2.Tick();
+        Ck(k1.Total() == 2 && k2.Total() == 3, "multi-system: two Controllers hold INDEPENDENT Sensors");
+        Ck(k1.Count() == 2 && k2.Count() == 3, "multi-system: each Controller's own domain isolated");
+
+        // ----- construct probe -----
+        Probe pr = @@Probe();
+        Ck(pr.Echo("hi") == "echo:hi", "@@:params.x + @@:data set/read");
+        Ck(pr.Here() == "A" && pr.Cap() == 50, "@@:system.state.name + const read");
+        Ck(pr.Classify(-1) == "neg" && pr.Classify(0) == "zero" && pr.Classify(50) == "pos" && pr.Classify(200) == "big",
+            "elif ladder + nested conditional (4 branches)");
+        Ck(pr.Guard() == 50 && !pr.Log().Contains("LEAK;"),
+            "@@:return(e) short-circuits trailing code (vs @@:(e))");
+        pr.Fire();
+        Ck(pr.Here() == "B" && pr.Evt() == "Fire", "@@:event recorded + labeled transition -> $B");
+
+        Probe pr2 = @@Probe();
+        pr2.Relay();
+        Ck(pr2.Here() == "B" && pr2.Log().Contains("B.relay;"), "forward transition -> => $B re-dispatched Relay");
+
+        Probe pr3 = @@Probe();
+        pr3.Ping();
+        Ck(pr3.Log().Contains("ping;") && pr3.Here() == "B", "action invocation + reentrant @@:self.Fire()");
+
+        Probe pr4 = @@Probe();
+        pr4.Fwd();
+        Ck(pr4.Here() == "C" && pr4.Log().Contains("C.fwd(payload)"),
+            "forward transition WITH state args -> => $C(arg) [#128 fixed]");
+
+        Probe pr5 = @@Probe();
+        Ck(pr5.OuterData() == "outer",
+            "@@:data call-scope isolated across reentrant @@:self call");
+
+        // ----- ASYNC: driven synchronously via GetAwaiter().GetResult() -----
+        Pump pump = @@Pump();
+        pump.init().GetAwaiter().GetResult();
+        int r1 = pump.Push().GetAwaiter().GetResult();
+        int r2 = pump.Push().GetAwaiter().GetResult();
+        Ck(r1 == 1 && r2 == 2, "async: two awaited Push() calls increment level 1,2");
+        Ck(pump.Peek() == 2, "async: SYNC op Peek() bypasses async gate, reads level=2");
+        int r3 = pump.Drain().GetAwaiter().GetResult();
+        Ck(r3 == 0 && pump.Peek() == 0, "async: awaited Drain() resets level to 0");
+
+        // ----- ASYNC E703 GATE: two concurrent Slow() drivers on one casing -----
+        Pump g = @@Pump();
+        g.init().GetAwaiter().GetResult();
+        Task<int> t1 = g.Slow();
+        Task<int> t2 = g.Slow();
+        try { Task.WhenAll(t1, t2).GetAwaiter().GetResult(); } catch { }
+        int successes = 0, e703 = 0;
+        try { if (t1.GetAwaiter().GetResult() >= 1) successes++; }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("E703")) { e703++; }
+        try { if (t2.GetAwaiter().GetResult() >= 1) successes++; }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("E703")) { e703++; }
+        Ck(successes == 1 && e703 == 1, "async: concurrent Slow() trips the E703 busy-gate (1 win, 1 E703)");
+        // gate clears after both settle
+        int r4 = g.Slow().GetAwaiter().GetResult();
+        Ck(r4 >= 1, "async: E703 gate clears after both drivers settle (fresh Slow() succeeds)");
+
+        // ----- async persist round-trip -----
+        Pump ap1 = @@Pump();
+        ap1.init().GetAwaiter().GetResult();
+        ap1.Push().GetAwaiter().GetResult();
+        ap1.Push().GetAwaiter().GetResult();         // level -> 2
+        string asnap = ap1.SaveState();
+        Pump ap2 = @@Pump();
+        ap2.RestoreState(asnap);
+        Ck(ap2.Peek() == 2, "async persist: restored Pump retains level=2 (sync op Peek())");
+
+        Console.WriteLine("1.." + _n);
+    }
+}
