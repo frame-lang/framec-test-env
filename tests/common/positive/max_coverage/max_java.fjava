@@ -1,0 +1,667 @@
+@@[target("java")]
+
+// ============================================================================
+// MAXIMAL FRAME COVERAGE FIXTURE — java
+// One runnable, self-asserting file exercising every Frame construct the Java
+// backend supports. TAP output via ck(). The matrix runner (java_batch.sh)
+// prepends `package frametest.<id>;`, batch-javac's with Jackson on the
+// classpath, and reflectively invokes the non-public `class Main`'s
+// `public static void main(String[])`.
+//
+// JAVA CONSTRAINTS (enforced by the backend):
+//   * Java permits only one top-level public type per source file — so exactly
+//     ONE @@system is public (Job, carrying @@[main]); every other system is
+//     `@@system private`, emitted as a package-private class in the same file.
+//     They are still instantiable from Main because they share the package.
+//   * Persist emits Jackson (com.fasterxml.jackson) save_state()/restore_state().
+//
+// JAVA ASYNC MODEL (RFC-0043, D1): the machine kernel is SYNCHRONOUS; the
+// casing wraps each interface result in CompletableFuture.completedFuture(...)
+// and a handler throw becomes CompletableFuture.failedFuture(e). Because a
+// handler completes instantly on the calling thread, a *concurrent* E703 trip
+// is NOT reproducible single-threaded (documented as the caller's
+// responsibility to serialize). The async gate is therefore exercised the way
+// the Java contract specifies: (a) the gate CYCLES — sequential awaited calls
+// each clear busy/in_flight; (b) a handler throw produces a failed future AND
+// clears the gate so the next call succeeds (no stuck-gate E703). Operations
+// stay SYNC even in an @@[async] system (no CompletableFuture wrap, gate bypass).
+//
+// CALL MODEL: own actions/operations/interface methods use the portable
+// `@@:self.name(args)` (-> this.name(args)); child-system calls are native Java
+// the user authors (this.sensor.bump()), with the child held in a typed domain
+// field. Java uses native `else if`, braces, lowercase true/false.
+// ============================================================================
+
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+
+// ============================================================================
+// CORE SYSTEM — HSM, modal stack, all 7 statements, transitions, references,
+// const (#139: persisted, NOT final), actions, operations, persist round-trip,
+// typed fields (int/boolean/double/String), internal operation call.
+// ============================================================================
+@@[main]
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[create(make)]
+@@system Job {
+
+    // [section: operations]
+    operations:
+        // [op: typed params + return, native return passthrough + conditional in op body]
+        clamp(v: int, hi: int): int {
+            if (v > hi) {
+                return hi;
+            }
+            return v;
+        }
+
+    // [section: interface]
+    interface:
+        start(id: String)
+        submit(task: String)
+        tick()
+        pause()
+        resume()
+        finish()
+        spin(n: int): int
+        status(): String
+        counter(): int
+        depth(): int
+        trace_of(): String
+        scratch_of(): int
+        // [boolean/double coverage + const read + internal op call]
+        set_verbose(v: boolean)
+        is_verbose(): boolean
+        set_ratio(r: double)
+        get_ratio(): double
+        capacity(): int
+        clamp_in(v: int, hi: int)
+        get_clamped(): int
+
+    // [section: machine]
+    machine:
+
+        // [state: initial]
+        $Begin {
+            // [handler: enter, no args]
+            $>() {
+                this.trace = this.trace + "Begin>;";
+            }
+            start(id: String) {
+                this.job_id = id;
+                @@:self.note("N;");                 // [action invocation via @@:self]
+                -> ("seed") $Idle
+            }
+            status(): String { @@:("begin") }
+            trace_of(): String { @@:(this.trace) }
+            counter(): int { @@:(this.attempts) }
+            // [boolean setter/getter — exercised + persist round-tripped]
+            set_verbose(v: boolean) { this.verbose = v; }
+            // [boolean read in a guard]
+            is_verbose(): boolean {
+                if (this.verbose) {
+                    @@:(true)
+                } else {
+                    @@:(false)
+                }
+            }
+            set_ratio(r: double) { this.ratio = r; }
+            get_ratio(): double { @@:(this.ratio) }
+            // [const read via interface method]
+            capacity(): int { @@:(this.MAX) }
+        }
+
+        // [state: HSM parent]
+        $Working {
+            status(): String { @@:("working") }
+            counter(): int { @@:(this.attempts) }
+            depth(): int { @@:(this.stack_depth) }
+            trace_of(): String { @@:(this.trace) }
+        }
+
+        // [state: HSM child => parent]
+        $Idle => $Working {
+            // [state var w/ type + init]
+            $.i: int = 0
+
+            // [handler: enter w/ param]
+            $>(seed: String) {
+                this.trace = this.trace + "Idle>(" + seed + ");";
+            }
+            // [handler: exit]
+            <$() {
+                this.trace = this.trace + "Idle<;";
+            }
+            submit(task: String) {
+                // [native control: terminal conditional w/ transitions]
+                if (task == "") {
+                    -> $Rejected
+                } else {
+                    this.attempts = this.attempts + 1;
+                    -> $Active(task)
+                }
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            // [transition forwarding via => $^ to HSM parent]
+            status(): String { => $^ }
+            depth(): int { => $^ }
+            spin(n: int): int {
+                // [native control: while loop over state var $.i]
+                while ($.i < n) {
+                    $.i = $.i + 1;
+                }
+                @@:($.i)
+            }
+        }
+
+        // [state: typed state parameter (receives state args)]
+        $Active(task: String) {
+            $>() {
+                this.trace = this.trace + "Active>(" + task + ");";
+            }
+            <$(why: String) {
+                this.trace = this.trace + "Active<(" + why + ");";
+            }
+            tick() {
+                this.scratch = this.scratch + 1;
+                // [native control: NON-TERMINAL conditional — mutate, fall through]
+                if (this.attempts < this.max_attempts) {
+                    this.attempts = this.attempts + 1;
+                }
+                this.trace = this.trace + "tick" + this.attempts + ";";
+            }
+            finish() {
+                ("done") -> ("finished") $Done       // [exit-args + enter-args transition]
+            }
+            status(): String { @@:("active") }
+            counter(): int { @@:(this.attempts) }
+            trace_of(): String { @@:(this.trace) }
+            scratch_of(): int { @@:(this.scratch) }
+            // [internal operation call: clamp() invoked as @@:self.clamp(...) inside a handler]
+            clamp_in(v: int, hi: int) {
+                this.clamped = @@:self.clamp(v, hi);
+            }
+            get_clamped(): int { @@:(this.clamped) }
+            // [boolean/double getters + const read reachable in $Active for persist-restore reads]
+            is_verbose(): boolean {
+                if (this.verbose) {
+                    @@:(true)
+                } else {
+                    @@:(false)
+                }
+            }
+            get_ratio(): double { @@:(this.ratio) }
+            capacity(): int { @@:(this.MAX) }
+        }
+
+        // [state: modal (pushed)]
+        $Paused {
+            $>() {
+                this.stack_depth = this.stack_depth + 1;
+            }
+            <$() {
+                this.stack_depth = this.stack_depth - 1;
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            resume() {
+                -> pop$
+            }
+            status(): String { @@:("paused") }
+            depth(): int { @@:(this.stack_depth) }
+        }
+
+        $Rejected {
+            status(): String { @@:("rejected") }
+            counter(): int { @@:(this.attempts) }
+            trace_of(): String { @@:(this.trace) }
+        }
+
+        // [state: final]
+        $Done {
+            $>(why: String) {
+                this.trace = this.trace + "Done>(" + why + ");";
+            }
+            status(): String { @@:("done") }
+            counter(): int { @@:(this.attempts) }
+            depth(): int { @@:(this.stack_depth) }
+            trace_of(): String { @@:(this.trace) }
+        }
+
+    // [section: actions]
+    actions:
+        note(s: String) {
+            this.trace = this.trace + s;
+        }
+
+    // [section: domain]
+    domain:
+        // [decl: const field — read AND persisted (#139: emitted NON-final so it serializes)]
+        const MAX: int = 99
+        // [decl: typed domain vars + init]
+        job_id: String = ""
+        attempts: int = 0
+        max_attempts: int = 3
+        stack_depth: int = 0
+        trace: String = ""
+        // [decl: boolean + double domain fields — guards/getters + persist round-trip]
+        verbose: boolean = false
+        ratio: double = 1.5
+        clamped: int = 0
+        // [attr: @@[no_persist] — excluded from the serialized blob, resets on restore]
+        @@[no_persist]
+        scratch: int = 0
+}
+
+// ============================================================================
+// MULTI-SYSTEM COMPOSITION — Controller holds + delegates to Sensor.
+// framec lowers the sensor domain field + @@Sensor() construction; the call
+// (this.sensor.bump()) is user-authored native Java. Both private (the file's
+// single public type is Job).
+// ============================================================================
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system private Sensor {
+    interface:
+        bump()
+        read(): int
+    machine:
+        $S {
+            bump() {
+                this.val = this.val + 1;
+            }
+            read(): int { @@:(this.val) }
+        }
+    domain:
+        val: int = 0
+}
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system private Controller {
+    interface:
+        tick()
+        total(): int
+        count(): int
+    machine:
+        $C {
+            tick() {
+                this.seen = this.seen + 1;
+                this.sensor.bump();                  // native call into child system
+            }
+            total(): int { @@:(this.sensor.read()) }
+            count(): int { @@:(this.seen) }
+        }
+    domain:
+        // [composition: hold a sub-system instance as a typed domain field]
+        sensor: Sensor = @@Sensor()
+        seen: int = 0
+}
+
+// ============================================================================
+// CONSTRUCT PROBE — the remaining reference/transition constructs:
+// @@:event, @@:params.x, @@:data.x (set+read, call-scope isolation),
+// @@:return(e) short-circuit, @@:system.state.name, labeled transition,
+// forward transition (-> => $S), forward WITH state args (#128), reentrant
+// @@:self, const read, action invocation, else-if ladder + nested conditional.
+// ============================================================================
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system private Probe {
+
+    interface:
+        echo(x: String): String
+        fire()
+        relay()
+        ping()
+        here(): String
+        evt(): String
+        cap(): int
+        log(): String
+        classify(n: int): String
+        guard(): int
+        outer_data(): String
+        inner_data()
+        fwd()
+
+    machine:
+
+        $A {
+            echo(x: String): String {
+                @@:data.tmp = @@:params.x
+                @@:("echo:" + @@:data.tmp)
+            }
+            // [@@:data call-scope isolation across a reentrant @@:self call]
+            outer_data(): String {
+                @@:data.k = "outer"
+                @@:self.inner_data()                 // inner gets its OWN @@:data scope
+                @@:(@@:data.k)                       // must still read "outer"
+            }
+            inner_data() {
+                @@:data.k = "inner"
+            }
+            // [else-if ladder + nested conditional — 4 branches]
+            classify(n: int): String {
+                if (n < 0) {
+                    @@:("neg")
+                } else if (n == 0) {
+                    @@:("zero")
+                } else {
+                    if (n > 100) {
+                        @@:("big")
+                    } else {
+                        @@:("pos")
+                    }
+                }
+            }
+            // [@@:return(e) short-circuits trailing code (vs @@:(e))]
+            guard(): int {
+                @@:return(this.LIMIT)
+                @@:self.helper("LEAK;");
+            }
+            fire() {
+                this.last = @@:event
+                -> "fired" $B                        // [transition: labeled]
+            }
+            relay() {
+                -> => $B                             // [transition: forward (re-dispatch)]
+            }
+            fwd() {
+                -> => $C("payload")                  // [transition: forward WITH state args (#128)]
+            }
+            ping() {
+                @@:self.helper("ping;");             // [action invocation via @@:self]
+                @@:self.fire()                       // [ref: reentrant self-call]
+            }
+            here(): String { @@:(@@:system.state.name) }
+            evt(): String { @@:return(this.last) }
+            cap(): int { @@:(this.LIMIT) }           // [decl: const read]
+            log(): String { @@:(this.trace) }
+        }
+
+        $B {
+            relay() {
+                this.trace = this.trace + "B.relay;";  // handles re-dispatched event
+            }
+            here(): String { @@:("B") }
+            evt(): String { @@:return(this.last) }
+            log(): String { @@:(this.trace) }
+        }
+
+        // [state: target of a forward transition carrying a state arg (#128 fixed)]
+        $C(tok: String) {
+            fwd() {
+                this.trace = this.trace + "C.fwd(" + tok + ");";
+            }
+            here(): String { @@:("C") }
+            log(): String { @@:(this.trace) }
+        }
+
+    // [section: actions]
+    actions:
+        helper(s: String) {
+            this.trace = this.trace + s;
+        }
+
+    domain:
+        const LIMIT: int = 50
+        trace: String = ""
+        last: String = ""
+}
+
+// ============================================================================
+// ASYNC SYSTEM — @@[async] Pump: async interface methods (CompletableFuture<T>)
+// + a SYNC operation bypass + the E703 single-driver gate. Java is sync-layered
+// (RFC-0043 D1): the gate is exercised by CYCLING (sequential awaited calls each
+// clear the gate) and by the failed-future-clears-gate path — a *concurrent*
+// trip is documented as not reproducible single-threaded.
+// ============================================================================
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[async]
+@@system private Pump {
+    operations:
+        // [op: SYNC bypass — operations are not async even in an @@[async] system]
+        peek(): int {
+            @@:(this.level)
+        }
+    interface:
+        async push(): Integer
+        async drain(): Integer
+        async boom(): Integer
+    machine:
+        $P {
+            push(): Integer {
+                this.level = this.level + 1;
+                @@:(this.level)
+            }
+            drain(): Integer {
+                this.level = 0;
+                @@:(this.level)
+            }
+            // [handler throw — becomes a failed future; the casing's finally
+            //  MUST still clear the gate so the next call succeeds]
+            boom(): Integer {
+                throw new RuntimeException("boom");
+            }
+        }
+    domain:
+        level: int = 0
+}
+
+// ============================================================================
+// DRIVER — TAP, fresh machine per scenario, asserts every path.
+// ============================================================================
+class Main {
+    static int _n = 0;
+    static void ck(boolean cond, String desc) {
+        _n++;
+        System.out.println((cond ? "ok " : "not ok ") + _n + " - " + desc);
+    }
+
+    public static void main(String[] args) throws Exception {
+        System.out.println("TAP version 14");
+
+        // ----- operations (instance form, factory-renamed make) -----
+        Job j0 = Job.make();
+        ck(j0.clamp(150, 99) == 99, "operation clamp(150,99)=99 (conditional in op body)");
+        ck(j0.clamp(5, 99) == 5, "operation clamp(5,99)=5 (native return passthrough)");
+
+        // ----- HSM forward via => $^ + terminal conditional + action -----
+        Job a = @@Job();
+        a.start("J1");
+        ck(a.status().equals("working"), "Idle forwards status via => $^ to parent $Working");
+        a.submit("");
+        ck(a.status().equals("rejected"), "submit('') terminal conditional -> $Rejected");
+        ck(a.trace_of().contains("N;"), "action note() invoked from start() via @@:self");
+
+        // ----- state-args + non-terminal conditional + trailing read -----
+        Job b = @@Job();
+        b.start("J2");
+        b.submit("payload");
+        ck(b.status().equals("active"), "submit(task) state-args -> $Active(task)");
+        b.tick();
+        b.tick();
+        b.tick();
+        b.tick();
+        ck(b.counter() == 3, "non-terminal conditional clamps attempts at max_attempts=3");
+        ck(b.trace_of().contains("tick3"), "trailing read of mutated field ran after the if");
+
+        // ----- exit-args + enter-args transition -----
+        b.finish();
+        ck(b.status().equals("done"), "finish() exit+enter-args -> $Done");
+        ck(b.trace_of().contains("Active<(done)"), "exit handler received exit arg 'done'");
+        ck(b.trace_of().contains("Done>(finished)"), "enter handler received enter arg 'finished'");
+
+        // ----- single-level modal: push$ / -> pop$ + second => $^ path -----
+        Job c = @@Job();
+        c.start("J3");
+        c.pause();
+        ck(c.status().equals("paused") && c.depth() == 1, "push$ -> $Paused; $Paused.$> set depth=1");
+        c.resume();
+        ck(c.status().equals("working") && c.depth() == 0,
+            "-> pop$ ran $Paused.<$ (depth->0) and depth() forwards via => $^ to $Working");
+
+        // ----- nested modal stack — two push$, two -> pop$ prove a real stack -----
+        Job cn = @@Job();
+        cn.start("J3b");
+        cn.pause();
+        cn.pause();
+        ck(cn.status().equals("paused"), "nested push$ twice -> still $Paused");
+        cn.resume();
+        cn.resume();
+        ck(cn.status().equals("working"), "two -> pop$ restore through the stack to $Idle");
+
+        // ----- while loop over a state var -----
+        Job d = @@Job();
+        d.start("J4");
+        ck(d.spin(5) == 5, "while loop over state var $.i -> 5");
+
+        // ----- const read via interface method -----
+        Job cap = @@Job();
+        ck(cap.capacity() == 99, "const MAX read via capacity() interface method = 99");
+
+        // ----- boolean read in a guard -----
+        Job bv = @@Job();
+        ck(bv.is_verbose() == false, "boolean field default false read in guard");
+        bv.set_verbose(true);
+        ck(bv.is_verbose() == true, "boolean field set true, read back true in guard");
+
+        // ----- double getter -----
+        Job fr = @@Job();
+        ck(fr.get_ratio() == 1.5, "double field default 1.5 via getter");
+        fr.set_ratio(2.75);
+        ck(fr.get_ratio() == 2.75, "double field set 2.75, read back");
+
+        // ----- internal operation call: clamp() called as @@:self.clamp(...) inside a handler -----
+        Job ci = @@Job();
+        ci.start("CI");
+        ci.submit("payload");                        // -> $Active
+        ci.clamp_in(250, 99);
+        ck(ci.get_clamped() == 99, "operation clamp() called internally (@@:self.clamp) = 99");
+        ci.clamp_in(7, 99);
+        ck(ci.get_clamped() == 7, "internal @@:self.clamp(7,99) = 7");
+
+        // ----- persist — deep round-trip incl. state-arg survival + const + no_persist -----
+        Job e = @@Job();
+        e.set_verbose(true);                         // set in $Begin (setters live there)
+        e.set_ratio(3.0625);                         // exact in double; survives JSON
+        e.start("J5");
+        e.submit("z");                               // -> $Active(z)
+        e.tick();                                    // attempts -> 1, scratch -> 1
+        String snap = e.save_state();
+        ck(e.scratch_of() == 1, "persist: @@[no_persist] scratch holds 1 before save");
+
+        Job e2 = @@Job();
+        e2.restore_state(snap);
+        ck(e2.trace_of().equals(e.trace_of()) && e2.trace_of().contains("Active>(z)"),
+            "persist restores FULL trace incl. state-arg 'z' (deep equality)");
+        ck(e2.counter() == e.counter() && e2.status().equals("active"),
+            "persist restores domain + current state ($Active)");
+        ck(e2.is_verbose() == true && e2.get_ratio() == 3.0625,
+            "persist round-trips boolean + double fields through JSON");
+        ck(e2.capacity() == 99,
+            "persist: const MAX survives save/restore + compiles (#139: not final)");
+        ck(e.scratch_of() == 1 && e2.scratch_of() == 0,
+            "@@[no_persist] scratch excluded from blob (restore resets to default 0)");
+
+        // ----- multi-system composition + ISOLATION (two independent Controllers) -----
+        Controller k1 = @@Controller();
+        k1.tick();
+        k1.tick();
+        Controller k2 = @@Controller();
+        k2.tick();
+        k2.tick();
+        k2.tick();
+        ck(k1.total() == 2 && k2.total() == 3, "multi-system: two Controllers hold INDEPENDENT Sensors");
+        ck(k1.count() == 2 && k2.count() == 3, "multi-system: each Controller's own domain isolated");
+
+        // ----- construct probe -----
+        Probe pr = @@Probe();
+        ck(pr.echo("hi").equals("echo:hi"), "@@:params.x + @@:data set/read");
+        ck(pr.here().equals("A") && pr.cap() == 50, "@@:system.state.name + const read");
+        ck(pr.classify(-1).equals("neg") && pr.classify(0).equals("zero") && pr.classify(50).equals("pos") && pr.classify(200).equals("big"),
+            "else-if ladder + nested conditional (4 branches)");
+        ck(pr.guard() == 50 && !pr.log().contains("LEAK;"),
+            "@@:return(e) short-circuits trailing code (vs @@:(e))");
+        pr.fire();
+        ck(pr.here().equals("B") && pr.evt().equals("fire"), "@@:event recorded + labeled transition -> $B");
+
+        Probe pr2 = @@Probe();
+        pr2.relay();
+        ck(pr2.here().equals("B") && pr2.log().contains("B.relay;"), "forward transition -> => $B re-dispatched relay");
+
+        Probe pr3 = @@Probe();
+        pr3.ping();
+        ck(pr3.log().contains("ping;") && pr3.here().equals("B"), "action invocation + reentrant @@:self.fire()");
+
+        Probe pr4 = @@Probe();
+        pr4.fwd();
+        ck(pr4.here().equals("C") && pr4.log().contains("C.fwd(payload)"),
+            "forward transition WITH state args -> => $C(arg) [#128 fixed]");
+
+        Probe pr5 = @@Probe();
+        ck(pr5.outer_data().equals("outer"),
+            "@@:data call-scope isolated across reentrant @@:self call");
+
+        // ----- ASYNC: CompletableFuture<T> interface, .get() to await -----
+        Pump pump = @@Pump();
+        pump.init().get();                           // API-parity no-op
+        int r1 = pump.push().get();
+        int r2 = pump.push().get();
+        ck(r1 == 1 && r2 == 2, "async: two awaited push() calls increment level 1,2");
+        ck(pump.peek() == 2, "async: SYNC op peek() bypasses async gate, reads level=2");
+        int r3 = pump.drain().get();
+        ck(r3 == 0 && pump.peek() == 0, "async: awaited drain() resets level to 0");
+
+        // ----- ASYNC gate CYCLES — sequential awaited calls each clear the gate -----
+        // (Java sync-layered: every completed call clears busy/in_flight so the
+        //  next call never sees a stuck gate. No E703 across sequential calls.)
+        Pump g = @@Pump();
+        g.init().get();
+        boolean cycled = true;
+        for (int k = 0; k < 5; k++) {
+            int rk = g.push().get();                 // would throw E703 if the gate stuck
+            if (rk != k + 1) cycled = false;
+        }
+        ck(cycled && g.peek() == 5, "async: gate CYCLES across 5 sequential awaited push() calls (no stuck E703)");
+
+        // ----- ASYNC failed-future clears the gate (handler throw) -----
+        Pump gx = @@Pump();
+        gx.init().get();
+        Throwable caught = null;
+        try {
+            gx.boom().get();                         // handler throws -> failed future
+        } catch (ExecutionException ex) {
+            caught = ex.getCause();
+        }
+        ck(caught instanceof RuntimeException && "boom".equals(caught.getMessage()),
+            "async: handler throw surfaces as a failed future (ExecutionException cause)");
+        // gate must be clear despite the throw — next call succeeds, not E703
+        int after = gx.push().get();
+        ck(after == 1, "async: failed future cleared the gate (next push() succeeds, no stuck E703)");
+
+        // ----- async persist round-trip -----
+        Pump ap1 = @@Pump();
+        ap1.init().get();
+        ap1.push().get();
+        ap1.push().get();                            // level -> 2
+        String asnap = ap1.save_state();
+        Pump ap2 = @@Pump();
+        ap2.restore_state(asnap);
+        ck(ap2.peek() == 2, "async persist: restored Pump retains level=2 (sync op peek())");
+
+        System.out.println("1.." + _n);
+    }
+}
