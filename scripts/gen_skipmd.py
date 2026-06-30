@@ -127,6 +127,50 @@ def segmenter_skip(stem_path: str, real: list[str]) -> SkipBatch:
     )
 
 
+def skip_only(stem_path: str, skip_exts: list[str], title: str,
+              body: str) -> SkipBatch:
+    """Build a SkipBatch by naming the backends to SKIP (the inverse of
+    real_exts). Convenient when most backends have real ports and only a
+    few are intentionally absent."""
+    real = [e for e in ALL_BACKENDS if e not in skip_exts]
+    return SkipBatch(stem_path=stem_path, real_exts=real, title=title,
+                     body=body)
+
+
+# Shared reasons reused across several stems.
+_ERLANG_MULTI_BODY = (
+    "Erlang requires one `-module` per file (framec E431), so a "
+    "multi-system / nested-`@@SystemName` fixture cannot be expressed "
+    "in a single `.ferl`. The same behavior is exercised end-to-end "
+    "via the multi-source layout under `tests/erlang/multi/` (one "
+    "`.ferl` per module + a shared `driver.escript`); persist recurses "
+    "through child gen_statem process trees. See capability-matrix "
+    "footnotes [k]/[p].\n\n"
+    "See `docs/partial-coverage-audit.md`."
+)
+
+_JAVA_ERLANG_MULTI_BODY = (
+    "Multi-system-per-file fixture. Java requires one public class per "
+    "file (framec E430) and Erlang one `-module` per file (E431), so "
+    "neither can host multiple `@@system` declarations in a single "
+    "source file. Cross-system composition is exercised for both via "
+    "the multi-source layouts under `tests/java/multi/` and "
+    "`tests/erlang/multi/`. See capability-matrix footnotes [j]/[k].\n\n"
+    "See `docs/partial-coverage-audit.md`."
+)
+
+_C_NO_COLLECTION_BODY = (
+    "C has no built-in list/dict type (capability-matrix footnote [l]), "
+    "so a list-/dict-typed *state argument* has no idiomatic C "
+    "representation to thread through the typed state-context path this "
+    "fixture probes. The 16 backends with native collections cover the "
+    "compound-state-arg path uniformly; C's compound-type persistence is "
+    "exercised separately by `102_persist_domain_list_dict` via the "
+    "symbol-mangled pack/unpack helpers.\n\n"
+    "See `docs/partial-coverage-audit.md`."
+)
+
+
 # ---------------------------------------------------------------------------
 # Batches — one entry per single-target fixture in framework dirs (not
 # cookbook dirs scientific/security/robotics/parser_specialists, which
@@ -288,6 +332,160 @@ BATCHES: list[SkipBatch] = [
             "consistent native-async target shape that Frame "
             "currently emits to (per the per-language capability "
             "matrix); no port for them.\n\n"
+            "See `docs/partial-coverage-audit.md`."
+        ),
+    ),
+
+    # === primary/101 — dynamically-typed int/float fidelity (single-target) ===
+    SkipBatch(
+        stem_path="primary/101_persist_int_fidelity",
+        real_exts=["fgd", "flua"],
+        title="Intentional skip — dynamic int/float fidelity only",
+        body=(
+            "Probes the int-vs-float representation ambiguity that only "
+            "arises on dynamically-typed backends: after a persist "
+            "round-trip, does an integer domain field deserialize back "
+            "as an int (not a float)? GDScript and Lua are the two "
+            "dynamic backends where the JSON number path can silently "
+            "promote `42` to `42.0`. On statically-typed backends the "
+            "field's declared type pins the representation, so there is "
+            "nothing to probe.\n\n"
+            "See `docs/partial-coverage-audit.md`."
+        ),
+    ),
+
+    # === primary/ list & dict state-args — C has no native collection ===
+    skip_only("primary/73_list_state_arg", ["fc"],
+              "Intentional skip — C has no native list type",
+              _C_NO_COLLECTION_BODY),
+    skip_only("primary/75_nested_list_state_arg", ["fc"],
+              "Intentional skip — C has no native list type",
+              _C_NO_COLLECTION_BODY),
+    skip_only("primary/78_nested_dict_state_arg", ["fc"],
+              "Intentional skip — C has no native dict type",
+              _C_NO_COLLECTION_BODY),
+    skip_only("primary/79_dict_of_list_state_arg", ["fc"],
+              "Intentional skip — C has no native list/dict type",
+              _C_NO_COLLECTION_BODY),
+    skip_only("primary/80_list_of_dict_state_arg", ["fc"],
+              "Intentional skip — C has no native list/dict type",
+              _C_NO_COLLECTION_BODY),
+
+    # === primary/ nested & multi-instance persist — Erlang one-module-per-file ===
+    skip_only("primary/84_persist_nested_hsm", ["ferl"],
+              "Intentional skip — Erlang one module per file",
+              _ERLANG_MULTI_BODY),
+    skip_only("primary/85_persist_three_level_nested", ["ferl"],
+              "Intentional skip — Erlang one module per file",
+              _ERLANG_MULTI_BODY),
+    skip_only("primary/86_persist_numeric_typing", ["ferl"],
+              "Intentional skip — Erlang one module per file",
+              _ERLANG_MULTI_BODY),
+    skip_only("primary/87_persist_multi_instance", ["ferl"],
+              "Intentional skip — Erlang one module per file",
+              _ERLANG_MULTI_BODY),
+
+    # === primary/88 — Erlang quiescent enforcement is implicit ===
+    skip_only(
+        "primary/88_persist_quiescent_error", ["ferl"],
+        "Intentional skip — Erlang quiescent contract is implicit",
+        (
+            "Erlang enforces the quiescent contract implicitly via "
+            "`gen_statem` run-to-completion semantics rather than an "
+            "explicit `E700` throw: a handler that synchronously calls "
+            "`save_state` on its own Pid deadlocks (the actor is busy "
+            "processing the current event), times out after 5s, and the "
+            "calling process crashes. Functionally equivalent to E700 "
+            "(the operation fails on a contract violation) but the "
+            "mechanism differs, so the explicit-error assertion this "
+            "fixture makes does not apply. See capability-matrix "
+            "footnote [q].\n\n"
+            "See `docs/partial-coverage-audit.md`."
+        ),
+    ),
+
+    # === primary/91 — multi-system cross-ref (Java + Erlang one-per-file) ===
+    skip_only("primary/91_main_attr_cross_ref", ["fjava", "ferl"],
+              "Intentional skip — multi-system per file (Java/Erlang)",
+              _JAVA_ERLANG_MULTI_BODY),
+
+    # === primary/82 — multi-system persist; Java + Erlang skip, rest are real ports ===
+    skip_only("primary/82_persist_multi_system", ["fjava", "ferl"],
+              "Intentional skip — multi-system per file (Java/Erlang)",
+              _JAVA_ERLANG_MULTI_BODY),
+
+    # === primary/54 — inline string interpolation; backends without the syntax ===
+    skip_only(
+        "primary/54_interp_state_var",
+        ["fc", "fcpp", "ferl", "fgd", "fgo", "fjava", "flua", "frs"],
+        "Intentional skip — no native inline string interpolation",
+        (
+            "This fixture exercises framec lowering a state-var (`$.x`) "
+            "*inside* the target's native inline string-interpolation "
+            "construct — Python f-strings, JS/Kotlin/Dart template "
+            "literals, C# `$\"…\"`, Swift `\\(…)`, Ruby `#{…}`, PHP "
+            "`\"{$…}\"`. The backends skipped here have no inline "
+            "interpolation syntax for that lowering to inhabit:\n\n"
+            "- **Rust** — `format!` is a macro, not inline string "
+            "interpolation; framec rejects the f-string form (transpile "
+            "error).\n"
+            "- **C, C++, Go, Java, Lua** — use printf-style / `String."
+            "format` / `%`-formatting, a different code path explicitly "
+            "out of scope for this fixture.\n"
+            "- **GDScript** — uses `%`/`.format()`; it has no inline "
+            "`${}`/`{}` interpolation, so framec emits literal braces "
+            "that GDScript does not expand (verified empirically; this "
+            "corrects the earlier audit note that listed GDScript as a "
+            "port candidate).\n\n"
+            "The interpolation feature is covered on the eight backends "
+            "with native inline syntax (C#, Dart, JS, Kotlin, Python, "
+            "Ruby, Swift, TS) plus PHP.\n\n"
+            "See `docs/partial-coverage-audit.md`."
+        ),
+    ),
+
+    # === primary/103 — @@! no-init sigil smoke on the RFC-0017 D7 reference set ===
+    # Real ports: erl, gd, java, py, rs (present) + kt, swift (this batch adds).
+    SkipBatch(
+        stem_path="primary/103_at_bang_no_init",
+        real_exts=["ferl", "fgd", "fjava", "fkt", "fpy", "frs", "fswift"],
+        title="Intentional skip — @@! sigil smoke on D7 reference backends",
+        body=(
+            "This fixture exists to exercise the `@@!Foo()` no-init "
+            "*sigil* itself (RFC-0017 D7) — the syntactic form that "
+            "allocates a naked shell without running the start state's "
+            "`$Start(...)` body or `$>` enter handler. It is scoped to "
+            "the D7 reference backends the sigil shipped on (Python, "
+            "Rust, Java, Kotlin, Swift, Erlang) plus GDScript.\n\n"
+            "On the remaining backends, the restore-without-init "
+            "*behavior* that `@@!` enables is already covered "
+            "end-to-end by the persist suite (tests 23-25, 51, 56-60, "
+            "83-88, 93, 96, 98, 99): `@@[load]` allocates the shell and "
+            "populates it from the serialized blob without re-firing the "
+            "enter cascade. Re-testing the sigil on every backend would "
+            "duplicate that coverage without exercising a new code "
+            "path.\n\n"
+            "See `docs/partial-coverage-audit.md`."
+        ),
+    ),
+
+    # === systems/ — forward-then-transition exec-ordering regression net (C + Rust) ===
+    # fc + frs are the REAL ports; skip.md goes on the other 15 backends.
+    SkipBatch(
+        stem_path="systems/child_forwards_then_transition_exec",
+        real_exts=["fc", "frs"],
+        title="Intentional skip — C/Rust exec-ordering regression net",
+        body=(
+            "Execution-ordering regression net with `@@run-expect` output "
+            "assertions (`FORWARD:PARENT` ×2 then `TRANSITION:`). It pins "
+            "the exact forward-then-transition dispatch sequence on the "
+            "two exec backends whose lowering is most divergent: C "
+            "(pointer-based dispatch) and Rust (typed `StateContext` "
+            "enum). The forward (`=> $^`) and transition (`-> $S`) "
+            "semantics themselves are exercised across all 17 backends by "
+            "the broader `control_flow/` and `systems/` suites; this "
+            "fixture's distinct value is the exact-output contract on the "
+            "C/Rust exec paths, which is not target-uniform.\n\n"
             "See `docs/partial-coverage-audit.md`."
         ),
     ),
