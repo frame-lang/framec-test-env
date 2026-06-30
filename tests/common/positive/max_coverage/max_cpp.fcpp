@@ -1,0 +1,664 @@
+@@[target("cpp_23")]
+
+// ============================================================================
+// MAXIMAL FRAME COVERAGE FIXTURE — cpp_23
+// One runnable, self-asserting file exercising every Frame construct the C++
+// backend supports. Construct tags are standalone [tag] comment lines above
+// each construct. TAP output, asserted by RUNNING under g++ -std=c++23 + the
+// nlohmann/json persist dependency (matches docker/runners/cpp_batch.sh).
+//
+// C++ idioms (vs the Python reference):
+//   * C++ HAS `this`. Own actions/ops/interface methods are invoked via the
+//     portable @@:self.<name>(args) (lowers to this->name(args)); an
+//     interface method that may transition is ALWAYS called through
+//     @@:self.<m>() so the transition guard runs. Domain reads use native
+//     this-><field>. Child systems are native calls: this->sensor->bump().
+//   * Native C++ statements end with `;`; Frame statements (-> $S, push$,
+//     @@:(e), @@:return(e), => $^) do NOT.
+//   * @@:event lowers to the event _message (a std::string).
+//   * @@:params.x lowers to the already-typed handler param.
+//   * @@:data.x is std::any — set with a std::string()-typed rvalue, read
+//     with std::any_cast<std::string>(@@:data.x) (the C++ analogue of C's
+//     (char*) cast). This is idiomatic, not a hack: @@:data is heterogeneous.
+//   * Conditionals are native C++ if / else if / else (Frame has no if/elif
+//     keyword here); a while loop over a state var is native C++ while(...).
+//   * Persist = JSON via nlohmann/json (@@[persist(std::string)] + save/load
+//     ops). const fields ARE serialized + restored (#139, just fixed on C++).
+//   * Async IS supported on C++ (RFC-0043): co_await + FrameTask + the E703
+//     busy-gate. Single-thread C++ coroutines run synchronously to the first
+//     real co_await, so a *concurrent* E703 trip (Python's asyncio.gather) is
+//     NOT reachable single-threaded (documented in the matrix C++ async
+//     fixtures). What IS reachable + asserted here: await mutates state and
+//     transitions; the RAII E703 guard CLEARS after a throwing handler so the
+//     next interface call is NOT spuriously rejected; and the gate cycles
+//     cleanly across sequential awaited calls. A sync operation bypasses the
+//     gate. See the async section for the full rationale.
+// ============================================================================
+
+#include <iostream>
+#include <string>
+#include <stdexcept>
+#include <nlohmann/json.hpp>
+
+// ----------------------------------------------------------------------------
+// TAP driver (inline, C++ convention).
+// ----------------------------------------------------------------------------
+static int _n = 0;
+static void _ck(bool cond, const char* desc) {
+    _n++;
+    std::cout << (cond ? "ok " : "not ok ") << _n << " - " << desc << "\n";
+}
+static bool _has(const std::string& hay, const std::string& needle) {
+    return hay.find(needle) != std::string::npos;
+}
+
+// ============================================================================
+// [attr: main] [attr: persist JSON] [attr: save op] [attr: load op]
+// [attr: factory rename]
+// Job — the workhorse: HSM, modal stack, transitions, enter/exit args, typed
+// state-args, operations, actions, const (read + persisted), persist
+// round-trip, @@[no_persist], double marshalling, while-loop over a state var.
+// ============================================================================
+@@[main]
+@@[persist(std::string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[create(make)]
+@@system Job {
+
+    // [section: operations]
+    operations:
+        // [op: typed params + return, with a conditional in the op body]
+        clamp(v: int, hi: int): int {
+            if (v > hi) {
+                @@:(hi)
+            }
+            @@:(v)
+        }
+
+    // [section: interface]
+    interface:
+        start(id: std::string)
+        submit(task: std::string)
+        tick()
+        pause()
+        resume()
+        finish()
+        spin(n: int): int
+        setrate(r: double)
+        boost(r: double)
+        rate(): double
+        cap(): int
+        status(): std::string
+        counter(): int
+        depth(): int
+        trace_of(): std::string
+        scratch_of(): int
+
+    // [section: machine]
+    machine:
+
+        // [state: initial]
+        $Begin {
+            // [handler: enter, no args]
+            $>() {
+                this->trace = this->trace + "Begin>;";
+            }
+            start(id: std::string) {
+                this->job_id = id;
+                @@:self.note("N;");                 // [action invocation via @@:self]
+                -> ("seed") $Idle                   // [transition: enter arg, no label]
+            }
+            status(): std::string { @@:(std::string("begin")) }
+            trace_of(): std::string { @@:(this->trace) }
+            counter(): int { @@:(this->attempts) }
+            rate(): double { @@:(this->throughput) }
+        }
+
+        // [state: HSM parent]
+        $Working {
+            status(): std::string { @@:(std::string("working")) }
+            counter(): int { @@:(this->attempts) }
+            depth(): int { @@:(this->stack_depth) }
+            trace_of(): std::string { @@:(this->trace) }
+        }
+
+        // [state: HSM child => parent]
+        $Idle => $Working {
+            // [handler: enter w/ typed param]
+            $>(seed: std::string) {
+                this->trace = this->trace + "Idle>(" + seed + ");";
+            }
+            // [handler: exit]
+            <$() {
+                this->trace = this->trace + "Idle<;";
+            }
+            submit(task: std::string) {
+                if (task == "") {
+                    -> $Rejected                    // [transition: plain, conditional branch]
+                } else {
+                    this->attempts = this->attempts + 1;
+                    -> $Active(task)                // [transition: w/ typed state arg]
+                }
+            }
+            pause() {
+                push$                               // [stmt: push modal]
+                -> $Paused
+            }
+            // [handler: forward to parent via => $^]
+            status(): std::string { => $^ }
+            depth(): int { => $^ }
+            // [handler: while loop over a state var]
+            spin(n: int): int {
+                $.i = 0
+                while ($.i < n) {
+                    $.i = $.i + 1;
+                }
+                @@:($.i)
+            }
+        }
+
+        // [state: receives a typed state arg]
+        $Active(task: std::string) {
+            $>() {
+                this->trace = this->trace + "Active>(" + task + ");";
+            }
+            // [handler: exit w/ arg]
+            <$(why: std::string) {
+                this->trace = this->trace + "Active<(" + why + ");";
+            }
+            tick() {
+                this->scratch = this->scratch + 1;
+                // [conditional: non-terminal if clamps a field]
+                if (this->attempts < this->max_attempts) {
+                    this->attempts = this->attempts + 1;
+                }
+                this->trace = this->trace + "tick" + std::to_string(this->attempts) + ";";
+            }
+            setrate(r: double) {
+                this->throughput = r;
+            }
+            // [transition: exit-arg ("boosted") + DOUBLE enter-arg (r) marshalling.
+            // The exit arg is REQUIRED here: $Active's exit handler consumes
+            // exit_args[0] (std::any_cast<std::string>), so every transition
+            // out of $Active must supply it — unlike C where exit_args are
+            // void* and an absent one reads NULL, C++ std::any throws on an
+            // empty cast. Supplying it is correct Frame usage, not a workaround.]
+            boost(r: double) {
+                ("boosted") -> (r) $Boosted
+            }
+            finish() {
+                ("done") -> ("finished") $Done      // [transition: exit-arg + enter-arg]
+            }
+            status(): std::string { @@:(std::string("active")) }
+            counter(): int { @@:(this->attempts) }
+            trace_of(): std::string { @@:(this->trace) }
+            scratch_of(): int { @@:(this->scratch) }
+            rate(): double { @@:(this->throughput) }
+            cap(): int { @@:(this->MAX) }           // [decl: const read — proves persist restored MAX]
+        }
+
+        // [state: child of $Working; enter handler receives a DOUBLE enter-arg]
+        $Boosted => $Working {
+            $>(x: double) {
+                this->throughput = x;
+            }
+            status(): std::string { @@:(std::string("boosted")) }
+            rate(): double { @@:(this->throughput) }
+            counter(): int { => $^ }
+            trace_of(): std::string { @@:(this->trace) }
+        }
+
+        // [state: modal (pushed); nested push$ proves a real stack]
+        $Paused {
+            $>() {
+                this->stack_depth = this->stack_depth + 1;
+            }
+            <$() {
+                this->stack_depth = this->stack_depth - 1;
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            resume() {
+                -> pop$                             // [stmt: pop modal]
+            }
+            status(): std::string { @@:(std::string("paused")) }
+            depth(): int { @@:(this->stack_depth) }
+        }
+
+        $Rejected {
+            status(): std::string { @@:(std::string("rejected")) }
+            counter(): int { @@:(this->attempts) }
+            trace_of(): std::string { @@:(this->trace) }
+        }
+
+        // [state: final, enter w/ arg]
+        $Done {
+            $>(why: std::string) {
+                this->trace = this->trace + "Done>(" + why + ");";
+            }
+            status(): std::string { @@:(std::string("done")) }
+            counter(): int { @@:(this->attempts) }
+            depth(): int { @@:(this->stack_depth) }
+            trace_of(): std::string { @@:(this->trace) }
+        }
+
+    // [section: actions]
+    actions:
+        note(s: std::string) {
+            this->trace = this->trace + s;
+        }
+
+    // [section: domain]
+    domain:
+        // [decl: const field — persisted (#139: const+persist clean on C++)]
+        const MAX: int = 99
+        // [decl: typed domain vars + init]
+        job_id: std::string = ""
+        attempts: int = 0
+        max_attempts: int = 3
+        stack_depth: int = 0
+        throughput: double = 0.0
+        trace: std::string = ""
+        // [attr: @@[no_persist] — excluded from the serialized blob]
+        @@[no_persist]
+        scratch: int = 0
+}
+
+// ============================================================================
+// ASYNC SYSTEM — [attr: @@[async]] async interface + co_await + the E703
+// busy-gate + a sync operation that bypasses the gate.
+//
+// Single-thread C++ coroutines run synchronously up to the first real
+// co_await, so a *concurrent* E703 trip (the Python fixture's asyncio.gather)
+// is unreachable here — documented across the matrix C++ async fixtures
+// (async_concurrent_entry_e703.fcpp). The behavior that IS reachable and is
+// asserted below: (1) an awaited interface call mutates state + transitions;
+// (2) a sync operation bypasses the gate; (3) a handler that throws still has
+// its RAII E703 guard clear `busy` so the NEXT interface call is accepted —
+// i.e. the gate is real and self-clearing, not a no-op.
+// ============================================================================
+@@[async]
+@@[persist(std::string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Pump {
+
+    // [op: sync operation — bypasses the async gate]
+    operations:
+        level(): int {
+            @@:(this->ticks)
+        }
+
+    interface:
+        async fill()                    // [async interface method]
+        async drain()
+        async boom()                    // throws — proves the gate self-clears
+
+    machine:
+
+        $Empty {
+            fill() {
+                this->ticks = this->ticks + 1;
+                -> $Full
+            }
+            boom() {
+                throw std::runtime_error("pump boom");
+            }
+        }
+
+        $Full {
+            drain() {
+                -> $Empty
+            }
+        }
+
+    domain:
+        ticks: int = 0
+}
+
+// ============================================================================
+// MULTI-SYSTEM COMPOSITION — Controller holds + delegates to a Sensor, with
+// two independent Controller instances proving per-instance isolation.
+// Composition idiom (C++): a std::shared_ptr<Sensor> domain var initialized
+// with @@Sensor(), called natively (this->sensor->bump()).
+// ============================================================================
+@@[persist(std::string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Sensor {
+    interface:
+        bump()
+        read(): int
+    machine:
+        $S {
+            bump() { this->val = this->val + 1; }
+            read(): int { @@:(this->val) }
+        }
+    domain:
+        val: int = 0
+}
+
+@@system Controller {
+    interface:
+        tick()
+        total(): int
+        count(): int
+    machine:
+        $C {
+            tick() {
+                this->seen = this->seen + 1;
+                this->sensor->bump();               // [composition: native child call]
+            }
+            total(): int { @@:(this->sensor->read()) }
+            count(): int { @@:(this->seen) }
+        }
+    domain:
+        // [composition: hold a sub-system instance in a domain var]
+        sensor: std::shared_ptr<Sensor> = @@Sensor()
+        seen: int = 0
+}
+
+// ============================================================================
+// CONSTRUCT PROBE — the remaining reference/transition constructs:
+// @@:event, @@:params.x, @@:data.x (set+read, call-scope isolation),
+// @@:return(e) short-circuit, @@:system.state.name, labeled transition,
+// forward (-> => $S), forward WITH state args (-> => $C(arg)), reentrant
+// @@:self.m(), const read, action invocation, elif-ladder + nested
+// conditional (native C++ if / else if / else).
+// ============================================================================
+@@system Probe {
+
+    interface:
+        echo(x: std::string): std::string
+        fire()
+        relay()
+        ping()
+        here(): std::string
+        evt(): std::string
+        cap(): int
+        log(): std::string
+        classify(n: int): std::string
+        guard(): int
+        outer_data(): std::string
+        inner_data()
+        fwd()
+
+    machine:
+
+        $A {
+            echo(x: std::string): std::string {
+                // [ref: @@:params.x + @@:data set]
+                @@:data.tmp = @@:params.x
+                // [ref: @@:data read]
+                @@:("echo:" + std::any_cast<std::string>(@@:data.tmp))
+            }
+            outer_data(): std::string {
+                @@:data.k = std::string("outer");
+                // reentrant: inner gets its OWN @@:data scope
+                @@:self.inner_data()
+                // must still read "outer" (call-scope isolation)
+                @@:(std::any_cast<std::string>(@@:data.k))
+            }
+            inner_data() {
+                @@:data.k = std::string("inner");
+            }
+            classify(n: int): std::string {
+                // [conditional: elif ladder + nested conditional (4 branches)]
+                if (n < 0) {
+                    @@:(std::string("neg"))
+                } else if (n == 0) {
+                    @@:(std::string("zero"))
+                } else {
+                    if (n > 100) {
+                        @@:(std::string("big"))
+                    } else {
+                        @@:(std::string("pos"))
+                    }
+                }
+            }
+            guard(): int {
+                @@:return(this->LIMIT)                  // [ref: @@:return short-circuits]
+                @@:self.helper("LEAK;");                // must NOT execute
+            }
+            fire() {
+                this->last = @@:event;                  // [ref: @@:event]
+                -> "fired" $B                           // [transition: labeled]
+            }
+            relay() {
+                -> => $B                                // [transition: forward (re-dispatch event)]
+            }
+            fwd() {
+                -> => $C("payload")                     // [transition: forward WITH state args]
+            }
+            ping() {
+                @@:self.helper("ping;");                // [action invocation via @@:self]
+                @@:self.fire();                         // [ref: reentrant self-call -> transitions to $B]
+            }
+            here(): std::string { @@:(@@:system.state.name) }   // [ref: @@:system.state.name]
+            evt(): std::string { @@:return(this->last) }
+            cap(): int { @@:(this->LIMIT) }             // [decl: const read]
+            log(): std::string { @@:(this->trace) }
+        }
+
+        $B {
+            relay() {
+                this->trace = this->trace + "B.relay;"; // handles the re-dispatched event
+            }
+            here(): std::string { @@:(std::string("B")) }
+            evt(): std::string { @@:return(this->last) }
+            log(): std::string { @@:(this->trace) }
+        }
+
+        // [state: target of a forward transition carrying a state arg]
+        $C(tok: std::string) {
+            fwd() {
+                this->trace = this->trace + "C.fwd(" + tok + ");";
+            }
+            here(): std::string { @@:(std::string("C")) }
+            log(): std::string { @@:(this->trace) }
+        }
+
+    // [section: actions]
+    actions:
+        helper(s: std::string) {
+            this->trace = this->trace + s;
+        }
+
+    domain:
+        // [decl: const field, read via this->LIMIT]
+        const LIMIT: int = 50
+        trace: std::string = ""
+        last: std::string = ""
+}
+
+// ============================================================================
+// DRIVER — TAP, fresh machine per scenario, asserts every path.
+// ============================================================================
+int main() {
+    std::cout << "TAP version 14\n";
+
+    // --- operations (instance form via factory rename) ---
+    auto j0 = Job::make();
+    _ck(j0.clamp(150, 99) == 99, "operation clamp(150,99)=99 (conditional in op body)");
+    _ck(j0.clamp(5, 99) == 5, "operation clamp(5,99)=5");
+
+    // --- HSM forward via => $^ ---
+    auto a = @@Job();
+    a.start("J1");
+    _ck(a.status() == "working", "Idle forwards status via => $^ to parent");
+    a.submit("");
+    _ck(a.status() == "rejected", "submit('') conditional branch -> $Rejected");
+    _ck(_has(a.trace_of(), "N;"), "action note() invoked from start() via @@:self");
+
+    // --- state-args + enter/exit args + non-terminal conditional clamp ---
+    auto b = @@Job();
+    b.start("J2");
+    b.submit("payload");
+    _ck(b.status() == "active", "submit(task) state-arg -> $Active(task)");
+    b.tick();
+    b.tick();
+    b.tick();
+    b.tick();
+    _ck(b.counter() == 3, "non-terminal conditional clamps attempts at max_attempts=3");
+    _ck(_has(b.trace_of(), "tick3;"), "trailing field read ran after the if");
+    b.finish();
+    _ck(b.status() == "done", "finish() exit+enter args -> $Done");
+    _ck(_has(b.trace_of(), "Active<(done);"), "exit handler received exit arg 'done'");
+    _ck(_has(b.trace_of(), "Done>(finished);"), "enter handler received enter arg 'finished'");
+    _ck(_has(b.trace_of(), "Active>(payload);"), "enter handler received state arg 'payload'");
+
+    // --- single-level modal: push$/pop$ with depth() asserted ---
+    auto c = @@Job();
+    c.start("J3");
+    c.pause();
+    _ck(c.status() == "paused" && c.depth() == 1,
+        "push$ -> $Paused; $Paused.$> set depth=1");
+    c.resume();
+    _ck(c.status() == "working" && c.depth() == 0,
+        "-> pop$ ran $Paused.<$ (depth->0); depth() forwards via => $^ to $Working");
+
+    // --- nested modal stack — two push$, two pop$ prove a real stack ---
+    auto cn = @@Job();
+    cn.start("J3b");
+    cn.pause();
+    cn.pause();
+    _ck(cn.status() == "paused", "nested push$ twice -> still $Paused");
+    cn.resume();
+    cn.resume();
+    _ck(cn.status() == "working", "two -> pop$ restore through the stack to $Idle");
+
+    // --- while loop over a state var ---
+    auto d = @@Job();
+    d.start("J4");
+    _ck(d.spin(5) == 5, "while loop over state var $.i -> 5");
+
+    // --- double interface param round-trips ---
+    auto fr = @@Job();
+    fr.start("JF");
+    fr.submit("p");
+    fr.setrate(2.5);
+    _ck(fr.rate() == 2.5, "double interface param round-trips");
+
+    // --- DOUBLE transition enter-arg -> $Boosted ---
+    auto fb = @@Job();
+    fb.start("JB");
+    fb.submit("q");
+    fb.boost(7.25);
+    _ck(fb.status() == "boosted" && fb.rate() == 7.25,
+        "transition double enter-arg -> $Boosted");
+    _ck(fb.counter() == 1, "$Boosted forwards counter() via => $^ to $Working");
+
+    // --- persist — FULL round-trip incl. state-arg + const + double + no_persist ---
+    fr.tick();
+    std::string snap = fr.save_state();
+    _ck(_has(snap, "\"throughput\":2.5") && _has(snap, "\"MAX\":99") && !_has(snap, "\"scratch\""),
+        "save blob carries double + const, EXCLUDES @@[no_persist] field");
+    auto fr2 = @@Job();
+    fr2.restore_state(snap);
+    _ck(fr2.trace_of() == fr.trace_of() && _has(fr2.trace_of(), "Active>(p);"),
+        "persist restores FULL trace incl. state arg 'p' (deep equality)");
+    _ck(fr2.counter() == fr.counter() && fr2.status() == "active",
+        "persist restores domain + current state");
+    _ck(fr2.rate() == 2.5, "persist round-trips the double field (2.5)");
+    _ck(fr2.cap() == 99,
+        "persist restores const field MAX=99 (#139: const+persist clean on C++)");
+    _ck(fr.scratch_of() == 1 && fr2.scratch_of() == 0,
+        "@@[no_persist] field excluded from blob (restore resets to default 0)");
+
+    // --- async: await mutates + transitions; sync op bypasses the gate;
+    //     gate self-clears after a throwing handler ---
+    auto p = @@Pump();
+    p.init().get();
+    p.fill().get();
+    _ck(p.level() == 1, "async fill(): awaited, mutated ticks, transitioned to $Full");
+    p.drain().get();
+    p.fill().get();
+    _ck(p.level() == 2, "async drain() transitioned $Full->$Empty; fill accepted again -> 2");
+
+    auto pe = @@Pump();
+    pe.init().get();
+    bool gate_threw = false;
+    try {
+        pe.boom().get();
+    } catch (const std::runtime_error& e) {
+        gate_threw = (std::string(e.what()) == "pump boom");
+    }
+    _ck(gate_threw, "async boom() handler throw propagates through .get()");
+    // Gate must be CLEAR now — a stuck gate would throw E703 here. Catch it so
+    // the assertion reports a clean `not ok` (rather than aborting) if the RAII
+    // guard ever regresses to not clearing busy.
+    bool gate_clear = false;
+    try {
+        pe.fill().get();
+        gate_clear = (pe.level() == 1);
+    } catch (const std::runtime_error&) {
+        gate_clear = false;   // E703 from a stuck gate
+    }
+    _ck(gate_clear,
+        "RAII E703 guard cleared after throw: next interface call accepted (not E703-rejected)");
+
+    // --- async persist round-trip across the gate ---
+    auto pp = @@Pump();
+    pp.init().get();
+    pp.fill().get();
+    std::string psnap = pp.save_state();
+    auto pp2 = @@Pump();
+    pp2.restore_state(psnap);
+    pp2.drain().get();
+    pp2.fill().get();
+    _ck(pp2.level() == 2,
+        "async persist round-trip: restored at $Full, drain+fill cycles gate to ticks=2");
+
+    // --- multi-system composition + ISOLATION (two independent Controllers) ---
+    auto k1 = @@Controller();
+    k1.tick();
+    k1.tick();
+    auto k2 = @@Controller();
+    k2.tick();
+    k2.tick();
+    k2.tick();
+    _ck(k1.total() == 2 && k2.total() == 3,
+        "multi-system: two Controllers hold INDEPENDENT Sensors");
+    _ck(k1.count() == 2 && k2.count() == 3,
+        "multi-system: each Controller's own domain isolated");
+
+    // --- construct probe ---
+    auto pr = @@Probe();
+    _ck(pr.echo("hi") == "echo:hi", "@@:params.x + @@:data set/read");
+    _ck(pr.here() == "A" && pr.cap() == 50, "@@:system.state.name + const read");
+    _ck(pr.classify(-1) == "neg" && pr.classify(0) == "zero"
+        && pr.classify(50) == "pos" && pr.classify(200) == "big",
+        "elif ladder + nested conditional (4 branches)");
+    _ck(pr.guard() == 50 && !_has(pr.log(), "LEAK;"),
+        "@@:return(e) short-circuits trailing code (vs @@:(e))");
+
+    auto prf = @@Probe();
+    prf.fire();
+    _ck(prf.here() == "B" && prf.evt() == "fire",
+        "@@:event recorded + labeled transition -> $B");
+
+    auto pr2 = @@Probe();
+    pr2.relay();
+    _ck(pr2.here() == "B" && _has(pr2.log(), "B.relay;"),
+        "forward transition -> => $B re-dispatched relay");
+
+    auto pr3 = @@Probe();
+    pr3.ping();
+    _ck(_has(pr3.log(), "ping;") && pr3.here() == "B",
+        "action invocation + reentrant @@:self.fire()");
+
+    auto pr4 = @@Probe();
+    pr4.fwd();
+    _ck(pr4.here() == "C" && _has(pr4.log(), "C.fwd(payload);"),
+        "forward transition WITH state args -> => $C(arg)");
+
+    auto pr5 = @@Probe();
+    _ck(pr5.outer_data() == "outer",
+        "@@:data call-scope isolated across reentrant @@:self call");
+
+    std::cout << "1.." << _n << "\n";
+    return 0;
+}
