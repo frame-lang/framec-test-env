@@ -1,0 +1,62 @@
+@@[target("swift")]
+
+// Test 102: list + dict as PERSISTED domain fields (Swift).
+// Exercises the type-ignorant domain-field path through Codable:
+// [Int] and [String:Int] must round-trip through saveState /
+// restoreState preserving order and key-value pairs.
+
+@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@system DomainListDict {
+    interface:
+        push(v: Int)
+        size_l(): Int
+        get_at(i: Int): Int
+        put(k: String, v: Int)
+        size_d(): Int
+        get_v(k: String): Int
+
+    machine:
+        $Active {
+            push(v: Int)         { self.items.append(v) }
+            size_l(): Int        { @@:(self.items.count) }
+            get_at(i: Int): Int  { @@:((i >= 0 && i < self.items.count) ? self.items[i] : -1) }
+            put(k: String, v: Int)  { self.scores[k] = v }
+            size_d(): Int        { @@:(self.scores.count) }
+            get_v(k: String): Int   { @@:(self.scores[k] ?? -1) }
+        }
+
+    domain:
+        items: [Int] = [Int]()
+        scores: [String: Int] = [String: Int]()
+}
+
+let s1 = @@DomainListDict()
+s1.push(10)
+s1.push(20)
+s1.push(30)
+s1.put("a", 1)
+s1.put("b", 2)
+s1.put("c", 3)
+
+if s1.size_l() != 3 { fatalError("pre size_l=\(s1.size_l())") }
+if s1.get_at(0) != 10 { fatalError("pre get_at0") }
+if s1.size_d() != 3 { fatalError("pre size_d") }
+if s1.get_v("b") != 2 { fatalError("pre b") }
+
+let snap = s1.saveState()
+
+let s2 = @@DomainListDict()
+s2.restoreState(snap)
+
+if s2.size_l() != 3 { fatalError("post size_l=\(s2.size_l())") }
+if s2.get_at(0) != 10 { fatalError("post items[0]=\(s2.get_at(0))") }
+if s2.get_at(1) != 20 { fatalError("post items[1]=\(s2.get_at(1))") }
+if s2.get_at(2) != 30 { fatalError("post items[2]=\(s2.get_at(2))") }
+if s2.size_d() != 3 { fatalError("post size_d=\(s2.size_d())") }
+if s2.get_v("a") != 1 { fatalError("post a") }
+if s2.get_v("b") != 2 { fatalError("post b") }
+if s2.get_v("c") != 3 { fatalError("post c") }
+
+print("PASS: 102_persist_domain_list_dict")

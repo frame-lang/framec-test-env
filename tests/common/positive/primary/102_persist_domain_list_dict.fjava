@@ -1,0 +1,69 @@
+@@[target("java")]
+
+import java.util.*;
+
+// Test 102: list + dict as PERSISTED domain fields (Java).
+// Exercises the type-ignorant domain-field path through the Jackson
+// serializer: ArrayList<Integer> and HashMap<String,Integer> must
+// round-trip through save_state / restore_state preserving order and
+// key-value pairs.
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system DomainListDict {
+    interface:
+        push(v: int)
+        size_l(): int
+        get_at(i: int): int
+        put(k: String, v: int)
+        size_d(): int
+        get_v(k: String): int
+
+    machine:
+        $Active {
+            push(v: int)         { items.add(v); }
+            size_l(): int        { @@:(items.size()) }
+            get_at(i: int): int  { @@:((i >= 0 && i < items.size()) ? items.get(i) : -1) }
+            put(k: String, v: int)  { scores.put(k, v); }
+            size_d(): int        { @@:(scores.size()) }
+            get_v(k: String): int   { @@:(scores.getOrDefault(k, -1)) }
+        }
+
+    domain:
+        items: java.util.List<Integer> = new java.util.ArrayList<Integer>()
+        scores: java.util.Map<String, Integer> = new java.util.HashMap<String, Integer>()
+}
+
+class Main {
+    public static void main(String[] args) {
+        var s1 = @@DomainListDict();
+        s1.push(10);
+        s1.push(20);
+        s1.push(30);
+        s1.put("a", 1);
+        s1.put("b", 2);
+        s1.put("c", 3);
+
+        if (s1.size_l() != 3) { System.out.println("FAIL pre size_l=" + s1.size_l()); System.exit(1); }
+        if (s1.get_at(0) != 10) { System.out.println("FAIL pre get_at0"); System.exit(1); }
+        if (s1.size_d() != 3) { System.out.println("FAIL pre size_d"); System.exit(1); }
+        if (s1.get_v("b") != 2) { System.out.println("FAIL pre b"); System.exit(1); }
+
+        String snap = s1.save_state();
+
+        var s2 = @@DomainListDict();
+        s2.restore_state(snap);
+
+        if (s2.size_l() != 3) { System.out.println("FAIL post size_l=" + s2.size_l()); System.exit(1); }
+        if (s2.get_at(0) != 10) { System.out.println("FAIL post items[0]=" + s2.get_at(0)); System.exit(1); }
+        if (s2.get_at(1) != 20) { System.out.println("FAIL post items[1]=" + s2.get_at(1)); System.exit(1); }
+        if (s2.get_at(2) != 30) { System.out.println("FAIL post items[2]=" + s2.get_at(2)); System.exit(1); }
+        if (s2.size_d() != 3) { System.out.println("FAIL post size_d=" + s2.size_d()); System.exit(1); }
+        if (s2.get_v("a") != 1) { System.out.println("FAIL post a"); System.exit(1); }
+        if (s2.get_v("b") != 2) { System.out.println("FAIL post b"); System.exit(1); }
+        if (s2.get_v("c") != 3) { System.out.println("FAIL post c"); System.exit(1); }
+
+        System.out.println("PASS: 102_persist_domain_list_dict");
+    }
+}

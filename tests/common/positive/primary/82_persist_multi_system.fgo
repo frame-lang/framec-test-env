@@ -1,0 +1,73 @@
+@@[target("go")]
+
+package main
+
+import (
+    "encoding/json"
+    "fmt"
+    "os"
+)
+
+var _ = json.Marshal
+
+@@[persist(string)]
+@@[save(SaveState)]
+@@[load(LoadState)]
+@@system Counter {
+    interface:
+        bump()
+        value(): int
+
+    machine:
+        $Active {
+            bump() { s.n = s.n + 1 }
+            value(): int { @@:(s.n) return; }
+        }
+
+    domain:
+        n: int = 0
+}@@[persist(string)]
+@@[save(SaveState)]
+@@[load(LoadState)]
+
+
+@@[main]
+@@system Container {
+    interface:
+        tick()
+        get_n(): int
+
+    machine:
+        $Active {
+            tick() {
+                s.n = s.n + 10
+                s.counter.Bump()
+            }
+            get_n(): int { @@:(s.n) return; }
+        }
+
+    domain:
+        n: int = 0
+        counter: *Counter = @@Counter()
+}
+
+func main() {
+    c1 := @@Container()
+    c1.Tick()
+    c1.Tick()
+    if c1.Get_n() != 20 {
+        fmt.Printf("FAIL pre n: %d\n", c1.Get_n())
+        os.Exit(1)
+    }
+
+    snap := c1.SaveState()
+    c2 := @@Container()
+
+    c2.LoadState(snap)
+    if c2.Get_n() != 20 {
+        fmt.Printf("FAIL post n: %d\n", c2.Get_n())
+        os.Exit(1)
+    }
+
+    fmt.Println("PASS: 82_persist_multi_system")
+}

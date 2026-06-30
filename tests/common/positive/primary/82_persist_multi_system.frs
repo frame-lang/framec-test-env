@@ -1,0 +1,57 @@
+@@[target("rust")]
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Counter {
+    interface:
+        bump()
+        value(): i32
+
+    machine:
+        $Active {
+            bump() { self.n = self.n + 1; }
+            value(): i32 { @@:(self.n) return; }
+        }
+
+    domain:
+        n: i32 = 0
+}@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+
+
+@@[main]
+@@system Container {
+    interface:
+        tick()
+        get_n(): i32
+
+    machine:
+        $Active {
+            tick() {
+                self.n = self.n + 10;
+                self.counter.bump();
+            }
+            get_n(): i32 { @@:(self.n) return; }
+        }
+
+    domain:
+        n: i32 = 0
+        counter: Counter = @@Counter()
+}
+
+fn main() {
+    let mut c1 = @@Container();
+    c1.tick();
+    c1.tick();
+    assert_eq!(c1.get_n(), 20, "FAIL pre n");
+
+    let snap = c1.save_state();
+    let mut c2 = @@Container();
+
+    c2.restore_state(snap.clone());
+    assert_eq!(c2.get_n(), 20, "FAIL post n");
+
+    println!("PASS: 82_persist_multi_system");
+}

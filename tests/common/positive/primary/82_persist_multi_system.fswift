@@ -1,0 +1,56 @@
+@@[target("swift")]
+
+
+@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@system Counter {
+    interface:
+        bump()
+        value(): Int
+
+    machine:
+        $Active {
+            bump() { self.n = self.n + 1 }
+            value(): Int { @@:(self.n) return; }
+        }
+
+    domain:
+        n: Int = 0
+}@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+
+
+@@[main]
+@@system Container {
+    interface:
+        tick()
+        get_n(): Int
+
+    machine:
+        $Active {
+            tick() {
+                self.n = self.n + 10
+                self.counter.bump()
+            }
+            get_n(): Int { @@:(self.n) return; }
+        }
+
+    domain:
+        n: Int = 0
+        counter: Counter = @@Counter()
+}
+
+let c1 = @@Container()
+c1.tick()
+c1.tick()
+if c1.get_n() != 20 { print("FAIL pre n: \(c1.get_n())"); exit(1) }
+
+let snap = c1.saveState()
+let c2 = @@Container()
+
+c2.restoreState(snap)
+if c2.get_n() != 20 { print("FAIL post n: \(c2.get_n())"); exit(1) }
+
+print("PASS: 82_persist_multi_system")

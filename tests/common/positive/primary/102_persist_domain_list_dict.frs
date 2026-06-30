@@ -1,0 +1,64 @@
+@@[target("rust")]
+
+use std::collections::HashMap;
+
+// Test 102: list + dict as PERSISTED domain fields (Rust).
+// Exercises the type-ignorant domain-field path through serde:
+// Vec<i32> and HashMap<String, i32> must round-trip through
+// save_state / restore_state preserving order and key-value pairs.
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system DomainListDict {
+    interface:
+        push(v: i32)
+        size_l(): i32
+        get_at(i: i32): i32
+        put(k: String, v: i32)
+        size_d(): i32
+        get_v(k: String): i32
+
+    machine:
+        $Active {
+            push(v: i32)         { self.items.push(v); }
+            size_l(): i32        { @@:(self.items.len() as i32) }
+            get_at(i: i32): i32  { @@:(if (i as usize) < self.items.len() { self.items[i as usize] } else { -1 }) }
+            put(k: String, v: i32)  { self.scores.insert(k, v); }
+            size_d(): i32        { @@:(self.scores.len() as i32) }
+            get_v(k: String): i32   { @@:(*self.scores.get(&k).unwrap_or(&-1)) }
+        }
+
+    domain:
+        items: Vec<i32> = vec![]
+        scores: HashMap<String, i32> = HashMap::new()
+}
+
+fn main() {
+    let mut s1 = @@DomainListDict();
+    s1.push(10);
+    s1.push(20);
+    s1.push(30);
+    s1.put("a".to_string(), 1);
+    s1.put("b".to_string(), 2);
+    s1.put("c".to_string(), 3);
+
+    assert_eq!(s1.size_l(), 3);
+    assert_eq!(s1.get_at(0), 10);
+    assert_eq!(s1.size_d(), 3);
+    assert_eq!(s1.get_v("b".to_string()), 2);
+
+    let snap = s1.save_state();
+    let mut s2 = @@DomainListDict();
+    s2.restore_state(snap);
+
+    assert_eq!(s2.size_l(), 3, "size_l");
+    assert_eq!(s2.get_at(0), 10, "items[0]");
+    assert_eq!(s2.get_at(1), 20, "items[1]");
+    assert_eq!(s2.get_at(2), 30, "items[2]");
+    assert_eq!(s2.size_d(), 3, "size_d");
+    assert_eq!(s2.get_v("a".to_string()), 1);
+    assert_eq!(s2.get_v("b".to_string()), 2);
+    assert_eq!(s2.get_v("c".to_string()), 3);
+    println!("PASS: 102_persist_domain_list_dict");
+}
