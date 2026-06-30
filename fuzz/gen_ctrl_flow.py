@@ -38,7 +38,26 @@ Usage:
 import argparse
 from pathlib import Path
 
+import re as _re
+
 from gen_nested import LANGS, method_name, native_types
+
+
+def ts_native_types(src: str) -> str:
+    """TypeScript-only type rewrite for the strict gate. `gen_nested`'s
+    `native_types` leaves TS untouched (TS is in the dynamic-target set,
+    so `int` passes through verbatim). But `int` is NOT a TS type, so
+    framec's verbatim passthrough emits `: int` annotations that `tsx`
+    strips at runtime yet `tsc --strict --noEmit` rejects (TS2304) —
+    exactly the #138 class of "runs but doesn't type-check". To make
+    the new strict gate meaningful (baseline strict-clean, so it fires
+    only on genuine framec regressions) we author the TS Frame source
+    with `number`, the way the hand-written matrix TS fixtures do. This
+    mirrors `native_types`: rewrite in type-annotation position only,
+    after a `:`. No-op for non-TS sources."""
+    if '@@[target("typescript")]' not in src:
+        return src
+    return _re.sub(r"(?<!:)(:\s*)int\b", lambda m: m.group(1) + "number", src)
 
 
 # Domain seeds. f starts at 5 so dom_eq_K with K=5 fires the if-true
@@ -200,6 +219,254 @@ def _nested_if_lua(outer_cond, inner_cond, body):
     )
 
 
+# =====================================================================
+# Wave-2 constructs: the FORMS the depth-2 if/else + nested-in-THEN
+# wave (above) never reaches. These are the shapes that let real bugs
+# slip through:
+#
+#   * else_if_chain (#124, Asteroids): an N-arm
+#       `if c0 {} else if c1 {} else if c2 {} else {}` chain. The
+#     Lua/Erlang block-transform lowering must thread `elseif` /
+#     `else if` arms, not just a single if/else.
+#   * nested_in_else (#135): a nested `if` inside the ELSE block —
+#       `if c {} else { if d {} else {} }`. The wave-1 nested form
+#     nests in the THEN block only; the else-side indent + statement
+#     book-keeping is a different code path.
+#   * chain_nested_else (#124 × #135): an else-if chain whose final
+#     `else` contains a nested if/else — the deepest mix of the two.
+#
+# Each renderer is FAMILY-based (brace-with-paren / brace-no-paren /
+# python-indent / ruby-end / lua-elseif-end) rather than 16 near-
+# duplicate functions, mirroring how the wave-1 renderers already
+# reuse `_if_js` across the whole C-family. A renderer takes the
+# pre-rendered cond strings + already-terminated body statements and
+# returns the construct source at the handler-body indent (16 spaces).
+#
+# `arm_conds[i]` pairs with `arm_bodies[i]`; `else_body` is the final
+# trailing else (None => no else arm). For nested_in_else, the inner
+# chain lives inside the outer else; we render it as a nested chain.
+# =====================================================================
+
+# Per-family delimiter config. `paren` wraps the cond; `then` is the
+# opener keyword suffix (Lua `then`, Ruby ""); `endkw` closes a block.
+_FAMILY = {
+    # brace-with-paren: JS/TS/Java/C/C++/C#/PHP/Kotlin/Dart
+    "brace_paren": dict(open='if (%s) {', elif_='}} else if (%s) {{',
+                        else_='} else {', close='}', paren=True,
+                        style="brace"),
+    # brace-no-paren: Rust/Go/Swift
+    "brace_noparen": dict(open='if %s {', elif_='}} else if %s {{',
+                          else_='} else {', close='}', paren=False,
+                          style="brace"),
+    # python-indent: Python/GDScript
+    "py": dict(style="py"),
+    "ruby": dict(style="ruby"),
+    "lua": dict(style="lua"),
+}
+
+# NOTE on Lua: the wave-1 Lua if-renderers emit NATIVE `if…then…
+# elseif…else…end`, which framec passes through verbatim. But #124
+# (`end else if`) and #135 (brace leak) are bugs in framec's Lua
+# BLOCK-TRANSFORM lowering, which only fires on the BRACE form
+# (`} else if c {`, `} else { if c { } }`). The native `elseif` form
+# sidesteps the lowering and would NOT have caught the Asteroids bug.
+# So for the Wave-2 forms Lua is routed through `brace_noparen`: the
+# Frame source carries brace-style `else if` / nested-`if`-in-`else`,
+# and framec's output_block_parser must lower it to `elseif` / `end`.
+# This is the real #124/#135 code path. (Erlang would join here too,
+# when its renderer lands.)
+_LANG_FAMILY = {
+    "javascript": "brace_paren", "typescript": "brace_paren",
+    "java": "brace_paren", "c": "brace_paren", "cpp": "brace_paren",
+    "csharp": "brace_paren", "php": "brace_paren", "kotlin": "brace_paren",
+    "dart": "brace_paren",
+    "rust": "brace_noparen", "go": "brace_noparen", "swift": "brace_noparen",
+    "lua": "brace_noparen",
+    "python_3": "py", "gdscript": "py",
+    "ruby": "ruby",
+}
+
+
+def _chain_brace(arm_conds, arm_bodies, else_body, paren, ind, body_ind):
+    """Render an else-if chain for a brace family at the given indent.
+    `ind` is the indent of the `if`; `body_ind` is the arm-body indent.
+    Works for both paren and no-paren brace families."""
+    lines = []
+    for i, (c, b) in enumerate(zip(arm_conds, arm_bodies)):
+        cc = f"({c})" if paren else c
+        if i == 0:
+            lines.append(f"{ind}if {cc} {{")
+        else:
+            lines.append(f"{ind}}} else if {cc} {{")
+        lines.append(f"{body_ind}{b}")
+    if else_body is not None:
+        lines.append(f"{ind}}} else {{")
+        lines.append(f"{body_ind}{else_body}")
+    lines.append(f"{ind}}}")
+    return "\n".join(lines)
+
+
+def _chain_py(arm_conds, arm_bodies, else_body, ind, body_ind):
+    lines = []
+    for i, (c, b) in enumerate(zip(arm_conds, arm_bodies)):
+        kw = "if" if i == 0 else "elif"
+        lines.append(f"{ind}{kw} {c}:")
+        lines.append(f"{body_ind}{b}")
+    if else_body is not None:
+        lines.append(f"{ind}else:")
+        lines.append(f"{body_ind}{else_body}")
+    return "\n".join(lines)
+
+
+def _chain_ruby(arm_conds, arm_bodies, else_body, ind, body_ind):
+    lines = []
+    for i, (c, b) in enumerate(zip(arm_conds, arm_bodies)):
+        kw = "if" if i == 0 else "elsif"
+        lines.append(f"{ind}{kw} {c}")
+        lines.append(f"{body_ind}{b}")
+    if else_body is not None:
+        lines.append(f"{ind}else")
+        lines.append(f"{body_ind}{else_body}")
+    lines.append(f"{ind}end")
+    return "\n".join(lines)
+
+
+def _chain_lua(arm_conds, arm_bodies, else_body, ind, body_ind):
+    lines = []
+    for i, (c, b) in enumerate(zip(arm_conds, arm_bodies)):
+        kw = "if" if i == 0 else "elseif"
+        lines.append(f"{ind}{kw} {c} then")
+        lines.append(f"{body_ind}{b}")
+    if else_body is not None:
+        lines.append(f"{ind}else")
+        lines.append(f"{body_ind}{else_body}")
+    lines.append(f"{ind}end")
+    return "\n".join(lines)
+
+
+def render_chain(lang, arm_conds, arm_bodies, else_body,
+                 ind=INDENT, body_ind=BODY_INDENT):
+    """Dispatch an else-if chain to the language's family renderer."""
+    fam = _LANG_FAMILY[lang]
+    style = _FAMILY[fam]["style"]
+    if style == "brace":
+        return _chain_brace(arm_conds, arm_bodies, else_body,
+                            _FAMILY[fam]["paren"], ind, body_ind)
+    if style == "py":
+        return _chain_py(arm_conds, arm_bodies, else_body, ind, body_ind)
+    if style == "ruby":
+        return _chain_ruby(arm_conds, arm_bodies, else_body, ind, body_ind)
+    if style == "lua":
+        return _chain_lua(arm_conds, arm_bodies, else_body, ind, body_ind)
+    raise ValueError(f"no chain renderer for {lang}")
+
+
+def render_nested_in_else(lang, outer_cond, then_body,
+                          inner_conds, inner_bodies, inner_else_body):
+    """`if outer { then } else { <chain of inner ifs> }`.
+
+    The inner chain is itself rendered with render_chain at a +4
+    deeper indent so the nested-in-ELSE indent/statement book-keeping
+    (the #135 path) is exercised. `len(inner_conds)` controls depth:
+    1 inner cond => 2 levels, 2 inner conds => a 3-level
+    if/elseif/else inside the else."""
+    fam = _LANG_FAMILY[lang]
+    style = _FAMILY[fam]["style"]
+    inner = render_chain(lang, inner_conds, inner_bodies, inner_else_body,
+                         ind=INNER_BLOCK_INDENT, body_ind=INNER_BODY_INDENT)
+    if style == "brace":
+        paren = _FAMILY[fam]["paren"]
+        oc = f"({outer_cond})" if paren else outer_cond
+        return (
+            f"{INDENT}if {oc} {{\n"
+            f"{BODY_INDENT}{then_body}\n"
+            f"{INDENT}}} else {{\n"
+            f"{inner}\n"
+            f"{INDENT}}}"
+        )
+    if style == "py":
+        return (
+            f"{INDENT}if {outer_cond}:\n"
+            f"{BODY_INDENT}{then_body}\n"
+            f"{INDENT}else:\n"
+            f"{inner}"
+        )
+    if style == "ruby":
+        return (
+            f"{INDENT}if {outer_cond}\n"
+            f"{BODY_INDENT}{then_body}\n"
+            f"{INDENT}else\n"
+            f"{inner}\n"
+            f"{INDENT}end"
+        )
+    if style == "lua":
+        return (
+            f"{INDENT}if {outer_cond} then\n"
+            f"{BODY_INDENT}{then_body}\n"
+            f"{INDENT}else\n"
+            f"{inner}\n"
+            f"{INDENT}end"
+        )
+    raise ValueError(f"no nested-in-else renderer for {lang}")
+
+
+def render_chain_nested_else(lang, arm_conds, arm_bodies,
+                             inner_conds, inner_bodies, inner_else_body):
+    """An else-if chain whose final `else` holds a nested if/else.
+    The deepest mix of the chain (#124) and nested-in-else (#135)
+    forms. Built by handing render_nested_in_else's inner-chain to the
+    chain renderer as the `else_body` — but because the else body is a
+    multi-line block, we assemble it directly per family."""
+    fam = _LANG_FAMILY[lang]
+    style = _FAMILY[fam]["style"]
+    inner = render_chain(lang, inner_conds, inner_bodies, inner_else_body,
+                         ind=INNER_BLOCK_INDENT, body_ind=INNER_BODY_INDENT)
+    if style == "brace":
+        paren = _FAMILY[fam]["paren"]
+        lines = []
+        for i, (c, b) in enumerate(zip(arm_conds, arm_bodies)):
+            cc = f"({c})" if paren else c
+            if i == 0:
+                lines.append(f"{INDENT}if {cc} {{")
+            else:
+                lines.append(f"{INDENT}}} else if {cc} {{")
+            lines.append(f"{BODY_INDENT}{b}")
+        lines.append(f"{INDENT}}} else {{")
+        lines.append(inner)
+        lines.append(f"{INDENT}}}")
+        return "\n".join(lines)
+    if style == "py":
+        lines = []
+        for i, (c, b) in enumerate(zip(arm_conds, arm_bodies)):
+            kw = "if" if i == 0 else "elif"
+            lines.append(f"{INDENT}{kw} {c}:")
+            lines.append(f"{BODY_INDENT}{b}")
+        lines.append(f"{INDENT}else:")
+        lines.append(inner)
+        return "\n".join(lines)
+    if style == "ruby":
+        lines = []
+        for i, (c, b) in enumerate(zip(arm_conds, arm_bodies)):
+            kw = "if" if i == 0 else "elsif"
+            lines.append(f"{INDENT}{kw} {c}")
+            lines.append(f"{BODY_INDENT}{b}")
+        lines.append(f"{INDENT}else")
+        lines.append(inner)
+        lines.append(f"{INDENT}end")
+        return "\n".join(lines)
+    if style == "lua":
+        lines = []
+        for i, (c, b) in enumerate(zip(arm_conds, arm_bodies)):
+            kw = "if" if i == 0 else "elseif"
+            lines.append(f"{INDENT}{kw} {c} then")
+            lines.append(f"{BODY_INDENT}{b}")
+        lines.append(f"{INDENT}else")
+        lines.append(inner)
+        lines.append(f"{INDENT}end")
+        return "\n".join(lines)
+    raise ValueError(f"no chain-nested-else renderer for {lang}")
+
+
 def _if_typescript(cond, body):
     return _if_js(cond, body)
 
@@ -333,11 +600,18 @@ class CondShape:
 
 
 def _cond_lit_true(spec):
-    return "1 == 1"
+    # Constant-true but NOT literal-vs-literal: `1 == 1` makes TS strict
+    # narrow both sides to the literal type `1` and reject the compare
+    # as unintentional (TS2367), which the #138 strict gate would then
+    # flag as a (spurious) failure. Read the domain field `f` (init 5)
+    # instead — `f >= 0` is always true, never narrowed to a literal.
+    return f"{spec.self_word}{spec.field_op}f >= 0"
 
 
 def _cond_lit_false(spec):
-    return "1 == 2"
+    # Constant-false, strict-clean (see _cond_lit_true). `f < 0` is
+    # always false for f init 5, and TS doesn't narrow it.
+    return f"{spec.self_word}{spec.field_op}f < 0"
 
 
 def _cond_dom_eq_hit(spec):
@@ -706,13 +980,36 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
     lines.append("}")
     lines.append("")
 
+    _emit_driver(lines, lang, cid, sys_name, m_drive, m_verify,
+                 body.drive_returns, expected, spec, no_arg=True)
+    return "\n".join(lines)
+
+
+def _emit_driver(lines, lang, cid, sys_name, m_drive, m_verify,
+                 drive_returns, expected, spec, no_arg=True,
+                 drive_arg=""):
+    """Per-language test-driver tail. Factored out of gen_case so the
+    Wave-2 forms (else-if chain, nested-in-else, chain+nested) reuse
+    the identical, proven driver. `drive_arg` lets a Wave-2 case pass
+    a selector value to drive(); empty => zero-arg drive().
+
+    TypeScript NOTE (the #138 gap): the TS `_fail` here must NOT depend
+    on `process` (no @types/node in the strict gate) — we throw instead
+    of `process.exit`. Combined with `native_types` rewriting `int`→
+    `number` for TS (see ts_native_types), the generated TS is
+    strict-clean BY CONSTRUCTION, so the new `tsc --strict --noEmit`
+    gate fails only on a genuine framec codegen regression."""
+    _drive_call_arg = drive_arg
+    # C free-function drive takes `self` first; a selector arg follows
+    # as `, <arg>`. Empty when no_arg.
+    _c_extra = f", {drive_arg}" if drive_arg != "" else ""
     if lang == "python_3":
         lines.append(spec.fail_exit_def)
         lines.append(f"_inst = @@{sys_name}()")
-        if body.drive_returns:
-            lines.append(f"_ret = _inst.{m_drive}()")
+        if drive_returns:
+            lines.append(f"_ret = _inst.{m_drive}({_drive_call_arg})")
         else:
-            lines.append(f"_inst.{m_drive}()")
+            lines.append(f"_inst.{m_drive}({_drive_call_arg})")
             lines.append(f"_ret = _inst.{m_verify}()")
         lines.append(f"if _ret != {expected}:")
         lines.append(f"    _fail(f\"expected ret={expected}, got {{_ret}}\")")
@@ -720,50 +1017,58 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
     elif lang == "javascript":
         lines.append(spec.fail_exit_def)
         lines.append(f"const _inst = @@{sys_name}();")
-        if body.drive_returns:
-            lines.append(f"const _ret = _inst.{m_drive}();")
+        if drive_returns:
+            lines.append(f"const _ret = _inst.{m_drive}({_drive_call_arg});")
         else:
-            lines.append(f"_inst.{m_drive}();")
+            lines.append(f"_inst.{m_drive}({_drive_call_arg});")
             lines.append(f"const _ret = _inst.{m_verify}();")
         lines.append(f"if (_ret !== {expected}) {{ _fail(\"expected ret={expected}, got \" + _ret); }}")
         lines.append(spec.println_pass.replace("nested-frame", "ctrl-flow"))
     elif lang == "typescript":
-        lines.append(spec.fail_exit_def)
+        # #138 gate: this _fail must NOT reference `process` (no
+        # @types/node under `tsc --strict`). Throw instead — same
+        # non-zero-exit + "FAIL" stderr the runner greps for.
+        lines.append('function _fail(msg: string): never { '
+                     'throw new Error("FAIL: " + msg); }')
         lines.append(f"const _inst = @@{sys_name}();")
-        if body.drive_returns:
-            lines.append(f"const _ret: number = _inst.{m_drive}();")
+        if drive_returns:
+            lines.append(f"const _ret: number = _inst.{m_drive}({_drive_call_arg});")
         else:
-            lines.append(f"_inst.{m_drive}();")
+            lines.append(f"_inst.{m_drive}({_drive_call_arg});")
             lines.append(f"const _ret: number = _inst.{m_verify}();")
         lines.append(f"if (_ret !== {expected}) {{ _fail(\"expected ret={expected}, got \" + _ret); }}")
         lines.append(spec.println_pass.replace("nested-frame", "ctrl-flow"))
     elif lang == "ruby":
         lines.append(spec.fail_exit_def)
         lines.append(f"_inst = @@{sys_name}()")
-        if body.drive_returns:
-            lines.append(f"_ret = _inst.{m_drive}")
+        # Ruby: paren-less call for zero-arg drive (wave-1/3); explicit
+        # `drive(sel)` when a Wave-2 selector arg is present.
+        _rb_drive = (f"{m_drive}({_drive_call_arg})"
+                     if _drive_call_arg != "" else m_drive)
+        if drive_returns:
+            lines.append(f"_ret = _inst.{_rb_drive}")
         else:
-            lines.append(f"_inst.{m_drive}")
+            lines.append(f"_inst.{_rb_drive}")
             lines.append(f"_ret = _inst.{m_verify}")
         lines.append(f"_fail(\"expected ret={expected}, got #{{_ret}}\") unless _ret == {expected}")
         lines.append(spec.println_pass.replace("nested-frame", "ctrl-flow"))
     elif lang == "lua":
         lines.append(spec.fail_exit_def)
         lines.append(f"local _inst = @@{sys_name}()")
-        if body.drive_returns:
-            lines.append(f"local _ret = _inst:{m_drive}()")
+        if drive_returns:
+            lines.append(f"local _ret = _inst:{m_drive}({_drive_call_arg})")
         else:
-            lines.append(f"_inst:{m_drive}()")
+            lines.append(f"_inst:{m_drive}({_drive_call_arg})")
             lines.append(f"local _ret = _inst:{m_verify}()")
         lines.append(f"if _ret ~= {expected} then _fail(\"expected ret={expected}, got \" .. tostring(_ret)) end")
         lines.append(spec.println_pass.replace("nested-frame", "ctrl-flow"))
     elif lang == "php":
         lines.append(spec.fail_exit_def)
         lines.append(f"$_inst = @@{sys_name}();")
-        if body.drive_returns:
-            lines.append(f"$_ret = $_inst->{m_drive}();")
+        if drive_returns:
+            lines.append(f"$_ret = $_inst->{m_drive}({_drive_call_arg});")
         else:
-            lines.append(f"$_inst->{m_drive}();")
+            lines.append(f"$_inst->{m_drive}({_drive_call_arg});")
             lines.append(f"$_ret = $_inst->{m_verify}();")
         lines.append(f"if ($_ret !== {expected}) {{ _fail(\"expected ret={expected}, got \" . $_ret); }}")
         lines.append(spec.println_pass.replace("nested-frame", "ctrl-flow"))
@@ -771,10 +1076,10 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
         lines.append(spec.fail_exit_def)
         lines.append("void main() {")
         lines.append(f"    final _inst = @@{sys_name}();")
-        if body.drive_returns:
-            lines.append(f"    final _ret = _inst.{m_drive}();")
+        if drive_returns:
+            lines.append(f"    final _ret = _inst.{m_drive}({_drive_call_arg});")
         else:
-            lines.append(f"    _inst.{m_drive}();")
+            lines.append(f"    _inst.{m_drive}({_drive_call_arg});")
             lines.append(f"    final _ret = _inst.{m_verify}();")
         lines.append(f"    if (_ret != {expected}) {{ _fail(\"expected ret={expected}, got $_ret\"); }}")
         lines.append(f"    {spec.println_pass.replace('nested-frame', 'ctrl-flow')}")
@@ -783,10 +1088,10 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
         lines.append(spec.fail_exit_def)
         lines.append("fn main() {")
         lines.append(f"    let mut _inst = @@{sys_name}();")
-        if body.drive_returns:
-            lines.append(f"    let _ret = _inst.{m_drive}();")
+        if drive_returns:
+            lines.append(f"    let _ret = _inst.{m_drive}({_drive_call_arg});")
         else:
-            lines.append(f"    _inst.{m_drive}();")
+            lines.append(f"    _inst.{m_drive}({_drive_call_arg});")
             lines.append(f"    let _ret = _inst.{m_verify}();")
         lines.append(f"    if _ret != {expected} {{ _fail(&format!(\"expected ret={expected}, got {{}}\", _ret)); }}")
         lines.append(f"    {spec.println_pass.replace('nested-frame', 'ctrl-flow')}")
@@ -800,10 +1105,10 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
         lines.append(spec.fail_exit_def)
         lines.append("func main() {")
         lines.append(f"    sm := @@{sys_name}()")
-        if body.drive_returns:
-            lines.append(f"    ret := sm.{m_drive}()")
+        if drive_returns:
+            lines.append(f"    ret := sm.{m_drive}({_drive_call_arg})")
         else:
-            lines.append(f"    sm.{m_drive}()")
+            lines.append(f"    sm.{m_drive}({_drive_call_arg})")
             lines.append(f"    ret := sm.{m_verify}()")
         lines.append(f"    if ret != {expected} {{ _fail(fmt.Sprintf(\"expected ret={expected}, got %d\", ret)) }}")
         lines.append(f"    {spec.println_pass.replace('nested-frame', 'ctrl-flow')}")
@@ -811,10 +1116,10 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
     elif lang == "swift":
         lines.append(spec.fail_exit_def)
         lines.append(f"var _inst = @@{sys_name}()")
-        if body.drive_returns:
-            lines.append(f"let _ret = _inst.{m_drive}()")
+        if drive_returns:
+            lines.append(f"let _ret = _inst.{m_drive}({_drive_call_arg})")
         else:
-            lines.append(f"_inst.{m_drive}()")
+            lines.append(f"_inst.{m_drive}({_drive_call_arg})")
             lines.append(f"let _ret = _inst.{m_verify}()")
         lines.append(f"if _ret != {expected} {{ _fail(\"expected ret={expected}, got \\(_ret)\") }}")
         lines.append(spec.println_pass.replace("nested-frame", "ctrl-flow"))
@@ -822,10 +1127,10 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
         lines.append("class Driver {")
         lines.append("    public static void main(String[] args) {")
         lines.append(f"        var _inst = @@{sys_name}();")
-        if body.drive_returns:
-            lines.append(f"        int _ret = (int) _inst.{m_drive}();")
+        if drive_returns:
+            lines.append(f"        int _ret = (int) _inst.{m_drive}({_drive_call_arg});")
         else:
-            lines.append(f"        _inst.{m_drive}();")
+            lines.append(f"        _inst.{m_drive}({_drive_call_arg});")
             lines.append(f"        int _ret = (int) _inst.{m_verify}();")
         lines.append(f"        if (_ret != {expected}) {{")
         lines.append(f"            System.out.println(\"FAIL: expected ret={expected}, got \" + _ret);")
@@ -841,10 +1146,10 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
         lines.append(spec.fail_exit_def)
         lines.append("fun main() {")
         lines.append(f"    val _inst = @@{sys_name}()")
-        if body.drive_returns:
-            lines.append(f"    val _ret = _inst.{m_drive}() as Int")
+        if drive_returns:
+            lines.append(f"    val _ret = _inst.{m_drive}({_drive_call_arg}) as Int")
         else:
-            lines.append(f"    _inst.{m_drive}()")
+            lines.append(f"    _inst.{m_drive}({_drive_call_arg})")
             lines.append(f"    val _ret = _inst.{m_verify}() as Int")
         lines.append(f"    if (_ret != {expected}) {{ _fail(\"expected ret={expected}, got $_ret\") }}")
         lines.append(f"    {spec.println_pass.replace('nested-frame', 'ctrl-flow')}")
@@ -854,10 +1159,10 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
         lines.append("    public class Driver {")
         lines.append("        public static void Main() {")
         lines.append(f"            var _inst = @@{sys_name}();")
-        if body.drive_returns:
-            lines.append(f"            int _ret = (int) _inst.{m_drive}();")
+        if drive_returns:
+            lines.append(f"            int _ret = (int) _inst.{m_drive}({_drive_call_arg});")
         else:
-            lines.append(f"            _inst.{m_drive}();")
+            lines.append(f"            _inst.{m_drive}({_drive_call_arg});")
             lines.append(f"            int _ret = (int) _inst.{m_verify}();")
         lines.append(f"            if (_ret != {expected}) {{")
         lines.append(f"                throw new System.Exception(\"FAIL: expected ret={expected}, got \" + _ret);")
@@ -871,10 +1176,10 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
         lines.append("#include <stdlib.h>")
         lines.append("int main(void) {")
         lines.append(f"    {sys_name}* _inst = @@{sys_name}();")
-        if body.drive_returns:
-            lines.append(f"    int _ret = (int)(intptr_t){sys_name}_{m_drive}(_inst);")
+        if drive_returns:
+            lines.append(f"    int _ret = (int)(intptr_t){sys_name}_{m_drive}(_inst{_c_extra});")
         else:
-            lines.append(f"    {sys_name}_{m_drive}(_inst);")
+            lines.append(f"    {sys_name}_{m_drive}(_inst{_c_extra});")
             lines.append(f"    int _ret = (int)(intptr_t){sys_name}_{m_verify}(_inst);")
         lines.append(f"    if (_ret != {expected}) {{")
         lines.append(f"        printf(\"FAIL: expected ret={expected}, got %d\\n\", _ret);")
@@ -887,10 +1192,10 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
         lines.append("#include <iostream>")
         lines.append("int main() {")
         lines.append(f"    auto _inst = @@{sys_name}();")
-        if body.drive_returns:
-            lines.append(f"    int _ret = std::any_cast<int>(_inst.{m_drive}());")
+        if drive_returns:
+            lines.append(f"    int _ret = std::any_cast<int>(_inst.{m_drive}({_drive_call_arg}));")
         else:
-            lines.append(f"    _inst.{m_drive}();")
+            lines.append(f"    _inst.{m_drive}({_drive_call_arg});")
             lines.append(f"    int _ret = std::any_cast<int>(_inst.{m_verify}());")
         lines.append(f"    if (_ret != {expected}) {{")
         lines.append(f"        std::cerr << \"FAIL: expected ret={expected}, got \" << _ret << std::endl;")
@@ -905,16 +1210,192 @@ def gen_case(lang, cid, equiv, expected, cond, body, lit, is_smoke,
         lines.append(spec.fail_exit_def)
         lines.append("func _init():")
         lines.append(f"    var _inst = @@{sys_name}()")
-        if body.drive_returns:
-            lines.append(f"    var _ret = _inst.{m_drive}()")
+        if drive_returns:
+            lines.append(f"    var _ret = _inst.{m_drive}({_drive_call_arg})")
         else:
-            lines.append(f"    _inst.{m_drive}()")
+            lines.append(f"    _inst.{m_drive}({_drive_call_arg})")
             lines.append(f"    var _ret = _inst.{m_verify}()")
         lines.append(f"    if _ret != {expected}:")
         lines.append(f"        _fail(\"expected ret={expected}, got \" + str(_ret))")
         lines.append(f"    {spec.println_pass.replace('nested-frame', 'ctrl-flow')}")
         lines.append("    quit()")
 
+    return "\n".join(lines)
+
+
+# =====================================================================
+# Wave-2 case generation: else-if chain, nested-in-else, chain+nested.
+#
+# These are self-contained (own enumerate / simulate / emit) so the
+# wave-1/wave-3 regression set above is untouched. Each case fixes ONE
+# selector value, so exactly one arm fires and is independently
+# asserted — a wrong arm => wrong observable => FAIL. Together the
+# per-arm cases prove every arm is reachable & distinct.
+#
+# Mechanics: `drive(sel: int)` carries the selector; each arm writes a
+# distinct literal to domain `f` (arm i => ARM_VALUE(i); the trailing
+# else => ELSE_VALUE). Verify via get_n (domain read), the same proven
+# void-drive-then-getter shape the other waves use.
+# =====================================================================
+
+ELSE_VALUE = 99            # value written by a trailing `else`.
+INNER_ELSE_VALUE = 88      # nested-in-else inner trailing `else`.
+THEN_VALUE = 7             # nested-in-else outer THEN arm value.
+
+
+def arm_value(i):
+    """Distinct per-arm observable: arm 0=>10, 1=>20, 2=>30, 3=>40."""
+    return 10 * (i + 1)
+
+
+def _sel_cond(spec, k):
+    """`sel == k` in the target's native spelling (sel is the handler
+    param; PHP needs `$sel`)."""
+    return f"{spec.param_prefix}sel == {k}"
+
+
+def _w2_body_dom_w(spec, value):
+    """Arm body: write `value` to domain f."""
+    return f"{spec.self_word}{spec.field_op}f = {value}"
+
+
+# Chain widths to generate: N=3 and N=4 ARMS (excluding the trailing
+# else). N=3 chain => if/else-if/else-if + else.
+CHAIN_WIDTHS = [3, 4]
+
+# nested-in-else inner-chain depths: 1 inner cond (=> if/else, a
+# 2-level total nest) and 2 inner conds (=> if/elif/else, 3-level).
+NESTED_ELSE_DEPTHS = [1, 2]
+
+
+def w2_enumerate():
+    """Yield Wave-2 cases as dicts. Each picks one firing arm so the
+    observable is unambiguous."""
+    # --- else-if chain (#124) ---
+    for n in CHAIN_WIDTHS:
+        # sel in 1..n hits arm (sel-1); sel=0 hits the trailing else.
+        for sel in list(range(1, n + 1)) + [0]:
+            if sel == 0:
+                expected = ELSE_VALUE
+                arm_tag = "else"
+            else:
+                expected = arm_value(sel - 1)
+                arm_tag = f"arm{sel - 1}"
+            cid = f"cf_chain{n}__sel{sel}_{arm_tag}"
+            cls = f"chain{n}__{arm_tag}"
+            yield dict(kind="chain", n=n, sel=sel, cid=cid, cls=cls,
+                       expected=expected)
+    # --- nested-in-else (#135) ---
+    # Outer cond `sel == 9` selects the THEN arm; else holds an inner
+    # chain over sel in 1..depth, with a trailing inner else.
+    for depth in NESTED_ELSE_DEPTHS:
+        sel_values = [9] + list(range(1, depth + 1)) + [0]
+        for sel in sel_values:
+            if sel == 9:
+                expected, arm_tag = THEN_VALUE, "then"
+            elif sel == 0:
+                expected, arm_tag = INNER_ELSE_VALUE, "inner_else"
+            else:
+                expected, arm_tag = arm_value(sel - 1), f"inner_arm{sel - 1}"
+            cid = f"cf_nelse{depth}__sel{sel}_{arm_tag}"
+            cls = f"nelse{depth}__{arm_tag}"
+            yield dict(kind="nested_else", depth=depth, sel=sel, cid=cid,
+                       cls=cls, expected=expected)
+    # --- chain + nested-in-else mix (#124 × #135) ---
+    # An N=3 chain whose trailing `else` holds a 2-arm inner chain.
+    # sel 1..3 hit the outer arms; sel 4/5 hit the inner arms; sel 0
+    # hits the inner trailing else.
+    OUTER_N = 3
+    INNER_N = 2
+    for sel in [1, 2, 3, 4, 5, 0]:
+        if 1 <= sel <= OUTER_N:
+            expected, arm_tag = arm_value(sel - 1), f"outer_arm{sel - 1}"
+        elif OUTER_N < sel <= OUTER_N + INNER_N:
+            inner_idx = sel - OUTER_N - 1
+            expected, arm_tag = arm_value(OUTER_N + inner_idx), \
+                f"inner_arm{inner_idx}"
+        else:  # sel == 0
+            expected, arm_tag = INNER_ELSE_VALUE, "inner_else"
+        cid = f"cf_mix__sel{sel}_{arm_tag}"
+        cls = f"mix__{arm_tag}"
+        yield dict(kind="mix", outer_n=OUTER_N, inner_n=INNER_N, sel=sel,
+                   cid=cid, cls=cls, expected=expected)
+
+
+def _w2_construct_src(lang, spec, case):
+    """Build the control-flow construct source for a Wave-2 case."""
+    stmt_end = spec.stmt_end
+    kind = case["kind"]
+    if kind == "chain":
+        n = case["n"]
+        conds = [_sel_cond(spec, k + 1) for k in range(n)]
+        bodies = [_w2_body_dom_w(spec, arm_value(k)) + stmt_end
+                  for k in range(n)]
+        else_body = _w2_body_dom_w(spec, ELSE_VALUE) + stmt_end
+        return render_chain(lang, conds, bodies, else_body)
+    if kind == "nested_else":
+        depth = case["depth"]
+        outer_cond = _sel_cond(spec, 9)
+        then_body = _w2_body_dom_w(spec, THEN_VALUE) + stmt_end
+        inner_conds = [_sel_cond(spec, k + 1) for k in range(depth)]
+        inner_bodies = [_w2_body_dom_w(spec, arm_value(k)) + stmt_end
+                        for k in range(depth)]
+        inner_else = _w2_body_dom_w(spec, INNER_ELSE_VALUE) + stmt_end
+        return render_nested_in_else(lang, outer_cond, then_body,
+                                     inner_conds, inner_bodies, inner_else)
+    if kind == "mix":
+        on, inn = case["outer_n"], case["inner_n"]
+        outer_conds = [_sel_cond(spec, k + 1) for k in range(on)]
+        outer_bodies = [_w2_body_dom_w(spec, arm_value(k)) + stmt_end
+                        for k in range(on)]
+        inner_conds = [_sel_cond(spec, on + k + 1) for k in range(inn)]
+        inner_bodies = [_w2_body_dom_w(spec, arm_value(on + k)) + stmt_end
+                        for k in range(inn)]
+        inner_else = _w2_body_dom_w(spec, INNER_ELSE_VALUE) + stmt_end
+        return render_chain_nested_else(lang, outer_conds, outer_bodies,
+                                        inner_conds, inner_bodies, inner_else)
+    raise ValueError(f"unknown wave-2 kind {kind}")
+
+
+def gen_case_w2(lang, case):
+    """Emit one Wave-2 .f<ext> source. Reuses _emit_driver — drive(sel)
+    is void, verify via get_n (domain read)."""
+    spec = LANGS[lang]
+    cid = case["cid"]
+    sys_name = f"CtrlFlow_{cid}"
+    expected = case["expected"]
+    sel = case["sel"]
+
+    m_drive = method_name(lang, "drive")
+    m_get_n = method_name(lang, "get_n")
+    drive_sig = f"{m_drive}(sel: int)"
+
+    construct = _w2_construct_src(lang, spec, case)
+
+    lines = []
+    lines.append(f'@@[target("{spec.target}")]')
+    lines.append("")
+    lines.append(f"@@system {sys_name} {{")
+    lines.append("    interface:")
+    lines.append(f"        {drive_sig}")
+    lines.append(f"        {m_get_n}(): int")
+    lines.append("")
+    lines.append("    machine:")
+    lines.append("        $S0 {")
+    lines.append(f"            {drive_sig} {{")
+    lines.append(construct)
+    lines.append("            }")
+    lines.append(f"            {m_get_n}(): int {{ @@:({spec.self_word}{spec.field_op}f) }}")
+    lines.append("        }")
+    lines.append("")
+    lines.append("    domain:")
+    lines.append(f"        f: int = 0")
+    lines.append("}")
+    lines.append("")
+
+    _emit_driver(lines, lang, cid, sys_name, m_drive, m_get_n,
+                 drive_returns=False, expected=expected, spec=spec,
+                 no_arg=False, drive_arg=str(sel))
     return "\n".join(lines)
 
 
@@ -951,13 +1432,25 @@ def main():
                 construct=construct, inner_cond=inner_cond,
             )
             path = out / f"{cid}.{spec.ext}"
-            path.write_text(native_types(src))
+            path.write_text(ts_native_types(native_types(src)))
             index_rows.append(
                 f"{lang}\t{cid}\t{equiv}\t{'yes' if is_smoke else 'no'}\t{expected}"
             )
             per_lang += 1
             if is_smoke:
                 smoke_count += 1
+        # --- Wave-2: else-if chain / nested-in-else / chain+nested ---
+        # All 22 are high-value forms; tag them all smoke so the smoke
+        # tier (every iteration) exercises #124/#135 coverage.
+        for case in w2_enumerate():
+            src = gen_case_w2(lang, case)
+            path = out / f"{case['cid']}.{spec.ext}"
+            path.write_text(ts_native_types(native_types(src)))
+            index_rows.append(
+                f"{lang}\t{case['cid']}\t{case['cls']}\tyes\t{case['expected']}"
+            )
+            per_lang += 1
+            smoke_count += 1
         smoke_count_by_lang[lang] = smoke_count
         cases_per_lang = per_lang
 

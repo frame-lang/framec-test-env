@@ -17,6 +17,26 @@ OUT_DIR=$SCRIPT_DIR/out_ctrl_flow
 LOG_DIR=$SCRIPT_DIR/logs_ctrl_flow
 mkdir -p "$OUT_DIR" "$LOG_DIR"
 
+# --- Strict type-check gate (#138) ----------------------------------
+# The `run` stage greps PASS from `tsx`, which STRIPS types — TS that
+# fails `tsc --strict --noEmit` (the #138 class: generated code that
+# runs but doesn't type-check) sails through invisibly. This gate runs
+# the strict compiler as a DISTINCT `typecheck` stage; a case that runs
+# but fails strict type-check grades FAIL, attributed to `typecheck`.
+#
+# Disabled automatically if `tsc` is absent (CI parity with framec's
+# own fsm_typescript skip-probe). Override: TS_STRICT=0 to force off.
+TS_STRICT=${TS_STRICT:-1}
+if [ "$TS_STRICT" = "1" ] && ! command -v tsc >/dev/null 2>&1; then
+    echo "note: tsc not found — TS strict gate disabled" >&2
+    TS_STRICT=0
+fi
+# Strict flags: modern module resolution, skipLibCheck to avoid lib.d.ts
+# noise, no node @types needed (the generated TS _fail throws, never
+# touches `process`). These match the flags proven to pass clean TS and
+# fail on `int` passthrough / persist type errors (#138).
+TSC_STRICT_FLAGS="--strict --noEmit --skipLibCheck --target es2020 --module esnext --moduleResolution bundler"
+
 TIER="full"
 EXPLICIT_LANGS=""
 while [ $# -gt 0 ]; do
@@ -117,6 +137,9 @@ run_one() {
     case_id=$(basename "$case_file" | sed 's/\.f[a-z]*$//')
     local out="$OUT_DIR/$lang/$case_id"
     local errlog="$LOG_DIR/$lang-$case_id.err"
+    # Strict-typecheck stage result. "SKIP" => no strict gate for this
+    # lang/case (only TS participates today). Set by the TS run branch.
+    local TC_RESULT="SKIP" TC_DETAIL=""
 
     # Kotlin batched fast path.
     if [ "$lang" = "kotlin" ] && [ -n "${KOTLIN_BATCH_JAR:-}" ]; then
@@ -191,7 +214,22 @@ run_one() {
             cp "$gen" "$mjs"
             result=$(node "$mjs" 2>&1); rc=$? ;;
         typescript)
-            result=$(tsx "$gen" 2>&1); rc=$? ;;
+            result=$(tsx "$gen" 2>&1); rc=$?
+            # Strict type-check gate (#138). Distinct stage: a TS case
+            # that RUNS (tsx) but fails `tsc --strict --noEmit` must
+            # grade FAIL, attributed to `typecheck`.
+            if [ "$TS_STRICT" = "1" ]; then
+                local tc_log="$out/tsc.err"
+                # shellcheck disable=SC2086
+                if tsc $TSC_STRICT_FLAGS "$gen" >"$tc_log" 2>&1; then
+                    TC_RESULT="PASS"; TC_DETAIL=""
+                else
+                    TC_RESULT="FAIL"
+                    TC_DETAIL=$(grep -E "error TS[0-9]+" "$tc_log" | head -3 | tr '\n' '|' | head -c 220)
+                    [ -z "$TC_DETAIL" ] && TC_DETAIL=$(head -3 "$tc_log" | tr '\n' '|' | head -c 220)
+                fi
+            fi
+            ;;
         ruby)
             result=$(ruby "$gen" 2>&1); rc=$? ;;
         lua)
@@ -331,13 +369,33 @@ ESCRIPT
             result=$(escript "$escript" 2>&1); rc=$? ;;
     esac
 
+    # Record the `run` stage.
+    local run_ok=0
     if [ $rc -eq 0 ] && echo "$result" | grep -q "^PASS"; then
         printf "%s\t%s\trun\tPASS\t\n" "$lang" "$case_id" >> "$summary"
+        run_ok=1
+    else
+        local e
+        e=$(echo "$result" | head -3 | tr '\n' '|' | head -c 220)
+        printf "%s\t%s\trun\tFAIL\t%s\n" "$lang" "$case_id" "$e" >> "$summary"
+    fi
+
+    # Record the `typecheck` stage as a DISTINCT row when it ran (#138).
+    # The case overall FAILs if EITHER run or typecheck failed, so the
+    # failure is attributable to the right stage.
+    local tc_ok=1
+    if [ "$TC_RESULT" != "SKIP" ]; then
+        if [ "$TC_RESULT" = "PASS" ]; then
+            printf "%s\t%s\ttypecheck\tPASS\t\n" "$lang" "$case_id" >> "$summary"
+        else
+            printf "%s\t%s\ttypecheck\tFAIL\t%s\n" "$lang" "$case_id" "$TC_DETAIL" >> "$summary"
+            tc_ok=0
+        fi
+    fi
+
+    if [ "$run_ok" -eq 1 ] && [ "$tc_ok" -eq 1 ]; then
         return 0
     fi
-    local e
-    e=$(echo "$result" | head -3 | tr '\n' '|' | head -c 220)
-    printf "%s\t%s\trun\tFAIL\t%s\n" "$lang" "$case_id" "$e" >> "$summary"
     return 1
 }
 
@@ -667,11 +725,13 @@ done
 } > "$LOG_DIR/summary.tsv"
 
 echo ""
-echo "# ctrl-flow [$TIER]: $passed / $total passed"
+echo "# ctrl-flow [$TIER]: $passed / $total passed (stages: transpile/compile/run/typecheck)"
 for ln in $LANGS; do
     f="$PER_LANG_LOG_DIR/summary_$ln.tsv"
     [ -f "$f" ] || continue
-    awk -F'\t' '$4 == "FAIL" {print "  not ok " $1 "/" $2 ": " $5}' "$f"
+    # Print stage ($3) so a `typecheck` FAIL (the #138 gate) is clearly
+    # attributed vs a `run` FAIL.
+    awk -F'\t' '$4 == "FAIL" {print "  not ok [" $3 "] " $1 "/" $2 ": " $5}' "$f"
 done
 
 if [ "$passed" -ne "$total" ]; then
