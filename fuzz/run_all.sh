@@ -43,6 +43,13 @@ set -o pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 DIFF_HARNESS="$SCRIPT_DIR/diff_harness/run_fuzz.py"
 
+# Route TypeScript execution through tools/tsx — a drop-in that strips types with
+# esbuild and runs the result with plain `node`, avoiding tsx's per-invocation
+# ESM loader hook, which crashed globally under full-run load (every TS case
+# failing at node:internal/process/esm_loader even though each passes alone).
+# Child phase runners inherit this PATH. See tools/tsx for the rationale.
+export PATH="$SCRIPT_DIR/tools:$PATH"
+
 TIER="full"
 LANG=""
 TAG=""
