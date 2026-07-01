@@ -1,0 +1,566 @@
+@@[target("swift")]
+
+// ============================================================================
+// MAXIMAL FRAME COVERAGE FIXTURE — swift
+// One runnable, self-asserting file exercising every Frame construct the Swift
+// backend supports. TAP output via ck(). The matrix runner compiles this file
+// with `swiftc` and executes the binary.
+//
+// Swift idioms: own actions/operations/interface methods use the portable
+// `@@:self.name(args)` (-> self.name(args)); child-system calls are native
+// Swift the user authors (`self.sensor.bump()`). Method names are emitted
+// verbatim (camelCase here). Native control flow is Swift `if ... { } else if
+// ... { }` and `while ... { }` (no `;`), written directly in handler bodies.
+// Domain fields are read/written natively as `self.field`. Types are Swift
+// native (`Int`/`String`/`Bool`/`Double`). Persist serializes via JSON/Codable.
+//
+// ASYNC EXCLUSION: the Swift backend IS async-layered (`@@[async]` → casing
+// gate + async/await), but async/await requires Swift >= 5.5 and the host
+// toolchain used to run-validate this fixture is Swift 5.3.2 (predates it). The
+// `@@[async]` Pump system is therefore deliberately OMITTED here so the fixture
+// stays runnable on the host; the async/E703 surface is covered by the matrix
+// async suite. Add a Swift >= 5.5 toolchain if async coverage is wanted in this
+// fixture too. (Everything else max_csharp covers is covered here.)
+// ============================================================================
+
+// ============================================================================
+// CORE SYSTEM — HSM, modal stack, all 7 statements, transitions, references,
+// const, actions, operations, persist round-trip, typed fields (Int/Bool/
+// Double/String), internal operation call.
+// ============================================================================
+@@[main]
+@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@[create(make)]
+@@system Job {
+
+    // [section: operations]
+    operations:
+        // [op: typed params + return, native return passthrough + conditional in op body]
+        clamp(v: Int, hi: Int): Int {
+            if v > hi {
+                return hi
+            }
+            return v
+        }
+
+    // [section: interface]
+    interface:
+        start(id: String)
+        submit(task: String)
+        tick()
+        pause()
+        resume()
+        finish()
+        spin(n: Int): Int
+        status(): String
+        counter(): Int
+        depth(): Int
+        traceOf(): String
+        scratchOf(): Int
+        // [bool/double coverage + const read + internal op call]
+        setVerbose(v: Bool)
+        isVerbose(): Bool
+        setRatio(r: Double)
+        getRatio(): Double
+        capacity(): Int
+        clampIn(v: Int, hi: Int)
+        getClamped(): Int
+
+    // [section: machine]
+    machine:
+
+        // [state: initial]
+        $Begin {
+            // [handler: enter, no args]
+            $>() {
+                self.trace = self.trace + "Begin>;"
+            }
+            start(id: String) {
+                self.jobId = id
+                @@:self.note("N;")                  // [action invocation via @@:self]
+                -> ("seed") $Idle
+            }
+            status(): String { @@:("begin") }
+            traceOf(): String { @@:(self.trace) }
+            counter(): Int { @@:(self.attempts) }
+            // [bool setter/getter — exercised + persist round-tripped]
+            setVerbose(v: Bool) { self.verbose = v }
+            // [bool read in a guard]
+            isVerbose(): Bool {
+                if self.verbose {
+                    @@:(true)
+                } else {
+                    @@:(false)
+                }
+            }
+            setRatio(r: Double) { self.ratio = r }
+            getRatio(): Double { @@:(self.ratio) }
+            // [const read via interface method]
+            capacity(): Int { @@:(self.max) }
+        }
+
+        // [state: HSM parent]
+        $Working {
+            status(): String { @@:("working") }
+            counter(): Int { @@:(self.attempts) }
+            depth(): Int { @@:(self.stackDepth) }
+            traceOf(): String { @@:(self.trace) }
+        }
+
+        // [state: HSM child => parent]
+        $Idle => $Working {
+            // [state var w/ type + init]
+            $.i: Int = 0
+
+            // [handler: enter w/ param]
+            $>(seed: String) {
+                self.trace = self.trace + "Idle>(" + seed + ");"
+            }
+            // [handler: exit]
+            <$() {
+                self.trace = self.trace + "Idle<;"
+            }
+            submit(task: String) {
+                // [native control: terminal conditional w/ transitions]
+                if task == "" {
+                    -> $Rejected
+                } else {
+                    self.attempts = self.attempts + 1
+                    -> $Active(task)
+                }
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            // [transition forwarding via => $^ to HSM parent]
+            status(): String { => $^ }
+            depth(): Int { => $^ }
+            spin(n: Int): Int {
+                // [native control: while loop over state var $.i]
+                while $.i < n {
+                    $.i = $.i + 1
+                }
+                @@:($.i)
+            }
+        }
+
+        // [state: typed state parameter (receives state args)]
+        $Active(task: String) {
+            $>() {
+                self.trace = self.trace + "Active>(" + task + ");"
+            }
+            <$(why: String) {
+                self.trace = self.trace + "Active<(" + why + ");"
+            }
+            tick() {
+                self.scratch = self.scratch + 1
+                // [native control: NON-TERMINAL conditional — mutate, fall through]
+                if self.attempts < self.maxAttempts {
+                    self.attempts = self.attempts + 1
+                }
+                self.trace = self.trace + "tick" + String(self.attempts) + ";"
+            }
+            finish() {
+                ("done") -> ("finished") $Done       // [exit-args + enter-args transition]
+            }
+            status(): String { @@:("active") }
+            counter(): Int { @@:(self.attempts) }
+            traceOf(): String { @@:(self.trace) }
+            scratchOf(): Int { @@:(self.scratch) }
+            // [internal operation call: clamp() invoked as @@:self.clamp(...) inside a handler]
+            clampIn(v: Int, hi: Int) {
+                self.clamped = @@:self.clamp(v, hi)
+            }
+            getClamped(): Int { @@:(self.clamped) }
+            // [bool/double getters + const read reachable in $Active for persist-restore reads]
+            isVerbose(): Bool {
+                if self.verbose {
+                    @@:(true)
+                } else {
+                    @@:(false)
+                }
+            }
+            getRatio(): Double { @@:(self.ratio) }
+            capacity(): Int { @@:(self.max) }
+        }
+
+        // [state: modal (pushed)]
+        $Paused {
+            $>() {
+                self.stackDepth = self.stackDepth + 1
+            }
+            <$() {
+                self.stackDepth = self.stackDepth - 1
+            }
+            pause() {
+                push$
+                -> $Paused
+            }
+            resume() {
+                -> pop$
+            }
+            status(): String { @@:("paused") }
+            depth(): Int { @@:(self.stackDepth) }
+        }
+
+        $Rejected {
+            status(): String { @@:("rejected") }
+            counter(): Int { @@:(self.attempts) }
+            traceOf(): String { @@:(self.trace) }
+        }
+
+        // [state: final]
+        $Done {
+            $>(why: String) {
+                self.trace = self.trace + "Done>(" + why + ");"
+            }
+            status(): String { @@:("done") }
+            counter(): Int { @@:(self.attempts) }
+            depth(): Int { @@:(self.stackDepth) }
+            traceOf(): String { @@:(self.trace) }
+        }
+
+    // [section: actions]
+    actions:
+        note(s: String) {
+            self.trace = self.trace + s
+        }
+
+    // [section: domain]
+    domain:
+        // [decl: const field — read AND persisted (#139: emitted mutable)]
+        const max: Int = 99
+        // [decl: typed domain vars + init]
+        jobId: String = ""
+        attempts: Int = 0
+        maxAttempts: Int = 3
+        stackDepth: Int = 0
+        trace: String = ""
+        // [decl: bool + double domain fields — guards/getters + persist round-trip]
+        verbose: Bool = false
+        ratio: Double = 1.5
+        clamped: Int = 0
+        // [attr: @@[no_persist] — excluded from the serialized blob, resets on restore]
+        @@[no_persist]
+        scratch: Int = 0
+}
+
+// ============================================================================
+// MULTI-SYSTEM COMPOSITION — Controller holds + delegates to Sensor.
+// framec lowers the $.sensor reference + @@Sensor() construction; the call
+// (self.sensor.bump()) is user-authored native Swift.
+// ============================================================================
+@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@system Sensor {
+    interface:
+        bump()
+        read(): Int
+    machine:
+        $S {
+            bump() {
+                self.val = self.val + 1
+            }
+            read(): Int { @@:(self.val) }
+        }
+    domain:
+        val: Int = 0
+}
+
+@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@system Controller {
+    interface:
+        tick()
+        total(): Int
+        count(): Int
+    machine:
+        $C {
+            tick() {
+                self.seen = self.seen + 1
+                self.sensor.bump()                   // native call into child system
+            }
+            total(): Int { @@:(self.sensor.read()) }
+            count(): Int { @@:(self.seen) }
+        }
+    domain:
+        // [composition: hold a sub-system instance as a typed domain field]
+        sensor: Sensor = @@Sensor()
+        seen: Int = 0
+}
+
+// ============================================================================
+// CONSTRUCT PROBE — the remaining reference/transition constructs:
+// @@:event, @@:params.x, @@:data.x (set+read, call-scope isolation),
+// @@:return(e) short-circuit, @@:system.state.name, labeled transition,
+// forward transition (-> => $S), forward WITH state args (#128), reentrant
+// @@:self, const read, action invocation, elif ladder + nested conditional.
+// (`guard` is a Swift keyword, so the guard-probe method is named `guardVal`.)
+// ============================================================================
+@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@system Probe {
+
+    interface:
+        echo(x: String): String
+        fire()
+        relay()
+        ping()
+        here(): String
+        evt(): String
+        cap(): Int
+        log(): String
+        classify(n: Int): String
+        guardVal(): Int
+        outerData(): String
+        innerData()
+        fwd()
+
+    machine:
+
+        $A {
+            echo(x: String): String {
+                @@:data.tmp = @@:params.x
+                // @@:data is heterogeneous call-scoped storage -> lowers to Any?
+                // on Swift; a native cast is the user's to write (ocean model),
+                // since Swift (unlike C#/Java/Kotlin) won't concat String + Any?.
+                @@:("echo:" + (@@:data.tmp as! String))
+            }
+            // [@@:data call-scope isolation across a reentrant @@:self call]
+            outerData(): String {
+                @@:data.k = "outer"
+                @@:self.innerData()                  // inner gets its OWN @@:data scope
+                @@:(@@:data.k as! String)             // must still read "outer" (native cast)
+            }
+            innerData() {
+                @@:data.k = "inner"
+            }
+            // [elif ladder + nested conditional — 4 branches]
+            classify(n: Int): String {
+                if n < 0 {
+                    @@:("neg")
+                } else if n == 0 {
+                    @@:("zero")
+                } else {
+                    if n > 100 {
+                        @@:("big")
+                    } else {
+                        @@:("pos")
+                    }
+                }
+            }
+            // [@@:return(e) short-circuits trailing code (vs @@:(e))]
+            guardVal(): Int {
+                @@:return(self.limit)
+                @@:self.helper("LEAK;")
+            }
+            fire() {
+                self.last = @@:event
+                -> "fired" $B                        // [transition: labeled]
+            }
+            relay() {
+                -> => $B                              // [transition: forward (re-dispatch)]
+            }
+            fwd() {
+                -> => $C("payload")                   // [transition: forward WITH state args (#128)]
+            }
+            ping() {
+                @@:self.helper("ping;")               // [action invocation via @@:self]
+                @@:self.fire()                        // [ref: reentrant self-call]
+            }
+            here(): String { @@:(@@:system.state.name) }
+            evt(): String { @@:return(self.last) }
+            cap(): Int { @@:(self.limit) }            // [decl: const read]
+            log(): String { @@:(self.trace) }
+        }
+
+        $B {
+            relay() {
+                self.trace = self.trace + "B.relay;"   // handles re-dispatched event
+            }
+            here(): String { @@:("B") }
+            evt(): String { @@:return(self.last) }
+            log(): String { @@:(self.trace) }
+        }
+
+        // [state: target of a forward transition carrying a state arg (#128 fixed)]
+        $C(tok: String) {
+            fwd() {
+                self.trace = self.trace + "C.fwd(" + tok + ");"
+            }
+            here(): String { @@:("C") }
+            log(): String { @@:(self.trace) }
+        }
+
+    // [section: actions]
+    actions:
+        helper(s: String) {
+            self.trace = self.trace + s
+        }
+
+    domain:
+        const limit: Int = 50
+        trace: String = ""
+        last: String = ""
+}
+
+// ============================================================================
+// DRIVER — TAP, fresh machine per scenario, asserts every path.
+// ============================================================================
+var tapN = 0
+func ck(_ cond: Bool, _ desc: String) {
+    tapN += 1
+    print((cond ? "ok " : "not ok ") + String(tapN) + " - " + desc)
+}
+
+print("TAP version 14")
+
+// ----- operations (instance form, factory-renamed make) -----
+let j0 = Job.make()
+ck(j0.clamp(150, 99) == 99, "operation clamp(150,99)=99 (conditional in op body)")
+ck(j0.clamp(5, 99) == 5, "operation clamp(5,99)=5 (native return passthrough)")
+
+// ----- HSM forward via => $^ + terminal conditional + action -----
+let a = @@Job()
+a.start("J1")
+ck(a.status() == "working", "Idle forwards status via => ^ to parent Working")
+a.submit("")
+ck(a.status() == "rejected", "submit('') terminal conditional -> Rejected")
+ck(a.traceOf().contains("N;"), "action note() invoked from start() via @@:self")
+
+// ----- state-args + non-terminal conditional + trailing read -----
+let b = @@Job()
+b.start("J2")
+b.submit("payload")
+ck(b.status() == "active", "submit(task) state-args -> Active(task)")
+b.tick()
+b.tick()
+b.tick()
+b.tick()
+ck(b.counter() == 3, "non-terminal conditional clamps attempts at maxAttempts=3")
+ck(b.traceOf().contains("tick3"), "trailing read of mutated field ran after the if")
+
+// ----- exit-args + enter-args transition -----
+b.finish()
+ck(b.status() == "done", "finish() exit+enter-args -> Done")
+ck(b.traceOf().contains("Active<(done)"), "exit handler received exit arg 'done'")
+ck(b.traceOf().contains("Done>(finished)"), "enter handler received enter arg 'finished'")
+
+// ----- single-level modal: push$ / -> pop$ + second => $^ path -----
+let c = @@Job()
+c.start("J3")
+c.pause()
+ck(c.status() == "paused" && c.depth() == 1, "push$ -> Paused; Paused.$> set depth=1")
+c.resume()
+ck(c.status() == "working" && c.depth() == 0,
+   "-> pop$ ran Paused.<$ (depth->0) and depth() forwards via => ^ to Working")
+
+// ----- nested modal stack — two push$, two -> pop$ prove a real stack -----
+let cn = @@Job()
+cn.start("J3b")
+cn.pause()
+cn.pause()
+ck(cn.status() == "paused", "nested push$ twice -> still Paused")
+cn.resume()
+cn.resume()
+ck(cn.status() == "working", "two -> pop$ restore through the stack to Idle")
+
+// ----- while loop over a state var -----
+let d = @@Job()
+d.start("J4")
+ck(d.spin(5) == 5, "while loop over state var $.i -> 5")
+
+// ----- const read via interface method -----
+let cap = @@Job()
+ck(cap.capacity() == 99, "const max read via capacity() interface method = 99")
+
+// ----- bool read in a guard -----
+let bv = @@Job()
+ck(bv.isVerbose() == false, "bool field default false read in guard")
+bv.setVerbose(true)
+ck(bv.isVerbose() == true, "bool field set true, read back true in guard")
+
+// ----- double getter -----
+let fr = @@Job()
+ck(fr.getRatio() == 1.5, "double field default 1.5 via getter")
+fr.setRatio(2.75)
+ck(fr.getRatio() == 2.75, "double field set 2.75, read back")
+
+// ----- internal operation call: clamp() called as @@:self.clamp(...) inside a handler -----
+let ci = @@Job()
+ci.start("CI")
+ci.submit("payload")                          // -> $Active
+ci.clampIn(250, 99)
+ck(ci.getClamped() == 99, "operation clamp() called internally (@@:self.clamp) = 99")
+ci.clampIn(7, 99)
+ck(ci.getClamped() == 7, "internal @@:self.clamp(7,99) = 7")
+
+// ----- persist — deep round-trip incl. state-arg survival + const + no_persist -----
+let e = @@Job()
+e.setVerbose(true)                            // set in $Begin (setters live there)
+e.setRatio(3.0625)                            // exact in double; survives JSON
+e.start("J5")
+e.submit("z")                                 // -> $Active(z)
+e.tick()                                      // attempts -> 1, scratch -> 1
+let snap = e.saveState()
+ck(e.scratchOf() == 1, "persist: @@[no_persist] scratch holds 1 before save")
+
+let e2 = @@Job()
+e2.restoreState(snap)
+ck(e2.traceOf() == e.traceOf() && e2.traceOf().contains("Active>(z)"),
+   "persist restores FULL trace incl. state-arg 'z' (deep equality)")
+ck(e2.counter() == e.counter() && e2.status() == "active",
+   "persist restores domain + current state (Active)")
+ck(e2.isVerbose() == true && e2.getRatio() == 3.0625,
+   "persist round-trips bool + double fields through JSON")
+ck(e2.capacity() == 99,
+   "persist: const max survives save/restore (#139: emitted mutable)")
+ck(e.scratchOf() == 1 && e2.scratchOf() == 0,
+   "@@[no_persist] scratch excluded from blob (restore resets to default 0)")
+
+// ----- multi-system composition + ISOLATION (two independent Controllers) -----
+let k1 = @@Controller()
+k1.tick()
+k1.tick()
+let k2 = @@Controller()
+k2.tick()
+k2.tick()
+k2.tick()
+ck(k1.total() == 2 && k2.total() == 3, "multi-system: two Controllers hold INDEPENDENT Sensors")
+ck(k1.count() == 2 && k2.count() == 3, "multi-system: each Controller's own domain isolated")
+
+// ----- construct probe -----
+let pr = @@Probe()
+ck(pr.echo("hi") == "echo:hi", "@@:params.x + @@:data set/read")
+ck(pr.here() == "A" && pr.cap() == 50, "@@:system.state.name + const read")
+ck(pr.classify(-1) == "neg" && pr.classify(0) == "zero" && pr.classify(50) == "pos" && pr.classify(200) == "big",
+   "elif ladder + nested conditional (4 branches)")
+ck(pr.guardVal() == 50 && !pr.log().contains("LEAK;"),
+   "@@:return(e) short-circuits trailing code (vs @@:(e))")
+pr.fire()
+ck(pr.here() == "B" && pr.evt() == "fire", "@@:event recorded + labeled transition -> B")
+
+let pr2 = @@Probe()
+pr2.relay()
+ck(pr2.here() == "B" && pr2.log().contains("B.relay;"), "forward transition -> => B re-dispatched relay")
+
+let pr3 = @@Probe()
+pr3.ping()
+ck(pr3.log().contains("ping;") && pr3.here() == "B", "action invocation + reentrant @@:self.fire()")
+
+let pr4 = @@Probe()
+pr4.fwd()
+ck(pr4.here() == "C" && pr4.log().contains("C.fwd(payload)"),
+   "forward transition WITH state args -> => C(arg) [#128 fixed]")
+
+let pr5 = @@Probe()
+ck(pr5.outerData() == "outer",
+   "@@:data call-scope isolated across reentrant @@:self call")
+
+print("1.." + String(tapN))
