@@ -1,0 +1,80 @@
+@@[target("java")]
+
+// RFC-0052 broadcast persist: `@@[*persist]` + `@@[*save]`/`@@[*load]` at module
+// position stamp EVERY system in the file (no per-system attrs). Round-trips
+// BOTH systems: domain field, machine state, and post-restore liveness on the
+// first; domain field on the second (proves the broadcast reached it).
+// Tagger is `@@system private` (E430: one public class per Java file).
+@@[*persist(String)]
+@@[*save(save_state)]
+@@[*load(restore_state)]
+
+@@[main]
+@@system Counter {
+    interface:
+        inc()
+        n(): int
+        st(): String
+
+    machine:
+        $A {
+            inc() {
+                this.count = this.count + 1;
+                -> $B
+            }
+            n(): int { @@:(this.count) }
+            st(): String { @@:("A") }
+        }
+        $B {
+            inc() {
+                this.count = this.count + 1;
+            }
+            n(): int { @@:(this.count) }
+            st(): String { @@:("B") }
+        }
+
+    domain:
+        count: int = 0
+}
+
+@@system private Tagger {
+    interface:
+        tag(t: String)
+        probe(): String
+
+    machine:
+        $S {
+            tag(t: String) {
+                this.label = t;
+            }
+            probe(): String { @@:(this.label) }
+        }
+
+    domain:
+        label: String = ""
+}
+
+class Main {
+    public static void main(String[] args) {
+        var c = @@Counter();
+        c.inc();
+        c.inc();
+        var t = @@Tagger();
+        t.tag("x");
+
+        String blobC = c.save_state();
+        String blobT = t.save_state();
+
+        var c2 = @@Counter();
+        c2.restore_state(blobC);
+        if ((int) c2.n() != 2) { throw new RuntimeException("counter domain"); }
+        if (!"B".equals((String) c2.st())) { throw new RuntimeException("counter state"); }
+        c2.inc();
+        if ((int) c2.n() != 3) { throw new RuntimeException("restored machine not live"); }
+
+        var t2 = @@Tagger();
+        t2.restore_state(blobT);
+        if (!"x".equals((String) t2.probe())) { throw new RuntimeException("broadcast second system"); }
+        System.out.println("PASS: broadcast_persist");
+    }
+}

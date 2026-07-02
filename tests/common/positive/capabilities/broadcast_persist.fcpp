@@ -1,0 +1,82 @@
+@@[target("cpp_17")]
+
+#include <cassert>
+#include <cstdio>
+#include <string>
+#include <nlohmann/json.hpp>
+// RFC-0052 broadcast persist: `@@[*persist]` + `@@[*save]`/`@@[*load]` at module
+// position stamp EVERY system in the file (no per-system attrs). Round-trips
+// BOTH systems: domain field, machine state, and post-restore liveness on the
+// first; domain field on the second (proves the broadcast reached it).
+@@[*persist(std::string)]
+@@[*save(save_state)]
+@@[*load(restore_state)]
+
+@@[main]
+@@system Counter {
+    interface:
+        inc()
+        n(): int
+        st(): std::string
+
+    machine:
+        $A {
+            inc() {
+                this->count = this->count + 1;
+                -> $B
+            }
+            n(): int { @@:(this->count) }
+            st(): std::string { @@:("A") }
+        }
+        $B {
+            inc() {
+                this->count = this->count + 1;
+            }
+            n(): int { @@:(this->count) }
+            st(): std::string { @@:("B") }
+        }
+
+    domain:
+        count: int = 0
+}
+
+@@system Tagger {
+    interface:
+        tag(t: std::string)
+        probe(): std::string
+
+    machine:
+        $S {
+            tag(t: std::string) {
+                this->label = t;
+            }
+            probe(): std::string { @@:(this->label) }
+        }
+
+    domain:
+        label: std::string = ""
+}
+
+int main() {
+    auto c = @@Counter();
+    c.inc();
+    c.inc();
+    auto t = @@Tagger();
+    t.tag("x");
+
+    auto blob_c = c.save_state();
+    auto blob_t = t.save_state();
+
+    auto c2 = @@Counter();
+    c2.restore_state(blob_c);
+    assert(std::any_cast<int>(c2.n()) == 2);
+    assert(std::any_cast<std::string>(c2.st()) == "B");
+    c2.inc();
+    assert(std::any_cast<int>(c2.n()) == 3);
+
+    auto t2 = @@Tagger();
+    t2.restore_state(blob_t);
+    assert(std::any_cast<std::string>(t2.probe()) == "x");
+    printf("PASS: broadcast_persist\n");
+    return 0;
+}

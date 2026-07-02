@@ -1,0 +1,77 @@
+@@[target("rust")]
+
+// RFC-0052 broadcast persist: `@@[*persist]` + `@@[*save]`/`@@[*load]` at module
+// position stamp EVERY system in the file (no per-system attrs). Round-trips
+// BOTH systems: domain field, machine state, and post-restore liveness on the
+// first; domain field on the second (proves the broadcast reached it).
+@@[*persist(String)]
+@@[*save(save_state)]
+@@[*load(restore_state)]
+
+@@[main]
+@@system Counter {
+    interface:
+        inc()
+        n(): i32
+        st(): String
+
+    machine:
+        $A {
+            inc() {
+                self.count = self.count + 1;
+                -> $B
+            }
+            n(): i32 { @@:(self.count) }
+            st(): String { @@:("A".to_string()) }
+        }
+        $B {
+            inc() {
+                self.count = self.count + 1;
+            }
+            n(): i32 { @@:(self.count) }
+            st(): String { @@:("B".to_string()) }
+        }
+
+    domain:
+        count: i32 = 0
+}
+
+@@system Tagger {
+    interface:
+        tag(t: String)
+        probe(): String
+
+    machine:
+        $S {
+            tag(t: String) {
+                self.label = t;
+            }
+            probe(): String { @@:(self.label.clone()) }
+        }
+
+    domain:
+        label: String = ""
+}
+
+fn main() {
+    let mut c = @@Counter();
+    c.inc();
+    c.inc();
+    let mut t = @@Tagger();
+    t.tag("x".to_string());
+
+    let blob_c = c.save_state();
+    let blob_t = t.save_state();
+
+    let mut c2 = @@Counter();
+    c2.restore_state(blob_c);
+    assert_eq!(c2.n(), 2, "counter domain");
+    assert_eq!(c2.st(), "B", "counter state");
+    c2.inc();
+    assert_eq!(c2.n(), 3, "restored machine not live");
+
+    let mut t2 = @@Tagger();
+    t2.restore_state(blob_t);
+    assert_eq!(t2.probe(), "x", "broadcast second system");
+    println!("PASS: broadcast_persist");
+}

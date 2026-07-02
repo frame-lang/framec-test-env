@@ -1,0 +1,99 @@
+@@[target("go")]
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+// RFC-0052 broadcast persist: `@@[*persist]` + `@@[*save]`/`@@[*load]` at module
+// position stamp EVERY system in the file (no per-system attrs). Round-trips
+// BOTH systems: domain field, machine state, and post-restore liveness on the
+// first; domain field on the second (proves the broadcast reached it).
+@@[*persist(string)]
+@@[*save(SaveState)]
+@@[*load(LoadState)]
+
+@@[main]
+@@system Counter {
+    interface:
+        inc()
+        n(): int
+        st(): string
+
+    machine:
+        $A {
+            inc() {
+                s.count = s.count + 1
+                -> $B
+            }
+            n(): int { @@:(s.count) }
+            st(): string { @@:("A") }
+        }
+        $B {
+            inc() {
+                s.count = s.count + 1
+            }
+            n(): int { @@:(s.count) }
+            st(): string { @@:("B") }
+        }
+
+    domain:
+        count: int = 0
+}
+
+@@system Tagger {
+    interface:
+        tag(t: string)
+        probe(): string
+
+    machine:
+        $S {
+            tag(t: string) {
+                s.label = t
+            }
+            probe(): string { @@:(s.label) }
+        }
+
+    domain:
+        label: string = ""
+}
+
+var _ = json.Marshal
+
+func main() {
+	c := @@Counter()
+	c.Inc()
+	c.Inc()
+	t := @@Tagger()
+	t.Tag("x")
+
+	blobC := c.SaveState()
+	blobT := t.SaveState()
+
+	c2 := @@Counter()
+	c2.LoadState(blobC)
+	if c2.N() != 2 {
+		fmt.Println("FAIL: counter domain")
+		os.Exit(1)
+	}
+	if c2.St() != "B" {
+		fmt.Println("FAIL: counter state")
+		os.Exit(1)
+	}
+	c2.Inc()
+	if c2.N() != 3 {
+		fmt.Println("FAIL: restored machine not live")
+		os.Exit(1)
+	}
+
+	t2 := @@Tagger()
+	t2.LoadState(blobT)
+	if t2.Probe() != "x" {
+		fmt.Println("FAIL: broadcast second system")
+		os.Exit(1)
+	}
+	fmt.Println("PASS: broadcast_persist")
+}

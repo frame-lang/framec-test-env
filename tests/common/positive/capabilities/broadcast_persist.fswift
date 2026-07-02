@@ -1,0 +1,75 @@
+@@[target("swift")]
+
+// RFC-0052 broadcast persist: `@@[*persist]` + `@@[*save]`/`@@[*load]` at module
+// position stamp EVERY system in the file (no per-system attrs). Round-trips
+// BOTH systems: domain field, machine state, and post-restore liveness on the
+// first; domain field on the second (proves the broadcast reached it).
+@@[*persist(String)]
+@@[*save(saveState)]
+@@[*load(restoreState)]
+
+@@[main]
+@@system Counter {
+    interface:
+        inc()
+        n(): Int
+        st(): String
+
+    machine:
+        $A {
+            inc() {
+                self.count = self.count + 1
+                -> $B
+            }
+            n(): Int { @@:(self.count) }
+            st(): String { @@:("A") }
+        }
+        $B {
+            inc() {
+                self.count = self.count + 1
+            }
+            n(): Int { @@:(self.count) }
+            st(): String { @@:("B") }
+        }
+
+    domain:
+        count: Int = 0
+}
+
+@@system Tagger {
+    interface:
+        tag(t: String)
+        probe(): String
+
+    machine:
+        $S {
+            tag(t: String) {
+                self.label = t
+            }
+            probe(): String { @@:(self.label) }
+        }
+
+    domain:
+        label: String = ""
+}
+
+var c = @@Counter()
+c.inc()
+c.inc()
+var t = @@Tagger()
+t.tag("x")
+
+let blobC = c.saveState()
+let blobT = t.saveState()
+
+var c2 = @@Counter()
+c2.restoreState(blobC)
+if c2.n() as! Int != 2 { fatalError("counter domain") }
+if c2.st() as! String != "B" { fatalError("counter state") }
+c2.inc()
+if c2.n() as! Int != 3 { fatalError("restored machine not live") }
+
+var t2 = @@Tagger()
+t2.restoreState(blobT)
+if t2.probe() as! String != "x" { fatalError("broadcast second system") }
+print("PASS: broadcast_persist")

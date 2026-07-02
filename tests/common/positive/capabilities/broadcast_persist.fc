@@ -1,0 +1,88 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+// RFC-0052 broadcast persist: `@@[*persist]` + `@@[*save]`/`@@[*load]` at module
+// position stamp EVERY system in the file (no per-system attrs). Round-trips
+// BOTH systems: domain field, machine state, and post-restore liveness on the
+// first; domain field on the second (proves the broadcast reached it).
+@@[*persist(char*)]
+@@[*save(save_state)]
+@@[*load(restore_state)]
+
+@@[main]
+@@system Counter {
+    interface:
+        inc()
+        n(): int
+        st(): char*
+
+    machine:
+        $A {
+            inc() {
+                self->count = self->count + 1;
+                -> $B
+            }
+            n(): int { @@:(self->count) }
+            st(): char* { @@:("A") }
+        }
+        $B {
+            inc() {
+                self->count = self->count + 1;
+            }
+            n(): int { @@:(self->count) }
+            st(): char* { @@:("B") }
+        }
+
+    domain:
+        count: int = 0
+}
+
+@@system Tagger {
+    interface:
+        tag(t: char*)
+        probe(): char*
+
+    machine:
+        $S {
+            tag(t: char*) {
+                self->label = t;
+            }
+            probe(): char* { @@:(self->label) }
+        }
+
+    domain:
+        label: char* = ""
+}
+
+int main() {
+    Counter* c = @@Counter();
+    Counter_inc(c);
+    Counter_inc(c);
+    Tagger* t = @@Tagger();
+    Tagger_tag(t, "x");
+
+    char* blob_c = Counter_save_state(c);
+    char* blob_t = Tagger_save_state(t);
+
+    Counter* c2 = @@Counter();
+    Counter_restore_state(c2, blob_c);
+    if (Counter_n(c2) != 2) { printf("FAIL: counter domain\n"); return 1; }
+    if (strcmp(Counter_st(c2), "B") != 0) { printf("FAIL: counter state\n"); return 1; }
+    Counter_inc(c2);
+    if (Counter_n(c2) != 3) { printf("FAIL: restored machine not live\n"); return 1; }
+
+    Tagger* t2 = @@Tagger();
+    Tagger_restore_state(t2, blob_t);
+    if (strcmp(Tagger_probe(t2), "x") != 0) { printf("FAIL: broadcast second system\n"); return 1; }
+    printf("PASS: broadcast_persist\n");
+    free(blob_c);
+    free(blob_t);
+    Counter_destroy(c);
+    Counter_destroy(c2);
+    Tagger_destroy(t);
+    Tagger_destroy(t2);
+    return 0;
+}

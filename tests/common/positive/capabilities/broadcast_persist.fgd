@@ -1,0 +1,78 @@
+@@[target("gdscript")]
+
+extends SceneTree
+# RFC-0052 broadcast persist: `@@[*persist]` + `@@[*save]`/`@@[*load]` at module
+# position stamp EVERY system in the file (no per-system attrs). Round-trips
+# BOTH systems: domain field, machine state, and post-restore liveness on the
+# first; domain field on the second (proves the broadcast reached it).
+@@[*persist(String)]
+@@[*save(save_state)]
+@@[*load(restore_state)]
+
+@@[main]
+@@system Counter {
+    interface:
+        inc()
+        n(): int
+        st(): String
+
+    machine:
+        $A {
+            inc() {
+                self.count = self.count + 1
+                -> $B
+            }
+            n(): int { @@:(self.count) }
+            st(): String { @@:("A") }
+        }
+        $B {
+            inc() {
+                self.count = self.count + 1
+            }
+            n(): int { @@:(self.count) }
+            st(): String { @@:("B") }
+        }
+
+    domain:
+        count: int = 0
+}
+
+@@system Tagger {
+    interface:
+        tag(t: String)
+        probe(): String
+
+    machine:
+        $S {
+            tag(t: String) {
+                self.label = t
+            }
+            probe(): String { @@:(self.label) }
+        }
+
+    domain:
+        label: String = ""
+}
+
+func _init():
+    var c = @@Counter()
+    c.inc()
+    c.inc()
+    var t = @@Tagger()
+    t.tag("x")
+
+    var blob_c = c.save_state()
+    var blob_t = t.save_state()
+
+    var c2 = @@Counter()
+    c2.restore_state(blob_c)
+    assert(c2.n() == 2, "counter domain")
+    assert(c2.st() == "B", "counter state")
+    c2.inc()
+    assert(c2.n() == 3, "restored machine not live")
+
+    var t2 = @@Tagger()
+    t2.restore_state(blob_t)
+    assert(t2.probe() == "x", "broadcast second system")
+    print("PASS: broadcast_persist")
+    quit()

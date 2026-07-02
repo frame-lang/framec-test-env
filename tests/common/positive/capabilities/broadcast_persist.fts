@@ -1,0 +1,75 @@
+@@[target("typescript")]
+
+// RFC-0052 broadcast persist: `@@[*persist]` + `@@[*save]`/`@@[*load]` at module
+// position stamp EVERY system in the file (no per-system attrs). Round-trips
+// BOTH systems: domain field, machine state, and post-restore liveness on the
+// first; domain field on the second (proves the broadcast reached it).
+@@[*persist(string)]
+@@[*save(saveState)]
+@@[*load(restoreState)]
+
+@@[main]
+@@system Counter {
+    interface:
+        inc()
+        n(): int
+        st(): str
+
+    machine:
+        $A {
+            inc() {
+                this.count = this.count + 1
+                -> $B
+            }
+            n(): int { @@:(this.count) }
+            st(): str { @@:("A") }
+        }
+        $B {
+            inc() {
+                this.count = this.count + 1
+            }
+            n(): int { @@:(this.count) }
+            st(): str { @@:("B") }
+        }
+
+    domain:
+        count: int = 0
+}
+
+@@system Tagger {
+    interface:
+        tag(t: str)
+        probe(): str
+
+    machine:
+        $S {
+            tag(t: str) {
+                this.label = t
+            }
+            probe(): str { @@:(this.label) }
+        }
+
+    domain:
+        label: str = ""
+}
+
+const c = @@Counter();
+c.inc();
+c.inc();
+const t = @@Tagger();
+t.tag("x");
+
+const blobC = c.saveState();
+const blobT = t.saveState();
+
+const c2 = @@Counter();
+c2.restoreState(blobC);
+if (c2.n() as number !== 2) { console.log("FAIL: counter domain"); process.exit(1); }
+if (c2.st() as string !== "B") { console.log("FAIL: counter state"); process.exit(1); }
+c2.inc();
+if (c2.n() as number !== 3) { console.log("FAIL: restored machine not live"); process.exit(1); }
+
+const t2 = @@Tagger();
+t2.restoreState(blobT);
+if (t2.probe() as string !== "x") { console.log("FAIL: broadcast second system"); process.exit(1); }
+console.log("PASS: broadcast_persist");

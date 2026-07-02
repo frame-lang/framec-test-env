@@ -1,0 +1,77 @@
+@@[target("ruby")]
+
+require 'json'
+
+# RFC-0052 broadcast persist: `@@[*persist]` + `@@[*save]`/`@@[*load]` at module
+# position stamp EVERY system in the file (no per-system attrs). Round-trips
+# BOTH systems: domain field, machine state, and post-restore liveness on the
+# first; domain field on the second (proves the broadcast reached it).
+@@[*persist(String)]
+@@[*save(save_state)]
+@@[*load(restore_state)]
+
+@@[main]
+@@system Counter {
+    interface:
+        inc()
+        n(): int
+        st(): str
+
+    machine:
+        $A {
+            inc() {
+                self.count = self.count + 1
+                -> $B
+            }
+            n(): int { @@:(self.count) }
+            st(): str { @@:("A") }
+        }
+        $B {
+            inc() {
+                self.count = self.count + 1
+            }
+            n(): int { @@:(self.count) }
+            st(): str { @@:("B") }
+        }
+
+    domain:
+        count: int = 0
+}
+
+@@system Tagger {
+    interface:
+        tag(t: str)
+        probe(): str
+
+    machine:
+        $S {
+            tag(t: str) {
+                self.label = t
+            }
+            probe(): str { @@:(self.label) }
+        }
+
+    domain:
+        label: str = ""
+}
+
+c = @@Counter()
+c.inc
+c.inc
+t = @@Tagger()
+t.tag("x")
+
+blob_c = c.save_state
+blob_t = t.save_state
+
+c2 = @@Counter()
+c2.restore_state(blob_c)
+raise "counter domain: expected 2, got #{c2.n}" unless c2.n == 2
+raise "counter state: expected B, got #{c2.st}" unless c2.st == "B"
+c2.inc
+raise "restored machine not live" unless c2.n == 3
+
+t2 = @@Tagger()
+t2.restore_state(blob_t)
+raise "broadcast second system: expected x" unless t2.probe == "x"
+puts "PASS: broadcast_persist"

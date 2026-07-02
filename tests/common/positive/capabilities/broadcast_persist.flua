@@ -1,0 +1,75 @@
+@@[target("lua")]
+
+-- RFC-0052 broadcast persist: `@@[*persist]` + `@@[*save]`/`@@[*load]` at module
+-- position stamp EVERY system in the file (no per-system attrs). Round-trips
+-- BOTH systems: domain field, machine state, and post-restore liveness on the
+-- first; domain field on the second (proves the broadcast reached it).
+@@[*persist(string)]
+@@[*save(save_state)]
+@@[*load(restore_state)]
+
+@@[main]
+@@system Counter {
+    interface:
+        inc()
+        n(): int
+        st(): str
+
+    machine:
+        $A {
+            inc() {
+                self.count = self.count + 1
+                -> $B
+            }
+            n(): int { @@:(self.count) }
+            st(): str { @@:("A") }
+        }
+        $B {
+            inc() {
+                self.count = self.count + 1
+            }
+            n(): int { @@:(self.count) }
+            st(): str { @@:("B") }
+        }
+
+    domain:
+        count: int = 0
+}
+
+@@system Tagger {
+    interface:
+        tag(t: str)
+        probe(): str
+
+    machine:
+        $S {
+            tag(t: str) {
+                self.label = t
+            }
+            probe(): str { @@:(self.label) }
+        }
+
+    domain:
+        label: str = ""
+}
+
+local c = @@Counter()
+c:inc()
+c:inc()
+local t = @@Tagger()
+t:tag("x")
+
+local blob_c = c:save_state()
+local blob_t = t:save_state()
+
+local c2 = @@Counter()
+c2:restore_state(blob_c)
+if c2:n() ~= 2 then print("FAIL: counter domain") os.exit(1) end
+if c2:st() ~= "B" then print("FAIL: counter state") os.exit(1) end
+c2:inc()
+if c2:n() ~= 3 then print("FAIL: restored machine not live") os.exit(1) end
+
+local t2 = @@Tagger()
+t2:restore_state(blob_t)
+if t2:probe() ~= "x" then print("FAIL: broadcast second system") os.exit(1) end
+print("PASS: broadcast_persist")

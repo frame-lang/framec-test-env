@@ -1,0 +1,80 @@
+@@[target("csharp")]
+
+using System.Text.Json;
+// RFC-0052 broadcast persist: `@@[*persist]` + `@@[*save]`/`@@[*load]` at module
+// position stamp EVERY system in the file (no per-system attrs). Round-trips
+// BOTH systems: domain field, machine state, and post-restore liveness on the
+// first; domain field on the second (proves the broadcast reached it).
+@@[*persist(string)]
+@@[*save(SaveState)]
+@@[*load(RestoreState)]
+
+@@[main]
+@@system Counter {
+    interface:
+        inc()
+        n(): int
+        st(): string
+
+    machine:
+        $A {
+            inc() {
+                this.count = this.count + 1;
+                -> $B
+            }
+            n(): int { @@:(this.count) }
+            st(): string { @@:("A") }
+        }
+        $B {
+            inc() {
+                this.count = this.count + 1;
+            }
+            n(): int { @@:(this.count) }
+            st(): string { @@:("B") }
+        }
+
+    domain:
+        count: int = 0
+}
+
+@@system Tagger {
+    interface:
+        tag(t: string)
+        probe(): string
+
+    machine:
+        $S {
+            tag(t: string) {
+                this.label = t;
+            }
+            probe(): string { @@:(this.label) }
+        }
+
+    domain:
+        label: string = ""
+}
+
+class Program {
+    static void Main(string[] args) {
+        var c = @@Counter();
+        c.inc();
+        c.inc();
+        var t = @@Tagger();
+        t.tag("x");
+
+        var blobC = c.SaveState();
+        var blobT = t.SaveState();
+
+        var c2 = @@Counter();
+        c2.RestoreState(blobC);
+        if ((int) c2.n() != 2) { throw new Exception("counter domain"); }
+        if ((string) c2.st() != "B") { throw new Exception("counter state"); }
+        c2.inc();
+        if ((int) c2.n() != 3) { throw new Exception("restored machine not live"); }
+
+        var t2 = @@Tagger();
+        t2.RestoreState(blobT);
+        if ((string) t2.probe() != "x") { throw new Exception("broadcast second system"); }
+        Console.WriteLine("PASS: broadcast_persist");
+    }
+}
