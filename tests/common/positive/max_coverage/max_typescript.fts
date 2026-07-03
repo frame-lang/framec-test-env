@@ -2,6 +2,8 @@
 
 // ============================================================================
 // MAXIMAL FRAME COVERAGE FIXTURE — typescript
+// CONTRACT: governed by tests/common/positive/max_coverage/README.md
+// (brought to contract 2026-07-03: Part-3 cross-product block Kid/Solo/Orch).
 // One runnable, self-asserting file exercising every Frame construct this
 // backend supports. Construct tags are `//` comment lines above each construct.
 // TAP output, driven + type-checked by real `tsc`/`tsx`/`node`.
@@ -376,6 +378,92 @@
 }
 
 // ============================================================================
+// CROSS-PRODUCT BLOCK (contract Part 3 — the distilled framec#159 family).
+// `tick` is deliberately on FOUR systems (Controller/Orch/Kid/Solo). TypeScript is
+// an OO passthrough target: the indexed splice must survive intact —
+// this.kids[i].tick(dt) — including the Frame-expression index.
+// ============================================================================
+@@system Kid {
+    interface:
+        tick(dt: number)
+        probe(): number
+    machine:
+        $S {
+            tick(dt: number) {
+                this.n = this.n + 1;
+            }
+            probe(): number {
+                @@:(this.n)
+            }
+        }
+    domain:
+        n: number = 0
+}
+
+@@system Solo {
+    // [collision: SAME interface method names as Kid — a sibling child type]
+    interface:
+        tick(dt: number)
+        probe(): number
+    machine:
+        $S {
+            tick(dt: number) {
+                this.p = this.p + 10;
+            }
+            probe(): number {
+                @@:(this.p)
+            }
+        }
+    domain:
+        p: number = 0
+}
+
+@@system Orch {
+    interface:
+        // [collision: orchestrator declares `tick` itself — caller-collision]
+        tick(dt: number)
+        adopt(k)
+        kidval(i: number): number
+        lastval(): number
+        soloval(): number
+    machine:
+        $S {
+            adopt(k) {
+                @@:self.kids.push(k);
+            }
+            tick(dt: number) {
+                @@:self._tickall(dt);
+            }
+            // [ref: indexed cross-system call, native-param index]
+            kidval(i: number): number {
+                @@:(@@:self.kids[i].probe())
+            }
+            // [ref: indexed cross-system call, FRAME-EXPRESSION index]
+            lastval(): number {
+                @@:(@@:self.kids[@@:self.kids.length - 1].probe())
+            }
+            // [ref: scalar sibling with the SAME collided method names]
+            soloval(): number {
+                @@:(@@:self.solo.probe())
+            }
+        }
+    actions:
+        _tickall(dt: number) {
+            for (let i = 0; i < @@:self.kids.length; i++) {
+                // [ref: indexed × cross-system × caller/sibling-collision]
+                @@:self.kids[i].tick(dt);
+            }
+            // [ref: scalar field, collided name]
+            @@:self.solo.tick(dt);
+        }
+    domain:
+        // [domain: array-of-systems + scalar sibling of a DIFFERENT type —
+        //  TS is static (E605): annotate; Kid[] keeps the element visible]
+        kids: Kid[] = []
+        solo: Solo = @@Solo()
+}
+
+// ============================================================================
 // CONSTRUCT PROBE — the remaining reference/transition constructs:
 // @@:event, @@:params.x, @@:data.x (set+read), @@:return(e), @@:system.state.name,
 // labeled transition, forward transition (-> => $S), reentrant @@:self.m(),
@@ -689,6 +777,23 @@ async function main(): Promise<void> {
     const pr5 = @@Probe();
     _ck(pr5.outer_data() === "outer",
         "@@:data call-scope isolated across reentrant @@:self call");
+
+    // --- CROSS-PRODUCT BLOCK (contract Part 3 / framec#159 family) ---
+    const o = @@Orch();
+    const ka = @@Kid();
+    const kb = @@Kid();
+    const kc = @@Kid();
+    o.adopt(ka);
+    o.adopt(kb);
+    o.adopt(kc);
+    o.tick(0.16);
+    o.tick(0.16);
+    _ck(o.kidval(0) === 2 && o.kidval(1) === 2 && o.kidval(2) === 2,
+        "x-product: indexed @@:self.kids[i].tick + 3 kids independent (collided name)");
+    _ck(o.lastval() === 2, "x-product: Frame-expression index kids[len-1].probe()");
+    _ck(o.soloval() === 20, "x-product: scalar sibling with identical method names");
+    ka.tick(1.0); // [control: native call]
+    _ck(o.kidval(0) === 3 && o.kidval(1) === 2, "x-product: control native call touches only kid 0");
 
     console.log("1.." + _n);
 }
