@@ -2,6 +2,8 @@
 
 // ============================================================================
 // MAXIMAL FRAME COVERAGE FIXTURE — csharp
+// CONTRACT: governed by tests/common/positive/max_coverage/README.md
+// (brought to contract 2026-07-03: Part-3 cross-product block Kid/Solo/Orch).
 // One runnable, self-asserting file exercising every Frame construct the C#
 // backend supports. TAP output via Ck(). The matrix runner wraps this file in
 // `namespace frametest.<id> { ... }` and reflectively invokes Program.Main().
@@ -278,7 +280,7 @@ using System.Threading.Tasks;
         $C {
             Tick() {
                 this.seen = this.seen + 1;
-                this.sensor.Bump();                  // native call into child system
+                this.sensor.Bump(); // [control: native child call]
             }
             Total(): int { @@:(this.sensor.Read()) }
             Count(): int { @@:(this.seen) }
@@ -287,6 +289,91 @@ using System.Threading.Tasks;
         // [composition: hold a sub-system instance as a typed domain field]
         sensor: Sensor = @@Sensor()
         seen: int = 0
+}
+
+// ============================================================================
+// CROSS-PRODUCT BLOCK (contract Part 3 — the distilled framec#159 family).
+// `Tick` on FOUR systems; C# is OO passthrough (Frame-declared casing is
+// preserved) — the indexed splice must survive intact, incl. the
+// Frame-expression index. Typed List<Kid> keeps the element visible (E605).
+// ============================================================================
+@@system Kid {
+    interface:
+        Tick(dt: double)
+        Probe(): int
+    machine:
+        $S {
+            Tick(dt: double) {
+                this.n = this.n + 1;
+            }
+            Probe(): int {
+                @@:(this.n)
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+@@system Solo {
+    // [collision: SAME interface method names as Kid — a sibling child type]
+    interface:
+        Tick(dt: double)
+        Probe(): int
+    machine:
+        $S {
+            Tick(dt: double) {
+                this.p = this.p + 10;
+            }
+            Probe(): int {
+                @@:(this.p)
+            }
+        }
+    domain:
+        p: int = 0
+}
+
+@@system Orch {
+    interface:
+        // [collision: orchestrator declares `Tick` itself — caller-collision]
+        Tick(dt: double)
+        Adopt(k: Kid)
+        Kidval(i: int): int
+        Lastval(): int
+        Soloval(): int
+    machine:
+        $S {
+            Adopt(k: Kid) {
+                @@:self.kids.Add(k);
+            }
+            Tick(dt: double) {
+                @@:self._tickall(dt);
+            }
+            // [ref: indexed cross-system call, native-param index]
+            Kidval(i: int): int {
+                @@:(@@:self.kids[i].Probe())
+            }
+            // [ref: indexed cross-system call, FRAME-EXPRESSION index]
+            Lastval(): int {
+                @@:(@@:self.kids[@@:self.kids.Count - 1].Probe())
+            }
+            // [ref: scalar sibling with the SAME collided method names]
+            Soloval(): int {
+                @@:(@@:self.solo.Probe())
+            }
+        }
+    actions:
+        _tickall(dt: double) {
+            for (int i = 0; i < @@:self.kids.Count; i++) {
+                // [ref: indexed × cross-system × caller/sibling-collision]
+                @@:self.kids[i].Tick(dt);
+            }
+            // [ref: scalar field, collided name]
+            @@:self.solo.Tick(dt);
+        }
+    domain:
+        // [domain: typed list-of-systems + scalar sibling of a DIFFERENT type]
+        kids: List<Kid> = new List<Kid>()
+        solo: Solo = @@Solo()
 }
 
 // ============================================================================
@@ -635,6 +722,23 @@ class Program {
         Pump ap2 = @@Pump();
         ap2.RestoreState(asnap);
         Ck(ap2.Peek() == 2, "async persist: restored Pump retains level=2 (sync op Peek())");
+
+        // --- CROSS-PRODUCT BLOCK (contract Part 3 / framec#159 family) ---
+        var o = @@Orch();
+        var ka = @@Kid();
+        var kb = @@Kid();
+        var kc = @@Kid();
+        o.Adopt(ka);
+        o.Adopt(kb);
+        o.Adopt(kc);
+        o.Tick(0.16);
+        o.Tick(0.16);
+        Ck((int) o.Kidval(0) == 2 && (int) o.Kidval(1) == 2 && (int) o.Kidval(2) == 2,
+            "x-product: indexed kids[i].Tick + 3 kids independent (collided name)");
+        Ck((int) o.Lastval() == 2, "x-product: Frame-expression index kids[Count-1].Probe()");
+        Ck((int) o.Soloval() == 20, "x-product: scalar sibling with identical method names");
+        ka.Tick(1.0); // [control: native call]
+        Ck((int) o.Kidval(0) == 3 && (int) o.Kidval(1) == 2, "x-product: control native call touches only kid 0");
 
         Console.WriteLine("1.." + _n);
     }

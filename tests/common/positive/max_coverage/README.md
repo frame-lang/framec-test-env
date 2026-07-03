@@ -445,6 +445,17 @@ record and grow as each language goes through the same process.
 
 ## Amendment log
 
+- **2026-07-03** — **ALL 16 fixtures brought to contract** (Erlang excluded).
+  Every fixture now carries the Part-3 cross-product block in its idiom, with
+  runtime verification: c 40/40 · go 40/40 · python 37/37 · js 37/37 ·
+  ts 48/48 · lua 38/38 (colon-lowered) · ruby 44/44 · php 44/44 (arrow-lowered)
+  · dart 50/50 · gdscript 38/38 · csharp 50/50 · java 51/51 (E430 private
+  siblings + Kid[] array) · kotlin 52/52 · swift 44/44 · rust 47/47 (E616-aware:
+  internal construction; owned Vec<Kid>; borrow-safe Frame-expression index;
+  @@[no_persist] on live-system fields under broadcast persist) · cpp 41/41
+  (coroutine-stripped local run; async section remains Docker-verified).
+  Sweep drove one framec change (R7): the C++ array-declarator emission
+  (`Kid* kids[4];`), mirroring C's.
 - **2026-07-03** — **Erlang excluded from the contract sweep** (deprecated
   implementation, W901); fixture frozen as-is.
 - **2026-07-03** — **max_c.fc brought to contract** (the worked exemplar):

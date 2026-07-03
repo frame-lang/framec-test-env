@@ -2,6 +2,8 @@
 
 // ============================================================================
 // MAXIMAL FRAME COVERAGE FIXTURE — kotlin
+// CONTRACT: governed by tests/common/positive/max_coverage/README.md
+// (brought to contract 2026-07-03: Part-3 cross-product block Kid/Solo/Orch).
 // One runnable, self-asserting file exercising every Frame construct the Kotlin
 // backend supports. TAP output via ck(). The matrix runner (kotlin_batch.sh)
 // prepends `@file:JvmName("Runner")` + `package frametest.<id>`, batch-compiles
@@ -10,7 +12,7 @@
 //
 // KOTLIN CALL MODEL: own actions/operations/interface methods use the portable
 // `@@:self.name(args)` (-> this.name(args)); child-system calls are native
-// Kotlin the user authors (this.sensor.bump()), with the child held in a typed
+// Kotlin the user authors (this.sensor.bump() // [control: native child call]
 // domain field. Kotlin uses native `else if`, braces, lowercase true/false,
 // and capitalized native types (Int/String/Boolean/Double).
 //
@@ -303,6 +305,90 @@ import kotlinx.coroutines.runBlocking
         // [composition: hold a sub-system instance as a typed domain field]
         sensor: Sensor = @@Sensor()
         seen: Int = 0
+}
+
+// ============================================================================
+// CROSS-PRODUCT BLOCK (contract Part 3 — the distilled framec#159 family).
+// `tick` on FOUR systems; Kotlin is OO passthrough — the indexed splice
+// (operator get) must survive intact, incl. the Frame-expression index.
+// ============================================================================
+@@system Kid {
+    interface:
+        tick(dt: Double)
+        probe(): Int
+    machine:
+        $S {
+            tick(dt: Double) {
+                this.n = this.n + 1
+            }
+            probe(): Int {
+                @@:(this.n)
+            }
+        }
+    domain:
+        n: Int = 0
+}
+
+@@system Solo {
+    // [collision: SAME interface method names as Kid — a sibling child type]
+    interface:
+        tick(dt: Double)
+        probe(): Int
+    machine:
+        $S {
+            tick(dt: Double) {
+                this.p = this.p + 10
+            }
+            probe(): Int {
+                @@:(this.p)
+            }
+        }
+    domain:
+        p: Int = 0
+}
+
+@@system Orch {
+    interface:
+        // [collision: orchestrator declares `tick` itself — caller-collision]
+        tick(dt: Double)
+        adopt(k: Kid)
+        kidval(i: Int): Int
+        lastval(): Int
+        soloval(): Int
+    machine:
+        $S {
+            adopt(k: Kid) {
+                @@:self.kids.add(k)
+            }
+            tick(dt: Double) {
+                @@:self._tickall(dt)
+            }
+            // [ref: indexed cross-system call, native-param index]
+            kidval(i: Int): Int {
+                @@:(@@:self.kids[i].probe())
+            }
+            // [ref: indexed cross-system call, FRAME-EXPRESSION index]
+            lastval(): Int {
+                @@:(@@:self.kids[@@:self.kids.size - 1].probe())
+            }
+            // [ref: scalar sibling with the SAME collided method names]
+            soloval(): Int {
+                @@:(@@:self.solo.probe())
+            }
+        }
+    actions:
+        _tickall(dt: Double) {
+            for (i in 0 until @@:self.kids.size) {
+                // [ref: indexed × cross-system × caller/sibling-collision]
+                @@:self.kids[i].tick(dt)
+            }
+            // [ref: scalar field, collided name]
+            @@:self.solo.tick(dt)
+        }
+    domain:
+        // [domain: typed list-of-systems + scalar sibling of a DIFFERENT type]
+        kids: MutableList<Kid> = mutableListOf()
+        solo: Solo = @@Solo()
 }
 
 // ============================================================================
@@ -664,6 +750,23 @@ fun main() = runBlocking {
     val ap2 = @@Pump()
     ap2.restore_state(asnap)
     ck(ap2.peek() == 2, "async persist: restored Pump retains level=2 (sync op peek())")
+
+    // --- CROSS-PRODUCT BLOCK (contract Part 3 / framec#159 family) ---
+    val o = @@Orch()
+    val ka = @@Kid()
+    val kb = @@Kid()
+    val kc = @@Kid()
+    o.adopt(ka)
+    o.adopt(kb)
+    o.adopt(kc)
+    o.tick(0.16)
+    o.tick(0.16)
+    ck(o.kidval(0) as Int == 2 && o.kidval(1) as Int == 2 && o.kidval(2) as Int == 2,
+        "x-product: indexed kids[i].tick + 3 kids independent (collided name)")
+    ck(o.lastval() as Int == 2, "x-product: Frame-expression index kids[size-1].probe()")
+    ck(o.soloval() as Int == 20, "x-product: scalar sibling with identical method names")
+    ka.tick(1.0) // [control: native call]
+    ck(o.kidval(0) as Int == 3 && o.kidval(1) as Int == 2, "x-product: control native call touches only kid 0")
 
     println("1.." + _n)
 }

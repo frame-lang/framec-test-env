@@ -2,6 +2,8 @@
 
 // ============================================================================
 // MAXIMAL FRAME COVERAGE FIXTURE — cpp_23
+// CONTRACT: governed by tests/common/positive/max_coverage/README.md
+// (brought to contract 2026-07-03: Part-3 cross-product block Kid/Solo/Orch).
 // One runnable, self-asserting file exercising every Frame construct the C++
 // backend supports. Construct tags are standalone [tag] comment lines above
 // each construct. TAP output, asserted by RUNNING under g++ -std=c++23 + the
@@ -350,7 +352,7 @@ static bool _has(const std::string& hay, const std::string& needle) {
         $C {
             tick() {
                 this->seen = this->seen + 1;
-                this->sensor->bump();               // [composition: native child call]
+                this->sensor->bump();               // [control: native child call]
             }
             total(): int { @@:(this->sensor->read()) }
             count(): int { @@:(this->seen) }
@@ -359,6 +361,99 @@ static bool _has(const std::string& hay, const std::string& needle) {
         // [composition: hold a sub-system instance in a domain var]
         sensor: std::shared_ptr<Sensor> = @@Sensor()
         seen: int = 0
+}
+
+// ============================================================================
+// CROSS-PRODUCT BLOCK (contract Part 3 — the distilled framec#159 family).
+// `tick` on FOUR systems; the portable indexed call must deref with `->`
+// (raw-pointer array element) — resolved via the VISIBLE `Kid*[4]` spelling
+// (framec emits the C++ declarator `Kid* kids[4];`). Method-name inference
+// is impossible (tick everywhere) by construction. `solo` is the bare-type
+// embed (shared_ptr) with the same collided names.
+// ============================================================================
+@@system Kid {
+    interface:
+        tick(dt: double)
+        probe(): int
+    machine:
+        $S {
+            tick(dt: double) {
+                this->n = this->n + 1;
+            }
+            probe(): int {
+                @@:(this->n)
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+@@system Solo {
+    // [collision: SAME interface method names as Kid — a sibling child type]
+    interface:
+        tick(dt: double)
+        probe(): int
+    machine:
+        $S {
+            tick(dt: double) {
+                this->p = this->p + 10;
+            }
+            probe(): int {
+                @@:(this->p)
+            }
+        }
+    domain:
+        p: int = 0
+}
+
+@@system Orch {
+    interface:
+        // [collision: orchestrator declares `tick` itself — caller-collision]
+        tick(dt: double)
+        adopt(k: Kid*)
+        kidval(i: int): int
+        lastval(): int
+        soloval(): int
+    machine:
+        $S {
+            adopt(k: Kid*) {
+                // [ref: indexed field WRITE through a Frame-expression index]
+                @@:self.kids[@@:self.kn] = k;
+                @@:self.kn = @@:self.kn + 1;
+            }
+            tick(dt: double) {
+                @@:self._tickall(dt);
+            }
+            // [ref: indexed cross-system call, native-param index — must
+            //  deref with ->: Kid* element via the visible Kid*[4] type]
+            kidval(i: int): int {
+                @@:(@@:self.kids[i].probe())
+            }
+            // [ref: indexed cross-system call, FRAME-EXPRESSION index]
+            lastval(): int {
+                @@:(@@:self.kids[@@:self.kn - 1].probe())
+            }
+            // [ref: scalar sibling (shared_ptr embed), collided names]
+            soloval(): int {
+                @@:(@@:self.solo.probe())
+            }
+        }
+    actions:
+        _tickall(dt: double) {
+            for (int i = 0; i < @@:self.kn; i++) {
+                // [ref: indexed × cross-system × caller/sibling-collision]
+                @@:self.kids[i].tick(dt);
+            }
+            // [ref: scalar field, collided name]
+            @@:self.solo.tick(dt);
+        }
+    domain:
+        // [domain: raw-pointer array-of-systems, VISIBLE element spelling —
+        //  framec emits the declarator `Kid* kids[4];` (#159 family)]
+        kids: Kid*[4]
+        kn: int = 0
+        // [domain: bare-type embed → std::shared_ptr<Solo>]
+        solo: Solo = @@Solo()
 }
 
 // ============================================================================
@@ -658,6 +753,24 @@ int main() {
     auto pr5 = @@Probe();
     _ck(pr5.outer_data() == "outer",
         "@@:data call-scope isolated across reentrant @@:self call");
+
+    // --- CROSS-PRODUCT BLOCK (contract Part 3 / framec#159 family) ---
+    auto o = @@Orch();
+    auto ka = @@Kid();
+    auto kb = @@Kid();
+    auto kc = @@Kid();
+    o.adopt(&ka);
+    o.adopt(&kb);
+    o.adopt(&kc);
+    o.tick(0.16);
+    o.tick(0.16);
+    _ck(std::any_cast<int>(o.kidval(0)) == 2 && std::any_cast<int>(o.kidval(1)) == 2 && std::any_cast<int>(o.kidval(2)) == 2,
+        "x-product: indexed kids[i]->tick + 3 kids independent (collided name)");
+    _ck(std::any_cast<int>(o.lastval()) == 2, "x-product: Frame-expression index kids[kn-1]->probe()");
+    _ck(std::any_cast<int>(o.soloval()) == 20, "x-product: scalar shared_ptr sibling with identical method names");
+    ka.tick(1.0); // [control: native call]
+    _ck(std::any_cast<int>(o.kidval(0)) == 3 && std::any_cast<int>(o.kidval(1)) == 2,
+        "x-product: control native call touches only kid 0");
 
     std::cout << "1.." << _n << "\n";
     return 0;

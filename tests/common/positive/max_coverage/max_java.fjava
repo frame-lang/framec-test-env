@@ -2,6 +2,8 @@
 
 // ============================================================================
 // MAXIMAL FRAME COVERAGE FIXTURE — java
+// CONTRACT: governed by tests/common/positive/max_coverage/README.md
+// (brought to contract 2026-07-03: Part-3 cross-product block Kid/Solo/Orch).
 // One runnable, self-asserting file exercising every Frame construct the Java
 // backend supports. TAP output via ck(). The matrix runner (java_batch.sh)
 // prepends `package frametest.<id>;`, batch-javac's with Jackson on the
@@ -296,7 +298,7 @@ import java.util.concurrent.ExecutionException;
         $C {
             tick() {
                 this.seen = this.seen + 1;
-                this.sensor.bump();                  // native call into child system
+                this.sensor.bump(); // [control: native child call]
             }
             total(): int { @@:(this.sensor.read()) }
             count(): int { @@:(this.seen) }
@@ -305,6 +307,99 @@ import java.util.concurrent.ExecutionException;
         // [composition: hold a sub-system instance as a typed domain field]
         sensor: Sensor = @@Sensor()
         seen: int = 0
+}
+
+// ============================================================================
+// CROSS-PRODUCT BLOCK (contract Part 3 — the distilled framec#159 family).
+// `tick` on FOUR systems; Java is OO passthrough — the indexed splice must
+// survive intact, incl. the Frame-expression index. Kid/Solo/Orch are
+// `@@system private` (E430: one public class per file).
+// ============================================================================
+@@system private Kid {
+    interface:
+        tick(dt: double)
+        probe(): int
+    machine:
+        $S {
+            tick(dt: double) {
+                this.n = this.n + 1;
+            }
+            probe(): int {
+                @@:(this.n)
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+@@system private Solo {
+    // [collision: SAME interface method names as Kid — a sibling child type]
+    interface:
+        tick(dt: double)
+        probe(): int
+    machine:
+        $S {
+            tick(dt: double) {
+                this.p = this.p + 10;
+            }
+            probe(): int {
+                @@:(this.p)
+            }
+        }
+    domain:
+        p: int = 0
+}
+
+@@system private Orch {
+    interface:
+        // [collision: orchestrator declares `tick` itself — caller-collision]
+        tick(dt: double)
+        adopt(k: Kid)
+        kidval(i: int): int
+        lastval(): int
+        soloval(): int
+    machine:
+        $S {
+            adopt(k: Kid) {
+                @@:self.kids.add(k);
+                // [ref: indexed field WRITE through a Frame-expression index]
+                @@:self.karr[@@:self.kn] = k;
+                @@:self.kn = @@:self.kn + 1;
+            }
+            tick(dt: double) {
+                @@:self._tickall(dt);
+            }
+            // [ref: indexed cross-system call, native-param index — java
+            //  ArrayList uses .get(i); the INDEXED bracket form is exercised
+            //  through a Kid[] array field on the sibling accessor below]
+            kidval(i: int): int {
+                @@:(@@:self.karr[i].probe())
+            }
+            // [ref: indexed cross-system call, FRAME-EXPRESSION index]
+            lastval(): int {
+                @@:(@@:self.karr[@@:self.kn - 1].probe())
+            }
+            // [ref: scalar sibling with the SAME collided method names]
+            soloval(): int {
+                @@:(@@:self.solo.probe())
+            }
+        }
+    actions:
+        _tickall(dt: double) {
+            for (int i = 0; i < @@:self.kn; i++) {
+                // [ref: indexed × cross-system × caller/sibling-collision —
+                //  through the typed Kid[] array field]
+                @@:self.karr[i].tick(dt);
+            }
+            // [ref: scalar field, collided name]
+            @@:self.solo.tick(dt);
+        }
+    domain:
+        // [domain: typed ARRAY-of-systems (bracket-indexable) + scalar sibling]
+        karr: Kid[] = new Kid[4]
+        kids: java.util.List<Kid> = new java.util.ArrayList<Kid>()
+        kn: int = 0
+        solo: Solo = @@Solo()
 }
 
 // ============================================================================
@@ -661,6 +756,23 @@ class Main {
         Pump ap2 = @@Pump();
         ap2.restore_state(asnap);
         ck(ap2.peek() == 2, "async persist: restored Pump retains level=2 (sync op peek())");
+
+        // --- CROSS-PRODUCT BLOCK (contract Part 3 / framec#159 family) ---
+        var o = @@Orch();
+        var ka = @@Kid();
+        var kb = @@Kid();
+        var kc = @@Kid();
+        o.adopt(ka);
+        o.adopt(kb);
+        o.adopt(kc);
+        o.tick(0.16);
+        o.tick(0.16);
+        ck((int) o.kidval(0) == 2 && (int) o.kidval(1) == 2 && (int) o.kidval(2) == 2,
+            "x-product: indexed karr[i].tick + 3 kids independent (collided name)");
+        ck((int) o.lastval() == 2, "x-product: Frame-expression index karr[kn-1].probe()");
+        ck((int) o.soloval() == 20, "x-product: scalar sibling with identical method names");
+        ka.tick(1.0); // [control: native call]
+        ck((int) o.kidval(0) == 3 && (int) o.kidval(1) == 2, "x-product: control native call touches only kid 0");
 
         System.out.println("1.." + _n);
     }

@@ -3,6 +3,8 @@
 
 // ============================================================================
 // MAXIMAL FRAME COVERAGE FIXTURE — rust (core: HSM, stack, all 7 statements,
+// CONTRACT: governed by tests/common/positive/max_coverage/README.md
+// (brought to contract 2026-07-03: Part-3 cross-product block Kid/Solo/Orch).
 // transitions, references, const, actions, operations, multi-system, probe).
 // Persist + async layered in after the core is green. TAP via fn ck.
 // ============================================================================
@@ -256,6 +258,7 @@
         $C {
             tick() {
                 self.seen = self.seen + 1;
+                // [control: native child call — user-authored Rust]
                 self.sensor.bump();
             }
             total(): i32 { @@:(self.sensor.read()) }
@@ -265,6 +268,116 @@
         // [composition: hold a sub-system as a domain field]
         sensor: Sensor = @@Sensor()
         seen: i32 = 0
+}
+
+// ============================================================================
+// CROSS-PRODUCT BLOCK (contract Part 3 — the distilled framec#159 family).
+// `tick` on FOUR systems; Rust passthrough splice on an OWNED Vec<Kid>.
+// NOTE: a live system CANNOT be an interface parameter on rust (E616 — the
+// event is Rc-shared, a move-only payload can't reach the handler; pass
+// Rc<RefCell<Sys>> instead). So Orch constructs its kids INTERNALLY — the
+// composition-ownership idiom — and the indexed portable calls exercise the
+// splice on owned elements.
+// ============================================================================
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Kid {
+    interface:
+        tick(dt: f64)
+        probe(): i32
+    machine:
+        $S {
+            tick(dt: f64) {
+                self.n = self.n + 1;
+            }
+            probe(): i32 {
+                @@:(self.n)
+            }
+        }
+    domain:
+        n: i32 = 0
+}
+
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Solo {
+    // [collision: SAME interface method names as Kid — a sibling child type]
+    interface:
+        tick(dt: f64)
+        probe(): i32
+    machine:
+        $S {
+            tick(dt: f64) {
+                self.p = self.p + 10;
+            }
+            probe(): i32 {
+                @@:(self.p)
+            }
+        }
+    domain:
+        p: i32 = 0
+}
+
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Orch {
+    interface:
+        // [collision: orchestrator declares `tick` itself — caller-collision]
+        tick(dt: f64)
+        boot(k: i32)
+        kidval(i: i32): i32
+        lastval(): i32
+        soloval(): i32
+    machine:
+        $S {
+            boot(k: i32) {
+                // [composition: internal construction — E616 forbids passing a
+                //  live system by value through the interface]
+                let mut j: i32 = 0;
+                while j < k {
+                    @@:self.kids.push(@@Kid());
+                    j += 1;
+                }
+            }
+            tick(dt: f64) {
+                @@:self._tickall(dt);
+            }
+            // [ref: indexed cross-system call, native-param index]
+            kidval(i: i32): i32 {
+                @@:(@@:self.kids[i as usize].probe())
+            }
+            // [ref: indexed cross-system call, FRAME-EXPRESSION index —
+            //  bound to a local first: rust two-phase borrow forbids
+            //  `kids[kids.len()-1].probe()` in one expression when probe
+            //  takes &mut self]
+            lastval(): i32 {
+                let last: usize = @@:self.kids.len() - 1;
+                @@:(@@:self.kids[last].probe())
+            }
+            // [ref: scalar sibling with the SAME collided method names]
+            soloval(): i32 {
+                @@:(@@:self.solo.probe())
+            }
+        }
+    actions:
+        _tickall(dt: f64) {
+            let mut i: usize = 0;
+            while i < @@:self.kids.len() {
+                // [ref: indexed × cross-system × caller/sibling-collision]
+                @@:self.kids[i].tick(dt);
+                i += 1;
+            }
+            // [ref: scalar field, collided name]
+            @@:self.solo.tick(dt);
+        }
+    domain:
+        // [domain: OWNED vec-of-systems + scalar sibling of a DIFFERENT type.
+        //  Live sub-machines are runtime composition, not data — excluded
+        //  from the broadcast persist via @@[no_persist].]
+        @@[no_persist]
+        kids: Vec<Kid> = Vec::new()
+        @@[no_persist]
+        solo: Solo = @@Solo()
 }
 
 // ============================================================================
@@ -580,6 +693,16 @@ fn main() {
     let mut ap2 = @@Pump();
     ap2.restore_state(asnap);
     ck(&mut n, ap2.peek() == 2, "async persist: restored Pump retains level=2 (sync op peek())");
+
+    // --- CROSS-PRODUCT BLOCK (contract Part 3 / framec#159 family) ---
+    let mut o = @@Orch();
+    o.boot(3);
+    o.tick(0.16);
+    o.tick(0.16);
+    ck(&mut n, o.kidval(0) == 2 && o.kidval(1) == 2 && o.kidval(2) == 2,
+        "x-product: indexed kids[i].tick + 3 kids independent (collided name)");
+    ck(&mut n, o.lastval() == 2, "x-product: Frame-expression index kids[len-1].probe()");
+    ck(&mut n, o.soloval() == 20, "x-product: scalar sibling with identical method names");
 
     println!("1..{}", n);
 }

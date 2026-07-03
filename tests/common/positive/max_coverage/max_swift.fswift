@@ -2,13 +2,15 @@
 
 // ============================================================================
 // MAXIMAL FRAME COVERAGE FIXTURE — swift
+// CONTRACT: governed by tests/common/positive/max_coverage/README.md
+// (brought to contract 2026-07-03: Part-3 cross-product block Kid/Solo/Orch).
 // One runnable, self-asserting file exercising every Frame construct the Swift
 // backend supports. TAP output via ck(). The matrix runner compiles this file
 // with `swiftc` and executes the binary.
 //
 // Swift idioms: own actions/operations/interface methods use the portable
 // `@@:self.name(args)` (-> self.name(args)); child-system calls are native
-// Swift the user authors (`self.sensor.bump()`). Method names are emitted
+// Swift the user authors (`self.sensor.bump() // [control: native child call]
 // verbatim (camelCase here). Native control flow is Swift `if ... { } else if
 // ... { }` and `while ... { }` (no `;`), written directly in handler bodies.
 // Domain fields are read/written natively as `self.field`. Types are Swift
@@ -295,6 +297,92 @@
 }
 
 // ============================================================================
+// CROSS-PRODUCT BLOCK (contract Part 3 — the distilled framec#159 family).
+// `tick` on FOUR systems; Swift is OO passthrough — the indexed splice must
+// survive intact, incl. the Frame-expression index.
+// ============================================================================
+@@system Kid {
+    interface:
+        tick(dt: Double)
+        probe(): Int
+    machine:
+        $S {
+            tick(dt: Double) {
+                self.n = self.n + 1
+            }
+            probe(): Int {
+                @@:(self.n)
+            }
+        }
+    domain:
+        n: Int = 0
+}
+
+@@system Solo {
+    // [collision: SAME interface method names as Kid — a sibling child type]
+    interface:
+        tick(dt: Double)
+        probe(): Int
+    machine:
+        $S {
+            tick(dt: Double) {
+                self.p = self.p + 10
+            }
+            probe(): Int {
+                @@:(self.p)
+            }
+        }
+    domain:
+        p: Int = 0
+}
+
+@@system Orch {
+    interface:
+        // [collision: orchestrator declares `tick` itself — caller-collision]
+        tick(dt: Double)
+        adopt(k: Kid)
+        kidval(i: Int): Int
+        lastval(): Int
+        soloval(): Int
+    machine:
+        $S {
+            adopt(k: Kid) {
+                @@:self.kids.append(k)
+            }
+            tick(dt: Double) {
+                @@:self._tickall(dt)
+            }
+            // [ref: indexed cross-system call, native-param index]
+            kidval(i: Int): Int {
+                @@:(@@:self.kids[i].probe())
+            }
+            // [ref: indexed cross-system call, FRAME-EXPRESSION index]
+            lastval(): Int {
+                @@:(@@:self.kids[@@:self.kids.count - 1].probe())
+            }
+            // [ref: scalar sibling with the SAME collided method names]
+            soloval(): Int {
+                @@:(@@:self.solo.probe())
+            }
+        }
+    actions:
+        _tickall(dt: Double) {
+            var i = 0
+            while i < @@:self.kids.count {
+                // [ref: indexed × cross-system × caller/sibling-collision]
+                @@:self.kids[i].tick(dt)
+                i = i + 1
+            }
+            // [ref: scalar field, collided name]
+            @@:self.solo.tick(dt)
+        }
+    domain:
+        // [domain: typed array-of-systems + scalar sibling of a DIFFERENT type]
+        kids: [Kid] = []
+        solo: Solo = @@Solo()
+}
+
+// ============================================================================
 // CONSTRUCT PROBE — the remaining reference/transition constructs:
 // @@:event, @@:params.x, @@:data.x (set+read, call-scope isolation),
 // @@:return(e) short-circuit, @@:system.state.name, labeled transition,
@@ -562,5 +650,22 @@ ck(pr4.here() == "C" && pr4.log().contains("C.fwd(payload)"),
 let pr5 = @@Probe()
 ck(pr5.outerData() == "outer",
    "@@:data call-scope isolated across reentrant @@:self call")
+
+// --- CROSS-PRODUCT BLOCK (contract Part 3 / framec#159 family) ---
+var o = @@Orch()
+var ka = @@Kid()
+var kb = @@Kid()
+var kc = @@Kid()
+o.adopt(ka)
+o.adopt(kb)
+o.adopt(kc)
+o.tick(0.16)
+o.tick(0.16)
+ck(o.kidval(0) as! Int == 2 && o.kidval(1) as! Int == 2 && o.kidval(2) as! Int == 2,
+   "x-product: indexed kids[i].tick + 3 kids independent (collided name)")
+ck(o.lastval() as! Int == 2, "x-product: Frame-expression index kids[count-1].probe()")
+ck(o.soloval() as! Int == 20, "x-product: scalar sibling with identical method names")
+ka.tick(1.0) // [control: native call]
+ck(o.kidval(0) as! Int == 3 && o.kidval(1) as! Int == 2, "x-product: control native call touches only kid 0")
 
 print("1.." + String(tapN))
