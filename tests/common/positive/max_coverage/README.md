@@ -209,7 +209,13 @@ record and grow as each language goes through the same process.
 
 ---
 
-### Erlang — `max_erlang.ferl` *(target DEPRECATED as of framec 4.6.1 — W901)*
+### Erlang — `max_erlang.ferl` *(EXCLUDED from the contract process — target DEPRECATED as of framec 4.6.1, W901)*
+
+> **The Erlang fixture is frozen and excluded from the language-by-language
+> contract sweep.** The current implementation is deprecated pending the
+> handler-lowering redesign (framec#119/#125); its fixture pins current
+> behavior only. New contract items (Part-3 block, R1 conversions) are NOT
+> back-ported to it. Revisit when the redesign lands.
 
 **General challenges**
 
@@ -439,6 +445,8 @@ record and grow as each language goes through the same process.
 
 ## Amendment log
 
+- **2026-07-03** — **Erlang excluded from the contract sweep** (deprecated
+  implementation, W901); fixture frozen as-is.
 - **2026-07-03** — **max_c.fc brought to contract** (the worked exemplar):
   composition calls converted to portable form (R1; one native retained as
   `[control:]`), Part-3 cross-product block added (Kid/Solo/Orch — `tick` on

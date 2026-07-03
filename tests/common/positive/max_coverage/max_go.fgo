@@ -15,6 +15,9 @@ var _ = json.Marshal
 
 // ============================================================================
 // MAXIMAL FRAME COVERAGE FIXTURE — go
+// CONTRACT: governed by tests/common/positive/max_coverage/README.md
+// (brought to contract 2026-07-03: R1 portable composition + Part-3
+// cross-product block — Kid/Solo/Orch below).
 //
 // One runnable, SELF-ASSERTING file exercising every Frame construct the Go
 // backend supports. Construct tags are `// [tag]` comments above each
@@ -304,7 +307,8 @@ var _ = json.Marshal
 			}
 			tick() {
 				s.seen = s.seen + 1
-				// [native child-system call: $.sensor reference lowered, call is Go]
+				// [control: native child-system call — $.sensor reference is
+				//  lowered, the CALL is user-authored Go (case-mapped by hand)]
 				$.sensor.Bump()
 			}
 			total(): int { @@:($.sensor.Read()); return; }
@@ -312,6 +316,84 @@ var _ = json.Marshal
 		}
 	domain:
 		seen: int = 0
+}
+
+// ============================================================================
+// CROSS-PRODUCT BLOCK (contract Part 3 — the distilled framec#159 family).
+// `tick` is deliberately on FOUR systems here (Controller, Orch, Kid, Solo):
+// the indexed portable call must case-map (`tick` -> `Tick`) via the VISIBLE
+// leading-group element spelling `[]*Kid` (rule 1) — method-name inference is
+// impossible by construction. This is the exact Go shape of the #159 reopen
+// (GhostGame._tick_all fanning tick(dt) to the ghosts).
+// ============================================================================
+@@system Kid {
+	interface:
+		tick(dt: float64)
+		probe(): int
+	machine:
+		$S {
+			tick(dt: float64) {
+				s.n = s.n + 1
+			}
+			probe(): int { @@:(s.n); return; }
+		}
+	domain:
+		n: int = 0
+}
+
+@@system Solo {
+	// [collision: SAME interface method names as Kid — a sibling child type]
+	interface:
+		tick(dt: float64)
+		probe(): int
+	machine:
+		$S {
+			tick(dt: float64) {
+				s.p = s.p + 10
+			}
+			probe(): int { @@:(s.p); return; }
+		}
+	domain:
+		p: int = 0
+}
+
+@@system Orch {
+	interface:
+		// [collision: orchestrator declares `tick` itself — caller-collision]
+		tick(dt: float64)
+		adopt(k: *Kid)
+		kidval(i: int): int
+		lastval(): int
+		soloval(): int
+	machine:
+		$S {
+			adopt(k: *Kid) {
+				s.kids = append(s.kids, k)
+			}
+			tick(dt: float64) { @@:self._tickall(dt); }
+			// [ref: indexed cross-system call, native-param index — case-maps
+			//  to s.kids[i].Probe() via the visible []*Kid element type]
+			kidval(i: int): int { @@:(@@:self.kids[i].probe()); return; }
+			// [ref: indexed cross-system call, FRAME-EXPRESSION index]
+			lastval(): int { @@:(@@:self.kids[len(@@:self.kids)-1].probe()); return; }
+			// [ref: scalar sibling with the SAME collided method names]
+			soloval(): int { @@:(@@:self.solo.probe()); return; }
+		}
+	actions:
+		_tickall(dt: float64) {
+			for i := 0; i < len(@@:self.kids); i++ {
+				// [ref: indexed × cross-system × caller/sibling-collision —
+				//  the framec#159 Go reopen shape; case-maps to .Tick(dt)]
+				@@:self.kids[i].tick(dt)
+			}
+			// [ref: scalar field, collided name — case-maps to .Tick(dt)]
+			@@:self.solo.tick(dt)
+		}
+	domain:
+		// [domain: slice-of-systems, VISIBLE leading-group element spelling]
+		kids: []*Kid
+		// [domain: scalar sibling child of a DIFFERENT type, identical methods]
+		solo: *Solo = @@Solo()
 }
 
 // ============================================================================
@@ -583,6 +665,23 @@ func main() {
 	pr5 := @@Probe()
 	ck(pr5.Outer_data() == "outer",
 		"@@:data call-scope isolated across reentrant @@:self call")
+
+	// --- CROSS-PRODUCT BLOCK (contract Part 3 / framec#159 family) ---
+	o := @@Orch()
+	ka := @@Kid()
+	kb := @@Kid()
+	kc := @@Kid()
+	o.Adopt(ka)
+	o.Adopt(kb)
+	o.Adopt(kc)
+	o.Tick(0.16)
+	o.Tick(0.16)
+	ck(o.Kidval(0) == 2 && o.Kidval(1) == 2 && o.Kidval(2) == 2,
+		"x-product: indexed @@:self.kids[i].tick case-mapped + 3 kids independent (collided name, 4 tick-bearing systems)")
+	ck(o.Lastval() == 2, "x-product: Frame-expression index @@:self.kids[len(...)-1].probe()")
+	ck(o.Soloval() == 20, "x-product: scalar sibling with identical method names dispatched to Solo")
+	ka.Tick(1.0) // [control: native pre-lowered call]
+	ck(o.Kidval(0) == 3 && o.Kidval(1) == 2, "x-product: control native call touches only kid 0")
 
 	fmt.Printf("1..%d\n", n)
 }
