@@ -2,6 +2,8 @@
 
 # ============================================================================
 # MAXIMAL FRAME COVERAGE FIXTURE — gdscript
+# CONTRACT: governed by tests/common/positive/max_coverage/README.md
+# (brought to contract 2026-07-03: Part-3 cross-product block Kid/Solo/Orch).
 # One runnable, self-asserting file exercising every Frame construct the
 # GDScript backend supports. Construct tags are standalone `# [tag]` lines
 # above each construct (never trailing `{`, GDScript is indent-sensitive like
@@ -339,6 +341,7 @@ extends SceneTree
             tick() {
                 self.seen = self.seen + 1
                 # [child-system call: native GDScript on the held instance]
+                # [control: native child call]
                 $.sensor.bump()
             }
             total(): int {
@@ -350,6 +353,91 @@ extends SceneTree
         }
     domain:
         seen: int = 0
+}
+
+# ============================================================================
+# CROSS-PRODUCT BLOCK (contract Part 3 — the distilled framec#159 family).
+# `tick` on FOUR systems; GDScript is OO passthrough — the indexed splice
+# must survive intact (self.kids[i].tick(dt)), incl. Frame-expression index.
+# ============================================================================
+@@system Kid {
+    interface:
+        tick(dt: float)
+        probe(): int
+    machine:
+        $S {
+            tick(dt: float) {
+                self.n = self.n + 1
+            }
+            probe(): int {
+                @@:(self.n)
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+@@system Solo {
+    # [collision: SAME interface method names as Kid — a sibling child type]
+    interface:
+        tick(dt: float)
+        probe(): int
+    machine:
+        $S {
+            tick(dt: float) {
+                self.p = self.p + 10
+            }
+            probe(): int {
+                @@:(self.p)
+            }
+        }
+    domain:
+        p: int = 0
+}
+
+@@system Orch {
+    interface:
+        # [collision: orchestrator declares `tick` itself — caller-collision]
+        tick(dt: float)
+        adopt(k)
+        kidval(i: int): int
+        lastval(): int
+        soloval(): int
+    machine:
+        $S {
+            adopt(k) {
+                @@:self.kids.append(k)
+            }
+            tick(dt: float) {
+                @@:self._tickall(dt)
+            }
+            # [ref: indexed cross-system call, native-param index]
+            kidval(i: int): int {
+                @@:(@@:self.kids[i].probe())
+            }
+            # [ref: indexed cross-system call, FRAME-EXPRESSION index]
+            lastval(): int {
+                @@:(@@:self.kids[@@:self.kids.size() - 1].probe())
+            }
+            # [ref: scalar sibling with the SAME collided method names]
+            soloval(): int {
+                @@:(@@:self.solo.probe())
+            }
+        }
+    actions:
+        _tickall(dt: float) {
+            var i = 0
+            while i < @@:self.kids.size():
+                # [ref: indexed × cross-system × caller/sibling-collision]
+                @@:self.kids[i].tick(dt)
+                i = i + 1
+            # [ref: scalar field, collided name]
+            @@:self.solo.tick(dt)
+        }
+    domain:
+        # [domain: array-of-systems + scalar sibling of a DIFFERENT type]
+        kids = []
+        solo = @@Solo()
 }
 
 # ============================================================================
@@ -614,6 +702,23 @@ func _init():
     var pr5 = @@Probe()
     ck(pr5.outer_data() == "outer",
         "@@:data call-scope isolated across reentrant @@:self call")
+
+    # --- CROSS-PRODUCT BLOCK (contract Part 3 / framec#159 family) ---
+    var o = @@Orch()
+    var ka = @@Kid()
+    var kb = @@Kid()
+    var kc = @@Kid()
+    o.adopt(ka)
+    o.adopt(kb)
+    o.adopt(kc)
+    o.tick(0.16)
+    o.tick(0.16)
+    ck(o.kidval(0) == 2 and o.kidval(1) == 2 and o.kidval(2) == 2,
+        "x-product: indexed kids[i].tick + 3 kids independent (collided name)")
+    ck(o.lastval() == 2, "x-product: Frame-expression index kids[size-1].probe()")
+    ck(o.soloval() == 20, "x-product: scalar sibling with identical method names")
+    ka.tick(1.0) # [control: native call]
+    ck(o.kidval(0) == 3 and o.kidval(1) == 2, "x-product: control native call touches only kid 0")
 
     print("1.." + str(_n))
     quit()

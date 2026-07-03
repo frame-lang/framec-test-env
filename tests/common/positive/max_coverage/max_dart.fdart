@@ -2,6 +2,8 @@
 
 // ============================================================================
 // MAXIMAL FRAME COVERAGE FIXTURE — dart
+// CONTRACT: governed by tests/common/positive/max_coverage/README.md
+// (brought to contract 2026-07-03: Part-3 cross-product block Kid/Solo/Orch).
 // One runnable, self-asserting file exercising every Frame construct the Dart
 // backend supports. TAP output via ck(). main() is async (Future<void>) so the
 // @@[async] Pump can be driven with real await + the E703 busy-gate tripped.
@@ -276,7 +278,7 @@ import 'dart:convert';
         $C {
             tick() {
                 this.seen = this.seen + 1;
-                this.sensor.bump();                  // native call into child system
+                this.sensor.bump();                  // [control: native child call]
             }
             total(): int { @@:(this.sensor.read()) }
             count(): int { @@:(this.seen) }
@@ -285,6 +287,91 @@ import 'dart:convert';
         // [composition: hold a sub-system instance as a typed domain field]
         sensor: Sensor = @@Sensor()
         seen: int = 0
+}
+
+// ============================================================================
+// CROSS-PRODUCT BLOCK (contract Part 3 — the distilled framec#159 family).
+// `tick` on FOUR systems; Dart is OO passthrough — the indexed splice must
+// survive intact (this.kids[i].tick(dt)), incl. the Frame-expression index.
+// Static typing (E605) keeps the element visible: List<Kid>.
+// ============================================================================
+@@system Kid {
+    interface:
+        tick(dt: double)
+        probe(): int
+    machine:
+        $S {
+            tick(dt: double) {
+                this.n = this.n + 1;
+            }
+            probe(): int {
+                @@:(this.n)
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+@@system Solo {
+    // [collision: SAME interface method names as Kid — a sibling child type]
+    interface:
+        tick(dt: double)
+        probe(): int
+    machine:
+        $S {
+            tick(dt: double) {
+                this.p = this.p + 10;
+            }
+            probe(): int {
+                @@:(this.p)
+            }
+        }
+    domain:
+        p: int = 0
+}
+
+@@system Orch {
+    interface:
+        // [collision: orchestrator declares `tick` itself — caller-collision]
+        tick(dt: double)
+        adopt(k: Kid)
+        kidval(i: int): int
+        lastval(): int
+        soloval(): int
+    machine:
+        $S {
+            adopt(k: Kid) {
+                @@:self.kids.add(k);
+            }
+            tick(dt: double) {
+                @@:self._tickall(dt);
+            }
+            // [ref: indexed cross-system call, native-param index]
+            kidval(i: int): int {
+                @@:(@@:self.kids[i].probe())
+            }
+            // [ref: indexed cross-system call, FRAME-EXPRESSION index]
+            lastval(): int {
+                @@:(@@:self.kids[@@:self.kids.length - 1].probe())
+            }
+            // [ref: scalar sibling with the SAME collided method names]
+            soloval(): int {
+                @@:(@@:self.solo.probe())
+            }
+        }
+    actions:
+        _tickall(dt: double) {
+            for (var i = 0; i < @@:self.kids.length; i++) {
+                // [ref: indexed × cross-system × caller/sibling-collision]
+                @@:self.kids[i].tick(dt);
+            }
+            // [ref: scalar field, collided name]
+            @@:self.solo.tick(dt);
+        }
+    domain:
+        // [domain: typed list-of-systems + scalar sibling of a DIFFERENT type]
+        kids: List<Kid> = []
+        solo: Solo = @@Solo()
 }
 
 // ============================================================================
@@ -642,6 +729,23 @@ Future<void> main() async {
     final ap2 = @@Pump();
     ap2.restoreState(asnap);
     ck(ap2.peek() == 2, "async persist: restored Pump retains level=2 (sync op peek())");
+
+    // --- CROSS-PRODUCT BLOCK (contract Part 3 / framec#159 family) ---
+    final o = @@Orch();
+    final ka = @@Kid();
+    final kb = @@Kid();
+    final kc = @@Kid();
+    o.adopt(ka);
+    o.adopt(kb);
+    o.adopt(kc);
+    o.tick(0.16);
+    o.tick(0.16);
+    ck(o.kidval(0) == 2 && o.kidval(1) == 2 && o.kidval(2) == 2,
+        "x-product: indexed kids[i].tick + 3 kids independent (collided name)");
+    ck(o.lastval() == 2, "x-product: Frame-expression index kids[len-1].probe()");
+    ck(o.soloval() == 20, "x-product: scalar sibling with identical method names");
+    ka.tick(1.0); // [control: native call]
+    ck(o.kidval(0) == 3 && o.kidval(1) == 2, "x-product: control native call touches only kid 0");
 
     print("1.." + _n.toString());
 }
