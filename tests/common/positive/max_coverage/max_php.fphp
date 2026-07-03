@@ -2,6 +2,8 @@
 
 # ============================================================================
 # MAXIMAL FRAME COVERAGE FIXTURE — php
+# CONTRACT: governed by tests/common/positive/max_coverage/README.md
+# (brought to contract 2026-07-03: Part-3 cross-product block Kid/Solo/Orch).
 # One runnable, self-asserting file exercising every Frame construct the PHP
 # backend supports. TAP output via ck(). The matrix runner executes this file
 # directly with `php` (framec emits the leading `<?php`).
@@ -281,7 +283,7 @@
         $C {
             tick() {
                 $this->seen = $this->seen + 1;
-                $this->sensor->bump();               # native call into child system
+                $this->sensor->bump();               # [control: native child call]
             }
             total(): int { @@:($this->sensor->read()) }
             count(): int { @@:($this->seen) }
@@ -290,6 +292,92 @@
         # [composition: hold a sub-system instance as a typed domain field (#144)]
         sensor: Sensor = @@Sensor()
         seen: int = 0
+}
+
+# ============================================================================
+# CROSS-PRODUCT BLOCK (contract Part 3 — the distilled framec#159 family).
+# `tick` on FOUR systems; the portable indexed call lowers to PHP's arrow:
+# $this->kids[$i]->tick($dt) — incl. the Frame-expression index.
+# ============================================================================
+@@system Kid {
+    interface:
+        tick(dt)
+        probe(): int
+    machine:
+        $S {
+            tick(dt) {
+                $this->n = $this->n + 1;
+            }
+            probe(): int {
+                @@:($this->n)
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+@@system Solo {
+    # [collision: SAME interface method names as Kid — a sibling child type]
+    interface:
+        tick(dt)
+        probe(): int
+    machine:
+        $S {
+            tick(dt) {
+                $this->p = $this->p + 10;
+            }
+            probe(): int {
+                @@:($this->p)
+            }
+        }
+    domain:
+        p: int = 0
+}
+
+@@system Orch {
+    interface:
+        # [collision: orchestrator declares `tick` itself — caller-collision]
+        tick(dt)
+        adopt(k)
+        kidval(i: int): int
+        lastval(): int
+        soloval(): int
+    machine:
+        $S {
+            adopt(k) {
+                @@:self.kids[] = $k;
+            }
+            tick(dt) {
+                @@:self._tickall($dt);
+            }
+            # [ref: indexed cross-system call, native-param index]
+            kidval(i: int): int {
+                @@:(@@:self.kids[$i].probe())
+            }
+            # [ref: indexed cross-system call, FRAME-EXPRESSION index]
+            lastval(): int {
+                @@:(@@:self.kids[count(@@:self.kids) - 1].probe())
+            }
+            # [ref: scalar sibling with the SAME collided method names]
+            soloval(): int {
+                @@:(@@:self.solo.probe())
+            }
+        }
+    actions:
+        _tickall(dt) {
+            $i = 0;
+            while ($i < count(@@:self.kids)) {
+                # [ref: indexed × cross-system × caller/sibling-collision]
+                @@:self.kids[$i].tick($dt);
+                $i = $i + 1;
+            }
+            # [ref: scalar field, collided name]
+            @@:self.solo.tick($dt);
+        }
+    domain:
+        # [domain: array-of-systems + scalar sibling of a DIFFERENT type]
+        kids = []
+        solo = @@Solo()
 }
 
 # ============================================================================
@@ -557,5 +645,22 @@ ck($pr4->here() == "C" && strpos($pr4->log(), "C.fwd(payload)") !== false,
 $pr5 = @@Probe();
 ck($pr5->outer_data() == "outer",
    "@@:data call-scope isolated across reentrant @@:self call");
+
+# --- CROSS-PRODUCT BLOCK (contract Part 3 / framec#159 family) ---
+$o = @@Orch();
+$ka = @@Kid();
+$kb = @@Kid();
+$kc = @@Kid();
+$o->adopt($ka);
+$o->adopt($kb);
+$o->adopt($kc);
+$o->tick(0.16);
+$o->tick(0.16);
+ck($o->kidval(0) == 2 && $o->kidval(1) == 2 && $o->kidval(2) == 2,
+   "x-product: indexed kids[i].tick arrow-lowered + 3 kids independent (collided name)");
+ck($o->lastval() == 2, "x-product: Frame-expression index kids[count-1].probe()");
+ck($o->soloval() == 20, "x-product: scalar sibling with identical method names");
+$ka->tick(1.0); # [control: native call]
+ck($o->kidval(0) == 3 && $o->kidval(1) == 2, "x-product: control native call touches only kid 0");
 
 echo "1.." . $tap_n . "\n";
