@@ -67,8 +67,8 @@ FRAMEC=/path/to/framec ./check_fsm_diagnostics.sh
 ## The two remaining §9 codes — framec observations, not fixture gaps
 
 Both were run down to the framec source; neither is cleanly assertable at the
-released-CLI boundary today, and each is a small framec-side finding worth a
-follow-up issue rather than a test-env TODO:
+released-CLI boundary today, and each is a small framec-side finding (filed as
+**framec#162** and **framec#163**) rather than a test-env TODO:
 
 - **E712** (transition inside an action body) — the parser *does* detect it
   (`fsm_parser/action_block_parser`: `error_code = "E712"`), but the CLI
