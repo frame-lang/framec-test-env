@@ -2,6 +2,9 @@
 
 -- ============================================================================
 -- MAXIMAL FRAME COVERAGE FIXTURE — lua
+-- CONTRACT: governed by tests/common/positive/max_coverage/README.md
+-- (brought to contract 2026-07-03: Part-3 cross-product block Kid/Solo/Orch;
+--  portable field calls exercise Lua's colon-dispatch lowering).
 -- One runnable, self-asserting file exercising every Frame construct the Lua
 -- backend supports. Construct tags are standalone [tag] comments above each
 -- construct. The native driver (epilog, below the systems) runs at chunk top
@@ -297,7 +300,9 @@
         $C {
             tick() {
                 self.seen = self.seen + 1
-                -- [composition: delegate to held sub-system w/ explicit colon]
+                -- [control: native colon call — user-authored; the PORTABLE
+                --  form (framec emits the colon) is exercised in the
+                --  cross-product block below]
                 self.sensor:bump()
             }
             total(): int {
@@ -311,6 +316,98 @@
         -- [composition: hold an independent sub-system instance per Controller]
         sensor = Sensor._create()
         seen: int = 0
+}
+
+-- ============================================================================
+-- CROSS-PRODUCT BLOCK (contract Part 3 — the distilled framec#159 family).
+-- `tick` is deliberately on FOUR systems (Controller/Orch/Kid/Solo). On Lua
+-- the portable call MUST lower to the COLON form (implicit self) — a `.`
+-- emission silently shifts arguments (framec#120/#134 class). The element
+-- type is kept visible with the informational annotation `Kid[]` (rule 1);
+-- method-name inference is impossible (tick everywhere) by construction.
+-- ============================================================================
+@@system Kid {
+    interface:
+        tick(dt)
+        probe(): int
+    machine:
+        $S {
+            tick(dt) {
+                self.n = self.n + 1
+            }
+            probe(): int {
+                @@:(self.n)
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+@@system Solo {
+    -- [collision: SAME interface method names as Kid — a sibling child type]
+    interface:
+        tick(dt)
+        probe(): int
+    machine:
+        $S {
+            tick(dt) {
+                self.p = self.p + 10
+            }
+            probe(): int {
+                @@:(self.p)
+            }
+        }
+    domain:
+        p: int = 0
+}
+
+@@system Orch {
+    interface:
+        -- [collision: orchestrator declares `tick` itself — caller-collision]
+        tick(dt)
+        adopt(k)
+        kidval(i: int): int
+        lastval(): int
+        soloval(): int
+    machine:
+        $S {
+            adopt(k) {
+                table.insert(@@:self.kids, k)
+            }
+            tick(dt) {
+                @@:self._tickall(dt)
+            }
+            -- [ref: indexed cross-system call, native-param index — must emit
+            --  the COLON: self.kids[i]:probe()]
+            kidval(i: int): int {
+                @@:(@@:self.kids[i].probe())
+            }
+            -- [ref: indexed cross-system call, FRAME-EXPRESSION index]
+            lastval(): int {
+                @@:(@@:self.kids[#@@:self.kids].probe())
+            }
+            -- [ref: scalar sibling with the SAME collided method names]
+            soloval(): int {
+                @@:(@@:self.solo.probe())
+            }
+        }
+    actions:
+        _tickall(dt) {
+            local i = 1
+            while i <= #@@:self.kids do
+                -- [ref: indexed × cross-system × caller/sibling-collision —
+                --  colon-lowered via the visible Kid[] annotation]
+                @@:self.kids[i].tick(dt)
+                i = i + 1
+            end
+            -- [ref: scalar field, collided name — colon-lowered]
+            @@:self.solo.tick(dt)
+        }
+    domain:
+        -- [domain: table-of-systems, VISIBLE element annotation (informational
+        --  on Lua; drives the colon-dispatch resolution) + scalar sibling]
+        kids: Kid[] = {}
+        solo: Solo = @@Solo()
 }
 
 -- ============================================================================
@@ -617,5 +714,22 @@ _ck(pr6:here() == "C"
     and contains(pr6:log(), "D<(gone)")
     and contains(pr6:log(), "C.fwd(payload)"),
     "exit-decorated forward (exit) -> => $C(arg): exit handler + state arg [#128]")
+
+-- --- CROSS-PRODUCT BLOCK (contract Part 3 / framec#159 family) ---
+local o = @@Orch()
+local ka = @@Kid()
+local kb = @@Kid()
+local kc = @@Kid()
+o:adopt(ka)
+o:adopt(kb)
+o:adopt(kc)
+o:tick(0.16)
+o:tick(0.16)
+_ck(o:kidval(1) == 2 and o:kidval(2) == 2 and o:kidval(3) == 2,
+    "x-product: indexed @@:self.kids[i].tick colon-lowered + 3 kids independent (collided name)")
+_ck(o:lastval() == 2, "x-product: Frame-expression index kids[#kids]:probe()")
+_ck(o:soloval() == 20, "x-product: scalar sibling with identical method names")
+ka:tick(1.0) -- [control: native colon call]
+_ck(o:kidval(1) == 3 and o:kidval(2) == 2, "x-product: control native call touches only kid 1")
 
 print("1.." .. _n)
