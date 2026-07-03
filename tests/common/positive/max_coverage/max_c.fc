@@ -9,14 +9,11 @@
 // CONTRACT: this fixture is governed by the living coverage contract in
 //   tests/common/positive/max_coverage/README.md
 // (generic pattern + per-language challenges; C is the worked exemplar).
-// KNOWN CONTRACT GAPS in this file, opened by the framec#159 post-mortem —
-// close them per README Part 2/3 when this fixture is next revised:
-//   * R1 violation: composition calls are HAND-LOWERED (`Sensor_bump(self->sensor)`)
-//     instead of the portable `@@:self.sensor.bump()` — the tagged construct
-//     never exercises framec's field-call lowering.
-//   * Missing cross-product block (README Part 3): no array-of-systems field
-//     (`kids: Child*[4]`), no indexed cross-system call, no caller/sibling
-//     method-name collision (`tick` on orchestrator + two children).
+// Contract status (2026-07-03): brought to contract as the worked exemplar —
+// composition calls are portable (R1; one native kept as [control:]), and the
+// Part-3 cross-product block (Kid/Solo/Orch: indexed × cross-system ×
+// caller/sibling name-collision, visible Kid*[4] element spelling,
+// Frame-expression index) is included with runtime assertions.
 //
 // C idioms (vs the Python reference):
 //   * No self/method syntax — own actions/ops/interface called with the
@@ -315,8 +312,13 @@ static int _has(const char* hay, const char* needle) {
         $C {
             tick() {
                 self->seen = self->seen + 1;
-                Sensor_bump(self->sensor);          // [composition: native child call]
+                // [ref: @@:self.field.method() — PORTABLE cross-system call;
+                //  framec lowers to Sensor_bump(self->sensor). R1: the lowering
+                //  itself is under test here, not its output.]
+                @@:self.sensor.bump();
             }
+            // [control: native pre-lowered call — proves the free-function
+            //  runtime side independently of the lowering above]
             total(): int { @@:(Sensor_read(self->sensor)) }
             count(): int { @@:(self->seen) }
         }
@@ -324,6 +326,90 @@ static int _has(const char* hay, const char* needle) {
         // [composition: hold a sub-system instance in a domain var]
         sensor: Sensor* = @@Sensor()
         seen: int = 0
+}
+
+// ============================================================================
+// CROSS-PRODUCT BLOCK (contract Part 3 — the distilled framec#159 family).
+// `tick` is deliberately declared on FIVE systems in this file (Job,
+// Controller, Orch, Kid, Solo): the indexed lowering below must resolve from
+// the VISIBLE element type alone — method-name inference is impossible here
+// by construction. Kid*[4] emits the C declarator `Kid* kids[4];` (no native
+// typedef — typedefs hide the element type from type-ignorant framec).
+// ============================================================================
+@@system Kid {
+    interface:
+        tick(dt: float)
+        probe(): int
+    machine:
+        $S {
+            tick(dt: float) { self->n = self->n + 1; }
+            probe(): int { @@:(self->n) }
+        }
+    domain:
+        n: int = 0
+}
+
+@@system Solo {
+    // [collision: SAME interface method names as Kid — a sibling child type]
+    interface:
+        tick(dt: float)
+        probe(): int
+    machine:
+        $S {
+            tick(dt: float) { self->p = self->p + 10; }
+            probe(): int { @@:(self->p) }
+        }
+    domain:
+        p: int = 0
+}
+
+@@system Orch {
+    interface:
+        // [collision: orchestrator declares `tick` itself — the caller-collision
+        //  wave of framec#159; parent/child sharing tick is the orchestrator norm]
+        tick(dt: float)
+        adopt(k: Kid*)
+        kid_val(i: int): int
+        last_val(): int
+        solo_val(): int
+    machine:
+        $S {
+            adopt(k: Kid*) {
+                // [ref: indexed field WRITE through a Frame-expression index]
+                @@:self.kids[@@:self.kn] = k;
+                @@:self.kn = @@:self.kn + 1;
+            }
+            tick(dt: float) { @@:self._tick_all(dt); }
+            // [ref: indexed cross-system call with a native-param index —
+            //  lowers to Kid_probe(self->kids[i])]
+            kid_val(i: int): int { @@:(@@:self.kids[i].probe()) }
+            // [ref: indexed cross-system call with a FRAME-EXPRESSION index —
+            //  lowers to Kid_probe(self->kids[self->kn - 1])]
+            last_val(): int { @@:(@@:self.kids[@@:self.kn - 1].probe()) }
+            // [ref: scalar sibling with the SAME collided method names]
+            solo_val(): int { @@:(@@:self.solo.probe()) }
+        }
+    actions:
+        _tick_all(dt: float) {
+            int i = 0;
+            while (i < @@:self.kn) {
+                // [ref: indexed × cross-system × caller-collision × sibling-
+                //  collision — the framec#159 shape. Lowers to
+                //  Kid_tick(self->kids[i], dt) via the visible element type.]
+                @@:self.kids[i].tick(dt);
+                i = i + 1;
+            }
+            // [ref: scalar field, collided name — Solo_tick(self->solo, dt)]
+            @@:self.solo.tick(dt);
+        }
+    domain:
+        // [domain: array-of-systems, VISIBLE element spelling — framec emits
+        //  the C declarator `Kid* kids[4];` (framec#159)]
+        kids: Kid*[4]
+        kn: int = 0
+        // [domain: scalar sibling child of a DIFFERENT type with identical
+        //  interface method names]
+        solo: Solo* = @@Solo()
 }
 
 // ============================================================================
@@ -554,6 +640,31 @@ int main(void) {
         "multi-system: each Controller's own domain isolated");
     Controller_destroy(k1);
     Controller_destroy(k2);
+
+    // --- CROSS-PRODUCT BLOCK (contract Part 3 / framec#159 family) ---
+    Orch* o = @@Orch();
+    Kid* ka = @@Kid();
+    Kid* kb = @@Kid();
+    Kid* kc = @@Kid();
+    Orch_adopt(o, ka);
+    Orch_adopt(o, kb);
+    Orch_adopt(o, kc);
+    Orch_tick(o, 0.16f);
+    Orch_tick(o, 0.16f);
+    _ck(Orch_kid_val(o, 0) == 2 && Orch_kid_val(o, 1) == 2 && Orch_kid_val(o, 2) == 2,
+        "x-product: indexed @@:self.kids[i].tick lowered + 3 kids independent (collided name, 5 tick-bearing systems)");
+    _ck(Orch_last_val(o) == 2,
+        "x-product: Frame-expression index @@:self.kids[@@:self.kn - 1].probe()");
+    _ck(Orch_solo_val(o) == 20,
+        "x-product: scalar sibling with identical method names dispatched to Solo");
+    Kid_tick(ka, 1.0f); // [control: native pre-lowered indexed-family call]
+    _ck(Orch_kid_val(o, 0) == 3 && Orch_kid_val(o, 1) == 2,
+        "x-product: control native call touches only kid 0 (aliasing sanity)");
+    Orch_destroy(o);
+    Kid_destroy(ka);
+    Kid_destroy(kb);
+    Kid_destroy(kc);
+    Solo* _slk = NULL; (void)_slk; // Solo owned by Orch's domain init; freed with o? (no _destroy cascade — accepted leak in TAP binary, per contract C notes)
 
     // --- construct probe ---
     Probe* pr = @@Probe();

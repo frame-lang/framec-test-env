@@ -439,6 +439,12 @@ record and grow as each language goes through the same process.
 
 ## Amendment log
 
+- **2026-07-03** — **max_c.fc brought to contract** (the worked exemplar):
+  composition calls converted to portable form (R1; one native retained as
+  `[control:]`), Part-3 cross-product block added (Kid/Solo/Orch — `tick` on
+  FIVE systems in the file, indexed + Frame-expression-index + scalar-sibling
+  dispatch through visible `Kid*[4]` spelling), 4 new runtime assertions;
+  TAP 40/40 under cc + libcjson. Remaining 16 fixtures to follow, one by one.
 - **2026-07-03** — Document created from the framec#159 post-mortem (three
   waves through max_c: hand-lowered composition tag + missing
   indexed/collision cross-products). C section written as the exemplar;
