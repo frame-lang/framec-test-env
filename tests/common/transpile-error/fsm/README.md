@@ -41,9 +41,9 @@ Output is TAP. Run:
 FRAMEC=/path/to/framec ./check_fsm_diagnostics.sh
 ```
 
-## Covered (16 fixtures, verified end-to-end on framec 4.6.1)
+## Covered (16 fixtures, verified end-to-end on framec 4.6.1 + the framec#162 fix)
 
-12 of the 14 RFC-0042 §9 diagnostic codes, plus a positive control:
+13 of the 14 RFC-0042 §9 diagnostic codes, plus a positive control:
 
 | Fixture | Code | What it exercises |
 |---|---|---|
@@ -62,27 +62,26 @@ FRAMEC=/path/to/framec ./check_fsm_diagnostics.sh
 | `charclass_on_token`        | E722 | char-class regex on a `token` alphabet |
 | `duplicate_stage_label`     | E730 | a stage capture label used more than once in one state |
 | `mode_c_alphabet_mismatch`  | E731 | Mode-C composition across mismatched alphabets |
-| `transition_in_action_body` | E700 | `->` inside an action body (see E712 note below) |
+| `transition_in_action_body` | E712 | `->` inside an action body (RFC-0042 §3.7) |
 
-## The two remaining §9 codes — framec observations, not fixture gaps
+## The one remaining §9 code — resolved as by-design, not a fixture gap
 
-Both were run down to the framec source; neither is cleanly assertable at the
-released-CLI boundary today, and each is a small framec-side finding (filed as
-**framec#162** and **framec#163**) rather than a test-env TODO:
+The two codes that weren't originally assertable at the CLI boundary were run
+down to the framec source and filed as framec#162 / framec#163:
 
-- **E712** (transition inside an action body) — the parser *does* detect it
-  (`fsm_parser/action_block_parser`: `error_code = "E712"`), but the CLI
-  surfaces it as **E700** (the specific code is flattened parser→CLI). The
-  `transition_in_action_body` fixture still guards the invariant (it asserts
-  the construct is *rejected*, as E700), but the E712 code does not survive to
-  the binary — arguably a framec bug (a diagnostic that doesn't reach the user
-  by its documented code).
-- **E723** (empty regex `//`) — the regex engine has the check
+- **E712** — *fixed* (framec#162): the parser assigned `error_code = "E712"`
+  but the CLI flattened it to E700. framec now surfaces E712 to the binary, so
+  `transition_in_action_body` asserts the real code above. (Requires the
+  framec#162 fix; on a framec without it the CLI reports E700.)
+- **E723** (empty regex `//`) — *resolved won't-fix* (framec#163): the regex
+  engine has the check
   (`fsm_regex`: `rejects_empty_with_e723`), but a literal `//` in `@@fsm`
-  source is consumed by the **segmenter** and reported as **E001**
-  (unterminated block) before the validator ever sees an empty pattern. So
-  E723 is reachable by the engine's unit tests but not from CLI source in
-  4.6.1.
+  source is a **line comment** (RFC-0042 §3.5), not an empty regex — so an
+  empty pattern can't be written as `//` and the E723 path is unreachable from
+  source. Resolved as by-design: framec now emits an `@@fsm`-specific
+  unterminated-block diagnostic that explains this, and RFC-0042 §6.10 records
+  the empty-pattern rejection as a deliberate RE2 deviation. No fixture — there
+  is no valid source that reaches E723.
 
 ## Adding a fixture
 
