@@ -78,28 +78,62 @@ Tests are organized under `tests/common/positive/`:
 
 | Category | Description |
 |---|---|
-| `primary/` | Core reference tests — interface, transitions, HSM, persistence |
-| `automata/` | Mealy/Moore machines |
-| `behavior_trees/` | AI agent patterns |
-| `capabilities/` | Actions, operations, system return |
-| `control_flow/` | If/else, while, forwards, branching |
+| `primary/` | Core reference tests — interface, transitions, HSM, persistence, async |
 | `core/` | Basic compilation and project structure |
-| `data_types/` | Lists, dicts, strings, type handling |
+| `control_flow/` | If/else, while, forwards, branching |
+| `systems/` | Multi-handler, nested states |
+| `capabilities/` | Actions, operations, system return |
 | `interfaces/` | Interface method patterns |
+| `system_params/` | System parameters and enter/exit args |
+| `data_types/` | Lists, dicts, strings, type handling |
 | `operators/` | Arithmetic, comparison, logical, ternary |
-| `protocols/` | Protocol patterns |
 | `scoping/` | Variable scope, nested functions |
 | `segmenter/` | Native code segmentation edge cases |
-| `systems/` | Multi-handler, nested states |
+| `automata/` | Mealy/Moore machines |
+| `behavior_trees/` | AI agent patterns |
+| `fsm/` | `@@fsm` recognizers (RFC-0042): regex match stages, captures, Mode-C composition |
+| `frame_machines/` | Broad `@@system` behavioral fixtures |
+| `demos/` | End-to-end demo programs |
+| `linux/`, `robotics/`, `scientific/`, `security/` | Cookbook / domain application suites |
+| `max_coverage/` | Per-language maximal-surface fixtures |
 | `validator/` | Validation edge cases |
 
-Error tests live in separate directories:
+(Run `ls tests/common/positive/` for the live list — categories are added per wave.)
+
+Error tests live in separate directories — they assert that *invalid* input is
+**rejected**, not silently miscompiled:
 
 | Directory | What It Tests |
 |---|---|
 | `common/compile-error/` | Generated code that should fail to compile |
 | `common/transpile-error/` | Frame source that `framec` should reject |
+| `common/transpile-error/fsm/` | Invalid `@@fsm` rejected **with the right diagnostic code** (see below) |
 | `common/runtime-error/` | Code that compiles but should fail at runtime |
+
+### Negative `@@fsm` diagnostics (`transpile-error/fsm/`)
+
+`@@fsm` validator diagnostics (E7xx) are raised before codegen and are
+target-independent, so these fixtures run on **one** target (`python_3`), not
+×17. Each declares its expectation in a header comment and a dedicated TAP
+runner asserts framec fails with that exact code:
+
+```
+# expect-error: E732    → framec must fail AND the error must contain E732
+# expect-ok             → framec must succeed (positive control)
+```
+
+Run `tests/common/transpile-error/fsm/check_fsm_diagnostics.sh`. See that
+directory's [README](../tests/common/transpile-error/fsm/README.md) for the
+covered codes and how to add a case.
+
+## Coverage gate (`.skip.md`)
+
+Every positive fixture stem must exist for all 17 backends — a real port
+(`<stem>.f<ext>`) **or** a `<stem>.f<ext>.skip.md` placeholder documenting why
+that backend is intentionally absent. `scripts/check_coverage.py` enforces this
+(run it to list gaps). A `.skip.md` should name the concrete reason
+(capability-matrix skip, language-shape constraint, single-target regression
+net, etc.) — see [partial-coverage-audit.md](partial-coverage-audit.md).
 
 ## Markers
 

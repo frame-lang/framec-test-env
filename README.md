@@ -70,7 +70,7 @@ tier and the 17-lang matrix miss** — run it (at least `smoke`, ideally
 | Kotlin | `.fkt` | `kotlin` | Experimental |
 | Swift | `.fswift` | `swift` | Experimental |
 | Ruby | `.frb` | `ruby` | Experimental |
-| Erlang | `.ferl` | `erlang` | Experimental |
+| Erlang | `.ferl` | `erlang` | Deprecated (being retired this release) |
 | Lua | `.flua` | `lua` | Experimental |
 | Dart | `.fdart` | `dart` | Experimental |
 | GDScript | `.fgd` | `gdscript` | Experimental |
@@ -85,7 +85,8 @@ framepiler_test_env/
 │   ├── common/
 │   │   ├── positive/<category>/  # Tests that should pass (per-language files)
 │   │   ├── compile-error/        # Expected compile failures
-│   │   ├── transpile-error/      # Expected transpile failures
+│   │   ├── transpile-error/      # Expected transpile failures (framec rejects source)
+│   │   │   └── fsm/              # @@fsm diagnostics: assert the exact E7xx code
 │   │   └── runtime-error/        # Expected runtime failures
 │   ├── python/                   # Python-specific tests
 │   ├── typescript/               # TypeScript-specific tests
@@ -101,11 +102,20 @@ framepiler_test_env/
 └── scripts/                      # Utilities
 ```
 
+## Coverage gate
+
+Every positive fixture stem must exist for all 17 backends — a real port or a
+`<stem>.f<ext>.skip.md` placeholder documenting why the backend is
+intentionally absent. Enforced by `scripts/check_coverage.py` (run it to list
+gaps). See [partial-coverage-audit.md](docs/partial-coverage-audit.md).
+
 ## Guides
 
 - [Docker Testing](docs/docker.md) — Running tests in containers, cross-compilation, debugging failures
-- [Writing Tests](docs/writing-tests.md) — Test file format, harness patterns, markers
+- [Writing Tests](docs/writing-tests.md) — Test file format, markers, coverage gate, negative/`@@fsm` diagnostics
 - [Adding a Language](docs/adding-a-language.md) — New backend container + runner setup
+- [Runtime Capability Matrix](docs/runtime-capability-matrix.md) — per-language conformance to the v4 runtime spec
+- [Partial-Coverage Audit](docs/partial-coverage-audit.md) — coverage-gap classification and resolution
 
 ## Test Output
 
