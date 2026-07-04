@@ -1,0 +1,69 @@
+@@[target("gdscript")]
+extends SceneTree
+
+# Test 102: list + dict as PERSISTED domain fields (GDScript).
+# Exercises the type-ignorant domain-field path through the native
+# var_to_bytes serializer: an Array and a Dictionary must round-trip
+# through save_state / restore_state preserving order and key-value
+# pairs.
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system DomainListDict {
+    interface:
+        push(v: int)
+        size_l(): int
+        get_at(i: int): int
+        put(k: String, v: int)
+        size_d(): int
+        get_v(k: String): int
+
+    machine:
+        $Active {
+            push(v: int)         { self.items.append(v) }
+            size_l(): int        { @@:(self.items.size()) }
+            get_at(i: int): int  { @@:(self.items[i] if i >= 0 and i < self.items.size() else -1) }
+            put(k: String, v: int)  { self.scores[k] = v }
+            size_d(): int        { @@:(self.scores.size()) }
+            get_v(k: String): int   { @@:(self.scores.get(k, -1)) }
+        }
+
+    domain:
+        items: Array = []
+        scores: Dictionary = {}
+}
+
+func main():
+    var s1 = @@DomainListDict()
+    s1.push(10)
+    s1.push(20)
+    s1.push(30)
+    s1.put("a", 1)
+    s1.put("b", 2)
+    s1.put("c", 3)
+
+    assert(s1.size_l() == 3, "pre size_l=" + str(s1.size_l()))
+    assert(s1.get_at(0) == 10, "pre get_at0")
+    assert(s1.size_d() == 3, "pre size_d")
+    assert(s1.get_v("b") == 2, "pre b")
+
+    var snap = s1.save_state()
+
+    var s2 = @@DomainListDict()
+    s2.restore_state(snap)
+
+    assert(s2.size_l() == 3, "post size_l=" + str(s2.size_l()))
+    assert(s2.get_at(0) == 10, "post items[0]=" + str(s2.get_at(0)))
+    assert(s2.get_at(1) == 20, "post items[1]=" + str(s2.get_at(1)))
+    assert(s2.get_at(2) == 30, "post items[2]=" + str(s2.get_at(2)))
+    assert(s2.size_d() == 3, "post size_d=" + str(s2.size_d()))
+    assert(s2.get_v("a") == 1, "post a")
+    assert(s2.get_v("b") == 2, "post b")
+    assert(s2.get_v("c") == 3, "post c")
+
+    print("PASS: 102_persist_domain_list_dict")
+
+func _init():
+    main()
+    quit()

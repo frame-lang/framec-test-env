@@ -1,0 +1,60 @@
+@@[target("dart")]
+
+import 'dart:convert';
+import 'dart:io';
+
+@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@system Counter {
+    interface:
+        bump()
+        value(): int
+
+    machine:
+        $Active {
+            bump() { this.n = this.n + 1; }
+            value(): int { @@:(this.n) return; }
+        }
+
+    domain:
+        n: int = 0
+}@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+
+
+@@[main]
+@@system Container {
+    interface:
+        tick()
+        get_n(): int
+
+    machine:
+        $Active {
+            tick() {
+                this.n = this.n + 10;
+                this.counter.bump();
+            }
+            get_n(): int { @@:(this.n) return; }
+        }
+
+    domain:
+        n: int = 0
+        counter: Counter = @@Counter()
+}
+
+void main() {
+    var c1 = @@Container();
+    c1.tick();
+    c1.tick();
+    if (c1.get_n() != 20) { print("FAIL pre n: ${c1.get_n()}"); exit(1); }
+
+    var snap = c1.saveState();
+    final c2 = @@Container();
+
+    c2.restoreState(snap);
+    if (c2.get_n() != 20) { print("FAIL post n: ${c2.get_n()}"); exit(1); }
+
+    print("PASS: 82_persist_multi_system");
+}

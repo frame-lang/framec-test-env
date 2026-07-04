@@ -1,0 +1,94 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <unistd.h>
+#include <sys/wait.h>
+#include <signal.h>
+#include <cjson/cJSON.h>
+
+// Test 88: quiescent contract (E700) on C.
+//
+// save_state() called from inside a handler is non-quiescent (the
+// handler's FrameContext is on the context stack) and must error per
+// RFC-0012. The C runtime enforces this by printing
+// "E700: system not quiescent" to stderr and calling abort() — there
+// is no catchable exception in C, so the violation terminates the
+// process. We observe it by forking the violation into a child and
+// installing a SIGABRT handler that _exit()s with a known marker code:
+// if (and only if) the in-handler save raises SIGABRT, the child exits
+// with that marker; if no abort fired, the child falls through to a
+// different exit code and the test fails. (The handler also sidesteps
+// the OS default-abort crash-reporter path, which would otherwise stall
+// the child for seconds.) Saves from outside any handler are quiescent
+// and succeed.
+
+@@[persist(char*)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Outer {
+    interface:
+        try_save_during_handler()
+
+    machine:
+        $S {
+            try_save_during_handler() {
+                // Native C call to the system's own save_state while a
+                // handler context is live → triggers the E700 abort.
+                Outer_save_state(self);
+            }
+        }
+
+    domain:
+}
+
+// Marker exit code: reached only when SIGABRT (the E700 abort) fires.
+#define E700_ABORT_MARKER 42
+static void on_sigabrt(int sig) { (void)sig; _exit(E700_ABORT_MARKER); }
+
+int main() {
+    // 1. Quiescent save (outside any handler) must succeed.
+    Outer* o1 = @@Outer();
+    char* snap = Outer_save_state(o1);
+    if (snap == NULL || strlen(snap) == 0) {
+        printf("FAIL: quiescent save returned empty\n");
+        return 1;
+    }
+    free(snap);
+
+    // 2. In-handler save is non-quiescent — must abort with E700.
+    //    Fork the violation; the child installs a SIGABRT handler that
+    //    exits with E700_ABORT_MARKER, so we confirm the abort fired
+    //    without paying the OS crash-reporter cost.
+    pid_t pid = fork();
+    if (pid == 0) {
+        signal(SIGABRT, on_sigabrt);
+        Outer* o2 = @@Outer();
+        Outer_try_save_during_handler(o2);
+        // Reached only if save_state did NOT abort — contract violated.
+        _exit(7);
+    }
+    int status = 0;
+    waitpid(pid, &status, 0);
+    int aborted = (WIFEXITED(status) && WEXITSTATUS(status) == E700_ABORT_MARKER)
+               || (WIFSIGNALED(status) && WTERMSIG(status) == SIGABRT);
+    if (!aborted) {
+        printf("FAIL: expected E700 abort from in-handler save; exited=%d code=%d signaled=%d sig=%d\n",
+               WIFEXITED(status), WIFEXITED(status) ? WEXITSTATUS(status) : 0,
+               WIFSIGNALED(status), WIFSIGNALED(status) ? WTERMSIG(status) : 0);
+        return 1;
+    }
+
+    // 3. A separate, never-violated instance is still quiescent and saves.
+    Outer* o3 = @@Outer();
+    char* snap3 = Outer_save_state(o3);
+    if (snap3 == NULL) {
+        printf("FAIL: fresh instance unusable\n");
+        return 1;
+    }
+    free(snap3);
+
+    printf("PASS: 88_persist_quiescent_error\n");
+    return 0;
+}

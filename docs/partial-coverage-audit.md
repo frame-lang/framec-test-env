@@ -150,3 +150,38 @@ filtering out `.driver`, `.escript`, README, and helper files.
 Cross-referenced against `runtime-capability-matrix.md` to
 classify gaps. Verdicts are conservative — when in doubt,
 classified as "Investigate" rather than "Stale".
+
+## Resolution (2026-06, branch `framework-skipfiles-404`)
+
+The coverage gate (`scripts/check_coverage.py`) is now **green**:
+every fixture stem under `tests/common/positive/` has all 17
+backend files — a real port or a documented `<stem>.f<ext>.skip.md`.
+The 129 then-missing files were resolved as **67 real ports**
+(each transpiled, compiled and *run* to PASS locally on all 17
+backends) plus **62 intentional `.skip.md`** placeholders generated
+by `scripts/gen_skipmd.py`.
+
+Real ports landed for every "Stale" item above: `data_types/`×5,
+`scoping/`×2, `capabilities/{actions_call_wrappers,
+system_return_header_defaults}` → js/ts/rs/swift; `102_persist_domain_list_dict`
+→ all 15 remaining backends; `82_persist_multi_system` → the 12
+multi-system backends (Java/Erlang stay skipped, one-system-per-file);
+`103_at_bang_no_init` → kt+swift; `54_interp_state_var` → php.
+The exploratory persist ports surfaced **no framec codegen bugs**.
+
+Two verdict corrections from the original snapshot, both
+evidence-based:
+
+- **`54_interp_state_var` GDScript** — listed above as a port
+  candidate ("native interpolation"), but framec lowers `$.x`
+  inside the target's *inline* interpolation syntax, and GDScript
+  has none (it uses `%`/`.format()`); framec emits literal `{...}`
+  that GDScript does not expand. GDScript is therefore a **skip**,
+  not a port. Only PHP was added for `54`.
+- **`81_persist_async_basic` Dart** — handled as an async-target
+  `.skip.md` (Dart is not in framec's async-codegen target set per
+  the matrix), rather than a real port.
+
+`88_persist_quiescent_error` was extended to C: since C signals
+E700 via `abort()` (no catchable exception), the fixture forks the
+violation and confirms the abort fired via a `SIGABRT` handler.

@@ -1,0 +1,67 @@
+@@[target("kotlin")]
+
+import kotlin.system.exitProcess
+
+// Test 102: list + dict as PERSISTED domain fields (Kotlin).
+// Exercises the type-ignorant domain-field path through the Jackson
+// serializer: MutableList<Int> and MutableMap<String,Int> must
+// round-trip through save_state / restore_state preserving order and
+// key-value pairs.
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system DomainListDict {
+    interface:
+        push(v: Int)
+        size_l(): Int
+        get_at(i: Int): Int
+        put(k: String, v: Int)
+        size_d(): Int
+        get_v(k: String): Int
+
+    machine:
+        $Active {
+            push(v: Int)         { items.add(v) }
+            size_l(): Int        { @@:(items.size) }
+            get_at(i: Int): Int  { @@:(if (i >= 0 && i < items.size) items[i] else -1) }
+            put(k: String, v: Int)  { scores[k] = v }
+            size_d(): Int        { @@:(scores.size) }
+            get_v(k: String): Int   { @@:(scores[k] ?: -1) }
+        }
+
+    domain:
+        items: MutableList<Int> = mutableListOf<Int>()
+        scores: MutableMap<String, Int> = mutableMapOf<String, Int>()
+}
+
+fun main() {
+    val s1 = @@DomainListDict()
+    s1.push(10)
+    s1.push(20)
+    s1.push(30)
+    s1.put("a", 1)
+    s1.put("b", 2)
+    s1.put("c", 3)
+
+    if ((s1.size_l() as Int) != 3) { println("FAIL pre size_l=${s1.size_l()}"); exitProcess(1) }
+    if ((s1.get_at(0) as Int) != 10) { println("FAIL pre get_at0"); exitProcess(1) }
+    if ((s1.size_d() as Int) != 3) { println("FAIL pre size_d"); exitProcess(1) }
+    if ((s1.get_v("b") as Int) != 2) { println("FAIL pre b"); exitProcess(1) }
+
+    val snap = s1.save_state() as String
+
+    val s2 = @@DomainListDict()
+    s2.restore_state(snap)
+
+    if ((s2.size_l() as Int) != 3) { println("FAIL post size_l=${s2.size_l()}"); exitProcess(1) }
+    if ((s2.get_at(0) as Int) != 10) { println("FAIL post items[0]=${s2.get_at(0)}"); exitProcess(1) }
+    if ((s2.get_at(1) as Int) != 20) { println("FAIL post items[1]=${s2.get_at(1)}"); exitProcess(1) }
+    if ((s2.get_at(2) as Int) != 30) { println("FAIL post items[2]=${s2.get_at(2)}"); exitProcess(1) }
+    if ((s2.size_d() as Int) != 3) { println("FAIL post size_d=${s2.size_d()}"); exitProcess(1) }
+    if ((s2.get_v("a") as Int) != 1) { println("FAIL post a"); exitProcess(1) }
+    if ((s2.get_v("b") as Int) != 2) { println("FAIL post b"); exitProcess(1) }
+    if ((s2.get_v("c") as Int) != 3) { println("FAIL post c"); exitProcess(1) }
+
+    println("PASS: 102_persist_domain_list_dict")
+}

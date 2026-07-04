@@ -1,0 +1,68 @@
+@@[target("csharp")]
+
+using System.Collections.Generic;
+
+// Test 102: list + dict as PERSISTED domain fields (C#).
+// Exercises the type-ignorant domain-field path through System.Text.Json:
+// List<int> and Dictionary<string,int> must round-trip through
+// SaveState / RestoreState preserving order and key-value pairs.
+
+@@[persist(string)]
+@@[save(SaveState)]
+@@[load(RestoreState)]
+@@system DomainListDict {
+    interface:
+        push(v: int)
+        size_l(): int
+        get_at(i: int): int
+        put(k: string, v: int)
+        size_d(): int
+        get_v(k: string): int
+
+    machine:
+        $Active {
+            push(v: int)         { items.Add(v); }
+            size_l(): int        { @@:(items.Count) }
+            get_at(i: int): int  { @@:((i >= 0 && i < items.Count) ? items[i] : -1) }
+            put(k: string, v: int)  { scores[k] = v; }
+            size_d(): int        { @@:(scores.Count) }
+            get_v(k: string): int   { @@:(scores.TryGetValue(k, out int __vv) ? __vv : -1) }
+        }
+
+    domain:
+        items: List<int> = new List<int>()
+        scores: Dictionary<string, int> = new Dictionary<string, int>()
+}
+
+class Program {
+    static void Main(string[] args) {
+        var s1 = @@DomainListDict();
+        s1.push(10);
+        s1.push(20);
+        s1.push(30);
+        s1.put("a", 1);
+        s1.put("b", 2);
+        s1.put("c", 3);
+
+        if (s1.size_l() != 3) { Console.WriteLine($"FAIL pre size_l={s1.size_l()}"); Environment.Exit(1); }
+        if (s1.get_at(0) != 10) { Console.WriteLine("FAIL pre get_at0"); Environment.Exit(1); }
+        if (s1.size_d() != 3) { Console.WriteLine("FAIL pre size_d"); Environment.Exit(1); }
+        if (s1.get_v("b") != 2) { Console.WriteLine("FAIL pre b"); Environment.Exit(1); }
+
+        var snap = s1.SaveState();
+
+        var s2 = @@DomainListDict();
+        s2.RestoreState(snap);
+
+        if (s2.size_l() != 3) { Console.WriteLine($"FAIL post size_l={s2.size_l()}"); Environment.Exit(1); }
+        if (s2.get_at(0) != 10) { Console.WriteLine($"FAIL post items[0]={s2.get_at(0)}"); Environment.Exit(1); }
+        if (s2.get_at(1) != 20) { Console.WriteLine($"FAIL post items[1]={s2.get_at(1)}"); Environment.Exit(1); }
+        if (s2.get_at(2) != 30) { Console.WriteLine($"FAIL post items[2]={s2.get_at(2)}"); Environment.Exit(1); }
+        if (s2.size_d() != 3) { Console.WriteLine($"FAIL post size_d={s2.size_d()}"); Environment.Exit(1); }
+        if (s2.get_v("a") != 1) { Console.WriteLine("FAIL post a"); Environment.Exit(1); }
+        if (s2.get_v("b") != 2) { Console.WriteLine("FAIL post b"); Environment.Exit(1); }
+        if (s2.get_v("c") != 3) { Console.WriteLine("FAIL post c"); Environment.Exit(1); }
+
+        Console.WriteLine("PASS: 102_persist_domain_list_dict");
+    }
+}
