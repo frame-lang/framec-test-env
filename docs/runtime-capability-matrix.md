@@ -3,6 +3,10 @@
 Per-language conformance to `docs/frame_runtime.md` (the v4 runtime
 spec). Generated from a manual audit on 2026-04-26.
 
+> **Erlang is deprecated** — being retired this release. Its `gen_statem`-native
+> divergences (footnotes [a]–[q]) are retained here for historical reference;
+> new coverage should not target Erlang.
+
 ## Legend
 
 - ✅ — fully implemented per spec
