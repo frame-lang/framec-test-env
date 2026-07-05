@@ -207,25 +207,24 @@ huge, the `.raw` has bloated past its contents — only the nuke (step 5) recove
 
 ### Playbook — least → most destructive
 
-1. **Build cache** (the usual culprit; zero runtime impact, biggest cheap win):
+1. **Build cache + stopped containers + dangling images** — `cd docker && make prune`
+   (the usual culprit; biggest cheap win, keeps the matrix images so `make test`
+   still runs fast, only the next `make build` is cold). Equivalent to:
    ```bash
    docker builder prune -af
-   ```
-2. **Stopped containers + dangling images** (safe, reversible):
-   ```bash
    docker container prune -f && docker image prune -f
    ```
    Or, for the matrix stack specifically: `make clean-images` (or
    `docker compose -f docker/docker-compose.yml down --remove-orphans --volumes`).
-3. **All unused images** (next `make build` re-pulls the 17 bases, ~a few GB):
+2. **All unused images** (next `make build` re-pulls the 17 bases, ~a few GB):
    ```bash
    docker system prune -af
    ```
-4. **Volumes too** (`docker volume ls` first — matrix runs are stateless, so normally fine):
+3. **Volumes too** (`docker volume ls` first — matrix runs are stateless, so normally fine):
    ```bash
    docker system prune -af --volumes
    ```
-5. **Nuke the VM disk** — last resort. Steps 1–4 free space *inside* `Docker.raw`;
+4. **Nuke the VM disk** — last resort. Steps 1–3 free space *inside* `Docker.raw`;
    this is the only thing that gives the space back to macOS.
    ```bash
    # 1. Quit Docker Desktop completely (not just the window — fully quit).

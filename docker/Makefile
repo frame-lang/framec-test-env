@@ -256,6 +256,22 @@ clean-images: clean
 	@echo "=== Removing Docker images ==="
 	@FRAMEC_BIN=/dev/null $(COMPOSE) down --rmi all 2>/dev/null || true
 
+# Reclaim Docker's reclaimable space (build cache + stopped containers +
+# dangling images) — the docs/docker.md tier-1/2 playbook, on demand. The
+# matrix images are KEPT (only build cache and dangling layers go), so
+# `make test` still runs fast; only the next `make build` recompiles image
+# layers cold. NOTE: this frees space INSIDE the Docker.raw VM disk, not
+# host free space — only nuking Docker.raw returns disk to macOS (see
+# docs/docker.md "Reclaiming Disk"). Not auto-run: pruning build cache
+# after every matrix run would make every image rebuild cold.
+prune:
+	@echo "=== Pruning Docker build cache + stopped containers + dangling images ==="
+	@docker builder prune -af 2>&1 | grep -iE 'reclaimed|total' || true
+	@docker container prune -f 2>&1 | grep -iE 'reclaimed|total' || true
+	@docker image prune -f   2>&1 | grep -iE 'reclaimed|total' || true
+	@echo "--- Docker footprint now ---"
+	@docker system df
+
 rebuild: clean-images build
 
 # --- Debug ---
@@ -314,5 +330,5 @@ help:
 	@echo "Config:"
 	@echo "  FRAMEPILER_SRC=/path    Framepiler source (default: $(FRAMEPILER_SRC))"
 
-.PHONY: build framec test test-all compile clean clean-cache clean-images rebuild status help coverage-check
+.PHONY: build framec test test-all compile clean clean-cache clean-images prune trim-cache rebuild status help coverage-check
 .PHONY: $(foreach lang,$(LANGS),build-$(lang) test-$(lang) compile-$(lang) shell-$(lang))
