@@ -24,8 +24,15 @@ mkdir -p "$_CACHE_ROOT"
 # disable. Without this, the cache grew unbounded — every framec rebuild
 # added a fresh generation, never reclaimed; C accumulated 100+ GB in
 # production. See docs/docker.md "framec transpile cache" for context.
+#
+# Default is 1: keep only the CURRENT framec generation. This still gives
+# full within-run and same-binary re-run cache hits (the current hash is
+# retained), but drops stale generations from prior framec builds on the
+# next run instead of letting up to 3 pile up (C alone is ~2.5 GB/gen).
+# A/B binary comparison (`run.sh --compare`) should set FRAMEC_CACHE_KEEP=2+
+# to keep both binaries' caches warm.
 _FRAMEC_CACHE_PARENT="${FRAMEC_CACHE_DIR:-/output/.framec_cache}"
-_FRAMEC_CACHE_KEEP="${FRAMEC_CACHE_KEEP:-3}"
+_FRAMEC_CACHE_KEEP="${FRAMEC_CACHE_KEEP:-1}"
 if [ "$_FRAMEC_CACHE_KEEP" -gt 0 ] && [ -d "$_FRAMEC_CACHE_PARENT" ]; then
     (
         cd "$_FRAMEC_CACHE_PARENT" 2>/dev/null && \

@@ -171,13 +171,19 @@ rebuild creates a new `<framec_hash>` top-level dir; previous ones are kept
 indefinitely.
 
 The script has LRU eviction (keeps the `FRAMEC_CACHE_KEEP` most-recent framec
-hashes per language; default 3). If you see runaway growth anyway, either the
-eviction was disabled (`FRAMEC_CACHE_KEEP=0`) or you're on a checkout that
-predates it — recover with:
+hashes per language; **default 1** — keep only the current framec generation,
+so stale generations from prior framec builds are dropped on the next run
+instead of piling up). `make test` also auto-sweeps any legacy VirtioFS host
+binds after each run (`trim-cache`), so the cache can never silently refill the
+host. If you see runaway growth anyway, either eviction was disabled
+(`FRAMEC_CACHE_KEEP=0`) or you're on a checkout that predates it — recover with:
 
 ```bash
 cd docker && make clean-cache    # or rm -rf ../output/*/.framec_cache
 ```
+
+> Set `FRAMEC_CACHE_KEEP=2+` if you A/B two framec binaries repeatedly
+> (`run.sh --compare`) and want both caches kept warm across runs.
 
 **Why C is worst.** framec's C codegen produces substantially larger per-fixture
 artifacts than other targets (~2.8 GB per cache generation across the 290-fixture

@@ -190,6 +190,20 @@ test: $(STAMP_DIR)/framec-native build
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
 	 ./collect-results.sh $(LANGS)
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native $(COMPOSE) down --remove-orphans 2>/dev/null || true
+	@$(MAKE) -s trim-cache
+
+# Post-run cache hygiene (auto, cheap). The in-VM framec_cache volume is
+# already trimmed to the current framec generation by framec_cached.sh's
+# LRU eviction (FRAMEC_CACHE_KEEP=1); this additionally sweeps any legacy
+# VirtioFS host binds so the cache can never silently refill the host
+# (the classic test-env disk leak — see docs/docker.md). To fully reclaim
+# the cache volume on demand, use `make clean-cache`.
+trim-cache:
+	@swept=0; for d in $(TEST_ENV_ROOT)/output/*/.framec_cache; do \
+		[ -d "$$d" ] || continue; \
+		rm -rf "$$d" && swept=1; \
+	done; \
+	[ "$$swept" = 1 ] && echo "=== framec cache: swept legacy host binds (volume kept at current gen) ===" || true
 
 test-all: test
 
