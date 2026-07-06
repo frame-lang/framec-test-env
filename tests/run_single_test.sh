@@ -24,7 +24,7 @@ done
 unset __dir
 
 # Environment (inherited from parent)
-FRAMEC="${FRAMEC:-/Users/marktruluck/projects/frame_transpiler/target/release/framec}"
+FRAMEC="${FRAMEC:-$(command -v framec 2>/dev/null)}"
 TEST_ENV_ROOT="${TEST_ENV_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 PYTHON_OUT="$TEST_ENV_ROOT/output/python/tests"

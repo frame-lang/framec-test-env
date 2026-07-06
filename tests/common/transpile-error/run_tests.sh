@@ -6,7 +6,7 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FRAMEC="${FRAMEC:-/Users/marktruluck/projects/frame_transpiler/target/release/framec}"
+FRAMEC="${FRAMEC:-$(command -v framec 2>/dev/null)}"
 TMPDIR="${TMPDIR:-/tmp}"
 
 # Colors (disabled if not tty)

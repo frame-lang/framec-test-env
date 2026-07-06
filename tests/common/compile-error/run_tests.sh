@@ -21,7 +21,7 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../../../.." && pwd)"
 
-FRAMEC="${FRAMEC:-$REPO_ROOT/framepiler/target/release/framec}"
+FRAMEC="${FRAMEC:-$(command -v framec 2>/dev/null)}"
 if [ ! -x "$FRAMEC" ]; then
     echo "Bail out! framec not found at $FRAMEC — set FRAMEC env var"
     exit 1

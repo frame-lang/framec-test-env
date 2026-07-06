@@ -29,8 +29,10 @@ from pathlib import Path
 REPO_ROOT = Path(__file__).resolve().parent.parent
 POSITIVE_DIR = REPO_ROOT / "tests" / "common" / "positive"
 
+# Erlang (`ferl`) is deprecated and no longer part of the enforced backend
+# set (see scripts/check_coverage.py) — do not emit new `.ferl.skip.md`.
 ALL_BACKENDS: tuple[str, ...] = (
-    "fc", "fcpp", "fcs", "fdart", "ferl", "fgd", "fgo", "fjava",
+    "fc", "fcpp", "fcs", "fdart", "fgd", "fgo", "fjava",
     "fjs", "fkt", "flua", "fphp", "fpy", "frb", "frs", "fswift", "fts",
 )
 

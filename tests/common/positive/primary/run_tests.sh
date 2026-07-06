@@ -14,7 +14,7 @@
 #   - Rust: framepiler_test_env/rust_test_crate/tests/
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-FRAMEC="${FRAMEC:-/Users/marktruluck/projects/frame_transpiler/target/release/framec}"
+FRAMEC="${FRAMEC:-$(command -v framec 2>/dev/null)}"
 
 # Test environment root (framepiler_test_env/)
 # From tests/common/primary/ go up: primary -> common -> tests -> framepiler_test_env

@@ -31,7 +31,7 @@
 #
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-FRAMEC="${FRAMEC:-/Users/marktruluck/projects/frame_transpiler/target/release/framec}"
+FRAMEC="${FRAMEC:-$(command -v framec 2>/dev/null)}"
 
 # Ensure all tool directories are in PATH (non-login shells like CI / Claude Code
 # don't source the user's profile, so tools from homebrew, cargo, nvm, etc.
