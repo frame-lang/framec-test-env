@@ -46,7 +46,7 @@ framec-test-env/
 ├── output/                       # generated code (gitignored build artifacts)
 ├── docker/                       # 17-language container matrix + Makefile
 ├── fuzz/                         # generator-driven fuzz suites (gen_*.py + runners)
-├── scripts/                      # check_coverage.py (coverage gate) + utilities
+├── scripts/                      # check_coverage.py + check_docs.py (gates) + utilities
 ├── bug/                          # bug-tracking system
 └── docs/                         # these guides
 ```
@@ -66,11 +66,22 @@ with every wave.
 ## Coverage gate
 
 `scripts/check_coverage.py` enforces that every positive fixture stem has all
-17 backends — a real port **or** a `<stem>.f<ext>.skip.md` placeholder that
+16 backends — a real port **or** a `<stem>.f<ext>.skip.md` placeholder that
 documents why the backend is intentionally absent. Run it to see any gaps; each
 gap needs a real fixture or a `.skip.md` naming the reason. See
 [partial-coverage-audit.md](partial-coverage-audit.md) for the classification
 methodology and the gap analysis.
+
+## Doc-freshness gate
+
+`scripts/check_docs.py` keeps the human docs from drifting away from the code.
+The backend dispatch in `docker/runners/runner.sh` (language → framec target →
+extensions) and the enforced set in `check_coverage.py` are the sources of
+truth; the script verifies the README **Supported Languages** table (target
+names, rows, the deprecated flag) and the "N backends" counts against them.
+Run `python scripts/check_docs.py` to verify, or `--fix` to regenerate. A
+stale table or an off-by-one count fails the check instead of misleading a
+reader.
 
 ## Negative / error tests
 

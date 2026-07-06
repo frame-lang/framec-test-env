@@ -128,7 +128,7 @@ covered codes and how to add a case.
 
 ## Coverage gate (`.skip.md`)
 
-Every positive fixture stem must exist for all 17 backends — a real port
+Every positive fixture stem must exist for all 16 backends — a real port
 (`<stem>.f<ext>`) **or** a `<stem>.f<ext>.skip.md` placeholder documenting why
 that backend is intentionally absent. `scripts/check_coverage.py` enforces this
 (run it to list gaps). A `.skip.md` should name the concrete reason

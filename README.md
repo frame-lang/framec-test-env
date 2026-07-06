@@ -62,7 +62,7 @@ tier and the 17-lang matrix miss** — run it (at least `smoke`, ideally
 | JavaScript | `.fjs` | `javascript` | Stable |
 | Rust | `.frs` | `rust` | Stable |
 | C | `.fc` | `c` | Stable |
-| C++ | `.fcpp` | `cpp` | Stable |
+| C++ | `.fcpp` | `cpp_23` | Stable |
 | C# | `.fcs` | `csharp` | Stable |
 | Java | `.fjava` | `java` | Stable |
 | Go | `.fgo` | `go` | Stable |
@@ -104,7 +104,7 @@ framepiler_test_env/
 
 ## Coverage gate
 
-Every positive fixture stem must exist for all 17 backends — a real port or a
+Every positive fixture stem must exist for all 16 backends — a real port or a
 `<stem>.f<ext>.skip.md` placeholder documenting why the backend is
 intentionally absent. Enforced by `scripts/check_coverage.py` (run it to list
 gaps). See [partial-coverage-audit.md](docs/partial-coverage-audit.md).
