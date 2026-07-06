@@ -494,5 +494,127 @@ BATCHES: list[SkipBatch] = [
 ]
 
 
+# ---------------------------------------------------------------------------
+# Coverage-gate closure (2026-07): the remaining common/positive gaps are all
+# single-target or capability-scoped by design — verified per-stem. Grouped
+# here and appended to BATCHES.
+# ---------------------------------------------------------------------------
+
+_MAX_COVERAGE_BODY = (
+    "Per-language **maximal-surface** fixture: exercises the fullest Frame "
+    "feature set a single backend supports (HSM, stack, all statement forms, "
+    "transitions, references, const, actions, operations, multi-system, "
+    "persist, async) written in that backend's own idioms. Single-target by "
+    "design — there is no cross-language equivalent; broad behavioral parity "
+    "is covered by the per-feature suites.\n\n"
+    "See `docs/partial-coverage-audit.md`."
+)
+
+_ASYNC_LANG_IDIOM_BODY = (
+    "Language-specific async/concurrency idiom test. It exercises a construct "
+    "particular to this backend's async model — e.g. C# exception filters / "
+    "`Task` combinators, Kotlin dispatchers / `Mutex` / supervisor scope / "
+    "cancellation, Swift `async let` / detached tasks / task groups, Dart "
+    "futures / zones / completers, C++ coroutine throw-propagation / "
+    "string-return lifetime, GDScript typed-await returns. These have no "
+    "cross-language analogue, so the fixture is single-target by design.\n\n"
+    "See `docs/partial-coverage-audit.md`."
+)
+
+_ASYNC_SPLIT_BODY = (
+    "Cross-backend async behavioral fixture whose coverage is **split across "
+    "the common and language-specific trees**: the Python, TypeScript, "
+    "JavaScript, Rust and Java variants live under `tests/<lang>/positive/` "
+    "(all five present there), while the six typed backends here carry the "
+    "`common/positive/primary/` copy. The remaining backends — C, Go, PHP, "
+    "Ruby, Lua — are one-color (no async/await), so the fixture does not "
+    "apply.\n\n"
+    "See `docs/partial-coverage-audit.md`."
+)
+
+_FLOAT_ERASURE_BODY = (
+    "Statically-typed numeric-erasure round-trip: probes whether an integer "
+    "survives a boundary that would erase it to a float, on the statically-"
+    "typed backends where that ambiguity exists (C#, Go, Java, Kotlin, "
+    "Swift). Dynamic backends preserve the runtime numeric type (nothing to "
+    "erase), so the fixture is scoped to those five by design.\n\n"
+    "See `docs/partial-coverage-audit.md`."
+)
+
+_TABLE_LITERAL_BODY = (
+    "Lua-specific: exercises a Lua table literal (`{...}`) inside a loop body "
+    "— native Lua syntax with no cross-language analogue. Single-target by "
+    "design.\n\n"
+    "See `docs/partial-coverage-audit.md`."
+)
+
+# max_coverage: one stem per language, present only on its own backend.
+_MAX = {
+    "max_c": "fc", "max_cpp": "fcpp", "max_csharp": "fcs", "max_dart": "fdart",
+    "max_gdscript": "fgd", "max_go": "fgo", "max_java": "fjava",
+    "max_javascript": "fjs", "max_kotlin": "fkt", "max_lua": "flua",
+    "max_python_3": "fpy", "max_rust": "frs", "max_typescript": "fts",
+}
+for _stem, _ext in _MAX.items():
+    BATCHES.append(SkipBatch(
+        stem_path=f"max_coverage/{_stem}", real_exts=[_ext],
+        title="Intentional skip — per-language maximal-surface fixture",
+        body=_MAX_COVERAGE_BODY))
+
+# primary/async_<lang>_*: language-specific async idiom, single-target.
+_ASYNC_IDIOM = {
+    "async_cpp_nested_throw_propagation": "fcpp",
+    "async_cpp_string_return_lifetime": "fcpp",
+    "async_cpp_throw_after_partial_await": "fcpp",
+    "async_cs_exception_filter": "fcs",
+    "async_cs_task_whenall_aggregation": "fcs",
+    "async_cs_task_whenany_winner": "fcs",
+    "async_dt_completer_bridge": "fdart",
+    "async_dt_future_then_chain": "fdart",
+    "async_dt_future_wait_aggregation": "fdart",
+    "async_dt_zone_value_propagation": "fdart",
+    "async_gd_no_node_subclass": "fgd",
+    "async_gd_optional_typing": "fgd",
+    "async_gd_typed_zero_return": "fgd",
+    "async_kt_cancellation_clears_gate": "fkt",
+    "async_kt_companion_factory_resolves": "fkt",
+    "async_kt_dispatcher_switch_in_handler": "fkt",
+    "async_kt_e703_message_format": "fkt",
+    "async_kt_mutex_serializes_drivers": "fkt",
+    "async_kt_noncancellable_finally": "fkt",
+    "async_kt_supervisor_scope_isolates": "fkt",
+    "async_sw_async_let_parallel": "fswift",
+    "async_sw_detached_task": "fswift",
+    "async_sw_task_cancel_clears_gate": "fswift",
+    "async_sw_task_group_concurrent_entry": "fswift",
+}
+for _stem, _ext in _ASYNC_IDIOM.items():
+    BATCHES.append(SkipBatch(
+        stem_path=f"primary/{_stem}", real_exts=[_ext],
+        title="Intentional skip — language-specific async idiom",
+        body=_ASYNC_LANG_IDIOM_BODY))
+
+# primary/async_* split across common + language-specific trees.
+for _stem in ("async_composition_parent_child", "async_concurrent_entry_e703",
+              "async_distinct_instances_parallel", "async_exception_clears_gate",
+              "async_persist_roundtrip_gate_clears", "async_sync_op_bypass_gate"):
+    BATCHES.append(SkipBatch(
+        stem_path=f"primary/{_stem}",
+        real_exts=["fcpp", "fcs", "fdart", "fgd", "fkt", "fswift"],
+        title="Intentional skip — async fixture split across test trees",
+        body=_ASYNC_SPLIT_BODY))
+
+BATCHES.append(SkipBatch(
+    stem_path="primary/float_erasure_roundtrip",
+    real_exts=["fcs", "fgo", "fjava", "fkt", "fswift"],
+    title="Intentional skip — statically-typed numeric erasure only",
+    body=_FLOAT_ERASURE_BODY))
+
+BATCHES.append(SkipBatch(
+    stem_path="control_flow/table_literal_in_loop", real_exts=["flua"],
+    title="Intentional skip — Lua-specific table literal",
+    body=_TABLE_LITERAL_BODY))
+
+
 if __name__ == "__main__":
     sys.exit(run(BATCHES))

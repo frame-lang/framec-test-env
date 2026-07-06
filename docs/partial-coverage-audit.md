@@ -185,3 +185,28 @@ evidence-based:
 `88_persist_quiescent_error` was extended to C: since C signals
 E700 via `abort()` (no catchable exception), the fixture forks the
 violation and confirms the abort fired via a `SIGABRT` handler.
+
+### Full gate closure (2026-07, integration branch)
+
+After consolidating onto current main, `check_coverage.py` reported
+**641 remaining gaps across 45 stems** — all inherited from newer main
+waves. Every one was verified **intentional single-target or
+capability-scoped**, not a missing port, and closed with `.skip.md`
+(via `gen_skipmd.py`):
+
+- **`max_coverage/` (13 stems)** — per-language maximal-surface fixtures;
+  single-target by design.
+- **`primary/async_{cpp,cs,dt,gd,kt,sw}_*` (24 stems)** — language-specific
+  async idiom tests (C# exception filters, Kotlin dispatchers / mutex /
+  supervisor, Swift async-let / task groups, Dart zones, C++ coroutine
+  throw propagation, GDScript typed await) with no cross-language analogue.
+- **`primary/async_*` (6 stems)** — cross-backend async fixtures split
+  across trees: the py/ts/js/rust/java variants live under
+  `tests/<lang>/positive/`; C/Go/PHP/Ruby/Lua are one-color (async N/A).
+- **`float_erasure_roundtrip`** (statically-typed backends only) and
+  **`control_flow/table_literal_in_loop`** (Lua-specific).
+
+Also this pass: Erlang (`ferl`) was removed from the enforced backend set
+(`check_coverage.py` / `gen_skipmd.py`) as it is being retired, and the
+gate now flags a stem that has **both** a real fixture and a `.skip.md`.
+Gate is green: every stem has 16 files (real port or documented skip).
