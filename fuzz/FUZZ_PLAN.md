@@ -38,7 +38,10 @@ canary to the full Phase-6 async breadth — **11 backends × 4 patterns**
 ordering differ. 44 representative cases (11×4) verified: all transpile,
 target code compile-checks 40/40 locally (C++ defers to the gcc:14
 container for `<coroutine>`). See the generator docstring for the full
-pattern × backend matrix. Not yet wired into `run_all.sh`.
+pattern × backend matrix. Wired into `run_all.sh` as **Phase 26**
+(`run_async_persist.sh`) — transpile-check across all 11 backends; the
+generated code's compile + runtime round-trip is covered by the matrix's
+`async_persist_roundtrip_gate_clears` fixtures.
 
 Target end state:
 
