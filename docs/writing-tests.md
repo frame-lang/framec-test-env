@@ -135,6 +135,25 @@ that backend is intentionally absent. `scripts/check_coverage.py` enforces this
 (capability-matrix skip, language-shape constraint, single-target regression
 net, etc.) — see [partial-coverage-audit.md](partial-coverage-audit.md).
 
+## Verifying a fixture locally
+
+`scripts/verify_local.sh` is the host-side counterpart to the Docker matrix:
+give it one or more fixture files and it runs framec transpile → native
+compile → run → PASS check for each, on the backend implied by the extension.
+
+```bash
+scripts/verify_local.sh tests/common/positive/data_types/dict_ops.frs
+scripts/verify_local.sh tests/common/positive/primary/23_persist_basic.*   # whole stem
+```
+
+Unlike `run_single_test.sh` (Docker-oriented), it **provisions the per-language
+deps** a bare host lacks — a serde+tokio cargo crate (rust), Jackson + org.json
+(java/kotlin), a `net10.0` project (c#), coroutines (kotlin), and picks the
+arm64 Homebrew `cjson`/`nlohmann` on Apple Silicon. A backend whose toolchain
+or dep is genuinely missing is reported `SKIP` (not a false fail); Erlang is
+`SKIP` (deprecated). Exit code is non-zero if any file fails, so it drops into
+CI or a pre-push hook. Deps are cached under `output/.verify_local/`.
+
 ## Markers
 
 Place in the first 10 lines of a test file:
