@@ -102,3 +102,4 @@ rejected, not silently miscompiled:
 - [runtime-capability-matrix.md](runtime-capability-matrix.md) — per-language conformance
 - [partial-coverage-audit.md](partial-coverage-audit.md) — coverage-gap analysis
 - [future-enhancements.md](future-enhancements.md) — perf/optimization backlog
+- [integration-notes-2026-07.md](integration-notes-2026-07.md) — integration-branch state + framec version coordination
