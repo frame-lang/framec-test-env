@@ -43,6 +43,13 @@ set -o pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 DIFF_HARNESS="$SCRIPT_DIR/diff_harness/run_fuzz.py"
 
+# Route TypeScript execution through tools/tsx — a drop-in that strips types with
+# esbuild and runs the result with plain `node`, avoiding tsx's per-invocation
+# ESM loader hook, which crashed globally under full-run load (every TS case
+# failing at node:internal/process/esm_loader even though each passes alone).
+# Child phase runners inherit this PATH. See tools/tsx for the rationale.
+export PATH="$SCRIPT_DIR/tools:$PATH"
+
 TIER="full"
 LANG=""
 TAG=""
@@ -61,7 +68,7 @@ while [ $# -gt 0 ]; do
         --help|-h)
             echo "Usage: $0 [--tier=smoke|core|full] [--lang=<name>] [--tag=<comma-list>] [--phases=<comma-list>]"
             echo ""
-            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 24 (default: all)"
+            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 24 26 (default: all)"
             echo "Tiers:  smoke (curated, fast), core (phase essentials), full (complete corpus)"
             exit 0
             ;;

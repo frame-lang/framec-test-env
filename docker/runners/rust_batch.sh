@@ -129,6 +129,20 @@ cd "$PROJECT"
 cargo build --release --message-format=short >/tmp/cargo_build.log 2>&1
 build_status=$?
 
+# A transient first-build failure under the 300+-bin parallel compile (resource
+# pressure — fd/memory/process limits) must not be attributed to individual
+# passing bins. Retry the full build once, unchanged, before any per-bin
+# removal: if the retry succeeds, every bin genuinely compiles. A real compile
+# error reproduces on the retry and is then scraped correctly below. Without
+# this, a passing fixture (observed: max_rust) was scraped from a transient
+# first failure, removed, and reported as `cargo build failed` while a clean
+# single build of the same 332 bins gives exit 0.
+if [ $build_status -ne 0 ]; then
+    echo "# rust: first cargo build failed — retrying full build once before per-bin attribution" >&2
+    cargo build --release --message-format=short >/tmp/cargo_build.log 2>&1
+    build_status=$?
+fi
+
 if [ $build_status -ne 0 ]; then
     # Filter to error lines only (skip warnings), then extract bin names.
     bad=$(grep -E ":[[:space:]]+error" /tmp/cargo_build.log \
