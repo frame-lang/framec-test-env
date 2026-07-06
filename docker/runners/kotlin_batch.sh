@@ -221,12 +221,21 @@ if [ -n "$kt_files" ]; then
     fi
     if [ ! -f "$ALL_JAR" ]; then
         # kotlinc echoes source paths with or without leading /, so match
-        # on the directory-suffix regardless.
+        # on the directory-suffix regardless. Iterate scrape→remove→recompile
+        # to a fixpoint: each round peels off the tests kotlinc named in an
+        # error and recompiles, isolating N independent broken fixtures one
+        # round at a time. kotlinc emits a single fat jar for all files, so
+        # there is no per-file artifact to check — only a residual failure
+        # that names no test dir hits kt_mass_fail.
         dir_suffix="${COMPILE_DIR#/}"
-        bad=$(grep -E "error:" /tmp/kotlinc_err \
-                | grep -oE "${dir_suffix}/[A-Za-z0-9_]+" \
-                | sed "s|${dir_suffix}/||" | sort -u)
-        if [ -n "$bad" ]; then
+        built=1   # nonzero = jar still not produced
+        attempts=0
+        while [ $attempts -lt 50 ]; do
+            attempts=$((attempts + 1))
+            bad=$(grep -E "error:" /tmp/kotlinc_err \
+                    | grep -oE "${dir_suffix}/[A-Za-z0-9_]+" \
+                    | sed "s|${dir_suffix}/||" | sort -u)
+            [ -n "$bad" ] || break   # nothing attributable — handled below
             for s in $bad; do
                 tmp_manifest="${MANIFEST}.tmp"
                 awk -v s="$s" -F'\t' 'BEGIN{OFS="\t"} {
@@ -238,14 +247,12 @@ if [ -n "$kt_files" ]; then
                 mv "$tmp_manifest" "$MANIFEST"
                 rm -rf "$COMPILE_DIR/${s}"
             done
-            if ! try_kotlinc; then
-                kt_mass_fail
-                echo "# kotlinc failed even after removing bad files — see below" >&2
-                head -40 /tmp/kotlinc_err >&2
-            fi
-        else
+            try_kotlinc || true
+            if [ -f "$ALL_JAR" ]; then built=0; break; fi
+        done
+        if [ $built -ne 0 ]; then
             kt_mass_fail
-            echo "# batch kotlinc failed — see below" >&2
+            echo "# kotlinc still failing after isolating attributable bad files — see below" >&2
             head -40 /tmp/kotlinc_err >&2
         fi
     fi

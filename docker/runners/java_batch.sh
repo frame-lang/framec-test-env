@@ -243,10 +243,19 @@ mass_mark_fail() {
 
 if [ -n "$java_files" ]; then
     if ! try_javac; then
-        bad=$(grep -E ":[0-9]+: error" /tmp/javac_err \
-                | grep -oE "$SRC_ROOT/[A-Za-z0-9_]+" \
-                | sed "s|$SRC_ROOT/||" | sort -u)
-        if [ -n "$bad" ]; then
+        # Iterate scrape→remove→recompile to a fixpoint: each round peels off
+        # the tests javac could name in an error and recompiles, so N
+        # independent broken fixtures are isolated one round at a time rather
+        # than collapsing the whole language after a single retry. Only a
+        # residual failure that names no test dir hits mass_mark_fail.
+        built=1   # nonzero = still failing
+        attempts=0
+        while [ $attempts -lt 50 ]; do
+            attempts=$((attempts + 1))
+            bad=$(grep -E ":[0-9]+: error" /tmp/javac_err \
+                    | grep -oE "$SRC_ROOT/[A-Za-z0-9_]+" \
+                    | sed "s|$SRC_ROOT/||" | sort -u)
+            [ -n "$bad" ] || break   # nothing attributable — handled below
             for s in $bad; do
                 tmp_manifest="${MANIFEST}.tmp"
                 awk -v s="$s" -F'\t' 'BEGIN{OFS="\t"} {
@@ -258,14 +267,11 @@ if [ -n "$java_files" ]; then
                 mv "$tmp_manifest" "$MANIFEST"
                 rm -rf "$SRC_ROOT/${s}"
             done
-            if ! try_javac; then
-                mass_mark_fail
-                echo "# javac failed even after removing bad files — see below" >&2
-                head -40 /tmp/javac_err >&2
-            fi
-        else
+            if try_javac; then built=0; break; fi
+        done
+        if [ $built -ne 0 ]; then
             mass_mark_fail
-            echo "# batch javac failed — see below" >&2
+            echo "# javac still failing after isolating attributable bad files — see below" >&2
             head -40 /tmp/javac_err >&2
         fi
     fi

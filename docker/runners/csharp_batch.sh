@@ -121,21 +121,27 @@ fi
 # null-ref, etc.) poisons the whole batch because the csc compiler
 # gives up on the assembly when any file has errors. Recovery strategy:
 # on failure, scrape error lines for the offending test subdirectories,
-# remove them from the build, mark those tests as COMPILE_FAIL, retry.
-# One retry only — if a second failure occurs, mark all remaining RUN
-# tests as COMPILE_FAIL and bail.
+# remove them from the build, mark those tests COMPILE_FAIL, and rebuild —
+# iterating to a fixpoint so N independent broken fixtures are each peeled
+# off in turn. Only a residual failure that names no single test dir (e.g. a
+# shared-type conflict) collapses the remaining RUN tests, and only after
+# every attributable file has been isolated.
 try_build() {
     dotnet build "$PROJECT" -c Release --nologo >/tmp/dotnet_build.log 2>&1
 }
 
 if ! try_build; then
-    # Error lines look like:
-    #   /opt/testrunner/tests/<sanitized>/<file>.cs(L,C): error CS...
-    # Filter to error lines only (not warnings) before extracting dirs.
-    bad=$(grep ": error " /tmp/dotnet_build.log \
-            | grep -oE "${TESTS_SRC_DIR}/[A-Za-z0-9_]+" \
-            | sed "s|${TESTS_SRC_DIR}/||" | sort -u)
-    if [ -n "$bad" ]; then
+    built=1   # nonzero = assembly still failing
+    attempts=0
+    while [ $attempts -lt 50 ]; do
+        attempts=$((attempts + 1))
+        # Error lines look like:
+        #   /opt/testrunner/tests/<sanitized>/<file>.cs(L,C): error CS...
+        # Filter to error lines only (not warnings) before extracting dirs.
+        bad=$(grep ": error " /tmp/dotnet_build.log \
+                | grep -oE "${TESTS_SRC_DIR}/[A-Za-z0-9_]+" \
+                | sed "s|${TESTS_SRC_DIR}/||" | sort -u)
+        [ -n "$bad" ] || break   # nothing attributable — handled below
         for s in $bad; do
             tmp_manifest="${MANIFEST}.tmp"
             awk -v s="$s" -F'\t' 'BEGIN{OFS="\t"} {
@@ -147,25 +153,19 @@ if ! try_build; then
             mv "$tmp_manifest" "$MANIFEST"
             rm -rf "${TESTS_SRC_DIR}/${s}"
         done
-        if ! try_build; then
-            tmp_manifest="${MANIFEST}.tmp"
-            awk -F'\t' 'BEGIN{OFS="\t"} {
-                if ($2 == "RUN") { $2 = "COMPILE_FAIL"; $4 = "" }
-                print
-            }' "$MANIFEST" > "$tmp_manifest"
-            mv "$tmp_manifest" "$MANIFEST"
-            echo "# dotnet build failed even after removing bad files — see below" >&2
-            tail -40 /tmp/dotnet_build.log >&2
-        fi
-    else
-        # Failure with no attributable source file — treat as total failure.
+        if try_build; then built=0; break; fi
+    done
+    if [ $built -ne 0 ]; then
+        # Residual failure with no attributable source file — treat the
+        # still-RUN remainder as a total failure so the integrity check
+        # (emitted == test_count) holds.
         tmp_manifest="${MANIFEST}.tmp"
         awk -F'\t' 'BEGIN{OFS="\t"} {
             if ($2 == "RUN") { $2 = "COMPILE_FAIL"; $4 = "" }
             print
         }' "$MANIFEST" > "$tmp_manifest"
         mv "$tmp_manifest" "$MANIFEST"
-        echo "# batch dotnet build failed — see below" >&2
+        echo "# dotnet build still failing after isolating attributable bad files — see below" >&2
         tail -40 /tmp/dotnet_build.log >&2
     fi
 fi

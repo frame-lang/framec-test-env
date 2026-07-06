@@ -145,18 +145,23 @@ build_rc=$?
 #   ./cmd/<sanitized>/main.go:NN:CC: ...message
 # Falls back to marking everything COMPILE_FAIL if we can't
 # attribute (preserves the integrity-check invariant).
-if [ "$build_rc" -ne 0 ]; then
+attempts=0
+while [ "$build_rc" -ne 0 ] && [ $attempts -lt 50 ]; do
+    attempts=$((attempts + 1))
     bad=$(grep -oE 'cmd/[A-Za-z0-9_]+/' "$BUILD_LOG" | sed 's|cmd/||;s|/||' | sort -u)
-    if [ -n "$bad" ]; then
-        # Retry build excluding the bad packages — some otherwise-good
-        # tests may still need compilation. Each retry is cheap because
-        # Go caches per-package.
-        for s in $bad; do
-            rm -rf "$CMD_DIR/$s"
-        done
-        ( cd "$RUNNER_ROOT" && go build -o "$BIN_DIR/" ./cmd/... ) >> "$BUILD_LOG" 2>&1 || true
-    fi
-fi
+    [ -n "$bad" ] || break   # unattributable — left to the existence check below
+    # Remove the packages Go named and rebuild, iterating to a fixpoint:
+    # a following round then compiles any good package whose output was
+    # withheld when a sibling failed, and surfaces any second-order broken
+    # package masked behind the first. Each round is cheap (Go caches
+    # per-package), and the per-binary existence check below is the
+    # authoritative attribution regardless of where the loop stops.
+    for s in $bad; do
+        rm -rf "$CMD_DIR/$s"
+    done
+    ( cd "$RUNNER_ROOT" && go build -o "$BIN_DIR/" ./cmd/... ) >> "$BUILD_LOG" 2>&1
+    build_rc=$?
+done
 
 # Mark RUN rows whose binary doesn't exist as COMPILE_FAIL.
 tmp_manifest="${MANIFEST}.tmp"
