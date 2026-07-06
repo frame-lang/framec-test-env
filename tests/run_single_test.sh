@@ -24,7 +24,9 @@ done
 unset __dir
 
 # Environment (inherited from parent)
-FRAMEC="${FRAMEC:-$(command -v framec 2>/dev/null)}"
+# framec: prefer the authoritative local build, fall back to PATH.
+FRAMEC="${FRAMEC:-$HOME/.frame/local/bin/framec}"
+[ -x "$FRAMEC" ] || FRAMEC="$(command -v framec 2>/dev/null)"
 TEST_ENV_ROOT="${TEST_ENV_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}"
 
 PYTHON_OUT="$TEST_ENV_ROOT/output/python/tests"

@@ -11,7 +11,9 @@
 set -o pipefail
 
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-FRAMEC=${FRAMEC:-/Users/marktruluck/projects/framepiler/target/release/framec}
+# framec: prefer the authoritative local build, fall back to PATH.
+FRAMEC="${FRAMEC:-$HOME/.frame/local/bin/framec}"
+[ -x "$FRAMEC" ] || FRAMEC="$(command -v framec 2>/dev/null)"
 CASES_DIR=$SCRIPT_DIR/cases_pushpop
 OUT_DIR=$SCRIPT_DIR/out_pushpop
 LOG_DIR=$SCRIPT_DIR/logs_pushpop

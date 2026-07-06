@@ -18,7 +18,9 @@
 
 set -o pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
-FRAMEC=${FRAMEC:-$(command -v framec 2>/dev/null)}
+# framec: prefer the authoritative local build, fall back to PATH.
+FRAMEC="${FRAMEC:-$HOME/.frame/local/bin/framec}"
+[ -x "$FRAMEC" ] || FRAMEC="$(command -v framec 2>/dev/null)"
 CASES_DIR=$SCRIPT_DIR/cases_async_persist
 
 TIER="full"

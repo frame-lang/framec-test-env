@@ -2,6 +2,37 @@
 
 Run Frame tests in isolated containers with the correct toolchain for each language. The framec binary is mounted at runtime — swap binaries without rebuilding containers.
 
+## Which framec (authoritative build)
+
+The **authoritative** framec is the most recent local build at:
+
+```
+~/.frame/local/bin/framec
+```
+
+Its version is `<x.y.z>.<n>` — the last release ordinals plus a local revision
+`.n` (bumped via `~/.frame/local/.build_seq`), e.g. `4.6.0.4`. This is the
+single source of truth for "what framec does this test-env target."
+
+**Every native and fuzz runner resolves framec the same way:**
+
+1. `$FRAMEC` if explicitly set (override for A/B or a pinned binary);
+2. else `~/.frame/local/bin/framec` (the authoritative local build);
+3. else `framec` on `PATH`.
+
+`run_tests.sh` and `fuzz/run_all.sh` print the resolved path + `--version` at
+startup so every run is self-describing (`run_all.sh` also *exports* it, so all
+fuzz phases share one version — a mixed-version run is meaningless). A PATH
+`framec` (e.g. a stale `cargo install`) is only a fallback; prefer the
+authoritative build.
+
+**The Docker matrix is the one exception**: it cross-compiles a *Linux* framec
+(`framec-native`) from source (`FRAMEPILER_SRC`, default `~/projects/framec`),
+because the containers run Linux — it can't use the macOS authoritative binary.
+`make test` prints the authoritative build's version as a reference; **ensure
+`FRAMEPILER_SRC` points at the source that produced it** or the matrix will test
+a different framec than local runs (`make test FRAMEPILER_SRC=/path/to/src`).
+
 ## Setup
 
 ### 1. Build Container Images

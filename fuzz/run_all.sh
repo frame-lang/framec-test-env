@@ -50,6 +50,18 @@ DIFF_HARNESS="$SCRIPT_DIR/diff_harness/run_fuzz.py"
 # Child phase runners inherit this PATH. See tools/tsx for the rationale.
 export PATH="$SCRIPT_DIR/tools:$PATH"
 
+# Resolve framec once — the authoritative local build, else PATH — and export
+# so every phase runs against the *same* version (a mixed-version run is
+# meaningless). See docs/docker.md "Which framec".
+FRAMEC="${FRAMEC:-$HOME/.frame/local/bin/framec}"
+[ -x "$FRAMEC" ] || FRAMEC="$(command -v framec 2>/dev/null)"
+export FRAMEC
+if [ -x "$FRAMEC" ]; then
+    echo "framec: $FRAMEC ($("$FRAMEC" --version 2>/dev/null))"
+else
+    echo "WARNING: framec not found ($HOME/.frame/local/bin/framec or PATH)" >&2
+fi
+
 TIER="full"
 LANG=""
 TAG=""

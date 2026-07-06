@@ -65,7 +65,14 @@ $(STAMP_DIR)/framec-native: $(SRC_STAMP) | $(STAMP_DIR)
 		CARGO_INCREMENTAL=0 cargo zigbuild --release -p framec --target aarch64-unknown-linux-gnu 2>&1 | tail -3 && \
 		cp target/aarch64-unknown-linux-gnu/release/framec "$(DOCKER_DIR)/framec-native"
 	@touch $@
-	@echo "Built: framec-native ($$(file framec-native | grep -o 'x86-64\|aarch64'))"
+	@echo "Built: framec-native ($$(file framec-native | grep -o 'x86-64\|aarch64')) from $(FRAMEPILER_SRC)"
+	@# The matrix cross-compiles a Linux framec from FRAMEPILER_SRC; it can't be
+	@# run on this host to self-report. Show the authoritative local build's
+	@# version as the reference — if it differs from FRAMEPILER_SRC's release,
+	@# the matrix is testing a different framec than local runs. See
+	@# docs/docker.md "Which framec".
+	@[ -x "$(HOME)/.frame/local/bin/framec" ] && \
+		echo "  authoritative local framec: $$($(HOME)/.frame/local/bin/framec --version) — ensure FRAMEPILER_SRC matches" || true
 
 framec: $(STAMP_DIR)/framec-native
 

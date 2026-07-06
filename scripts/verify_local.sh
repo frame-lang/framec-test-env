@@ -30,7 +30,9 @@
 
 set -o pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-FRAMEC="${FRAMEC:-$(command -v framec 2>/dev/null)}"
+# framec: prefer the authoritative local build, fall back to PATH.
+FRAMEC="${FRAMEC:-$HOME/.frame/local/bin/framec}"
+[ -x "$FRAMEC" ] || FRAMEC="$(command -v framec 2>/dev/null)"
 CACHE="$ROOT/output/.verify_local"
 # Force arm64 on Apple Silicon *hardware* — detect via sysctl, not `uname -m`,
 # which reports x86_64 under a Rosetta shell and would then mismatch the arm64
