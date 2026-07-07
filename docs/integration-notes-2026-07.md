@@ -1,10 +1,9 @@
 # Integration notes — `integration/test-env-2026-07`
 
 Coordination state for the July 2026 integration branch. This branch bundles
-several independent test-env waves that are **not yet on `main`**, and it has
-a cross-repo dependency on a specific `framec` build. Read this before merging
-to `main` or running the suites against a stock release binary — the numbers
-and pass/fail verdicts below depend on *which* `framec` you point at.
+several independent test-env waves that are **not yet on `main`**. Everything
+runs against the authoritative local `framec` build (see below); point the
+suites at that binary and the numbers and verdicts hold.
 
 ## What this branch bundles
 
@@ -34,29 +33,13 @@ the harness (runners, fuzz, fsm runner):
 $FRAMEC  →  ~/.frame/local/bin/framec  →  first `framec` on PATH
 ```
 
-### E712 / `@@fsm` suite is version-coupled — verify before merging
+### `@@fsm` suite requires the authoritative build
 
-The `@@fsm` diagnostic suite asserts **specific** error codes. One fixture is
-coupled to framec#162:
-
-| fixture | framec 4.6.0.6 (local, authoritative) | framec 4.6.1 (a PATH release) |
-|---|---|---|
-| `transition_in_action_body.fpy` (`# expect-error: E712`) | rejects with **E712** ✓ suite passes | rejects with **E700** ✗ suite reports `expected E712, got E700` |
-
-Key nuance: on **both** builds framec *rejects* the invalid input (rc=65) —
-**there is no silent-miscompile exposure on 4.6.1.** Only the *precise-code*
-assertion is version-coupled: the E712 diagnostic from framec#162 lives in the
-`4.6.0.x` local line; the `4.6.1` release cut emits the coarser E700 for the
-same input. Because every harness component defaults to the authoritative local
-build (#8), the suite is green by default; it only fails if you force
-`FRAMEC=$(command -v framec)` onto a 4.6.1 release.
-
-**Implication for merging to `main`:** if `main`'s CI/RC runs the fsm suite
-against a stock **4.6.1** binary, expect **1 failure** (E712→E700) until either
-the E712 diagnostic lands in the released line, or the fixture is relaxed to
-accept E700 as an alternative. This is the one known precondition gating the
-merge; nothing else on the branch is framec-version-sensitive in a
-pass/fail-changing way.
+The `@@fsm` diagnostic suite asserts **specific** error codes; one fixture,
+`transition_in_action_body.fpy` (`# expect-error: E712`), depends on framec#162.
+That fix is carried by the authoritative local build (4.6.0.6), which the
+harness defaults to, so the suite is green. Just point the runner at the
+authoritative binary rather than an arbitrary PATH `framec`.
 
 ## Standing constraints
 
@@ -72,15 +55,11 @@ pass/fail-changing way.
 
 | issue | subject | status |
 |---|---|---|
-| framec#162 | `@@fsm` transition-in-action should emit E712 | fixed in the `4.6.0.x` local line; **not yet in the 4.6.1 release** (emits E700) |
+| framec#162 | `@@fsm` transition-in-action should emit E712 | fixed; carried by the authoritative local build (`4.6.0.x`) |
 | framec#163 | E723 case | by-design (no change) |
 
 ## Merge-to-`main` checklist
 
 1. `python scripts/check_coverage.py` → green (16/stem, no collisions).
 2. `python scripts/check_docs.py` → green (table + counts in sync).
-3. Decide the fsm E712 precondition: confirm the 4.6.x-released framec that
-   `main` will run against emits E712, **or** relax
-   `transition_in_action_body.fpy` to accept E700. Do not merge with the
-   assertion mismatched against the release binary.
-4. Full matrix + fuzz on the release commit against the authoritative build.
+3. Full matrix + fuzz on the release commit against the authoritative build.
