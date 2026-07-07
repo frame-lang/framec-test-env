@@ -41,7 +41,10 @@ Output is TAP. Run:
 FRAMEC=/path/to/framec ./check_fsm_diagnostics.sh
 ```
 
-## Covered (16 fixtures, verified end-to-end on framec 4.6.1 + the framec#162 fix)
+## Covered (16 fixtures, verified end-to-end on the authoritative local build — framec 4.6.0.6, which carries the framec#162 fix)
+
+> Run the suite against the authoritative build (`~/.frame/local/bin/framec`),
+> which carries framec#162 (E712) — the runner defaults to it.
 
 13 of the 14 RFC-0042 §9 diagnostic codes, plus a positive control:
 
