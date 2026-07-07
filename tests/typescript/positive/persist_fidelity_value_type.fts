@@ -1,0 +1,49 @@
+@@[target("typescript")]
+
+// RFC-0053 foundational fidelity: getmag() invokes magSq() on the reconstructed
+// value, so a lossy restore fails even though a bare field read would pass.
+// TypeScript is JavaScript at runtime (types erased) → expected lossy FAIL,
+// same family as the JS backend.
+
+class Vec2 {
+    x: number;
+    y: number;
+    constructor(x: number = 0, y: number = 0) { this.x = x; this.y = y; }
+    magSq(): number { return this.x * this.x + this.y * this.y; }
+}
+
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x: number, y: number)
+        getx(): number
+        getmag(): number
+
+    machine:
+        $S {
+            setv(x: number, y: number) { @@:self.v = new Vec2(x, y) }
+            getx(): number { @@:(@@:self.v.x) }
+            getmag(): number { @@:(@@:self.v.magSq()) }
+        }
+
+    domain:
+        v: Vec2 = new Vec2(0, 0)
+}
+
+const s1 = @@Bag();
+s1.setv(3, 4);
+const snap = s1.save_state();
+
+const s2 = @@Bag();
+s2.restore_state(snap);
+
+const x = s2.getx();
+const m = s2.getmag();
+if (x === 3 && m === 25) {
+    console.log("PASS: persist_fidelity_value_type");
+} else {
+    console.log(`FAIL: x=${x} magSq=${m} (want x=3 magSq=25)`);
+    process.exit(1);
+}

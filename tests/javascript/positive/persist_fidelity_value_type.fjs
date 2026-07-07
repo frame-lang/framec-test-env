@@ -1,0 +1,55 @@
+@@[target("javascript")]
+
+// RFC-0053 foundational fidelity: a @@[persist] system with a USER-TYPED domain
+// field must round-trip faithfully — the restored value is a real Vec2 whose
+// method works, not a type-erased plain object. The getmag() probe calls a
+// method on the reconstructed value.
+
+class Vec2 {
+    constructor(x = 0.0, y = 0.0) {
+        this.x = x;
+        this.y = y;
+    }
+
+    magSq() {
+        return this.x * this.x + this.y * this.y;
+    }
+}
+
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x, y)
+        getx(): double
+        getmag(): double
+
+    machine:
+        $S {
+            setv(x, y) { @@:self.v = new Vec2(x, y) }
+            getx()    { @@:(@@:self.v.x) }
+            getmag()  { @@:(@@:self.v.magSq()) }
+        }
+
+    domain:
+        v = new Vec2(0.0, 0.0)
+}
+
+function main() {
+    const s1 = @@Bag();
+    s1.setv(3.0, 4.0);
+    const snap = s1.save_state();
+
+    const s2 = @@Bag();
+    s2.restore_state(snap);
+
+    const x = s2.getx();
+    const m = s2.getmag();
+    if (x !== 3.0 || m !== 25.0) {
+        throw new Error(`x=${x} mag=${m} (want x=3.0 mag=25.0)`);
+    }
+    console.log("PASS: persist_fidelity_value_type");
+}
+
+main();

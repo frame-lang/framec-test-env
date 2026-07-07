@@ -1,0 +1,49 @@
+@@[target("kotlin")]
+
+// RFC-0053 foundational fidelity: a @@[persist] system with a USER-TYPED domain
+// field must round-trip faithfully — the restored value is a real Vec2 instance
+// (its method works), not a type-erased map. The getmag() probe calls a METHOD
+// on the reconstructed value, so a lossy plain-map restore fails here even though
+// a bare field read would pass.
+
+class Vec2(var x: Double = 0.0, var y: Double = 0.0) {
+    fun magSq(): Double = x * x + y * y // 25.0 for (3,4); a method a map cannot answer
+}
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x: Double, y: Double)
+        getx(): Double
+        getmag(): Double
+
+    machine:
+        $S {
+            setv(x: Double, y: Double) { @@:self.v = Vec2(x, y) }
+            getx(): Double { @@:(@@:self.v.x) }
+            getmag(): Double { @@:(@@:self.v.magSq()) }
+        }
+
+    domain:
+        v: Vec2 = Vec2(0.0, 0.0)
+}
+
+fun main() {
+    val s1 = @@Bag()
+    s1.setv(3.0, 4.0)
+    val snap = s1.save_state()
+
+    val s2 = @@Bag()
+    s2.restore_state(snap)
+
+    val x = s2.getx()
+    val m = s2.getmag()
+    if (x == 3.0 && m == 25.0) {
+        println("PASS: persist_fidelity_value_type")
+    } else {
+        println("FAIL: x=$x magSq=$m (want x=3.0 magSq=25.0)")
+        throw RuntimeException("fidelity mismatch")
+    }
+}

@@ -1,0 +1,63 @@
+@@[target("cpp")]
+
+// RFC-0053 foundational fidelity: getmag() invokes magSq() on the reconstructed
+// value, so a lossy restore fails even though a bare field read would pass.
+// C++ persist uses nlohmann/json (ADL to_json/from_json hooks) → schema route,
+// expected PASS.
+
+#include <iostream>
+#include <cmath>
+#include <nlohmann/json.hpp>
+
+struct Vec2 {
+    double x = 0.0;
+    double y = 0.0;
+    double magSq() const { return x * x + y * y; }
+};
+
+inline void to_json(nlohmann::json& j, const Vec2& v) {
+    j = nlohmann::json{{"x", v.x}, {"y", v.y}};
+}
+inline void from_json(const nlohmann::json& j, Vec2& v) {
+    j.at("x").get_to(v.x);
+    j.at("y").get_to(v.y);
+}
+
+@@[persist(std::string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x: double, y: double)
+        getx(): double
+        getmag(): double
+
+    machine:
+        $S {
+            setv(x: double, y: double) { @@:self.v = Vec2{x, y}; }
+            getx(): double { @@:(@@:self.v.x) }
+            getmag(): double { @@:(@@:self.v.magSq()) }
+        }
+
+    domain:
+        v: Vec2 = Vec2{}
+}
+
+int main() {
+    auto s1 = @@Bag();
+    s1.setv(3.0, 4.0);
+    auto snap = s1.save_state();
+
+    auto s2 = @@Bag();
+    s2.restore_state(snap);
+
+    double x = s2.getx();
+    double m = s2.getmag();
+    if (x == 3.0 && m == 25.0) {
+        std::cout << "PASS: persist_fidelity_value_type" << std::endl;
+        return 0;
+    } else {
+        std::cout << "FAIL: x=" << x << " magSq=" << m << " (want x=3.0 magSq=25.0)" << std::endl;
+        return 1;
+    }
+}

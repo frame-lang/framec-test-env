@@ -1,0 +1,87 @@
+@@[target("go")]
+
+// RFC-0053 foundational fidelity: a @@[persist] system with a USER-TYPED domain
+// field must round-trip faithfully — the restored value is a real Vec2 instance
+// (its method works), not a type-erased map. The getmag() probe calls a METHOD
+// on the reconstructed value, so a lossy plain-map restore fails here even though
+// a bare field read would pass.
+//
+// Go persist uses encoding/json: Vec2 needs EXPORTED fields (X, Y) so json can
+// marshal them; the save/restore helpers are hand-written (Go's persist idiom),
+// mirroring the existing 24_persist_roundtrip.fgo fixture.
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+type Vec2 struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
+func NewVec2(x float64, y float64) Vec2 {
+	return Vec2{X: x, Y: y}
+}
+
+// A method a type-erased map cannot answer: 25.0 for (3,4).
+func (v Vec2) MagSq() float64 {
+	return v.X*v.X + v.Y*v.Y
+}
+
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x: float64, y: float64)
+        getx(): float64
+        getmag(): float64
+
+    machine:
+        $S {
+            setv(x: float64, y: float64) {
+                @@:self.v = NewVec2(x, y)
+            }
+
+            getx(): float64 {
+                @@:(@@:self.v.X)
+                return;
+            }
+
+            getmag(): float64 {
+                @@:(@@:self.v.MagSq())
+                return;
+            }
+        }
+
+    domain:
+        v: Vec2 = NewVec2(0, 0)
+}
+
+func main() {
+	// 1. instantiate, mutate with a genuine Vec2(3,4)
+	s1 := @@Bag()
+	s1.Setv(3.0, 4.0)
+
+	// 2. save via framec-generated Save_state (encoding/json)
+	snap := s1.Save_state()
+	fmt.Printf("saved: %s\n", snap)
+
+	// 3. fresh instance, restore via framec-generated Restore_state
+	s2 := @@Bag()
+	s2.Restore_state(snap)
+
+	x := s2.Getx()
+	m := s2.Getmag() // calls MagSq() on the reconstructed value — the fidelity probe
+
+	if x == 3.0 && m == 25.0 {
+		fmt.Println("PASS: persist_fidelity_value_type")
+	} else {
+		fmt.Printf("FAIL: x=%v magSq=%v (want x=3.0 magSq=25.0)\n", x, m)
+		os.Exit(1)
+	}
+}

@@ -1,0 +1,54 @@
+@@[target("csharp")]
+
+using System.Text.Json;
+
+public struct Vec2 {
+    public double x;
+    public double y;
+    public Vec2(double x, double y) { this.x = x; this.y = y; }
+    public double MagSq() { return x * x + y * y; }
+}
+
+@@[persist(string)]
+@@[save(SaveState)]
+@@[load(RestoreState)]
+@@system Bag {
+    interface:
+        setv(x: double, y: double)
+        getx(): double
+        getmag(): double
+
+    machine:
+        $S {
+            setv(x: double, y: double) {
+                this.v = new Vec2(x, y);
+            }
+            getx(): double { @@:(this.v.x) }
+            getmag(): double { @@:(this.v.MagSq()) }
+        }
+
+    domain:
+        v: Vec2 = new Vec2(0, 0)
+}
+
+class Program {
+    static void Main(string[] args) {
+        var b = @@Bag();
+        b.setv(3, 4);
+        var snap = b.SaveState();
+
+        var b2 = @@Bag();
+        b2.RestoreState(snap);
+
+        double gx = b2.getx();
+        double gmag = b2.getmag();
+
+        if (gx != 3) {
+            throw new Exception("FAIL: expected getx()==3, got " + gx);
+        }
+        if (gmag != 25) {
+            throw new Exception("FAIL: expected getmag()==25, got " + gmag);
+        }
+        Console.WriteLine("PASS: persist_fidelity_value_type");
+    }
+}

@@ -1,0 +1,52 @@
+@@[target("python_3")]
+
+# RFC-0053 foundational fidelity: a @@[persist] system with a USER-TYPED domain
+# field must round-trip faithfully — the restored value is a real Vec2 whose
+# method works, not a type-erased dict. The getmag() probe calls a method on the
+# reconstructed value. (#174: json.dumps cannot serialize the Vec2 instance, so
+# this currently fails at save_state() with TypeError — the strictest dynamic
+# backend hard-crashes rather than degrading.)
+
+class Vec2:
+    def __init__(self, x=0.0, y=0.0):
+        self.x = x
+        self.y = y
+
+    def mag_sq(self):
+        return self.x * self.x + self.y * self.y
+
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x, y)
+        getx()
+        getmag()
+
+    machine:
+        $S {
+            setv(x, y) { @@:self.v = Vec2(x, y) }
+            getx() { @@:(@@:self.v.x) }
+            getmag() { @@:(@@:self.v.mag_sq()) }
+        }
+
+    domain:
+        v = Vec2(0.0, 0.0)
+}
+
+def main():
+    s1 = @@Bag()
+    s1.setv(3.0, 4.0)
+    snap = s1.save_state()
+
+    s2 = @@Bag()
+    s2.restore_state(snap)
+
+    x = s2.getx()
+    m = s2.getmag()
+    assert x == 3.0 and m == 25.0, f"x={x} mag_sq={m} (want x=3.0 mag_sq=25.0)"
+    print("PASS: persist_fidelity_value_type")
+
+if __name__ == '__main__':
+    main()

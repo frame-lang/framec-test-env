@@ -1,0 +1,64 @@
+-- RFC-0053 full-fidelity persist/restore probe (Lua).
+-- Lua has NO first-class type identity: objects are plain tables +
+-- metatables by convention. Vec2 here is the idiomatic Lua "class":
+-- a metatable holding methods, wired to instances via setmetatable.
+-- This is the documented RFC-0053 CEILING case for Lua.
+local Vec2Meta = {}
+Vec2Meta.__index = Vec2Meta
+
+function Vec2Meta:magSq()
+    return self.x * self.x + self.y * self.y
+end
+
+local function Vec2(x, y)
+    return setmetatable({ x = x, y = y }, Vec2Meta)
+end
+
+@@[target("lua")]
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[main]
+@@system Bag {
+    interface:
+        setv(x: double, y: double)
+        getx(): double
+        getmag(): double
+
+    machine:
+        $S {
+            setv(x: double, y: double) {
+                self.v = Vec2(x, y)
+            }
+            getx(): double {
+                @@:(self.v.x)
+            }
+            getmag(): double {
+                @@:(self.v:magSq())
+            }
+        }
+    domain:
+        v: Vec2 = Vec2(0, 0)
+}
+
+local function must(label, actual, expected)
+    if actual ~= expected then
+        print("FAIL " .. label .. ": " .. tostring(actual) .. " expected " .. tostring(expected))
+        os.exit(1)
+    end
+end
+
+local b = @@Bag()
+b:setv(3, 4)
+must("getx before save", b:getx(), 3)
+must("getmag before save", b:getmag(), 25)
+
+local snap = b:save_state()
+
+local r = @@Bag()
+r:restore_state(snap)
+
+must("getx after restore", r:getx(), 3)
+must("getmag after restore", r:getmag(), 25)
+
+print("PASS: persist_fidelity_value_type")

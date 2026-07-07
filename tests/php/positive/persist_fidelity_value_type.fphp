@@ -1,0 +1,60 @@
+@@[target("php")]
+
+// RFC-0053 foundational fidelity: a @@[persist] system with a USER-TYPED domain
+// field must round-trip faithfully — the restored value is a real Vec2 instance
+// (its method works), not a type-erased map/stdClass. The getmag() probe calls a
+// METHOD on the reconstructed value, so a lossy plain-object restore fails here
+// even though a bare field read would pass.
+
+class Vec2 {
+    public $x;
+    public $y;
+
+    public function __construct($x = 0.0, $y = 0.0) {
+        $this->x = $x;
+        $this->y = $y;
+    }
+
+    public function magSq() {
+        return $this->x * $this->x + $this->y * $this->y;
+    }
+}
+
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x, y)
+        getx(): float
+        getmag(): float
+
+    machine:
+        $S {
+            setv(x, y) { $this->v = new Vec2($x, $y); }
+            getx(): float { @@:($this->v->x) }
+            getmag(): float { @@:($this->v->magSq()) }
+        }
+
+    domain:
+        v = new Vec2(0.0, 0.0)
+}
+
+echo "=== Test: persist_fidelity_value_type ===" . "\n";
+
+$s1 = @@Bag();
+$s1->setv(3.0, 4.0);
+$snap = $s1->save_state();
+
+$s2 = @@Bag();
+$s2->restore_state($snap);
+
+$x = $s2->getx();
+$m = $s2->getmag();
+
+if ($x === 3.0 && $m === 25.0) {
+    echo "PASS: persist_fidelity_value_type" . "\n";
+} else {
+    echo "FAIL: x=" . var_export($x, true) . " magSq=" . var_export($m, true) . " (want x=3.0 magSq=25.0)" . "\n";
+    exit(1);
+}

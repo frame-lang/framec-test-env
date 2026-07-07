@@ -1,0 +1,56 @@
+@@[target("java")]
+
+// RFC-0053 foundational fidelity: a @@[persist] system with a USER-TYPED domain
+// field must round-trip faithfully — the restored value is a real Vec2 whose
+// method works, not a type-erased map. getmag() invokes magSq() on the
+// reconstruction, so a lossy restore fails here even though a bare field read
+// would pass. Java persist uses Jackson (ObjectMapper + TypeReference), the
+// schema route → expected PASS.
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x: double, y: double)
+        getx(): double
+        getmag(): double
+
+    machine:
+        $S {
+            setv(x: double, y: double) { @@:self.v = new Vec2(x, y) }
+            getx(): double { @@:(@@:self.v.x) }
+            getmag(): double { @@:(@@:self.v.magSq()) }
+        }
+
+    domain:
+        v: Vec2 = new Vec2(0.0, 0.0)
+}
+
+class Vec2 {
+    public double x;
+    public double y;
+    public Vec2() {}
+    public Vec2(double x, double y) { this.x = x; this.y = y; }
+    public double magSq() { return x * x + y * y; }
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        Bag s1 = new Bag();
+        s1.setv(3.0, 4.0);
+        String snap = s1.save_state();
+
+        Bag s2 = new Bag();
+        s2.restore_state(snap);
+
+        double x = s2.getx();
+        double m = s2.getmag();
+        if (x == 3.0 && m == 25.0) {
+            System.out.println("PASS: persist_fidelity_value_type");
+        } else {
+            System.out.println("FAIL: x=" + x + " magSq=" + m + " (want x=3.0 magSq=25.0)");
+            System.exit(1);
+        }
+    }
+}

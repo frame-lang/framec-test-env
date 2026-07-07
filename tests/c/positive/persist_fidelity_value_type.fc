@@ -1,0 +1,88 @@
+@@[target("c")]
+
+// RFC-0053 foundational fidelity (C idiom): a @@[persist] system with a
+// USER-TYPED domain field must round-trip faithfully. In C a "user type" is a
+// struct; there are no classes/methods, so a "method" is a free function
+// Vec2_magSq(Vec2). The getmag() probe calls that free function on the
+// reconstructed struct, so a lossy/zeroed restore fails here even though a bare
+// field read might pass.
+//
+// The C persist contract is type-ignorant: for a domain field of type Vec2,
+// framec emits calls to Bag_persist_pack_field_Vec2 / Bag_persist_unpack_field_Vec2
+// (system-name-mangled). The runtime only defines the blessed scalar/collection
+// helpers (int/double/str/bool/list/dict); a user type extends the set exactly
+// as the runtime comment documents — the user provides those two functions in
+// the native prolog. This is the type-ignorant boundary: cJSON does the work.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+typedef struct { double x; double y; } Vec2;
+
+// Free function standing in for Vec2::magSq() — 25.0 for (3,4).
+static double Vec2_magSq(Vec2 v) { return v.x * v.x + v.y * v.y; }
+
+// User-supplied persist helpers for the Vec2 domain field (see contract above).
+static cJSON* Bag_persist_pack_field_Vec2(void* p) {
+    Vec2* v = (Vec2*)p;
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "x", v->x);
+    cJSON_AddNumberToObject(o, "y", v->y);
+    return o;
+}
+static void Bag_persist_unpack_field_Vec2(cJSON* j, void* p) {
+    Vec2* v = (Vec2*)p;
+    cJSON* jx = j ? cJSON_GetObjectItem(j, "x") : NULL;
+    cJSON* jy = j ? cJSON_GetObjectItem(j, "y") : NULL;
+    v->x = jx ? jx->valuedouble : 0.0;
+    v->y = jy ? jy->valuedouble : 0.0;
+}
+
+@@[persist(char*)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x: double, y: double)
+        getx(): double
+        getmag(): double
+
+    machine:
+        $S {
+            setv(x: double, y: double) {
+                Vec2 tmp;
+                tmp.x = x;
+                tmp.y = y;
+                @@:self.v = tmp;
+            }
+            getx(): double { @@:(@@:self.v.x) }
+            getmag(): double { @@:(Vec2_magSq(@@:self.v)) }
+        }
+
+    domain:
+        v: Vec2 = { 0.0, 0.0 }
+}
+
+int main() {
+    Bag* s1 = @@Bag();
+    Bag_setv(s1, 3.0, 4.0);
+    char* snap = Bag_save_state(s1);
+
+    Bag* s2 = @@Bag();
+    Bag_restore_state(s2, snap);
+
+    double x = Bag_getx(s2);
+    double m = Bag_getmag(s2);
+
+    if (x == 3.0 && m == 25.0) {
+        printf("PASS: persist_fidelity_value_type\n");
+        free(snap);
+        return 0;
+    } else {
+        printf("FAIL: x=%f magSq=%f (want x=3.0 magSq=25.0)\n", x, m);
+        free(snap);
+        return 1;
+    }
+}

@@ -1,0 +1,71 @@
+@@[target("rust")]
+
+// persist_fidelity_value_type — RFC-0053 foundational contract.
+//
+// A user-typed domain field (Vec2, a value type with a method) must
+// round-trip through save_state/restore_state as a genuinely-typed
+// instance, not a type-erased map. getmag() calls a METHOD on the
+// restored value, so a lossy restore fails it even though a bare
+// field read (getx()) would still pass.
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+struct Vec2 {
+    x: f64,
+    y: f64,
+}
+
+impl Vec2 {
+    fn new(x: f64, y: f64) -> Self {
+        Vec2 { x, y }
+    }
+
+    fn magSq(&self) -> f64 {
+        self.x * self.x + self.y * self.y
+    }
+}
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x: f64, y: f64)
+        getx(): f64
+        getmag(): f64
+
+    machine:
+        $S {
+            setv(x: f64, y: f64) {
+                @@:self.v = Vec2::new(x, y)
+            }
+            getx() {
+                @@:(@@:self.v.x)
+            }
+            getmag() {
+                @@:(@@:self.v.magSq())
+            }
+        }
+
+    domain:
+        v: Vec2 = Vec2::new(0.0, 0.0)
+}
+
+fn main() {
+    let mut s1 = @@Bag();
+    s1.setv(3.0, 4.0);
+
+    let snap: String = s1.save_state();
+
+    let mut s2 = @@Bag();
+    s2.restore_state(snap);
+
+    let x = s2.getx();
+    let mag = s2.getmag();
+
+    assert_eq!(x, 3.0, "getx after restore");
+    assert_eq!(mag, 25.0, "getmag after restore (3^2 + 4^2)");
+
+    println!("PASS: persist_fidelity_value_type");
+}

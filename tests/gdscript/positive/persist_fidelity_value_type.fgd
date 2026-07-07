@@ -1,0 +1,53 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+class Vec2:
+    var x: float = 0.0
+    var y: float = 0.0
+
+    func _init(px: float = 0.0, py: float = 0.0):
+        x = px
+        y = py
+
+    func magSq() -> float:
+        return x * x + y * y
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x: float, y: float)
+        getx(): float
+        getmag(): float
+
+    machine:
+        $S {
+            setv(x: float, y: float) {
+                self.v = Vec2.new(x, y)
+            }
+            getx(): float { @@:(self.v.x) }
+            getmag(): float { @@:(self.v.magSq()) }
+        }
+
+    domain:
+        v: Vec2 = Vec2.new(0, 0)
+}
+
+func _init():
+    var b = @@Bag()
+    b.setv(3, 4)
+    assert(b.getx() == 3, "Expected getx()==3 pre-save")
+    assert(b.getmag() == 25, "Expected getmag()==25 pre-save")
+
+    var snap = b.save_state()
+    var b2 = @@Bag()
+    b2.restore_state(snap)
+
+    if b2.getx() == 3 and b2.getmag() == 25:
+        print("PASS: persist_fidelity_value_type")
+        quit()
+    else:
+        print("FAIL: getx=", b2.getx(), " getmag=", b2.getmag())
+        quit(1)

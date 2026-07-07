@@ -1,0 +1,53 @@
+@@[target("swift")]
+
+// RFC-0053 foundational fidelity: a @@[persist] system with a USER-TYPED domain
+// field must round-trip faithfully. Swift restore uses JSONDecoder (Codable) and
+// reconstructs a real Vec2; the getmag() probe calls a method on it. (#178: the
+// SAVE side uses JSONSerialization and crashes on the Codable struct — so this
+// test currently fails at save_state(), before restore is even reached.)
+
+import Foundation
+
+public struct Vec2: Codable {
+    public var x: Double = 0.0
+    public var y: Double = 0.0
+    public init() {}
+    public init(_ x: Double, _ y: Double) { self.x = x; self.y = y }
+    public func magSq() -> Double { return x * x + y * y }
+}
+
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x: Double, y: Double)
+        getx(): Double
+        getmag(): Double
+
+    machine:
+        $S {
+            setv(x: Double, y: Double) { @@:self.v = Vec2(x, y) }
+            getx(): Double { @@:(@@:self.v.x) }
+            getmag(): Double { @@:(@@:self.v.magSq()) }
+        }
+
+    domain:
+        v: Vec2 = Vec2(0.0, 0.0)
+}
+
+let s1 = @@Bag()
+s1.setv(3.0, 4.0)
+let snap = s1.save_state()
+
+let s2 = @@Bag()
+s2.restore_state(snap)
+
+let x = s2.getx()
+let m = s2.getmag()
+if x == 3.0 && m == 25.0 {
+    print("PASS: persist_fidelity_value_type")
+} else {
+    print("FAIL: x=\(x) magSq=\(m) (want x=3.0 magSq=25.0)")
+    exit(1)
+}
