@@ -1,0 +1,49 @@
+@@[target("ruby")]
+
+# RFC-0053 compartment fidelity (Ruby): a user-typed value held in a STATE
+# VARIABLE ($.sv → compartment.state_vars) must round-trip faithfully, not just a
+# domain field. The reflective tag/revive passes run tree-wide over the whole
+# snapshot, so a value nested in the serialized compartment chain is
+# reconstructed while the compartment scaffolding passes through untagged.
+
+class Vec2
+  attr_accessor :x, :y
+  def initialize(x = 0.0, y = 0.0)
+    @x = x
+    @y = y
+  end
+
+  def mag_sq
+    @x * @x + @y * @y
+  end
+end
+
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x, y)
+        getmag()
+
+    machine:
+        $S {
+            $.sv = Vec2.new(0.0, 0.0)
+
+            setv(x, y) { $.sv = Vec2.new(x, y) }
+            getmag()   { @@:($.sv.mag_sq) }
+        }
+
+    domain:
+        marker = 1
+}
+
+s1 = @@Bag()
+s1.setv(3.0, 4.0)
+snap = s1.save_state
+
+s2 = @@Bag()
+s2.restore_state(snap)
+
+raise "compartment state-var Vec2 did not round-trip: #{s2.getmag}" unless s2.getmag == 25.0
+puts "PASS: persist_fidelity_state_var"
