@@ -1,0 +1,71 @@
+@@[target("go")]
+
+// RFC-0053 compartment fidelity (Go): a user-typed value held in a STATE
+// VARIABLE ($.sv -> the compartment's typed state context) must round-trip
+// faithfully, not just a domain field. getmag() calls MagSq() on the
+// reconstructed state-var value, so a lossy restore fails here.
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+type Vec2 struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
+}
+
+func NewVec2(x float64, y float64) Vec2 {
+	return Vec2{X: x, Y: y}
+}
+
+func (v Vec2) MagSq() float64 {
+	return v.X*v.X + v.Y*v.Y
+}
+
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x: float64, y: float64)
+        getmag(): float64
+
+    machine:
+        $S {
+            $.sv: Vec2 = NewVec2(0, 0)
+
+            setv(x: float64, y: float64) {
+                $.sv = NewVec2(x, y)
+            }
+
+            getmag(): float64 {
+                @@:($.sv.MagSq())
+                return;
+            }
+        }
+
+    domain:
+        marker: int = 1
+}
+
+func main() {
+	s1 := @@Bag()
+	s1.Setv(3.0, 4.0)
+
+	snap := s1.Save_state()
+
+	s2 := @@Bag()
+	s2.Restore_state(snap)
+
+	m := s2.Getmag()
+	if m == 25.0 {
+		fmt.Println("PASS: persist_fidelity_state_var")
+	} else {
+		fmt.Printf("FAIL: compartment state-var Vec2 did not round-trip: magSq=%v\n", m)
+		os.Exit(1)
+	}
+}
