@@ -1,0 +1,58 @@
+-- RFC-0053 compartment fidelity (Lua): a user-typed value held in a STATE
+-- VARIABLE ($.sv -> compartment.state_vars) must round-trip faithfully, not just
+-- a domain field. The reflective encode/revive passes run tree-wide over the
+-- whole snapshot, so a value nested in the serialized compartment chain is
+-- reconstructed (its metatable re-attached) while the compartment scaffolding
+-- passes through untagged.
+local Vec2Meta = {}
+Vec2Meta.__index = Vec2Meta
+Vec2Meta.__name = "Vec2"
+
+function Vec2Meta:magSq()
+    return self.x * self.x + self.y * self.y
+end
+
+local function Vec2(x, y)
+    return setmetatable({ x = x, y = y }, Vec2Meta)
+end
+
+@@[target("lua")]
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@[main]
+@@system Bag {
+    interface:
+        setv(x: double, y: double)
+        getmag(): double
+
+    machine:
+        $S {
+            $.sv = Vec2(0, 0)
+
+            setv(x: double, y: double) {
+                $.sv = Vec2(x, y)
+            }
+            getmag(): double {
+                @@:($.sv:magSq())
+            }
+    }
+    domain:
+        marker: double = 1
+}
+
+local b = @@Bag()
+b:setv(3, 4)
+
+local snap = b:save_state()
+
+local r = @@Bag()
+r:restore_state(snap)
+
+local m = r:getmag()
+if m ~= 25 then
+    print("FAIL: compartment state-var Vec2 did not round-trip: " .. tostring(m))
+    os.exit(1)
+end
+
+print("PASS: persist_fidelity_state_var")

@@ -2,6 +2,13 @@
 
 extends SceneTree
 
+# RFC-0053 compartment fidelity (GDScript): a user-typed value held in a STATE
+# VARIABLE ($.sv -> compartment.state_vars) must round-trip faithfully, not just
+# a domain field. The reflective encode/revive passes run tree-wide over the
+# whole snapshot, so a value nested in the serialized compartment chain is
+# reconstructed (via the closed-world registry) while the compartment
+# scaffolding passes through untagged.
+
 class Vec2:
     var x: float = 0.0
     var y: float = 0.0
@@ -19,40 +26,35 @@ class Vec2:
 @@system Bag {
     interface:
         setv(x: float, y: float)
-        getx(): float
         getmag(): float
 
     machine:
         $S {
+            $.sv = Vec2.new(0, 0)
+
             setv(x: float, y: float) {
-                self.v = Vec2.new(x, y)
+                $.sv = Vec2.new(x, y)
             }
-            getx(): float { @@:(self.v.x) }
-            getmag(): float { @@:(self.v.magSq()) }
-        }
+            getmag(): float { @@:($.sv.magSq()) }
+    }
 
     domain:
-        v: Vec2 = Vec2.new(0, 0)
+        marker: float = 1
 }
 
 func _init():
     var b = @@Bag()
-    # GDScript inner classes have no discoverable name (no resource_path /
-    # global_name reachable from a method), so the closed-world registry is
-    # supplied from file scope, where the sibling class Vec2 is in scope.
     b.register_persist_type("Vec2", Vec2)
     b.setv(3, 4)
-    assert(b.getx() == 3, "Expected getx()==3 pre-save")
-    assert(b.getmag() == 25, "Expected getmag()==25 pre-save")
 
     var snap = b.save_state()
     var b2 = @@Bag()
     b2.register_persist_type("Vec2", Vec2)
     b2.restore_state(snap)
 
-    if b2.getx() == 3 and b2.getmag() == 25:
-        print("PASS: persist_fidelity_value_type")
+    if b2.getmag() == 25:
+        print("PASS: persist_fidelity_state_var")
         quit()
     else:
-        print("FAIL: getx=", b2.getx(), " getmag=", b2.getmag())
+        print("FAIL: getmag=", b2.getmag())
         quit(1)
