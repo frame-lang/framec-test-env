@@ -1,0 +1,59 @@
+@@[target("php")]
+
+// RFC-0053 compartment fidelity (PHP): a user-typed value held in a STATE
+// VARIABLE ($this->sv -> compartment.state_vars) must round-trip faithfully, not
+// just a domain field. The reflective encode/revive passes run tree-wide over the
+// whole snapshot, so a value nested in the serialized compartment chain is
+// reconstructed while the compartment scaffolding passes through untagged.
+
+class Vec2 {
+    public $x;
+    public $y;
+
+    public function __construct($x = 0.0, $y = 0.0) {
+        $this->x = $x;
+        $this->y = $y;
+    }
+
+    public function magSq() {
+        return $this->x * $this->x + $this->y * $this->y;
+    }
+}
+
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x, y)
+        getmag(): float
+
+    machine:
+        $S {
+            $.sv = new Vec2(0.0, 0.0)
+
+            setv(x, y) { $.sv = new Vec2($x, $y); }
+            getmag(): float { @@:($.sv->magSq()) }
+        }
+
+    domain:
+        marker = 1
+}
+
+echo "=== Test: persist_fidelity_state_var ===" . "\n";
+
+$s1 = @@Bag();
+$s1->setv(3.0, 4.0);
+$snap = $s1->save_state();
+
+$s2 = @@Bag();
+$s2->restore_state($snap);
+
+$m = $s2->getmag();
+
+if ($m == 25.0) {
+    echo "PASS: persist_fidelity_state_var" . "\n";
+} else {
+    echo "FAIL: compartment state-var Vec2 did not round-trip: magSq=" . var_export($m, true) . "\n";
+    exit(1);
+}
