@@ -1,0 +1,58 @@
+@@[target("javascript")]
+
+// RFC-0053 hybrid registry (JS): the closed-world registry is graph-seeded from
+// the receiving instance's own initialized object graph, which covers every type
+// that has an initializer. A value whose runtime type is NOT reachable from an
+// initializer (here: a state var initialized to null, then assigned a Vec2) is
+// the residual gap. Such a type is refused (E750) until the user registers it via
+// registerPersistType — the hook that makes the hybrid complete. This fixture
+// proves both halves: the gap fails closed, and the hook closes it faithfully.
+
+class Vec2 {
+    constructor(x = 0.0, y = 0.0) { this.x = x; this.y = y; }
+    magSq() { return this.x * this.x + this.y * this.y; }
+}
+
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x, y)
+        getmag(): double
+
+    machine:
+        $S {
+            $.sv = null
+
+            setv(x, y) { $.sv = new Vec2(x, y) }
+            getmag()   { @@:($.sv.magSq()) }
+        }
+
+    domain:
+        marker = 1
+}
+
+function main() {
+    const s1 = @@Bag();
+    s1.setv(3.0, 4.0);
+    const snap = s1.save_state();
+
+    // Gap: fresh $.sv is null, so graph-seed never sees Vec2 -> refuse (fail closed).
+    const s2 = @@Bag();
+    let refused = false;
+    try { s2.restore_state(snap); }
+    catch (e) { refused = String(e.message).includes("E750"); }
+    if (!refused) { throw new Error("dynamic-only Vec2 was resolved without the hook"); }
+
+    // Hook closes the gap -> faithful restore.
+    Bag.registerPersistType(Vec2);
+    const s3 = @@Bag();
+    s3.restore_state(snap);
+    const m = s3.getmag();
+    if (m !== 25.0) { throw new Error(`hook restore did not round-trip: mag=${m}`); }
+
+    console.log("PASS: persist_hook_registration");
+}
+
+main();
