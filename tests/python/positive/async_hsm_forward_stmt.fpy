@@ -1,0 +1,46 @@
+@@[target("python_3")]
+
+# Async HSM explicit `=> $^` statement forward.
+# Validates: an explicit `=> $^` inside an async handler body is awaited
+# (the "#158 remainder"). A missing await leaves the parent handler's
+# coroutine un-awaited, so the return value comes back as None.
+
+import asyncio
+
+async def mock_transform(data):
+    await asyncio.sleep(0)
+    return data.upper()
+
+@@[async]
+@@system AsyncHsmStmt {
+    interface:
+        async other(data: str): str
+
+    machine:
+        $Child => $Parent {
+            # Child handles 'other' but explicitly forwards to the parent.
+            other(data: str): str {
+                => $^
+            }
+        }
+
+        $Parent {
+            other(data: str): str {
+                result = await mock_transform(data)
+                @@:("parent_other:" + result)
+                return
+            }
+        }
+}
+
+async def main():
+    s = @@AsyncHsmStmt()
+    await s.init()
+
+    result = await s.other("test")
+    assert result == "parent_other:TEST", f"Expected 'parent_other:TEST', got '{result}'"
+
+    print("PASS: async HSM explicit => $^ statement forward")
+
+if __name__ == '__main__':
+    asyncio.run(main())

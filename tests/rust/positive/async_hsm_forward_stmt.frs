@@ -1,0 +1,45 @@
+@@[target("rust")]
+
+// Async HSM explicit `=> $^` statement forward.
+// Validates: an explicit `=> $^` inside an async handler body is awaited
+// (the "#158 remainder"). A missing await makes the forward a bare future —
+// the match arm mistypes against the awaited-`()` siblings and the parent's
+// return value is lost.
+
+async fn mock_transform(data: &str) -> String {
+    data.to_uppercase()
+}
+
+@@[async]
+@@system AsyncHsmStmt {
+    interface:
+        async other(data: String): String
+
+    machine:
+        $Child => $Parent {
+            // Child handles 'other' but explicitly forwards to the parent.
+            other(data: String): String {
+                => $^
+            }
+        }
+
+        $Parent {
+            other(data: String): String {
+                let result = mock_transform(&data).await;
+                @@:(format!("parent_other:{}", result))
+                return;
+            }
+        }
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let mut s = @@AsyncHsmStmt();
+    s.init().await;
+
+    let result = s.other(String::from("test")).await?;
+    assert_eq!(result, "parent_other:TEST", "Expected 'parent_other:TEST', got '{}'", result);
+
+    println!("PASS: async HSM explicit => $^ statement forward");
+    Ok(())
+}
