@@ -1,0 +1,36 @@
+@@[target("csharp")]
+
+// Async HSM explicit `=> $^` statement forward (C#). #158 remainder.
+
+using System.Threading.Tasks;
+
+@@[async]
+@@system AsyncHsmStmt {
+    interface:
+        async other(data: string): string
+
+    machine:
+        $Child => $Parent {
+            other(data: string): string {
+                => $^
+            }
+        }
+
+        $Parent {
+            other(data: string): string {
+                await Task.Yield();
+                @@:("parent_other:" + data.ToUpper())
+                return;
+            }
+        }
+}
+
+class Program {
+    static void Main() {
+        var s = @@AsyncHsmStmt();
+        s.init().GetAwaiter().GetResult();
+        string r = s.other("test").GetAwaiter().GetResult();
+        if (r != "parent_other:TEST") throw new Exception($"expected 'parent_other:TEST', got '{r}'");
+        Console.WriteLine("PASS: async HSM explicit => $^ statement forward");
+    }
+}

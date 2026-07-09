@@ -1,0 +1,43 @@
+@@[target("dart")]
+
+// Async HSM explicit `=> $^` statement forward (Dart). The child handles `other`
+// but explicitly forwards to the parent; the parent's awaited return value must
+// reach the caller (#158 remainder — a missing await drops it).
+
+Future<String> mockTransform(String data) async {
+    await Future.delayed(Duration.zero);
+    return data.toUpperCase();
+}
+
+@@[async]
+@@system AsyncHsmStmt {
+    interface:
+        async other(data: String): String
+
+    machine:
+        $Child => $Parent {
+            other(data: String): String {
+                => $^
+            }
+        }
+
+        $Parent {
+            other(data: String): String {
+                final result = await mockTransform(data);
+                @@:("parent_other:" + result)
+                return;
+            }
+        }
+}
+
+Future<void> main() async {
+    final s = @@AsyncHsmStmt();
+    await s.init();
+
+    final r = await s.other("test");
+    if (r != "parent_other:TEST") {
+        throw Exception("Expected 'parent_other:TEST', got '$r'");
+    }
+
+    print("PASS: async HSM explicit => \$^ statement forward");
+}

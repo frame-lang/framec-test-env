@@ -1,0 +1,58 @@
+@@[target("swift")]
+
+// Async HSM parent forward (Swift). Validates the default `=> $^` forward is
+// awaited (#158). Async interface methods are `async throws`; driven with
+// try await from top-level async code.
+
+import Foundation
+
+func mockTransform(_ data: String) async -> String {
+    return data.uppercased()
+}
+
+@@[async]
+@@system AsyncHsm {
+    interface:
+        async process(data: String): String
+        async other(data: String): String
+
+    machine:
+        $Child => $Parent {
+            process(data: String): String {
+                let result = await mockTransform(data)
+                @@:("child:" + result)
+                return
+            }
+            => $^
+        }
+
+        $Parent {
+            process(data: String): String {
+                let result = await mockTransform(data)
+                @@:("parent:" + result)
+                return
+            }
+            other(data: String): String {
+                let result = await mockTransform(data)
+                @@:("parent_other:" + result)
+                return
+            }
+        }
+}
+
+let s = @@AsyncHsm()
+try await s.initAsync()
+
+let r1 = try await s.process("hello")
+if r1 != "child:HELLO" {
+    print("FAIL: expected 'child:HELLO', got '\(r1)'")
+    exit(1)
+}
+
+let r2 = try await s.other("test")
+if r2 != "parent_other:TEST" {
+    print("FAIL: expected 'parent_other:TEST', got '\(r2)'")
+    exit(1)
+}
+
+print("PASS: async HSM forward — default forward dispatches to parent")

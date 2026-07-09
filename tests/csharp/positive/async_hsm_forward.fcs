@@ -1,0 +1,52 @@
+@@[target("csharp")]
+
+// Async HSM parent forward (C#). Validates the default `=> $^` forward is
+// awaited (#158). Async interface methods return Task; the driver drives them
+// synchronously via GetAwaiter().GetResult().
+
+using System.Threading.Tasks;
+
+@@[async]
+@@system AsyncHsm {
+    interface:
+        async process(data: string): string
+        async other(data: string): string
+
+    machine:
+        $Child => $Parent {
+            process(data: string): string {
+                await Task.Yield();
+                @@:("child:" + data.ToUpper())
+                return;
+            }
+            => $^
+        }
+
+        $Parent {
+            process(data: string): string {
+                await Task.Yield();
+                @@:("parent:" + data.ToUpper())
+                return;
+            }
+            other(data: string): string {
+                await Task.Yield();
+                @@:("parent_other:" + data.ToUpper())
+                return;
+            }
+        }
+}
+
+class Program {
+    static void Main() {
+        var s = @@AsyncHsm();
+        s.init().GetAwaiter().GetResult();
+
+        string r1 = s.process("hello").GetAwaiter().GetResult();
+        if (r1 != "child:HELLO") throw new Exception($"expected 'child:HELLO', got '{r1}'");
+
+        string r2 = s.other("test").GetAwaiter().GetResult();
+        if (r2 != "parent_other:TEST") throw new Exception($"expected 'parent_other:TEST', got '{r2}'");
+
+        Console.WriteLine("PASS: async HSM forward — default forward dispatches to parent");
+    }
+}

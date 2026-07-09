@@ -1,0 +1,50 @@
+@@[target("cpp")]
+
+// Async HSM explicit `=> $^` statement forward (C++). The child handles `other`
+// but explicitly forwards to the parent; the parent's co_awaited return value
+// must reach the caller (#158 remainder — a missing co_await drops it).
+
+#include <iostream>
+#include <string>
+#include <cctype>
+
+inline std::string mockTransform(const std::string& data) {
+    std::string r = data;
+    for (auto& c : r) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return r;
+}
+
+@@[async]
+@@system AsyncHsmStmt {
+    interface:
+        async other(data: std::string): std::string
+
+    machine:
+        $Child => $Parent {
+            other(data: std::string): std::string {
+                => $^
+            }
+        }
+
+        $Parent {
+            other(data: std::string): std::string {
+                std::string result = mockTransform(data);
+                @@:(std::string("parent_other:") + result)
+                return;
+            }
+        }
+}
+
+int main() {
+    auto s = @@AsyncHsmStmt();
+    s.init().get();
+
+    std::string r = s.other("test").get();
+    if (r != "parent_other:TEST") {
+        std::cout << "FAIL: expected 'parent_other:TEST', got '" << r << "'" << std::endl;
+        return 1;
+    }
+
+    std::cout << "PASS: async HSM explicit => $^ statement forward" << std::endl;
+    return 0;
+}

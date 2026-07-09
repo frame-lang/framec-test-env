@@ -1,0 +1,66 @@
+@@[target("cpp")]
+
+// Async HSM parent forward (C++). Validates: the default `=> $^` forward from
+// $Child to $Parent is co_awaited in async mode (#158). `other` is unhandled by
+// $Child, so it forwards to $Parent. Interface methods return a FrameTask driven
+// with .get(); a sync transform stands in for the native await point.
+
+#include <iostream>
+#include <string>
+#include <cctype>
+
+inline std::string mockTransform(const std::string& data) {
+    std::string r = data;
+    for (auto& c : r) c = static_cast<char>(std::toupper(static_cast<unsigned char>(c)));
+    return r;
+}
+
+@@[async]
+@@system AsyncHsm {
+    interface:
+        async process(data: std::string): std::string
+        async other(data: std::string): std::string
+
+    machine:
+        $Child => $Parent {
+            process(data: std::string): std::string {
+                std::string result = mockTransform(data);
+                @@:(std::string("child:") + result)
+                return;
+            }
+            => $^
+        }
+
+        $Parent {
+            process(data: std::string): std::string {
+                std::string result = mockTransform(data);
+                @@:(std::string("parent:") + result)
+                return;
+            }
+            other(data: std::string): std::string {
+                std::string result = mockTransform(data);
+                @@:(std::string("parent_other:") + result)
+                return;
+            }
+        }
+}
+
+int main() {
+    auto s = @@AsyncHsm();
+    s.init().get();
+
+    std::string r1 = s.process("hello").get();
+    if (r1 != "child:HELLO") {
+        std::cout << "FAIL: expected 'child:HELLO', got '" << r1 << "'" << std::endl;
+        return 1;
+    }
+
+    std::string r2 = s.other("test").get();
+    if (r2 != "parent_other:TEST") {
+        std::cout << "FAIL: expected 'parent_other:TEST', got '" << r2 << "'" << std::endl;
+        return 1;
+    }
+
+    std::cout << "PASS: async HSM forward — default forward dispatches to parent" << std::endl;
+    return 0;
+}

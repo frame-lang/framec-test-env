@@ -1,0 +1,57 @@
+@@[target("dart")]
+
+// Async HSM parent forward (Dart). Validates: the default `=> $^` forward from
+// $Child to $Parent is awaited in async mode (the #158 hoist). `other` is
+// unhandled by $Child, so it forwards to $Parent's handler.
+
+Future<String> mockTransform(String data) async {
+    await Future.delayed(Duration.zero);
+    return data.toUpperCase();
+}
+
+@@[async]
+@@system AsyncHsm {
+    interface:
+        async process(data: String): String
+        async other(data: String): String
+
+    machine:
+        $Child => $Parent {
+            process(data: String): String {
+                final result = await mockTransform(data);
+                @@:("child:" + result)
+                return;
+            }
+            => $^
+        }
+
+        $Parent {
+            process(data: String): String {
+                final result = await mockTransform(data);
+                @@:("parent:" + result)
+                return;
+            }
+            other(data: String): String {
+                final result = await mockTransform(data);
+                @@:("parent_other:" + result)
+                return;
+            }
+        }
+}
+
+Future<void> main() async {
+    final s = @@AsyncHsm();
+    await s.init();
+
+    final r1 = await s.process("hello");
+    if (r1 != "child:HELLO") {
+        throw Exception("Expected 'child:HELLO', got '$r1'");
+    }
+
+    final r2 = await s.other("test");
+    if (r2 != "parent_other:TEST") {
+        throw Exception("Expected 'parent_other:TEST', got '$r2'");
+    }
+
+    print("PASS: async HSM forward — default forward dispatches to parent");
+}

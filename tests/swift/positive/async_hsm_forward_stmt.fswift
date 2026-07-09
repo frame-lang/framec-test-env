@@ -1,0 +1,41 @@
+@@[target("swift")]
+
+// Async HSM explicit `=> $^` statement forward (Swift). #158 remainder.
+
+import Foundation
+
+func mockTransform(_ data: String) async -> String {
+    return data.uppercased()
+}
+
+@@[async]
+@@system AsyncHsmStmt {
+    interface:
+        async other(data: String): String
+
+    machine:
+        $Child => $Parent {
+            other(data: String): String {
+                => $^
+            }
+        }
+
+        $Parent {
+            other(data: String): String {
+                let result = await mockTransform(data)
+                @@:("parent_other:" + result)
+                return
+            }
+        }
+}
+
+let s = @@AsyncHsmStmt()
+try await s.initAsync()
+
+let r = try await s.other("test")
+if r != "parent_other:TEST" {
+    print("FAIL: expected 'parent_other:TEST', got '\(r)'")
+    exit(1)
+}
+
+print("PASS: async HSM explicit => $^ statement forward")
