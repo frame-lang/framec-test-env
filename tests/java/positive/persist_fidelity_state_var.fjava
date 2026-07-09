@@ -1,0 +1,55 @@
+@@[target("java")]
+
+// RFC-0053 compartment fidelity: a user-typed value can live in a STATE VARIABLE
+// (compartment.state_vars), not just a domain field. It must round-trip
+// faithfully too — the value tagged in the serialized compartment chain is
+// reconstructed so getmag() can call magSq() on the restored state var. A lossy
+// restore (type-erased map) would throw when the method is invoked. Java persist
+// uses Jackson (ObjectMapper + TypeReference), the schema route → expected PASS.
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x: double, y: double)
+        getmag(): double
+
+    machine:
+        $S {
+            $.sv: Vec2 = new Vec2(0.0, 0.0)
+
+            setv(x: double, y: double) { $.sv = new Vec2(x, y) }
+            getmag(): double { @@:($.sv.magSq()) }
+        }
+
+    domain:
+        marker: int = 1
+}
+
+class Vec2 {
+    public double x;
+    public double y;
+    public Vec2() {}
+    public Vec2(double x, double y) { this.x = x; this.y = y; }
+    public double magSq() { return x * x + y * y; }
+}
+
+class Main {
+    public static void main(String[] args) throws Exception {
+        Bag s1 = new Bag();
+        s1.setv(3.0, 4.0);
+        String snap = s1.save_state();
+
+        Bag s2 = new Bag();
+        s2.restore_state(snap);
+
+        double m = s2.getmag();
+        if (m == 25.0) {
+            System.out.println("PASS: persist_fidelity_state_var");
+        } else {
+            System.out.println("FAIL: magSq=" + m + " (want 25.0)");
+            System.exit(1);
+        }
+    }
+}

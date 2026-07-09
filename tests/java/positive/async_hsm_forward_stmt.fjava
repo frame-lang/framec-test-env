@@ -1,0 +1,47 @@
+@@[target("java")]
+
+import java.util.concurrent.ExecutionException;
+
+// Async HSM explicit `=> $^` statement forward (Java port of
+// async_hsm_forward_stmt.fpy). Validates: an explicit `=> $^` inside an async
+// handler body dispatches to the parent and the parent handler's result flows
+// back through the child's future. If the forward failed to chain the parent's
+// completion, the returned value would come back null instead of the expected
+// string. Java async wraps interface returns in CompletableFuture<T>; the driver
+// calls .get() and init() is an API-parity no-op.
+
+@@[async]
+@@system AsyncHsmStmt {
+    interface:
+        async other(data: String): String
+
+    machine:
+        $Child => $Parent {
+            // Child handles 'other' but explicitly forwards to the parent.
+            other(data: String): String {
+                => $^
+            }
+        }
+
+        $Parent {
+            other(data: String): String {
+                String result = data.toUpperCase();
+                @@:("parent_other:" + result)
+                return
+            }
+        }
+}
+
+class Main {
+    public static void main(String[] args) throws InterruptedException, ExecutionException {
+        AsyncHsmStmt s = @@AsyncHsmStmt();
+        s.init().get();
+
+        String result = s.other("test").get();
+        if (!"parent_other:TEST".equals(result)) {
+            throw new RuntimeException("Expected 'parent_other:TEST', got '" + result + "'");
+        }
+
+        System.out.println("PASS: async HSM explicit => $^ statement forward");
+    }
+}

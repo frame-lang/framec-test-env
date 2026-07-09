@@ -1,0 +1,53 @@
+@@[target("csharp")]
+
+using System.Text.Json;
+
+// RFC-0053 compartment fidelity (C#): a user-typed value held in a STATE
+// VARIABLE ($.sv -> compartment.state_vars) must round-trip faithfully, not just
+// a domain field. getmag() calls MagSq() on the reconstructed state-var value.
+
+public struct Vec2 {
+    public double x;
+    public double y;
+    public Vec2(double x, double y) { this.x = x; this.y = y; }
+    public double MagSq() { return x * x + y * y; }
+}
+
+@@[persist(string)]
+@@[save(SaveState)]
+@@[load(RestoreState)]
+@@system Bag {
+    interface:
+        setv(x: double, y: double)
+        getmag(): double
+
+    machine:
+        $S {
+            $.sv: Vec2 = new Vec2(0, 0)
+
+            setv(x: double, y: double) {
+                $.sv = new Vec2(x, y);
+            }
+            getmag(): double { @@:($.sv.MagSq()) }
+        }
+
+    domain:
+        marker: int = 1
+}
+
+class Program {
+    static void Main(string[] args) {
+        var b = @@Bag();
+        b.setv(3, 4);
+        var snap = b.SaveState();
+
+        var b2 = @@Bag();
+        b2.RestoreState(snap);
+
+        double gmag = b2.getmag();
+        if (gmag != 25) {
+            throw new Exception("FAIL: compartment state-var Vec2 did not round-trip: magSq=" + gmag);
+        }
+        Console.WriteLine("PASS: persist_fidelity_state_var");
+    }
+}

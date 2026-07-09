@@ -1,0 +1,65 @@
+@@[target("java")]
+
+import java.util.concurrent.ExecutionException;
+
+// Async HSM parent forward (Java port of async_hsm_forward.fpy).
+// Validates: in async mode a `=> $^` default forward dispatches to the parent
+// state and the parent handler's result flows back through the child's future.
+// Java's async approximation wraps interface returns in CompletableFuture<T>
+// (see make_java_interface_async); the driver calls .get() and init() is an
+// API-parity no-op. The uppercase transform stands in for the Python
+// mock_transform coroutine.
+
+@@[async]
+@@system AsyncHsm {
+    interface:
+        async process(data: String): String
+        async other(data: String): String
+
+    machine:
+        $Child => $Parent {
+            process(data: String): String {
+                String result = data.toUpperCase();
+                @@:("child:" + result)
+                return
+            }
+
+            // Unhandled events forward to parent via default forward.
+            => $^
+        }
+
+        $Parent {
+            process(data: String): String {
+                String result = data.toUpperCase();
+                @@:("parent:" + result)
+                return
+            }
+
+            other(data: String): String {
+                String result = data.toUpperCase();
+                @@:("parent_other:" + result)
+                return
+            }
+        }
+}
+
+class Main {
+    public static void main(String[] args) throws InterruptedException, ExecutionException {
+        AsyncHsm s = @@AsyncHsm();
+        s.init().get();
+
+        // Child handles process directly.
+        String result = s.process("hello").get();
+        if (!"child:HELLO".equals(result)) {
+            throw new RuntimeException("Expected 'child:HELLO', got '" + result + "'");
+        }
+
+        // Child doesn't handle 'other' — default forward to parent.
+        String other = s.other("test").get();
+        if (!"parent_other:TEST".equals(other)) {
+            throw new RuntimeException("Expected 'parent_other:TEST', got '" + other + "'");
+        }
+
+        System.out.println("PASS: async HSM forward — default forward dispatches to parent");
+    }
+}

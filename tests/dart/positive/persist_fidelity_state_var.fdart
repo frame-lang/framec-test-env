@@ -1,0 +1,54 @@
+@@[target("dart")]
+
+// RFC-0053 compartment fidelity (Dart): a user-typed value held in a STATE
+// VARIABLE ($.sv -> compartment.state_vars) must round-trip faithfully, not just
+// a domain field. getmag() calls magSq() on the reconstructed state-var value,
+// so a lossy restore (plain Map) fails here.
+
+import 'dart:convert';
+
+class Vec2 {
+    double x, y;
+    Vec2([this.x = 0.0, this.y = 0.0]);
+    double magSq() => x * x + y * y;
+    Map<String, dynamic> toJson() => {'x': x, 'y': y};
+    factory Vec2.fromJson(Map<String, dynamic> j) =>
+        Vec2((j['x'] as num).toDouble(), (j['y'] as num).toDouble());
+}
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x: double, y: double)
+        getmag(): double
+
+    machine:
+        $S {
+            $.sv: Vec2 = Vec2(0.0, 0.0)
+
+            setv(x: double, y: double) { $.sv = Vec2(x, y); }
+            getmag(): double { @@:($.sv.magSq()) }
+        }
+
+    domain:
+        marker: int = 1
+}
+
+void main() {
+    final s1 = @@Bag();
+    s1.setv(3.0, 4.0);
+    final snap = s1.save_state();
+
+    final s2 = @@Bag();
+    s2.restore_state(snap);
+
+    final m = s2.getmag();
+    if (m == 25.0) {
+        print("PASS: persist_fidelity_state_var");
+    } else {
+        print("FAIL: compartment state-var Vec2 did not round-trip: magSq=$m");
+        throw Exception("fidelity mismatch");
+    }
+}

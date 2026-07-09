@@ -1,0 +1,50 @@
+@@[target("gdscript")]
+
+# Async HSM explicit `=> $^` statement forward
+# (port of tests/python/positive/async_hsm_forward_stmt.fpy).
+# Validates: an explicit `=> $^` inside an async handler body is awaited.
+# A missing await would leave the parent handler's coroutine un-awaited, so
+# the return value would come back empty instead of "parent_other:TEST".
+
+extends SceneTree
+
+# Native GDScript helper. Handler bodies run inside the generated machine
+# class, where a file-scope func is not reachable via self; a sibling inner
+# class IS resolvable by name (same pattern as persist_fidelity_value_type.fgd).
+class Xf:
+    static func mock_transform(data: String) -> String:
+        return data.to_upper()
+
+@@[async]
+@@system AsyncHsmStmt {
+    interface:
+        async other(data: String): String
+
+    machine:
+        $Child => $Parent {
+            # Child handles 'other' but explicitly forwards to the parent.
+            other(data: String): String {
+                => $^
+            }
+        }
+
+        $Parent {
+            other(data: String): String {
+                var result = await Xf.mock_transform(data)
+                @@:("parent_other:" + result)
+            }
+        }
+}
+
+func _init():
+    var s = @@AsyncHsmStmt()
+    await s.init()
+
+    var r = await s.other("test")
+    if r != "parent_other:TEST":
+        print("FAIL: expected 'parent_other:TEST', got '", r, "'")
+        quit(1)
+        return
+
+    print("PASS: async HSM explicit => $^ statement forward")
+    quit()
