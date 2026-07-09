@@ -1,0 +1,81 @@
+@@[target("c")]
+
+// RFC-0053 compartment fidelity (C idiom): a user-typed value (a struct Vec2)
+// held in a STATE VARIABLE ($.sv -> compartment.state_vars) must round-trip
+// faithfully, not just a domain field. In C a state var of a struct is
+// heap-boxed in the FrameDict (a struct is larger than void*); getmag() calls
+// the free fn Vec2_magSq on the reconstructed box, so a lossy/truncated restore
+// fails here.
+//
+// Boxed state vars reuse the SAME persist hooks as a domain field of the type
+// (`Bag_persist_pack_field_Vec2` / `Bag_persist_unpack_field_Vec2`), so only one
+// pair is written even for a system with both a Vec2 field and a Vec2 state var.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <cjson/cJSON.h>
+
+typedef struct { double x; double y; } Vec2;
+
+// Free function standing in for Vec2::magSq() — 25.0 for (3,4).
+static double Vec2_magSq(Vec2 v) { return v.x * v.x + v.y * v.y; }
+
+// User-supplied persist helpers (field form: pack reads *(Vec2*)p; unpack
+// writes into *(Vec2*)p). Shared by domain fields and boxed state vars.
+static cJSON* Bag_persist_pack_field_Vec2(void* p) {
+    Vec2* v = (Vec2*)p;
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "x", v->x);
+    cJSON_AddNumberToObject(o, "y", v->y);
+    return o;
+}
+static void Bag_persist_unpack_field_Vec2(cJSON* j, void* p) {
+    Vec2* v = (Vec2*)p;
+    cJSON* jx = j ? cJSON_GetObjectItem(j, "x") : NULL;
+    cJSON* jy = j ? cJSON_GetObjectItem(j, "y") : NULL;
+    v->x = jx ? jx->valuedouble : 0.0;
+    v->y = jy ? jy->valuedouble : 0.0;
+}
+
+@@[persist(char*)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        setv(x: double, y: double)
+        getmag(): double
+
+    machine:
+        $S {
+            $.sv: Vec2 = (Vec2){0.0, 0.0}
+
+            setv(x: double, y: double) {
+                Vec2 t;
+                t.x = x;
+                t.y = y;
+                $.sv = t;
+            }
+            getmag(): double { @@:(Vec2_magSq($.sv)) }
+    }
+
+    domain:
+        marker: int = 1
+}
+
+int main() {
+    Bag* s1 = @@Bag();
+    Bag_setv(s1, 3.0, 4.0);
+    char* snap = Bag_save_state(s1);
+
+    Bag* s2 = @@Bag();
+    Bag_restore_state(s2, snap);
+
+    double m = Bag_getmag(s2);
+    if (m == 25.0) {
+        printf("PASS: persist_fidelity_state_var\n");
+        return 0;
+    } else {
+        printf("FAIL: compartment state-var Vec2 did not round-trip: magSq=%g\n", m);
+        return 1;
+    }
+}
