@@ -1,16 +1,29 @@
 @@[target("javascript")]
 
-// RFC-0053 hybrid registry (JS): the closed-world registry is graph-seeded from
-// the receiving instance's own initialized object graph, which covers every type
-// that has an initializer. A value whose runtime type is NOT reachable from an
-// initializer (here: a state var initialized to null, then assigned a Vec2) is
-// the residual gap. Such a type is refused (E750) until the user registers it via
-// registerPersistType — the hook that makes the hybrid complete. This fixture
-// proves both halves: the gap fails closed, and the hook closes it faithfully.
+// RFC-0055 restore type-resolution + the registration hook (JS).
+//
+// A snapshot stores each object's type as a string tag; JS cannot turn that string
+// back into a module-scoped class by reflection, so restore resolves it against a
+// name->constructor table framec builds from lexical references it can name at
+// compile time. R1 (E752) requires a declared type on every persisted field, and
+// framec seeds the table from that declaration — so a MONOMORPHIC user type
+// resolves with no hook (see the persist_fidelity_* fixtures).
+//
+// The registration hook's remaining role is POLYMORPHISM: a field declared as a
+// base type but holding a SUBTYPE at save time. The declaration seeds the base
+// (Shape); the snapshot's runtime tag is the concrete subtype (Circle), which the
+// declaration never names, so restore cannot resolve it and fails loud (E750 — a
+// fidelity signal, not a security check) until the user hands framec a lexical
+// reference to the subtype via registerPersistType. This proves both halves: the
+// unresolved subtype fails loud, and the hook resolves it faithfully.
 
-class Vec2 {
-    constructor(x = 0.0, y = 0.0) { this.x = x; this.y = y; }
-    magSq() { return this.x * this.x + this.y * this.y; }
+class Shape {
+    area() { return 0.0; }
+}
+class Circle extends Shape {
+    constructor(r = 0.0) { super(); this.r = r; }
+    // 3 stands in for pi so the round-trip check is exact integer math.
+    area() { return 3.0 * this.r * this.r; }
 }
 
 @@[persist(string)]
@@ -18,39 +31,41 @@ class Vec2 {
 @@[load(restore_state)]
 @@system Bag {
     interface:
-        setv(x, y)
-        getmag(): double
+        setshape(r)
+        getarea(): double
 
     machine:
         $S {
-            $.sv = null
+            $.sv: Shape = null
 
-            setv(x, y) { $.sv = new Vec2(x, y) }
-            getmag()   { @@:($.sv.magSq()) }
+            setshape(r) { $.sv = new Circle(r) }
+            getarea()   { @@:($.sv.area()) }
         }
 
     domain:
-        marker = 1
+        marker: number = 1
 }
 
 function main() {
     const s1 = @@Bag();
-    s1.setv(3.0, 4.0);
+    s1.setshape(2.0);
     const snap = s1.save_state();
 
-    // Gap: fresh $.sv is null, so graph-seed never sees Vec2 -> refuse (fail closed).
+    // Polymorphic residual: $.sv is declared Shape (seeded from the declaration),
+    // but the saved value's runtime type is Circle, which the declaration never
+    // names -> unresolved -> fail loud.
     const s2 = @@Bag();
-    let refused = false;
+    let unresolved = false;
     try { s2.restore_state(snap); }
-    catch (e) { refused = String(e.message).includes("E750"); }
-    if (!refused) { throw new Error("dynamic-only Vec2 was resolved without the hook"); }
+    catch (e) { unresolved = String(e.message).includes("E750"); }
+    if (!unresolved) { throw new Error("polymorphic subtype Circle resolved without the hook"); }
 
-    // Hook closes the gap -> faithful restore.
-    Bag.registerPersistType(Vec2);
+    // Hook hands framec the concrete subtype -> faithful restore (Circle.area, not Shape.area).
+    Bag.registerPersistType(Circle);
     const s3 = @@Bag();
     s3.restore_state(snap);
-    const m = s3.getmag();
-    if (m !== 25.0) { throw new Error(`hook restore did not round-trip: mag=${m}`); }
+    const a = s3.getarea();
+    if (a !== 12.0) { throw new Error(`hook restore did not round-trip: area=${a}`); }
 
     console.log("PASS: persist_hook_registration");
 }
