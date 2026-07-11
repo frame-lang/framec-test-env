@@ -1,0 +1,50 @@
+@@[target("rust")]
+
+// #186: a non-Copy event payload (a struct holding a String + Vec) must be
+// cloned out of the shared &FrameEvent, not moved with `*p` (which is E0507 for
+// any non-Copy type). framec is type-ignorant, so it clones every event param
+// except the built-in Copy scalars.
+
+#[derive(Clone, Debug, PartialEq)]
+struct Payload { tag: String, items: Vec<u32> }
+
+@@system PayloadRelay {
+    interface:
+        take(p: Payload)
+        count(n: u32)
+        last(): String = String::new()
+        total(): u32 = 0
+
+    machine:
+        $S {
+            take(p: Payload) {
+                self.seen = p.tag.clone();
+                self.sum = p.items.iter().sum();
+            }
+            count(n: u32) {
+                self.sum = self.sum + n;
+            }
+            last(): String {
+                @@:(self.seen.clone())
+                return;
+            }
+            total(): u32 {
+                @@:(self.sum)
+                return;
+            }
+    }
+
+    domain:
+        seen: String = String::new()
+        sum: u32 = 0
+}
+
+fn main() {
+    let mut r = @@PayloadRelay();
+    r.take(Payload { tag: String::from("hello"), items: vec![1, 2, 3] });
+    assert_eq!(r.last(), "hello", "non-Copy payload did not round-trip");
+    assert_eq!(r.total(), 6, "Vec payload sum wrong");
+    r.count(4);
+    assert_eq!(r.total(), 10, "Copy scalar param wrong");
+    println!("PASS: event_param_non_copy_payload");
+}
