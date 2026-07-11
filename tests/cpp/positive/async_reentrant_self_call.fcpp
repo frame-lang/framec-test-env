@@ -1,0 +1,41 @@
+@@[target("cpp")]
+
+// #184 — C++ async reentrant self-interface-call.
+//
+// `twice()` calls `@@:self.add(...)` — a reentrant interface (kernel-dispatched)
+// self-call, so in async mode it is `co_await`ed (#181) and the handler becomes a
+// `FrameTask` coroutine. The `_transitioned` guard emitted after that call must be
+// `co_return;` (not a bare `return;`, which is illegal in a coroutine — #184).
+// This fixture never actually transitions, so the guard falls through; its purpose
+// is that the coroutine COMPILES and the awaited value flows: add=5, twice=10.
+
+#include <iostream>
+
+@@[async]
+@@system Acc {
+    interface:
+        async add(x: int): int
+        async twice(): int
+    machine:
+        $Active {
+            $>() { @@:self.n = 0; }
+            add(x: int): int  { @@:self.n = @@:self.n + x;  @@:(@@:self.n) }
+            twice(): int      { @@:self.add(@@:self.n);     @@:(@@:self.n) }
+        }
+    domain:
+        n: int = 0;
+}
+
+int main() {
+    auto s = @@Acc();
+    s.init().get();
+
+    int a = s.add(5).get();
+    if (a != 5) { std::cout << "FAIL add: " << a << std::endl; return 1; }
+
+    int t = s.twice().get();
+    if (t != 10) { std::cout << "FAIL twice: " << t << std::endl; return 1; }
+
+    std::cout << "PASS: async_reentrant_self_call" << std::endl;
+    return 0;
+}
