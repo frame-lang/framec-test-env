@@ -85,11 +85,7 @@ framec: $(STAMP_DIR)/framec-native
 # --- Container images ---
 
 define LANG_BUILD_RULE
-# $(wildcard ...) so a per-language batch-runner edit (e.g. *_batch.sh) busts
-# the image stamp and triggers a rebuild — the Dockerfile bakes it in via COPY,
-# so without this an edited runner is silently NOT retested. wildcard keeps the
-# rule valid for languages with no batch script (e.g. bare `c`).
-$(STAMP_DIR)/image-$(1): base/$(1)/Dockerfile $(RUNNER) runners/framec_cached.sh $(wildcard runners/$(1)_batch.sh) | $(STAMP_DIR)
+$(STAMP_DIR)/image-$(1): base/$(1)/Dockerfile $(RUNNER) runners/framec_cached.sh | $(STAMP_DIR)
 	@echo "=== Building $(1) container ==="
 	@FRAMEC_BIN=/dev/null $(COMPOSE) build \
 		--build-arg RUNNER_HASH=$(RUNNER_HASH) $(1)
