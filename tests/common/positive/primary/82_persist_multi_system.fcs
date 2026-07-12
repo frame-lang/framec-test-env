@@ -1,0 +1,60 @@
+@@[target("csharp")]
+
+
+@@[persist(string)]
+@@[save(SaveState)]
+@@[load(RestoreState)]
+@@system Counter {
+    interface:
+        bump()
+        value(): int
+
+    machine:
+        $Active {
+            bump() { this.n = this.n + 1; }
+            value(): int { @@:(this.n) }
+        }
+
+    domain:
+        n: int = 0
+}@@[persist(string)]
+@@[save(SaveState)]
+@@[load(RestoreState)]
+
+
+@@[main]
+@@system Container {
+    interface:
+        tick()
+        get_n(): int
+
+    machine:
+        $Active {
+            tick() {
+                this.n = this.n + 10;
+                this.counter.bump();
+            }
+            get_n(): int { @@:(this.n) }
+        }
+
+    domain:
+        n: int = 0
+        counter: Counter = @@Counter()
+}
+
+class Program {
+    public static void Main(string[] args) {
+        var c1 = @@Container();
+        c1.tick();
+        c1.tick();
+        if (c1.get_n() != 20) { Console.WriteLine($"FAIL pre n: {c1.get_n()}"); Environment.Exit(1); }
+
+        var snap = c1.SaveState();
+        var c2 = @@Container();
+
+        c2.RestoreState(snap);
+        if (c2.get_n() != 20) { Console.WriteLine($"FAIL post n: {c2.get_n()}"); Environment.Exit(1); }
+
+        Console.WriteLine("PASS: 82_persist_multi_system");
+    }
+}

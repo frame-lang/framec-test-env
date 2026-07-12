@@ -43,6 +43,25 @@ set -o pipefail
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 DIFF_HARNESS="$SCRIPT_DIR/diff_harness/run_fuzz.py"
 
+# Route TypeScript execution through tools/tsx — a drop-in that strips types with
+# esbuild and runs the result with plain `node`, avoiding tsx's per-invocation
+# ESM loader hook, which crashed globally under full-run load (every TS case
+# failing at node:internal/process/esm_loader even though each passes alone).
+# Child phase runners inherit this PATH. See tools/tsx for the rationale.
+export PATH="$SCRIPT_DIR/tools:$PATH"
+
+# Resolve framec once — the authoritative local build, else PATH — and export
+# so every phase runs against the *same* version (a mixed-version run is
+# meaningless). See docs/docker.md "Which framec".
+FRAMEC="${FRAMEC:-$HOME/.frame/local/bin/framec}"
+[ -x "$FRAMEC" ] || FRAMEC="$(command -v framec 2>/dev/null)"
+export FRAMEC
+if [ -x "$FRAMEC" ]; then
+    echo "framec: $FRAMEC ($("$FRAMEC" --version 2>/dev/null))"
+else
+    echo "WARNING: framec not found ($HOME/.frame/local/bin/framec or PATH)" >&2
+fi
+
 TIER="full"
 LANG=""
 TAG=""
@@ -61,7 +80,7 @@ while [ $# -gt 0 ]; do
         --help|-h)
             echo "Usage: $0 [--tier=smoke|core|full] [--lang=<name>] [--tag=<comma-list>] [--phases=<comma-list>]"
             echo ""
-            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 24 (default: all)"
+            echo "Phases: 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 24 26 (default: all)"
             echo "Tiers:  smoke (curated, fast), core (phase essentials), full (complete corpus)"
             exit 0
             ;;
@@ -77,7 +96,7 @@ fi
 
 # Default phase list. Phase 1 is infrastructure-only (no runnable
 # fuzz). Phases 11+ are not yet built.
-ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 24"
+ALL_PHASES="2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 24 26"
 PHASES=${PHASES_REQUESTED:-$ALL_PHASES}
 PHASES=$(echo "$PHASES" | tr ',' ' ')
 
@@ -96,6 +115,7 @@ LANG_ARG_STRESS=""
 LANG_ARG_PUSHPOP=""
 LANG_ARG_CONST_SYS=""
 LANG_ARG_ARITH=""
+LANG_ARG_ASYNC_PERSIST=""
 LANG_ARG_DIFF=""
 LANG_ARG_NEGATIVE=""
 if [ -n "$LANG" ]; then
@@ -112,6 +132,7 @@ if [ -n "$LANG" ]; then
     LANG_ARG_PUSHPOP="--lang=$LANG"            # run_pushpop.sh
     LANG_ARG_CONST_SYS="--lang=$LANG"          # run_const_sys.sh
     LANG_ARG_ARITH="--lang=$LANG"              # run_arith.sh
+    LANG_ARG_ASYNC_PERSIST="--lang=$LANG"      # run_async_persist.sh
     LANG_ARG_DIFF="--langs=$LANG"              # run_fuzz.py
     LANG_ARG_NEGATIVE="-l $LANG"               # run_negative.sh
 fi
@@ -153,6 +174,7 @@ run_phase() {
         20) run_const_sys ;;
         21) run_arith ;;
         24) run_persist_x ;;
+        26) run_async_persist ;;
         *)  echo "Phase $phase: unknown" >&2; return 1 ;;
     esac
 }
@@ -180,6 +202,7 @@ phase_name() {
         20) echo "const-sys" ;;
         21) echo "arith" ;;
         24) echo "persist-x" ;;
+        26) echo "async-persist" ;;
         *) echo "?" ;;
     esac
 }
@@ -294,6 +317,13 @@ run_arith() {
     [ -n "$LANG_ARG_ARITH" ] && args="$args $LANG_ARG_ARITH"
     # shellcheck disable=SC2086
     "$SCRIPT_DIR/run_arith.sh" $args
+}
+
+run_async_persist() {
+    local args="--tier=$TIER"
+    [ -n "$LANG_ARG_ASYNC_PERSIST" ] && args="$args $LANG_ARG_ASYNC_PERSIST"
+    # shellcheck disable=SC2086
+    "$SCRIPT_DIR/run_async_persist.sh" $args
 }
 
 run_persist_x() {

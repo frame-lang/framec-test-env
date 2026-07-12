@@ -30,6 +30,19 @@ compile errors.
 - Phase 10 (Expression cross-product): v2 = 460 cases × 17 = 7,820
   cases, clean. D1/D2/D3 closed.
 
+**Phase 26 (async × persist), 2026-07:** extended from the Python-only
+canary to the full Phase-6 async breadth — **11 backends × 4 patterns**
+(`await_then_save`, `save_between_awaits`, `restore_then_await`,
+`gate_clears`) via `gen_async_persist.py`. All four reuse one proven
+`@@[async] @@[persist]` system; only the driver's save-point and await
+ordering differ. 44 representative cases (11×4) verified: all transpile,
+target code compile-checks 40/40 locally (C++ defers to the gcc:14
+container for `<coroutine>`). See the generator docstring for the full
+pattern × backend matrix. Wired into `run_all.sh` as **Phase 26**
+(`run_async_persist.sh`) — transpile-check across all 11 backends; the
+generated code's compile + runtime round-trip is covered by the matrix's
+`async_persist_roundtrip_gate_clears` fixtures.
+
 Target end state:
 
 - All runtime fuzzers apply to all applicable backends (~11–17 each).

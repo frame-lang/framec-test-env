@@ -1,0 +1,51 @@
+@@[target("swift")]
+
+// Test 103: `@@!Foo()` no-init allocation (RFC-0017 D7).
+// See 103_at_bang_no_init.fpy for the full contract description.
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Counter {
+    interface:
+        inc()
+        get_n(): Int
+        get_lc(): Int
+
+    machine:
+        $Active {
+            $> { self.lifecycle_count = self.lifecycle_count + 1 }
+            inc() { self.n = self.n + 1 }
+            get_n(): Int { @@:(self.n) }
+            get_lc(): Int { @@:(self.lifecycle_count) }
+        }
+
+    domain:
+        n: Int = 0
+        lifecycle_count: Int = 0
+}
+
+// Path 1: @@Counter() — factory; $> fires.
+let a = @@Counter()
+if a.get_lc() != 1 { print("FAIL: factory lc=\(a.get_lc())"); exit(1) }
+a.inc(); a.inc(); a.inc()
+if a.get_n() != 3 { print("FAIL: factory n=\(a.get_n())"); exit(1) }
+let blob = a.save_state()
+
+// Path 2: @@!Counter() — naked shell; $> does NOT fire.
+let fresh = @@!Counter()
+if fresh.get_lc() != 0 { print("FAIL: bang lc=\(fresh.get_lc())"); exit(1) }
+if fresh.get_n() != 0 { print("FAIL: bang n=\(fresh.get_n())"); exit(1) }
+
+// Path 3: @@!Counter() + restore — blob's lc is preserved.
+fresh.restore_state(blob)
+if fresh.get_n() != 3 { print("FAIL: restored n=\(fresh.get_n())"); exit(1) }
+if fresh.get_lc() != 1 { print("FAIL: restored lc=\(fresh.get_lc())"); exit(1) }
+
+// Path 4: @@!Counter() shell, then a method — works without $>.
+let naked = @@!Counter()
+naked.inc()
+if naked.get_n() != 1 { print("FAIL: naked.inc n=\(naked.get_n())"); exit(1) }
+if naked.get_lc() != 0 { print("FAIL: naked still lc=0; got \(naked.get_lc())"); exit(1) }
+
+print("PASS: 103_at_bang_no_init")

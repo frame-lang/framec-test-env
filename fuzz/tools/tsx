@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# Drop-in replacement for `tsx <file.ts>` used by the fuzz harness.
+#
+# Why: `tsx` runs TypeScript via a per-invocation node ESM loader hook. Under the
+# full-run load that hook can crash globally with an empty-Error
+# `node:internal/process/esm_loader` uncaught exception, failing every TS case in
+# a run even though each passes in isolation. This shim instead strips types with
+# esbuild (which tsx already bundles) to an ESM `.mjs` and runs it with plain
+# `node` — exactly the robust path the JavaScript backend uses. Deterministic,
+# no loader hook. Output is identical to `tsx` (verified across the fuzz corpus).
+set -euo pipefail
+
+file="$1"
+
+# Resolve the esbuild bundled alongside the real tsx (portable; macOS readlink
+# has no -f). Fall back to a PATH esbuild, then to the conventional global path.
+_resolve_esbuild() {
+    local tsx_bin link tsx_real tsx_root
+    tsx_bin="$(command -v tsx || true)"
+    if [ -n "$tsx_bin" ]; then
+        link="$(readlink "$tsx_bin" 2>/dev/null || true)"
+        if [ -n "$link" ]; then
+            case "$link" in
+                /*) tsx_real="$link" ;;
+                *)  tsx_real="$(cd "$(dirname "$tsx_bin")" && cd "$(dirname "$link")" && pwd)/$(basename "$link")" ;;
+            esac
+        else
+            tsx_real="$tsx_bin"
+        fi
+        tsx_root="$(cd "$(dirname "$tsx_real")/.." 2>/dev/null && pwd || true)"
+        if [ -n "$tsx_root" ] && [ -x "$tsx_root/node_modules/.bin/esbuild" ]; then
+            printf '%s' "$tsx_root/node_modules/.bin/esbuild"; return 0
+        fi
+    fi
+    if command -v esbuild >/dev/null 2>&1; then command -v esbuild; return 0; fi
+    if [ -x /usr/local/lib/node_modules/tsx/node_modules/.bin/esbuild ]; then
+        printf '%s' /usr/local/lib/node_modules/tsx/node_modules/.bin/esbuild; return 0
+    fi
+    return 1
+}
+
+esbuild="$(_resolve_esbuild)" || { echo "ts-shim: cannot locate esbuild" >&2; exit 127; }
+
+mjs="${file%.ts}.__run.mjs"
+esberr="$(mktemp)"
+trap 'rm -f "$mjs" "$esberr"' EXIT
+if ! "$esbuild" "$file" --format=esm --platform=node --log-level=error \
+        --outfile="$mjs" >"$esberr" 2>&1; then
+    cat "$esberr" >&2
+    exit 1
+fi
+exec node "$mjs"

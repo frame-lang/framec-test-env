@@ -1,0 +1,66 @@
+@@[target("javascript")]
+
+// Test 102: list + dict as PERSISTED domain fields (JavaScript).
+// Exercises the type-ignorant domain-field path through JSON:
+// a native array and object must round-trip through saveState /
+// restoreState preserving order and key-value pairs.
+
+@@[persist(string)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@system DomainListDict {
+    interface:
+        push(v)
+        size_l()
+        get_at(i)
+        put(k, v)
+        size_d()
+        get_v(k)
+
+    machine:
+        $Active {
+            push(v)        { this.items.push(v); }
+            size_l()       { @@:(this.items.length) }
+            get_at(i)      { @@:((i >= 0 && i < this.items.length) ? this.items[i] : -1) }
+            put(k, v)      { this.scores[k] = v; }
+            size_d()       { @@:(Object.keys(this.scores).length) }
+            get_v(k)       { @@:(this.scores[k] !== undefined ? this.scores[k] : -1) }
+        }
+
+    domain:
+        items = []
+        scores = {}
+}
+
+function main() {
+    const s1 = @@DomainListDict();
+    s1.push(10);
+    s1.push(20);
+    s1.push(30);
+    s1.put("a", 1);
+    s1.put("b", 2);
+    s1.put("c", 3);
+
+    if (s1.size_l() !== 3) { throw new Error(`pre size_l=${s1.size_l()}`); }
+    if (s1.get_at(0) !== 10) { throw new Error("pre get_at0"); }
+    if (s1.size_d() !== 3) { throw new Error("pre size_d"); }
+    if (s1.get_v("b") !== 2) { throw new Error("pre b"); }
+
+    const snap = s1.saveState();
+
+    const s2 = @@DomainListDict();
+    s2.restoreState(snap);
+
+    if (s2.size_l() !== 3) { throw new Error(`post size_l=${s2.size_l()}`); }
+    if (s2.get_at(0) !== 10) { throw new Error(`post items[0]=${s2.get_at(0)}`); }
+    if (s2.get_at(1) !== 20) { throw new Error(`post items[1]=${s2.get_at(1)}`); }
+    if (s2.get_at(2) !== 30) { throw new Error(`post items[2]=${s2.get_at(2)}`); }
+    if (s2.size_d() !== 3) { throw new Error(`post size_d=${s2.size_d()}`); }
+    if (s2.get_v("a") !== 1) { throw new Error("post a"); }
+    if (s2.get_v("b") !== 2) { throw new Error("post b"); }
+    if (s2.get_v("c") !== 3) { throw new Error("post c"); }
+
+    console.log("PASS: 102_persist_domain_list_dict");
+}
+
+main();

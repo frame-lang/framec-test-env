@@ -1,0 +1,64 @@
+@@[target("c")]
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <cjson/cJSON.h>
+
+@@[persist(char*)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Counter {
+    interface:
+        bump()
+        value(): int
+
+    machine:
+        $Active {
+            bump() { self->n = self->n + 1; }
+            value(): int { @@:(self->n) return; }
+        }
+
+    domain:
+        n: int = 0
+}@@[persist(char*)]
+@@[save(save_state)]
+@@[load(restore_state)]
+
+
+@@[main]
+@@system Container {
+    interface:
+        tick()
+        get_n(): int
+
+    machine:
+        $Active {
+            tick() {
+                self->n = self->n + 10;
+                Counter_bump(self->counter);
+            }
+            get_n(): int { @@:(self->n) return; }
+        }
+
+    domain:
+        n: int = 0
+        counter: Counter* = @@Counter()
+}
+
+int main() {
+    Container* c1 = @@Container();
+    Container_tick(c1);
+    Container_tick(c1);
+    if (Container_get_n(c1) != 20) { printf("FAIL pre n: %d\n", Container_get_n(c1)); return 1; }
+
+    char* snap = Container_save_state(c1);
+    Container* c2 = @@Container();
+
+    Container_restore_state(c2, snap);
+    free(snap);
+    if (Container_get_n(c2) != 20) { printf("FAIL post n: %d\n", Container_get_n(c2)); return 1; }
+
+    printf("PASS: 82_persist_multi_system\n");
+    return 0;
+}

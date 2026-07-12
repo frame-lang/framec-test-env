@@ -1,0 +1,63 @@
+@@[target("gdscript")]
+
+extends SceneTree
+
+# NOTE: GDScript reserves the identifier "Container" (a native UI Node class),
+# so a system named Container cannot be emitted as a GDScript class_name.
+# The system is renamed CounterHolder here; behavior is identical to the spec.
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Counter {
+    interface:
+        bump()
+        value(): int
+
+    machine:
+        $Active {
+            bump() { self.n = self.n + 1 }
+            value(): int { @@:(self.n) return }
+        }
+
+    domain:
+        n: int = 0
+}@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+
+
+@@[main]
+@@system CounterHolder {
+    interface:
+        tick()
+        get_n(): int
+
+    machine:
+        $Active {
+            tick() {
+                self.n = self.n + 10
+                self.counter.bump()
+            }
+            get_n(): int { @@:(self.n) return }
+        }
+
+    domain:
+        n: int = 0
+        counter = @@Counter()
+}
+
+func _init():
+    var c1 = @@CounterHolder()
+    c1.tick()
+    c1.tick()
+    assert(c1.get_n() == 20, "FAIL pre n: " + str(c1.get_n()))
+
+    var snap = c1.save_state()
+    var c2 = @@CounterHolder()
+
+    c2.restore_state(snap)
+    assert(c2.get_n() == 20, "FAIL post n: " + str(c2.get_n()))
+
+    print("PASS: 82_persist_multi_system")
+    quit()

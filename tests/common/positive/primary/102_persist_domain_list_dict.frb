@@ -1,0 +1,64 @@
+@@[target("ruby")]
+
+require 'json'
+
+# Test 102: list + dict as PERSISTED domain fields (Ruby).
+# Exercises the type-ignorant domain-field path through the native
+# JSON serializer: an Array and a Hash must round-trip through
+# save_state / restore_state preserving order and key-value pairs.
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system DomainListDict {
+    interface:
+        push(v: int)
+        size_l(): int
+        get_at(i: int): int
+        put(k: String, v: int)
+        size_d(): int
+        get_v(k: String): int
+
+    machine:
+        $Active {
+            push(v: int)         { self.items.push(v) }
+            size_l(): int        { @@:(self.items.length) }
+            get_at(i: int): int  { @@:((i >= 0 && i < self.items.length) ? self.items[i] : -1) }
+            put(k: String, v: int)  { self.scores[k] = v }
+            size_d(): int        { @@:(self.scores.size) }
+            get_v(k: String): int   { @@:(self.scores.fetch(k, -1)) }
+        }
+
+    domain:
+        items: Array = []
+        scores: Hash = {}
+}
+
+s1 = @@DomainListDict()
+s1.push(10)
+s1.push(20)
+s1.push(30)
+s1.put("a", 1)
+s1.put("b", 2)
+s1.put("c", 3)
+
+abort("FAIL pre size_l=#{s1.size_l}") unless s1.size_l == 3
+abort("FAIL pre get_at0") unless s1.get_at(0) == 10
+abort("FAIL pre size_d") unless s1.size_d == 3
+abort("FAIL pre b") unless s1.get_v("b") == 2
+
+snap = s1.save_state()
+
+s2 = @@DomainListDict()
+s2.restore_state(snap)
+
+abort("FAIL post size_l=#{s2.size_l}") unless s2.size_l == 3
+abort("FAIL post items[0]=#{s2.get_at(0)}") unless s2.get_at(0) == 10
+abort("FAIL post items[1]=#{s2.get_at(1)}") unless s2.get_at(1) == 20
+abort("FAIL post items[2]=#{s2.get_at(2)}") unless s2.get_at(2) == 30
+abort("FAIL post size_d=#{s2.size_d}") unless s2.size_d == 3
+abort("FAIL post a") unless s2.get_v("a") == 1
+abort("FAIL post b") unless s2.get_v("b") == 2
+abort("FAIL post c") unless s2.get_v("c") == 3
+
+puts "PASS: 102_persist_domain_list_dict"

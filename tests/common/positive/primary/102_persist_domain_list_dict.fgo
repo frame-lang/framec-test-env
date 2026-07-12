@@ -1,0 +1,144 @@
+@@[target("go")]
+
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"os"
+)
+
+// Test 102: list + dict as PERSISTED domain fields (Go).
+// Go's framec persist surfaces unexported domain fields; this fixture
+// round-trips a []int and a map[string]int through a hand-written
+// snapshot (same package, can read/write unexported fields — the same
+// pattern 23_persist_basic uses), preserving order and key-value pairs.
+
+@@[persist(string)]
+@@[save(SaveState)]
+@@[load(LoadState)]
+@@system DomainListDict {
+    interface:
+        Push(v: int)
+        SizeL(): int
+        GetAt(i: int): int
+        Put(k: string, v: int)
+        SizeD(): int
+        GetV(k: string): int
+
+    machine:
+        $Active {
+            Push(v: int)        { s.items = append(s.items, v) }
+            SizeL(): int        { @@:(len(s.items)); return; }
+            GetAt(i: int): int  { if i >= 0 && i < len(s.items) { @@:(s.items[i]); return }; @@:(-1); return; }
+            Put(k: string, v: int)  { s.scores[k] = v }
+            SizeD(): int        { @@:(len(s.scores)); return; }
+            GetV(k: string): int    { if vv, ok := s.scores[k]; ok { @@:(vv); return }; @@:(-1); return; }
+        }
+
+    domain:
+        items : []int = []int{}
+        scores : map[string]int = make(map[string]int)
+}
+
+// --- Persist helpers (same package, can access unexported fields) ---
+
+type domainListDictSnapshot struct {
+	State  string         `json:"state"`
+	Items  []int          `json:"items"`
+	Scores map[string]int `json:"scores"`
+}
+
+func saveDomainListDict(s *DomainListDict) string {
+	snap := domainListDictSnapshot{
+		State:  s.__compartment.state,
+		Items:  s.items,
+		Scores: s.scores,
+	}
+	b, err := json.Marshal(snap)
+	if err != nil {
+		panic(err)
+	}
+	return string(b)
+}
+
+func restoreDomainListDict(jsonStr string) *DomainListDict {
+	var snap domainListDictSnapshot
+	if err := json.Unmarshal([]byte(jsonStr), &snap); err != nil {
+		panic(err)
+	}
+	s := &DomainListDict{}
+	s._state_stack = make([]*DomainListDictCompartment, 0)
+	s._context_stack = make([]DomainListDictFrameContext, 0)
+	s.__compartment = newDomainListDictCompartment(snap.State)
+	s.__next_compartment = nil
+	s.items = snap.Items
+	s.scores = snap.Scores
+	return s
+}
+
+func main() {
+	s1 := @@DomainListDict()
+	s1.Push(10)
+	s1.Push(20)
+	s1.Push(30)
+	s1.Put("a", 1)
+	s1.Put("b", 2)
+	s1.Put("c", 3)
+
+	if s1.SizeL() != 3 {
+		fmt.Printf("FAIL pre size_l=%d\n", s1.SizeL())
+		os.Exit(1)
+	}
+	if s1.GetAt(0) != 10 {
+		fmt.Println("FAIL pre get_at0")
+		os.Exit(1)
+	}
+	if s1.SizeD() != 3 {
+		fmt.Println("FAIL pre size_d")
+		os.Exit(1)
+	}
+	if s1.GetV("b") != 2 {
+		fmt.Println("FAIL pre b")
+		os.Exit(1)
+	}
+
+	snap := saveDomainListDict(s1)
+
+	s2 := restoreDomainListDict(snap)
+
+	if s2.SizeL() != 3 {
+		fmt.Printf("FAIL post size_l=%d\n", s2.SizeL())
+		os.Exit(1)
+	}
+	if s2.GetAt(0) != 10 {
+		fmt.Printf("FAIL post items[0]=%d\n", s2.GetAt(0))
+		os.Exit(1)
+	}
+	if s2.GetAt(1) != 20 {
+		fmt.Printf("FAIL post items[1]=%d\n", s2.GetAt(1))
+		os.Exit(1)
+	}
+	if s2.GetAt(2) != 30 {
+		fmt.Printf("FAIL post items[2]=%d\n", s2.GetAt(2))
+		os.Exit(1)
+	}
+	if s2.SizeD() != 3 {
+		fmt.Printf("FAIL post size_d=%d\n", s2.SizeD())
+		os.Exit(1)
+	}
+	if s2.GetV("a") != 1 {
+		fmt.Println("FAIL post a")
+		os.Exit(1)
+	}
+	if s2.GetV("b") != 2 {
+		fmt.Println("FAIL post b")
+		os.Exit(1)
+	}
+	if s2.GetV("c") != 3 {
+		fmt.Println("FAIL post c")
+		os.Exit(1)
+	}
+
+	fmt.Println("PASS: 102_persist_domain_list_dict")
+}

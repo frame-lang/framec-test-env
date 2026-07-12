@@ -1,0 +1,56 @@
+@@[target("php")]
+
+
+@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Counter {
+    interface:
+        bump()
+        value(): int
+
+    machine:
+        $Active {
+            bump() { $this->n = $this->n + 1; }
+            value(): int { @@:($this->n) return; }
+        }
+
+    domain:
+        n: int = 0
+}@@[persist(string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+
+
+@@[main]
+@@system Container {
+    interface:
+        tick()
+        get_n(): int
+
+    machine:
+        $Active {
+            tick() {
+                $this->n = $this->n + 10;
+                $this->counter->bump();
+            }
+            get_n(): int { @@:($this->n) return; }
+        }
+
+    domain:
+        n: int = 0
+        counter = @@Counter()
+}
+
+$c1 = @@Container();
+$c1->tick();
+$c1->tick();
+if ($c1->get_n() !== 20) { echo "FAIL pre n: " . $c1->get_n() . "\n"; exit(1); }
+
+$snap = $c1->save_state();
+$c2 = @@Container();
+
+$c2->restore_state($snap);
+if ($c2->get_n() !== 20) { echo "FAIL post n: " . $c2->get_n() . "\n"; exit(1); }
+
+echo "PASS: 82_persist_multi_system\n";

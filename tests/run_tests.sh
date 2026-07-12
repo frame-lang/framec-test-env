@@ -31,7 +31,9 @@
 #
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-FRAMEC="${FRAMEC:-/Users/marktruluck/projects/frame_transpiler/target/release/framec}"
+# framec: prefer the authoritative local build, fall back to PATH.
+FRAMEC="${FRAMEC:-$HOME/.frame/local/bin/framec}"
+[ -x "$FRAMEC" ] || FRAMEC="$(command -v framec 2>/dev/null)"
 
 # Ensure all tool directories are in PATH (non-login shells like CI / Claude Code
 # don't source the user's profile, so tools from homebrew, cargo, nvm, etc.
@@ -720,7 +722,7 @@ run_category() {
 echo "=========================================="
 echo "Frame V4 Test Runner"
 echo "=========================================="
-echo "Transpiler: $FRAMEC"
+echo "Transpiler: $FRAMEC ($("$FRAMEC" --version 2>/dev/null || echo '?'))"
 echo "Test root:  $SCRIPT_DIR"
 echo "Output:     $TEST_ENV_ROOT/output/"
 [ -n "$FILTER_LANG" ] && echo "Language:   $FILTER_LANG"

@@ -1,0 +1,65 @@
+@@[target("dart")]
+import 'dart:convert';
+
+// Test 102: list + dict as PERSISTED domain fields (Dart).
+// Exercises the type-ignorant domain-field path through the native
+// JSON serializer: List<int> and Map<String,int> must round-trip
+// through saveState / restoreState preserving order and key-value pairs.
+
+@@[persist(String)]
+@@[save(saveState)]
+@@[load(restoreState)]
+@@system DomainListDict {
+    interface:
+        push(v: int)
+        size_l(): int
+        get_at(i: int): int
+        put(k: String, v: int)
+        size_d(): int
+        get_v(k: String): int
+
+    machine:
+        $Active {
+            push(v: int)         { this.items.add(v); }
+            size_l(): int        { @@:(this.items.length) }
+            get_at(i: int): int  { @@:((i >= 0 && i < this.items.length) ? this.items[i] : -1) }
+            put(k: String, v: int)  { this.scores[k] = v; }
+            size_d(): int        { @@:(this.scores.length) }
+            get_v(k: String): int   { @@:(this.scores[k] ?? -1) }
+        }
+
+    domain:
+        items: List<int> = <int>[]
+        scores: Map<String, int> = <String, int>{}
+}
+
+void main() {
+    final s1 = @@DomainListDict();
+    s1.push(10);
+    s1.push(20);
+    s1.push(30);
+    s1.put("a", 1);
+    s1.put("b", 2);
+    s1.put("c", 3);
+
+    if (s1.size_l() != 3) { throw Exception("pre size_l=${s1.size_l()}"); }
+    if (s1.get_at(0) != 10) { throw Exception("pre get_at0"); }
+    if (s1.size_d() != 3) { throw Exception("pre size_d"); }
+    if (s1.get_v("b") != 2) { throw Exception("pre b"); }
+
+    final snap = s1.saveState();
+
+    final s2 = @@DomainListDict();
+    s2.restoreState(snap);
+
+    if (s2.size_l() != 3) { throw Exception("post size_l=${s2.size_l()}"); }
+    if (s2.get_at(0) != 10) { throw Exception("post items[0]=${s2.get_at(0)}"); }
+    if (s2.get_at(1) != 20) { throw Exception("post items[1]=${s2.get_at(1)}"); }
+    if (s2.get_at(2) != 30) { throw Exception("post items[2]=${s2.get_at(2)}"); }
+    if (s2.size_d() != 3) { throw Exception("post size_d=${s2.size_d()}"); }
+    if (s2.get_v("a") != 1) { throw Exception("post a"); }
+    if (s2.get_v("b") != 2) { throw Exception("post b"); }
+    if (s2.get_v("c") != 3) { throw Exception("post c"); }
+
+    print("PASS: 102_persist_domain_list_dict");
+}

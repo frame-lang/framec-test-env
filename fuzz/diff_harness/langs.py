@@ -2937,7 +2937,14 @@ def run_node_esm(p: Path) -> List[str]:
 
 
 def run_ts(p: Path) -> List[str]:
-    # ts-node or ts runner; for now use tsx if available, else bun.
+    # Route through the fuzz `tools/tsx` shim: esbuild strips types to an ESM
+    # `.mjs`, then plain `node` runs it — the same robust path the JS backend
+    # uses. Avoids tsx's per-invocation ESM loader hook, which crashed globally
+    # under full-run load (every TS case failing at node ESM loader even though
+    # each passes alone). Falls back to `npx tsx` if the shim is absent.
+    shim = Path(__file__).resolve().parent.parent / "tools" / "tsx"
+    if shim.is_file():
+        return [str(shim), str(p)]
     return ["npx", "tsx", str(p)]
 
 

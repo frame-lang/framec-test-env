@@ -11,10 +11,16 @@
 #   make status                   # Show build state
 #   make help                     # This message
 #
-# The framec binary is always built from source inside Docker.
-# FRAMEPILER_SRC must point at your framec checkout. Defaults to
-# ../../framec (the sibling-dir layout: <parent>/framec next to
-# <parent>/framec-test-env). Override if yours lives elsewhere:
+# The framec binary is cross-compiled from source for the matrix.
+# FRAMEPILER_SRC must point at the SAME framec source the authoritative
+# local build (~/.frame/local/bin/framec) is built from — the `staging`
+# (release) line — so the matrix and local runs validate the same framec.
+# Defaults to ../../framec-staging (sibling-dir layout: <parent>/framec-staging
+# next to <parent>/framec-test-env). Do NOT default this to ../../framec:
+# that checkout tracks `main` (bleeding-edge), which drifts from the release
+# line and made the matrix validate a different framec than local runs — see
+# framec#190 (a main-only C# persist regression the matrix caught while local
+# was clean). Override if yours lives elsewhere:
 #   make test FRAMEPILER_SRC=/path/to/framec
 
 SHELL := /bin/bash
@@ -23,7 +29,7 @@ SHELL := /bin/bash
 # Path to the framec checkout (renamed from "framepiler"). The variable
 # keeps its old name for command-line back-compat; the default tracks
 # the rename.
-FRAMEPILER_SRC ?= $(shell cd ../.. && pwd)/framec
+FRAMEPILER_SRC ?= $(shell cd ../.. && pwd)/framec-staging
 DOCKER_DIR     := $(shell pwd)
 TEST_ENV_ROOT  := $(shell cd .. && pwd)
 RUNNER         := runners/runner.sh
@@ -65,14 +71,25 @@ $(STAMP_DIR)/framec-native: $(SRC_STAMP) | $(STAMP_DIR)
 		CARGO_INCREMENTAL=0 cargo zigbuild --release -p framec --target aarch64-unknown-linux-gnu 2>&1 | tail -3 && \
 		cp target/aarch64-unknown-linux-gnu/release/framec "$(DOCKER_DIR)/framec-native"
 	@touch $@
-	@echo "Built: framec-native ($$(file framec-native | grep -o 'x86-64\|aarch64'))"
+	@echo "Built: framec-native ($$(file framec-native | grep -o 'x86-64\|aarch64')) from $(FRAMEPILER_SRC)"
+	@# The matrix cross-compiles a Linux framec from FRAMEPILER_SRC; it can't be
+	@# run on this host to self-report. Show the authoritative local build's
+	@# version as the reference — if it differs from FRAMEPILER_SRC's release,
+	@# the matrix is testing a different framec than local runs. See
+	@# docs/docker.md "Which framec".
+	@[ -x "$(HOME)/.frame/local/bin/framec" ] && \
+		echo "  authoritative local framec: $$($(HOME)/.frame/local/bin/framec --version) — ensure FRAMEPILER_SRC matches" || true
 
 framec: $(STAMP_DIR)/framec-native
 
 # --- Container images ---
 
 define LANG_BUILD_RULE
-$(STAMP_DIR)/image-$(1): base/$(1)/Dockerfile $(RUNNER) runners/framec_cached.sh | $(STAMP_DIR)
+# $(wildcard ...) so a per-language batch-runner edit (e.g. *_batch.sh) busts
+# the image stamp and triggers a rebuild — the Dockerfile bakes it in via COPY,
+# so without this an edited runner is silently NOT retested. wildcard keeps the
+# rule valid for languages with no batch script (e.g. bare `c`).
+$(STAMP_DIR)/image-$(1): base/$(1)/Dockerfile $(RUNNER) runners/framec_cached.sh $(wildcard runners/$(1)_batch.sh) | $(STAMP_DIR)
 	@echo "=== Building $(1) container ==="
 	@FRAMEC_BIN=/dev/null $(COMPOSE) build \
 		--build-arg RUNNER_HASH=$(RUNNER_HASH) $(1)
@@ -190,6 +207,20 @@ test: $(STAMP_DIR)/framec-native build
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native \
 	 ./collect-results.sh $(LANGS)
 	@FRAMEC_BIN=$(DOCKER_DIR)/framec-native $(COMPOSE) down --remove-orphans 2>/dev/null || true
+	@$(MAKE) -s trim-cache
+
+# Post-run cache hygiene (auto, cheap). The in-VM framec_cache volume is
+# already trimmed to the current framec generation by framec_cached.sh's
+# LRU eviction (FRAMEC_CACHE_KEEP=1); this additionally sweeps any legacy
+# VirtioFS host binds so the cache can never silently refill the host
+# (the classic test-env disk leak — see docs/docker.md). To fully reclaim
+# the cache volume on demand, use `make clean-cache`.
+trim-cache:
+	@swept=0; for d in $(TEST_ENV_ROOT)/output/*/.framec_cache; do \
+		[ -d "$$d" ] || continue; \
+		rm -rf "$$d" && swept=1; \
+	done; \
+	[ "$$swept" = 1 ] && echo "=== framec cache: swept legacy host binds (volume kept at current gen) ===" || true
 
 test-all: test
 
@@ -241,6 +272,22 @@ clean-cache:
 clean-images: clean
 	@echo "=== Removing Docker images ==="
 	@FRAMEC_BIN=/dev/null $(COMPOSE) down --rmi all 2>/dev/null || true
+
+# Reclaim Docker's reclaimable space (build cache + stopped containers +
+# dangling images) — the docs/docker.md tier-1/2 playbook, on demand. The
+# matrix images are KEPT (only build cache and dangling layers go), so
+# `make test` still runs fast; only the next `make build` recompiles image
+# layers cold. NOTE: this frees space INSIDE the Docker.raw VM disk, not
+# host free space — only nuking Docker.raw returns disk to macOS (see
+# docs/docker.md "Reclaiming Disk"). Not auto-run: pruning build cache
+# after every matrix run would make every image rebuild cold.
+prune:
+	@echo "=== Pruning Docker build cache + stopped containers + dangling images ==="
+	@docker builder prune -af 2>&1 | grep -iE 'reclaimed|total' || true
+	@docker container prune -f 2>&1 | grep -iE 'reclaimed|total' || true
+	@docker image prune -f   2>&1 | grep -iE 'reclaimed|total' || true
+	@echo "--- Docker footprint now ---"
+	@docker system df
 
 rebuild: clean-images build
 
@@ -300,5 +347,5 @@ help:
 	@echo "Config:"
 	@echo "  FRAMEPILER_SRC=/path    Framepiler source (default: $(FRAMEPILER_SRC))"
 
-.PHONY: build framec test test-all compile clean clean-cache clean-images rebuild status help coverage-check
+.PHONY: build framec test test-all compile clean clean-cache clean-images prune trim-cache rebuild status help coverage-check
 .PHONY: $(foreach lang,$(LANGS),build-$(lang) test-$(lang) compile-$(lang) shell-$(lang))

@@ -1,0 +1,72 @@
+@@[target("cpp_17")]
+
+#include <iostream>
+#include <vector>
+#include <unordered_map>
+#include <string>
+#include <nlohmann/json.hpp>
+
+// Test 102: list + dict as PERSISTED domain fields (C++).
+// Exercises the type-ignorant domain-field path through the native
+// nlohmann serializer: std::vector<int> and
+// std::unordered_map<std::string,int> must round-trip through
+// save_state / restore_state preserving order and key-value pairs.
+
+@@[persist(std::string)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system DomainListDict {
+    interface:
+        push(v: int)
+        size_l(): int
+        get_at(i: int): int
+        put(k: std::string, v: int)
+        size_d(): int
+        get_v(k: std::string): int
+
+    machine:
+        $Active {
+            push(v: int)         { items.push_back(v); }
+            size_l(): int        { @@:((int)items.size()) }
+            get_at(i: int): int  { @@:((i >= 0 && (size_t)i < items.size()) ? items[i] : -1) }
+            put(k: std::string, v: int)  { scores[k] = v; }
+            size_d(): int        { @@:((int)scores.size()) }
+            get_v(k: std::string): int   { @@:(scores.count(k) ? scores.at(k) : -1) }
+        }
+
+    domain:
+        items: std::vector<int> = std::vector<int>{}
+        scores: std::unordered_map<std::string, int> = std::unordered_map<std::string, int>{}
+}
+
+int main() {
+    auto s1 = @@DomainListDict();
+    s1.push(10);
+    s1.push(20);
+    s1.push(30);
+    s1.put("a", 1);
+    s1.put("b", 2);
+    s1.put("c", 3);
+
+    if (s1.size_l() != 3) { printf("FAIL pre size_l=%d\n", s1.size_l()); return 1; }
+    if (s1.get_at(0) != 10) { printf("FAIL pre get_at0\n"); return 1; }
+    if (s1.size_d() != 3) { printf("FAIL pre size_d\n"); return 1; }
+    if (s1.get_v("b") != 2) { printf("FAIL pre b\n"); return 1; }
+
+    std::string snap = s1.save_state();
+
+    auto s2 = @@DomainListDict();
+    s2.restore_state(snap);
+
+    if (s2.size_l() != 3) { printf("FAIL post size_l=%d\n", s2.size_l()); return 1; }
+    if (s2.get_at(0) != 10) { printf("FAIL post items[0]=%d\n", s2.get_at(0)); return 1; }
+    if (s2.get_at(1) != 20) { printf("FAIL post items[1]=%d\n", s2.get_at(1)); return 1; }
+    if (s2.get_at(2) != 30) { printf("FAIL post items[2]=%d\n", s2.get_at(2)); return 1; }
+    if (s2.size_d() != 3) { printf("FAIL post size_d=%d\n", s2.size_d()); return 1; }
+    if (s2.get_v("a") != 1) { printf("FAIL post a\n"); return 1; }
+    if (s2.get_v("b") != 2) { printf("FAIL post b\n"); return 1; }
+    if (s2.get_v("c") != 3) { printf("FAIL post c\n"); return 1; }
+
+    printf("PASS: 102_persist_domain_list_dict\n");
+    return 0;
+}

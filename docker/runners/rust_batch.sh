@@ -129,34 +129,61 @@ cd "$PROJECT"
 cargo build --release --message-format=short >/tmp/cargo_build.log 2>&1
 build_status=$?
 
+# A transient first-build failure under the 300+-bin parallel compile (resource
+# pressure — fd/memory/process limits) must not be attributed to individual
+# passing bins. Retry the full build once, unchanged, before any per-bin
+# removal: if the retry succeeds, every bin genuinely compiles. A real compile
+# error reproduces on the retry and is then scraped correctly below. Without
+# this, a passing fixture (observed: max_rust) was scraped from a transient
+# first failure, removed, and reported as `cargo build failed` while a clean
+# single build of the same 332 bins gives exit 0.
 if [ $build_status -ne 0 ]; then
+    echo "# rust: first cargo build failed — retrying full build once before per-bin attribution" >&2
+    cargo build --release --message-format=short >/tmp/cargo_build.log 2>&1
+    build_status=$?
+fi
+
+# Iterate scrape→remove→rebuild to a fixpoint. Each round removes the bins
+# rustc could attribute an error to and rebuilds; a following round then
+# catches any broken bin that was masked behind the first failure. This
+# isolates N independent broken fixtures instead of giving up after a single
+# retry and collapsing the whole language to COMPILE_FAIL. The counter is a
+# defensive backstop — each round removes ≥1 bin or breaks, so it terminates.
+attempts=0
+while [ $build_status -ne 0 ] && [ $attempts -lt 50 ]; do
+    attempts=$((attempts + 1))
     # Filter to error lines only (skip warnings), then extract bin names.
     bad=$(grep -E ":[[:space:]]+error" /tmp/cargo_build.log \
             | grep -oE "src/bin/[A-Za-z0-9_]+\.rs" \
             | sed 's|src/bin/||;s|\.rs$||' | sort -u)
-    if [ -n "$bad" ]; then
-        for s in $bad; do
-            tmp_manifest="${MANIFEST}.tmp"
-            awk -v s="$s" -F'\t' 'BEGIN{OFS="\t"} {
-                if ($2 == "RUN" && $4 == s) { $2 = "COMPILE_FAIL"; $4 = "" }
-                print
-            }' "$MANIFEST" > "$tmp_manifest"
-            mv "$tmp_manifest" "$MANIFEST"
-            rm -f "$BIN_SRC/${s}.rs"
-        done
-        cargo build --release --message-format=short >/tmp/cargo_build.log 2>&1
-        build_status=$?
-    fi
-fi
+    [ -n "$bad" ] || break   # unattributable failure — left to existence check
+    for s in $bad; do
+        # Remove source and any lingering artifact so the existence check
+        # below can never false-pass a removed bin from a stale binary.
+        rm -f "$BIN_SRC/${s}.rs" "$BIN_DIR/${s}"
+    done
+    cargo build --release --message-format=short >/tmp/cargo_build.log 2>&1
+    build_status=$?
+done
+
+# Ground-truth attribution: a RUN row whose release artifact never
+# materialized is a compile failure. cargo writes each bin that compiled to
+# target/release/ even when a sibling bin fails, so artifact existence is
+# authoritative and never over-marks a bin that genuinely built. Mirrors
+# go_batch.sh's per-binary `test -x` check.
+tmp_manifest="${MANIFEST}.tmp"
+awk -v bd="$BIN_DIR" -F'\t' 'BEGIN{OFS="\t"} {
+    if ($2 == "RUN") {
+        bin = bd "/" $4
+        cmd = "test -x \"" bin "\""
+        if (system(cmd) != 0) { $2 = "COMPILE_FAIL"; $4 = "" }
+    }
+    print
+}' "$MANIFEST" > "$tmp_manifest"
+mv "$tmp_manifest" "$MANIFEST"
 
 if [ $build_status -ne 0 ]; then
-    tmp_manifest="${MANIFEST}.tmp"
-    awk -F'\t' 'BEGIN{OFS="\t"} {
-        if ($2 == "RUN") { $2 = "COMPILE_FAIL"; $4 = "" }
-        print
-    }' "$MANIFEST" > "$tmp_manifest"
-    mv "$tmp_manifest" "$MANIFEST"
-    echo "# cargo build failed even after removing bad bins — see below" >&2
+    echo "# rust: cargo build still failing after isolating broken bins — see below" >&2
     tail -40 /tmp/cargo_build.log >&2
 fi
 

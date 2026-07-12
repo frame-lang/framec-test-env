@@ -6,7 +6,9 @@
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-FRAMEC="${FRAMEC:-/Users/marktruluck/projects/frame_transpiler/target/release/framec}"
+# framec: prefer the authoritative local build, fall back to PATH.
+FRAMEC="${FRAMEC:-$HOME/.frame/local/bin/framec}"
+[ -x "$FRAMEC" ] || FRAMEC="$(command -v framec 2>/dev/null)"
 TMPDIR="${TMPDIR:-/tmp}"
 
 # Colors (disabled if not tty)
@@ -61,6 +63,21 @@ for src in "$SCRIPT_DIR"/*.fc "$SCRIPT_DIR"/*.fpy "$SCRIPT_DIR"/*.fts "$SCRIPT_D
     [ -f "$src" ] || continue
     run_transpile_error_test "$src"
 done
+
+# FSM diagnostic sub-suite (issue #20). Unlike the plain transpile-error tests
+# above (pass == "transpile failed"), this asserts framec fails with the RIGHT
+# diagnostic code — the guarantee that closes the framec#100 silent-miscompile
+# gap. @@fsm diagnostics are validator-stage / target-independent, so it runs
+# once on python_3. Its ok/not-ok lines are folded into this suite's plan.
+if [ -x "$SCRIPT_DIR/fsm/check_fsm_diagnostics.sh" ]; then
+    fsm_out="$(FRAMEC="$FRAMEC" "$SCRIPT_DIR/fsm/check_fsm_diagnostics.sh" 2>&1 || true)"
+    while IFS= read -r line; do
+        case "$line" in
+            "ok "*)     TEST_NUM=$((TEST_NUM + 1)); PASS=$((PASS + 1)); echo "ok $TEST_NUM - ${line#ok * - }" ;;
+            "not ok "*) TEST_NUM=$((TEST_NUM + 1)); FAIL=$((FAIL + 1)); echo "not ok $TEST_NUM - ${line#not ok * - }" ;;
+        esac
+    done <<< "$fsm_out"
+fi
 
 # TAP plan (at end for streaming)
 echo "1..$TEST_NUM"
