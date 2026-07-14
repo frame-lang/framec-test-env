@@ -38,8 +38,13 @@ COMPOSE        := docker compose
 # Detect host architecture for build targets
 HOST_ARCH      := $(shell uname -m)
 
-# All 17 target languages. GDScript now uses native ARM64 Godot.
-LANGS := python typescript javascript rust c cpp csharp java go php kotlin swift ruby erlang lua dart gdscript
+# Active target languages (16). GDScript uses native ARM64 Godot.
+# Erlang is DEPRECATED and disabled — kept out of LANGS so the matrix does not
+# build/run it, but its container (base/erlang/), runner (erlang_batch.sh),
+# dispatch (runner.sh), and .ferl fixtures are all retained for possible future
+# revival. To re-enable, move `erlang` back into LANGS.
+LANGS := python typescript javascript rust c cpp csharp java go php kotlin swift ruby lua dart gdscript
+DEPRECATED_LANGS := erlang
 
 # --- Stamp files ---
 STAMP_DIR     := .stamps
