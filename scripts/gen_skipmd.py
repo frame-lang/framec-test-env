@@ -553,7 +553,8 @@ _MAX = {
     "max_c": "fc", "max_cpp": "fcpp", "max_csharp": "fcs", "max_dart": "fdart",
     "max_gdscript": "fgd", "max_go": "fgo", "max_java": "fjava",
     "max_javascript": "fjs", "max_kotlin": "fkt", "max_lua": "flua",
-    "max_python_3": "fpy", "max_rust": "frs", "max_typescript": "fts",
+    "max_php": "fphp", "max_python_3": "fpy", "max_ruby": "frb",
+    "max_rust": "frs", "max_swift": "fswift", "max_typescript": "fts",
 }
 for _stem, _ext in _MAX.items():
     BATCHES.append(SkipBatch(
