@@ -1,0 +1,83 @@
+@@[target("rust")]
+
+// persist_fidelity_stack — RFC-0056 STACK + compartment fidelity (Rust). LOCAL fixture:
+// validate against framec-ng first; promote to test-env once green.
+//
+// Saved while $Outer sits on the state stack: restore must rebuild the whole stack, each
+// stacked compartment's state variables intact. Drops-the-stack -> pop$ crashes; keeps-only-
+// the-name -> the stacked Vec2 is lost.
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Serialize, Deserialize, Clone, Debug, Default)]
+struct Vec2 {
+    x: f64,
+    y: f64,
+}
+
+impl Vec2 {
+    fn new(x: f64, y: f64) -> Self {
+        Vec2 { x, y }
+    }
+    fn magSq(&self) -> f64 {
+        self.x * self.x + self.y * self.y
+    }
+}
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Nest {
+    interface:
+        go()
+        setinner(v: f64)
+        innerval(): f64
+        goback()
+        outermag(): f64
+
+    machine:
+        $Outer {
+            $.ov: Vec2 = Vec2::new(0.0, 0.0)
+
+            go() {
+                $.ov = Vec2::new(3.0, 4.0)
+                push$ -> $Inner
+            }
+            outermag() {
+                @@:($.ov.magSq())
+            }
+        }
+        $Inner {
+            $.iv: f64 = 0.0
+
+            setinner(v: f64) {
+                $.iv = v
+            }
+            innerval() {
+                @@:($.iv)
+            }
+            goback() {
+                -> pop$
+            }
+        }
+
+    domain:
+        marker: i32 = 1
+}
+
+fn main() {
+    let mut s1 = @@Nest();
+    s1.go();
+    s1.setinner(5.0);
+
+    let snap: String = s1.save_state();
+
+    let mut s2 = @@Nest();
+    s2.restore_state(snap);
+
+    assert_eq!(s2.innerval(), 5.0, "current-compartment state-var lost");
+    s2.goback();
+    assert_eq!(s2.outermag(), 25.0, "STACKED compartment state-var did not round-trip");
+
+    println!("PASS: persist_fidelity_stack");
+}

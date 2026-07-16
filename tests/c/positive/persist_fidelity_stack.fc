@@ -1,0 +1,76 @@
+@@[target("c")]
+
+// persist_fidelity_stack (C / cJSON + author hooks) — RFC-0056 STACK + compartment fidelity.
+// Vec2 is a user type: the author supplies pack/unpack hooks; framec emits the calls. Writes
+// use Frame's `$.ov = <expr>` (whole state var); `self->` is not usable in a handler because
+// `->` is Frame's transition operator.
+//
+// The cJSON include + the author hooks live in the TOP prolog (before the system), so this
+// fixture is portable: the shipping compiler requires the user to supply the include and to
+// define the hooks before the emitted persist code; the cleanroom compiler emits its own
+// guarded include + externs and is happy either way.
+
+#include <cjson/cJSON.h>
+
+typedef struct { double x; double y; } Vec2;
+static Vec2 vzero(void) { Vec2 v; v.x = 0; v.y = 0; return v; }
+static Vec2 mkvec(double x, double y) { Vec2 v; v.x = x; v.y = y; return v; }
+
+cJSON* Nest_persist_pack_field_Vec2(void* p) {
+    const Vec2* v = (const Vec2*)p;
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddNumberToObject(o, "x", v->x);
+    cJSON_AddNumberToObject(o, "y", v->y);
+    return o;
+}
+void Nest_persist_unpack_field_Vec2(cJSON* j, void* p) {
+    Vec2* v = (Vec2*)p;
+    v->x = cJSON_GetObjectItem(j, "x")->valuedouble;
+    v->y = cJSON_GetObjectItem(j, "y")->valuedouble;
+}
+
+@@[persist(char*)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Nest {
+    interface:
+        go()
+        setinner(v: double)
+        innerval(): double
+        goback()
+        outermag(): double
+    machine:
+        $Outer {
+            $.ov: Vec2 = vzero()
+            go() {
+                $.ov = mkvec(3.0, 4.0)
+                push$ -> $Inner
+            }
+            outermag(): double {
+                @@:($.ov.x * $.ov.x + $.ov.y * $.ov.y)
+            }
+        }
+        $Inner {
+            $.iv: double = 0.0
+            setinner(v: double) { $.iv = v }
+            innerval(): double { @@:($.iv) }
+            goback() { -> pop$ }
+        }
+    domain:
+        marker: int = 1
+}
+
+#include <stdio.h>
+int main(void) {
+    Nest* s1 = Nest_new();
+    Nest_go(s1);
+    Nest_setinner(s1, 5.0);
+    char* snap = Nest_save_state(s1);
+    Nest* s2 = Nest_new();
+    Nest_restore_state(s2, snap);
+    if (Nest_innerval(s2) != 5.0) { printf("FAIL: inner=%f\n", Nest_innerval(s2)); return 1; }
+    Nest_goback(s2);
+    if (Nest_outermag(s2) != 25.0) { printf("FAIL: outermag=%f\n", Nest_outermag(s2)); return 1; }
+    printf("PASS: persist_fidelity_stack\n");
+    return 0;
+}

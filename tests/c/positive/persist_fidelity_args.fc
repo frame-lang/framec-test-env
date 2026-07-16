@@ -1,0 +1,34 @@
+@@[target("c")]
+
+// cJSON in the top prolog so this is portable: shipping expects the user to include it;
+// the cleanroom emits its own guarded include and is happy either way.
+#include <cjson/cJSON.h>
+
+@@[persist(char*)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Cart {
+    interface:
+        buy()
+        qty(): int
+    machine:
+        $Browse {
+            buy() { push$ -> $Paid(5) }
+        }
+        $Paid(amount: int) {
+            qty(): int { @@:(amount) }
+        }
+    domain:
+        marker: int = 0
+}
+#include <stdio.h>
+int main(void) {
+    Cart* c1 = Cart_new();
+    Cart_buy(c1);
+    char* snap = Cart_save_state(c1);
+    Cart* c2 = Cart_new();
+    Cart_restore_state(c2, snap);
+    if (Cart_qty(c2) != 5) { printf("FAIL: qty=%d\n", Cart_qty(c2)); return 1; }
+    printf("PASS: persist_fidelity_args\n");
+    return 0;
+}

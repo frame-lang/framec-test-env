@@ -1,0 +1,52 @@
+@@[target("rust")]
+
+// persist_fidelity_args — RFC-0056 state-ARGS fidelity (Rust). LOCAL fixture: validate
+// against framec-ng first; promote to test-env once green.
+//
+// A push carries state args into $Paid; a save is taken while $Paid is live. Restore must
+// rebuild the typed args variant so a `$$[..]` read (bound as a handler local) returns the
+// SAME values — a String and an int, both round-tripped by the host serializer with no
+// framec per-type code. Erased-args -> the values are lost or mis-typed after restore.
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Cart {
+    interface:
+        buy()
+        itemname(): String
+        itemqty(): i32
+
+    machine:
+        $Browse {
+            buy() {
+                push$ -> $Paid("cola".to_string(), 5)
+            }
+        }
+        $Paid(item: String, qty: i32) {
+            itemname(): String {
+                @@:(item.clone())
+            }
+            itemqty(): i32 {
+                @@:(qty)
+            }
+        }
+
+    domain:
+        marker: i32 = 0
+}
+
+fn main() {
+    let mut c1 = @@Cart();
+    c1.buy();
+
+    let snap: String = c1.save_state();
+
+    let mut c2 = @@Cart();
+    c2.restore_state(snap);
+
+    assert_eq!(c2.itemname(), "cola", "state ARG (String) lost across persist");
+    assert_eq!(c2.itemqty(), 5, "state ARG (int) lost across persist");
+
+    println!("PASS: persist_fidelity_args");
+}

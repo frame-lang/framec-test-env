@@ -1,0 +1,74 @@
+@@[target("java")]
+
+// persist_fidelity_stack (Java / Jackson) — RFC-0056 STACK + compartment fidelity.
+// Saved while $Outer sits on the state stack: restore must rebuild the whole stack, each
+// stacked compartment's typed state variables intact. Drops-the-stack -> pop$ crashes;
+// keeps-only-the-name -> the stacked Vec2 is lost.
+
+class Vec2 {
+    public double x;
+    public double y;
+    public Vec2() {}
+    public Vec2(double x, double y) { this.x = x; this.y = y; }
+    public double magSq() { return this.x * this.x + this.y * this.y; }
+}
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Nest {
+    interface:
+        go()
+        setinner(v: double)
+        innerval(): double
+        goback()
+        outermag(): double
+
+    machine:
+        $Outer {
+            $.ov: Vec2 = new Vec2(0.0, 0.0)
+
+            go() {
+                $.ov = new Vec2(3.0, 4.0);
+                push$ -> $Inner
+            }
+            outermag(): double {
+                @@:($.ov.magSq())
+            }
+        }
+        $Inner {
+            $.iv: double = 0.0
+
+            setinner(v: double) {
+                $.iv = v;
+            }
+            innerval(): double {
+                @@:($.iv)
+            }
+            goback() {
+                -> pop$
+            }
+        }
+
+    domain:
+        marker: int = 1
+}
+
+class Main {
+    public static void main(String[] a) {
+        Nest s1 = new Nest();
+        s1.go();
+        s1.setinner(5.0);
+
+        String snap = s1.save_state();
+
+        Nest s2 = new Nest();
+        s2.restore_state(snap);
+
+        if (s2.innerval() != 5.0) throw new RuntimeException("current-compartment state-var lost: " + s2.innerval());
+        s2.goback();
+        if (s2.outermag() != 25.0) throw new RuntimeException("STACKED compartment state-var did not round-trip: " + s2.outermag());
+
+        System.out.println("PASS: persist_fidelity_stack");
+    }
+}

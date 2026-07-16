@@ -1,0 +1,33 @@
+@@[target("java")]
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Coll {
+    interface:
+        set()
+        get(): String
+    machine:
+        $A {
+            $.state: String = "unset"
+            set() {
+                $.state = "USER_DATA";
+            }
+            get(): String { @@:($.state) }
+        }
+    domain:
+        marker: int = 0
+}
+// A user STATE VARIABLE literally named `state` must round-trip through save/restore — its
+// name must not be swallowed or overwritten by the serializer's control-state bookkeeping.
+// The round-trip below is the portable proof (no serializer-shape or version-specific API).
+class Main {
+    public static void main(String[] a) throws Exception {
+        Coll c1 = new Coll();
+        c1.set();
+        String snap = c1.save_state();
+        Coll c2 = new Coll();
+        c2.restore_state(snap);
+        if (!c2.get().equals("USER_DATA")) throw new RuntimeException("user $.state var lost: " + c2.get());
+        System.out.println("PASS: persist_fidelity_state_key");
+    }
+}
