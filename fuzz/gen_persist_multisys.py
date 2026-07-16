@@ -56,17 +56,15 @@ LANGS = {
         "epilogue": '''
 if __name__ == "__main__":
     root = Outer()
-    root.tick()
-    root.tick()
-    root.tick()
-    if root.get_inner_n() != 3:
+{ticks}
+    if root.get_inner_n() != {n}:
         print("FAIL pre: " + str(root.get_inner_n()))
         raise SystemExit(1)
 
     snap = root.save_state()
     rest = Outer()
     rest.restore_state(snap)
-    if rest.get_inner_n() != 3:
+    if rest.get_inner_n() != {n}:
         print("FAIL post: " + str(rest.get_inner_n()))
         raise SystemExit(1)
 
@@ -82,17 +80,15 @@ if __name__ == "__main__":
         "prologue": "",
         "epilogue": '''
 const root = new Outer();
-root.tick();
-root.tick();
-root.tick();
-if (root.getInnerN() !== 3) {{
+{ticks}
+if (root.getInnerN() !== {n}) {{
     console.log("FAIL pre: " + root.getInnerN());
     process.exit(1);
 }}
 const snap = root.saveState();
 const rest = new Outer();
 rest.restoreState(snap);
-if (rest.getInnerN() !== 3) {{
+if (rest.getInnerN() !== {n}) {{
     console.log("FAIL post: " + rest.getInnerN());
     process.exit(1);
 }}
@@ -537,6 +533,24 @@ def method_names_for(lang):
     }
 
 
+def _case_n(case_id):
+    """Per-case tick count (2..7). Varying this makes the post-restore assertion
+    `get_inner_n() == n` meaningful — a restore that returned a constant (e.g. the
+    old fixed 3) now FAILS on every case where n != 3, instead of passing silently."""
+    return 2 + (int(case_id) % 6)
+
+
+def _render_ticks(lang, n):
+    """The N `tick()` calls that drive the inner counter, in the running langs' syntax.
+    The transpile-only targets keep their literal 3-tick epilogues (they never execute
+    the assertion), so they simply ignore the {ticks}/{n} format kwargs."""
+    if lang == "python_3":
+        return "\n".join("    root.tick()" for _ in range(n))
+    if lang in ("javascript", "typescript"):
+        return "\n".join("root.tick();" for _ in range(n))
+    return ""
+
+
 def _build_frame(lang, pattern_id, case_id, *, inner_param):
     """Render the Frame source common to P1 / P2.
 
@@ -610,7 +624,9 @@ def _build_frame(lang, pattern_id, case_id, *, inner_param):
 }}}}
 '''
 
-    return frame.format() + spec["epilogue"].format(tag=tag)
+    n = _case_n(case_id)
+    return frame.format() + spec["epilogue"].format(
+        tag=tag, ticks=_render_ticks(lang, n), n=n)
 
 
 def gen_p1(lang, case_id):
@@ -698,7 +714,9 @@ def gen_p3(lang, case_id):
 }}}}
 '''
 
-    return frame.format() + spec["epilogue"].format(tag=tag)
+    n = _case_n(case_id)
+    return frame.format() + spec["epilogue"].format(
+        tag=tag, ticks=_render_ticks(lang, n), n=n)
 
 
 PATTERNS = [
