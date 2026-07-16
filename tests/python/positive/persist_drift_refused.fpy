@@ -1,0 +1,44 @@
+@@[target("python_3")]
+
+# persist_drift_refused — RFC-0056 E751: a snapshot whose schema fingerprint does not match
+# THIS program must be REFUSED, not silently mis-restored into the wrong shape. This is the
+# ONLY thing standing between a drifted save and a silent corruption, and it had zero tests.
+# We save a good blob, mutate its `_schema`, and assert restore refuses AND leaves the fresh
+# instance untouched (n stays 0).
+
+import json
+
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Counter {
+    interface:
+        bump()
+        getn()
+    machine:
+        $A { bump() { @@:self.n = @@:self.n + 1 } getn() { @@:(@@:self.n) } }
+    domain:
+        n = 0
+}
+
+def main():
+    s1 = @@Counter()
+    s1.bump(); s1.bump(); s1.bump()
+    good = s1.save_state()
+
+    blob = json.loads(good)
+    blob["_schema"] = "frame-persist:2|DRIFTED-FIELD:int|A(|)"
+    bad = json.dumps(blob)
+
+    s2 = @@Counter()  # n == 0
+    try:
+        s2.restore_state(bad)
+        print("FAIL: a drifted-schema snapshot was accepted (n=" + str(s2.getn()) + ")")
+    except RuntimeError as e:
+        if "E751" in str(e) and s2.getn() == 0:
+            print("PASS: persist_drift_refused")
+        else:
+            print("FAIL: wrong refusal or state was mutated: " + str(e) + " n=" + str(s2.getn()))
+
+if __name__ == "__main__":
+    main()

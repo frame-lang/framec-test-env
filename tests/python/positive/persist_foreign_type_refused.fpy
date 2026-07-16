@@ -1,0 +1,46 @@
+@@[target("python_3")]
+
+# persist_foreign_type_refused — RFC-0056 E750 (closed-world safety floor). On the reflective
+# route the type name travels IN the snapshot, so a tampered/hostile blob could name an
+# AMBIENT identity (a builtin, an imported-but-undeclared class) to have restore instantiate
+# it. The reviver must resolve type tags ONLY against types THIS program declares, and refuse
+# anything else. This is the "untrusted input, bounded blast radius" posture — asserted nowhere
+# before. We take a good blob, retag a value's `@f:t` to a foreign name, and assert refusal.
+
+class Vec2:
+    def __init__(self, x=0.0, y=0.0):
+        self.x = x
+        self.y = y
+
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        seed()
+    machine:
+        $S { seed() { @@:self.v = Vec2(3.0, 4.0) } }
+    domain:
+        v = Vec2()
+}
+
+def main():
+    s1 = @@Bag()
+    s1.seed()
+    good = s1.save_state()
+
+    # Retag the value's out-of-band type slot to a FOREIGN identity the program never declares.
+    bad = good.replace('"@f:t": "Vec2"', '"@f:t": "eval"')
+
+    s2 = @@Bag()
+    try:
+        s2.restore_state(bad)
+        print("FAIL: a foreign type name was resolved instead of refused")
+    except RuntimeError as e:
+        if "E750" in str(e):
+            print("PASS: persist_foreign_type_refused")
+        else:
+            print("FAIL: wrong error (expected E750): " + str(e))
+
+if __name__ == "__main__":
+    main()

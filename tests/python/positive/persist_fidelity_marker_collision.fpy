@@ -1,0 +1,76 @@
+@@[target("python_3")]
+
+# persist_fidelity_marker_collision — RFC-0056 / RFC-0053 #233: out-of-band framing.
+#
+# THE regression the persist rebuild exists to prevent: a user value that itself CARRIES the
+# type-tag key must NOT be mis-restored as a typed instance. The reviver must read the type
+# ONLY from the out-of-band envelope slot (`@f:t`), never from a key inside the user's data.
+#
+# Here a domain dict holds `__frame_type__` (the OLD compiler's inline tag) AND, adversarially,
+# the reserved framing key `@f:t` — both as ordinary user data. A genuine instance (Vec2) sits
+# beside it. After save -> restore into a FRESH instance:
+#   - the dict must come back a dict (its marker keys are inert data), and
+#   - the instance must come back a real Vec2 (method callable on the restored value).
+# The old inline-tag scheme silently restored the dict AS a Vec2 (#233); out-of-band framing
+# makes that structurally impossible.
+
+class Vec2:
+    def __init__(self, x=0.0, y=0.0):
+        self.x = x
+        self.y = y
+    def mag_sq(self):
+        return self.x * self.x + self.y * self.y
+
+@@[persist(str)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Bag {
+    interface:
+        seed()
+        get_marked()
+        get_frametag()
+        get_real_magsq()
+
+    machine:
+        $S {
+            seed() {
+                @@:self.marked = {"__frame_type__": "Vec2", "x": 9, "y": 0}
+                @@:self.frametag = {"@f:t": "Vec2", "@f:v": {"x": 1, "y": 1}}
+                @@:self.real = Vec2(3.0, 4.0)
+            }
+            get_marked() { @@:(@@:self.marked) }
+            get_frametag() { @@:(@@:self.frametag) }
+            get_real_magsq() { @@:(@@:self.real.mag_sq()) }
+        }
+    domain:
+        marked = {}
+        frametag = {}
+        real = Vec2()
+}
+
+def main():
+    s1 = @@Bag()
+    s1.seed()
+    snap = s1.save_state()
+
+    s2 = @@Bag()
+    s2.restore_state(snap)
+
+    m = s2.get_marked()
+    ft = s2.get_frametag()
+    mag = s2.get_real_magsq()
+
+    ok = True
+    if type(m).__name__ != "dict":
+        print("FAIL: user dict carrying __frame_type__ mis-restored as " + type(m).__name__); ok = False
+    if m != {"__frame_type__": "Vec2", "x": 9, "y": 0}:
+        print("FAIL: marked dict value changed: " + str(m)); ok = False
+    if type(ft).__name__ != "dict":
+        print("FAIL: user dict carrying @f:t mis-restored as " + type(ft).__name__); ok = False
+    if mag != 25.0:
+        print("FAIL: the genuine Vec2 instance did not round-trip (magSq=" + str(mag) + ")"); ok = False
+    if ok:
+        print("PASS: persist_fidelity_marker_collision")
+
+if __name__ == "__main__":
+    main()
