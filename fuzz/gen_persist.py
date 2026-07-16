@@ -40,6 +40,7 @@ HSM_DEPTHS = [0, 1, 2]
 STATE_VARS = [False, True]
 DOMAIN_SETS = ["int", "int_str", "int_str_bool"]
 TARGET_OFFSETS = [0, 1, 2]  # how many transitions before snapshot
+STACK_DEPTHS = [1, 2, 3, 5]  # stack-fidelity: compartments pushed before the mid-stack snapshot
 
 # --- Per-language config -------------------------------------------------
 
@@ -307,9 +308,103 @@ def gen_case(lang, case_id, params):
     return frame + "\n\n" + harness
 
 
+# --- STACK fidelity cases -------------------------------------------------
+# The ring cases above never touch the stack. These build a stack `depth` deep — each pushed
+# compartment carrying its OWN `$.sv` — save MID-STACK, restore into a fresh instance, then
+# unwind, asserting every stacked compartment's state var survived. A restore that drops the
+# stack (pop crashes) or loses a stacked frame's data FAILS here; the ring cases would not
+# notice. This is the RFC-0056 "control state = the whole compartment AND the stack" property.
+
+def gen_stack_frame(case_id, depth, spec):
+    sys_name = f"PersistStk{case_id:04d}"
+    int_t = spec.int_type
+    str_t = spec.str_type
+    save_ret = "str" if spec.target == "python_3" else "string"
+    save_method = "save_state" if spec.target == "python_3" else "saveState"
+    load_method = "restore_state" if spec.target == "python_3" else "restoreState"
+    L = []
+    L.append(f'@@[target("{spec.target}")]')
+    L.append("")
+    L.append(f"@@[persist({save_ret})]")
+    L.append(f"@@[save({save_method})]")
+    L.append(f"@@[load({load_method})]")
+    L.append(f"@@system {sys_name} {{")
+    L.append("    interface:")
+    L.append("        descend()")
+    L.append("        ascend()")
+    L.append(f"        set_sv(v: {int_t})")
+    L.append(f"        sv(): {int_t}")
+    L.append(f"        where(): {str_t}")
+    L.append("")
+    L.append("    machine:")
+    for i in range(depth + 1):
+        L.append(f"        $S{i} {{")
+        L.append(f"            $.sv: {int_t} = 0")
+        if i < depth:
+            L.append(f"            descend() {{ push$ -> $S{i + 1} }}")
+        else:
+            L.append("            descend() { }")
+        L.append("            ascend() { -> pop$ }")
+        L.append(f"            set_sv(v: {int_t}) {{ $.sv = v }}")
+        L.append(f"            sv(): {int_t} {{ @@:($.sv) }}")
+        L.append(f'            where(): {str_t} {{ @@:("S{i}") }}')
+        L.append("        }")
+    L.append("}")
+    return "\n".join(L), sys_name
+
+
+def gen_stack_harness(lang, case_id, depth, sys_name, spec):
+    # value at level i (distinct across levels so a swap/loss is caught)
+    def val(i):
+        return 3000 + case_id * 10 + i
+    if lang == "python_3":
+        L = ["", spec.fail_exit.strip(), "", "if __name__ == '__main__':"]
+        L.append(f"    inst = @@{sys_name}()")
+        for i in range(depth):
+            L.append(f"    inst.set_sv({val(i)})")   # set this level, then push it onto the stack
+            L.append("    inst.descend()")
+        L.append(f"    inst.set_sv({val(depth)})")   # top-of-stack (current) level
+        L.append("    snap = inst.save_state()")
+        L.append(f"    rest = {sys_name}()")
+        L.append("    rest.restore_state(snap)")
+        L.append(f'    if rest.sv() != {val(depth)}: _fail(f"top sv: {{rest.sv()}} != {val(depth)}")')
+        for i in range(depth - 1, -1, -1):
+            L.append("    rest.ascend()")   # pop back to level i — its STACKED compartment must be intact
+            L.append(f'    if rest.where() != "S{i}": _fail(f"level {i} state: {{rest.where()}}")')
+            L.append(f'    if rest.sv() != {val(i)}: _fail(f"level {i} sv: {{rest.sv()}} != {val(i)}")')
+        L.append('    print("PASS: persist stack fidelity")')
+        return "\n".join(L) + "\n"
+    if lang in ("javascript", "typescript"):
+        L = ["", spec.fail_exit.strip(), "", f"const inst = new {sys_name}();"]
+        for i in range(depth):
+            L.append(f"inst.set_sv({val(i)});")
+            L.append("inst.descend();")
+        L.append(f"inst.set_sv({val(depth)});")
+        L.append("const snap = inst.saveState();")
+        restore = spec.restore_call.format(SYS=sys_name).replace("\n    ", "\n")
+        L.append(restore)
+        L.append(f'if (rest.sv() !== {val(depth)}) _fail(`top sv: ${{rest.sv()}} != {val(depth)}`);')
+        for i in range(depth - 1, -1, -1):
+            L.append("rest.ascend();")
+            L.append(f'if (rest.where() !== "S{i}") _fail(`level {i} state: ${{rest.where()}}`);')
+            L.append(f'if (rest.sv() !== {val(i)}) _fail(`level {i} sv: ${{rest.sv()}} != {val(i)}`);')
+        L.append('console.log("PASS: persist stack fidelity");')
+        return "\n".join(L) + "\n"
+    raise ValueError(lang)
+
+
+def gen_stack_case(lang, case_id, depth):
+    spec = LANGS[lang]
+    frame, sys_name = gen_stack_frame(case_id, depth, spec)
+    harness = gen_stack_harness(lang, case_id, depth, sys_name, spec)
+    return frame + "\n\n" + harness
+
+
 def main():
     p = argparse.ArgumentParser()
     p.add_argument("--max", type=int, default=100)
+    p.add_argument("--stack", type=int, default=25,
+                   help="Number of stack-fidelity cases per target")
     p.add_argument("--lang", type=str, default=None,
                    help="Limit to one target (python_3 | javascript | typescript)")
     p.add_argument("--seed", type=int, default=42)
@@ -323,6 +418,10 @@ def main():
     ))
     random.shuffle(axes)
     axes = axes[:args.max]
+
+    # Stack-fidelity cases: cycle through a range of depths so a fixed slice covers shallow and
+    # deep stacks. Kept as a separate `stk_` corpus so they don't perturb the ring axis product.
+    stack_depths = [STACK_DEPTHS[i % len(STACK_DEPTHS)] for i in range(args.stack)]
 
     langs = [args.lang] if args.lang else list(LANGS.keys())
     args.out.mkdir(parents=True, exist_ok=True)
@@ -340,7 +439,10 @@ def main():
             )
             (lang_dir / f"case_{cid:04d}.{spec.ext}").write_text(
                 gen_case(lang_key, cid, params))
-        print(f"Generated {len(axes)} persist cases for {spec.target}")
+        for cid, depth in enumerate(stack_depths):
+            (lang_dir / f"stk_{cid:04d}.{spec.ext}").write_text(
+                gen_stack_case(lang_key, cid, depth))
+        print(f"Generated {len(axes)} ring + {len(stack_depths)} stack cases for {spec.target}")
 
 
 if __name__ == "__main__":
