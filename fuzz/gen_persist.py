@@ -135,6 +135,7 @@ def gen_machine(params, spec):
     domain_set = params["domain_set"]
     has_str = domain_set in ("int_str", "int_str_bool")
     has_bool = domain_set == "int_str_bool"
+    use_sv = params["use_state_vars"]
     int_t = spec.int_type
     str_t = spec.str_type
     bool_t = spec.bool_type
@@ -146,6 +147,12 @@ def gen_machine(params, spec):
         lines.append(f"        set_s(v: {str_t})")
     if has_bool:
         lines.append(f"        set_b(v: {bool_t})")
+    # STATE-VAR axis (was dead): a `$.` state variable, distinct from the `self.` domain
+    # fields — it lives in the compartment and must round-trip through the control state, not
+    # just the domain. Set/read in whatever state is current at save time.
+    if use_sv:
+        lines.append(f"        set_sv(v: {int_t})")
+        lines.append(f"        sv(): {int_t}")
     lines.append(f"        status(): {str_t}")
     lines.append("")
     lines.append("    machine:")
@@ -157,6 +164,8 @@ def gen_machine(params, spec):
             lines.append(f"        {st} => {parent} {{")
         else:
             lines.append(f"        {st} {{")
+        if use_sv:
+            lines.append(f"            $.sv: {int_t} = 0")
         nxt = state_name((i + 1) % n)
         lines.append(f"            advance() {{ -> {nxt} }}")
         lines.append(f"            set_x(v: {int_t}) {{ {spec.self_x} = v }}")
@@ -164,6 +173,9 @@ def gen_machine(params, spec):
             lines.append(f"            set_s(v: {str_t}) {{ {spec.self_s} = v }}")
         if has_bool:
             lines.append(f"            set_b(v: {bool_t}) {{ {spec.self_b} = v }}")
+        if use_sv:
+            lines.append(f"            set_sv(v: {int_t}) {{ $.sv = v }}")
+            lines.append(f"            sv(): {int_t} {{ @@:($.sv) }}")
         lines.append(f'            status(): {str_t} {{ @@:("s{i}") }}')
         if has_parent:
             lines.append("            => $^")
@@ -179,19 +191,17 @@ def gen_system_frame(case_id, params, spec):
     if spec.prolog:
         lines.append(spec.prolog)
         lines.append("")
-    lines.append("@@[persist]")
-    lines.append(f"@@system {sys_name} {{")
-    # RFC-0012 amendment: declare the framework-managed save/load ops.
+    # The three-attribute persist contract (portable across shipping AND the cleanroom):
+    # `@@[persist(<blob>)]` + `@@[save(<name>)]` + `@@[load(<name>)]`. framec generates the
+    # save/load methods from these — no `operations:` block. (The old bare `@@[persist]` +
+    # operations style is cleanroom-E814.)
     save_ret = "str" if spec.target == "python_3" else "string"
     save_method = "save_state" if spec.target == "python_3" else "saveState"
     load_method = "restore_state" if spec.target == "python_3" else "restoreState"
-    lines.append("    operations:")
-    lines.append("        @@[save]")
-    lines.append(f"        {save_method}(): {save_ret} {{}}")
-    lines.append("")
-    lines.append("        @@[load]")
-    lines.append(f"        {load_method}(data: {save_ret}) {{}}")
-    lines.append("")
+    lines.append(f"@@[persist({save_ret})]")
+    lines.append(f"@@[save({save_method})]")
+    lines.append(f"@@[load({load_method})]")
+    lines.append(f"@@system {sys_name} {{")
     lines.append(gen_machine(params, spec))
     lines.append("")
     lines.append("    domain:")
@@ -211,6 +221,8 @@ def gen_harness_python(case_id, params, sys_name, spec):
     seed = 1000 + case_id
     has_str = params["domain_set"] in ("int_str", "int_str_bool")
     has_bool = params["domain_set"] == "int_str_bool"
+    use_sv = params["use_state_vars"]
+    sv_val = 7000 + case_id  # distinct from x, so a swapped/lost state var is caught
 
     lines = []
     lines.append("")
@@ -225,6 +237,8 @@ def gen_harness_python(case_id, params, sys_name, spec):
         lines.append(f'    inst.set_s("sval_{seed}")')
     if has_bool:
         lines.append(f"    inst.set_b({'True' if seed % 2 == 0 else 'False'})")
+    if use_sv:
+        lines.append(f"    inst.set_sv({sv_val})")
     lines.append(f"    inst_status = inst.status()")
     lines.append(f"    {spec.save_call}")
     lines.append(f"    {spec.restore_call.format(SYS=sys_name)}")
@@ -234,6 +248,8 @@ def gen_harness_python(case_id, params, sys_name, spec):
         lines.append(f'    {spec.str_cmp.format()}')
     if has_bool:
         lines.append(f'    if rest.b != inst.b: _fail(f"b: {{rest.b}} != {{inst.b}}")')
+    if use_sv:
+        lines.append(f'    if rest.sv() != inst.sv(): _fail(f"sv: {{rest.sv()}} != {{inst.sv()}}")')
     lines.append(f"    {spec.println}")
     return "\n".join(lines) + "\n"
 
@@ -244,6 +260,8 @@ def gen_harness_js(case_id, params, sys_name, spec):
     seed = 1000 + case_id
     has_str = params["domain_set"] in ("int_str", "int_str_bool")
     has_bool = params["domain_set"] == "int_str_bool"
+    use_sv = params["use_state_vars"]
+    sv_val = 7000 + case_id  # distinct from x, so a swapped/lost state var is caught
 
     lines = []
     lines.append("")
@@ -257,6 +275,8 @@ def gen_harness_js(case_id, params, sys_name, spec):
         lines.append(f'inst.set_s("sval_{seed}");')
     if has_bool:
         lines.append(f"inst.set_b({spec.bool_true if seed % 2 == 0 else spec.bool_false});")
+    if use_sv:
+        lines.append(f"inst.set_sv({sv_val});")
     lines.append("const inst_status = inst.status();")
     lines.append(f"{spec.save_call}")
     lines.append(f"{spec.restore_call.format(SYS=sys_name)}")
@@ -266,6 +286,8 @@ def gen_harness_js(case_id, params, sys_name, spec):
         lines.append(spec.str_cmp.format())
     if has_bool:
         lines.append(f'if (rest.b !== inst.b) _fail(`b: ${{rest.b}} !== ${{inst.b}}`);')
+    if use_sv:
+        lines.append(f'if (rest.sv() !== inst.sv()) _fail(`sv: ${{rest.sv()}} !== ${{inst.sv()}}`);')
     lines.append(spec.println)
     return "\n".join(lines) + "\n"
 
