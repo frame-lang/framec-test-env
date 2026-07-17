@@ -1,0 +1,64 @@
+@@[target("rust")]
+
+// persist_nested_subsystem — RFC-0056 nested sub-system persistence (Rust / serde).
+//
+// A system holding another system in its domain (`inner: Counter = @@Counter()`) must save and
+// restore the WHOLE sub-system by embedding the typed sub-system struct in the parent's snapshot;
+// serde recurses it (compartment + domain) with no reflection. The sub-system struct must derive
+// Clone/Serialize/Deserialize or this would not compile — the gap this fixture guards.
+
+use serde::{Deserialize, Serialize};
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Counter {
+    interface:
+        bump()
+        count(): i32
+    machine:
+        $Active {
+            bump() {
+                self.n = self.n + 1;
+            }
+            count(): i32 {
+                @@:(self.n)
+            }
+        }
+    domain:
+        n: i32 = 0
+}
+
+@@[main]
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Holder {
+    interface:
+        tick()
+        val(): i32
+    machine:
+        $Run {
+            tick() {
+                self.inner.bump();
+            }
+            val(): i32 {
+                @@:(self.inner.count())
+            }
+        }
+    domain:
+        inner: Counter = @@Counter()
+}
+
+fn main() {
+    let mut h = Holder::new();
+    h.tick();
+    h.tick();
+    h.tick();
+    assert_eq!(h.val(), 3, "pre-save nested value wrong");
+    let snap: String = h.save_state();
+    let mut r = Holder::new();
+    r.restore_state(snap);
+    assert_eq!(r.val(), 3, "nested sub-system did not round-trip");
+    println!("PASS: persist_nested_subsystem");
+}
