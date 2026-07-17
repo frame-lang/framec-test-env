@@ -1,0 +1,69 @@
+@@[target("c")]
+
+// persist_nested_subsystem — RFC-0056 nested sub-system persistence (C / cJSON).
+//
+// A system holding another system in its domain (`inner: Counter = @@Counter()`) must save and
+// restore the WHOLE sub-system. C treats a sub-system field NOT as an opaque user type (no author
+// hook) but by DELEGATING to the sub-system's own save_state/restore_state: framec emits
+// `Holder_persist_pack_field_Counter` calling `Counter_save_state`, and unpack calling
+// `Counter_restore_state` into the field's existing instance (factory-rebuild). No hand-written
+// marshalling hook is required — the guard is that framec auto-emits it for a sibling @@system.
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <cjson/cJSON.h>
+
+@@[persist(char*)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Counter {
+    interface:
+        bump()
+        count(): int
+    machine:
+        $Active {
+            bump() {
+                @@:self.n = @@:self.n + 1;
+            }
+            count(): int {
+                @@:(@@:self.n)
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+@@[main]
+@@[persist(char*)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Holder {
+    interface:
+        tick()
+        val(): int
+    machine:
+        $Run {
+            tick() {
+                @@:self.inner.bump();
+            }
+            val(): int {
+                @@:(@@:self.inner.count())
+            }
+        }
+    domain:
+        inner: Counter = @@Counter()
+}
+
+int main(void) {
+    Holder* h = Holder_new();
+    Holder_tick(h);
+    Holder_tick(h);
+    Holder_tick(h);
+    if (Holder_val(h) != 3) { printf("FAIL pre: %d\n", Holder_val(h)); return 1; }
+    char* snap = Holder_save_state(h);
+    Holder* r = Holder_new();
+    Holder_restore_state(r, snap);
+    if (Holder_val(r) != 3) { printf("FAIL: nested not restored: %d\n", Holder_val(r)); return 1; }
+    printf("PASS: persist_nested_subsystem\n");
+    return 0;
+}
