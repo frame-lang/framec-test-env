@@ -1,0 +1,57 @@
+@@[target("java")]
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system private Counter {
+    interface:
+        bump()
+        count(): int
+    machine:
+        $Active {
+            bump() {
+                @@:self.n = @@:self.n + 1;
+            }
+            count(): int {
+                @@:(@@:self.n)
+            }
+        }
+    domain:
+        n: int = 0
+}
+
+@@[main]
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system Holder {
+    interface:
+        tick()
+        val(): int
+    machine:
+        $Run {
+            tick() {
+                @@:self.inner.bump();
+            }
+            val(): int {
+                @@:(@@:self.inner.count())
+            }
+        }
+    domain:
+        inner: Counter = @@Counter()
+}
+
+class Main {
+    public static void main(String[] a) {
+        Holder h = new Holder();
+        h.tick();
+        h.tick();
+        h.tick();
+        if (h.val() != 3) throw new RuntimeException("pre: " + h.val());
+        String snap = h.save_state();
+        Holder r = new Holder();
+        r.restore_state(snap);
+        if (r.val() != 3) throw new RuntimeException("nested sub-system not restored: " + r.val());
+        System.out.println("PASS: java nested sub-system persist");
+    }
+}
