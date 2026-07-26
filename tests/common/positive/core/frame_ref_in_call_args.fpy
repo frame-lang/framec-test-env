@@ -1,0 +1,40 @@
+@@[target("python")]
+
+# REGRESSION: a Frame reference used as a self-call ARGUMENT (`@@:self.echo($.val)`) must be
+# LOWERED to the target's state-var read, not shipped verbatim (which emitted a literal `$.val`
+# into the output — invalid in every target). Shared scan/node layer: the args were captured as
+# raw text and never run through native_parts.
+
+@@system RefInArgs {
+    interface:
+        run(): int
+        echo(n: int): int
+    machine:
+        $A {
+            $.val: int = 0
+            run(): int {
+                $.val = 7
+                @@:self.echo($.val)
+                @@:($.val)
+            }
+            echo(n: int): int {
+                self.seen = n
+                @@:(n)
+            }
+        }
+    domain:
+        seen = 0
+}
+
+if __name__ == "__main__":
+    print("TAP version 14")
+    print("1..1")
+    try:
+        s = @@RefInArgs()
+        got = s.run()
+        if got == 7 and s.seen == 7:
+            print("ok 1 - frame ref in call args is lowered")
+        else:
+            print("not ok 1 - run=" + str(got) + " seen=" + str(s.seen))
+    except Exception as e:
+        print("not ok 1 - " + str(e))

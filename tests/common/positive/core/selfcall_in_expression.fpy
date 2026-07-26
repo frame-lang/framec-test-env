@@ -1,0 +1,34 @@
+@@[target("python")]
+
+# REGRESSION: a bare `@@:self.method()` in EXPRESSION position (an assignment RHS) is an
+# OPERAND, not a statement. It must lower INLINE (`x = self.g()`), not be split out as a
+# standalone self-call statement leaving a dangling `x =` (a SyntaxError).
+# Found running framec-ng over this corpus; the defect was in the shared scan layer
+# (native_parts had no inline arm for the no-field self-call form), so it affected every backend.
+
+@@system SelfCallExpr {
+    interface:
+        compute(): int
+        five(): int
+    machine:
+        $Work {
+            compute(): int {
+                x = @@:self.five()
+                @@:(x + 1)
+            }
+            five(): int { @@:(5) }
+        }
+}
+
+if __name__ == "__main__":
+    print("TAP version 14")
+    print("1..1")
+    try:
+        s = @@SelfCallExpr()
+        got = s.compute()
+        if got == 6:
+            print("ok 1 - self-call in expression position lowers inline")
+        else:
+            print("not ok 1 - expected 6, got " + str(got))
+    except Exception as e:
+        print("not ok 1 - " + str(e))

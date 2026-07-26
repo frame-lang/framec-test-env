@@ -1,0 +1,40 @@
+@@[target("python")]
+
+# REGRESSION: a Frame reference used as a transition ENTER argument (`-> ($.v) $B`) must be
+# LOWERED, not shipped verbatim. Shared scan layer (parse_after_arrow kept the arg text raw),
+# so the leak hit every backend.
+
+@@system RefInTransArgs {
+    interface:
+        go()
+        peek(): str
+    machine:
+        $A {
+            $.v: str = "carried"
+            go() {
+                -> ($.v) $B
+            }
+            peek(): str { @@:("") }
+        }
+        $B {
+            $.got: str = ""
+            $>(v: str) {
+                $.got = v
+            }
+            peek(): str { @@:($.got) }
+        }
+}
+
+if __name__ == "__main__":
+    print("TAP version 14")
+    print("1..1")
+    try:
+        s = @@RefInTransArgs()
+        s.go()
+        got = s.peek()
+        if got == "carried":
+            print("ok 1 - frame ref in transition args is lowered")
+        else:
+            print("not ok 1 - expected 'carried', got " + repr(got))
+    except Exception as e:
+        print("not ok 1 - " + str(e))

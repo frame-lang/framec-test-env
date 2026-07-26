@@ -1,0 +1,69 @@
+# INTENTIONAL DIVERGENCES — fixtures where framec-ng is deliberately NOT byte-identical to the
+# legacy oracle because ng FIXES a legacy bug.
+#
+# Owner ruling (2026-07-24): legacy's bugs are FIXED in ng, not reproduced. Byte-faithfulness is
+# the bar EVERYWHERE ELSE; a fixture listed here can never go byte-identical, by design.
+#
+# RULES for adding an entry — all three are required:
+#   1. Name the legacy bug precisely (what legacy emits, why it is wrong).
+#   2. Point at the VALIDATING FIXTURE — a cleanroom test that PROVES the fix, designed to FAIL on
+#      legacy and PASS on ng. Prefer RUNTIME validation (compile the emitted code, run it, assert
+#      observable behavior), modelled on
+#      compiler/tests/two_backends.rs::lifecycle_handlers_run_with_args_on_both_backends.
+#   3. Record the divergence in a code comment at the emit site too, so it is deliberate in-tree.
+#
+# Anything NOT listed here must be byte-identical to legacy. This file is the allowlist the
+# faithfulness ratchet (faithfulness_diff.sh) excludes from its denominator — keep it SHORT and
+# justified; it is not a place to park "ng is different and we haven't fixed it yet".
+#
+# Format: <subpath-under-tests/common/positive/>  # <the legacy bug this fixes>
+#
+# ---------------------------------------------------------------------------------------------
+# (entries added as each bug fix lands with its validating fixture)
+
+# =============================================================================================
+# D2 — constructor cannot construct (journal DIVERGENCE-JOURNAL.md#D2).
+#   legacy: `def __init__(self)` takes no header params; domain seeding + start-compartment
+#           enter-args live only in `_create`. A plain `Sys(args)` -> TypeError; `Sys()` leaves
+#           domain fields unassigned. ng: `__init__(self, <params>)` seeds domain + builds the
+#           start compartment with its state/enter args; `_create` just delegates `cls(<params>)`.
+#   Validator: compiler/tests/legacy_bug_fixes.rs::plain_constructor_builds_a_usable_system.
+#   Each fixture below verified (this run, vs the LOCAL 4.6.0.x oracle): the ENTIRE code delta is
+#   the __init__/_create relocation (params, domain/enter-arg seeding, `c=cls()`->`c=cls(args)`,
+#   the legacy empty `__prepareEnter("Start",[],[])` placeholder, `c.__next_compartment=None`) and
+#   NOTHING else; runtime output is byte-identical (harness builds via @@Sys(...) -> _create).
+# =============================================================================================
+demos/21_worker_pool.fpy                            # D2 constructor relocation (params+enter-args)
+scientific/01_phases_of_matter.fpy                  # D2 constructor relocation (3 domain params)
+scientific/05_enzyme_kinetics.fpy                   # D2 constructor relocation (domain param)
+scientific/07_sir_epidemic.fpy                      # D2 constructor relocation (2 domain params)
+scientific/09_pcr_cycler.fpy                        # D2 constructor relocation (domain param)
+system_params/sysparam_domain_bool.fpy              # D2 constructor relocation (bool domain param)
+system_params/sysparam_domain_default.fpy           # D2 constructor relocation (defaulted param; default filled at call site both sides)
+system_params/sysparam_domain_int.fpy               # D2 constructor relocation (int domain param)
+system_params/sysparam_domain_multi.fpy             # D2 constructor relocation (3 domain params)
+system_params/sysparam_domain_str.fpy               # D2 constructor relocation (str domain param)
+system_params/sysparam_enter_mixed.fpy              # D2 constructor relocation (state+enter+domain args)
+system_params/sysparam_enter_single.fpy             # D2 constructor relocation (single enter arg)
+system_params/sysparam_mixed.fpy                    # D2 constructor relocation (state arg + domain)
+system_params/sysparam_state_single.fpy             # D2 constructor relocation (single state arg)
+
+# =============================================================================================
+# D3 — state-vars only seed via `_create` (journal DIVERGENCE-JOURNAL.md#D3).
+#   legacy: `$.x` initializers go into a synthesized `$>` handler guarded by
+#           `if "n" not in compartment.state_vars:`, which only runs via `_create`; `Sys().peek()`
+#           -> KeyError. ng: seeds the compartment's state_vars where the compartment is BUILT
+#           (in __init__ for the start state, in each transition for a destination) — so the same
+#           `$.x` may be seeded at N build sites where legacy emitted one guarded seed.
+#   Validator: compiler/tests/legacy_bug_fixes.rs::state_vars_are_seeded_for_a_plain_constructor.
+#   Each fixture below verified (this run, vs the LOCAL 4.6.0.x oracle): the ENTIRE code delta is
+#   the state-var seed relocation (legacy `if "X" not in ... : compartment.state_vars["X"]=V` ->
+#   ng `[__|self.__]compartment.state_vars["X"]=V` at each build site, SAME (X,V)) and NOTHING
+#   else; runtime output is byte-identical.
+# =============================================================================================
+demos/07_modal_dialog_stack.fpy                     # D3 state-var seed relocation (name)
+linux/09_signal_handler_stack.fpy                   # D3 state-var seed relocation (saved_regs, signum)
+parser_specialists/01_statement_disambiguator.fpy   # D3 state-var seed relocation (result, 7 build sites)
+primary/26_state_params.fpy                         # D3 state-var seed relocation (count)
+primary/48_hsm_exit_handlers.fpy                    # D3 state-var seed relocation (child_var)
+scientific/10_infusion_pump.fpy                     # D3 state-var seed relocation (reason)
