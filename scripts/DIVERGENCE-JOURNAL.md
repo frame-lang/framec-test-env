@@ -83,3 +83,49 @@ gate proving identical behavior (`code=journaled result=identical`).
   `h() { pass }` emits `        pass ` (trailing space); **ng trims** it. Owner ruled KEEP ng clean.
   Affected: the ~16 action-body fixtures (`linux/*`, `capabilities/*`) whose ng-vs-legacy delta is
   trailing-whitespace-only. To be enumerated + added to intentional_divergences.txt when M8 lands.
+
+---
+
+## D2-rust — parameterized `Sys::new(param)` cannot construct in legacy (Rust) — added 2026-07-26
+Rust spelling of D2. Verified vs the LOCAL 4.6.0.33 oracle (`-l rust`) by emitting with both, `cmp`,
+and building + running the emitted Rust (gated by workflow, 6/6 lenses PASS).
+- **construct:** a system WITH constructor params (domain/state/enter), e.g. `@@system Cell(seed: i64)`.
+- **legacy:** emits NO `pub fn new(<params>)`; inlines the struct literal straight into
+  `pub fn __create(<params>) -> Self { let mut c = Self { …seed…, __compartment: Comp::new("S") }; …lifecycle… c }`.
+  So `Cell::new(5)` is a compile error and the ONLY way to obtain a `Cell` is the lifecycle-running factory.
+- **ng:** `pub fn new(seed) -> Self { Self { …seeded…, __compartment: Comp::new("S"), __next_compartment: None } }`
+  + `pub fn __create(seed) { let mut c = Self::new(seed); …lifecycle… c }` — the plain ctor builds a
+  usable instance; the factory still runs the enter lifecycle.
+- **why legacy is wrong:** a type whose plain constructor cannot build a usable value (only a
+  lifecycle-running factory can) is broken by construction — cannot be built without a live kernel,
+  cannot be composed as another system's domain field via `new`. Same defect as Python D2.
+- **scope:** PARAMETERIZED-only. A PARAMLESS Rust system is byte-identical (legacy already emits
+  `new()` + a delegating `__create()`). Only parameterized systems are allowlisted.
+- **validator:** `compiler/tests/rust_acceptance.rs::plain_constructor_builds_a_usable_system_rust`
+  (builds `Ctor::new(7)` directly — absent in legacy — seeds+reads the domain; then the factory path).
+  Fails on legacy (no `new(i64)` → rustc error), passes on ng.
+- **emit site:** `compiler/src/text/emit/rust.rs` `emit_kernel_open` (`pub fn new(<plist>)` always
+  emitted + `__create` delegating via `Self::new(<ctor_args>)`).
+- **affected:** `construction/m2_construction.frs` (anchor) — entire delta is two D2 relocations
+  (`Inner(start)`, `Cell(seed)`); both programs compile and print identical TAP (`ok 1..3`).
+
+## D3-rust — state-var seeding is NOT a Rust divergence (recorded to prevent mis-listing) — 2026-07-26
+The shared D3 entry is dynamic-target-shaped (Python: a guarded synthesized `$>` handler that only
+runs via `_create`). It does NOT apply to Rust.
+- **legacy (`-l rust`):** `$.x = V` is seeded structurally in the state's typed-context `Default` impl
+  (`impl Default for <S>Context { fn default() { Self { x: V } } }`), built through
+  `<S>Compartment::new(..)`, which runs in BOTH `new()` and `__create()`. So legacy Rust already seeds
+  `$.x` for a plain-constructed instance.
+- **ng:** identical — `m2_construction.frs`'s `$.count: i64 = 100` shows zero delta.
+- **conclusion:** do NOT add any Rust fixture under a D3 allowlist; Rust state-var seeding is byte-faithful.
+
+## (leaf FIX, NOT a divergence) `@@Inner()` domain sub-system → `Inner::__create(..)` — 2026-07-26
+Recorded to explain a Rust-leaf change; NOT an allowlist entry (it moves ng TOWARD the oracle).
+- **before:** `domain_field_init` lowered `inner: Inner = @@Inner(7)` to `Inner::new(7)`, skipping the
+  sub-system's start `$>` lifecycle.
+- **legacy + fixed ng:** `Inner::__create(7)` — FRAME instantiation is the two-phase factory (runs
+  `$>`), the same lowering `@@Inner(7)` gets in native water; byte-identical to legacy.
+- **emit site:** `compiler/src/text/emit/rust.rs` `domain_field_init`. The scanner path
+  (`open_scanner`) deliberately keeps `new` (a scanner constructs WITHOUT running; RFC-0042 `over()`),
+  a separate site, unaffected.
+- This is the **Rust half of the M2 grid gap** "system-typed domain field not lowered through `_create`".
