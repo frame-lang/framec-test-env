@@ -163,12 +163,15 @@ FRAMEC_BIN=/dev/null docker compose build --no-cache <lang>
 
 The matrix accumulates disk in three places that ordinary cleanup misses:
 
-- **framec transpile cache** — `output/<lang>/.framec_cache/<framec_hash>/` accumulates
-  a fresh per-fixture tar set every time framec is recompiled, with **no eviction**.
-  C is the worst offender by far (~2.8 GB per cache generation due to fat per-fixture
-  artifacts vs. ~5 MB elsewhere); on a busy month this reaches **100+ GB in C alone**.
-  Almost always the biggest leak in this repo specifically — see the dedicated section
-  below.
+- **framec transpile cache** — `output/<lang>/.framec_cache/<framec_hash>/` gets a
+  fresh per-fixture tar set every time framec is recompiled. **Now bounded** by LRU
+  eviction (`FRAMEC_CACHE_KEEP`, **default 1** — only the current framec generation is
+  kept) plus an automatic `trim-cache` sweep after each `make test`, so it no longer
+  refills the host on its own. It grows unbounded only on pre-eviction checkouts or if
+  you set `FRAMEC_CACHE_KEEP=0`. C is still the worst per-generation (~2.8 GB vs ~5 MB
+  for Python — fat per-fixture C artifacts), and stale generations left over from
+  *before* the eviction fix could reach **100+ GB in C alone** — historically the
+  biggest leak in this repo. See the dedicated section below.
 - **Build cache** — every `make framec` cross-compile dumps cache layers. On a busy
   week this reaches 10–20 GB with *zero* of it in use.
 - **The Docker VM disk image** — on macOS, Docker Desktop stores everything
