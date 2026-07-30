@@ -37,15 +37,81 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # Each target compiles ITS OWN fixtures (each carries that language's native main).
 FIX_EXT = {"rust": "frs", "python": "fpy", "java": "fjava", "c": "fc"}
 
-# The DoD fixture inventories, from docs/faithfulness/M<k>.md.
+# The DoD fixture inventories, from docs/faithfulness/M<k>.md (framec-cleanroom). Keep these in
+# step with the docs — the doc is the contract, this is the executable form of it.
 MILESTONES = {
-    "M1": [
+    "M1": [  # Foundation (kernel & dispatch)
         "foundation/foundation_minimal",
         "foundation/foundation_value_return",
         "foundation/foundation_transition",
         "foundation/foundation_lifecycle",
         "foundation/foundation_enter_args",
         "foundation/foundation_selfcall",
+    ],
+    "M2": [  # Construction & Seeding
+        "foundation/foundation_minimal",
+        "system_params/sysparam_state_single",
+        "system_params/sysparam_enter_single",
+        "system_params/sysparam_mixed",
+        "primary/98_param_child_domain_init",
+        "core/machineless_operations",
+        "primary/96_rfc0015_restore_skips_init",
+    ],
+    "M3": [  # Handlers & Interface
+        "foundation/foundation_value_return",
+        "primary/35_return_init",
+        "capabilities/system_return_header_defaults",
+        "primary/26_state_params",
+        "primary/39_self_call",
+        "primary/53_transition_guard",
+        "primary/52_deep_self_call",
+        "control_flow/handler_params_manifest",
+    ],
+    "M4": [  # Actions & Operations
+        "primary/21_actions_basic",
+        "primary/22_operations_basic",
+        "core/machineless_operations",
+        "core/mixed_ops",
+        "capabilities/actions_call_wrappers",
+    ],
+    "M5": [  # Hierarchy (HSM)
+        "primary/30_hsm_default_forward",
+        "primary/50_hsm_omitted_handlers",
+        "primary/46_hsm_enter_parent_only",
+        "primary/52_hsm_state_arg_propagation",
+        "primary/65_hsm_forward_state_args",
+        "primary/19_transition_forward",
+        "primary/29_forward_enter_first",
+        "control_flow/child_forwards_then_transition_exec",
+    ],
+    "M6": [  # State Stack
+        "primary/71_persist_push_depth_three",
+        "primary/58_persist_pushpop_state_args",
+        "primary/72_push_self_call",
+        "primary/25_persist_stack",
+        "validator/terminal_last_stack_ops",
+        "systems/parent_forward_then_stack_then_transition_exec",
+    ],
+    "M7": [  # Persistence
+        "primary/56_persist_state_args",
+        "primary/25_persist_stack",
+        "primary/82_persist_multi_system",
+        "primary/83_persist_5deep",
+        "primary/84_persist_nested_hsm",
+        "primary/71_persist_push_depth_three",
+        "primary/88_persist_quiescent_error",
+        "primary/96_rfc0015_restore_skips_init",
+    ],
+    "M8": [  # Native-Text fidelity
+        "segmenter/frame_tokens_in_comments",
+        "segmenter/heavy_native_prolog",
+        "segmenter/nested_braces",
+        "control_flow/inside_comment_transition_ignored",
+        "control_flow/inside_string_tokens_ignored",
+        "control_flow/transition_inline_comment",
+        "control_flow/forward_multi_native",
+        "control_flow/forward_trailing_whitespace",
+        "data_types/test_mixed_body_strings_comments",
     ],
 }
 
