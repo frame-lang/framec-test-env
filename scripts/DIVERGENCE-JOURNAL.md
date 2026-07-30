@@ -129,3 +129,38 @@ Recorded to explain a Rust-leaf change; NOT an allowlist entry (it moves ng TOWA
   (`open_scanner`) deliberately keeps `new` (a scanner constructs WITHOUT running; RFC-0042 `over()`),
   a separate site, unaffected.
 - This is the **Rust half of the M2 grid gap** "system-typed domain field not lowered through `_create`".
+
+## D-RUST-1 — nested persist: the parent embedded the child's STRUCT (rust)
+- **construct:** a `@@[persist]` system with a domain field typed as another `@@system`
+  (`child: Inner = @@Inner()`).
+- **legacy:** composes — the parent stores the child's OWN snapshot and delegates
+  (`serde_json::from_str(&self.child.save_state())`; restore = `Inner::new()` +
+  `child.restore_state(...)`).
+- **ng (before):** put `child: Inner` in a serde-derived `__Snap` and wrote `self.child.clone()`.
+- **why that was wrong:** a system struct derives no serde (it holds compartments, context stacks,
+  `Rc`s), so this demanded `Serialize`/`Deserialize`/`Clone` it does not have — the emitted program
+  **did not compile** (E0277/E0599) on every nested-persist fixture.
+- **ng (now):** composition, per the owner ruling and `frame_language.md` "Composed systems" —
+  Frame has no embedded-machine concept, so the parent stores the child's blob and rebuilds it
+  through its own constructor + load. Recurses to any depth (proven on an L1→L5 chain).
+- **byte status:** ng keeps its `__Snap` design rather than legacy's `serde_json::Value` assembly,
+  so the two differ in spelling while agreeing in SEMANTICS. Journaled as a deliberate divergence.
+- **validator:** `composed_child_persists_through_its_own_api` (BUILDS AND RUNS: mutates parent and
+  child, snapshots, mutates again, restores, and requires both to come back).
+- **affected:** `primary/{25,71,82,83,84}_persist*` (rust).
+
+## D-RUST-2 — a bare `@@:self.<event>()` statement lost the transition guard (rust)
+- **construct:** `@@:self.go()` as a whole statement, where `go()` transitions, followed by more
+  statements.
+- **legacy:** emits the reentrancy guard after the call
+  (`if ... ctx._transitioned { return; }`), so the trailing statements do not run.
+- **ng (before):** emitted the guard only for the EXPRESSION-position twin (`x = @@:self.g()`), so
+  the statements after a bare call ran **in the wrong state**. It compiled and ran — a byte-diff
+  and a compile check both called it green.
+- **ng (now):** the guard fires on the `Stmt::SelfCall` path too, with the same two exclusions
+  (kernel model only; not an `actions:` call).
+- **byte status:** ng now MATCHES legacy here — this is a fixed ng bug, not a standing divergence;
+  recorded so the validator has a home.
+- **validator:** `bare_self_call_statement_gets_the_transition_guard` (BUILDS AND RUNS; asserts the
+  post-call statement did not execute).
+- **affected:** `primary/{39,52,53,72}` (rust).
