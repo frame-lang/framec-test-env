@@ -63,16 +63,57 @@ def emit(target, fixture, workdir):
     return out, None
 
 
+# Third-party crates the corpus legitimately uses (persist -> serde/serde_json, async -> tokio).
+# WITHOUT these on the compiler's search path, every such fixture dies at `unresolved import serde`
+# and whatever ELSE is wrong in the file is never reported — the missing crate MASKS real ng bugs,
+# exactly as byte-identity masked non-compiling output and compiling masked wrong behavior. Build
+# them once into a scratch cargo project, then link each fixture against those rlibs.
+RUST_CRATES = ("serde", "serde_json", "tokio")
+_rust_deps_cache = {}
+
+
+def rust_deps():
+    """Path to a deps dir + `--extern` args for RUST_CRATES, building them once on first use."""
+    if _rust_deps_cache:
+        return _rust_deps_cache.get("dir"), _rust_deps_cache.get("externs", [])
+    prj = os.path.join(tempfile.gettempdir(), "framec_golden_deps")
+    os.makedirs(os.path.join(prj, "src"), exist_ok=True)
+    with open(os.path.join(prj, "Cargo.toml"), "w") as f:
+        f.write(
+            '[package]\nname = "fixdeps"\nversion = "0.1.0"\nedition = "2021"\n\n'
+            "[dependencies]\n"
+            'serde = { version = "1", features = ["derive"] }\n'
+            'serde_json = "1"\n'
+            'tokio = { version = "1", features = ["full"] }\n'
+        )
+    with open(os.path.join(prj, "src", "main.rs"), "w") as f:
+        f.write("fn main() {}\n")
+    subprocess.run(["cargo", "build"], cwd=prj, capture_output=True, text=True, timeout=900)
+    deps = os.path.join(prj, "target", "debug", "deps")
+    externs = []
+    for c in RUST_CRATES:
+        hits = sorted(
+            glob.glob(os.path.join(deps, "lib%s-*.rlib" % c)),
+            key=os.path.getmtime,
+            reverse=True,
+        )
+        if hits:
+            externs += ["--extern", "%s=%s" % (c, hits[0])]
+    _rust_deps_cache["dir"] = deps if os.path.isdir(deps) else None
+    _rust_deps_cache["externs"] = externs
+    return _rust_deps_cache["dir"], externs
+
+
 def build(target, src, workdir):
     """Stage 2 — compile the emitted code with the real toolchain."""
     if target == "rust":
         exe = os.path.join(workdir, "prog")
-        p = subprocess.run(
-            ["rustc", "--edition", "2021", "--crate-type", "bin", "-o", exe, src],
-            capture_output=True,
-            text=True,
-            cwd=workdir,
-        )
+        deps, externs = rust_deps()
+        cmd = ["rustc", "--edition", "2021"]
+        if deps:
+            cmd += ["-L", deps]
+        cmd += externs + ["--crate-type", "bin", "-o", exe, src]
+        p = subprocess.run(cmd, capture_output=True, text=True, cwd=workdir)
         if p.returncode != 0:
             errs = [l for l in p.stderr.splitlines() if l.startswith("error")][:3]
             return None, errs or p.stderr.strip().splitlines()[:3]
