@@ -1,0 +1,75 @@
+// @@doc-pins:     the `@@:(<expr>)` value-return path with a string-literal operand -- the Rust
+//                 return-slot wrap (legacy `rust_wrap_for_boxing`, rust_system.rs:1566-1598).
+// @@doc-detects:  a compiler that re-encodes string-literal bytes instead of passing them through.
+//                 Legacy 4.6.0.33 rebuilds the literal one byte at a time with `push(b as char)`
+//                 -- a Latin-1 widening: each UTF-8 byte becomes its own U+0080..U+00FF code
+//                 point, which Rust then re-encodes to two. `é` (C3 A9) emits as `Ã©`
+//                 (C3 83 C2 A9). The emitted program COMPILES and RUNS; it just returns the wrong
+//                 string, so a byte-differ and a compile sweep both call it green.
+// @@doc-oracle:   FAIL(utf8-widening-in-return-wrap)
+// @@doc-contract: max_coverage/README.md#R4
+//
+// MEASURED, both compilers, on this exact construct:
+//     oracle   __return_val = ...Ret(String::from("cafÃ©"))     <- C3 83 C2 A9
+//     ng       __return_val = ...Ret(String::from("café"))     <- C3 A9
+//
+// Scope, stated honestly: the same widening exists at several other sites (the domain-field
+// initializer path is NOT one of them -- both compilers get that right, verified). This fixture
+// pins ONE path. The corpus contains zero non-ASCII bytes across 352 fixtures, so before this file
+// the entire class was unexercised by construction; one fixture proves the defect exists, it does
+// not cover its surface (identifiers, comments, state names, persist blobs, scan(u8) byte literals).
+//
+// Frame is type-ignorant and passes user expressions through verbatim (frame_language.md).
+// "Verbatim" has to mean BYTES, not "the same characters modulo an encoding round-trip".
+
+@@system Utf8Literal {
+    interface:
+        label(): String
+        arrow(): String
+
+    machine:
+        $A {
+            // 2-byte UTF-8 (U+00E9) inside an otherwise-ASCII word.
+            label(): String {
+                @@:("café")
+            }
+            // 3-byte UTF-8 (U+2192) -- a wider code point, to catch a widening that only shows up
+            // beyond the 2-byte range.
+            arrow(): String {
+                @@:("→")
+            }
+        }
+}
+
+fn main() {
+    println!("TAP version 14");
+    println!("1..4");
+    let mut m = @@Utf8Literal();
+
+    let t = m.label();
+    if t == "café" {
+        println!("ok 1 - 2-byte literal round-trips through the return slot");
+    } else {
+        println!("not ok 1 - 2-byte literal # got {:?} ({} bytes)", t, t.len());
+    }
+    // The byte/char counts are the sharper assertion. A double-encoded `é` still LOOKS like text,
+    // so eyeballing the emitted source misses it; the counts do not. "café" is 5 bytes / 4 chars.
+    // Widened, it is 6 bytes / 5 chars.
+    if t.len() == 5 && t.chars().count() == 4 {
+        println!("ok 2 - 2-byte literal has the right byte and char counts");
+    } else {
+        println!("not ok 2 - 2-byte literal # {} bytes, {} chars", t.len(), t.chars().count());
+    }
+
+    let a = m.arrow();
+    if a == "→" {
+        println!("ok 3 - 3-byte literal round-trips through the return slot");
+    } else {
+        println!("not ok 3 - 3-byte literal # got {:?} ({} bytes)", a, a.len());
+    }
+    if a.len() == 3 && a.chars().count() == 1 {
+        println!("ok 4 - 3-byte literal has the right byte and char counts");
+    } else {
+        println!("not ok 4 - 3-byte literal # {} bytes, {} chars", a.len(), a.chars().count());
+    }
+}
