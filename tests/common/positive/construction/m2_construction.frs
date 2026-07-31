@@ -1,0 +1,72 @@
+// M2 Construction & Seeding — Rust anchor (authored, foundation-style TAP).
+//
+// Exercises the three construction facts M2 owns, in one runnable program:
+//   D2  — a system param seeds a domain field through the PLAIN constructor `new(<params>)`,
+//         and `__create` delegates to it. This is the journaled D2 divergence: legacy omits
+//         `new` for a PARAMETERIZED system and inlines the struct literal straight into
+//         `__create` (a system whose own plain constructor cannot build a usable instance).
+//         ng emits `new(seed)`/`new(start)` + a delegating `__create`. (A PARAMLESS system —
+//         none here — is byte-identical: legacy already emits new()+__create() for it.)
+//   D3  — `$.count: i64 = 100` is a state-var seeded at compartment-build via the typed-context
+//         `Default` impl. On Rust this is BYTE-IDENTICAL to legacy (legacy seeds it structurally
+//         through the same Default impl, unlike Python's guarded synthesized `$>`), so it is NOT
+//         a divergence — the anchor proves the seed reaches a plain-constructed instance.
+//   @@Inner — `inner: Inner = @@Inner(7)` is a domain sub-system: FRAME instantiation, which is
+//         the two-phase factory `Inner::__create(7)` (runs Inner's start `$>`), matching legacy.
+//
+// The whole ng-vs-legacy delta is exactly the two D2 relocations (Inner(start), Cell(seed));
+// everything else is byte-identical, and both emitted programs compile with rustc and print the
+// same TAP.
+@@[target("rust")]
+
+@@system Inner(start: i64) {
+    interface:
+        val(): i64
+    machine:
+        $I {
+            val(): i64 {
+                @@:(self.n)
+            }
+        }
+    domain:
+        n: i64 = start
+}
+
+@@[main]
+@@system Cell(seed: i64) {
+    interface:
+        config(): i64
+        count(): i64
+        inner_val(): i64
+    machine:
+        $Live {
+            $.count: i64 = 100
+            config(): i64 {
+                @@:(self.config)
+            }
+            count(): i64 {
+                @@:($.count)
+            }
+            inner_val(): i64 {
+                @@:(self.inner.val())
+            }
+        }
+    domain:
+        config: i64 = seed
+        inner: Inner = @@Inner(7)
+}
+
+fn main() {
+    println!("TAP version 14");
+    println!("1..3");
+    let mut c = @@Cell(5);
+    let cfg = c.config();
+    if cfg == 5 { println!("ok 1 - domain field seeded from system param via new()"); }
+    else { println!("not ok 1 - config # got {}", cfg); }
+    let cnt = c.count();
+    if cnt == 100 { println!("ok 2 - state var seeded at compartment build"); }
+    else { println!("not ok 2 - count # got {}", cnt); }
+    let iv = c.inner_val();
+    if iv == 7 { println!("ok 3 - nested @@Inner() built via __create"); }
+    else { println!("not ok 3 - inner_val # got {}", iv); }
+}
