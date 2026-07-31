@@ -137,14 +137,28 @@ MILESTONES = {
 }
 
 
+# The emitted file's extension is the TARGET LANGUAGE's, not the fixture's. Java additionally
+# requires the filename to match its public class, so the name is derived from the source.
+OUT_EXT = {"rust": "rs", "python": "py", "java": "java", "c": "c"}
+
+
 def emit(target, fixture, workdir):
     """Stage 1 — transpile the fixture with ng."""
-    out = os.path.join(workdir, "gen." + ("rs" if target == "rust" else target))
     p = subprocess.run(
         [NG, "-l", target, "--emit", fixture], capture_output=True, text=True
     )
     if p.returncode != 0 or not p.stdout.strip():
         return None, (p.stderr or "ng produced no output").strip().splitlines()[:3]
+    stem = "gen"
+    if target == "java":
+        # javac: a public class must live in a file of the same name.
+        m = re.search(r"^\s*public\s+(?:final\s+)?class\s+(\w+)", p.stdout, re.M)
+        if not m:
+            m = re.search(r"^\s*class\s+(\w+)", p.stdout, re.M)
+        if not m:
+            return None, ["no class declaration found in emitted java"]
+        stem = m.group(1)
+    out = os.path.join(workdir, "%s.%s" % (stem, OUT_EXT[target]))
     with open(out, "w") as f:
         f.write(p.stdout)
     return out, None
@@ -155,7 +169,7 @@ def emit(target, fixture, workdir):
 # and whatever ELSE is wrong in the file is never reported — the missing crate MASKS real ng bugs,
 # exactly as byte-identity masked non-compiling output and compiling masked wrong behavior. Build
 # them once into a scratch cargo project, then link each fixture against those rlibs.
-RUST_CRATES = ("serde", "serde_json", "tokio")
+RUST_CRATES = ("serde", "serde_json", "tokio", "futures")
 _rust_deps_cache = {}
 
 
@@ -217,6 +231,39 @@ def build(target, src, workdir):
             errs = [l for l in p.stderr.splitlines() if l.startswith("error")][:3]
             return None, errs or p.stderr.strip().splitlines()[:3]
         return [exe], None
+
+    if target == "python":
+        # Interpreted: nothing to build, but SYNTAX-CHECK so a malformed emit is reported at
+        # BUILD rather than surfacing as a confusing RUN failure — the same stage split the
+        # compiled targets get.
+        p = subprocess.run(
+            [sys.executable, "-m", "py_compile", src], capture_output=True, text=True
+        )
+        if p.returncode != 0:
+            return None, p.stderr.strip().splitlines()[-3:]
+        return [sys.executable, src], None
+
+    if target == "c":
+        exe = os.path.join(workdir, "prog")
+        p = subprocess.run(
+            ["cc", "-std=c11", "-o", exe, src, "-lm"],
+            capture_output=True, text=True, cwd=workdir,
+        )
+        if p.returncode != 0:
+            errs = [l for l in p.stderr.splitlines() if "error" in l][:3]
+            return None, errs or p.stderr.strip().splitlines()[:3]
+        return [exe], None
+
+    if target == "java":
+        p = subprocess.run(
+            ["javac", "-d", workdir, src], capture_output=True, text=True, cwd=workdir
+        )
+        if p.returncode != 0:
+            errs = [l for l in p.stderr.splitlines() if "error" in l][:3]
+            return None, errs or p.stderr.strip().splitlines()[:3]
+        cls = os.path.splitext(os.path.basename(src))[0]
+        return ["java", "-cp", workdir, cls], None
+
     return None, ["build not implemented for target " + target]
 
 
@@ -304,6 +351,7 @@ def main():
         return 2
 
     fixtures = []
+    missing = 0
     if args and args[0] == "--milestone":
         name = args[1]
         base = os.path.join(ROOT, "tests/common/positive")
@@ -312,7 +360,11 @@ def main():
             if os.path.exists(path):
                 fixtures.append(path)
             else:
+                # A DoD fixture that does not exist is a FAILED milestone, not a note. `--milestone
+                # M8` used to exit 0 while `control_flow/inside_string_tokens_ignored` resolved to
+                # no file at all -- the inventory claimed coverage nothing provided.
                 print("MISSING  %s.%s (DoD fixture absent)" % (stem, ext))
+                missing += 1
         label = "%s DoD inventory" % name
     elif args and args[0] == "--all":
         fixtures = sorted(
@@ -326,7 +378,7 @@ def main():
         label = "%d fixture(s)" % len(args)
 
     print("=== golden_run: %s / target=%s (emit -> build -> RUN -> assert) ===" % (label, target))
-    passed = failed = 0
+    passed = failed = missing
     skipped = 0
     for f in fixtures:
         short = os.path.relpath(f, os.path.join(ROOT, "tests/common/positive"))
