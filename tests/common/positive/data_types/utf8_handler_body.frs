@@ -1,0 +1,77 @@
+// @@doc-pins:     the NATIVE-TEXT passthrough of a handler body, in a system carrying a non-Copy
+//                 domain field -- which is what makes legacy run its Rust auto-clone walker
+//                 (`apply_rust_auto_clone`, rust_system.rs:1986-2281) over the user's code.
+// @@doc-detects:  a compiler that rewrites bytes inside a native handler body. Frame DELIMITS
+//                 native text and never transforms it (frame_language.md: "a bare native `self.`
+//                 is passthrough"; RFC-0046 deleted three backends' bare-`self.` rewrites for
+//                 exactly this reason). Legacy's walker copies the body with `out.push(b as char)`
+//                 -- a Latin-1 widening -- so any non-ASCII byte in a handler body is corrupted.
+// @@doc-oracle:   FAIL(utf8-widening-in-autoclone-walker)
+// @@doc-contract: max_coverage/README.md#R4
+//
+// MEASURED, both compilers, on this exact construct:
+//     oracle   let caf<C3 83 C2 83 C3 82 C2 A9> = 1;    <- é widened TWICE
+//     ng       let caf<C3 A9> = 1;                      <- byte-exact
+//
+// The double widening is not a typo: the body passes through two `as char` copies, so `é` becomes
+// `Ã©` becomes `ÃƒÂ©`. The result is not valid Rust — rustc reports `unknown start of token` — so
+// this fails at BUILD, a DIFFERENT stage from its sibling `utf8_string_literal.frs`, which fails at
+// ASSERT. Same defect class, two sites, two failure modes; fixing one does not fix the other.
+//
+// WHY THE DOMAIN FIELD IS LOAD-BEARING: `tag: String` is non-Copy, and that is the condition that
+// makes legacy walk this body at all. Delete it and the corruption disappears — which is precisely
+// why this went unnoticed: the bug needs a feature interaction (non-Copy field × non-ASCII body),
+// and the corpus permuted single axes. That is the framec#159 post-mortem restated
+// (max_coverage/README.md: "the fixture permuted single axes; the bugs were cross-products").
+
+@@system Utf8HandlerBody {
+    interface:
+        go(): i32
+        label(): String
+
+    machine:
+        $A {
+            go(): i32 {
+                // Non-ASCII IDENTIFIERS, which Rust permits and Frame must not touch.
+                let café = 10;
+                let τ = café + 5;
+                @@:(τ)
+            }
+            label(): String {
+                // A non-ASCII string literal in native position, plus a comment carrying
+                // non-ASCII — a comment is native text too, and rewriting it is still rewriting.
+                let s = String::from("naïve — 日本"); // ← must survive verbatim
+                @@:(s)
+            }
+        }
+
+    domain:
+        // Non-Copy, and therefore the trigger. See the note above.
+        tag: String = String::from("x")
+}
+
+fn main() {
+    println!("TAP version 14");
+    println!("1..3");
+    let mut m = @@Utf8HandlerBody();
+
+    let v = m.go();
+    if v == 15 {
+        println!("ok 1 - non-ASCII identifiers survive the handler body");
+    } else {
+        println!("not ok 1 - non-ASCII identifiers # got {}", v);
+    }
+
+    let s = m.label();
+    if s == "naïve — 日本" {
+        println!("ok 2 - non-ASCII native string literal survives verbatim");
+    } else {
+        println!("not ok 2 - native string literal # got {:?}", s);
+    }
+    // 5 + 1 + 1 + 1 + 1 + 1 + 2 = "naïve" is 6 bytes, " — " is 5, "日本" is 6 => 17 bytes, 10 chars.
+    if s.len() == 17 && s.chars().count() == 10 {
+        println!("ok 3 - native string literal has the right byte and char counts");
+    } else {
+        println!("not ok 3 - native literal # {} bytes, {} chars", s.len(), s.chars().count());
+    }
+}
