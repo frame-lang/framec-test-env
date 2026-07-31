@@ -164,3 +164,46 @@ Recorded to explain a Rust-leaf change; NOT an allowlist entry (it moves ng TOWA
 - **validator:** `bare_self_call_statement_gets_the_transition_guard` (BUILDS AND RUNS; asserts the
   post-call statement did not execute).
 - **affected:** `primary/{39,52,53,72}` (rust).
+
+## D-RUST-3 — legacy REWRITES native text to insert `.clone()`; ng passes it through (rust)
+- **construct:** a bare native call whose argument is a bare native field —
+  `self.do_resolve(self.name)` in a handler body, where `name: String` is a domain field.
+- **legacy:** `apply_rust_auto_clone` (`framec/src/frame_c/compiler/codegen/rust_system.rs:1986`)
+  walks every `NativeBlock`, pattern-matches `self.<m>(<args>)` in the emitted text, and rewrites
+  any argument spelled exactly `self.<field>` to `self.<field>.clone()`.
+- **ng:** emits the user's bytes unchanged.
+- **why ng is right, and this is not a spelling choice:** `frame_language.md` — "A bare native
+  `self.` is passthrough"; Frame recognizes exactly 7 constructs in a handler body and this is none
+  of them. RFC-0046 §"Everything under `@@:self.` is framec's to lower … Anything **not** under
+  `@@:` is native code and passes through untouched", and that RFC **deleted three backends'
+  bare-`self.` rewrites** for this exact reason, noting they were "inconsistent … with the matrix
+  green throughout because every fixture sidesteps the issue". This is the same rewrite, re-added
+  on a fourth backend two RFCs later. `frame_language.md` even refuses to fix a native self-call's
+  *punctuation* (`.` vs Lua's `:`) — a compiler that may not change a `.` may not append `.clone()`.
+- **four defects it causes, each compile-proved:**
+  1. **whitespace/paren sensitive** — `self.do_it(self.name)` and `self.do_it((self.name))` are the
+     same Rust expression; the first is rewritten, the second is not and fails E0505/E0507. Same for
+     `self . name`.
+  2. **authors an error on non-`Clone` types** — a field whose type derives nothing gets
+     `.clone()` appended and fails E0599, with `.clone()` in the message the user never wrote.
+  3. **hardcoded 20-name Copy list** (`rust_type_is_copy`) — any Copy type spelled outside it
+     (`(i32,i32)`, `[u8;4]`, an alias) gets a spurious clone.
+  4. **corrupts UTF-8** — the rewriter's `out.push(bytes[i] as char)` is a Latin-1 widening, so a
+     handler body containing a non-ASCII identifier is double-encoded:
+     `let café = 1;` becomes `let cafÃ© = 1;` and rustc reports `unknown start of token: \u{83}`.
+     A silent miscompile in shipped 4.6.0.33 for any such body in a system with a non-Copy domain
+     field. **ng's output is byte-exact.**
+- **resolution:** FIXTURE correction, not an ng change. The nine sites were a mechanical port of the
+  `.fpy` siblings (byte-identical handler bodies — correct Python, invalid Rust): the types were
+  ported, the native code was not. The user now writes `.clone()`, which is what the target language
+  requires and what Frame's own docs tell them to do (`frame_language.md`: "Write what the target
+  compiler expects").
+- **byte status:** with the corrected fixtures BOTH compilers emit compiling, passing programs, so
+  this costs nothing on either side and is not a standing byte divergence.
+- **validator:** `golden_run rust linux/04_usb_enumeration.frs linux/08_kernel_module_loader.frs`
+  (BUILDS AND RUNS; the fixtures' own assertions: "refcount blocks unload", "reload from failed").
+- **affected:** `linux/08_kernel_module_loader.frs` (8 sites, `name: String`),
+  `linux/04_usb_enumeration.frs` (1 site, line 85, `product: String`; its other 6 field arguments
+  are `i32` and were always correct). `linux/06_oom_killer.frs` has one such call on an `i32` field
+  — correct as written, untouched.
+- **follow-up for the legacy tree:** `apply_rust_auto_clone` can be deleted once the fixtures land.
