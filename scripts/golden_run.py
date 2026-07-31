@@ -142,7 +142,19 @@ def rust_deps():
     """Path to a deps dir + `--extern` args for RUST_CRATES, building them once on first use."""
     if _rust_deps_cache:
         return _rust_deps_cache.get("dir"), _rust_deps_cache.get("externs", [])
-    prj = os.path.join(tempfile.gettempdir(), "framec_golden_deps")
+    # Key the cache on the TARGET TRIPLE. An rlib is arch-specific, so a cache built for one
+    # target and reused under another fails to link with an error that reads nothing like its
+    # cause — it looks like a codegen regression in the persist cluster. (Relevant while the
+    # machine's language infra moves off x86 to arm.)
+    triple = "unknown"
+    try:
+        vv = subprocess.run(["rustc", "-vV"], capture_output=True, text=True, timeout=60).stdout
+        for line in vv.splitlines():
+            if line.startswith("host:"):
+                triple = line.split(":", 1)[1].strip()
+    except Exception:
+        pass
+    prj = os.path.join(tempfile.gettempdir(), "framec_golden_deps_" + triple)
     os.makedirs(os.path.join(prj, "src"), exist_ok=True)
     with open(os.path.join(prj, "Cargo.toml"), "w") as f:
         f.write(
