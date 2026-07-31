@@ -1,4 +1,4 @@
-// @@skip — `@@fsm` removed from the validation plan (owner ruling 2026-07-30); the regex DSL is out of scope for the milestone grid.
+// @@skip: @@fsm removed from the validation plan (owner ruling 2026-07-30); the regex DSL is out of scope for the milestone grid.
 # `@@fsm` behavioral conformance matrix (RFC-0042)
 
 Cross-language behavioral fixtures for the Frame `@@fsm` recognizer construct.

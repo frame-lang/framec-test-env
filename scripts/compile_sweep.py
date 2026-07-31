@@ -35,6 +35,19 @@ TARGET = os.environ.get("TARGET", "rust")
 #            (`.frs`/`.fpy`/`.fjava`/`.fc`). Compiling a rust `.frs` as java leaks the Rust `main`
 #            in — always emit each target from ITS fixtures, or every fixture "fails" spuriously.
 EXT = {"rust": "rs", "python": "py", "java": "java", "c": "c"}[TARGET]
+
+
+def _is_skipped(path):
+    """Honor the corpus SKIP marker (`@@skip` / `@xfail` in the first 10 lines) — the SAME
+    convention differential_test.sh and golden_run.py use, so a fixture leaves scope for every
+    harness at once instead of per-tool."""
+    import re as _re
+    try:
+        with open(path) as f:
+            head = "".join(next(f, "") for _ in range(10))
+    except OSError:
+        return False
+    return _re.search(r"@@?(skip|xfail)", head) is not None
 FIX_EXT = {"rust": "frs", "python": "fpy", "java": "fjava", "c": "fc"}[TARGET]
 
 
@@ -62,7 +75,11 @@ def main():
     fails = 0
     hist = collections.Counter()
     examples = collections.defaultdict(list)
+    skipped = 0
     for f in fixtures:
+        if _is_skipped(f):
+            skipped += 1
+            continue
         sub = os.path.relpath(f, f"{TE}/tests/common/positive")
         td = tempfile.mkdtemp()
         try:
@@ -92,7 +109,7 @@ def main():
             fails += 1; hist["(exception)"] += 1
         finally:
             shutil.rmtree(td, ignore_errors=True)
-    print(f"TARGET={TARGET}  total={len(fixtures)} COMPILES={compiles} no_emit(ng)={no_emit} FAIL={fails}")
+    print(f"TARGET={TARGET}  total={len(fixtures)} COMPILES={compiles} no_emit(ng)={no_emit} FAIL={fails} SKIP={skipped}")
     print("=== error histogram (fix the dominant root-cause first) ===")
     for e, n in hist.most_common():
         print(f"  {e}  x{n}")

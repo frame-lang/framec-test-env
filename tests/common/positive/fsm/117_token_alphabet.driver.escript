@@ -1,4 +1,4 @@
-// @@skip — `@@fsm` removed from the validation plan (owner ruling 2026-07-30); the regex DSL is out of scope for the milestone grid.
+// @@skip: @@fsm removed from the validation plan (owner ruling 2026-07-30); the regex DSL is out of scope for the milestone grid.
 #!/usr/bin/env escript
 %% Token alphabet: token kinds are atoms (recognize/1 over a list of atoms).
 main(_) ->
