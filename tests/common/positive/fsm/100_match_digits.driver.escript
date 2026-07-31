@@ -1,3 +1,4 @@
+// @@skip — `@@fsm` removed from the validation plan (owner ruling 2026-07-30); the regex DSL is out of scope for the milestone grid.
 #!/usr/bin/env escript
 %% Behavioral driver for FSM-MATRIX 100 (Erlang). Mirrors the Python/Rust
 %% contract: `digits:recognize/1` returns the final recognizer-state map.

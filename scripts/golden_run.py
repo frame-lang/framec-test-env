@@ -56,6 +56,9 @@ MILESTONES = {
         "primary/98_param_child_domain_init",
         "core/machineless_operations",
         "primary/96_rfc0015_restore_skips_init",
+        "primary/53_const_domain",           # const domain fields
+        "primary/97_rfc0015_create_rename",  # @@[create] factory rename
+        "primary/89_attribute_per_item",     # per-item attributes
     ],
     "M3": [  # Handlers & Interface
         "foundation/foundation_value_return",
@@ -66,6 +69,10 @@ MILESTONES = {
         "primary/53_transition_guard",
         "primary/52_deep_self_call",
         "control_flow/handler_params_manifest",
+        "primary/36_context_basic",          # @@:data — call-scoped context data
+        "primary/38_context_data",           # @@:data isolation across dispatch
+        "demos/28_auth_flow",                # interface/return over a real flow
+        "demos/19_async_http_client",        # @@[async] — casing + async interface
     ],
     "M4": [  # Actions & Operations
         "primary/21_actions_basic",
@@ -73,6 +80,7 @@ MILESTONES = {
         "core/machineless_operations",
         "core/mixed_ops",
         "capabilities/actions_call_wrappers",
+        "linux/08_kernel_module_loader",     # action bodies moving out of domain fields
     ],
     "M5": [  # Hierarchy (HSM)
         "primary/30_hsm_default_forward",
@@ -83,6 +91,9 @@ MILESTONES = {
         "primary/19_transition_forward",
         "primary/29_forward_enter_first",
         "control_flow/child_forwards_then_transition_exec",
+        "primary/49_hsm_enter_exit_params",  # HSM enter/exit PARAMS
+        "demos/23_vending_machine",          # HSM + stack over a real flow
+        "demos/30_graceful_shutdown",        # forward + terminal states over a real flow
     ],
     "M6": [  # State Stack
         "primary/71_persist_push_depth_three",
@@ -91,6 +102,7 @@ MILESTONES = {
         "primary/25_persist_stack",
         "validator/terminal_last_stack_ops",
         "systems/parent_forward_then_stack_then_transition_exec",
+        "demos/27_deployment_pipeline",      # stack over a real flow
     ],
     "M7": [  # Persistence
         "primary/56_persist_state_args",
@@ -101,6 +113,7 @@ MILESTONES = {
         "primary/71_persist_push_depth_three",
         "primary/88_persist_quiescent_error",
         "primary/96_rfc0015_restore_skips_init",
+        "primary/81_persist_async_basic",    # persist + async together
     ],
     "M8": [  # Native-Text fidelity
         "segmenter/frame_tokens_in_comments",
@@ -112,6 +125,12 @@ MILESTONES = {
         "control_flow/forward_multi_native",
         "control_flow/forward_trailing_whitespace",
         "data_types/test_mixed_body_strings_comments",
+        "scoping/function_scope",            # native fn containing `self`
+        "scoping/nested_functions",          # nested native fns (delimiter slicing)
+        "security/10_secure_boot",           # deep native nesting
+        "linux/04_usb_enumeration",          # native borrow of a domain field
+        "frame_machines/expr_scanner",       # @@[scan(u8)] byte-literal patterns
+        "frame_machines/state_var_parser",   # @@[scan(u8)] byte-literal patterns
     ],
 }
 
@@ -239,6 +258,20 @@ def check_tap(stdout):
     return True, None
 
 
+def is_skipped(fixture):
+    """Does this fixture carry the corpus SKIP marker in its first 10 lines?
+
+    Same convention `differential_test.sh` uses (`@@skip` / `@skip` / `@@xfail` / `@xfail`), so a
+    fixture is out of scope for every harness at once rather than per-tool.
+    """
+    try:
+        with open(fixture) as f:
+            head = "".join(next(f, "") for _ in range(10))
+    except OSError:
+        return False
+    return re.search(r"@@?(skip|xfail)", head) is not None
+
+
 def one(target, fixture):
     """Run all four stages for one fixture; return (passed, stage, detail_lines)."""
     with tempfile.TemporaryDirectory() as wd:
@@ -292,9 +325,14 @@ def main():
 
     print("=== golden_run: %s / target=%s (emit -> build -> RUN -> assert) ===" % (label, target))
     passed = failed = 0
+    skipped = 0
     for f in fixtures:
-        ok, stage, detail = one(target, f)
         short = os.path.relpath(f, os.path.join(ROOT, "tests/common/positive"))
+        if is_skipped(f):
+            skipped += 1
+            print("  SKIP   %s" % short)
+            continue
+        ok, stage, detail = one(target, f)
         if ok:
             passed += 1
             print("  PASS   %s" % short)
@@ -304,7 +342,10 @@ def main():
             for d in detail:
                 print("           %s" % d)
     print("----")
-    print("TARGET=%s  EXECUTED-PASS=%d  FAIL=%d  total=%d" % (target, passed, failed, passed + failed))
+    print(
+        "TARGET=%s  EXECUTED-PASS=%d  FAIL=%d  SKIP=%d  total=%d"
+        % (target, passed, failed, skipped, passed + failed + skipped)
+    )
     return 1 if failed else 0
 
 
