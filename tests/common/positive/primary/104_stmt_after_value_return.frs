@@ -1,0 +1,44 @@
+@@[target("rust")]
+
+// A statement AFTER `@@:(expr)` must still run.
+//
+// `@@:(v)` writes the return SLOT on the live context; it does not end the handler. A
+// reimplementation that treats it as a body terminal silently DELETES every statement after it —
+// the emitted program compiles and runs, and the deleted work simply never happens. Nothing in the
+// corpus asserted this, so the regression was invisible to byte-diff, to the compiler, and to the
+// test suite alike.
+
+@@system StmtAfterReturn {
+    interface:
+        go(): i32
+        ran(): i32
+
+    machine:
+        $S {
+            go(): i32 {
+                @@:(5)
+                self.after = 1;
+            }
+            ran(): i32 { @@:(self.after) return; }
+        }
+
+    domain:
+        after: i32 = 0
+}
+
+fn main() {
+    println!("TAP version 14");
+    println!("1..2");
+    let mut m = @@StmtAfterReturn();
+    let v = m.go();
+    if v == 5 {
+        println!("ok 1 - the return slot still carries its value");
+    } else {
+        println!("not ok 1 - return slot # got {}", v);
+    }
+    if m.ran() == 1 {
+        println!("ok 2 - the statement after @@:(v) executed");
+    } else {
+        println!("not ok 2 - the statement after @@:(v) was DROPPED");
+    }
+}

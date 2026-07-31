@@ -1,0 +1,61 @@
+@@[target("rust")]
+
+// Restore must CLEAR the transient runtime state.
+//
+// The context stack and any queued next-compartment are runtime scaffolding, not snapshot content:
+// a restored machine is quiescent. Leaving them stale carries the PRE-restore dispatch state into
+// the restored machine — nothing fails loudly, it just behaves wrong afterwards. The observable
+// consequence is that a restored machine must accept a fresh save (a save refuses when the context
+// stack is non-empty, E700), and must keep dispatching normally.
+
+@@[persist(String)]
+@@[save(save_state)]
+@@[load(restore_state)]
+@@system RestoreTransient {
+    interface:
+        bump()
+        value(): i32
+
+    machine:
+        $S {
+            bump() { self.n = self.n + 1; }
+            value(): i32 { @@:(self.n) return; }
+        }
+
+    domain:
+        n: i32 = 0
+}
+
+fn main() {
+    println!("TAP version 14");
+    println!("1..3");
+    let mut m = @@RestoreTransient();
+    m.bump();
+    m.bump();
+    let snap = m.save_state();
+
+    let mut r = @@RestoreTransient();
+    r.restore_state(snap);
+    if r.value() == 2 {
+        println!("ok 1 - restored value");
+    } else {
+        println!("not ok 1 - restored value # got {}", r.value());
+    }
+
+    // A restored machine is quiescent, so it can be snapshotted again immediately. If restore had
+    // left a context on the stack, this would panic with E700.
+    let snap2 = r.save_state();
+    if snap2.len() > 0 {
+        println!("ok 2 - a restored machine is quiescent and can save again");
+    } else {
+        println!("not ok 2 - re-save produced nothing");
+    }
+
+    // And it still dispatches normally afterwards.
+    r.bump();
+    if r.value() == 3 {
+        println!("ok 3 - a restored machine keeps dispatching");
+    } else {
+        println!("not ok 3 - dispatch after restore # got {}", r.value());
+    }
+}

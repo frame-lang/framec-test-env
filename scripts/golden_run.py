@@ -73,6 +73,7 @@ MILESTONES = {
         "primary/38_context_data",           # @@:data isolation across dispatch
         "demos/28_auth_flow",                # interface/return over a real flow
         "demos/19_async_http_client",        # @@[async] — casing + async interface
+        "primary/104_stmt_after_value_return", # a statement AFTER @@:(v) must run
     ],
     "M4": [  # Actions & Operations
         "primary/21_actions_basic",
@@ -114,6 +115,7 @@ MILESTONES = {
         "primary/88_persist_quiescent_error",
         "primary/96_rfc0015_restore_skips_init",
         "primary/81_persist_async_basic",    # persist + async together
+        "primary/105_restore_clears_transient", # restore clears the transient runtime state
     ],
     "M8": [  # Native-Text fidelity
         "segmenter/frame_tokens_in_comments",
