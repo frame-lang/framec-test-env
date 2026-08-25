@@ -35,7 +35,8 @@ NG = os.environ.get(
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 # Each target compiles ITS OWN fixtures (each carries that language's native main).
-FIX_EXT = {"rust": "frs", "python": "fpy", "java": "fjava", "c": "fc"}
+FIX_EXT = {"rust": "frs", "python": "fpy", "java": "fjava", "c": "fc",
+           "go": "fgo", "typescript": "fts"}
 
 # The DoD fixture inventories, from docs/faithfulness/M<k>.md (framec-cleanroom). Keep these in
 # step with the docs — the doc is the contract, this is the executable form of it.
@@ -139,7 +140,8 @@ MILESTONES = {
 
 # The emitted file's extension is the TARGET LANGUAGE's, not the fixture's. Java additionally
 # requires the filename to match its public class, so the name is derived from the source.
-OUT_EXT = {"rust": "rs", "python": "py", "java": "java", "c": "c"}
+OUT_EXT = {"rust": "rs", "python": "py", "java": "java", "c": "c",
+           "go": "go", "typescript": "ts"}
 
 
 def emit(target, fixture, workdir):
@@ -263,6 +265,43 @@ def build(target, src, workdir):
             return None, errs or p.stderr.strip().splitlines()[:3]
         cls = os.path.splitext(os.path.basename(src))[0]
         return ["java", "-cp", workdir, cls], None
+
+    if target == "go":
+        # `go run` needs a module context, so give the emission a throwaway one.
+        # An unused import or variable is a hard ERROR in go, not a warning, and
+        # that is exactly the class this gate should surface rather than mask --
+        # so the compiler's own message is reported at BUILD.
+        exe = os.path.join(workdir, "prog")
+        gomod = os.path.join(workdir, "go.mod")
+        if not os.path.exists(gomod):
+            with open(gomod, "w") as f:
+                f.write("module golden\n\ngo 1.21\n")
+        env = dict(os.environ, GO111MODULE="on", GOFLAGS="-mod=mod")
+        p = subprocess.run(["go", "build", "-o", exe, src],
+                           capture_output=True, text=True, cwd=workdir, env=env)
+        if p.returncode != 0:
+            errs = [l for l in p.stderr.splitlines() if ".go:" in l][:3]
+            return None, errs or p.stderr.strip().splitlines()[:3]
+        return [exe], None
+
+    if target == "typescript":
+        # Two stages in one: tsc TYPE-CHECKS and emits js, node runs the js. The
+        # check runs --strict deliberately -- a gate that accepts what tsc would
+        # reject under the settings the ladder targets is measuring a different
+        # compiler than the one users have.
+        js = os.path.splitext(src)[0] + ".js"
+        p = subprocess.run(
+            ["tsc", "--strict", "--target", "es2020", "--module", "commonjs",
+             "--skipLibCheck", src],
+            capture_output=True, text=True, cwd=workdir,
+        )
+        # tsc reports diagnostics on STDOUT, not stderr.
+        if p.returncode != 0:
+            errs = [l for l in (p.stdout + p.stderr).splitlines() if "error TS" in l][:3]
+            return None, errs or (p.stdout + p.stderr).strip().splitlines()[:3]
+        if not os.path.exists(js):
+            return None, ["tsc produced no .js beside the source"]
+        return ["node", js], None
 
     return None, ["build not implemented for target " + target]
 
